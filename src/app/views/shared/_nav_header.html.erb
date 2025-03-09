@@ -1,0 +1,131 @@
+<!-- ========== HEADER ========== -->
+<header class="flex flex-wrap md:justify-start md:flex-nowrap z-50 w-full bg-black border-b border-gray-200 dark:bg-black dark:border-neutral-700">
+  <nav class="relative max-w-[85rem] w-full mx-auto flex items-center justify-between gap-3 py-2 px-4 sm:px-6 lg:px-8">
+
+    <a class="flex-none inline-block w-32 h-8 font-semibold text-xl text-white focus:outline-hidden focus:opacity-80 dark:text-white" href="#" aria-label="Brand">
+      <%= image_tag "ASAP_sansTagline_White.svg", 
+      class: 'h-full w-full object-contain', 
+        style: '', 
+        alt: 'ASAP Logo' %> 
+    </a>
+
+    <div class="md:order-3 flex justify-end items-center gap-x-1">
+      <!-- Collapse Button -->
+      <button type="button" class="md:hidden relative p-2 flex items-center font-medium text-sm rounded-lg border border-gray-200 text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 focus:text-black disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" id="hs-header-base-collapse" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base" >
+        Menu
+        <svg class="shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+      </button>
+      <!-- End Collapse Button -->
+
+      <div class="hidden md:inline-block md:me-2">
+        <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
+      </div>
+
+      <!-- Offcanvas Toggle -->
+      <button type="button" class="relative size-9 flex justify-center items-center text-sm font-semibold rounded-lg border border-transparent text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-transparent dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base-offcanvas" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base-offcanvas">
+        <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>
+        <span class="sr-only">Toggle navigation</span>
+      </button>
+      <!-- End Offcanvas Toggle -->
+    </div>
+
+    <!-- Collapse -->
+    <div id="hs-header-base" class="hs-overlay [--auto-close:md] hs-overlay-open:translate-x-0 -translate-x-full fixed top-0 start-0 transition-all duration-300 transform h-full max-w-xs w-full z-60 bg-black border-e basis-full grow md:order-2 md:static md:block md:h-auto md:max-w-none md:w-auto md:border-e-transparent md:transition-none md:translate-x-0 md:z-40 md:basis-auto dark:bg-black dark:border-e-gray-700 md:dark:border-e-transparent hidden" role="dialog" tabindex="-1" aria-label="Sidebar" data-hs-overlay-close-on-resize >
+      <div class="overflow-hidden overflow-y-auto max-h-[75vh] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500">
+        <div class="py-2 md:py-0 px-2 md:px-0 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-1">
+          <!-- Offcanvas Header -->
+          <div class="md:hidden p-2 flex justify-between items-center">
+            <h3 id="hs-header-base-label" class="font-bold text-white">
+              Menu title
+            </h3>
+            <button type="button" class="size-8 inline-flex justify-center items-center gap-x-2 rounded-full border border-transparent bg-gray-100 text-gray-800 hover:bg-gray-200 focus:outline-hidden focus:bg-gray-200 disabled:opacity-50 disabled:pointer-events-none dark:bg-neutral-700 dark:hover:bg-neutral-600 dark:text-neutral-400 dark:focus:bg-neutral-600" aria-label="Close" data-hs-overlay="#hs-header-base">
+              <span class="sr-only">Close</span>
+              <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+          <!-- End Offcanvas Header -->
+          <div class="grow">
+            <div class="flex flex-col md:flex-row md:justify-end md:items-center gap-0.5 md:gap-1">
+              <!-- Home button -->
+              <a class="<%= tw_menu_item %>" 
+                 href="<%= root_path %>" 
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>
+                  <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+                Home
+              </a>
+
+              <!-- Dropdown -->
+              <div class="relative inline-block text-left" 
+                   data-controller="dropdown">
+                <button type="button" 
+                        class="<%= tw_menu_item %>"
+                        data-dropdown-toggle="true"
+                        data-action="click->dropdown#toggle">
+                  <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m3 10 2.5-2.5L3 5"/>
+                    <path d="m3 19 2.5-2.5L3 14"/>
+                    <path d="M10 6h11"/>
+                    <path d="M10 12h11"/>
+                    <path d="M10 18h11"/>
+                  </svg>
+                  Dropdown
+                  <svg class="duration-300 shrink-0 size-4 ms-auto md:ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m6 9 6 6 6-6"/>
+                  </svg>
+                </button>
+
+                <!-- Dropdown Menu -->
+                <div class="hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 
+                            dark:bg-gray-800 dark:border dark:border-gray-700
+                            z-[1000] top-full"
+                     style="position: fixed;"
+                     data-dropdown-target="menu">
+                  <!-- Dropdown Item 1 -->
+                  <a class="<%= tw_menu_item(:dropdown_item) %>"
+                     href="#"
+                     data-controller="nav-item"
+                     data-action="click->nav-item#navigate">
+                    <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9" cy="7" r="4"/>
+                      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    My Account
+                  </a>
+                  
+                  <!-- Dropdown Item 2 -->
+                  <a class="<%= tw_menu_item(:dropdown_item) %>"
+                     href="#"
+                     data-controller="nav-item"
+                     data-action="click->nav-item#navigate">
+                    <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M18 6 6 18"/>
+                      <path d="m6 6 12 12"/>
+                    </svg>
+                    Sign Out
+                  </a>
+                </div>
+              </div>
+              <!-- End Dropdown -->
+
+              <a class="<%= tw_menu_item %>" 
+                 href="#"
+                 data-controller="nav-item"              
+                 data-action="click->nav-item#navigate">
+                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
+                Add New
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Collapse -->
+  </nav>
+</header>
+<!-- ========== END HEADER ========== -->

@@ -1,0 +1,1 @@
+config.assets.build_in_background = false 

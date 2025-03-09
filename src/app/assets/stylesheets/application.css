@@ -1,0 +1,23 @@
+/*
+ * This is a manifest file that'll be compiled into application.css.
+ * With Propshaft, assets are served efficiently without preprocessing steps.
+ */
+
+/*  Layout components */
+
+/* Fixed footer at the bottom of the page */
+#main_footer {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background-color: #FAFAFA;
+}
+
+#main_footer table {
+  width: 100%;
+}
+
+#footer {
+  margin-bottom: 50px;
+  text-align: center;
+}

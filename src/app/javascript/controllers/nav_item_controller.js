@@ -9,7 +9,7 @@ export default class extends Controller {
     const currentPath = window.location.pathname
     const itemPath = this.element.getAttribute("href")
     const isDropdownItem = this.element.classList.contains('menu-item-dropdown')
-    
+    console.log(isDropdownItem, this.element.innerHTML)
     // Reset state
     this.element.classList.remove("bg-gray-100", "text-gray-800", "dark:bg-neutral-700", "dark:text-white")
     

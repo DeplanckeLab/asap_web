@@ -54,7 +54,7 @@
     }
   
     .menu-item-default {
-      @apply text-white hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
+      @apply text-white text-white bg-gray-800 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
     }
   
     .menu-item-dropdown {

@@ -1,6 +1,6 @@
 FROM ruby:3.4.1-alpine
 
-RUN apk update && apk add build-base nodejs postgresql-dev bash emacs docker shadow wget git openssh mailx netcat-openbsd pigz sqlite postgresql boost boost-dev yarn
+RUN apk update && apk add build-base nodejs postgresql-dev bash emacs docker shadow wget git openssh mailx netcat-openbsd pigz sqlite postgresql boost boost-dev yarn entr
 RUN apk add openjdk8-jre curl #default-jre default-jdk
 #RUN echo "relayhost = mail.epfl.ch" >> /etc/postfix/main.cf
 #RUN /etc/init.d/postfix start

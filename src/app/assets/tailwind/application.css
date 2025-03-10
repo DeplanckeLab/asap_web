@@ -1,0 +1,63 @@
+@import "tailwindcss";
+/* @config "../../../tailwind.config.js"; */
+
+@layer base {
+    :root {
+      font-family: 'Inter', sans-serif;
+    }
+    @supports (font-variation-settings: normal) {
+      :root {
+        font-family: 'Inter var', sans-serif;
+      }
+    }
+  }
+  
+  @layer components {
+    .btn {
+      @apply py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
+    }
+  
+    .btn-primary {
+      @apply bg-blue-600 text-white hover:bg-blue-700 focus:bg-blue-700;
+    }
+  
+    .btn-secondary {
+      @apply bg-gray-600 text-white hover:bg-gray-700 focus:bg-gray-700;
+    }
+  
+    .btn-success {
+      @apply bg-green-600 text-white hover:bg-green-700 focus:bg-green-700;
+    }
+  
+    .btn-warning {
+      @apply bg-yellow-600 text-white hover:bg-yellow-700 focus:bg-yellow-700;
+    }
+  
+    .btn-danger {
+      @apply bg-red-600 text-white hover:bg-red-700 focus:bg-red-700;
+    }
+  
+    .btn-info {
+      @apply bg-blue-600 text-white hover:bg-blue-700 focus:bg-blue-700;
+    }
+  
+    .btn-light {
+      @apply border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 focus:bg-gray-50 dark:bg-neutral-900 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-800 dark:focus:bg-neutral-800;
+    }
+  
+    .btn-dark {
+      @apply bg-gray-800 text-white hover:bg-gray-900 focus:bg-gray-900;
+    }
+  
+    .menu-item {
+      @apply p-2 flex items-center text-sm rounded-lg focus:outline-none;
+    }
+  
+    .menu-item-default {
+      @apply text-white hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
+    }
+  
+    .menu-item-dropdown {
+      @apply gap-x-3.5 py-2 px-3 text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 dark:text-gray-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
+    }
+  } 

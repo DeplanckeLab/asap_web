@@ -1,0 +1,9 @@
+#!/bin/sh
+echo "Starting Tailwind CSS watcher..."
+
+# Run the initial Tailwind build
+bin/rails tailwindcss:build &
+
+# Use `entr` to watch for changes in Tailwind assets and trigger the build
+echo "Watching for changes in app/assets/tailwind/*.css..."
+find app/assets/tailwind -type f | entr -r bin/rails tailwindcss:build

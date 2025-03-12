@@ -21,3 +21,20 @@
   margin-bottom: 50px;
   text-align: center;
 }
+
+.tuto-image {
+  display: block;
+  margin-bottom:2em;
+  margin-top:2em;
+  margin-left: auto;
+  margin-right: auto;
+  width: 80%;
+}
+
+.sm {margin-top:1em;margin-bottom:1em}
+
+#tuto-menu {
+  position:fixed;
+  z-index:10;
+  background-color:white
+}

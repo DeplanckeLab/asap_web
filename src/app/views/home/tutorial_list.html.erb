@@ -1,0 +1,12 @@
+<ul id='tutorial_slide' class='nobullets my-8'>
+<% @h_tutos.each_key do |tuto| %> 
+  <li id='tuto-<%= tuto %>' class='alert alert-info mb-3 mx-8'>
+    <%= link_to @h_tutos[tuto], tutorial_home_index_path(:t => tuto) %>
+    <% if icon = @h_icons[tuto] %>
+      <%= link_to image_tag(icon[0], class: "h-[50px]"), icon[1] %>
+
+    <% end %>
+  </li>
+<% end %>
+</ul>
+

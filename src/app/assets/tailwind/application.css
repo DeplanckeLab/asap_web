@@ -10,9 +10,34 @@
         font-family: 'Inter var', sans-serif;
       }
     }
+    img, video {
+      max-width: 100%;
+      height: min-height
+    }
   }
   
   @layer components {
+    .alert {
+      @apply px-4 py-3 rounded relative
+    }
+
+    .alert-info {
+        @apply bg-blue-100 border border-blue-400 text-blue-700 dark:bg-blue-900 dark:border-blue-800 dark:text-blue-300
+    }
+
+    .alert-success {
+      @apply bg-green-100 border border-green-400 text-green-700 dark:bg-green-900 dark:border-green-800 dark:text-green-300
+    }
+
+    .alert-warning {
+      @apply bg-yellow-100 border border-yellow-400 text-yellow-700 dark:bg-yellow-900 dark:border-yellow-800 dark:text-yellow-300
+    }
+    
+    .alert-danger {
+      @apply bg-red-100 border border-red-400 text-red-700 dark:bg-red-900 dark:border-red-800 dark:text-red-300
+    }
+
+
     .btn {
       @apply py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
     }
@@ -54,7 +79,7 @@
     }
   
     .menu-item-default {
-      @apply text-white text-white bg-gray-800 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
+      @apply text-white bg-gray-800 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
     }
   
     .menu-item-dropdown {

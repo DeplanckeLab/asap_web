@@ -9,6 +9,8 @@ export default class extends Controller {
     const currentPath = window.location.pathname
     const itemPath = this.element.getAttribute("href")
     const isDropdownItem = this.element.classList.contains('menu-item-dropdown')
+    const isMenuItem = this.element.classList.contains('menu-item')
+
     console.log(isDropdownItem, this.element.innerHTML)
     // Reset state
     this.element.classList.remove("bg-gray-100", "text-gray-800", "dark:bg-neutral-700", "dark:text-white")
@@ -16,9 +18,7 @@ export default class extends Controller {
     // Different default styling for dropdown items vs regular nav items
     if (isDropdownItem) {
       this.element.classList.add("text-gray-800", "dark:text-neutral-200")
-    } else {
-      this.element.classList.add("text-white", "dark:text-neutral-200")
-    }
+    } 
     
     this.element.removeAttribute("aria-current")
     
@@ -26,13 +26,15 @@ export default class extends Controller {
     if (itemPath && (
       itemPath === currentPath || 
       (currentPath === "/" && itemPath === "/")
-    )) {
-      this.element.classList.remove("text-white", "text-gray-800", "dark:text-neutral-200")
-      this.element.classList.add("bg-gray-100", "text-gray-800", "dark:bg-neutral-700", "dark:text-white")
+    ))   {
+      if (isMenuItem){
+        this.element.classList.remove("text-white", "text-gray-800", "dark:text-neutral-200")
+        this.element.classList.add("bg-gray-100", "text-gray-800", "dark:bg-neutral-700", "dark:text-white")
+       }
       this.element.setAttribute("aria-current", "page")
     }
   }
-  
+
   navigate() {
     // Update active state after navigation
     setTimeout(() => this.setActiveState(), 50)

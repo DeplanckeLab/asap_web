@@ -1,8 +1,12 @@
 <!-- ========== HEADER ========== -->
-<header class="flex flex-wrap md:justify-start md:flex-nowrap z-50 w-full bg-black border-b border-gray-200 dark:bg-black dark:border-neutral-700">
+<header class="flex flex-wrap md:justify-start md:flex-nowrap fixed left-0 top-0 z-50 w-full bg-black border-b border-gray-200 dark:bg-black dark:border-neutral-700">
   <nav class="relative max-w-[85rem] w-full mx-auto flex items-center justify-between gap-3 py-2 px-4 sm:px-6 lg:px-8">
 
-    <a class="flex-none inline-block w-32 h-8 font-semibold text-xl text-white focus:outline-hidden focus:opacity-80 dark:text-white" href="#" aria-label="Brand">
+    <a class="flex-none inline-block w-32 h-8 font-semibold text-xl text-white focus:outline-hidden focus:opacity-80 dark:text-white" 
+      href="<%= root_path %>" 
+      aria-label="Brand"
+      data-controller="nav-item"
+      data-action="click->nav-item#navigate">
       <%= image_tag "ASAP_sansTagline_White.svg", 
       class: 'h-full w-full object-contain', 
         style: '', 
@@ -46,17 +50,7 @@
           <!-- End Offcanvas Header -->
           <div class="grow">
             <div class="flex flex-col md:flex-row md:justify-end md:items-center gap-0.5 md:gap-1">
-              <!-- Home button -->
-              <a class="<%= tw_menu_item %>" 
-                 href="<%= root_path %>" 
-                 data-controller="nav-item"
-                 data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>
-                  <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                </svg>
-                Home
-              </a>
+              
 
               <!-- Dropdown -->
               <div class="relative inline-block text-left" 
@@ -126,7 +120,15 @@
                  data-controller="nav-item"              
                  data-action="click->nav-item#navigate">
                 <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
-                Projects
+                Browse projects
+              </a>
+
+              <a class="<%= tw_menu_item %>" 
+                 href="<%= tutorial_home_index_path %>"
+                 data-controller="nav-item"              
+                 data-action="click->nav-item#navigate">
+                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
+                Tutorials
               </a>
             </div>
           </div>

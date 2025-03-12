@@ -4,6 +4,96 @@ echo "Starting Tailwind CSS watcher..."
 # Run the initial Tailwind build
 bin/rails tailwindcss:build &
 
-# Use `entr` to watch for changes in Tailwind assets and trigger the build
-echo "Watching for changes in app/assets/tailwind/*.css..."
-find app/assets/tailwind -type f | entr -r bin/rails tailwindcss:build
+# Extract paths from tailwind.config.js without loading plugins
+WATCH_PATHS=$(node -e "
+  // Read the file as text to avoid requiring plugins
+  const fs = require('fs');
+  const path = require('path');
+  const configPath = path.resolve('$(pwd)/tailwind.config.js');
+  
+  try {
+    const configText = fs.readFileSync(configPath, 'utf8');
+    
+    // Extract content array using regex
+    const contentMatch = configText.match(/content:\\s*\\[([^\\]]*?)\\]/s);
+    
+    if (contentMatch && contentMatch[1]) {
+      const contentText = contentMatch[1];
+      
+      // Extract paths from the content array
+      const pathRegex = /'([^']+)'|\"([^\"]+)\"/g;
+      const paths = [];
+      let match;
+      
+      while ((match = pathRegex.exec(contentText)) !== null) {
+        const path = match[1] || match[2];
+        if (path) paths.push(path);
+      }
+      
+      console.log(paths.join(' '));
+    }
+  } catch (error) {
+    console.error('Error parsing tailwind.config.js:', error.message);
+    // Fallback to default paths if parsing fails
+    console.log('./public/*.html ./app/helpers/**/*.rb ./app/javascript/**/*.js ./app/views/**/*.{erb,haml,html,slim} ./app/assets/builds/*');
+  }
+")
+
+echo "Watching for changes in Tailwind content files..."
+echo "Paths to watch: $WATCH_PATHS"
+
+# Create a temporary file with all files to watch
+TMP_FILE=$(mktemp)
+
+# Add Tailwind source files
+find app/assets/tailwind -name "*.css" -type f > "$TMP_FILE"
+
+# Process each path from the config
+for pattern in $WATCH_PATHS; do
+  # Extract the base directory and extension pattern
+  base_dir=$(echo "$pattern" | sed -E 's/([^*{]*).*/\1/' | sed 's/\/\*\*\/.*$//' | sed 's/\/\*.*$//')
+  
+  if [ -d "$base_dir" ]; then
+    # Handle different pattern types
+    if [[ "$pattern" == *"**"* ]]; then
+      # Handle recursive patterns with specific extensions
+      if [[ "$pattern" == *"{erb,haml,html,slim}"* ]]; then
+        # Handle multiple extensions for views
+        find "$base_dir" -type f \( -name "*.erb" -o -name "*.haml" -o -name "*.html" -o -name "*.slim" \) >> "$TMP_FILE"
+      elif [[ "$pattern" == *".rb"* ]]; then
+        # Handle Ruby files
+        find "$base_dir" -type f -name "*.rb" >> "$TMP_FILE"
+      elif [[ "$pattern" == *".js"* ]]; then
+        # Handle JavaScript files
+        find "$base_dir" -type f -name "*.js" >> "$TMP_FILE"
+      else
+        # Generic recursive search
+        find "$base_dir" -type f >> "$TMP_FILE"
+      fi
+    elif [[ "$pattern" == *"*."* ]]; then
+      # Handle simple wildcard patterns
+      ext=$(echo "$pattern" | sed -E 's/.*\*\.([^{]*).*/\1/')
+      find "$base_dir" -type f -name "*.$ext" >> "$TMP_FILE"
+    else
+      # Handle directory patterns
+      find "$pattern" -type f 2>/dev/null >> "$TMP_FILE"
+    fi
+  fi
+done
+
+echo "Also watching app/assets/tailwind/*.css"
+echo "Found $(wc -l < "$TMP_FILE") files to watch"
+
+# Remove duplicates and empty lines
+sort -u "$TMP_FILE" | grep -v "node_modules" | grep -v "^\s*$" > "${TMP_FILE}.sorted"
+mv "${TMP_FILE}.sorted" "$TMP_FILE"
+
+# Use entr to watch the files
+if [ -s "$TMP_FILE" ]; then
+  cat "$TMP_FILE" | entr -r bin/rails tailwindcss:build
+  rm "$TMP_FILE"
+else
+  echo "No files found to watch. Watching Tailwind source files only."
+  find app/assets/tailwind -name "*.css" -type f | entr -r bin/rails tailwindcss:build
+  rm "$TMP_FILE"
+fi

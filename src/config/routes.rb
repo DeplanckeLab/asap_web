@@ -4,6 +4,7 @@ Rails.application.routes.draw do
     collection do
       get :home
       get :tutorial
+      get :file_format
     end
   end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

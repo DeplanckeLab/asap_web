@@ -1,2 +1,3 @@
 web: bin/rails server -b '0.0.0.0'
-css: bin/tailwindcss-watch
+css: WATCHMAN_DISABLE=true NODE_OPTIONS=--watch-poll bin/rails tailwindcss:watch
+

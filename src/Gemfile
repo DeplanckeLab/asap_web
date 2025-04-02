@@ -29,8 +29,8 @@ gem "turbo-rails", "~> 2.0", ">= 2.0.11"
 #gem "tailwindcss-rails", "~> 3.0"
 #gem "tailwindcss-ruby", "~> 3.4", ">= 3.4.14"
 
-gem 'tailwindcss-rails', '~> 4.2'
-gem 'tailwindcss-ruby', '~> 4.0', '>= 4.0.12'
+gem 'tailwindcss-rails' #, '~> 4.2'
+#gem 'tailwindcss-ruby', '~> 4.0', '>= 4.0.12'
 
 gem "bootsnap", "~> 1.18", require: false
 gem "thruster", "~> 0.1.8", require: false
@@ -72,7 +72,7 @@ group :development, :test do
   #gem 'erb-formatter', '~> 0.7.3', require: false
   #gem 'rufo', '~>0.13.0', require: false
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
-  gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
+  gem "debug", platforms: %i[ mri mingw x64_mingw ], require: "debug/prelude"
 
   # Static analysis for security vulnerabilities [https://brakemanscanner.org/]
   gem "brakeman", require: false

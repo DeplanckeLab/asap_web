@@ -7,8 +7,8 @@
   </div>
 
   <!-- Main Content (Push right by 200px) -->
-  <div class="ml-[200px] flex-1 bg-gray-100 min-h-screen">
-    <h3><%= @h_tutos[params[:t]] %></h3>
+  <div class="ml-[200px] flex-1 bg-gray-100 min-h-screen p-8">
+    <h3 class="text-xl font-semibold text-gray-800"><%= @h_tutos[params[:t]] %></h3>
     <%= render :partial => 'tutorial_' + params[:t] if params[:t] and File.exist?("app/views/home/_tutorial_" + params[:t] + ".html.erb") %>
   </div>
 </div>

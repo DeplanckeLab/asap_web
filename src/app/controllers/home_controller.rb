@@ -3,6 +3,13 @@ class HomeController < ApplicationController
   def welcome
   end
 
+
+  def file_format
+    @h_formats = FileFormat.all.index_by(&:name)
+    # This uses ActiveRecord's index_by method which is more efficient
+    # than manually mapping and creating a hash
+  end
+
   def tutorial
     
     @h_tutos = {

@@ -52,6 +52,31 @@
             <div class="flex flex-col md:flex-row md:justify-end md:items-center gap-0.5 md:gap-1">
               
 
+              
+
+              <a class="<%= tw_menu_item %>" 
+                 href="<%= raw(new_project_path) %>">
+                <!-- <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg> -->
+                New project
+              </a>
+
+              <a class="<%= tw_menu_item %>" 
+                 href="#"
+                 data-controller="nav-item"              
+                 data-action="click->nav-item#navigate">
+                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
+                Browse projects
+              </a>
+
+              <a class="<%= tw_menu_item %>" 
+                 href="<%= tutorial_home_index_path %>"
+                 data-controller="nav-item"              
+                 data-action="click->nav-item#navigate">
+                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
+                Tutorials
+              </a>
+
+
               <!-- Dropdown -->
               <div class="relative inline-block text-left" 
                    data-controller="dropdown">
@@ -66,7 +91,7 @@
                     <path d="M10 12h11"/>
                     <path d="M10 18h11"/>
                   </svg>
-                  Dropdown
+                  Admin tools
                   <svg class="duration-300 shrink-0 size-4 ms-auto md:ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="m6 9 6 6 6-6"/>
                   </svg>
@@ -107,29 +132,6 @@
               </div>
               <!-- End Dropdown -->
 
-              <a class="<%= tw_menu_item %>" 
-                 href="#"
-                 data-controller="nav-item"              
-                 data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
-                New project
-              </a>
-
-              <a class="<%= tw_menu_item %>" 
-                 href="#"
-                 data-controller="nav-item"              
-                 data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
-                Browse projects
-              </a>
-
-              <a class="<%= tw_menu_item %>" 
-                 href="<%= tutorial_home_index_path %>"
-                 data-controller="nav-item"              
-                 data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
-                Tutorials
-              </a>
             </div>
           </div>
         </div>

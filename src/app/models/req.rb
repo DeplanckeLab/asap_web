@@ -23,3 +23,4 @@ class Req < ApplicationRecord
     error.present?
   end
 end
+

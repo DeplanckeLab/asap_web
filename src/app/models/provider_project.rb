@@ -21,3 +21,4 @@ class ProviderProject < ApplicationRecord
     JSON.parse(attrs_json) rescue {}
   end
 end
+

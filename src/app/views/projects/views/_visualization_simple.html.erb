@@ -1,3 +1,6 @@
+<!-- Load PIXI.js globally -->
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+
 <div data-controller="visualization" 
      data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
      data-visualization-default-loom-file-value="<%= @default_loom_file %>"
@@ -137,10 +140,79 @@
     <div style="padding: 15px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <h2 style="margin: 0; font-size: 18px; font-weight: 600;">UMAP Visualization</h2>
     </div>
-    <div style="flex: 1; padding: 20px; display: flex; align-items: center; justify-content: center;">
-      <div style="text-align: center; color: #6b7280;">
-        <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
-        <p style="margin: 0;">Visualization will be rendered here</p>
+    
+    <!-- Menu Bar -->
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+      <!-- Left side: Loom file and Metadata Selection -->
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <select data-visualization-target="loomFileSelect" 
+                  data-action="change->visualization#updateEmbeddings"
+                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
+            <% @available_loom_files.each do |filepath| %>
+              <option value="<%= filepath %>">
+                <%= filepath.split('/').first.capitalize %>
+              </option>
+            <% end %>
+          </select>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <select data-visualization-target="metadataSelect" 
+                  data-action="change->visualization#updateMetadata"
+                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
+            <option value="">Select metadata...</option>
+            <% if @h_metadata[@default_loom_file] && @h_metadata[@default_loom_file]['cell'] && @h_metadata[@default_loom_file]['cell']['NUMERIC'] %>
+              <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| 
+                   metadata.nber_rows && metadata.nber_rows >= 2 && metadata.nber_rows <= 50 && 
+                   metadata.nber_cols && metadata.nber_cols == @project.nber_cols 
+                 }.each do |metadata| %>
+                <option value="<%= metadata.id %>">
+                  <%= metadata.display_name %> (<%= metadata.nber_rows %> rows)
+                </option>
+              <% end %>
+            <% end %>
+          </select>
+        </div>
+      </div>
+
+      <!-- Right side: Actions -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                onmouseout="this.style.backgroundColor='#f3f4f6'">
+          <i class="fas fa-download" style="margin-right: 4px;"></i>Export
+        </button>
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                onmouseout="this.style.backgroundColor='#f3f4f6'">
+          <i class="fas fa-expand" style="margin-right: 4px;"></i>Fullscreen
+        </button>
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #2563eb; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                onmouseover="this.style.backgroundColor='#1d4ed8'" 
+                onmouseout="this.style.backgroundColor='#2563eb'">
+          <i class="fas fa-sync" style="margin-right: 4px;"></i>Refresh
+        </button>
+      </div>
+    </div>
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column;">
+      <!-- Plot Container -->
+      <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px;">
+        <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
+          <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
+          <p style="margin: 0;">Select metadata from the dropdown to visualize</p>
+        </div>
+      </div>
+      
+      <!-- Plot Controls -->
+      <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
+        <div>
+          <span>Controls: </span>
+          <span>Drag to pan • Scroll to zoom</span>
+        </div>
+        <div id="plot-info" style="display: none;">
+          <span id="point-count">0</span> points
+        </div>
       </div>
     </div>
   </div>

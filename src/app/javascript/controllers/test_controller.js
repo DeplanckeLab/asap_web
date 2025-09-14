@@ -12,3 +12,4 @@ export default class extends Controller {
     alert('Test controller is working!')
   }
 }
+

@@ -24,13 +24,10 @@ class Annot < ApplicationRecord
   # Get metadata annotations for a project
   def self.available_metadata(project_id)
     # Find runs that created embeddings
-    embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: ['dim_reduction', 'pca', 'tsne', 'umap'] })
+    runs = Run.joins(:step).where(project_id: project_id)
     
     # Get annotations that are NOT created by dimension reduction runs
-    where(project_id: project_id)
-      .where.not(ori_run_id: embedding_runs.pluck(:id))
-      .where("name LIKE '/col_attrs/%'")
-      .order(:name)
+    where(project_id: project_id).order(:name)
   end
   
   # Get available loom files for a project

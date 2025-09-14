@@ -27,3 +27,4 @@ class ExpEntry < ApplicationRecord
     JSON.parse(identifiers_json) rescue {}
   end
 end
+

@@ -11,6 +11,7 @@ Rails.application.routes.draw do
       get :get_lineage
       get :summary_test
       get :tsv_from_json
+      get :metadata_coordinates
     end
   end
   

@@ -9,3 +9,4 @@ class IdentifierType < ApplicationRecord
     name.presence || "Unknown Type"
   end
 end
+

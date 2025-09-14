@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy ]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates]
 
   # GET /projects or /projects.json
   def index
@@ -62,9 +62,9 @@ class ProjectsController < ApplicationController
     
     # Get available loom files and metadata for the project
     @available_loom_files = Annot.available_loom_files(@project.id)
-    @available_metadata = Annot.available_metadata(@project.id)
+    available_metadata = Annot.available_metadata(@project.id)
     
-    @h_metadata = organize_metadata(@available_metadata)
+    @h_metadata = organize_metadata(available_metadata)
 
     # Get all embeddings for all loom files
     #@all_embeddings_by_loom = {}
@@ -329,15 +329,124 @@ class ProjectsController < ApplicationController
     render 'summary_test'
   end
 
+  # GET /projects/1/metadata_coordinates.json
+  def metadata_coordinates
+    metadata_id = params[:metadata_id]
+    loom_file = params[:loom_file] || @default_loom_file
+    
+    # Find the metadata annotation
+    metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
+    
+    if metadata.nil?
+      render json: { error: 'Metadata not found' }, status: 404
+      return
+    end
+    
+    # Get the full path to the loom file
+    loom_path = @project_dir + loom_file
+    
+    begin
+      # Extract metadata coordinates using the service
+      Rails.logger.info "Extracting metadata coordinates for: #{metadata.name}"
+      Rails.logger.info "Loom file path: #{loom_path}"
+      
+      # Use metadata name directly (it should already include the correct path)
+      coordinates = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
+      
+      Rails.logger.info "Raw coordinates retrieved: #{coordinates.length} coordinate pairs"
+      Rails.logger.info "First 5 coordinates: #{coordinates.first(5).inspect}"
+      Rails.logger.info "Last 5 coordinates: #{coordinates.last(5).inspect}"
+      
+      if coordinates.empty?
+        Rails.logger.error "No coordinates found for metadata: #{metadata.name}"
+        render json: { error: 'No coordinates found' }, status: 404
+        return
+      end
+      
+      # Log coordinate statistics
+      if coordinates.first.is_a?(Array) && coordinates.first.length >= 2
+        x_values = coordinates.map { |coord| coord[0] }.compact
+        y_values = coordinates.map { |coord| coord[1] }.compact
+        
+        Rails.logger.info "X values range: #{x_values.min} to #{x_values.max}"
+        Rails.logger.info "Y values range: #{y_values.min} to #{y_values.max}"
+        Rails.logger.info "X values sample: #{x_values.first(10).inspect}"
+        Rails.logger.info "Y values sample: #{y_values.first(10).inspect}"
+      end
+      
+      # Compress the data to binary format
+      binary_data = compress_coordinates_to_binary(coordinates)
+      
+      # Return binary data with metadata headers
+      response.headers['Content-Type'] = 'application/octet-stream'
+      response.headers['X-Metadata-ID'] = metadata_id.to_s
+      response.headers['X-Metadata-Name'] = metadata.display_name
+      response.headers['X-Cell-Count'] = coordinates.length.to_s
+      response.headers['X-Data-Type'] = 'coordinates'
+      
+      render body: binary_data
+    rescue => e
+      Rails.logger.error "Error fetching metadata coordinates: #{e.message}"
+      render json: { error: 'Failed to fetch coordinates' }, status: 500
+    end
+  end
+
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_project
       @project = Project.find(params.expect(:id))
+      @project_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
     end
 
     # Only allow a list of trusted parameters through.
     def project_params
       params.fetch(:project, {})
+    end
+    
+    # Compress coordinate data to binary format for maximum efficiency
+    def compress_coordinates_to_binary(coordinates)
+      # coordinates is an array of arrays: [[x1, y1], [x2, y2], ...]
+      # We'll round to 3 decimal places and store as 16-bit signed integers
+      
+      Rails.logger.info "Starting binary compression of #{coordinates.length} coordinate pairs"
+      
+      # Convert to integers (multiply by 1000 for 3 decimal precision)
+      integer_coords = coordinates.map do |coord_pair|
+        if coord_pair.is_a?(Array) && coord_pair.length >= 2
+          x = (coord_pair[0].to_f * 1000).round
+          y = (coord_pair[1].to_f * 1000).round
+          # Clamp to 16-bit signed integer range (-32,768 to 32,767)
+          x = [[x, -32768].max, 32767].min
+          y = [[y, -32768].max, 32767].min
+          [x, y]
+        else
+          Rails.logger.warn "Invalid coordinate pair: #{coord_pair.inspect}"
+          [0, 0] # fallback for invalid data
+        end
+      end
+      
+      # Log compression statistics
+      x_integers = integer_coords.map { |coord| coord[0] }
+      y_integers = integer_coords.map { |coord| coord[1] }
+      
+      Rails.logger.info "Integer X range: #{x_integers.min} to #{x_integers.max}"
+      Rails.logger.info "Integer Y range: #{y_integers.min} to #{y_integers.max}"
+      Rails.logger.info "First 5 integer coordinates: #{integer_coords.first(5).inspect}"
+      
+      # Create binary data using 16-bit signed integers (2 bytes per coordinate)
+      # This gives us a range of -32.768 to 32.767 with 3 decimal precision
+      binary_data = String.new(encoding: 'ASCII-8BIT')
+      
+      integer_coords.each do |x, y|
+        # Pack as little-endian 16-bit signed integers
+        binary_data << [x].pack('s<')  # 's<' = signed 16-bit little-endian
+        binary_data << [y].pack('s<')
+      end
+      
+      Rails.logger.info "Binary compression complete: #{binary_data.bytesize} bytes for #{coordinates.length} coordinate pairs"
+      Rails.logger.info "Compression ratio: #{(coordinates.length * 2 * 8.0 / binary_data.bytesize).round(2)}x"
+      
+      binary_data
     end
     
     # Generate klay data for pipeline visualization

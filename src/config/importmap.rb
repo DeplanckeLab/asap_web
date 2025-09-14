@@ -10,6 +10,7 @@ pin "@fortawesome/fontawesome-free", to: "https://cdnjs.cloudflare.com/ajax/libs
 #pin "plotly", to: "https://cdn.plot.ly/plotly-2.32.0.min.js", preload: true
 pin "@coreui/coreui", to: "https://cdn.jsdelivr.net/npm/@coreui/coreui@4.3.0/dist/js/coreui.bundle.min.js", preload: true
 pin "nouislider", to: "https://ga.jspm.io/npm:nouislider@15.7.1/dist/nouislider.mjs"
+pin "pixi.js", to: "https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.js"
 
 pin_all_from "app/javascript/controllers", under: "controllers"
 

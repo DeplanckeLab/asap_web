@@ -9,3 +9,4 @@ class Journal < ApplicationRecord
     name.presence || "Unknown Journal"
   end
 end
+

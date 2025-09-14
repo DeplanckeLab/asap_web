@@ -55,3 +55,4 @@ class RunsController < ApplicationController
     params.fetch(:run, {})
   end
 end
+

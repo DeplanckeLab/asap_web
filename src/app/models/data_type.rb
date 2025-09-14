@@ -28,3 +28,4 @@ class DataType < ApplicationRecord
     name == 'expression'
   end
 end
+

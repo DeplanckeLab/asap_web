@@ -23,3 +23,4 @@ class ExpEntriesController < ApplicationController
     @exp_entry = ExpEntry.find(params[:id])
   end
 end
+

@@ -28,3 +28,4 @@ class Article < ApplicationRecord
     "#{display_authors}. #{display_title}. #{display_journal}. #{display_year}."
   end
 end
+

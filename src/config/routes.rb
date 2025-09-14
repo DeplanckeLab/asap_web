@@ -1,5 +1,34 @@
 Rails.application.routes.draw do
-  resources :projects
+  devise_for :users
+  resources :projects do
+    member do
+      get :instructions
+      get :get_commands
+      get :get_file
+      get :get_loom_files_json
+      get :get_step
+      get :get_run
+      get :get_lineage
+      get :summary_test
+      get :tsv_from_json
+    end
+  end
+  
+  resources :articles do
+    member do
+      get :summary
+    end
+  end
+  
+  resources :exp_entries do
+    member do
+      get :summary
+    end
+  end
+  
+  resources :runs
+  resources :reqs
+  
   resources :home do
     collection do
       get :home

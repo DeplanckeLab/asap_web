@@ -1,0 +1,10 @@
+<h1>Summary Test</h1>
+<p>Admin status: <%= admin? %></p>
+<p>Project: <%= @project&.name %></p>
+<p>User: <%= current_user&.email %></p>
+
+<hr>
+
+<h2>Summary Partial Test</h2>
+<%= render :partial => 'projects/views/summary' %>
+

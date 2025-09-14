@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASAP - Authentication</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <%= image_tag "ASAP_sansTagline_White.svg", 
+          class: 'h-12 w-48 object-contain mx-auto mb-4', 
+          alt: 'ASAP Logo' %>
+      <h2 class="text-3xl font-bold text-gray-900">
+        <% if controller_name == 'sessions' %>
+          Sign in to your account
+        <% elsif controller_name == 'registrations' %>
+          Create your account
+        <% elsif controller_name == 'passwords' %>
+          Reset your password
+        <% else %>
+          ASAP Authentication
+        <% end %>
+      </h2>
+    </div>
+
+    <!-- Flash Messages -->
+    <% if notice %>
+      <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+        <%= notice %>
+      </div>
+    <% end %>
+
+    <% if alert %>
+      <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <%= alert %>
+      </div>
+    <% end %>
+
+    <!-- Main Content -->
+    <div class="bg-white py-8 px-6 shadow-lg rounded-lg">
+      <%= yield %>
+    </div>
+
+    <!-- Footer Links -->
+    <div class="text-center text-sm text-gray-600">
+      <% if controller_name == 'sessions' %>
+        <%= link_to "Don't have an account? Sign up", new_user_registration_path, class: "text-blue-600 hover:text-blue-500" %>
+      <% elsif controller_name == 'registrations' %>
+        <%= link_to "Already have an account? Sign in", new_user_session_path, class: "text-blue-600 hover:text-blue-500" %>
+      <% end %>
+    </div>
+  </div>
+</body>
+</html>
+

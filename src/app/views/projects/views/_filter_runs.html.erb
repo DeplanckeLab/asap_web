@@ -1,0 +1,45 @@
+<%# Filter runs partial - simplified version %>
+<div class="filter-runs-container">
+  <div class="row">
+    <div class="col-md-12">
+      <h5>Pipeline Filter</h5>
+      <div class="form-group">
+        <label for="filter-select">Filter by step:</label>
+        <select id="filter-select" class="form-control">
+          <option value="">All steps</option>
+          <% @h_steps.each do |step_id, step| %>
+            <option value="<%= step_id %>"><%= step.name || "Step #{step_id}" %></option>
+          <% end %>
+        </select>
+      </div>
+      
+      <div class="filter-stats">
+        <span class="badge badge-info">Total runs: <%= @runs.size %></span>
+        <% if @list_filter_run_ids.any? %>
+          <span class="badge badge-warning">Filtered runs: <%= @list_filter_run_ids.size %></span>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+$(document).ready(function() {
+  // Create a mapping of step IDs to run IDs for JavaScript filtering
+  var stepRunsMap = <%= raw @runs.group_by(&:step_id).to_json %>;
+  
+  $('#filter-select').change(function() {
+    var selectedStepId = $(this).val();
+    if (selectedStepId) {
+      // Filter runs by step using the pre-computed mapping
+      var filteredRuns = stepRunsMap[selectedStepId] || [];
+      // Update display - this would need to be implemented based on your specific needs
+      console.log('Filtering by step:', selectedStepId, 'Runs:', filteredRuns);
+    } else {
+      // Show all runs
+      var allRuns = <%= raw @runs.map(&:id).to_json %>;
+      console.log('Showing all runs:', allRuns);
+    }
+  });
+});
+</script>

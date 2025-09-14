@@ -1,0 +1,159 @@
+<div data-controller="visualization" 
+     data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
+     data-visualization-default-loom-file-value="<%= @default_loom_file %>"
+     style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0;">
+  
+  <!-- Left Panel: Metadata -->
+  <div style="width: 380px; height: 100vh; background-color: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column;">
+    <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Cell Metadata</h2>
+      <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Select metadata to color the plot</p>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+      <!-- Categorical Metadata Section -->
+      <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
+        <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Categorical Metadata</h3>
+        </div>
+        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+          <% if @h_metadata[@default_loom_file] %>
+            <% @h_metadata[@default_loom_file]['cell']['DISCRETE'].each do |metadata| %>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
+                <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f9fafb'" 
+                     onmouseout="this.style.backgroundColor=''"
+                     data-action="click->visualization#toggleMetadata">
+                  <!-- Chevron -->
+                  <div style="margin-right: 12px; color: #9ca3af; transition: transform 0.2s;">
+                    <svg style="width: 12px; height: 12px;" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
+                    </svg>
+                  </div>
+                  <!-- Content -->
+                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                    <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
+                  </div>
+                  <!-- Hidden Radio -->
+                  <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
+                  <!-- Water Drop Button -->
+                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                          data-action="click->visualization#waterDropClicked"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-active="false"
+                          onclick="event.stopPropagation()">
+                    <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                    </svg>
+                  </button>
+                </div>
+                <!-- Categories (initially hidden) -->
+                <div style="padding-left: 32px; padding-bottom: 8px; display: none;">
+                  <% if metadata.categories_json.present? %>
+                    <% begin %>
+                      <% categories = JSON.parse(metadata.categories_json) %>
+                      <% if categories.is_a?(Hash) %>
+                        <% categories.each do |category, count| %>
+                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
+                            <span style="color: #374151;"><%= category %></span>
+                            <span style="color: #6b7280; font-weight: 500;"><%= count %> cells</span>
+                          </div>
+                        <% end %>
+                      <% elsif categories.is_a?(Array) %>
+                        <% categories.each_with_index do |category, index| %>
+                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
+                            <span style="color: #374151;"><%= category %></span>
+                            <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
+                          </div>
+                        <% end %>
+                      <% end %>
+                    <% rescue JSON::ParserError %>
+                      <div style="font-size: 12px; color: #6b7280; padding: 8px;">Unable to parse categories</div>
+                    <% end %>
+                  <% else %>
+                    <div style="font-size: 12px; color: #6b7280; padding: 8px;">No category data available</div>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          <% else %>
+            <p style="color: #6b7280; font-size: 14px;">No categorical metadata available</p>
+          <% end %>
+        </div>
+      </div>
+
+      <!-- Draggable Divider -->
+      <div id="metadata-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s;" 
+           onmouseover="this.style.backgroundColor='#9ca3af'" 
+           onmouseout="this.style.backgroundColor='#d1d5db'">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px;"></div>
+      </div>
+
+      <!-- Continuous Metadata Section -->
+      <div style="height: 50%; display: flex; flex-direction: column;">
+        <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Continuous Metadata</h3>
+        </div>
+        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+          <% if @h_metadata[@default_loom_file] %>
+            <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].each do |metadata| %>
+              <div style="display: flex; align-items: center; padding: 8px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; margin-bottom: 4px;"
+                   onmouseover="this.style.backgroundColor='#f9fafb'" 
+                   onmouseout="this.style.backgroundColor=''">
+                <!-- Radio Button -->
+                <input type="radio" name="color_by" value="<%= metadata.id %>" style="margin-right: 12px;">
+                <!-- Content -->
+                <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                  <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                  <div style="font-size: 12px; color: #6b7280;">
+                    Range: <%= metadata.min_val&.round(2) || 'N/A' %> - <%= metadata.max_val&.round(2) || 'N/A' %>
+                  </div>
+                </div>
+                <!-- Water Drop Button -->
+                <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                        onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'" 
+                        onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor=''"
+                        data-action="click->visualization#waterDropClicked"
+                        data-metadata-name="<%= metadata.display_name %>">
+                  <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                  </svg>
+                </button>
+              </div>
+            <% end %>
+          <% else %>
+            <p style="color: #6b7280; font-size: 14px;">No continuous metadata available</p>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content: UMAP Plot -->
+  <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column;">
+    <div style="padding: 15px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">UMAP Visualization</h2>
+    </div>
+    <div style="flex: 1; padding: 20px; display: flex; align-items: center; justify-content: center;">
+      <div style="text-align: center; color: #6b7280;">
+        <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
+        <p style="margin: 0;">Visualization will be rendered here</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel: Gene Expression -->
+  <div style="width: 320px; height: 100vh; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;">
+    <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
+      <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Search and visualize gene expression</p>
+    </div>
+    <div style="flex: 1; padding: 20px; overflow-y: auto;">
+      <p>Gene expression content will go here</p>
+    </div>
+  </div>
+</div>
+

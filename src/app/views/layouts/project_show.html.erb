@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= @project.display_name %> - ASAP</title>
+  <%= csrf_meta_tags %>
+  <%= csp_meta_tag %>
+  
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <%= stylesheet_link_tag "tailwind", "inter-font", "data-turbo-track": "reload" %>
+  <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+  
+  <!-- JavaScript -->
+  <%= javascript_importmap_tags %>
+</head>
+<body class="bg-gray-50">
+  <!-- Top Bar -->
+  <div class="bg-black shadow-sm border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Left side: Logo and Project Info -->
+        <div class="flex items-center space-x-6">
+          <!-- ASAP Logo -->
+          <div class="flex-shrink-0">
+            <%= image_tag "ASAP_sansTagline_White.svg", 
+                class: 'h-8 w-32 object-contain', 
+                alt: 'ASAP Logo' %>
+          </div>
+          
+          <!-- Project Info -->
+          <div class="flex items-center space-x-4">
+            <div>
+              <h1 class="text-lg font-semibold text-white"><%= @project.display_name %></h1>
+              <div class="flex items-center space-x-4 text-sm text-gray-300">
+                <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> cells</span>
+                <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= @project.organism_display %></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Center: ASAP Version -->
+        <div class="flex-1 flex justify-center">
+          <span class="text-sm text-gray-300">ASAP v<%= @project.version_id || '2.0.0' %></span>
+        </div>
+        
+        <!-- Right side: Navigation Icons -->
+        <div class="flex items-center space-x-2">
+          <!-- Summary Icon -->
+          <%= link_to project_path(@project, view: 'summary'), 
+              class: "p-2 rounded-lg #{@view_type == 'summary' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
+            <i class="fas fa-info-circle text-lg"></i>
+          <% end %>
+          
+          <!-- Visualization Icon (default selected) -->
+          <%= link_to project_path(@project, view: 'visualization'), 
+              class: "p-2 rounded-lg #{@view_type == 'visualization' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
+            <i class="fas fa-chart-line text-lg"></i>
+          <% end %>
+          
+          <!-- Analysis Icon -->
+          <%= link_to project_path(@project, view: 'analysis'), 
+              class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
+            <i class="fas fa-microscope text-lg"></i>
+          <% end %>
+          
+          <!-- Data Icon -->
+          <%= link_to project_path(@project, view: 'data'), 
+              class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
+            <i class="fas fa-database text-lg"></i>
+          <% end %>
+          
+          <!-- Settings Icon -->
+          <%= link_to project_path(@project, view: 'settings'), 
+              class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
+            <i class="fas fa-cog text-lg"></i>
+          <% end %>
+          
+          <!-- Back to Projects -->
+          <%= link_to projects_path, 
+              class: "ml-4 p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+            <i class="fas fa-arrow-left text-lg"></i>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Area -->
+  <div>
+    <%= yield %>
+  </div>
+  
+  <!-- Additional JavaScript -->
+  <%= javascript_include_tag "application", "data-turbo-track": "reload", defer: true %>
+</body>
+</html>

@@ -1,11 +1,16 @@
 module AdminAuthorization
   extend ActiveSupport::Concern
 
-  private
-
   def admin?
-    ENV['ADMIN_EMAILS'].split(',').include? current_user&.email
+    # Return false if no authentication system is in place
+    return false unless current_user
+    
+    # Check if current user's email is in admin emails list
+    admin_emails = ENV['ADMIN_EMAILS']&.split(',') || []
+    admin_emails.include?(current_user.email)
   end
+
+  private
 
   def authorize_admin
     unless admin?

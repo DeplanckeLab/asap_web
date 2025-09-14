@@ -23,6 +23,9 @@ Rails.application.configure do
   # Enable server timing.
   config.server_timing = true
 
+  # Configure action mailer for Devise
+  config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }
+
 #  config.action_cable.allowed_request_origins = [ "https://asap-test.epfl.ch" ]
   
   # Enable/disable Action Controller caching. By default Action Controller caching is disabled.

@@ -1,26 +1,233 @@
-<% content_for :title, "Projects" %>
+<% content_for :title, "Browse Projects" %>
 
-<div class="w-full">
-  <% if notice.present? %>
-    <p class="py-2 px-3 bg-green-50 mb-5 text-green-500 font-medium rounded-md inline-block" id="notice"><%= notice %></p>
-  <% end %>
+<div class="min-h-screen bg-gray-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <% if notice.present? %>
+      <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+        <p class="text-green-800"><%= notice %></p>
+      </div>
+    <% end %>
 
-  <div class="flex justify-between items-center">
-    <h1 class="font-bold text-4xl">Projects</h1>
-    <%= link_to "New project", new_project_path, class: "rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white block font-medium" %>
-  </div>
-<!--
-  <div id="projects" class="min-w-full">
+    <!-- Header -->
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">Browse Projects</h1>
+      <p class="text-gray-600">Search and explore single-cell RNA sequencing projects</p>
+    </div>
+
+    <!-- Search Form -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+      <%= form_with url: projects_path, method: :get, local: true, class: "space-y-6" do |form| %>
+        <!-- Search Bar -->
+        <div>
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-2">Search Projects</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
+            </div>
+            <%= form.text_field :q, value: @query, placeholder: "Search by name, description, technology...", 
+                class: "block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500" %>
+          </div>
+        </div>
+
+        <!-- Filters Row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Organism Filter -->
+          <div>
+            <label for="organism_id" class="block text-sm font-medium text-gray-700 mb-2">Organism</label>
+            <%= form.select :organism_id, 
+                options_from_collection_for_select(@organisms, :id, :display_name, @filters[:organism_id]), 
+                { prompt: "All organisms" }, 
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+          </div>
+
+          <!-- Technology Filter -->
+          <div>
+            <label for="technology" class="block text-sm font-medium text-gray-700 mb-2">Technology</label>
+            <%= form.select :technology, 
+                options_for_select(@technologies.map { |t| [t, t] }, @filters[:technology]), 
+                { prompt: "All technologies" }, 
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+          </div>
+
+          <!-- Tissue Filter -->
+          <div>
+            <label for="tissue" class="block text-sm font-medium text-gray-700 mb-2">Tissue</label>
+            <%= form.select :tissue, 
+                options_for_select(@tissues.map { |t| [t, t] }, @filters[:tissue]), 
+                { prompt: "All tissues" }, 
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+          </div>
+
+          <!-- Status Filter -->
+          <div>
+            <label for="status_id" class="block text-sm font-medium text-gray-700 mb-2">Status</label>
+            <%= form.select :status_id, 
+                options_from_collection_for_select(@statuses, :id, :display_name, @filters[:status_id]), 
+                { prompt: "All statuses" }, 
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+          </div>
+        </div>
+
+        <!-- Additional Filters Row -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Public Only Filter -->
+          <div class="flex items-center">
+            <%= form.check_box :public_only, { checked: @filters[:public_only] == 'true', class: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" } %>
+            <label for="public_only" class="ml-2 block text-sm text-gray-900">Public projects only</label>
+          </div>
+
+          <!-- Sort Options -->
+          <div>
+            <label for="sort" class="block text-sm font-medium text-gray-700 mb-2">Sort by</label>
+            <%= form.select :sort, 
+                options_for_select([
+                  ['Most Recent', 'created_at'],
+                  ['Name (A-Z)', 'name'],
+                  ['Most Views', 'views'],
+                  ['Last Updated', 'updated_at']
+                ], @filters[:sort]), 
+                {}, 
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-end space-x-3">
+            <%= form.submit "Search", class: "px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" %>
+            <%= link_to "Clear", projects_path, class: "px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2" %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Results Header -->
+    <div class="flex justify-between items-center mb-6">
+      <div class="text-sm text-gray-600">
+        <% if @projects.any? %>
+          Showing <%= (@current_page - 1) * @per_page + 1 %>-<%= [@current_page * @per_page, @total_count].min %> of <%= @total_count %> projects
+        <% else %>
+          No projects found
+        <% end %>
+      </div>
+      
+      <div class="flex space-x-2">
+        <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+      </div>
+    </div>
+
+    <!-- Projects Grid -->
     <% if @projects.any? %>
-      <% @projects.each do |project| %>
-        <%= render project %>
-        <p>
-          <%= link_to "Show this project", project, class: "ml-2 rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 inline-block font-medium" %>
-        </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <% @projects.each do |project| %>
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
+            <!-- Project Header -->
+            <div class="p-6 border-b border-gray-100">
+              <div class="flex items-start justify-between">
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                  <%= link_to project.display_name, project_path(project), class: "hover:text-blue-600" %>
+                </h3>
+                <% if project.is_public? %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    Public
+                  </span>
+                <% end %>
+              </div>
+              
+              <% if project.description.present? %>
+                <p class="text-sm text-gray-600 line-clamp-2"><%= truncate(project.description, length: 120) %></p>
+              <% end %>
+            </div>
+
+            <!-- Project Stats -->
+            <div class="p-6">
+              <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span class="text-gray-500">Cells:</span>
+                  <span class="font-medium text-gray-900"><%= number_with_delimiter(project.cell_count) %></span>
+                </div>
+                <div>
+                  <span class="text-gray-500">Genes:</span>
+                  <span class="font-medium text-gray-900"><%= number_with_delimiter(project.gene_count) %></span>
+                </div>
+                <div>
+                  <span class="text-gray-500">Technology:</span>
+                  <span class="font-medium text-gray-900"><%= project.technology_display %></span>
+                </div>
+                <div>
+                  <span class="text-gray-500">Tissue:</span>
+                  <span class="font-medium text-gray-900"><%= project.tissue_display %></span>
+                </div>
+              </div>
+
+              <!-- Project Meta -->
+              <div class="mt-4 pt-4 border-t border-gray-100">
+                <div class="flex items-center justify-between text-xs text-gray-500">
+                  <span>Created <%= time_ago_in_words(project.created_at) %> ago</span>
+                  <span><%= pluralize(project.view_count, 'view') %></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Project Actions -->
+            <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
+              <div class="flex space-x-2">
+                <%= link_to "View", project_path(project), class: "flex-1 text-center px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none" %>
+                <% if project.is_public? %>
+                  <%= link_to "Clone", "#", class: "flex-1 text-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-700 focus:outline-none" %>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+
+      <!-- Simple Pagination -->
+      <% if @total_count > @per_page %>
+        <div class="mt-8 flex justify-center">
+          <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+            <% if @current_page > 1 %>
+              <%= link_to "Previous", projects_path(page: @current_page - 1, q: @query, organism_id: @filters[:organism_id], technology: @filters[:technology], tissue: @filters[:tissue], status_id: @filters[:status_id], public_only: @filters[:public_only], sort: @filters[:sort]), class: "relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50" %>
+            <% end %>
+            
+            <% total_pages = (@total_count.to_f / @per_page).ceil %>
+            <% start_page = [@current_page - 2, 1].max %>
+            <% end_page = [@current_page + 2, total_pages].min %>
+            
+            <% (start_page..end_page).each do |page| %>
+              <% if page == @current_page %>
+                <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-blue-50 text-sm font-medium text-blue-600">
+                  <%= page %>
+                </span>
+              <% else %>
+                <%= link_to page, projects_path(page: page, q: @query, organism_id: @filters[:organism_id], technology: @filters[:technology], tissue: @filters[:tissue], status_id: @filters[:status_id], public_only: @filters[:public_only], sort: @filters[:sort]), class: "relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50" %>
+              <% end %>
+            <% end %>
+            
+            <% if @current_page < total_pages %>
+              <%= link_to "Next", projects_path(page: @current_page + 1, q: @query, organism_id: @filters[:organism_id], technology: @filters[:technology], tissue: @filters[:tissue], status_id: @filters[:status_id], public_only: @filters[:public_only], sort: @filters[:sort]), class: "relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50" %>
+            <% end %>
+          </nav>
+        </div>
       <% end %>
     <% else %>
-      <p class="text-center my-10">No projects found.</p>
+      <!-- Empty State -->
+      <div class="text-center py-12">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+        </svg>
+        <h3 class="mt-2 text-sm font-medium text-gray-900">No projects found</h3>
+        <p class="mt-1 text-sm text-gray-500">
+          <% if @query.present? || @filters.values.any?(&:present?) %>
+            Try adjusting your search criteria or filters.
+          <% else %>
+            Get started by creating a new project.
+          <% end %>
+        </p>
+        <div class="mt-6">
+          <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+        </div>
+      </div>
     <% end %>
   </div>
--->
 </div>

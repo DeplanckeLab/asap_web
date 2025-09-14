@@ -1,21 +1,16 @@
-<div class='container-fluid'>
-  <div class='card text-md-center col-md-4 centered-card'>
-    <div class='card-body'>
-    <h2 class='card-title'>  
-Forgot your password?</h2>
+<h2>Forgot your password?</h2>
 
 <%= form_for(resource, as: resource_name, url: password_path(resource_name), html: { method: :post }) do |f| %>
-  <%= devise_error_messages! %>
+  <%= render "devise/shared/error_messages", resource: resource %>
 
-  <div class="field form-group">
-    <%# f.label :email %><br />
-    <%= f.email_field :email, autofocus: true, autocomplete: "email", class:'form-control', placeholder:'Type here your email' %>
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.email_field :email, autofocus: true, autocomplete: "email" %>
   </div>
 
   <div class="actions">
-    <%= f.submit "Send me reset password instructions", class:'btn btn-primary' %>
+    <%= f.submit "Send me reset password instructions" %>
   </div>
 <% end %>
-<br/>
+
 <%= render "devise/shared/links" %>
-</div></div></div>

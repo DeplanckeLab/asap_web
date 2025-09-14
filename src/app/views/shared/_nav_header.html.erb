@@ -77,60 +77,91 @@
               </a>
 
 
-              <!-- Dropdown -->
-              <div class="relative inline-block text-left" 
-                   data-controller="dropdown">
-                <button type="button" 
-                        class="<%= tw_menu_item %>"
-                        data-dropdown-toggle="true"
-                        data-action="click->dropdown#toggle">
-                  <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m3 10 2.5-2.5L3 5"/>
-                    <path d="m3 19 2.5-2.5L3 14"/>
-                    <path d="M10 6h11"/>
-                    <path d="M10 12h11"/>
-                    <path d="M10 18h11"/>
-                  </svg>
-                  Admin tools
-                  <svg class="duration-300 shrink-0 size-4 ms-auto md:ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m6 9 6 6 6-6"/>
-                  </svg>
-                </button>
-
-                <!-- Dropdown Menu -->
-                <div class="hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 
-                            dark:bg-gray-800 dark:border dark:border-gray-700
-                            z-[1000] top-full"
-                     style="position: fixed;"
-                     data-dropdown-target="menu">
-                  <!-- Dropdown Item 1 -->
-                  <a class="<%= tw_menu_item(:dropdown_item) %>"
-                     href="#"
-                     data-controller="nav-item"
-                     data-action="click->nav-item#navigate">
-                    <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <% if user_signed_in? %>
+                <!-- User Dropdown -->
+                <div class="relative inline-block text-left" 
+                     data-controller="dropdown">
+                  <button type="button" 
+                          class="<%= tw_menu_item %>"
+                          data-dropdown-toggle="true"
+                          data-action="click->dropdown#toggle">
+                    <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
                       <circle cx="9" cy="7" r="4"/>
                       <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
                       <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                     </svg>
-                    My Account
-                  </a>
-                  
-                  <!-- Dropdown Item 2 -->
-                  <a class="<%= tw_menu_item(:dropdown_item) %>"
-                     href="#"
-                     data-controller="nav-item"
-                     data-action="click->nav-item#navigate">
-                    <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M18 6 6 18"/>
-                      <path d="m6 6 12 12"/>
+                    <%= current_user.displayed_name || current_user.email %>
+                    <svg class="duration-300 shrink-0 size-4 ms-auto md:ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m6 9 6 6 6-6"/>
                     </svg>
-                    Sign Out
-                  </a>
+                  </button>
+
+                  <!-- Dropdown Menu -->
+                  <div class="hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 
+                              dark:bg-gray-800 dark:border dark:border-gray-700
+                              z-[1000] top-full"
+                       style="position: fixed;"
+                       data-dropdown-target="menu">
+                    <!-- My Account -->
+                    <a class="<%= tw_menu_item(:dropdown_item) %>"
+                       href="<%= edit_user_registration_path %>"
+                       data-controller="nav-item"
+                       data-action="click->nav-item#navigate">
+                      <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                      </svg>
+                      My Account
+                    </a>
+                    
+                    <!-- Sign Out -->
+                    <%= link_to destroy_user_session_path, method: :delete, 
+                        class: "#{tw_menu_item(:dropdown_item)}",
+                        data: { 
+                          controller: "nav-item",
+                          action: "click->nav-item#navigate",
+                          "turbo-method": :delete
+                        } do %>
+                      <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18"/>
+                        <path d="m6 6 12 12"/>
+                      </svg>
+                      Sign Out
+                    <% end %>
+                  </div>
                 </div>
-              </div>
-              <!-- End Dropdown -->
+                <!-- End User Dropdown -->
+              <% else %>
+                <!-- Sign In / Sign Up Links -->
+                <a class="<%= tw_menu_item %>" 
+                   href="<%= new_user_session_path %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate">
+                  <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
+                  Sign In
+                </a>
+
+                <a class="<%= tw_menu_item %>" 
+                   href="<%= new_user_registration_path %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate">
+                  <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
+                  Sign Up
+                </a>
+              <% end %>
 
             </div>
           </div>

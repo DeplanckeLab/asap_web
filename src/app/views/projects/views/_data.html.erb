@@ -1,0 +1,158 @@
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-2">Data</h2>
+    <p class="text-gray-600">Data files, metadata, and project information</p>
+  </div>
+
+  <!-- Project Information -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <!-- Basic Info -->
+    <div class="bg-gray-50 rounded-lg p-4">
+      <h3 class="text-lg font-semibold text-gray-900 mb-3">Project Information</h3>
+      <div class="space-y-3 text-sm">
+        <div class="flex justify-between">
+          <span class="text-gray-600">Project Name:</span>
+          <span class="font-medium"><%= @project.display_name %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Key:</span>
+          <span class="font-medium"><%= @project.key || 'N/A' %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Technology:</span>
+          <span class="font-medium"><%= @project.technology_display %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Tissue:</span>
+          <span class="font-medium"><%= @project.tissue_display %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Organism:</span>
+          <span class="font-medium"><%= @project.organism_display %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Status:</span>
+          <span class="font-medium"><%= @project.status_display %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Public:</span>
+          <span class="font-medium"><%= @project.is_public? ? 'Yes' : 'No' %></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Statistics -->
+    <div class="bg-gray-50 rounded-lg p-4">
+      <h3 class="text-lg font-semibold text-gray-900 mb-3">Data Statistics</h3>
+      <div class="space-y-3 text-sm">
+        <div class="flex justify-between">
+          <span class="text-gray-600">Total Cells:</span>
+          <span class="font-medium"><%= number_with_delimiter(@project.cell_count) %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Total Genes:</span>
+          <span class="font-medium"><%= number_with_delimiter(@project.gene_count) %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Disk Size:</span>
+          <span class="font-medium"><%= @project.disk_size_mb %> MB</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Views:</span>
+          <span class="font-medium"><%= number_with_delimiter(@project.view_count) %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Clones:</span>
+          <span class="font-medium"><%= number_with_delimiter(@project.clone_count) %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Created:</span>
+          <span class="font-medium"><%= @project.created_date %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-600">Updated:</span>
+          <span class="font-medium"><%= @project.updated_date %></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Files -->
+  <div class="bg-gray-50 rounded-lg p-6 mb-6">
+    <h3 class="text-lg font-semibold text-gray-900 mb-4">Data Files</h3>
+    
+    <div class="bg-white rounded-lg border border-gray-200">
+      <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <div class="grid grid-cols-12 gap-4 text-sm font-medium text-gray-700">
+          <div class="col-span-4">File Name</div>
+          <div class="col-span-2">Type</div>
+          <div class="col-span-2">Size</div>
+          <div class="col-span-2">Status</div>
+          <div class="col-span-2">Actions</div>
+        </div>
+      </div>
+      
+      <div class="divide-y divide-gray-200">
+        <div class="px-4 py-3">
+          <div class="grid grid-cols-12 gap-4 text-sm">
+            <div class="col-span-4 font-medium text-gray-900">expression_matrix.h5ad</div>
+            <div class="col-span-2 text-gray-600">AnnData</div>
+            <div class="col-span-2 text-gray-600">245.6 MB</div>
+            <div class="col-span-2">
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Processed</span>
+            </div>
+            <div class="col-span-2">
+              <button class="text-blue-600 hover:text-blue-800 text-sm">Download</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="px-4 py-3">
+          <div class="grid grid-cols-12 gap-4 text-sm">
+            <div class="col-span-4 font-medium text-gray-900">metadata.csv</div>
+            <div class="col-span-2 text-gray-600">CSV</div>
+            <div class="col-span-2 text-gray-600">2.1 MB</div>
+            <div class="col-span-2">
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Processed</span>
+            </div>
+            <div class="col-span-2">
+              <button class="text-blue-600 hover:text-blue-800 text-sm">Download</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="px-4 py-3">
+          <div class="grid grid-cols-12 gap-4 text-sm">
+            <div class="col-span-4 font-medium text-gray-900">raw_counts.mtx</div>
+            <div class="col-span-2 text-gray-600">Matrix</div>
+            <div class="col-span-2 text-gray-600">156.8 MB</div>
+            <div class="col-span-2">
+              <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">Processing</span>
+            </div>
+            <div class="col-span-2">
+              <button class="text-gray-400 text-sm" disabled>Download</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Description -->
+  <% if @project.description.present? %>
+    <div class="bg-gray-50 rounded-lg p-6 mb-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-3">Description</h3>
+      <p class="text-gray-700"><%= @project.description %></p>
+    </div>
+  <% end %>
+
+  <!-- Action Buttons -->
+  <div class="flex justify-end space-x-3">
+    <button class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
+      <i class="fas fa-edit mr-2"></i>Edit Project
+    </button>
+    <button class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      <i class="fas fa-upload mr-2"></i>Upload Files
+    </button>
+  </div>
+</div>

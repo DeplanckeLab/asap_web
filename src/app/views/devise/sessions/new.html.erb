@@ -1,34 +1,30 @@
-<div class='container-fluid'>
-  <div class='card text-md-center col-md-4 centered-card'>
-    <div class='card-body'>
-    <h2 class='card-title'>
-      Log in
-    </h2>
-    <%= form_for(resource, as: resource_name, url: session_path(resource_name)) do |f| %>
-    
-    <div class="field" class=''>
-      <%# f.label :email %><br />
-      <%= f.email_field :email, autofocus: true, autocomplete: "email", placeholder: "Email", class: 'form-control mx-sm-3' %>
-    </div>
-    
-    <div class="field" class=''>
-      <%# f.label :password %><br />
-      <%= f.password_field :password, autocomplete: "off",  placeholder: "Password", class: 'form-control mx-sm-3' %>
-    </div>
-    <br/>
-    <% if devise_mapping.rememberable? -%>
-    <div class="field">
-      <%= f.check_box :remember_me %>
-      <%= f.label :remember_me %>
-    </div>
-    <% end -%>
-    
-    <div class="actions">
-      <%= f.submit "Log in", class: 'btn btn-primary' %>
-    </div>
-    <% end %>
-    <br/>
-    <%= render "devise/shared/links" %>
-    </div>
+<%= form_for(resource, as: resource_name, url: session_path(resource_name), html: { class: "space-y-6" }) do |f| %>
+  <div>
+    <%= f.label :email, class: "block text-sm font-medium text-gray-700" %>
+    <%= f.email_field :email, autofocus: true, autocomplete: "email", 
+        class: "mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" %>
   </div>
+
+  <div>
+    <%= f.label :password, class: "block text-sm font-medium text-gray-700" %>
+    <%= f.password_field :password, autocomplete: "current-password", 
+        class: "mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" %>
+  </div>
+
+  <% if devise_mapping.rememberable? %>
+    <div class="flex items-center">
+      <%= f.check_box :remember_me, class: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" %>
+      <%= f.label :remember_me, class: "ml-2 block text-sm text-gray-900" %>
+    </div>
+  <% end %>
+
+  <div>
+    <%= f.submit "Sign in", 
+        class: "w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+  </div>
+<% end %>
+
+<div class="mt-6">
+  <%= link_to "Forgot your password?", new_user_password_path, 
+      class: "text-sm text-blue-600 hover:text-blue-500" %>
 </div>

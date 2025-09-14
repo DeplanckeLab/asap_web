@@ -161,29 +161,53 @@ class H5DataService
     begin
       # Use ASAP.jar to extract the full metadata vector (with values)
       cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -meta #{metadata_path} -loom #{h5_file}"
+      Rails.logger.info "Executing ASAP.jar command: #{cmd}"
       result = `#{cmd}`
+      Rails.logger.info "Command exit status: #{$?.exitstatus}"
+      Rails.logger.info "Command output length: #{result.length} characters"
 
       if $?.success?
         begin
-          # Parse JSON - the result should be an array with 2 vectors: [v1, v2]
+          # Parse JSON - handle both single vectors and coordinate pairs
           json_data = JSON.parse(result)
           
-          if json_data['values'].is_a?(Array) && json_data['values'].length == 2
-            v1, v2 = json_data['values']
-            if v1.is_a?(Array) && v2.is_a?(Array) && v1.length == v2.length
-              # Convert to coordinate pairs
-              coordinates = v1.zip(v2)
-              Rails.logger.info "Successfully extracted metadata vector with #{coordinates.length} coordinate pairs from #{metadata_path}"
-              return coordinates
+          Rails.logger.info "Metadata extraction result for #{metadata_path}: nber_rows=#{json_data['nber_rows']}, values type=#{json_data['values']&.class}"
+          
+          if json_data['values'].is_a?(Array)
+            case json_data['nber_rows']
+            when 2
+              # Coordinate pairs - extract two vectors and zip them
+              v1, v2 = json_data['values']
+              if v1.is_a?(Array) && v2.is_a?(Array) && v1.length == v2.length
+                # Convert to coordinate pairs
+                coordinates = v1.zip(v2)
+                Rails.logger.info "Successfully extracted metadata vector with #{coordinates.length} coordinate pairs from #{metadata_path}"
+                return coordinates
+              else
+                Rails.logger.error "Invalid vector format for coordinate pairs: v1.length=#{v1&.length}, v2.length=#{v2&.length}"
+                Rails.logger.error "v1 type: #{v1&.class}, v2 type: #{v2&.class}"
+                return []
+              end
+            when 1
+              # Single vector - return as array of single values
+              single_vector = json_data['values']
+              if single_vector.is_a?(Array)
+                Rails.logger.info "Successfully extracted metadata vector with #{single_vector.length} single values from #{metadata_path}"
+                return single_vector
+              else
+                Rails.logger.error "Invalid single vector format: type=#{single_vector.class}"
+                return []
+              end
             else
-              Rails.logger.error "Invalid vector format: v1.length=#{v1&.length}, v2.length=#{v2&.length}"
-              Rails.logger.error "v1 type: #{v1&.class}, v2 type: #{v2&.class}"
+              Rails.logger.error "Unexpected nber_rows value: #{json_data['nber_rows']} (expected 1 or 2)"
+              Rails.logger.error "JSON structure: #{json_data.keys}" if json_data.is_a?(Hash)
+              Rails.logger.error "Raw output: #{result[0..500]}..." # Show first 500 chars
               return []
             end
           else
-            Rails.logger.error "Invalid JSON format: expected 'values' key with array of 2 vectors"
+            Rails.logger.error "Invalid JSON format: 'values' is not an array"
             Rails.logger.error "JSON structure: #{json_data.keys}" if json_data.is_a?(Hash)
-            Rails.logger.error "values type: #{json_data['values']&.class}, length: #{json_data['values']&.length}"
+            Rails.logger.error "values type: #{json_data['values']&.class}"
             Rails.logger.error "Raw output: #{result[0..500]}..." # Show first 500 chars
             return []
           end

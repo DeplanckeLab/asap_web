@@ -4,7 +4,7 @@ class ApplicationController < ActionController::Base
   allow_browser versions: :modern
 
   # Devise authentication
-  before_action :authenticate_user!, except: [:index, :show, :metadata_coordinates]
+  before_action :authenticate_user!, except: [:index, :show, :metadata_coordinates, :metadata_vectors]
   before_action :configure_permitted_parameters, if: :devise_controller?
 
   # Make admin? method available to views

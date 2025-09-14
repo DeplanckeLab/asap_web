@@ -160,14 +160,32 @@
 
         <!-- Right side: Actions -->
         <div class="flex items-center space-x-2">
-          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">
-            <i class="fas fa-download mr-1"></i>Export
+          <!-- Lasso Selection Button -->
+          <button id="lasso-button" 
+                  class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
+                  data-action="click->visualization#toggleLassoSelection"
+                  title="Lasso Selection">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
           </button>
-          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">
-            <i class="fas fa-expand mr-1"></i>Fullscreen
+          
+          <!-- Export Button (Icon Only) -->
+          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
+                  title="Export">
+            <i class="fas fa-download"></i>
           </button>
-          <button class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
-            <i class="fas fa-sync mr-1"></i>Refresh
+          
+          <!-- Fullscreen Button (Icon Only) -->
+          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
+                  title="Fullscreen">
+            <i class="fas fa-expand"></i>
+          </button>
+          
+          <!-- Refresh Button (Icon Only) -->
+          <button class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-200" 
+                  title="Refresh">
+            <i class="fas fa-sync"></i>
           </button>
         </div>
       </div>

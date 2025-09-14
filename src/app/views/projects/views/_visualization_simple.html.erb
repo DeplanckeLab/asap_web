@@ -43,7 +43,7 @@
                   <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
                           onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
                           onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                          data-action="click->visualization#waterDropClicked"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
                           data-metadata-name="<%= metadata.display_name %>"
                           data-metadata-id="<%= metadata.id %>"
                           data-active="false"

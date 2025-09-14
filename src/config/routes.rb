@@ -12,6 +12,7 @@ Rails.application.routes.draw do
       get :summary_test
       get :tsv_from_json
       get :metadata_coordinates
+      get :metadata_vectors
     end
   end
   

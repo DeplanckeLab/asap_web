@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors]
 
   # GET /projects or /projects.json
   def index
@@ -391,6 +391,62 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/1/metadata_vectors.json
+  def metadata_vectors
+    loom_file = params[:loom_file] || @default_loom_file
+    metadata_ids = params[:metadata_ids]&.split(',') || []
+    
+    # Get the full path to the loom file
+    loom_path = @project_dir + loom_file
+    
+    begin
+      metadata_vectors_data = {}
+      
+      metadata_ids.each do |metadata_id|
+        metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
+        next unless metadata
+        
+        Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"
+        Rails.logger.info "Metadata path: #{metadata.name}, Data type: #{metadata.data_type.name}"
+        Rails.logger.info "Loom file path: #{loom_path}"
+        Rails.logger.info "Full command will be: java -jar lib/ASAP.jar -T ExtractMetadata -meta '#{metadata.name}' -loom '#{loom_path}'"
+        
+        # Get the raw metadata vector
+        raw_vector = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
+        
+        if raw_vector.empty?
+          Rails.logger.warn "No data found for metadata: #{metadata.display_name} (path: #{metadata.name})"
+          Rails.logger.warn "This could be due to: 1) Metadata path not found in loom file, 2) Empty metadata, 3) ASAP.jar extraction failed"
+          next
+        end
+        
+        Rails.logger.info "Successfully extracted #{raw_vector.length} values for #{metadata.display_name}"
+        
+        # Compress based on data type
+        compressed_data = compress_metadata_vector(raw_vector, metadata)
+        
+        metadata_vectors_data[metadata_id] = {
+          id: metadata.id,
+          name: metadata.display_name,
+          data_type: metadata.data_type.name,
+          compressed_data: compressed_data[:data] ? Base64.encode64(compressed_data[:data]) : nil,
+          compression_info: compressed_data[:info]
+        }
+        
+        Rails.logger.info "Compressed metadata #{metadata.display_name}: #{compressed_data[:info]}"
+      end
+      
+      render json: { 
+        metadata_vectors: metadata_vectors_data,
+        total_loaded: metadata_vectors_data.size,
+        loom_file: loom_file
+      }
+    rescue => e
+      Rails.logger.error "Error loading metadata vectors: #{e.message}"
+      render json: { error: 'Failed to load metadata vectors' }, status: 500
+    end
+  end
+
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_project
@@ -447,6 +503,176 @@ class ProjectsController < ApplicationController
       Rails.logger.info "Compression ratio: #{(coordinates.length * 2 * 8.0 / binary_data.bytesize).round(2)}x"
       
       binary_data
+    end
+    
+    # Compress metadata vector based on data type
+    def compress_metadata_vector(raw_vector, metadata)
+      data_type = metadata.data_type.name
+      
+      case data_type
+      when 'DISCRETE'
+        compress_discrete_metadata_vector(raw_vector, metadata)
+      when 'CONTINUOUS'
+        compress_continuous_metadata_vector(raw_vector, metadata)
+      else
+        Rails.logger.warn "Unknown data type for compression: #{data_type}"
+        { data: nil, info: "Unknown data type: #{data_type}" }
+      end
+    end
+    
+    # Compress discrete metadata by replacing values with category indices
+    def compress_discrete_metadata_vector(raw_vector, metadata)
+      Rails.logger.info "Compressing discrete metadata: #{metadata.display_name}"
+      
+      # Parse categories from metadata
+      categories = []
+      if metadata.categories_json.present?
+        begin
+          parsed_categories = JSON.parse(metadata.categories_json)
+          if parsed_categories.is_a?(Hash)
+            categories = parsed_categories.keys.sort
+          elsif parsed_categories.is_a?(Array)
+            categories = parsed_categories.sort
+          end
+        rescue JSON::ParserError => e
+          Rails.logger.error "Failed to parse categories for #{metadata.display_name}: #{e.message}"
+          return { data: nil, info: "Failed to parse categories" }
+        end
+      end
+      
+      if categories.empty?
+        Rails.logger.warn "No categories found for discrete metadata: #{metadata.display_name}"
+        return { data: nil, info: "No categories available" }
+      end
+      
+      # Create category to index mapping
+      category_to_index = {}
+      categories.each_with_index { |cat, idx| category_to_index[cat] = idx }
+      
+      Rails.logger.info "Found #{categories.length} categories for #{metadata.display_name}: #{categories.first(5).join(', ')}#{categories.length > 5 ? '...' : ''}"
+      
+      # Convert values to indices
+      indices = raw_vector.map do |value|
+        # Handle both single values and coordinate pairs
+        actual_value = value.is_a?(Array) ? value[0] : value
+        category_to_index[actual_value.to_s] || 0 # fallback to 0 if not found
+      end
+      
+      # Determine optimal bit width based on actual number of unique categories
+      unique_indices = indices.uniq.sort
+      num_categories = unique_indices.length
+      
+      # Handle edge cases
+      if num_categories <= 1
+        Rails.logger.info "Only #{num_categories} unique category(ies) found - no compression needed"
+        return { data: nil, info: "Only #{num_categories} category - no compression needed" }
+      end
+      
+      # Calculate minimum bits needed
+      min_bits_needed = Math.log2(num_categories).ceil
+      
+      # Choose bit width that can accommodate all categories
+      bit_width = case min_bits_needed
+                  when 1 then 1    # 1 bit for 2 categories (0, 1)
+                  when 2..8 then 8     # 8 bits (1 byte) for 2-256 categories
+                  when 9..16 then 16   # 16 bits (2 bytes) for 257-65536 categories
+                  when 17..32 then 32  # 32 bits (4 bytes) for more categories
+                  else 32  # fallback
+                  end
+      
+      max_index = indices.max
+      actual_categories_used = unique_indices.length
+      
+      Rails.logger.info "Compression optimization: #{actual_categories_used} unique categories, #{min_bits_needed} bits needed, using #{bit_width}-bit encoding"
+      
+      # Pack indices into binary data
+      binary_data = String.new(encoding: 'ASCII-8BIT')
+      
+      case bit_width
+      when 1
+        # Special case: pack 8 indices per byte for 1-bit encoding
+        indices.each_slice(8) do |slice|
+          byte = 0
+          slice.each_with_index do |idx, i|
+            byte |= (idx & 1) << i
+          end
+          binary_data << [byte].pack('C')
+        end
+      when 8
+        indices.each { |idx| binary_data << [idx].pack('C') }  # unsigned char
+      when 16
+        indices.each { |idx| binary_data << [idx].pack('v') }  # unsigned short little-endian
+      when 32
+        indices.each { |idx| binary_data << [idx].pack('V') }  # unsigned long little-endian
+      end
+      
+      compression_info = {
+        type: 'discrete',
+        categories: categories,
+        bit_width: bit_width,
+        cell_count: raw_vector.length,
+        category_count: categories.length,
+        unique_categories_used: actual_categories_used,
+        min_bits_needed: min_bits_needed,
+        binary_size: binary_data.bytesize,
+        compression_ratio: (raw_vector.length * 4.0 / binary_data.bytesize).round(2) # assuming original was 4 bytes per value
+      }
+      
+      Rails.logger.info "Discrete compression complete: #{binary_data.bytesize} bytes for #{raw_vector.length} cells (#{compression_info[:compression_ratio]}x compression)"
+      
+      { data: binary_data, info: compression_info }
+    end
+    
+    # Compress continuous metadata using float compression
+    def compress_continuous_metadata_vector(raw_vector, metadata)
+      Rails.logger.info "Compressing continuous metadata: #{metadata.display_name}"
+      
+      # Extract numeric values from raw vector
+      numeric_values = raw_vector.map do |value|
+        # Handle both single values and coordinate pairs
+        actual_value = value.is_a?(Array) ? value[0] : value
+        actual_value.to_f
+      end
+      
+      # Calculate statistics
+      min_val = numeric_values.min
+      max_val = numeric_values.max
+      range = max_val - min_val
+      
+      Rails.logger.info "Continuous value range: #{min_val} to #{max_val} (range: #{range})"
+      
+      # Determine optimal precision and bit width
+      if range <= 0
+        Rails.logger.warn "Zero range for continuous metadata: #{metadata.display_name}"
+        return { data: nil, info: "Zero range - no variation in data" }
+      end
+      
+      # Use 16-bit unsigned integers with normalization
+      # This gives us good precision for most continuous data
+      normalized_values = numeric_values.map do |val|
+        # Normalize to 0-65535 range
+        normalized = ((val - min_val) / range * 65535).round
+        [[normalized, 0].max, 65535].min  # clamp to valid range
+      end
+      
+      # Pack into binary data
+      binary_data = String.new(encoding: 'ASCII-8BIT')
+      normalized_values.each { |val| binary_data << [val].pack('v') }  # unsigned short little-endian
+      
+      compression_info = {
+        type: 'continuous',
+        min_val: min_val,
+        max_val: max_val,
+        range: range,
+        cell_count: raw_vector.length,
+        bit_width: 16,
+        binary_size: binary_data.bytesize,
+        compression_ratio: (raw_vector.length * 8.0 / binary_data.bytesize).round(2) # assuming original was 8 bytes per value
+      }
+      
+      Rails.logger.info "Continuous compression complete: #{binary_data.bytesize} bytes for #{raw_vector.length} cells (#{compression_info[:compression_ratio]}x compression)"
+      
+      { data: binary_data, info: compression_info }
     end
     
     # Generate klay data for pipeline visualization

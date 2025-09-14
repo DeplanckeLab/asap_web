@@ -39,6 +39,12 @@ export default class extends Controller {
     setTimeout(() => {
       this.initializeDraggableDivider()
     }, 500)
+    
+    // Initialize metadata vectors storage
+    this.loadedMetadataVectors = {}
+    this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
+    
+    // No automatic loading - metadata will be loaded on-demand when needed
   }
 
   disconnect() {
@@ -442,16 +448,10 @@ export default class extends Controller {
       // Just update the points without animation
       existingGraphics.clear()
       const pointSize = 1
-      const pointColor = 0x3b82f6
       
-      existingGraphics.beginFill(pointColor)
-      for (let i = 0; i < coordinates.length; i++) {
-        const [x, y] = coordinates[i]
-        const screenX = this.normalizeX(x, newBounds)
-        const screenY = this.normalizeY(y, newBounds)
-        existingGraphics.drawCircle(screenX, screenY, pointSize)
-      }
-      existingGraphics.endFill()
+      // Always use the centralized color function
+      console.log('Updating existing points with current coloring scheme')
+      this.updatePointsWithCurrentColoring(existingGraphics, coordinates, newBounds)
       
       // Update point count display
       const pointCountElement = document.getElementById('point-count')
@@ -480,6 +480,135 @@ export default class extends Controller {
     }
   }
 
+  // Update existing graphics object with current coloring scheme
+  updatePointsWithCurrentColoring(graphics, coordinates, bounds) {
+    const pointSize = 1
+
+    // Check if we have metadata coloring active
+    if (this.currentMetadataVector && this.currentMetadataVector.values) {
+      const { data_type, values, compression_info } = this.currentMetadataVector
+
+      // Ensure we have the same number of values as coordinates
+      if (values.length !== coordinates.length) {
+        console.error(`Mismatch: ${values.length} metadata values vs ${coordinates.length} coordinates`)
+        // Fall back to default coloring
+        this.renderPointsWithDefaultColor(graphics, coordinates, bounds, pointSize)
+        return
+      }
+
+      if (data_type === 'DISCRETE') {
+        // For discrete data, group points by category for efficient rendering
+        const { categories } = compression_info
+        const colorMap = this.createDiscreteColorMap(categories)
+        
+        // Group points by category
+        const pointsByCategory = {}
+        const uniqueValues = [...new Set(values)]
+        uniqueValues.forEach(value => {
+          pointsByCategory[value] = []
+        })
+        
+        coordinates.forEach((coord, index) => {
+          const value = values[index]
+          pointsByCategory[value].push(coord)
+        })
+        
+        // Render points for each category
+        Object.entries(pointsByCategory).forEach(([category, coords]) => {
+          if (coords.length === 0) return
+          
+          const color = colorMap[category]
+          graphics.beginFill(color)
+          
+          coords.forEach(([x, y]) => {
+            const screenX = this.normalizeX(x, bounds)
+            const screenY = this.normalizeY(y, bounds)
+            graphics.drawCircle(screenX, screenY, pointSize)
+          })
+          
+          graphics.endFill()
+        })
+        
+        console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
+        
+      } else if (data_type === 'CONTINUOUS') {
+        // For continuous data, render each point with its individual color
+        const minVal = compression_info.min_val
+        const maxVal = compression_info.max_val
+        const range = maxVal - minVal
+        
+        for (let i = 0; i < coordinates.length; i++) {
+          const [x, y] = coordinates[i]
+          const value = values[i]
+          const normalizedValue = (value - minVal) / range
+          const color = this.valueToColor(normalizedValue)
+          
+          const screenX = this.normalizeX(x, bounds)
+          const screenY = this.normalizeY(y, bounds)
+          
+          graphics.beginFill(color)
+          graphics.drawCircle(screenX, screenY, pointSize)
+          graphics.endFill()
+        }
+        
+        console.log(`Updated ${coordinates.length} points with continuous metadata coloring (${this.currentMetadataVector.name})`)
+      }
+    } else {
+      // No metadata coloring active, use default blue color
+      console.log('Using default blue coloring')
+      this.renderPointsWithDefaultColor(graphics, coordinates, bounds, pointSize)
+    }
+  }
+
+  // Render points with default blue color
+  renderPointsWithDefaultColor(graphics, coordinates, bounds, pointSize) {
+    const pointColor = 0x3b82f6 // Default blue color
+    
+    graphics.beginFill(pointColor)
+    for (let i = 0; i < coordinates.length; i++) {
+      const [x, y] = coordinates[i]
+      const screenX = this.normalizeX(x, bounds)
+      const screenY = this.normalizeY(y, bounds)
+      graphics.drawCircle(screenX, screenY, pointSize)
+    }
+    graphics.endFill()
+    
+    console.log(`Rendered ${coordinates.length} points with default blue color`)
+  }
+
+  // Centralized function to get the color for a point at a given index
+  // This will be extended to handle all types of coloring (metadata, selection, filtering, etc.)
+  getPointColor(pointIndex) {
+    // Default blue color
+    let pointColor = 0x3b82f6
+
+    // Check for metadata coloring
+    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[pointIndex] !== undefined) {
+      const { data_type, values, compression_info } = this.currentMetadataVector
+      const value = values[pointIndex]
+      
+      if (data_type === 'DISCRETE') {
+        const colorMap = this.createDiscreteColorMap(compression_info.categories)
+        pointColor = colorMap[value] || 0x3b82f6
+      } else if (data_type === 'CONTINUOUS') {
+        const minVal = compression_info.min_val
+        const maxVal = compression_info.max_val
+        const range = maxVal - minVal
+        const normalizedValue = (value - minVal) / range
+        pointColor = this.valueToColor(normalizedValue)
+      }
+    }
+
+    // TODO: Add other coloring logic here:
+    // - Selection coloring (highlighted points)
+    // - Filtering coloring (filtered out points)
+    // - Custom user-defined coloring
+    // - Expression-based coloring
+    // - Clustering coloring
+
+    return pointColor
+  }
+
   extractCurrentScreenPositions(existingGraphics, currentBounds, coordinateCount) {
     // Since we can't easily extract positions from a PIXI Graphics object,
     // we'll recreate the positions using the current bounds and coordinates
@@ -491,8 +620,9 @@ export default class extends Controller {
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds, existingGraphics) {
     console.log('Creating animated points from previous to new coordinates')
     const pointSize = 1 // Keep same size as original plot
-    const pointColor = 0x3b82f6 // Keep same blue color as original plot
     const animationDuration = 4000 // 4 seconds for very smooth transition
+    
+    console.log('Creating animated points with current coloring scheme')
     
     // Create a container for animated points
     const animatedContainer = new this.PIXI.Container()
@@ -522,6 +652,9 @@ export default class extends Controller {
       // Track maximum movement for debugging
       const movement = Math.sqrt((endX - startX) ** 2 + (endY - startY) ** 2)
       maxMovement = Math.max(maxMovement, movement)
+      
+      // Determine point color using centralized color function
+      const pointColor = this.getPointColor(i)
       
       // Create point sprite
       const point = new this.PIXI.Graphics()
@@ -760,8 +893,790 @@ export default class extends Controller {
     return coordinates
   }
 
-toggleDropdown(event) {
-    console.log('toggleDropdown called')
+  // Load a single metadata vector on demand
+  async loadSingleMetadataVector(metadataId) {
+    console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
+    
+    // Check if already loaded
+    if (this.loadedMetadataVectors[metadataId]) {
+      console.log(`Metadata vector ${metadataId} already loaded`)
+      return this.loadedMetadataVectors[metadataId]
+    }
+    
+    // Check if currently loading
+    if (this.loadingMetadataVectors.has(metadataId)) {
+      console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
+      // Wait for the loading to complete
+      while (this.loadingMetadataVectors.has(metadataId)) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      return this.loadedMetadataVectors[metadataId]
+    }
+    
+    // Mark as loading and show spinner
+    this.loadingMetadataVectors.add(metadataId)
+    this.showLoadingSpinner(metadataId)
+    
+    try {
+      // Get the current loom file
+      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      
+      // Build the URL for the single metadata vector endpoint
+      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
+      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      console.log(`Fetching single metadata vector from URL: ${url}`)
+      
+      // Get CSRF token safely
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+      
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken
+      }
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      console.log('Received single metadata vector data:', data)
+      
+      // Store the loaded metadata vector
+      const vectorData = data.metadata_vectors[metadataId]
+      if (vectorData) {
+        this.loadedMetadataVectors[metadataId] = vectorData
+        this.metadataVectorsLoomFile = data.loom_file
+        
+        const info = vectorData.compression_info
+        console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        
+        return vectorData
+      } else {
+        throw new Error(`Metadata vector ${metadataId} not found in response`)
+      }
+      
+    } catch (error) {
+      console.error(`Error loading metadata vector ${metadataId}:`, error)
+      return null
+    } finally {
+      // Remove from loading set and hide spinner
+      this.loadingMetadataVectors.delete(metadataId)
+      this.hideLoadingSpinner(metadataId)
+    }
+  }
+
+  // Get loaded metadata vector for a specific metadata ID
+  getLoadedMetadataVector(metadataId) {
+    if (!this.loadedMetadataVectors) {
+      console.log('No metadata vectors loaded yet')
+      return null
+    }
+    
+    const vectorData = this.loadedMetadataVectors[metadataId]
+    if (!vectorData) {
+      console.log(`No loaded vector found for metadata ID: ${metadataId}`)
+      return null
+    }
+    
+    console.log(`Retrieved loaded vector for ${vectorData.name}:`, vectorData.compression_info)
+    return vectorData
+  }
+
+  // Decompress discrete metadata vector from binary data
+  decompressDiscreteMetadataVector(binaryData, compressionInfo) {
+    console.log('Decompressing discrete metadata vector:', compressionInfo)
+    
+    const { categories, bit_width, cell_count } = compressionInfo
+    const indices = []
+    
+    // Convert Base64 string to ArrayBuffer if needed
+    let arrayBuffer
+    if (typeof binaryData === 'string') {
+      // Decode Base64 string to binary data
+      const binaryString = atob(binaryData)
+      arrayBuffer = new ArrayBuffer(binaryString.length)
+      const view = new Uint8Array(arrayBuffer)
+      for (let i = 0; i < binaryString.length; i++) {
+        view[i] = binaryString.charCodeAt(i)
+      }
+    } else {
+      arrayBuffer = binaryData.buffer || binaryData
+    }
+    
+    // Create a DataView for reading binary data
+    const view = new DataView(arrayBuffer)
+    
+    // Read indices based on bit width
+    switch (bit_width) {
+      case 1:
+        // Special case: unpack 8 indices per byte for 1-bit encoding
+        for (let i = 0; i < cell_count; i++) {
+          const byteIndex = Math.floor(i / 8)
+          const bitIndex = i % 8
+          const byte = view.getUint8(byteIndex)
+          const index = (byte >> bitIndex) & 1
+          indices.push(index)
+        }
+        break
+      case 8:
+        for (let i = 0; i < cell_count; i++) {
+          indices.push(view.getUint8(i))
+        }
+        break
+      case 16:
+        for (let i = 0; i < cell_count; i++) {
+          indices.push(view.getUint16(i * 2, true)) // little-endian
+        }
+        break
+      case 32:
+        for (let i = 0; i < cell_count; i++) {
+          indices.push(view.getUint32(i * 4, true)) // little-endian
+        }
+        break
+      default:
+        throw new Error(`Unsupported bit width: ${bit_width}`)
+    }
+    
+    // Convert indices back to category names
+    const categoryValues = indices.map(index => categories[index] || 'Unknown')
+    
+    console.log(`Decompressed ${cell_count} discrete values:`, {
+      first10: categoryValues.slice(0, 10),
+      uniqueValues: [...new Set(categoryValues)].length,
+      categories: categories.length
+    })
+    
+    return categoryValues
+  }
+
+  // Decompress continuous metadata vector from binary data
+  decompressContinuousMetadataVector(binaryData, compressionInfo) {
+    console.log('Decompressing continuous metadata vector:', compressionInfo)
+    
+    const { min_val, max_val, cell_count, bit_width } = compressionInfo
+    const normalizedValues = []
+    
+    // Convert Base64 string to ArrayBuffer if needed
+    let arrayBuffer
+    if (typeof binaryData === 'string') {
+      // Decode Base64 string to binary data
+      const binaryString = atob(binaryData)
+      arrayBuffer = new ArrayBuffer(binaryString.length)
+      const view = new Uint8Array(arrayBuffer)
+      for (let i = 0; i < binaryString.length; i++) {
+        view[i] = binaryString.charCodeAt(i)
+      }
+    } else {
+      arrayBuffer = binaryData.buffer || binaryData
+    }
+    
+    // Create a DataView for reading binary data
+    const view = new DataView(arrayBuffer)
+    
+    // Read normalized values
+    for (let i = 0; i < cell_count; i++) {
+      let normalized
+      
+      switch (bit_width) {
+        case 16:
+          normalized = view.getUint16(i * 2, true) // little-endian
+          break
+        default:
+          throw new Error(`Unsupported bit width for continuous data: ${bit_width}`)
+      }
+      
+      normalizedValues.push(normalized)
+    }
+    
+    // Denormalize back to original range
+    const range = max_val - min_val
+    const numericValues = normalizedValues.map(normalized => {
+      return min_val + (normalized / 65535) * range
+    })
+    
+    console.log(`Decompressed ${cell_count} continuous values:`, {
+      first10: numericValues.slice(0, 10),
+      range: `${numericValues[0]?.toFixed(3)} to ${numericValues[cell_count-1]?.toFixed(3)}`,
+      actualRange: `${Math.min(...numericValues).toFixed(3)} to ${Math.max(...numericValues).toFixed(3)}`
+    })
+    
+    return numericValues
+  }
+
+  // Load and visualize metadata vector for a specific metadata ID
+  async loadAndVisualizeMetadataVector(metadataId) {
+    console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
+    
+    // Load the metadata vector on-demand
+    const vectorData = await this.loadSingleMetadataVector(metadataId)
+    
+    if (!vectorData) {
+      console.error('Failed to load metadata vector')
+      return
+    }
+    
+    // Decompress the vector data based on type
+    let values
+    try {
+      if (vectorData.data_type === 'DISCRETE') {
+        values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+      } else if (vectorData.data_type === 'CONTINUOUS') {
+        values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+      } else {
+        console.error('Unknown data type:', vectorData.data_type)
+        return
+      }
+    } catch (error) {
+      console.error('Error decompressing metadata vector:', error)
+      return
+    }
+    
+    console.log(`Successfully decompressed ${values.length} values for ${vectorData.name}`)
+    
+    // Store the decompressed values for visualization
+    this.currentMetadataVector = {
+      id: metadataId,
+      name: vectorData.name,
+      data_type: vectorData.data_type,
+      values: values,
+      compression_info: vectorData.compression_info
+    }
+    
+    // Update visualization with metadata coloring
+    this.updateVisualizationWithMetadataVector()
+  }
+
+  // Load all metadata vectors in a single request
+  async loadAllMetadataVectorsInSingleRequest() {
+    console.log('=== LOADING ALL METADATA VECTORS IN SINGLE REQUEST ===')
+    
+    // Get all metadata IDs from the page
+    const metadataElements = document.querySelectorAll('[data-metadata-item]')
+    const metadataIds = Array.from(metadataElements).map(el => el.dataset.metadataItem)
+    
+    if (metadataIds.length === 0) {
+      console.log('No metadata items found on page')
+      return
+    }
+    
+    console.log(`Found ${metadataIds.length} metadata items to load:`, metadataIds)
+    
+    try {
+      // Get the current loom file
+      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      
+      // Build the URL for the metadata vectors endpoint (single request for all)
+      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
+      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataIds.join(',')}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      console.log('Fetching all metadata vectors in single request from URL:', url)
+      
+      // Get CSRF token safely
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+      
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken
+      }
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      console.log('Received all metadata vectors data:', data)
+      
+      // Store the loaded metadata vectors
+      this.loadedMetadataVectors = data.metadata_vectors || {}
+      this.metadataVectorsLoomFile = data.loom_file
+      
+      console.log(`Successfully loaded ${data.total_loaded} metadata vectors in single request`)
+      
+      // Log compression info for each loaded vector
+      Object.entries(this.loadedMetadataVectors).forEach(([metadataId, vectorData]) => {
+        const info = vectorData.compression_info
+        console.log(`✓ ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+      })
+      
+    } catch (error) {
+      console.error('Error loading all metadata vectors in single request:', error)
+      // Don't show alert for startup loading - just log the error
+    }
+  }
+
+  // Load a single metadata vector silently (for preloading)
+  async loadSingleMetadataVectorSilently(metadataId) {
+    console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
+    
+    // Check if already loaded
+    if (this.loadedMetadataVectors[metadataId]) {
+      console.log(`Metadata vector ${metadataId} already loaded`)
+      return this.loadedMetadataVectors[metadataId]
+    }
+    
+    // Check if currently loading
+    if (this.loadingMetadataVectors.has(metadataId)) {
+      console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
+      // Wait for the loading to complete
+      while (this.loadingMetadataVectors.has(metadataId)) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      return this.loadedMetadataVectors[metadataId]
+    }
+    
+    // Mark as loading (but don't show spinner)
+    this.loadingMetadataVectors.add(metadataId)
+    
+    try {
+      // Get the current loom file
+      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      
+      // Build the URL for the single metadata vector endpoint
+      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
+      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      console.log(`Fetching single metadata vector silently from URL: ${url}`)
+      
+      // Get CSRF token safely
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+      
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken
+      }
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      console.log('Received single metadata vector data silently:', data)
+      
+      // Store the loaded metadata vector
+      const vectorData = data.metadata_vectors[metadataId]
+      if (vectorData) {
+        this.loadedMetadataVectors[metadataId] = vectorData
+        this.metadataVectorsLoomFile = data.loom_file
+        
+        const info = vectorData.compression_info
+        console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        
+        return vectorData
+      } else {
+        throw new Error(`Metadata vector ${metadataId} not found in response`)
+      }
+      
+    } catch (error) {
+      console.error(`Error loading metadata vector ${metadataId} silently:`, error)
+      return null
+    } finally {
+      // Remove from loading set (no spinner to hide)
+      this.loadingMetadataVectors.delete(metadataId)
+    }
+  }
+
+  // Show loading spinner for a specific metadata ID
+  showLoadingSpinner(metadataId) {
+    const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
+    if (!button) {
+      console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
+      return
+    }
+    
+    // Store original content
+    if (!button.dataset.originalContent) {
+      button.dataset.originalContent = button.innerHTML
+    }
+    
+    // Replace with spinner
+    button.innerHTML = `
+      <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+        <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+          <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+    `
+    
+    // Add CSS animation if not already added
+    if (!document.getElementById('spinner-styles')) {
+      const style = document.createElement('style')
+      style.id = 'spinner-styles'
+      style.textContent = `
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `
+      document.head.appendChild(style)
+    }
+    
+    // Disable button during loading
+    button.disabled = true
+    button.style.cursor = 'wait'
+    
+    console.log(`Showing loading spinner for metadata ${metadataId}`)
+  }
+
+  // Hide loading spinner for a specific metadata ID
+  hideLoadingSpinner(metadataId) {
+    const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
+    if (!button) {
+      console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
+      return
+    }
+    
+    // Restore original content
+    if (button.dataset.originalContent) {
+      button.innerHTML = button.dataset.originalContent
+    }
+    
+    // Re-enable button
+    button.disabled = false
+    button.style.cursor = 'pointer'
+    
+    console.log(`Hiding loading spinner for metadata ${metadataId}`)
+  }
+
+  // Preload metadata vector on hover for better UX
+  preloadMetadataVector(event) {
+    const button = event.currentTarget
+    const metadataId = button.dataset.metadataId
+    
+    // Only preload if not already loaded and not currently loading
+    if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
+      console.log(`Preloading metadata vector ${metadataId} on hover`)
+      // Load in background without showing spinner
+      this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+        console.log(`Preload failed for metadata ${metadataId}:`, error.message)
+        // Don't show error to user for preloading failures
+      })
+    }
+  }
+
+  // Update visualization with metadata vector coloring
+  updateVisualizationWithMetadataVector() {
+    if (!this.currentMetadataVector || !this.pixiApp || !this.scatterContainer) {
+      console.log('Cannot update visualization - missing data or PIXI app')
+      return
+    }
+    
+    console.log(`Updating visualization with ${this.currentMetadataVector.name} (${this.currentMetadataVector.data_type})`)
+    
+    const { data_type, values, compression_info } = this.currentMetadataVector
+    
+    // Get existing coordinates for coloring
+    if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
+      console.error('No coordinates available for coloring')
+      return
+    }
+    
+    // Ensure we have the same number of values as coordinates
+    if (values.length !== this.currentCoordinates.length) {
+      console.error(`Mismatch: ${values.length} metadata values vs ${this.currentCoordinates.length} coordinates`)
+      return
+    }
+    
+    // Clear existing colored points
+    this.scatterContainer.removeChildren()
+    
+    // Use the centralized coloring approach
+    this.renderPointsWithCurrentColoring()
+    
+    console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
+  }
+
+  // Render all points using the current coloring scheme
+  renderPointsWithCurrentColoring() {
+    if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
+      console.log('Cannot render points - missing PIXI app or coordinates')
+      return
+    }
+
+    const graphics = new this.PIXI.Graphics()
+    const pointSize = 1
+
+    // Check if we have metadata coloring active
+    if (this.currentMetadataVector && this.currentMetadataVector.values) {
+      const { data_type, values, compression_info } = this.currentMetadataVector
+
+      if (data_type === 'DISCRETE') {
+        // Group points by category for efficient rendering
+        const { categories } = compression_info
+        const colorMap = this.createDiscreteColorMap(categories)
+        
+        const pointsByCategory = {}
+        const uniqueValues = [...new Set(values)]
+        uniqueValues.forEach(value => {
+          pointsByCategory[value] = []
+        })
+        
+        this.currentCoordinates.forEach((coord, index) => {
+          const value = values[index]
+          pointsByCategory[value].push(coord)
+        })
+        
+        // Render points for each category
+        Object.entries(pointsByCategory).forEach(([category, coords]) => {
+          if (coords.length === 0) return
+          
+          const color = colorMap[category]
+          graphics.beginFill(color)
+          
+          coords.forEach(([x, y]) => {
+            const screenX = this.normalizeX(x, this.currentBounds)
+            const screenY = this.normalizeY(y, this.currentBounds)
+            graphics.drawCircle(screenX, screenY, pointSize)
+          })
+          
+          graphics.endFill()
+        })
+        
+        // Update point count display
+        this.updatePointCountDisplay(this.currentCoordinates.length, uniqueValues.length)
+        
+      } else if (data_type === 'CONTINUOUS') {
+        // Render each point with its individual color
+        const minVal = compression_info.min_val
+        const maxVal = compression_info.max_val
+        const range = maxVal - minVal
+        
+        for (let i = 0; i < this.currentCoordinates.length; i++) {
+          const [x, y] = this.currentCoordinates[i]
+          const value = values[i]
+          const normalizedValue = (value - minVal) / range
+          const color = this.valueToColor(normalizedValue)
+          
+          const screenX = this.normalizeX(x, this.currentBounds)
+          const screenY = this.normalizeY(y, this.currentBounds)
+          
+          graphics.beginFill(color)
+          graphics.drawCircle(screenX, screenY, pointSize)
+          graphics.endFill()
+        }
+        
+        // Update point count display
+        this.updatePointCountDisplay(this.currentCoordinates.length, 'continuous')
+      }
+    } else {
+      // Use default blue color
+      this.renderPointsWithDefaultColor(graphics, this.currentCoordinates, this.currentBounds, pointSize)
+      
+      // Update point count display
+      const pointCountElement = document.getElementById('point-count')
+      if (pointCountElement) {
+        pointCountElement.textContent = `${this.currentCoordinates.length.toLocaleString()} points`
+      }
+    }
+    
+    this.scatterContainer.addChild(graphics)
+    console.log(`Rendered ${this.currentCoordinates.length} points with current coloring scheme`)
+  }
+
+  // Color points for discrete metadata
+  colorPointsDiscrete(values, compressionInfo) {
+    console.log('Coloring points for discrete metadata:', {
+      categories: compressionInfo.categories,
+      uniqueCount: [...new Set(values)].length
+    })
+    
+    const { categories } = compressionInfo
+    const uniqueValues = [...new Set(values)]
+    
+    // Create color map for categories
+    const colorMap = this.createDiscreteColorMap(categories)
+    
+    // Group points by category for efficient rendering
+    const pointsByCategory = {}
+    uniqueValues.forEach(value => {
+      pointsByCategory[value] = []
+    })
+    
+    // Group coordinates by their category values
+    this.currentCoordinates.forEach((coord, index) => {
+      const value = values[index]
+      pointsByCategory[value].push(coord)
+    })
+    
+    // Render points for each category
+    Object.entries(pointsByCategory).forEach(([category, coords]) => {
+      if (coords.length === 0) return
+      
+      const color = colorMap[category]
+      const graphics = new this.PIXI.Graphics()
+      
+      graphics.beginFill(color)
+      
+      coords.forEach(([x, y]) => {
+        const screenX = this.normalizeX(x, this.currentBounds)
+        const screenY = this.normalizeY(y, this.currentBounds)
+        graphics.drawCircle(screenX, screenY, 1)
+      })
+      
+      graphics.endFill()
+      this.scatterContainer.addChild(graphics)
+    })
+    
+    // Update point count display
+    this.updatePointCountDisplay(this.currentCoordinates.length, uniqueValues.length)
+  }
+
+  // Color points for continuous metadata
+  colorPointsContinuous(values, compressionInfo) {
+    console.log('Coloring points for continuous metadata:', {
+      range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
+      actualRange: `${Math.min(...values).toFixed(3)} to ${Math.max(...values).toFixed(3)}`
+    })
+    
+    const minVal = compressionInfo.min_val
+    const maxVal = compressionInfo.max_val
+    const range = maxVal - minVal
+    
+    // Create single graphics object for all points
+    const graphics = new this.PIXI.Graphics()
+    
+    // Render points with color based on value
+    this.currentCoordinates.forEach((coord, index) => {
+      const value = values[index]
+      const normalizedValue = (value - minVal) / range
+      
+      // Convert to color (blue to red gradient)
+      const color = this.valueToColor(normalizedValue)
+      
+      const screenX = this.normalizeX(coord[0], this.currentBounds)
+      const screenY = this.normalizeY(coord[1], this.currentBounds)
+      
+      graphics.beginFill(color)
+      graphics.drawCircle(screenX, screenY, 1)
+      graphics.endFill()
+    })
+    
+    this.scatterContainer.addChild(graphics)
+    
+    // Update point count display
+    this.updatePointCountDisplay(this.currentCoordinates.length, 'continuous')
+  }
+
+  // Create color map for discrete categories
+  createDiscreteColorMap(categories) {
+    const colors = [
+      0x1f77b4, // blue
+      0xff7f0e, // orange
+      0x2ca02c, // green
+      0xd62728, // red
+      0x9467bd, // purple
+      0x8c564b, // brown
+      0xe377c2, // pink
+      0x7f7f7f, // gray
+      0xbcbd22, // olive
+      0x17becf, // cyan
+      0xff6b6b, // light red
+      0x4ecdc4, // teal
+      0x45b7d1, // light blue
+      0x96ceb4, // mint
+      0xfeca57, // yellow
+      0xff9ff3, // magenta
+    ]
+    
+    const colorMap = {}
+    categories.forEach((category, index) => {
+      colorMap[category] = colors[index % colors.length]
+    })
+    
+    console.log('Created discrete color map:', colorMap)
+    return colorMap
+  }
+
+  // Convert normalized value (0-1) to color
+  valueToColor(normalizedValue) {
+    // Clamp to 0-1 range
+    const clamped = Math.max(0, Math.min(1, normalizedValue))
+    
+    // Blue to red gradient
+    if (clamped < 0.5) {
+      // Blue to green
+      const t = clamped * 2
+      const r = Math.round(0 * (1 - t) + 0 * t)
+      const g = Math.round(0 * (1 - t) + 255 * t)
+      const b = Math.round(255 * (1 - t) + 0 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Green to red
+      const t = (clamped - 0.5) * 2
+      const r = Math.round(0 * (1 - t) + 255 * t)
+      const g = Math.round(255 * (1 - t) + 0 * t)
+      const b = Math.round(0 * (1 - t) + 0 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Update point count display
+  updatePointCountDisplay(totalPoints, categoriesOrType) {
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      if (typeof categoriesOrType === 'number') {
+        pointCountElement.textContent = `${totalPoints.toLocaleString()} points, ${categoriesOrType} categories`
+      } else {
+        pointCountElement.textContent = `${totalPoints.toLocaleString()} points (${categoriesOrType})`
+      }
+    }
+  }
+
+  // Clear metadata coloring and return to default blue points
+  clearMetadataColoring() {
+    if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
+      console.log('Cannot clear coloring - missing PIXI app or coordinates')
+      return
+    }
+    
+    console.log('Clearing metadata coloring, returning to default blue points')
+    
+    // Clear current metadata vector
+    this.currentMetadataVector = null
+    
+    // Clear existing colored points and re-render with default coloring
+    this.scatterContainer.removeChildren()
+    this.renderPointsWithCurrentColoring()
+    
+    console.log('Successfully cleared metadata coloring')
+  }
+
+  toggleDropdown(event) {
+     console.log('toggleDropdown called')
     event.stopPropagation()
     
     const button = event.currentTarget
@@ -842,7 +1757,7 @@ toggleDropdown(event) {
   }
 
   // Toggle metadata categories (moved from inline JS)
-  toggleMetadata(event) {
+  async toggleMetadata(event) {
     const headerElement = event.currentTarget
     const chevron = headerElement.querySelector('svg')
     const categoriesDiv = headerElement.nextElementSibling
@@ -854,9 +1769,23 @@ toggleDropdown(event) {
     }
     
     // Toggle the chevron rotation
-    if (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)') {
+    const isExpanding = chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)'
+    
+    if (isExpanding) {
       chevron.style.transform = 'rotate(90deg)'
       categoriesDiv.style.display = 'block'
+      
+      // Load metadata vector when expanding categories (for future coloring)
+      const metadataItem = headerElement.closest('[data-metadata-item]')
+      if (metadataItem) {
+        const metadataId = metadataItem.dataset.metadataItem
+        console.log(`Loading metadata vector for ${metadataId} on category expansion`)
+        
+        // Load silently in background (no spinner for category expansion)
+        this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+          console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+        })
+      }
     } else {
       chevron.style.transform = 'rotate(0deg)'
       categoriesDiv.style.display = 'none'
@@ -978,6 +1907,7 @@ toggleDropdown(event) {
       console.log('Button is already active - deselecting...')
       this.resetAllWaterDropButtons()
       this.removeAllCategoryColors()
+      this.clearMetadataColoring()
       console.log('=== DESELECTION COMPLETE ===')
       return
     }
@@ -1003,6 +1933,10 @@ toggleDropdown(event) {
     if (metadataContainer) {
       console.log('Step 5: Adding category colors...')
       this.addCategoryColors(metadataContainer, metadataId)
+      
+      // 6. Load and visualize metadata vector if available
+      console.log('Step 6: Loading metadata vector for visualization...')
+      this.loadAndVisualizeMetadataVector(metadataId)
     } else {
       console.error('ERROR: Could not find metadata container!')
     }

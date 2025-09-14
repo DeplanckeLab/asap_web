@@ -2317,7 +2317,6 @@ export default class extends Controller {
     // Clear any existing interaction state
     this.clearLasso()
     this.stopPanning()
-    this.clearZoom()
     
     // Update cursor based on mode
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -2326,8 +2325,6 @@ export default class extends Controller {
         canvas.style.cursor = 'crosshair'
       } else if (mode === 'pan') {
         canvas.style.cursor = 'grab'
-      } else if (mode === 'zoom') {
-        canvas.style.cursor = 'crosshair'
       }
     }
     
@@ -2372,9 +2369,6 @@ export default class extends Controller {
     } else if (this.interactionMode === 'lasso') {
       canvas.style.cursor = 'crosshair'
       console.log('🎯 Set cursor to crosshair (lasso mode)')
-    } else if (this.interactionMode === 'zoom') {
-      canvas.style.cursor = 'crosshair'
-      console.log('🎯 Set cursor to crosshair (zoom mode)')
     }
   }
 
@@ -2405,8 +2399,6 @@ export default class extends Controller {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseDown(event)
-    } else if (this.interactionMode === 'zoom') {
-      this.onZoomMouseDown(event)
     }
   }
 
@@ -2415,8 +2407,6 @@ export default class extends Controller {
       this.onLassoMouseMove(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseMove(event)
-    } else if (this.interactionMode === 'zoom') {
-      this.onZoomMouseMove(event)
     }
   }
 
@@ -2425,8 +2415,6 @@ export default class extends Controller {
       this.onLassoMouseUp(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseUp(event)
-    } else if (this.interactionMode === 'zoom') {
-      this.onZoomMouseUp(event)
     }
   }
 
@@ -2436,8 +2424,6 @@ export default class extends Controller {
       this.onLassoDoubleClick(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanDoubleClick(event)
-    } else if (this.interactionMode === 'zoom') {
-      this.onZoomDoubleClick(event)
     }
   }
 
@@ -2460,6 +2446,12 @@ export default class extends Controller {
     
     console.log('✅ Zooming with data available')
     
+    // Get mouse position relative to canvas
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const rect = canvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    
     // Basic zoom implementation
     const delta = event.deltaY > 0 ? 1.1 : 0.9
     const centerX = (this.currentBounds.minX + this.currentBounds.maxX) / 2
@@ -2472,7 +2464,7 @@ export default class extends Controller {
       maxY: centerY + (this.currentBounds.maxY - centerY) * delta
     }
     
-    console.log('🔄 Zoom: Updating bounds to:', newBounds)
+    console.log('🔄 Zoom: Updating bounds to:', newBounds, 'Mouse position:', { mouseX, mouseY })
     
     // Store the old bounds for translation calculation
     const oldBounds = { ...this.currentBounds }
@@ -2480,8 +2472,8 @@ export default class extends Controller {
     // Update current bounds
     this.currentBounds = newBounds
     
-    // Use translation approach like pan mode
-    this.translatePointsForZoom(oldBounds, newBounds)
+    // Use translation approach like pan mode, centered on mouse position
+    this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
   }
 
   // Lasso mode handlers
@@ -2663,160 +2655,8 @@ export default class extends Controller {
     this.cancelSelection()
   }
 
-  // Zoom mode handlers
-  onZoomMouseDown(event) {
-    console.log('🔍 Zoom mouse down')
-    this.isDrawingZoom = true
-    
-    // Get starting position
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-    if (!canvas) return
-    
-    const rect = canvas.getBoundingClientRect()
-    this.zoomStartX = event.clientX - rect.left
-    this.zoomStartY = event.clientY - rect.top
-    
-    // Create zoom rectangle graphics
-    this.zoomGraphics = new this.PIXI.Graphics()
-    this.pixiApp.stage.addChild(this.zoomGraphics)
-  }
 
-  onZoomMouseMove(event) {
-    if (!this.isDrawingZoom) return
-    
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-    if (!canvas) return
-    
-    const rect = canvas.getBoundingClientRect()
-    const currentX = event.clientX - rect.left
-    const currentY = event.clientY - rect.top
-    
-    // Update zoom rectangle
-    this.updateZoomGraphics(this.zoomStartX, this.zoomStartY, currentX, currentY)
-  }
 
-  onZoomMouseUp(event) {
-    if (!this.isDrawingZoom) return
-    
-    console.log('🔍 Zoom mouse up')
-    this.isDrawingZoom = false
-    
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-    if (!canvas) return
-    
-    const rect = canvas.getBoundingClientRect()
-    const endX = event.clientX - rect.left
-    const endY = event.clientY - rect.top
-    
-    // Calculate zoom bounds
-    const zoomBounds = this.calculateZoomBounds(this.zoomStartX, this.zoomStartY, endX, endY)
-    
-    if (zoomBounds) {
-      console.log('🔍 Zooming to bounds:', zoomBounds)
-      this.updateVisualizationBounds(zoomBounds)
-    }
-    
-    // Clear zoom graphics
-    this.clearZoom()
-  }
-
-  onZoomDoubleClick(event) {
-    console.log('🔍 Zoom mode double-click: Resetting zoom and pan')
-    this.resetZoomAndPan()
-  }
-
-  updateZoomGraphics(startX, startY, endX, endY) {
-    if (!this.zoomGraphics) return
-    
-    this.zoomGraphics.clear()
-    this.zoomGraphics.lineStyle(2, 0xff6b6b, 0.8) // Red line
-    this.zoomGraphics.beginFill(0xff6b6b, 0.1) // Light red fill
-    
-    const width = Math.abs(endX - startX)
-    const height = Math.abs(endY - startY)
-    const x = Math.min(startX, endX)
-    const y = Math.min(startY, endY)
-    
-    this.zoomGraphics.drawRect(x, y, width, height)
-    this.zoomGraphics.endFill()
-  }
-
-  calculateZoomBounds(startX, startY, endX, endY) {
-    if (!this.currentBounds || !this.currentCoordinates) return null
-    
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-    if (!canvas) return null
-    
-    // Calculate the selected rectangle
-    const rectX = Math.min(startX, endX)
-    const rectY = Math.min(startY, endY)
-    const rectWidth = Math.abs(endX - startX)
-    const rectHeight = Math.abs(endY - startY)
-    
-    // Minimum size check
-    if (rectWidth < 10 || rectHeight < 10) {
-      console.log('🔍 Selection too small, ignoring')
-      return null
-    }
-    
-    // Convert screen coordinates to data coordinates
-    const canvasWidth = canvas.width
-    const canvasHeight = canvas.height
-    
-    // Calculate the aspect ratio of the canvas
-    const canvasAspect = canvasWidth / canvasHeight
-    
-    // Calculate the aspect ratio of the selection
-    const selectionAspect = rectWidth / rectHeight
-    
-    let finalRectX = rectX
-    let finalRectY = rectY
-    let finalRectWidth = rectWidth
-    let finalRectHeight = rectHeight
-    
-    // Adjust selection to match canvas aspect ratio
-    if (selectionAspect > canvasAspect) {
-      // Selection is wider than canvas aspect ratio
-      finalRectHeight = rectWidth / canvasAspect
-      finalRectY = rectY - (finalRectHeight - rectHeight) / 2
-    } else {
-      // Selection is taller than canvas aspect ratio
-      finalRectWidth = rectHeight * canvasAspect
-      finalRectX = rectX - (finalRectWidth - rectWidth) / 2
-    }
-    
-    // Convert to normalized coordinates (0-1)
-    const normX = finalRectX / canvasWidth
-    const normY = finalRectY / canvasHeight
-    const normWidth = finalRectWidth / canvasWidth
-    const normHeight = finalRectHeight / canvasHeight
-    
-    // Convert to data coordinates
-    const dataWidth = this.currentBounds.maxX - this.currentBounds.minX
-    const dataHeight = this.currentBounds.maxY - this.currentBounds.minY
-    
-    const newBounds = {
-      minX: this.currentBounds.minX + normX * dataWidth,
-      maxX: this.currentBounds.minX + (normX + normWidth) * dataWidth,
-      minY: this.currentBounds.minY + normY * dataHeight,
-      maxY: this.currentBounds.minY + (normY + normHeight) * dataHeight
-    }
-    
-    return newBounds
-  }
-
-  clearZoom() {
-    this.isDrawingZoom = false
-    this.isZooming = false
-    this.zoomStartX = 0
-    this.zoomStartY = 0
-    
-    if (this.zoomGraphics) {
-      this.pixiApp.stage.removeChild(this.zoomGraphics)
-      this.zoomGraphics.destroy()
-      this.zoomGraphics = null
-    }
-  }
 
   // Reset zoom and pan to original view
   resetZoomAndPan() {
@@ -2984,7 +2824,7 @@ export default class extends Controller {
   }
 
   // Translate existing point positions for zoom operations (like pan but with scale)
-  translatePointsForZoom(oldBounds, newBounds) {
+  translatePointsForZoom(oldBounds, newBounds, mouseX = null, mouseY = null) {
     if (!oldBounds || !newBounds) return
 
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -2999,11 +2839,11 @@ export default class extends Controller {
     const scaleX = oldWidth / newWidth  // Invert because we're zooming in
     const scaleY = oldHeight / newHeight
 
-    // Calculate the center point of the canvas
-    const centerX = canvas.width / 2
-    const centerY = canvas.height / 2
+    // Use mouse position as zoom center, fallback to canvas center
+    const centerX = mouseX !== null ? mouseX : canvas.width / 2
+    const centerY = mouseY !== null ? mouseY : canvas.height / 2
 
-    console.log('🔄 Zoom Translation:', { scaleX, scaleY, centerX, centerY })
+    console.log('🔄 Zoom Translation:', { scaleX, scaleY, centerX, centerY, mouseX, mouseY })
 
     let translatedCount = 0
 
@@ -3015,7 +2855,7 @@ export default class extends Controller {
           const currentX = child.x
           const currentY = child.y
           
-          // Apply zoom transformation: scale around center
+          // Apply zoom transformation: scale around mouse position
           const relativeX = currentX - centerX
           const relativeY = currentY - centerY
           
@@ -3091,14 +2931,31 @@ export default class extends Controller {
     
     const selectedIndices = []
     
-    this.currentCoordinates.forEach((coord, index) => {
-      const screenX = this.normalizeX(coord[0], this.currentBounds)
-      const screenY = this.normalizeY(coord[1], this.currentBounds)
-      
-      if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
-        selectedIndices.push(index)
+    // Check points by their actual screen positions (after pan/zoom transformations)
+    this.scatterContainer.children.forEach((child, index) => {
+      if (child.isPoint && child.cellId !== undefined) {
+        const screenX = child.x
+        const screenY = child.y
+        
+        if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+          selectedIndices.push(child.cellId)
+        }
       }
     })
+    
+    // Also check points in animatedContainer if they exist
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      this.animatedContainer.children.forEach((child, index) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          const screenX = child.x
+          const screenY = child.y
+          
+          if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+            selectedIndices.push(child.cellId)
+          }
+        }
+      })
+    }
     
     console.log(`Selected ${selectedIndices.length} cells with lasso`)
     
@@ -3110,8 +2967,61 @@ export default class extends Controller {
     // Update selection count display
     this.updateSelectionCount()
     
-    // Re-render points to show selection
-    this.forceReRenderPoints()
+    // Update colors of selected points without re-rendering (preserves pan/zoom state)
+    this.updateSelectedPointColors()
+  }
+
+  // Update colors of selected points without re-rendering (preserves pan/zoom state)
+  updateSelectedPointColors() {
+    if (!this.scatterContainer) return
+    
+    console.log('🎨 Updating selected point colors without re-rendering')
+    
+    // Update colors in scatterContainer
+    this.scatterContainer.children.forEach((child) => {
+      if (child.isPoint && child.cellId !== undefined) {
+        if (this.selectedCells.has(child.cellId)) {
+          // Set selected color (red) by clearing and redrawing
+          child.clear()
+          child.beginFill(0xff0000) // Pure red
+          child.drawCircle(0, 0, 1) // Same size as original
+          child.endFill()
+        } else {
+          // Restore original color
+          const originalColor = this.originalPointColors.get(child.cellId)
+          if (originalColor !== undefined) {
+            child.clear()
+            child.beginFill(originalColor)
+            child.drawCircle(0, 0, 1) // Same size as original
+            child.endFill()
+          }
+        }
+      }
+    })
+    
+    // Also update colors in animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      this.animatedContainer.children.forEach((child) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          if (this.selectedCells.has(child.cellId)) {
+            // Set selected color (red) by clearing and redrawing
+            child.clear()
+            child.beginFill(0xff0000) // Pure red
+            child.drawCircle(0, 0, 1) // Same size as original
+            child.endFill()
+          } else {
+            // Restore original color
+            const originalColor = this.originalPointColors.get(child.cellId)
+            if (originalColor !== undefined) {
+              child.clear()
+              child.beginFill(originalColor)
+              child.drawCircle(0, 0, 1) // Same size as original
+              child.endFill()
+            }
+          }
+        }
+      })
+    }
   }
 
   isPointInPolygon(x, y, polygon) {
@@ -3197,8 +3107,8 @@ export default class extends Controller {
     // Clear the selected cells
     this.selectedCells.clear()
     
-    // Re-render points to show original colors (without selection)
-    this.forceReRenderPoints()
+    // Update colors without re-rendering (preserves pan/zoom state)
+    this.updateSelectedPointColors()
     
     // Update the cell count display
     this.updateSelectedCellsCount()

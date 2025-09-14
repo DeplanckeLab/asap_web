@@ -10,7 +10,7 @@ export default class extends Controller {
   }
 
   connect() {
-    console.log('Visualization controller connected')
+    console.log('🚀 Visualization controller connected')
     // Simple test - remove this after debugging
     setTimeout(() => {
       console.log('Controller test: Water drop buttons found:', document.querySelectorAll('[data-action*="waterDropClicked"]').length)
@@ -44,6 +44,33 @@ export default class extends Controller {
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
+    // Initialize interaction mode state
+    this.interactionMode = 'pan' // 'pan', 'lasso', or 'zoom'
+    this.selectedCells = new Set()
+    this.originalPointColors = new Map() // Store original colors for reset functionality
+    this.lassoGraphics = null
+    this.lassoPoints = []
+    this.isDrawingLasso = false
+    
+    // Zoom mode state
+    this.isDrawingZoom = false
+    this.isZooming = false
+    this.zoomStartX = 0
+    this.zoomStartY = 0
+    this.zoomGraphics = null
+    this.wheelZoomTimeout = null
+    
+    // Pan mode state
+    this.isPanning = false
+    this.panStartX = 0
+    this.panStartY = 0
+    this.panStartBounds = null
+    
+    // Initialize interaction system after DOM is ready
+    setTimeout(() => {
+      this.setupInteractionSystem()
+    }, 100)
+    
     // No automatic loading - metadata will be loaded on-demand when needed
   }
 
@@ -52,10 +79,62 @@ export default class extends Controller {
     if (this.boundCloseDropdowns) {
       document.removeEventListener('click', this.boundCloseDropdowns)
     }
+    
+    // Remove interaction event listeners
+    this.removeInteractionEventListeners()
+    
+    // Clean up any existing PIXI app
+    if (this.pixiApp) {
+      this.pixiApp.destroy(true)
+      this.pixiApp = null
+    }
   }
   
   testAction() {
     alert('Stimulus controller is working!')
+  }
+
+  setupInteractionSystem() {
+    console.log('🔧 Setting up interaction system')
+    
+    // Set up the mode dropdown change handler
+    const modeDropdown = document.getElementById('interaction-mode')
+    if (modeDropdown) {
+      console.log('✅ Found interaction mode dropdown')
+      modeDropdown.addEventListener('change', (event) => {
+        console.log('🔄 Mode dropdown changed to:', event.target.value)
+        this.changeInteractionMode(event)
+      })
+    } else {
+      console.log('❌ Interaction mode dropdown not found')
+    }
+    
+    // Set up canvas event listeners when PIXI app becomes available
+    this.setupCanvasListeners()
+  }
+
+  setupCanvasListeners() {
+    console.log('🔍 Setting up canvas listeners')
+    
+    // This will be called when the PIXI app is created
+    // For now, we'll set up a polling mechanism to check for the canvas
+    const checkForCanvas = () => {
+      const canvas = document.querySelector('.plot-container canvas')
+      console.log('🔍 Checking for canvas:', !!canvas, 'Setup done:', !!this.canvasListenersSetup)
+      
+      if (canvas && !this.canvasListenersSetup) {
+        console.log('✅ Canvas found, setting up interaction listeners')
+        this.canvas = canvas
+        this.addInteractionEventListeners()
+        this.canvasListenersSetup = true
+      } else if (!canvas) {
+        console.log('⏳ Canvas not found yet, checking again in 500ms')
+        // Keep checking every 500ms until canvas is available
+        setTimeout(checkForCanvas, 500)
+      }
+    }
+    
+    checkForCanvas()
   }
 
   updateEmbeddings() {
@@ -288,7 +367,11 @@ export default class extends Controller {
       
       // Check if we already have a PIXI app for this loom file
       if (this.pixiApp && this.currentLoomFile === this.loomFileSelectTarget.value) {
-        console.log('Updating existing plot with new coordinates for same loom file')
+        console.log('Changing visualization coordinates - animating transition')
+        // Clear selection since coordinates might have changed
+        this.selectedCells.clear()
+        this.updateSelectedCellsCount()
+        // Use updateScatterPlot to animate coordinate changes
         await this.updateScatterPlot(coordinates)
         return
       }
@@ -359,56 +442,46 @@ export default class extends Controller {
     this.currentCoordinates = coordinates // Store coordinates for future transitions
     console.log('Coordinate bounds:', bounds)
     
-    // Create graphics for efficient rendering
-    const graphics = new PIXI.Graphics()
-    
     // Set point properties
     const pointSize = 1
     const pointColor = 0x3b82f6 // Blue color
     
-    // Render points in batches for performance
-    const batchSize = 10000
-    let currentBatch = 0
-    
-    const renderBatch = () => {
-      const start = currentBatch * batchSize
-      const end = Math.min(start + batchSize, coordinates.length)
+    // Render points individually to support pan/zoom optimization
+    for (let i = 0; i < coordinates.length; i++) {
+      const [x, y] = coordinates[i]
       
-      graphics.beginFill(pointColor)
+      // Normalize coordinates to screen space
+      const screenX = this.normalizeX(x, bounds)
+      const screenY = this.normalizeY(y, bounds)
       
-      for (let i = start; i < end; i++) {
-        const [x, y] = coordinates[i]
-        
-        // Normalize coordinates to screen space
-        const screenX = this.normalizeX(x, bounds)
-        const screenY = this.normalizeY(y, bounds)
-        
-        // Draw point
-        graphics.drawCircle(screenX, screenY, pointSize)
-      }
+      // Create individual point graphics
+      const point = new PIXI.Graphics()
+      point.beginFill(pointColor)
+      point.drawCircle(0, 0, pointSize)
+      point.endFill()
+      point.x = screenX
+      point.y = screenY
       
-      graphics.endFill()
+      // Store cell ID and mark as point for later reference
+      point.cellId = i
+      point.isPoint = true
       
-      currentBatch++
+      // Store original color for reset functionality
+      this.storeOriginalPointColor(i, pointColor)
       
-      if (end < coordinates.length) {
-        // Continue with next batch
-        requestAnimationFrame(renderBatch)
-      } else {
-        // All points rendered, add to stage
-        this.scatterContainer.addChild(graphics)
-        console.log(`Rendered ${coordinates.length} points in ${currentBatch} batches`)
-        
-        // Update point count display
-        const pointCountElement = document.getElementById('point-count')
-        if (pointCountElement) {
-          pointCountElement.textContent = coordinates.length.toLocaleString()
-        }
-      }
+      this.scatterContainer.addChild(point)
     }
     
-    // Start rendering
-    renderBatch()
+    console.log(`Rendered ${coordinates.length} individual points`)
+    
+    // Update point count display
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      pointCountElement.textContent = coordinates.length.toLocaleString()
+    }
+    
+    // Clear any stored original positions since points were recreated
+    this.clearStoredOriginalPositions()
   }
 
   async updateScatterPlot(coordinates) {
@@ -421,10 +494,10 @@ export default class extends Controller {
     const newBounds = this.calculateBounds(coordinates)
     console.log('New coordinate bounds:', newBounds)
     
-    // Get existing graphics object
-    const existingGraphics = this.scatterContainer.children[0]
-    if (!existingGraphics) {
-      console.log('No existing graphics found, falling back to full render')
+    // Check if we have existing points to update
+    const hasExistingPoints = this.scatterContainer.children.length > 0
+    if (!hasExistingPoints) {
+      console.log('No existing points found, falling back to full render')
       await this.renderScatterPlot(coordinates)
       return
     }
@@ -444,14 +517,12 @@ export default class extends Controller {
     )
     
     if (!boundsChanged) {
-      console.log('Bounds are the same, no transition needed')
-      // Just update the points without animation
-      existingGraphics.clear()
-      const pointSize = 1
+      console.log('Bounds are the same, no transition needed - re-rendering points with new coordinates')
+      // Clear existing individual points and re-render
+      this.scatterContainer.removeChildren()
       
-      // Always use the centralized color function
-      console.log('Updating existing points with current coloring scheme')
-      this.updatePointsWithCurrentColoring(existingGraphics, coordinates, newBounds)
+      // Re-render with new coordinates using current coloring
+      this.renderPointsWithCurrentColoring()
       
       // Update point count display
       const pointCountElement = document.getElementById('point-count')
@@ -468,8 +539,11 @@ export default class extends Controller {
       this.scatterContainer.removeChild(this.animatedContainer)
     }
     
+    // Clear all existing individual points before animation
+    this.scatterContainer.removeChildren()
+    
     // Create individual point sprites for animation using previous coordinates
-    this.createAnimatedPoints(previousCoordinates, coordinates, currentBounds, newBounds, existingGraphics)
+    this.createAnimatedPoints(previousCoordinates, coordinates, currentBounds, newBounds)
     
     console.log(`Created ${coordinates.length} animated points for transition`)
     
@@ -497,56 +571,33 @@ export default class extends Controller {
       }
 
       if (data_type === 'DISCRETE') {
-        // For discrete data, group points by category for efficient rendering
-        const { categories } = compression_info
-        const colorMap = this.createDiscreteColorMap(categories)
-        
-        // Group points by category
-        const pointsByCategory = {}
-        const uniqueValues = [...new Set(values)]
-        uniqueValues.forEach(value => {
-          pointsByCategory[value] = []
-        })
-        
-        coordinates.forEach((coord, index) => {
-          const value = values[index]
-          pointsByCategory[value].push(coord)
-        })
-        
-        // Render points for each category
-        Object.entries(pointsByCategory).forEach(([category, coords]) => {
-          if (coords.length === 0) return
-          
-          const color = colorMap[category]
-          graphics.beginFill(color)
-          
-          coords.forEach(([x, y]) => {
-            const screenX = this.normalizeX(x, bounds)
-            const screenY = this.normalizeY(y, bounds)
-            graphics.drawCircle(screenX, screenY, pointSize)
-          })
-          
-          graphics.endFill()
-        })
-        
-        console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
-        
-      } else if (data_type === 'CONTINUOUS') {
-        // For continuous data, render each point with its individual color
-        const minVal = compression_info.min_val
-        const maxVal = compression_info.max_val
-        const range = maxVal - minVal
-        
+        // Render each point individually to support selection transparency
         for (let i = 0; i < coordinates.length; i++) {
           const [x, y] = coordinates[i]
-          const value = values[i]
-          const normalizedValue = (value - minVal) / range
-          const color = this.valueToColor(normalizedValue)
+          const { color, alpha } = this.getColorAndAlpha(i)
           
           const screenX = this.normalizeX(x, bounds)
           const screenY = this.normalizeY(y, bounds)
           
           graphics.beginFill(color)
+          graphics.alpha = alpha
+          graphics.drawCircle(screenX, screenY, pointSize)
+          graphics.endFill()
+        }
+        
+        console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
+        
+      } else if (data_type === 'CONTINUOUS') {
+        // Render each point individually to support selection transparency
+        for (let i = 0; i < coordinates.length; i++) {
+          const [x, y] = coordinates[i]
+          const { color, alpha } = this.getColorAndAlpha(i)
+          
+          const screenX = this.normalizeX(x, bounds)
+          const screenY = this.normalizeY(y, bounds)
+          
+          graphics.beginFill(color)
+          graphics.alpha = alpha
           graphics.drawCircle(screenX, screenY, pointSize)
           graphics.endFill()
         }
@@ -554,9 +605,20 @@ export default class extends Controller {
         console.log(`Updated ${coordinates.length} points with continuous metadata coloring (${this.currentMetadataVector.name})`)
       }
     } else {
-      // No metadata coloring active, use default blue color
+      // Render each point individually to support selection transparency
       console.log('Using default blue coloring')
-      this.renderPointsWithDefaultColor(graphics, coordinates, bounds, pointSize)
+      for (let i = 0; i < coordinates.length; i++) {
+        const [x, y] = coordinates[i]
+        const { color, alpha } = this.getColorAndAlpha(i)
+        
+        const screenX = this.normalizeX(x, bounds)
+        const screenY = this.normalizeY(y, bounds)
+        
+        graphics.beginFill(color)
+        graphics.alpha = alpha
+        graphics.drawCircle(screenX, screenY, pointSize)
+        graphics.endFill()
+      }
     }
   }
 
@@ -576,48 +638,57 @@ export default class extends Controller {
     console.log(`Rendered ${coordinates.length} points with default blue color`)
   }
 
-  // Centralized function to get the color for a point at a given index
-  // This will be extended to handle all types of coloring (metadata, selection, filtering, etc.)
-  getPointColor(pointIndex) {
-    // Default blue color
-    let pointColor = 0x3b82f6
+  // Helper method to get color and alpha separately for PIXI.js
+  getColorAndAlpha(pointIndex) {
+    const hasSelection = this.selectedCells && this.selectedCells.size > 0
+    const isSelected = this.selectedCells && this.selectedCells.has(pointIndex)
+    
+    // Check for selection coloring first (highest priority)
+    if (isSelected) {
+      return { color: 0xff0000, alpha: 1.0 } // Red for selected points
+    }
 
     // Check for metadata coloring
+    let baseColor = 0x3b82f6 // Default blue color
     if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[pointIndex] !== undefined) {
       const { data_type, values, compression_info } = this.currentMetadataVector
       const value = values[pointIndex]
       
       if (data_type === 'DISCRETE') {
         const colorMap = this.createDiscreteColorMap(compression_info.categories)
-        pointColor = colorMap[value] || 0x3b82f6
+        baseColor = colorMap[value] || 0x3b82f6
       } else if (data_type === 'CONTINUOUS') {
         const minVal = compression_info.min_val
         const maxVal = compression_info.max_val
         const range = maxVal - minVal
         const normalizedValue = (value - minVal) / range
-        pointColor = this.valueToColor(normalizedValue)
+        baseColor = this.valueToColor(normalizedValue)
       }
     }
 
-    // TODO: Add other coloring logic here:
-    // - Selection coloring (highlighted points)
-    // - Filtering coloring (filtered out points)
-    // - Custom user-defined coloring
-    // - Expression-based coloring
-    // - Clustering coloring
+    // If there's a selection and this point is not selected, make it semi-transparent
+    if (hasSelection && !isSelected) {
+      return { color: baseColor, alpha: 0.3 } // 30% opacity for unselected points
+    }
 
-    return pointColor
+    return { color: baseColor, alpha: 1.0 }
   }
 
-  extractCurrentScreenPositions(existingGraphics, currentBounds, coordinateCount) {
-    // Since we can't easily extract positions from a PIXI Graphics object,
+  // Centralized function to get the color for a point at a given index
+  // This will be extended to handle all types of coloring (metadata, selection, filtering, etc.)
+  getPointColor(pointIndex) {
+    return this.getColorAndAlpha(pointIndex).color
+  }
+
+  extractCurrentScreenPositions(currentBounds, coordinateCount) {
+    // Since we can't easily extract positions from individual PIXI Graphics objects,
     // we'll recreate the positions using the current bounds and coordinates
     // This is a limitation of PIXI Graphics - we need to store positions differently
     console.log('Extracting current screen positions (recreating from bounds)')
     return currentBounds
   }
 
-  createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds, existingGraphics) {
+  createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
     console.log('Creating animated points from previous to new coordinates')
     const pointSize = 1 // Keep same size as original plot
     const animationDuration = 4000 // 4 seconds for very smooth transition
@@ -629,10 +700,7 @@ export default class extends Controller {
     this.scatterContainer.addChild(animatedContainer)
     this.animatedContainer = animatedContainer // Store reference for cleanup
     
-    // Remove old graphics object after animation container is added (no gap)
-    if (existingGraphics) {
-      this.scatterContainer.removeChild(existingGraphics)
-    }
+    // Clear any existing individual points (they're already cleared by removeChildren() in updateScatterPlot)
     
     // Create individual point sprites
     const points = []
@@ -665,6 +733,13 @@ export default class extends Controller {
       // Set initial position
       point.x = startX
       point.y = startY
+      
+      // Store cell ID and mark as point for later reference
+      point.cellId = i
+      point.isPoint = true
+      
+      // Store original color for reset functionality
+      this.storeOriginalPointColor(i, pointColor)
       
       animatedContainer.addChild(point)
       points.push({ sprite: point, startX, startY, endX, endY })
@@ -799,48 +874,18 @@ export default class extends Controller {
     // Make the stage interactive
     this.pixiApp.stage.interactive = true
     
-    // Add zoom and pan functionality
-    let isDragging = false
-    let dragStart = { x: 0, y: 0 }
-    
-    // Mouse/touch events for panning
-    this.pixiApp.stage.on('pointerdown', (event) => {
-      isDragging = true
-      dragStart = { x: event.data.global.x, y: event.data.global.y }
-    })
-    
-    this.pixiApp.stage.on('pointermove', (event) => {
-      if (isDragging) {
-        const dx = event.data.global.x - dragStart.x
-        const dy = event.data.global.y - dragStart.y
-        
-        this.scatterContainer.x += dx
-        this.scatterContainer.y += dy
-        
-        dragStart = { x: event.data.global.x, y: event.data.global.y }
+    // Set initial cursor based on interaction mode
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (canvas) {
+      if (this.interactionMode === 'pan') {
+        canvas.style.cursor = 'grab'
+      } else if (this.interactionMode === 'lasso') {
+        canvas.style.cursor = 'crosshair'
       }
-    })
+    }
     
-    this.pixiApp.stage.on('pointerup', () => {
-      isDragging = false
-    })
-    
-    // Wheel event for zooming
-    this.pixiApp.view.addEventListener('wheel', (event) => {
-      event.preventDefault()
-      
-      const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1
-      const mouseX = event.clientX - this.pixiApp.view.getBoundingClientRect().left
-      const mouseY = event.clientY - this.pixiApp.view.getBoundingClientRect().top
-      
-      // Zoom towards mouse position
-      this.scatterContainer.scale.x *= zoomFactor
-      this.scatterContainer.scale.y *= zoomFactor
-      
-      // Clamp zoom levels
-      this.scatterContainer.scale.x = Math.max(0.1, Math.min(10, this.scatterContainer.scale.x))
-      this.scatterContainer.scale.y = Math.max(0.1, Math.min(10, this.scatterContainer.scale.y))
-    })
+    // Add our new interaction event listeners
+    this.addInteractionEventListeners()
   }
 
   decompressBinaryCoordinates(arrayBuffer) {
@@ -1411,11 +1456,8 @@ export default class extends Controller {
       return
     }
     
-    // Clear existing colored points
-    this.scatterContainer.removeChildren()
-    
     // Use the centralized coloring approach
-    this.renderPointsWithCurrentColoring()
+    this.forceReRenderPoints()
     
     console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
@@ -1427,7 +1469,9 @@ export default class extends Controller {
       return
     }
 
-    const graphics = new this.PIXI.Graphics()
+    // Clear existing points
+    this.scatterContainer.removeChildren()
+    
     const pointSize = 1
 
     // Check if we have metadata coloring active
@@ -1435,66 +1479,115 @@ export default class extends Controller {
       const { data_type, values, compression_info } = this.currentMetadataVector
 
       if (data_type === 'DISCRETE') {
-        // Group points by category for efficient rendering
-        const { categories } = compression_info
-        const colorMap = this.createDiscreteColorMap(categories)
-        
-        const pointsByCategory = {}
+        // Render each point individually to support selection transparency and color reset
         const uniqueValues = [...new Set(values)]
-        uniqueValues.forEach(value => {
-          pointsByCategory[value] = []
+        
+        // Calculate category frequencies for layering (larger categories first)
+        const categoryFrequencies = {}
+        values.forEach(value => {
+          categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
         })
         
-        this.currentCoordinates.forEach((coord, index) => {
-          const value = values[index]
-          pointsByCategory[value].push(coord)
-        })
+        console.log('Category frequencies for layering:', categoryFrequencies)
         
-        // Render points for each category
-        Object.entries(pointsByCategory).forEach(([category, coords]) => {
-          if (coords.length === 0) return
-          
-          const color = colorMap[category]
-          graphics.beginFill(color)
-          
-          coords.forEach(([x, y]) => {
-            const screenX = this.normalizeX(x, this.currentBounds)
-            const screenY = this.normalizeY(y, this.currentBounds)
-            graphics.drawCircle(screenX, screenY, pointSize)
+        // Sort point indices by category size (largest categories first, so they render in background)
+        const sortedPointIndices = Array.from({ length: this.currentCoordinates.length }, (_, i) => i)
+          .sort((a, b) => {
+            const categoryA = values[a]
+            const categoryB = values[b]
+            const freqA = categoryFrequencies[categoryA]
+            const freqB = categoryFrequencies[categoryB]
+            return freqB - freqA // Descending order (largest first)
           })
+        
+        // Render points in sorted order (largest categories first)
+        sortedPointIndices.forEach(i => {
+          const [x, y] = this.currentCoordinates[i]
+          const { color, alpha } = this.getColorAndAlpha(i)
           
-          graphics.endFill()
+          const screenX = this.normalizeX(x, this.currentBounds)
+          const screenY = this.normalizeY(y, this.currentBounds)
+          
+          // Create individual point graphics
+          const point = new this.PIXI.Graphics()
+          point.beginFill(color)
+          point.alpha = alpha
+          point.drawCircle(0, 0, pointSize)
+          point.endFill()
+          point.x = screenX
+          point.y = screenY
+          
+          // Store cell ID and mark as point for later reference
+          point.cellId = i
+          point.isPoint = true
+          
+          // Store original color for reset functionality
+          this.storeOriginalPointColor(i, color)
+          
+          this.scatterContainer.addChild(point)
         })
         
         // Update point count display
         this.updatePointCountDisplay(this.currentCoordinates.length, uniqueValues.length)
         
       } else if (data_type === 'CONTINUOUS') {
-        // Render each point with its individual color
-        const minVal = compression_info.min_val
-        const maxVal = compression_info.max_val
-        const range = maxVal - minVal
-        
+        // Render each point individually to support selection transparency and color reset
         for (let i = 0; i < this.currentCoordinates.length; i++) {
           const [x, y] = this.currentCoordinates[i]
-          const value = values[i]
-          const normalizedValue = (value - minVal) / range
-          const color = this.valueToColor(normalizedValue)
+          const { color, alpha } = this.getColorAndAlpha(i)
           
           const screenX = this.normalizeX(x, this.currentBounds)
           const screenY = this.normalizeY(y, this.currentBounds)
           
-          graphics.beginFill(color)
-          graphics.drawCircle(screenX, screenY, pointSize)
-          graphics.endFill()
+          // Create individual point graphics
+          const point = new this.PIXI.Graphics()
+          point.beginFill(color)
+          point.alpha = alpha
+          point.drawCircle(0, 0, pointSize)
+          point.endFill()
+          point.x = screenX
+          point.y = screenY
+          
+          // Store cell ID and mark as point for later reference
+          point.cellId = i
+          point.isPoint = true
+          
+          // Store original color for reset functionality
+          this.storeOriginalPointColor(i, color)
+          
+          this.scatterContainer.addChild(point)
         }
         
         // Update point count display
         this.updatePointCountDisplay(this.currentCoordinates.length, 'continuous')
       }
     } else {
-      // Use default blue color
-      this.renderPointsWithDefaultColor(graphics, this.currentCoordinates, this.currentBounds, pointSize)
+      // Render each point individually to support selection transparency and color reset
+      for (let i = 0; i < this.currentCoordinates.length; i++) {
+        const [x, y] = this.currentCoordinates[i]
+        const { color, alpha } = this.getColorAndAlpha(i)
+        
+        const screenX = this.normalizeX(x, this.currentBounds)
+        const screenY = this.normalizeY(y, this.currentBounds)
+        
+        // Create individual point graphics
+        const point = new this.PIXI.Graphics()
+        point.beginFill(color)
+        point.alpha = alpha
+        point.drawCircle(0, 0, pointSize)
+        point.endFill()
+        point.x = screenX
+        point.y = screenY
+        
+        // Store cell ID and mark as point for later reference
+        point.cellId = i
+        point.isPoint = true
+        
+        // Store original color for reset functionality
+        this.storeOriginalPointColor(i, color)
+        
+        this.scatterContainer.addChild(point)
+      }
       
       // Update point count display
       const pointCountElement = document.getElementById('point-count')
@@ -1503,8 +1596,10 @@ export default class extends Controller {
       }
     }
     
-    this.scatterContainer.addChild(graphics)
     console.log(`Rendered ${this.currentCoordinates.length} points with current coloring scheme`)
+    
+    // Clear any stored original positions since points were recreated
+    this.clearStoredOriginalPositions()
   }
 
   // Color points for discrete metadata
@@ -1597,19 +1692,21 @@ export default class extends Controller {
       0x1f77b4, // blue
       0xff7f0e, // orange
       0x2ca02c, // green
-      0xd62728, // red
       0x9467bd, // purple
       0x8c564b, // brown
       0xe377c2, // pink
       0x7f7f7f, // gray
       0xbcbd22, // olive
       0x17becf, // cyan
-      0xff6b6b, // light red
       0x4ecdc4, // teal
       0x45b7d1, // light blue
       0x96ceb4, // mint
       0xfeca57, // yellow
       0xff9ff3, // magenta
+      0x9b59b6, // violet
+      0x3498db, // sky blue
+      0x2ecc71, // emerald
+      0xf39c12, // carrot
     ]
     
     const colorMap = {}
@@ -1669,8 +1766,7 @@ export default class extends Controller {
     this.currentMetadataVector = null
     
     // Clear existing colored points and re-render with default coloring
-    this.scatterContainer.removeChildren()
-    this.renderPointsWithCurrentColoring()
+    this.forceReRenderPoints()
     
     console.log('Successfully cleared metadata coloring')
   }
@@ -2209,5 +2305,926 @@ export default class extends Controller {
         }
       })
     }, 0)
+  }
+
+  // Interaction Mode Methods
+  changeInteractionMode(event) {
+    const mode = event.target.value
+    console.log('Changing interaction mode to:', mode)
+    
+    this.interactionMode = mode
+    
+    // Clear any existing interaction state
+    this.clearLasso()
+    this.stopPanning()
+    this.clearZoom()
+    
+    // Update cursor based on mode
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (canvas) {
+      if (mode === 'lasso') {
+        canvas.style.cursor = 'crosshair'
+      } else if (mode === 'pan') {
+        canvas.style.cursor = 'grab'
+      } else if (mode === 'zoom') {
+        canvas.style.cursor = 'crosshair'
+      }
+    }
+    
+    // Remove existing event listeners and add new ones
+    this.removeInteractionEventListeners()
+    this.addInteractionEventListeners()
+  }
+
+  addInteractionEventListeners() {
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) {
+      console.log('❌ No canvas available for interaction listeners')
+      return
+    }
+    
+    console.log('✅ Adding interaction event listeners to canvas')
+    
+    this.boundMouseDown = this.onInteractionMouseDown.bind(this)
+    this.boundMouseMove = this.onInteractionMouseMove.bind(this)
+    this.boundMouseUp = this.onInteractionMouseUp.bind(this)
+    this.boundWheel = this.onInteractionWheel.bind(this)
+    this.boundDoubleClick = this.onInteractionDoubleClick.bind(this)
+    
+    canvas.addEventListener('mousedown', this.boundMouseDown)
+    canvas.addEventListener('mousemove', this.boundMouseMove)
+    canvas.addEventListener('mouseup', this.boundMouseUp)
+    canvas.addEventListener('wheel', this.boundWheel)
+    canvas.addEventListener('dblclick', this.boundDoubleClick)
+    
+    console.log('✅ Event listeners added:', {
+      mousedown: !!this.boundMouseDown,
+      mousemove: !!this.boundMouseMove,
+      mouseup: !!this.boundMouseUp,
+      wheel: !!this.boundWheel,
+      dblclick: !!this.boundDoubleClick
+    })
+    
+    // Set initial cursor
+    if (this.interactionMode === 'pan') {
+      canvas.style.cursor = 'grab'
+      console.log('🎯 Set cursor to grab (pan mode)')
+    } else if (this.interactionMode === 'lasso') {
+      canvas.style.cursor = 'crosshair'
+      console.log('🎯 Set cursor to crosshair (lasso mode)')
+    } else if (this.interactionMode === 'zoom') {
+      canvas.style.cursor = 'crosshair'
+      console.log('🎯 Set cursor to crosshair (zoom mode)')
+    }
+  }
+
+  removeInteractionEventListeners() {
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    if (this.boundMouseDown) {
+      canvas.removeEventListener('mousedown', this.boundMouseDown)
+    }
+    if (this.boundMouseMove) {
+      canvas.removeEventListener('mousemove', this.boundMouseMove)
+    }
+    if (this.boundMouseUp) {
+      canvas.removeEventListener('mouseup', this.boundMouseUp)
+    }
+    if (this.boundWheel) {
+      canvas.removeEventListener('wheel', this.boundWheel)
+    }
+    if (this.boundDoubleClick) {
+      canvas.removeEventListener('dblclick', this.boundDoubleClick)
+    }
+  }
+
+  onInteractionMouseDown(event) {
+    console.log('🖱️ Mouse down event:', this.interactionMode)
+    if (this.interactionMode === 'lasso') {
+      this.onLassoMouseDown(event)
+    } else if (this.interactionMode === 'pan') {
+      this.onPanMouseDown(event)
+    } else if (this.interactionMode === 'zoom') {
+      this.onZoomMouseDown(event)
+    }
+  }
+
+  onInteractionMouseMove(event) {
+    if (this.interactionMode === 'lasso') {
+      this.onLassoMouseMove(event)
+    } else if (this.interactionMode === 'pan') {
+      this.onPanMouseMove(event)
+    } else if (this.interactionMode === 'zoom') {
+      this.onZoomMouseMove(event)
+    }
+  }
+
+  onInteractionMouseUp(event) {
+    if (this.interactionMode === 'lasso') {
+      this.onLassoMouseUp(event)
+    } else if (this.interactionMode === 'pan') {
+      this.onPanMouseUp(event)
+    } else if (this.interactionMode === 'zoom') {
+      this.onZoomMouseUp(event)
+    }
+  }
+
+  onInteractionDoubleClick(event) {
+    console.log('🖱️ Double-click event:', this.interactionMode)
+    if (this.interactionMode === 'lasso') {
+      this.onLassoDoubleClick(event)
+    } else if (this.interactionMode === 'pan') {
+      this.onPanDoubleClick(event)
+    } else if (this.interactionMode === 'zoom') {
+      this.onZoomDoubleClick(event)
+    }
+  }
+
+  onInteractionWheel(event) {
+    console.log('🔄 Wheel event:', event.deltaY, 'isPanning:', this.isPanning, 'interactionMode:', this.interactionMode)
+    
+    // Don't zoom if we're currently panning (but allow zoom in pan mode when not actively panning)
+    if (this.isPanning) {
+      console.log('🚫 Ignoring wheel event during active panning')
+      return
+    }
+    
+    // Zoom functionality
+    event.preventDefault()
+    
+    if (!this.currentCoordinates || !this.currentBounds) {
+      console.log('❌ No data available for zoom')
+      return
+    }
+    
+    console.log('✅ Zooming with data available')
+    
+    // Basic zoom implementation
+    const delta = event.deltaY > 0 ? 1.1 : 0.9
+    const centerX = (this.currentBounds.minX + this.currentBounds.maxX) / 2
+    const centerY = (this.currentBounds.minY + this.currentBounds.maxY) / 2
+    
+    const newBounds = {
+      minX: centerX - (centerX - this.currentBounds.minX) * delta,
+      maxX: centerX + (this.currentBounds.maxX - centerX) * delta,
+      minY: centerY - (centerY - this.currentBounds.minY) * delta,
+      maxY: centerY + (this.currentBounds.maxY - centerY) * delta
+    }
+    
+    console.log('🔄 Zoom: Updating bounds to:', newBounds)
+    
+    // Store the old bounds for translation calculation
+    const oldBounds = { ...this.currentBounds }
+    
+    // Update current bounds
+    this.currentBounds = newBounds
+    
+    // Use translation approach like pan mode
+    this.translatePointsForZoom(oldBounds, newBounds)
+  }
+
+  // Lasso mode handlers
+  onLassoMouseDown(event) {
+    console.log('Lasso mouse down')
+    this.isDrawingLasso = true
+    this.lassoPoints = []
+    
+    // Get mouse position relative to canvas
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    
+    this.lassoPoints.push({ x, y })
+    
+    // Create lasso graphics object
+    this.lassoGraphics = new this.PIXI.Graphics()
+    this.pixiApp.stage.addChild(this.lassoGraphics)
+  }
+
+  onLassoMouseMove(event) {
+    if (!this.isDrawingLasso) return
+    
+    // Get mouse position relative to canvas
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    
+    this.lassoPoints.push({ x, y })
+    this.updateLassoGraphics()
+  }
+
+  onLassoMouseUp(event) {
+    if (!this.isDrawingLasso) return
+    
+    console.log('Lasso mouse up - completing selection')
+    this.isDrawingLasso = false
+    
+    // Only proceed if we have a PIXI app and coordinates to work with
+    if (!this.pixiApp || !this.currentCoordinates) {
+      console.log('No PIXI app or coordinates available for lasso selection')
+      this.clearLasso()
+      return
+    }
+    
+    // Complete the lasso by closing the path
+    if (this.lassoPoints.length > 2) {
+      this.lassoPoints.push(this.lassoPoints[0]) // Close the loop
+      this.updateLassoGraphics()
+      
+      // Find points inside the lasso
+      this.selectPointsInLasso()
+    }
+    
+    // Clear lasso after a short delay
+    setTimeout(() => {
+      this.clearLasso()
+    }, 1000)
+  }
+
+  // Pan mode handlers
+  onPanMouseDown(event) {
+    console.log('Pan mouse down')
+    this.isPanning = true
+    
+    // Store starting position
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    this.panStartX = event.clientX - rect.left
+    this.panStartY = event.clientY - rect.top
+    
+    // Store current bounds
+    this.panStartBounds = { ...this.currentBounds }
+    
+    // Store original bounds for consistent pan scaling
+    this.panOriginalBounds = this.calculateBounds(this.currentCoordinates)
+    
+    // Change cursor to grabbing
+    const panCanvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (panCanvas) {
+      panCanvas.style.cursor = 'grabbing'
+    }
+  }
+
+  onPanMouseMove(event) {
+    if (!this.isPanning) return
+    
+    // Get current mouse position
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const currentX = event.clientX - rect.left
+    const currentY = event.clientY - rect.top
+    
+    // Calculate pan delta
+    const deltaX = currentX - this.panStartX
+    const deltaY = currentY - this.panStartY
+    
+    // Convert screen delta to data delta
+    const canvasWidth = canvas.width
+    const canvasHeight = canvas.height
+    
+    // Use current bounds for pan calculation to match current view
+    const dataDeltaX = (deltaX / canvasWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
+    const dataDeltaY = (deltaY / canvasHeight) * (this.panStartBounds.maxY - this.panStartBounds.minY)
+    
+    // Update bounds
+    const newBounds = {
+      minX: this.panStartBounds.minX - dataDeltaX,
+      maxX: this.panStartBounds.maxX - dataDeltaX,
+      minY: this.panStartBounds.minY - dataDeltaY, // Invert Y axis
+      maxY: this.panStartBounds.maxY - dataDeltaY
+    }
+    
+    // Debug: Check if bounds are changing size (indicating zoom)
+    const startWidth = this.panStartBounds.maxX - this.panStartBounds.minX
+    const startHeight = this.panStartBounds.maxY - this.panStartBounds.minY
+    const newWidth = newBounds.maxX - newBounds.minX
+    const newHeight = newBounds.maxY - newBounds.minY
+    
+    console.log('🔄 Pan Debug:', {
+      deltaX: deltaX,
+      deltaY: deltaY,
+      dataDeltaX: dataDeltaX,
+      dataDeltaY: dataDeltaY,
+      startBounds: this.panStartBounds,
+      newBounds: newBounds,
+      sizeChange: {
+        width: { start: startWidth, new: newWidth, diff: newWidth - startWidth },
+        height: { start: startHeight, new: newHeight, diff: newHeight - startHeight }
+      }
+    })
+    
+    // Update visualization with new bounds
+    console.log('🔄 Pan: Updating bounds to:', newBounds)
+    this.updateVisualizationBounds(newBounds)
+  }
+
+  onPanMouseUp(event) {
+    if (!this.isPanning) return
+    
+    console.log('Pan mouse up')
+    this.stopPanning()
+  }
+
+  stopPanning() {
+    this.isPanning = false
+    this.panStartX = 0
+    this.panStartY = 0
+    this.panStartBounds = null
+    this.panOriginalBounds = null
+    
+    // Reset cursor
+    const stopCanvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (stopCanvas) {
+      if (this.interactionMode === 'pan') {
+        stopCanvas.style.cursor = 'grab'
+      }
+    }
+  }
+
+  // Double-click handlers for pan and lasso modes
+  onPanDoubleClick(event) {
+    console.log('🔄 Pan mode double-click: Resetting zoom and pan')
+    this.resetZoomAndPan()
+  }
+
+  onLassoDoubleClick(event) {
+    console.log('❌ Lasso mode double-click: Canceling current selection')
+    this.cancelSelection()
+  }
+
+  // Zoom mode handlers
+  onZoomMouseDown(event) {
+    console.log('🔍 Zoom mouse down')
+    this.isDrawingZoom = true
+    
+    // Get starting position
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    this.zoomStartX = event.clientX - rect.left
+    this.zoomStartY = event.clientY - rect.top
+    
+    // Create zoom rectangle graphics
+    this.zoomGraphics = new this.PIXI.Graphics()
+    this.pixiApp.stage.addChild(this.zoomGraphics)
+  }
+
+  onZoomMouseMove(event) {
+    if (!this.isDrawingZoom) return
+    
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const currentX = event.clientX - rect.left
+    const currentY = event.clientY - rect.top
+    
+    // Update zoom rectangle
+    this.updateZoomGraphics(this.zoomStartX, this.zoomStartY, currentX, currentY)
+  }
+
+  onZoomMouseUp(event) {
+    if (!this.isDrawingZoom) return
+    
+    console.log('🔍 Zoom mouse up')
+    this.isDrawingZoom = false
+    
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const endX = event.clientX - rect.left
+    const endY = event.clientY - rect.top
+    
+    // Calculate zoom bounds
+    const zoomBounds = this.calculateZoomBounds(this.zoomStartX, this.zoomStartY, endX, endY)
+    
+    if (zoomBounds) {
+      console.log('🔍 Zooming to bounds:', zoomBounds)
+      this.updateVisualizationBounds(zoomBounds)
+    }
+    
+    // Clear zoom graphics
+    this.clearZoom()
+  }
+
+  onZoomDoubleClick(event) {
+    console.log('🔍 Zoom mode double-click: Resetting zoom and pan')
+    this.resetZoomAndPan()
+  }
+
+  updateZoomGraphics(startX, startY, endX, endY) {
+    if (!this.zoomGraphics) return
+    
+    this.zoomGraphics.clear()
+    this.zoomGraphics.lineStyle(2, 0xff6b6b, 0.8) // Red line
+    this.zoomGraphics.beginFill(0xff6b6b, 0.1) // Light red fill
+    
+    const width = Math.abs(endX - startX)
+    const height = Math.abs(endY - startY)
+    const x = Math.min(startX, endX)
+    const y = Math.min(startY, endY)
+    
+    this.zoomGraphics.drawRect(x, y, width, height)
+    this.zoomGraphics.endFill()
+  }
+
+  calculateZoomBounds(startX, startY, endX, endY) {
+    if (!this.currentBounds || !this.currentCoordinates) return null
+    
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return null
+    
+    // Calculate the selected rectangle
+    const rectX = Math.min(startX, endX)
+    const rectY = Math.min(startY, endY)
+    const rectWidth = Math.abs(endX - startX)
+    const rectHeight = Math.abs(endY - startY)
+    
+    // Minimum size check
+    if (rectWidth < 10 || rectHeight < 10) {
+      console.log('🔍 Selection too small, ignoring')
+      return null
+    }
+    
+    // Convert screen coordinates to data coordinates
+    const canvasWidth = canvas.width
+    const canvasHeight = canvas.height
+    
+    // Calculate the aspect ratio of the canvas
+    const canvasAspect = canvasWidth / canvasHeight
+    
+    // Calculate the aspect ratio of the selection
+    const selectionAspect = rectWidth / rectHeight
+    
+    let finalRectX = rectX
+    let finalRectY = rectY
+    let finalRectWidth = rectWidth
+    let finalRectHeight = rectHeight
+    
+    // Adjust selection to match canvas aspect ratio
+    if (selectionAspect > canvasAspect) {
+      // Selection is wider than canvas aspect ratio
+      finalRectHeight = rectWidth / canvasAspect
+      finalRectY = rectY - (finalRectHeight - rectHeight) / 2
+    } else {
+      // Selection is taller than canvas aspect ratio
+      finalRectWidth = rectHeight * canvasAspect
+      finalRectX = rectX - (finalRectWidth - rectWidth) / 2
+    }
+    
+    // Convert to normalized coordinates (0-1)
+    const normX = finalRectX / canvasWidth
+    const normY = finalRectY / canvasHeight
+    const normWidth = finalRectWidth / canvasWidth
+    const normHeight = finalRectHeight / canvasHeight
+    
+    // Convert to data coordinates
+    const dataWidth = this.currentBounds.maxX - this.currentBounds.minX
+    const dataHeight = this.currentBounds.maxY - this.currentBounds.minY
+    
+    const newBounds = {
+      minX: this.currentBounds.minX + normX * dataWidth,
+      maxX: this.currentBounds.minX + (normX + normWidth) * dataWidth,
+      minY: this.currentBounds.minY + normY * dataHeight,
+      maxY: this.currentBounds.minY + (normY + normHeight) * dataHeight
+    }
+    
+    return newBounds
+  }
+
+  clearZoom() {
+    this.isDrawingZoom = false
+    this.isZooming = false
+    this.zoomStartX = 0
+    this.zoomStartY = 0
+    
+    if (this.zoomGraphics) {
+      this.pixiApp.stage.removeChild(this.zoomGraphics)
+      this.zoomGraphics.destroy()
+      this.zoomGraphics = null
+    }
+  }
+
+  // Reset zoom and pan to original view
+  resetZoomAndPan() {
+    if (!this.currentCoordinates) {
+      console.log('❌ No data available for reset')
+      return
+    }
+
+    console.log('🔄 Resetting to original view')
+    
+    // Clear any stored original positions to force re-rendering
+    this.clearStoredOriginalPositions()
+    
+    // Reset to original bounds
+    const originalBounds = this.calculateBounds(this.currentCoordinates)
+    this.currentBounds = originalBounds
+    
+    // Force re-render all points with original bounds
+    this.scatterContainer.removeChildren()
+    this.renderPointsWithCurrentColoring()
+    
+    console.log('✅ Zoom and pan reset to original view')
+  }
+
+  updateVisualizationBounds(newBounds) {
+    console.log('🔄 updateVisualizationBounds called with:', newBounds)
+    this.currentBounds = newBounds
+    
+    // Update existing point positions instead of re-rendering
+    if (this.currentCoordinates && this.scatterContainer) {
+      this.updatePointPositions()
+    } else {
+      console.log('❌ Cannot update positions - missing data')
+    }
+  }
+
+  // Optimized method to update point positions without re-rendering
+  updatePointPositions() {
+    if (!this.currentCoordinates || !this.currentBounds || !this.scatterContainer) {
+      console.log('❌ Cannot update positions - missing data:', {
+        coordinates: !!this.currentCoordinates,
+        bounds: !!this.currentBounds,
+        container: !!this.scatterContainer
+      })
+      return
+    }
+
+    console.log('🔄 Updating point positions:', {
+      pointCount: this.scatterContainer.children.length,
+      coordinateCount: this.currentCoordinates.length
+    })
+
+    // For pan operations, we should just translate existing positions
+    // For zoom operations, we need to recalculate from coordinates (scale change)
+    if (this.isPanning && this.panStartBounds) {
+      console.log('🔄 Panning: Translating existing positions')
+      this.translatePointPositions()
+      return
+    }
+
+    // Cache bounds calculations for performance
+    const bounds = this.currentBounds
+    const width = bounds.maxX - bounds.minX
+    const height = bounds.maxY - bounds.minY
+
+    let updatedCount = 0
+
+    // Helper function to update points in a container
+    const updatePointsInContainer = (container, containerName) => {
+      container.children.forEach((child, index) => {
+        // Debug: Check what we're working with
+        if (index < 3) {
+          console.log(`${containerName} Point ${index}:`, {
+            isPoint: child.isPoint,
+            cellId: child.cellId,
+            hasPosition: child.x !== undefined && child.y !== undefined
+          })
+        }
+
+        // Try to update if it's a point with cellId
+        if (child.isPoint && child.cellId !== undefined && child.cellId < this.currentCoordinates.length) {
+          const [x, y] = this.currentCoordinates[child.cellId]
+          
+          // Optimized normalization (avoid function calls)
+          const normalizedX = (x - bounds.minX) / width
+          const normalizedY = (y - bounds.minY) / height
+          
+          // Convert to screen coordinates
+          const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+          if (canvas) {
+            child.x = normalizedX * canvas.width
+            child.y = normalizedY * canvas.height
+            updatedCount++
+          }
+        }
+      })
+    }
+
+    // Update positions of existing points in scatterContainer (direct children)
+    updatePointsInContainer(this.scatterContainer, 'Direct')
+    
+    // Also check for points in animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children')
+      updatePointsInContainer(this.animatedContainer, 'Animated')
+    }
+
+    console.log(`✅ Updated ${updatedCount} point positions`)
+    
+    // Fallback: If no points were updated, fall back to re-rendering
+    if (updatedCount === 0 && this.scatterContainer.children.length > 0) {
+      console.log('⚠️ No points updated, falling back to re-rendering')
+      // Only fall back if we have coordinates and bounds
+      if (this.currentCoordinates && this.currentBounds) {
+        this.forceReRenderPoints()
+      }
+    }
+  }
+
+  // Translate existing point positions for pan operations
+  translatePointPositions() {
+    if (!this.panStartBounds || !this.currentBounds) return
+
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+
+    // Calculate the translation needed (direct from bounds difference)
+    const scaleFactor = 0.5 // Reduce sensitivity by half
+    const deltaX = (this.currentBounds.minX - this.panStartBounds.minX) * (canvas.width / (this.panStartBounds.maxX - this.panStartBounds.minX)) * scaleFactor
+    const deltaY = (this.currentBounds.minY - this.panStartBounds.minY) * (canvas.height / (this.panStartBounds.maxY - this.panStartBounds.minY)) * scaleFactor
+
+    console.log('🔄 Pan Translation:', { deltaX, deltaY })
+
+    let translatedCount = 0
+
+    // Helper function to translate points in a container
+    const translatePointsInContainer = (container, containerName) => {
+      container.children.forEach((child) => {
+        if (child.isPoint) {
+          // Always translate from current position, not stored original
+          const currentX = child.x
+          const currentY = child.y
+          
+          // Apply translation from current position
+          child.x = currentX - deltaX
+          child.y = currentY - deltaY
+          translatedCount++
+        }
+      })
+    }
+
+    // Translate points in scatterContainer (direct children)
+    translatePointsInContainer(this.scatterContainer, 'Direct')
+    
+    // Also check for points in animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for pan translation')
+      translatePointsInContainer(this.animatedContainer, 'Animated')
+    }
+
+    // Don't update panStartBounds - keep original reference for sharp direction changes
+    // this.panStartBounds = { ...this.currentBounds }
+
+    console.log(`✅ Pan translated ${translatedCount} point positions`)
+  }
+
+  // Translate existing point positions for zoom operations (like pan but with scale)
+  translatePointsForZoom(oldBounds, newBounds) {
+    if (!oldBounds || !newBounds) return
+
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+
+    // Calculate scale factors for zoom
+    const oldWidth = oldBounds.maxX - oldBounds.minX
+    const oldHeight = oldBounds.maxY - oldBounds.minY
+    const newWidth = newBounds.maxX - newBounds.minX
+    const newHeight = newBounds.maxY - newBounds.minY
+
+    const scaleX = oldWidth / newWidth  // Invert because we're zooming in
+    const scaleY = oldHeight / newHeight
+
+    // Calculate the center point of the canvas
+    const centerX = canvas.width / 2
+    const centerY = canvas.height / 2
+
+    console.log('🔄 Zoom Translation:', { scaleX, scaleY, centerX, centerY })
+
+    let translatedCount = 0
+
+    // Helper function to translate points in a container
+    const translatePointsInContainer = (container, containerName) => {
+      container.children.forEach((child) => {
+        if (child.isPoint) {
+          // Always scale from current position, not stored original
+          const currentX = child.x
+          const currentY = child.y
+          
+          // Apply zoom transformation: scale around center
+          const relativeX = currentX - centerX
+          const relativeY = currentY - centerY
+          
+          child.x = centerX + (relativeX * scaleX)
+          child.y = centerY + (relativeY * scaleY)
+          translatedCount++
+        }
+      })
+    }
+
+    // Translate points in scatterContainer (direct children)
+    translatePointsInContainer(this.scatterContainer, 'Direct')
+    
+    // Also check for points in animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for zoom translation')
+      translatePointsInContainer(this.animatedContainer, 'Animated')
+    }
+
+    console.log(`✅ Zoom translated ${translatedCount} point positions`)
+  }
+
+  // Clear stored original positions (called when coordinates change)
+  clearStoredOriginalPositions() {
+    console.log('🧹 Clearing stored original positions')
+    
+    // Clear positions in scatterContainer
+    this.scatterContainer.children.forEach((child) => {
+      if (child.isPoint) {
+        delete child.originalX
+        delete child.originalY
+      }
+    })
+    
+    // Also clear positions in animatedContainer if it exists
+    if (this.animatedContainer) {
+      this.animatedContainer.children.forEach((child) => {
+        if (child.isPoint) {
+          delete child.originalX
+          delete child.originalY
+        }
+      })
+    }
+  }
+
+  // Force re-render when colors or metadata change
+  forceReRenderPoints() {
+    if (this.currentCoordinates && this.scatterContainer) {
+      this.scatterContainer.removeChildren()
+      this.renderPointsWithCurrentColoring()
+    }
+  }
+
+  updateLassoGraphics() {
+    if (!this.lassoGraphics || this.lassoPoints.length < 2) return
+    
+    this.lassoGraphics.clear()
+    this.lassoGraphics.lineStyle(2, 0x3b82f6, 0.8) // Blue line
+    this.lassoGraphics.beginFill(0x3b82f6, 0.1) // Light blue fill
+    
+    this.lassoGraphics.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y)
+    for (let i = 1; i < this.lassoPoints.length; i++) {
+      this.lassoGraphics.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y)
+    }
+    
+    this.lassoGraphics.endFill()
+  }
+
+  selectPointsInLasso() {
+    if (!this.currentCoordinates || this.lassoPoints.length < 3) return
+    
+    console.log(`Checking ${this.currentCoordinates.length} points against lasso selection`)
+    
+    const selectedIndices = []
+    
+    this.currentCoordinates.forEach((coord, index) => {
+      const screenX = this.normalizeX(coord[0], this.currentBounds)
+      const screenY = this.normalizeY(coord[1], this.currentBounds)
+      
+      if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+        selectedIndices.push(index)
+      }
+    })
+    
+    console.log(`Selected ${selectedIndices.length} cells with lasso`)
+    
+    // Add to selected cells set
+    selectedIndices.forEach(index => {
+      this.selectedCells.add(index)
+    })
+    
+    // Update selection count display
+    this.updateSelectionCount()
+    
+    // Re-render points to show selection
+    this.forceReRenderPoints()
+  }
+
+  isPointInPolygon(x, y, polygon) {
+    let inside = false
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].y > y) !== (polygon[j].y > y)) &&
+          (x < (polygon[j].x - polygon[i].x) * (y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside
+      }
+    }
+    return inside
+  }
+
+  clearLasso() {
+    if (this.lassoGraphics) {
+      this.pixiApp.stage.removeChild(this.lassoGraphics)
+      this.lassoGraphics = null
+    }
+    this.lassoPoints = []
+    this.isDrawingLasso = false
+  }
+
+  updateSelectionCount() {
+    const countElement = document.getElementById('selected-cells-count')
+    if (countElement) {
+      countElement.textContent = this.selectedCells.size.toLocaleString()
+    }
+  }
+
+  // Tab switching for selections panel
+  switchSelectionTab(event) {
+    const tab = event.currentTarget.dataset.tab
+    console.log('Switching to tab:', tab)
+    
+    // Update tab buttons
+    const cellsTab = document.getElementById('cells-tab')
+    const geneSetsTab = document.getElementById('gene-sets-tab')
+    const cellsContent = document.getElementById('cells-tab-content')
+    const geneSetsContent = document.getElementById('gene-sets-tab-content')
+    
+    if (tab === 'cells') {
+      cellsTab.classList.add('border-blue-500', 'text-blue-600')
+      cellsTab.classList.remove('border-transparent', 'text-gray-500')
+      geneSetsTab.classList.remove('border-blue-500', 'text-blue-600')
+      geneSetsTab.classList.add('border-transparent', 'text-gray-500')
+      
+      cellsContent.classList.remove('hidden')
+      geneSetsContent.classList.add('hidden')
+    } else if (tab === 'gene-sets') {
+      geneSetsTab.classList.add('border-blue-500', 'text-blue-600')
+      geneSetsTab.classList.remove('border-transparent', 'text-gray-500')
+      cellsTab.classList.remove('border-blue-500', 'text-blue-600')
+      cellsTab.classList.add('border-transparent', 'text-gray-500')
+      
+      geneSetsContent.classList.remove('hidden')
+      cellsContent.classList.add('hidden')
+    }
+  }
+
+  // Save selection method
+  saveSelection() {
+    console.log('💾 Saving selection:', this.selectedCells.size, 'cells')
+    
+    if (this.selectedCells.size === 0) {
+      alert('No cells selected to save')
+      return
+    }
+    
+    // Here you would typically save the selection to a backend or local storage
+    // For now, we'll just show a success message
+    const selectionName = prompt('Enter a name for this selection:')
+    if (selectionName) {
+      console.log(`Selection "${selectionName}" saved with ${this.selectedCells.size} cells`)
+      // TODO: Implement actual saving logic (API call, local storage, etc.)
+      alert(`Selection "${selectionName}" saved successfully!`)
+    }
+  }
+
+  // Cancel selection method - resets points to original colors
+  cancelSelection() {
+    console.log('❌ Canceling selection, resetting to original colors')
+    
+    // Clear the selected cells
+    this.selectedCells.clear()
+    
+    // Re-render points to show original colors (without selection)
+    this.forceReRenderPoints()
+    
+    // Update the cell count display
+    this.updateSelectedCellsCount()
+    
+    // Clear any lasso graphics
+    if (this.lassoGraphics) {
+      this.lassoGraphics.clear()
+      this.lassoGraphics = null
+    }
+    
+    console.log('✅ Selection canceled, points reset to original colors')
+  }
+
+
+  // Store original colors when points are first rendered
+  storeOriginalPointColor(cellId, color) {
+    if (!this.originalPointColors.has(cellId)) {
+      this.originalPointColors.set(cellId, color)
+    }
+  }
+
+  // Update the selected cells count display
+  updateSelectedCellsCount() {
+    const countElement = document.getElementById('selected-cells-count')
+    if (countElement) {
+      countElement.textContent = this.selectedCells.size
+    }
   }
 }

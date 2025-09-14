@@ -3,3 +3,4 @@ class ArticlesProject < ApplicationRecord
   belongs_to :project
 end
 
+

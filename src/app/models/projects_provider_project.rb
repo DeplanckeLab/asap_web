@@ -3,3 +3,4 @@ class ProjectsProviderProject < ApplicationRecord
   belongs_to :provider_project
 end
 
+

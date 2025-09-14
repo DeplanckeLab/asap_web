@@ -24,3 +24,4 @@ class Req < ApplicationRecord
   end
 end
 
+

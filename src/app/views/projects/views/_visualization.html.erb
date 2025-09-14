@@ -1,9 +1,5 @@
-<!-- SIMPLE TEST -->
-<div style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0;">
-  <div style="width: 320px; height: 100vh; background-color: red; border: 2px solid black;">LEFT PANEL</div>
-  <div style="flex: 1; height: 100vh; background-color: blue; border: 2px solid black;">MIDDLE PANEL</div>
-  <div style="width: 320px; height: 100vh; background-color: green; border: 2px solid black;">RIGHT PANEL</div>
-</div>
+<!-- Load PIXI.js globally -->
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
 
 <div data-controller="visualization" 
      data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
@@ -11,325 +7,378 @@
      style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0;">
   
   <!-- Left Panel: Metadata -->
-  <div style="width: 320px; height: 100vh; background-color: red; border: 2px solid black;">
-    <div style="padding: 20px; color: white; font-weight: bold;">LEFT PANEL CONTENT</div>
-    <%# @h_metadata.keys.to_json %>
-          <!-- Metadata Panels Container -->
-      <div class="flex-1 flex flex-col min-h-0">
-        <!-- Categorical Metadata Section -->
-        <div id="discrete-panel" class="flex-shrink-0" style="height: 50%;">
-          <div class="p-4 h-full flex flex-col">
-            <h3 class="text-sm font-medium text-gray-900 mb-3">Categorical Metadata</h3>
-            <div class="space-y-2 flex-1 overflow-y-auto">
-              <% if @h_metadata[@default_loom_file] %>
-              <% @h_metadata[@default_loom_file]['cell']['DISCRETE'].each do |metadata| %>
-                <div class="metadata-item border border-gray-200 rounded-lg">
-                  <div class="metadata-header flex items-center p-2 hover:bg-gray-50 cursor-pointer" 
-                       data-action="click->visualization#toggleMetadata"
-                       data-metadata-id="<%= metadata.id %>"
-                       data-metadata-value="<%= metadata.id %>">
-                    <div class="chevron mr-3 text-gray-400 transition-transform duration-200">
-                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                      </svg>
-                    </div>
-                     <div class="flex-1">
-                       <div class="text-sm font-medium text-gray-900"><%= metadata.display_name %></div>
-                       <div class="text-xs text-gray-500"><%= metadata.nber_cats || 0 %> categories</div>
-                     </div>
-                     <input type="radio" name="color_by" value="<%= metadata.id %>" class="hidden">
-                     
-                     <!-- Water Drop Button -->
-                     <button class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors duration-200 ml-2" 
-                             data-metadata-id="<%= metadata.id %>"
-                             data-metadata-type="categorical"
-                             onclick="event.stopPropagation()">
-                       <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                         <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
-                       </svg>
-                     </button>
+  <div style="width: 380px; height: 100vh; background-color: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column;">
+    
+    <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Cell Metadata</h2>
+      <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Select metadata to color the plot</p>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+      <!-- Categorical Metadata Section -->
+      <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
+        <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Categorical Metadata</h3>
+        </div>
+        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+          <% if @h_metadata[@default_loom_file] %>
+            <% @h_metadata[@default_loom_file]['cell']['DISCRETE'].each do |metadata| %>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
+                <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f9fafb'" 
+                     onmouseout="this.style.backgroundColor=''"
+                     data-action="click->visualization#toggleMetadata">
+                  <!-- Chevron -->
+                  <div style="margin-right: 12px; color: #9ca3af; transition: transform 0.2s;">
+                    <svg style="width: 12px; height: 12px;" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
+                    </svg>
                   </div>
-                  <div class="metadata-categories hidden pl-8 pb-2">
-                    <% if metadata.categories_json.present? %>
-                      <% begin %>
-                        <% categories = JSON.parse(metadata.categories_json) %>
-                        <% if categories.is_a?(Hash) %>
-                          <% categories.each do |category, count| %>
-                            <div class="flex justify-between items-center py-1 px-2 text-xs">
-                              <span class="text-gray-700"><%= category %></span>
-                              <span class="text-gray-500 font-medium"><%= count %> cells</span>
-                            </div>
-                          <% end %>
-                        <% elsif categories.is_a?(Array) %>
-                          <% categories.each_with_index do |category, index| %>
-                            <div class="flex justify-between items-center py-1 px-2 text-xs">
-                              <span class="text-gray-700"><%= category %></span>
-                              <span class="text-gray-500 font-medium">Category <%= index + 1 %></span>
-                            </div>
-                          <% end %>
+                  <!-- Content -->
+                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                    <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
+                  </div>
+                  <!-- Hidden Radio -->
+                  <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
+                  <!-- Water Drop Button -->
+                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-active="false"
+                          onclick="event.stopPropagation()">
+                    <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                    </svg>
+                  </button>
+                </div>
+                <!-- Categories (initially hidden) -->
+                <div style="padding-left: 32px; padding-bottom: 8px; display: none;">
+                  <% if metadata.categories_json.present? %>
+                    <% begin %>
+                      <% categories = JSON.parse(metadata.categories_json) %>
+                      <% if categories.is_a?(Hash) %>
+                        <% categories.each do |category, count| %>
+                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
+                            <span style="color: #374151;"><%= category %></span>
+                            <span style="color: #6b7280; font-weight: 500;"><%= count %> cells</span>
+                          </div>
                         <% end %>
-                      <% rescue JSON::ParserError %>
-                        <div class="text-xs text-gray-500 px-2 py-1">Unable to parse categories</div>
+                      <% elsif categories.is_a?(Array) %>
+                        <% categories.each_with_index do |category, index| %>
+                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
+                            <span style="color: #374151;"><%= category %></span>
+                            <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
+                          </div>
+                        <% end %>
                       <% end %>
-                    <% else %>
-                      <div class="text-xs text-gray-500 px-2 py-1">No category data available</div>
+                    <% rescue JSON::ParserError %>
+                      <div style="font-size: 12px; color: #6b7280; padding: 8px;">Unable to parse categories</div>
                     <% end %>
+                  <% else %>
+                    <div style="font-size: 12px; color: #6b7280; padding: 8px;">No category data available</div>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          <% else %>
+            <p style="color: #6b7280; font-size: 14px;">No categorical metadata available</p>
+          <% end %>
+        </div>
+      </div>
+
+      <!-- Draggable Divider -->
+      <div id="metadata-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s;" 
+           onmouseover="this.style.backgroundColor='#9ca3af'" 
+           onmouseout="this.style.backgroundColor='#d1d5db'">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px;"></div>
+      </div>
+
+      <!-- Continuous Metadata Section -->
+      <div style="height: 50%; display: flex; flex-direction: column;">
+        <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Continuous Metadata</h3>
+        </div>
+        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+          <% if @h_metadata[@default_loom_file] %>
+            <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].each do |metadata| %>
+              <div style="display: flex; align-items: center; padding: 8px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; margin-bottom: 4px;"
+                   onmouseover="this.style.backgroundColor='#f9fafb'" 
+                   onmouseout="this.style.backgroundColor=''">
+                <!-- Radio Button -->
+                <input type="radio" name="color_by" value="<%= metadata.id %>" style="margin-right: 12px;">
+                <!-- Content -->
+                <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                  <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                  <div style="font-size: 12px; color: #6b7280;">
+                    Range: <%= metadata.min_val&.round(2) || 'N/A' %> - <%= metadata.max_val&.round(2) || 'N/A' %>
                   </div>
                 </div>
-              <% end %>
-              <% end %>
-            </div>
-          </div>
-        </div>
-
-        <!-- Draggable Divider -->
-        <div id="metadata-divider" class="h-1 bg-gray-300 hover:bg-gray-400 cursor-row-resize border-y border-gray-200 relative group">
-          <div class="absolute inset-0 flex items-center justify-center">
-            <div class="w-8 h-0.5 bg-gray-400 group-hover:bg-gray-500 rounded"></div>
-          </div>
-        </div>
-
-        <!-- Continuous Metadata Section -->
-        <div id="continuous-panel" class="flex-1 min-h-0">
-          <div class="p-4 h-full flex flex-col">
-            <h3 class="text-sm font-medium text-gray-900 mb-3">Continuous Metadata</h3>
-            <div class="space-y-2 flex-1 overflow-y-auto">
-              <% if @h_metadata[@default_loom_file] %>
-                <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].each do |metadata| %>
-                 <div class="flex items-center p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                   <label class="flex items-center flex-1 cursor-pointer">
-                     <input type="radio" name="color_by" value="<%= metadata.id %>" class="mr-3 text-blue-600">
-                     <div class="flex-1">
-                       <div class="text-sm font-medium text-gray-900"><%= metadata.display_name %></div>
-                       <div class="text-xs text-gray-500">
-                         Range: <%= metadata.min_val&.round(2) || 'N/A' %> - <%= metadata.max_val&.round(2) || 'N/A' %>
-                       </div>
-                     </div>
-                   </label>
-                   
-                   <!-- Water Drop Button -->
-                   <button class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors duration-200 ml-2" 
-                           data-metadata-id="<%= metadata.id %>"
-                           data-metadata-type="continuous"
-                           onclick="event.stopPropagation()">
-                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                       <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
-                     </svg>
-                   </button>
-                 </div>
-              <% end %>
-              <% end %>
-            </div>
-          </div>
+                <!-- Water Drop Button -->
+                <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                        onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'" 
+                        onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor=''"
+                        data-action="click->visualization#waterDropClicked"
+                        data-metadata-name="<%= metadata.display_name %>">
+                  <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                  </svg>
+                </button>
+              </div>
+            <% end %>
+          <% else %>
+            <p style="color: #6b7280; font-size: 14px;">No continuous metadata available</p>
+          <% end %>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Main Content: UMAP Plot -->
-  <div style="flex: 1; height: 100vh; background-color: blue; border: 2px solid black;">
-    <div style="padding: 20px; color: white; font-weight: bold;">MIDDLE PANEL CONTENT</div>
-      <div class="flex items-center justify-between px-4 py-2">
-        <!-- Left side: Loom file and Embedding Selection -->
-        <div class="flex items-center space-x-4">
-          <div class="flex items-center space-x-2">
-            <select data-visualization-target="loomFileSelect" 
-                    data-action="change->visualization#updateEmbeddings"
-                    class="text-sm border border-gray-300 rounded px-2 py-1">
-              <% @available_loom_files.each do |filepath| %>
-                <option value="<%= filepath %>">
-                  <%= filepath.split('/').first.capitalize %>
+  <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column;">
+    <div style="padding: 15px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">UMAP Visualization</h2>
+    </div>
+    
+    <!-- Menu Bar -->
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+      <!-- Left side: Loom file and Metadata Selection -->
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <select data-visualization-target="loomFileSelect" 
+                  data-action="change->visualization#updateEmbeddings"
+                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
+            <% @available_loom_files.each do |filepath| %>
+              <option value="<%= filepath %>">
+                <%= filepath.split('/').first.capitalize %>
+              </option>
+            <% end %>
+          </select>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <select data-visualization-target="metadataSelect" 
+                  data-action="change->visualization#updateMetadata"
+                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
+            <option value="">Select metadata...</option>
+            <% if @h_metadata[@default_loom_file] && @h_metadata[@default_loom_file]['cell'] && @h_metadata[@default_loom_file]['cell']['NUMERIC'] %>
+              <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| 
+                   metadata.nber_rows && metadata.nber_rows >= 2 && metadata.nber_rows <= 50 && 
+                   metadata.nber_cols && metadata.nber_cols == @project.nber_cols 
+                 }.each do |metadata| %>
+                <option value="<%= metadata.id %>">
+                  <%= metadata.display_name %> (<%= metadata.nber_rows %> rows)
                 </option>
               <% end %>
-            </select>
-          </div>
-
-          <!--
-          <div class="flex items-center space-x-2">
-           <%# @available_embeddings.to_json %>
-            <select data-visualization-target="embeddingSelect" 
-                    class="text-sm border border-gray-300 rounded px-2 py-1">
-              <option selected>Select embedding...</option>             
-              <%# @available_embeddings.each do |embedding| %>
-                <option value="<%# embedding.id %>"><%# embedding.display_name %></option>
-              <%# end %>
-            </select>
-          </div>
-        </div>
-        -->
-
-        <!-- Right side: Actions -->
-        <div class="flex items-center space-x-2">
-          <!-- Lasso Selection Button -->
-          <button id="lasso-button" 
-                  class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
-                  data-action="click->visualization#toggleLassoSelection"
-                  title="Lasso Selection">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </button>
-          
-          <!-- Export Button (Icon Only) -->
-          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
-                  title="Export">
-            <i class="fas fa-download"></i>
-          </button>
-          
-          <!-- Fullscreen Button (Icon Only) -->
-          <button class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors duration-200" 
-                  title="Fullscreen">
-            <i class="fas fa-expand"></i>
-          </button>
-          
-          <!-- Refresh Button (Icon Only) -->
-          <button class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-200" 
-                  title="Refresh">
-            <i class="fas fa-sync"></i>
-          </button>
+            <% end %>
+          </select>
         </div>
       </div>
-    </div>
 
-    <!-- Plot Area -->
-    <div class="flex-1 bg-gray-50 p-4">
-      <!-- UMAP Plot Container -->
-      <div class="w-full h-full bg-white rounded-lg border border-gray-200 flex items-center justify-center">
-        <div class="text-center text-gray-500">
-          <div class="mb-4">
-            <svg class="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-            </svg>
-          </div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">UMAP Visualization</h3>
-          <p class="text-sm text-gray-600">Select metadata from the left panel to color the plot</p>
+      <!-- Right side: Actions -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <!-- Interaction Mode Dropdown -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label style="font-size: 14px; color: #374151; font-weight: 500;">Mode:</label>
+          <select id="interaction-mode" 
+                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px; background-color: white; cursor: pointer;"
+                  data-action="change->visualization#changeInteractionMode">
+            <option value="pan">Pan</option>
+            <option value="lasso">Lasso</option>
+            <option value="zoom">Zoom</option>
+          </select>
+        </div>
+        
+        <!-- Export Button (Icon Only) -->
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                title="Export"
+                onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                onmouseout="this.style.backgroundColor='#f3f4f6'">
+          <i class="fas fa-download"></i>
+        </button>
+        
+        <!-- Fullscreen Button (Icon Only) -->
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                title="Fullscreen"
+                onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                onmouseout="this.style.backgroundColor='#f3f4f6'">
+          <i class="fas fa-expand"></i>
+        </button>
+        
+        <!-- Refresh Button (Icon Only) -->
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #2563eb; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+                title="Refresh"
+                onmouseover="this.style.backgroundColor='#1d4ed8'" 
+                onmouseout="this.style.backgroundColor='#2563eb'">
+          <i class="fas fa-sync"></i>
+        </button>
+      </div>
+    </div>
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column;">
+      <!-- Plot Container -->
+      <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px;">
+        <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
+          <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
+          <p style="margin: 0;">Select metadata from the dropdown to visualize</p>
+        </div>
+      </div>
+      
+      <!-- Plot Controls -->
+      <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
+        <div>
+          <span>Controls: </span>
+          <span>Drag to pan • Scroll to zoom</span>
+        </div>
+        <div id="plot-info" style="display: none;">
+          <span id="point-count">0</span> points
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Right Panel: Gene Expression -->
-  <div style="width: 320px; height: 100vh; background-color: green; border: 2px solid black;">
-    <div style="padding: 20px; color: white; font-weight: bold;">RIGHT PANEL CONTENT</div>
-      <h2 class="text-lg font-semibold text-gray-900">Gene Expression</h2>
-      <p class="text-sm text-gray-600">Search and visualize gene expression</p>
-    </div>
-
-    <!-- Gene Search -->
-    <div class="p-4 border-b border-gray-200">
-      <div class="relative">
-        <input type="text" placeholder="Search genes..." 
-               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <div class="absolute right-3 top-2.5">
-          <i class="fas fa-search text-gray-400"></i>
-        </div>
+  <!-- Right Panel: Split into Gene Expression and Selections -->
+  <div style="width: 320px; height: 100vh; display: flex; flex-direction: column;">
+    
+    <!-- Top Section: Gene Expression Panel -->
+    <div style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;">
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
+        <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Search and visualize gene expression</p>
+      </div>
+      <div style="flex: 1; padding: 20px; overflow-y: auto;">
+        <p>Gene expression content will go here</p>
       </div>
     </div>
 
-    <!-- Recent Genes -->
-    <div class="flex-1 flex flex-col min-h-0">
-      <div class="p-4 border-b border-gray-200">
-        <h3 class="text-sm font-medium text-gray-900 mb-3">Recent Genes</h3>
-        <div class="space-y-2 max-h-48 overflow-y-auto">
-          <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">CD3D</div>
-              <div class="text-xs text-gray-500">T cell marker</div>
-            </div>
-            <button class="text-blue-600 hover:text-blue-800">
-              <i class="fas fa-plus text-sm"></i>
-            </button>
-          </div>
-          
-          <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">CD8A</div>
-              <div class="text-xs text-gray-500">CD8+ T cell marker</div>
-            </div>
-            <button class="text-blue-600 hover:text-blue-800">
-              <i class="fas fa-plus text-sm"></i>
-            </button>
-          </div>
-          
-          <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">CD4</div>
-              <div class="text-xs text-gray-500">CD4+ T cell marker</div>
-            </div>
-            <button class="text-blue-600 hover:text-blue-800">
-              <i class="fas fa-plus text-sm"></i>
-            </button>
-          </div>
-          
-          <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">FOXP3</div>
-              <div class="text-xs text-gray-500">Treg marker</div>
-            </div>
-            <button class="text-blue-600 hover:text-blue-800">
-              <i class="fas fa-plus text-sm"></i>
-            </button>
-          </div>
-          
-          <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">IL2RA</div>
-              <div class="text-xs text-gray-500">IL-2 receptor</div>
-            </div>
-            <button class="text-blue-600 hover:text-blue-800">
-              <i class="fas fa-plus text-sm"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Selected Genes -->
-      <div class="flex-1 p-4">
-        <h3 class="text-sm font-medium text-gray-900 mb-3">Selected Genes</h3>
-        <div class="space-y-2 max-h-48 overflow-y-auto">
-          <div class="flex items-center justify-between p-2 bg-blue-50 rounded-lg">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">CD3D</div>
-              <div class="text-xs text-gray-500">Expression: 0.2-4.5</div>
-            </div>
-            <button class="text-red-600 hover:text-red-800">
-              <i class="fas fa-times text-sm"></i>
-            </button>
-          </div>
-          
-          <div class="flex items-center justify-between p-2 bg-blue-50 rounded-lg">
-            <div class="flex-1">
-              <div class="text-sm font-medium text-gray-900">CD8A</div>
-              <div class="text-xs text-gray-500">Expression: 0.1-3.2</div>
-            </div>
-            <button class="text-red-600 hover:text-red-800">
-              <i class="fas fa-times text-sm"></i>
-            </button>
-          </div>
-        </div>
-      </div>
+    <!-- Draggable Divider -->
+    <div id="right-panel-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s;" 
+         onmouseover="this.style.backgroundColor='#9ca3af'" 
+         onmouseout="this.style.backgroundColor='#d1d5db'">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px;"></div>
     </div>
 
-    <!-- Gene Expression Controls -->
-    <div class="p-4 border-t border-gray-200">
-      <h3 class="text-sm font-medium text-gray-900 mb-3">Expression Options</h3>
-      <div class="space-y-3">
-        <div>
-          <label class="flex items-center">
-            <input type="checkbox" checked class="mr-2 text-blue-600">
-            <span class="text-sm text-gray-700">Show expression</span>
-          </label>
-        </div>
-        <div>
-          <label class="flex items-center">
-            <input type="checkbox" class="mr-2 text-blue-600">
-            <span class="text-sm text-gray-700">Log scale</span>
-          </label>
-        </div>
-        <div class="pt-2">
-          <button class="w-full px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
-            <i class="fas fa-eye mr-2"></i>Visualize Genes
+    <!-- Bottom Section: Selections Panel -->
+    <div style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column;">
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Selections</h2>
+        <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Manage cell and gene set selections</p>
+      </div>
+
+      <!-- Selection Tabs -->
+      <div style="border-bottom: 1px solid #e5e7eb;">
+        <nav style="display: flex; padding: 0 16px;">
+          <button id="cells-tab" 
+                  style="padding: 8px 16px; border-bottom: 2px solid #3b82f6; font-weight: 500; font-size: 14px; color: #3b82f6; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer;"
+                  data-action="click->visualization#switchSelectionTab"
+                  data-tab="cells">
+            Cells
           </button>
+          <button id="gene-sets-tab" 
+                  style="padding: 8px 16px; border-bottom: 2px solid transparent; font-weight: 500; font-size: 14px; color: #6b7280; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;"
+                  onmouseover="this.style.color='#374151'; this.style.borderBottomColor='#d1d5db'"
+                  onmouseout="this.style.color='#6b7280'; this.style.borderBottomColor='transparent'"
+                  data-action="click->visualization#switchSelectionTab"
+                  data-tab="gene-sets">
+            Gene Sets
+          </button>
+        </nav>
+      </div>
+
+      <!-- Tab Content -->
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <!-- Cells Tab Content -->
+        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow-y: auto;">
+          <div style="margin-bottom: 16px;">
+            <!-- Cell count with action buttons -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+              <div style="font-size: 14px; color: #6b7280;">
+                <span id="selected-cells-count">0</span> cells selected
+              </div>
+              
+              <!-- Action buttons (icons only) -->
+              <div style="display: flex; gap: 8px;">
+                <!-- Save Selection Button (Icon Only) -->
+                <button id="save-selection-btn"
+                        style="padding: 6px; background-color: #3b82f6; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
+                        title="Save Selection"
+                        data-action="click->visualization#saveSelection"
+                        onmouseover="this.style.backgroundColor='#2563eb'"
+                        onmouseout="this.style.backgroundColor='#3b82f6'">
+                  <i class="fas fa-save" style="font-size: 14px;"></i>
+                </button>
+                
+                <!-- Cancel Selection Button (Icon Only) -->
+                <button id="cancel-selection-btn"
+                        style="padding: 6px; background-color: #d1d5db; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
+                        title="Cancel Selection"
+                        data-action="click->visualization#cancelSelection"
+                        onmouseover="this.style.backgroundColor='#9ca3af'"
+                        onmouseout="this.style.backgroundColor='#d1d5db'">
+                  <i class="fas fa-times" style="font-size: 14px;"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Saved Selections List -->
+            <div>
+              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>
+              <div style="max-height: 120px; overflow-y: auto;">
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; background-color: white; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 4px;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 14px; font-weight: 500;">T Cell Cluster</div>
+                    <div style="font-size: 12px; color: #6b7280;">1,234 cells</div>
+                  </div>
+                  <button style="color: #dc2626; background: none; border: none; cursor: pointer; padding: 4px;"
+                          onmouseover="this.style.color='#b91c1c'"
+                          onmouseout="this.style.color='#dc2626'">
+                    <i class="fas fa-trash" style="font-size: 12px;"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gene Sets Tab Content -->
+        <div id="gene-sets-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; display: none;">
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 14px; color: #6b7280; margin-bottom: 12px;">
+              Manage gene sets for analysis
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+              <button style="width: 100%; padding: 8px 12px; background-color: #3b82f6; color: white; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
+                      onmouseover="this.style.backgroundColor='#2563eb'"
+                      onmouseout="this.style.backgroundColor='#3b82f6'">
+                <i class="fas fa-plus" style="margin-right: 8px;"></i>Create Gene Set
+              </button>
+              <button style="width: 100%; padding: 8px 12px; background-color: #d1d5db; color: #374151; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
+                      onmouseover="this.style.backgroundColor='#9ca3af'"
+                      onmouseout="this.style.backgroundColor='#d1d5db'">
+                <i class="fas fa-upload" style="margin-right: 8px;"></i>Import Gene Set
+              </button>
+            </div>
+
+            <!-- Gene Sets List -->
+            <div>
+              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Gene Sets</h3>
+              <div style="max-height: 120px; overflow-y: auto;">
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; background-color: white; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 4px;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 14px; font-weight: 500;">T Cell Markers</div>
+                    <div style="font-size: 12px; color: #6b7280;">15 genes</div>
+                  </div>
+                  <button style="color: #dc2626; background: none; border: none; cursor: pointer; padding: 4px;"
+                          onmouseover="this.style.color='#b91c1c'"
+                          onmouseout="this.style.color='#dc2626'">
+                    <i class="fas fa-trash" style="font-size: 12px;"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -337,67 +386,28 @@
 </div>
 
 <script>
-function toggleMetadata(headerElement) {
-  console.log('toggleMetadata called with:', headerElement)
-  
-  const metadataItem = headerElement.closest('.metadata-item')
-  const chevron = headerElement.querySelector('.chevron svg')
-  const categoriesDiv = metadataItem.querySelector('.metadata-categories')
-  const radioInput = metadataItem.querySelector('input[type="radio"]')
-  
-  console.log('Elements found:', { 
-    metadataItem, 
-    chevron, 
-    categoriesDiv, 
-    radioInput 
-  })
-  
-  if (!chevron || !categoriesDiv || !radioInput) {
-    console.error('Required elements not found')
-    return
-  }
-  
-  // Toggle the chevron rotation
-  if (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)') {
-    console.log('Expanding metadata')
-    chevron.style.transform = 'rotate(90deg)'
-    categoriesDiv.classList.remove('hidden')
-  } else {
-    console.log('Collapsing metadata')
-    chevron.style.transform = 'rotate(0deg)'
-    categoriesDiv.classList.add('hidden')
-  }
-  
-  // Select this metadata option
-  radioInput.checked = true
-  
-  // Trigger change event to update visualization if needed
-  const changeEvent = new Event('change', { bubbles: true })
-  radioInput.dispatchEvent(changeEvent)
-}
-
-// Draggable divider functionality
+// Right Panel Draggable Divider functionality
 document.addEventListener('DOMContentLoaded', function() {
-  const divider = document.getElementById('metadata-divider')
-  const discretePanel = document.getElementById('discrete-panel')
-  const continuousPanel = document.getElementById('continuous-panel')
-  const container = discretePanel.parentElement
+  const rightPanelDivider = document.getElementById('right-panel-divider')
+  const rightPanel = rightPanelDivider.parentElement
+  const geneExpressionPanel = rightPanel.querySelector('div:first-child')
+  const selectionsPanel = rightPanel.querySelector('div:last-child')
   
-  let isDragging = false
-  let startY = 0
-  let startHeight = 0
+  let isDraggingRight = false
+  let startYRight = 0
+  let startHeightRight = 0
   
   // Minimum heights for panels (in pixels)
-  const minPanelHeight = 100
+  const minPanelHeightRight = 150
   
-  function startDrag(e) {
-    isDragging = true
-    startY = e.clientY
-    startHeight = discretePanel.offsetHeight
+  function startDragRight(e) {
+    isDraggingRight = true
+    startYRight = e.clientY
+    startHeightRight = geneExpressionPanel.offsetHeight
     
     // Add visual feedback
     document.body.style.cursor = 'row-resize'
-    divider.style.backgroundColor = '#6B7280' // darker gray
+    rightPanelDivider.style.backgroundColor = '#6B7280' // darker gray
     
     // Prevent text selection during drag
     document.body.style.userSelect = 'none'
@@ -405,44 +415,41 @@ document.addEventListener('DOMContentLoaded', function() {
     e.preventDefault()
   }
   
-  function doDrag(e) {
-    if (!isDragging) return
+  function doDragRight(e) {
+    if (!isDraggingRight) return
     
-    const deltaY = e.clientY - startY
-    const newHeight = startHeight + deltaY
+    const deltaY = e.clientY - startYRight
+    const newHeight = startHeightRight + deltaY
     
     // Calculate container height
-    const containerHeight = container.offsetHeight - divider.offsetHeight
+    const containerHeight = rightPanel.offsetHeight - rightPanelDivider.offsetHeight
     
     // Apply constraints
-    const constrainedHeight = Math.max(minPanelHeight, Math.min(newHeight, containerHeight - minPanelHeight))
+    const constrainedHeight = Math.max(minPanelHeightRight, Math.min(newHeight, containerHeight - minPanelHeightRight))
     
-    // Update discrete panel height
-    const heightPercentage = (constrainedHeight / containerHeight) * 100
-    discretePanel.style.height = heightPercentage + '%'
-    
-    // Continuous panel will automatically take remaining space due to flex-1
+    // Update gene expression panel height
+    geneExpressionPanel.style.height = constrainedHeight + 'px'
+    selectionsPanel.style.height = (containerHeight - constrainedHeight) + 'px'
   }
   
-  function stopDrag() {
-    if (!isDragging) return
+  function stopDragRight() {
+    if (!isDraggingRight) return
     
-    isDragging = false
+    isDraggingRight = false
     
     // Remove visual feedback
     document.body.style.cursor = ''
-    divider.style.backgroundColor = ''
+    rightPanelDivider.style.backgroundColor = ''
     document.body.style.userSelect = ''
   }
   
   // Event listeners
-  divider.addEventListener('mousedown', startDrag)
-  document.addEventListener('mousemove', doDrag)
-  document.addEventListener('mouseup', stopDrag)
+  rightPanelDivider.addEventListener('mousedown', startDragRight)
+  document.addEventListener('mousemove', doDragRight)
+  document.addEventListener('mouseup', stopDragRight)
+  document.addEventListener('mouseleave', stopDragRight)
   
-  // Also handle mouse leave to stop dragging if mouse leaves window
-  document.addEventListener('mouseleave', stopDrag)
-  
-  console.log('Draggable divider initialized')
+  console.log('Right panel draggable divider initialized')
 })
 </script>
+

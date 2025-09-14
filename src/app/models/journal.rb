@@ -10,3 +10,4 @@ class Journal < ApplicationRecord
   end
 end
 
+

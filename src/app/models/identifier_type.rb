@@ -10,3 +10,4 @@ class IdentifierType < ApplicationRecord
   end
 end
 
+

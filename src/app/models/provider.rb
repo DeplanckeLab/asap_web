@@ -20,3 +20,4 @@ class Provider < ApplicationRecord
   end
 end
 
+

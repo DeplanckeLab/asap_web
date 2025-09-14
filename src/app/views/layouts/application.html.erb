@@ -21,6 +21,32 @@
     <%# Includes all stylesheet files in app/assets/stylesheets %>
     <%= stylesheet_link_tag "tailwind", "inter-font", "data-turbo-track": "reload" %>
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    
+    <%# Global color palette from helper method %>
+    <script>
+      console.log('🎨 Layout script executing...');
+      try {
+        console.log('🎨 Attempting to load colors from server...');
+        var colors = <%= category_colors.to_json %>;
+        console.log('🎨 Raw colors from server:', colors);
+        console.log('🎨 Colors type:', typeof colors);
+        console.log('🎨 Colors length:', colors ? colors.length : 'null/undefined');
+        
+        window.CATEGORY_COLORS = colors;
+        console.log('🎨 window.CATEGORY_COLORS set to:', window.CATEGORY_COLORS);
+        
+        if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
+          console.error('❌ No colors loaded from server configuration!');
+        } else {
+          console.log('✅ Colors loaded successfully!');
+        }
+      } catch (error) {
+        console.error('❌ Error loading colors from server:', error);
+        console.error('❌ Error stack:', error.stack);
+        window.CATEGORY_COLORS = null;
+      }
+    </script>
+    
     <%= javascript_importmap_tags %>
   </head>
 

@@ -1,6 +1,31 @@
 <!-- Load PIXI.js globally -->
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
 
+<!-- Global color palette for visualization -->
+<script>
+  console.log('🎨 Visualization view script executing...');
+  try {
+    console.log('🎨 Attempting to load colors from server...');
+    var colors = <%= raw category_colors.to_json %>;
+    console.log('🎨 Raw colors from server:', colors);
+    console.log('🎨 Colors type:', typeof colors);
+    console.log('🎨 Colors length:', colors ? colors.length : 'null/undefined');
+    
+    window.CATEGORY_COLORS = colors;
+    console.log('🎨 window.CATEGORY_COLORS set to:', window.CATEGORY_COLORS);
+    
+    if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
+      console.error('❌ No colors loaded from server configuration!');
+    } else {
+      console.log('✅ Colors loaded successfully in visualization view!');
+    }
+  } catch (error) {
+    console.error('❌ Error loading colors from server:', error);
+    console.error('❌ Error stack:', error.stack);
+    window.CATEGORY_COLORS = null;
+  }
+</script>
+
 <div data-controller="visualization" 
      data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
      data-visualization-default-loom-file-value="<%= @default_loom_file %>"
@@ -49,9 +74,7 @@
                           data-metadata-id="<%= metadata.id %>"
                           data-active="false"
                           onclick="event.stopPropagation()">
-                    <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
-                    </svg>
+                    <i class="fas fa-palette" style="font-size: 16px;"></i>
                   </button>
                 </div>
                 <!-- Categories (initially hidden) -->
@@ -60,16 +83,34 @@
                     <% begin %>
                       <% categories = JSON.parse(metadata.categories_json) %>
                       <% if categories.is_a?(Hash) %>
-                        <% categories.each do |category, count| %>
+                        <% 
+                          # Sort categories by count (largest to smallest) to match plot ordering
+                          sorted_categories = categories.sort_by { |category, count| -count }
+                        %>
+                        <% sorted_categories.each_with_index do |(category, count), index| %>
+                          <% 
+                            # Use the same color palette as the JavaScript plot
+                            # Index is now based on sorted order (largest to smallest)
+                            category_color = category_colors[index % category_colors.length]
+                          %>
                           <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
-                            <span style="color: #374151;"><%= category %></span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <span style="color: #374151;"><%= category %></span>
+                            </div>
                             <span style="color: #6b7280; font-weight: 500;"><%= count %> cells</span>
                           </div>
                         <% end %>
                       <% elsif categories.is_a?(Array) %>
                         <% categories.each_with_index do |category, index| %>
+                          <% 
+                            # Use the same color palette as the JavaScript plot
+                            category_index = categories.index(category)
+                            category_color = category_colors[category_index % category_colors.length]
+                          %>
                           <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
-                            <span style="color: #374151;"><%= category %></span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <span style="color: #374151;"><%= category %></span>
+                            </div>
                             <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
                           </div>
                         <% end %>
@@ -122,9 +163,7 @@
                         onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor=''"
                         data-action="click->visualization#waterDropClicked"
                         data-metadata-name="<%= metadata.display_name %>">
-                  <svg style="width: 16px; height: 16px;" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
-                  </svg>
+                  <i class="fas fa-palette" style="font-size: 16px;"></i>
                 </button>
               </div>
             <% end %>
@@ -143,7 +182,7 @@
     </div>
     
     <!-- Menu Bar -->
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+    <div style="display: flex; align-items: center; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
       <div style="display: flex; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 8px;">
@@ -178,41 +217,63 @@
       </div>
 
       <!-- Right side: Actions -->
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <!-- Interaction Mode Dropdown -->
+      <div style="display: flex; align-items: center; gap: 8px; ml-1">
+        <!-- Interaction Mode Buttons -->
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label style="font-size: 14px; color: #374151; font-weight: 500;">Mode:</label>
-          <select id="interaction-mode" 
-                  style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px; background-color: white; cursor: pointer;"
-                  data-action="change->visualization#changeInteractionMode">
-            <option value="pan">Pan/Zoom</option>
-            <option value="lasso">Lasso</option>
-          </select>
+                    <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
+            <!-- Pan/Zoom Button -->
+            <button id="pan-mode-btn"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    title="Pan/Zoom Mode"
+                    data-action="click->visualization#setPanMode"
+                    data-mode="pan">
+              <i class="fas fa-arrows-alt" style="font-size: 14px;"></i>
+            </button>
+            
+            <!-- Pick Mode Button -->
+            <button id="pick-mode-btn"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    title="Pick Mode - Click points for details"
+                    data-action="click->visualization#setPickMode"
+                    data-mode="pick">
+              <i class="fas fa-mouse-pointer" style="font-size: 14px;"></i>
+            </button>
+            
+            <!-- Lasso Button -->
+            <button id="lasso-mode-btn"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s;"
+                    title="Lasso Selection Mode"
+                    data-action="click->visualization#setLassoMode"
+                    data-mode="lasso">
+              <%= render 'shared/lasso_icon' %>
+            </button>
+          </div>
         </div>
         
-        <!-- Export Button (Icon Only) -->
-        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
-                title="Export"
+        <!-- Save Button (Icon Only) -->
+        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
+                title="Save as SVG"
+                data-action="click->visualization#saveAsSVG"
                 onmouseover="this.style.backgroundColor='#e5e7eb'" 
                 onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-download"></i>
+          <i class="fas fa-save" style="font-size: 14px;"></i>
         </button>
         
         <!-- Fullscreen Button (Icon Only) -->
-        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+        <!--<button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
                 title="Fullscreen"
                 onmouseover="this.style.backgroundColor='#e5e7eb'" 
                 onmouseout="this.style.backgroundColor='#f3f4f6'">
           <i class="fas fa-expand"></i>
         </button>
-        
+        -->
         <!-- Refresh Button (Icon Only) -->
-        <button style="padding: 6px 12px; font-size: 14px; background-color: #2563eb; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
+        <!--<button style="padding: 6px 12px; font-size: 14px; background-color: #2563eb; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
                 title="Refresh"
                 onmouseover="this.style.backgroundColor='#1d4ed8'" 
                 onmouseout="this.style.backgroundColor='#2563eb'">
           <i class="fas fa-sync"></i>
-        </button>
+        </button>-->
       </div>
     </div>
     <div style="flex: 1; padding: 20px; display: flex; flex-direction: column;">
@@ -221,6 +282,11 @@
         <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
           <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
           <p style="margin: 0;">Select metadata from the dropdown to visualize</p>
+        </div>
+        
+        <!-- Tooltip for point hover -->
+        <div id="point-tooltip" style="position: absolute; background-color: rgba(0, 0, 0, 0.9); color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 10000; display: none; max-width: 200px; word-wrap: break-word; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2);">
+          <div id="tooltip-content"></div>
         </div>
       </div>
       

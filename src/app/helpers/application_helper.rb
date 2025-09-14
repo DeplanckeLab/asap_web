@@ -41,6 +41,25 @@ module ApplicationHelper
     
     "#{authors}. #{title}. #{journal}. #{year}."
   end
+
+  def category_colors
+    @category_colors ||= begin
+      colors_file = Rails.root.join('config', 'visualization_colors.yml')
+      if File.exist?(colors_file)
+        YAML.load_file(colors_file)['category_colors']
+      else
+        raise "Color configuration file not found at #{colors_file}"
+      end
+    end
+  end
+
+  def create_category_color_map(categories)
+    color_map = {}
+    categories.each_with_index do |category, index|
+      color_map[category] = category_colors[index % category_colors.length]
+    end
+    color_map
+  end
 end
 
 # Basic utility class for JSON parsing

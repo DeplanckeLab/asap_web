@@ -25,6 +25,34 @@ export default class extends Controller {
       defaultLoomFileValue: this.defaultLoomFileValue
     })
     
+    // Test color loading immediately
+    console.log('🎨 Controller connecting - testing global colors availability:')
+    console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+    console.log('🎨 typeof window.CATEGORY_COLORS:', typeof window.CATEGORY_COLORS)
+    console.log('🎨 window.CATEGORY_COLORS length:', window.CATEGORY_COLORS?.length)
+    console.log('🎨 window object keys:', Object.keys(window).filter(k => k.includes('CATEGORY')))
+    
+    if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
+      console.error('❌ CRITICAL: No global colors available! This will cause visualization errors.')
+      console.error('❌ Available window properties:', Object.keys(window).slice(0, 10))
+      
+      // Try again after a short delay in case colors are loaded asynchronously
+      setTimeout(() => {
+        console.log('🎨 Delayed check - window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+        if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
+          console.log('✅ Colors loaded after delay!')
+          // Clear cache to get fresh colors
+          this.clearCategoryColorsCache()
+        } else {
+          console.error('❌ Still no colors after delay')
+        }
+      }, 1000)
+    } else {
+      console.log('✅ Global colors are available!')
+      // Clear cache to get fresh colors
+      this.clearCategoryColorsCache()
+    }
+    
     // Set the default loom file selection
     if (this.hasDefaultLoomFileValue && this.hasLoomFileSelectTarget) {
       this.loomFileSelectTarget.value = this.defaultLoomFileValue
@@ -45,12 +73,16 @@ export default class extends Controller {
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
     // Initialize interaction mode state
-    this.interactionMode = 'pan' // 'pan', 'lasso', or 'zoom'
+    this.interactionMode = 'pan' // 'pan', 'lasso', 'pick', or 'zoom'
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.lassoGraphics = null
     this.lassoPoints = []
     this.isDrawingLasso = false
+    
+    // Initialize tooltip state
+    this.tooltip = null
+    this.tooltipContent = null
     
     // Zoom mode state
     this.isDrawingZoom = false
@@ -69,6 +101,7 @@ export default class extends Controller {
     // Initialize interaction system after DOM is ready
     setTimeout(() => {
       this.setupInteractionSystem()
+      this.initializeTooltip()
     }, 100)
     
     // No automatic loading - metadata will be loaded on-demand when needed
@@ -94,19 +127,90 @@ export default class extends Controller {
     alert('Stimulus controller is working!')
   }
 
+  initializeTooltip() {
+    console.log('🔧 Initializing tooltip system')
+    this.tooltip = document.getElementById('point-tooltip')
+    this.tooltipContent = document.getElementById('tooltip-content')
+    
+    if (!this.tooltip || !this.tooltipContent) {
+      console.warn('Tooltip elements not found, creating dynamically:', {
+        tooltip: !!this.tooltip,
+        tooltipContent: !!this.tooltipContent,
+        tooltipElement: this.tooltip,
+        contentElement: this.tooltipContent
+      })
+      
+      // Create tooltip dynamically
+      this.createTooltipDynamically()
+      return
+    }
+    
+    console.log('Tooltip system initialized successfully:', {
+      tooltip: this.tooltip,
+      tooltipContent: this.tooltipContent,
+      tooltipTagName: this.tooltip.tagName,
+      tooltipId: this.tooltip.id
+    })
+  }
+
+  createTooltipDynamically() {
+    console.log('🔧 Creating tooltip dynamically')
+    
+    // Remove existing tooltip if it exists
+    const existingTooltip = document.getElementById('point-tooltip')
+    if (existingTooltip) {
+      existingTooltip.remove()
+    }
+    
+    // Create tooltip element
+    this.tooltip = document.createElement('div')
+    this.tooltip.id = 'point-tooltip'
+    
+    // Set styles individually for better compatibility
+    this.tooltip.style.position = 'fixed'
+    this.tooltip.style.backgroundColor = 'red'
+    this.tooltip.style.color = 'white'
+    this.tooltip.style.padding = '12px 16px'
+    this.tooltip.style.borderRadius = '6px'
+    this.tooltip.style.fontSize = '16px'
+    this.tooltip.style.pointerEvents = 'none'
+    this.tooltip.style.zIndex = '999999'
+    this.tooltip.style.display = 'none'
+    this.tooltip.style.maxWidth = '200px'
+    this.tooltip.style.wordWrap = 'break-word'
+    this.tooltip.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)'
+    this.tooltip.style.border = '3px solid yellow'
+    this.tooltip.style.left = '50px'
+    this.tooltip.style.top = '50px'
+    
+    // Create content element
+    this.tooltipContent = document.createElement('div')
+    this.tooltipContent.id = 'tooltip-content'
+    this.tooltip.appendChild(this.tooltipContent)
+    
+    // Add to body
+    document.body.appendChild(this.tooltip)
+    
+    console.log('✅ Tooltip created dynamically:', {
+      tooltip: this.tooltip,
+      tooltipContent: this.tooltipContent,
+      parentNode: this.tooltip.parentNode
+    })
+  }
+
   setupInteractionSystem() {
     console.log('🔧 Setting up interaction system')
     
-    // Set up the mode dropdown change handler
-    const modeDropdown = document.getElementById('interaction-mode')
-    if (modeDropdown) {
-      console.log('✅ Found interaction mode dropdown')
-      modeDropdown.addEventListener('change', (event) => {
-        console.log('🔄 Mode dropdown changed to:', event.target.value)
-        this.changeInteractionMode(event)
-      })
+    // Set up interaction mode buttons
+    const panBtn = document.getElementById('pan-mode-btn')
+    const pickBtn = document.getElementById('pick-mode-btn')
+    const lassoBtn = document.getElementById('lasso-mode-btn')
+    if (panBtn && pickBtn && lassoBtn) {
+      console.log('✅ Found interaction mode buttons')
+      // Set initial state (pan mode is default)
+      this.updateButtonStates('pan')
     } else {
-      console.log('❌ Interaction mode dropdown not found')
+      console.log('❌ Interaction mode buttons not found')
     }
     
     // Set up canvas event listeners when PIXI app becomes available
@@ -448,12 +552,12 @@ export default class extends Controller {
     
     // Render points individually to support pan/zoom optimization
     for (let i = 0; i < coordinates.length; i++) {
-      const [x, y] = coordinates[i]
-      
-      // Normalize coordinates to screen space
-      const screenX = this.normalizeX(x, bounds)
-      const screenY = this.normalizeY(y, bounds)
-      
+        const [x, y] = coordinates[i]
+        
+        // Normalize coordinates to screen space
+        const screenX = this.normalizeX(x, bounds)
+        const screenY = this.normalizeY(y, bounds)
+        
       // Create individual point graphics
       const point = new PIXI.Graphics()
       point.beginFill(pointColor)
@@ -469,15 +573,33 @@ export default class extends Controller {
       // Store original color for reset functionality
       this.storeOriginalPointColor(i, pointColor)
       
+      // Add hover functionality
+      point.interactive = true
+      point.buttonMode = false
+      point.on('pointerover', () => this.showTooltip(i, point))
+      point.on('pointerout', () => this.hideTooltip())
+      point.on('pointerdown', (event) => this.onPointClick(i, point, event))
+      
+      // Debug: Log point creation
+      if (i < 5) { // Only log first 5 points to avoid spam
+        console.log(`Created point ${i}:`, { 
+          cellId: point.cellId, 
+          isPoint: point.isPoint, 
+          interactive: point.interactive,
+          x: point.x, 
+          y: point.y 
+        })
+      }
+      
       this.scatterContainer.addChild(point)
     }
     
     console.log(`Rendered ${coordinates.length} individual points`)
-    
-    // Update point count display
-    const pointCountElement = document.getElementById('point-count')
-    if (pointCountElement) {
-      pointCountElement.textContent = coordinates.length.toLocaleString()
+        
+        // Update point count display
+        const pointCountElement = document.getElementById('point-count')
+        if (pointCountElement) {
+          pointCountElement.textContent = coordinates.length.toLocaleString()
     }
     
     // Clear any stored original positions since points were recreated
@@ -655,8 +777,12 @@ export default class extends Controller {
       const value = values[pointIndex]
       
       if (data_type === 'DISCRETE') {
-        const colorMap = this.createDiscreteColorMap(compression_info.categories)
-        baseColor = colorMap[value] || 0x3b82f6
+        // Cache the color map to avoid recalculating for every point
+        if (!this._cachedColorMap) {
+          const sortedCategories = this.getSortedCategories(values, [...compression_info.categories])
+          this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
+        }
+        baseColor = this._cachedColorMap[value] || 0x3b82f6
       } else if (data_type === 'CONTINUOUS') {
         const minVal = compression_info.min_val
         const maxVal = compression_info.max_val
@@ -740,6 +866,13 @@ export default class extends Controller {
       
       // Store original color for reset functionality
       this.storeOriginalPointColor(i, pointColor)
+      
+      // Add hover functionality
+      point.interactive = true
+      point.buttonMode = false
+      point.on('pointerover', () => this.showTooltip(i, point))
+      point.on('pointerout', () => this.hideTooltip())
+      point.on('pointerdown', (event) => this.onPointClick(i, point, event))
       
       animatedContainer.addChild(point)
       points.push({ sprite: point, startX, startY, endX, endY })
@@ -1199,6 +1332,12 @@ export default class extends Controller {
       compression_info: vectorData.compression_info
     }
     
+    // Also store the metadata ID for color mapping
+    this.currentMetadataId = metadataId
+
+    // Clear the cached color map since we have new metadata
+    this.clearColorMapCache()
+    
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
   }
@@ -1524,6 +1663,12 @@ export default class extends Controller {
           // Store original color for reset functionality
           this.storeOriginalPointColor(i, color)
           
+          // Add hover functionality
+          point.interactive = true
+          point.buttonMode = false
+          point.on('pointerover', () => this.showTooltip(i, point))
+          point.on('pointerout', () => this.hideTooltip())
+          
           this.scatterContainer.addChild(point)
         })
         
@@ -1554,6 +1699,12 @@ export default class extends Controller {
           
           // Store original color for reset functionality
           this.storeOriginalPointColor(i, color)
+          
+          // Add hover functionality
+          point.interactive = true
+          point.buttonMode = false
+          point.on('pointerover', () => this.showTooltip(i, point))
+          point.on('pointerout', () => this.hideTooltip())
           
           this.scatterContainer.addChild(point)
         }
@@ -1602,53 +1753,6 @@ export default class extends Controller {
     this.clearStoredOriginalPositions()
   }
 
-  // Color points for discrete metadata
-  colorPointsDiscrete(values, compressionInfo) {
-    console.log('Coloring points for discrete metadata:', {
-      categories: compressionInfo.categories,
-      uniqueCount: [...new Set(values)].length
-    })
-    
-    const { categories } = compressionInfo
-    const uniqueValues = [...new Set(values)]
-    
-    // Create color map for categories
-    const colorMap = this.createDiscreteColorMap(categories)
-    
-    // Group points by category for efficient rendering
-    const pointsByCategory = {}
-    uniqueValues.forEach(value => {
-      pointsByCategory[value] = []
-    })
-    
-    // Group coordinates by their category values
-    this.currentCoordinates.forEach((coord, index) => {
-      const value = values[index]
-      pointsByCategory[value].push(coord)
-    })
-    
-    // Render points for each category
-    Object.entries(pointsByCategory).forEach(([category, coords]) => {
-      if (coords.length === 0) return
-      
-      const color = colorMap[category]
-      const graphics = new this.PIXI.Graphics()
-      
-      graphics.beginFill(color)
-      
-      coords.forEach(([x, y]) => {
-        const screenX = this.normalizeX(x, this.currentBounds)
-        const screenY = this.normalizeY(y, this.currentBounds)
-        graphics.drawCircle(screenX, screenY, 1)
-      })
-      
-      graphics.endFill()
-      this.scatterContainer.addChild(graphics)
-    })
-    
-    // Update point count display
-    this.updatePointCountDisplay(this.currentCoordinates.length, uniqueValues.length)
-  }
 
   // Color points for continuous metadata
   colorPointsContinuous(values, compressionInfo) {
@@ -1687,35 +1791,93 @@ export default class extends Controller {
   }
 
   // Create color map for discrete categories
-  createDiscreteColorMap(categories) {
-    const colors = [
-      0x1f77b4, // blue
-      0xff7f0e, // orange
-      0x2ca02c, // green
-      0x9467bd, // purple
-      0x8c564b, // brown
-      0xe377c2, // pink
-      0x7f7f7f, // gray
-      0xbcbd22, // olive
-      0x17becf, // cyan
-      0x4ecdc4, // teal
-      0x45b7d1, // light blue
-      0x96ceb4, // mint
-      0xfeca57, // yellow
-      0xff9ff3, // magenta
-      0x9b59b6, // violet
-      0x3498db, // sky blue
-      0x2ecc71, // emerald
-      0xf39c12, // carrot
-    ]
+  // Get categories sorted by frequency (largest to smallest) to match HTML legend ordering
+  getSortedCategories(values, categories) {
+    // Calculate category frequencies
+    const categoryFrequencies = {}
+    values.forEach(value => {
+      categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
+    })
+    
+    // Sort categories by frequency (largest to smallest)
+    const sorted = categories.sort((a, b) => {
+      const freqA = categoryFrequencies[a] || 0
+      const freqB = categoryFrequencies[b] || 0
+      return freqB - freqA // Descending order (largest first)
+    })
+    return sorted
+  }
+
+  createDiscreteColorMap(categories, metadataId) {
+    // Use the centralized color palette from the server
+    const colors = this.getCategoryColors()
     
     const colorMap = {}
     categories.forEach((category, index) => {
+      // Check if we have a stored color for this category in this metadata
+      const storageKey = `category_color_${metadataId}_${category}`
+      const storedColor = localStorage.getItem(storageKey)
+      
+      if (storedColor) {
+        // Convert hex string to number for PIXI.js
+        colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
+        console.log(`🎨 Plot using stored color for "${category}" in metadata ${metadataId}: ${storedColor}`)
+      } else {
+        // Use default color
       colorMap[category] = colors[index % colors.length]
+        console.log(`🎨 Plot using default color for "${category}" (index ${index}) in metadata ${metadataId}: ${colors[index % colors.length].toString(16)}`)
+      }
     })
     
-    console.log('Created discrete color map:', colorMap)
     return colorMap
+  }
+
+  getCategoryColors() {
+    // Cache the colors to prevent repeated conversion
+    if (this._cachedCategoryColors) {
+      return this._cachedCategoryColors
+    }
+    
+    console.log('🎨 getCategoryColors called - converting colors for first time')
+    console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+    
+    // Use colors from the global color palette loaded in layout
+    if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
+      console.log('🎨 Converting colors to JavaScript hex numbers')
+      // Convert CSS hex colors (#1f77b4) to JavaScript hex numbers (0x1f77b4)
+      const jsColors = window.CATEGORY_COLORS.map(cssColor => {
+        // Remove # and convert to hex number
+        return parseInt(cssColor.replace('#', ''), 16)
+      })
+      console.log('🎨 Converted colors:', jsColors)
+      
+      // Cache the converted colors
+      this._cachedCategoryColors = jsColors
+      return jsColors
+    }
+    
+    // Temporary fallback to prevent infinite loop - will be removed once colors are properly loaded
+    console.warn('⚠️ Using temporary fallback colors to prevent infinite loop')
+    const fallbackColors = [
+      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b, 
+      0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4
+    ]
+    
+    // Cache the fallback colors too
+    this._cachedCategoryColors = fallbackColors
+    return fallbackColors
+  }
+
+  // Clear the cached colors (call this when colors are reloaded)
+  clearCategoryColorsCache() {
+    this._cachedCategoryColors = null
+    console.log('🎨 Category colors cache cleared')
+  }
+
+  // Clear the cached color map (call this when metadata changes)
+  clearColorMapCache() {
+    this._cachedColorMap = null
+    console.log('🎨 Color map cache cleared')
   }
 
   // Convert normalized value (0-1) to color
@@ -1756,14 +1918,18 @@ export default class extends Controller {
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
     if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
-      console.log('Cannot clear coloring - missing PIXI app or coordinates')
+      //console.log('Cannot clear coloring - missing PIXI app or coordinates')
       return
     }
     
-    console.log('Clearing metadata coloring, returning to default blue points')
+    //console.log('Clearing metadata coloring, returning to default blue points')
     
     // Clear current metadata vector
     this.currentMetadataVector = null
+    this.currentMetadataId = null
+    
+    // Clear the cached color map since we're clearing metadata
+    this.clearColorMapCache()
     
     // Clear existing colored points and re-render with default coloring
     this.forceReRenderPoints()
@@ -1772,7 +1938,7 @@ export default class extends Controller {
   }
 
   toggleDropdown(event) {
-     console.log('toggleDropdown called')
+     //console.log('toggleDropdown called')
     event.stopPropagation()
     
     const button = event.currentTarget
@@ -1792,7 +1958,7 @@ export default class extends Controller {
   editMetadata(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('Edit metadata:', metadataId)
+    //console.log('Edit metadata:', metadataId)
     // TODO: Implement edit functionality
     alert(`Edit metadata ${metadataId}`)
     this.closeAllDropdowns()
@@ -1801,7 +1967,7 @@ export default class extends Controller {
   exportMetadata(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('Export metadata:', metadataId)
+    //console.log('Export metadata:', metadataId)
     // TODO: Implement export functionality
     alert(`Export metadata ${metadataId}`)
     this.closeAllDropdowns()
@@ -1810,7 +1976,7 @@ export default class extends Controller {
   duplicateMetadata(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('Duplicate metadata:', metadataId)
+    //console.log('Duplicate metadata:', metadataId)
     // TODO: Implement duplicate functionality
     alert(`Duplicate metadata ${metadataId}`)
     this.closeAllDropdowns()
@@ -1819,7 +1985,7 @@ export default class extends Controller {
   viewCategories(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('View categories for metadata:', metadataId)
+    //console.log('View categories for metadata:', metadataId)
     // TODO: Implement view categories functionality
     alert(`View categories for metadata ${metadataId}`)
     this.closeAllDropdowns()
@@ -1828,7 +1994,7 @@ export default class extends Controller {
   viewStatistics(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('View statistics for metadata:', metadataId)
+    //console.log('View statistics for metadata:', metadataId)
     // TODO: Implement view statistics functionality
     alert(`View statistics for metadata ${metadataId}`)
     this.closeAllDropdowns()
@@ -1837,7 +2003,7 @@ export default class extends Controller {
   deleteMetadata(event) {
     event.preventDefault()
     const metadataId = event.currentTarget.dataset.metadataId
-    console.log('Delete metadata:', metadataId)
+    //console.log('Delete metadata:', metadataId)
     
     if (confirm(`Are you sure you want to delete metadata ${metadataId}?`)) {
       // TODO: Implement delete functionality
@@ -1875,11 +2041,11 @@ export default class extends Controller {
       const metadataItem = headerElement.closest('[data-metadata-item]')
       if (metadataItem) {
         const metadataId = metadataItem.dataset.metadataItem
-        console.log(`Loading metadata vector for ${metadataId} on category expansion`)
+        //console.log(`Loading metadata vector for ${metadataId} on category expansion`)
         
         // Load silently in background (no spinner for category expansion)
         this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-          console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+          //console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
         })
       }
     } else {
@@ -1908,7 +2074,7 @@ export default class extends Controller {
     const continuousPanel = divider.nextElementSibling
     const container = discretePanel?.parentElement
     
-    console.log('Elements found:', { divider, discretePanel, continuousPanel, container })
+    //console.log('Elements found:', { divider, discretePanel, continuousPanel, container })
     
     if (!discretePanel || !continuousPanel || !container) {
       console.error('Required elements for draggable divider not found', { discretePanel, continuousPanel, container })
@@ -1954,7 +2120,7 @@ export default class extends Controller {
       const heightPercentage = (constrainedHeight / containerHeight) * 100
       discretePanel.style.height = heightPercentage + '%'
       
-      console.log('Dragging:', { deltaY, newHeight, containerHeight, constrainedHeight, heightPercentage })
+      //console.log('Dragging:', { deltaY, newHeight, containerHeight, constrainedHeight, heightPercentage })
     }
     
     const stopDrag = () => {
@@ -1980,9 +2146,9 @@ export default class extends Controller {
   // Handle water drop button clicks
   waterDropClicked(event) {
     console.log('=== WATER DROP CLICKED ===')
-    console.log('Event:', event)
-    console.log('Event target:', event.target)
-    console.log('Event currentTarget:', event.currentTarget)
+    console.log('🎨 Event:', event)
+    console.log('🎨 Event target:', event.target)
+    console.log('🎨 Event currentTarget:', event.currentTarget)
     
     event.preventDefault()
     event.stopPropagation()
@@ -1992,103 +2158,115 @@ export default class extends Controller {
     const metadataId = button.dataset.metadataId
     const isCurrentlyActive = button.dataset.active === 'true'
     
-    console.log('Button element:', button)
-    console.log('Metadata name:', metadataName)
-    console.log('Metadata ID:', metadataId)
-    console.log('Is currently active:', isCurrentlyActive)
-    console.log('Button dataset:', button.dataset)
+    console.log('🎨 Button element:', button)
+    console.log('🎨 Metadata name:', metadataName)
+    console.log('🎨 Metadata ID:', metadataId)
+    console.log('🎨 Is currently active:', isCurrentlyActive)
+    
+    //console.log('Button element:', button)
+    //console.log('Metadata name:', metadataName)
+    //console.log('Metadata ID:', metadataId)
+    //console.log('Is currently active:', isCurrentlyActive)
+    //console.log('Button dataset:', button.dataset)
     
     if (isCurrentlyActive) {
       // Button is already active - deselect it
-      console.log('Button is already active - deselecting...')
+      console.log('🎨 Button is already active - deselecting...')
       this.resetAllWaterDropButtons()
       this.removeAllCategoryColors()
       this.clearMetadataColoring()
-      console.log('=== DESELECTION COMPLETE ===')
+      console.log('🎨 === DESELECTION COMPLETE ===')
       return
     }
     
     // Button is not active - select it
     // 1. Reset all water drop buttons to grey (cancel previous associations)
-    console.log('Step 1: Resetting all water drop buttons...')
+    console.log('🎨 Step 1: Resetting all water drop buttons...')
     this.resetAllWaterDropButtons()
     
+    // 1.5. Hide all reset buttons (since we're switching to a different metadata)
+    console.log('🎨 Step 1.5: Hiding all reset buttons...')
+    this.hideAllResetButtons()
+    
     // 2. Remove all existing colored disks from all metadata
-    console.log('Step 2: Removing all existing category colors...')
+    console.log('🎨 Step 2: Removing all existing category colors...')
     this.removeAllCategoryColors()
     
     // 3. Set this button to blue (active)
-    console.log('Step 3: Setting this button as active...')
+    console.log('🎨 Step 3: Setting this button as active...')
     this.setWaterDropButtonActive(button)
     
     // 4. Find the metadata item container and add colored categories
-    console.log('Step 4: Finding metadata container...')
+    console.log('🎨 Step 4: Finding metadata container...')
     const metadataContainer = button.closest('[data-metadata-item]')
-    console.log('Metadata container found:', metadataContainer)
+    console.log('🎨 Metadata container found:', metadataContainer)
     
     if (metadataContainer) {
-      console.log('Step 5: Adding category colors...')
+      console.log('🎨 Step 5: Adding category colors...')
       this.addCategoryColors(metadataContainer, metadataId)
       
       // 6. Load and visualize metadata vector if available
-      console.log('Step 6: Loading metadata vector for visualization...')
+      console.log('🎨 Step 6: Loading metadata vector for visualization...')
       this.loadAndVisualizeMetadataVector(metadataId)
     } else {
-      console.error('ERROR: Could not find metadata container!')
+      console.error('🎨 ERROR: Could not find metadata container!')
     }
     
-    console.log('=== WATER DROP CLICK COMPLETE ===')
+    console.log('🎨 === WATER DROP CLICK COMPLETE ===')
   }
   
   // Reset all water drop buttons to grey
   resetAllWaterDropButtons() {
-    console.log('resetAllWaterDropButtons: Starting...')
+    //console.log('resetAllWaterDropButtons: Starting...')
     const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"]')
-    console.log('resetAllWaterDropButtons: Found', allButtons.length, 'buttons')
+    //console.log('resetAllWaterDropButtons: Found', allButtons.length, 'buttons')
     allButtons.forEach((button, index) => {
-      console.log(`resetAllWaterDropButtons: Resetting button ${index}:`, button)
+      //console.log(`resetAllWaterDropButtons: Resetting button ${index}:`, button)
       button.style.color = '#9ca3af'
       button.style.backgroundColor = ''
       button.dataset.active = 'false'
     })
-    console.log('resetAllWaterDropButtons: Complete')
+    //console.log('resetAllWaterDropButtons: Complete')
   }
   
   // Set a water drop button to active (blue)
   setWaterDropButtonActive(button) {
-    console.log('setWaterDropButtonActive: Setting button as active:', button)
+    //console.log('setWaterDropButtonActive: Setting button as active:', button)
     button.style.color = '#3b82f6'
     button.style.backgroundColor = '#dbeafe'
     button.dataset.active = 'true'
-    console.log('setWaterDropButtonActive: Button now has color:', button.style.color)
+    //console.log('setWaterDropButtonActive: Button now has color:', button.style.color)
   }
   
   // Remove all category colors from all metadata
   removeAllCategoryColors() {
-    console.log('removeAllCategoryColors: Starting...')
+    //console.log('removeAllCategoryColors: Starting...')
     const allColorDisks = document.querySelectorAll('.category-color-disk')
-    console.log('removeAllCategoryColors: Found', allColorDisks.length, 'existing color disks')
+    //console.log('removeAllCategoryColors: Found', allColorDisks.length, 'existing color disks')
     allColorDisks.forEach((disk, index) => {
-      console.log(`removeAllCategoryColors: Removing disk ${index}:`, disk)
+      //console.log(`removeAllCategoryColors: Removing disk ${index}:`, disk)
       disk.remove()
     })
-    console.log('removeAllCategoryColors: Complete')
+    //console.log('removeAllCategoryColors: Complete')
   }
   
   // Add colored disks to categories
   addCategoryColors(metadataContainer, metadataId) {
-    console.log('Adding category colors for metadata:', metadataId)
+    console.log('🎨 addCategoryColors called for metadata:', metadataId)
     
     // Remove existing category colors
     const existingColors = metadataContainer.querySelectorAll('.category-color-disk')
+    console.log('🎨 Removing existing colors:', existingColors.length)
     existingColors.forEach(color => color.remove())
     
     // First, make sure the categories are expanded
     const chevron = metadataContainer.querySelector('svg')
     const categoriesDiv = metadataContainer.querySelector('[style*="padding-left: 32px"]')
+    console.log('🎨 Chevron found:', !!chevron)
+    console.log('🎨 Categories div found:', !!categoriesDiv)
     
     if (chevron && chevron.style.transform !== 'rotate(90deg)') {
-      console.log('Expanding categories first...')
+      console.log('🎨 Expanding categories first...')
       // Directly expand the categories
       chevron.style.transform = 'rotate(90deg)'
       if (categoriesDiv) {
@@ -2097,27 +2275,32 @@ export default class extends Controller {
     }
     
     // Wait a bit for the categories to expand, then add colors
+    console.log('🎨 Setting timeout for color addition...')
     setTimeout(() => {
+      console.log('🎨 Timeout executed - adding colors...')
       // Find categories container
       const categoriesContainer = metadataContainer.querySelector('[style*="padding-left: 32px"]')
-      console.log('Categories container found:', categoriesContainer)
+      console.log('🎨 Categories container found:', !!categoriesContainer)
       
       if (!categoriesContainer || categoriesContainer.style.display === 'none') {
-        console.log('Categories container not found or hidden')
+        console.log('🎨 Categories container not found or hidden')
         return
       }
       
       // Get categories data
+      console.log('🎨 Getting categories for metadata...')
       const categories = this.getCategoriesForMetadata(metadataId)
-      console.log('Categories data:', categories)
+      console.log('🎨 Categories data:', categories)
       
       if (!categories || categories.length === 0) {
-        console.log('No categories found')
+        console.log('🎨 No categories found')
         return
       }
     
     // Add colored disks to each category
     const categoryItems = categoriesContainer.querySelectorAll('div[style*="display: flex; justify-content: space-between"]')
+    console.log('🎨 Found category items:', categoryItems.length)
+    
     categoryItems.forEach((item, index) => {
       // Set up the container for absolute positioning
       item.style.position = 'relative'
@@ -2125,6 +2308,8 @@ export default class extends Controller {
       
       const categoryName = item.querySelector('span').textContent.trim()
       const color = this.getCategoryColor(categoryName, index, metadataId)
+      
+      console.log(`🎨 Adding color disk for "${categoryName}" (index ${index}) with color ${color}`)
       
       // Create color disk
       const colorDisk = document.createElement('div')
@@ -2163,6 +2348,9 @@ export default class extends Controller {
       item.insertBefore(colorDisk, item.firstChild)
     })
     
+    // Add reset button if there are customized colors
+    this.addResetColorsButton(metadataContainer, metadataId)
+    
     }, 200) // Wait 200ms for categories to expand
   }
   
@@ -2196,8 +2384,25 @@ export default class extends Controller {
     return categories
   }
   
-  // Get color for a category (with default colors)
+  // Get color for a category (using the same color palette as the plot)
   getCategoryColor(categoryName, index, metadataId) {
+    // Always check if we have a stored color for this category in this specific metadata
+    const storageKey = `category_color_${metadataId}_${categoryName}`
+    const storedColor = localStorage.getItem(storageKey)
+    
+    if (storedColor) {
+      console.log(`🎨 Using stored color for "${categoryName}" in metadata ${metadataId}: ${storedColor}`)
+      return storedColor
+    }
+    
+    // Use the same color palette as the plot
+    if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
+      const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
+      console.log(`🎨 Using default color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${color}`)
+      return color
+    }
+    
+    // Fallback to default colors if global colors are not available
     const defaultColors = [
       '#3b82f6', // blue
       '#ef4444', // red
@@ -2209,10 +2414,198 @@ export default class extends Controller {
       '#f97316'  // orange
     ]
     
-    // Check if we have a stored color for this category in this specific metadata
-    const storageKey = `category_color_${metadataId}_${categoryName}`
-    const storedColor = localStorage.getItem(storageKey)
-    return storedColor || defaultColors[index % defaultColors.length]
+    const fallbackColor = defaultColors[index % defaultColors.length]
+    console.log(`🎨 Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
+    return fallbackColor
+  }
+  
+  // Check if a metadata has any customized colors
+  hasCustomizedColors(metadataId) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith(`category_color_${metadataId}_`)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // Clear all stored colors for a metadata
+  clearStoredColors(metadataId) {
+    console.log(`🧹 Clearing all stored colors for metadata ${metadataId}`)
+    const keysToRemove = []
+    
+    // Find all localStorage keys for this metadata
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith(`category_color_${metadataId}_`)) {
+        keysToRemove.push(key)
+      }
+    }
+    
+    // Remove the keys
+    keysToRemove.forEach(key => {
+      const categoryName = key.replace(`category_color_${metadataId}_`, '')
+      console.log(`🧹 Removing stored color for "${categoryName}"`)
+      localStorage.removeItem(key)
+    })
+    
+    console.log(`🧹 Cleared ${keysToRemove.length} stored colors`)
+  }
+
+  // Add reset colors button for a metadata
+  addResetColorsButton(metadataContainer, metadataId) {
+    // Check if there are customized colors
+    if (!this.hasCustomizedColors(metadataId)) {
+      return // No customized colors, don't show reset button
+    }
+
+    // Check if this metadata is currently active (being used for coloring)
+    const waterDropButton = metadataContainer.querySelector('[data-action*="waterDropClicked"]')
+    if (!waterDropButton || waterDropButton.dataset.active !== 'true') {
+      return // Metadata is not active, don't show reset button
+    }
+
+    // Check if reset button already exists
+    const existingResetButton = metadataContainer.querySelector('.reset-colors-btn')
+    if (existingResetButton) {
+      return // Reset button already exists
+    }
+
+    // Create reset button
+    const resetButton = document.createElement('button')
+    resetButton.className = 'reset-colors-btn'
+    resetButton.innerHTML = '<i class="fas fa-undo"></i>' // Font Awesome undo icon
+    resetButton.title = 'Reset to default colors'
+    resetButton.style.cssText = `
+      padding: 4px;
+      color: #ef4444;
+      background: #fef2f2;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-right: 4px;
+      font-size: 16px;
+      font-weight: normal;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: top;
+    `
+
+    // Add hover effects
+    resetButton.addEventListener('mouseenter', () => {
+      if (resetButton.dataset.active !== 'true') {
+        resetButton.style.color = '#dc2626'
+        resetButton.style.backgroundColor = '#fee2e2'
+      }
+    })
+    
+    resetButton.addEventListener('mouseleave', () => {
+      if (resetButton.dataset.active !== 'true') {
+        resetButton.style.color = '#ef4444'
+        resetButton.style.backgroundColor = '#fef2f2'
+      }
+    })
+
+    // Add click handler
+    resetButton.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.resetColorsForMetadata(metadataId)
+    })
+
+    // Insert before the water drop button
+    waterDropButton.parentNode.insertBefore(resetButton, waterDropButton)
+    
+    // Ensure the reset button has the exact same height as the palette button
+    const paletteButtonHeight = waterDropButton.offsetHeight
+    resetButton.style.height = paletteButtonHeight + 'px'
+    resetButton.style.minHeight = paletteButtonHeight + 'px'
+    
+    console.log('🎨 Added reset colors button for metadata', metadataId, 'with height:', paletteButtonHeight + 'px')
+  }
+
+  // Reset colors for a specific metadata
+  resetColorsForMetadata(metadataId) {
+    console.log('🔄 Resetting colors for metadata', metadataId)
+    
+    // Clear stored colors
+    this.clearStoredColors(metadataId)
+    
+    // Clear cached color map
+    this._cachedColorMap = null
+    
+    // Re-render the plot if this is the current metadata
+    if (this.currentMetadataId === metadataId && this.currentMetadataVector) {
+      console.log('🔄 Re-rendering plot with default colors')
+      this.renderPointsWithCurrentColoring()
+    }
+    
+    // Update the legend colors
+    this.updateLegendColors(metadataId)
+    
+    // Remove the reset button since there are no more customized colors
+    this.removeResetColorsButton(metadataId)
+  }
+
+  // Get default color for a category (ignoring localStorage)
+  getDefaultCategoryColor(categoryName, index) {
+    // Use the same color palette as the plot
+    if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
+      const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
+      return color
+    }
+    
+    // Fallback to default colors if global colors are not available
+    const defaultColors = [
+      '#3b82f6', // blue
+      '#ef4444', // red
+      '#10b981', // green
+      '#f59e0b', // yellow
+      '#8b5cf6', // purple
+      '#06b6d4', // cyan
+      '#84cc16', // lime
+      '#f97316'  // orange
+    ]
+    
+    return defaultColors[index % defaultColors.length]
+  }
+
+  // Update legend colors to default
+  updateLegendColors(metadataId) {
+    const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataContainer) return
+
+    const colorDisks = metadataContainer.querySelectorAll('.category-color-disk')
+    colorDisks.forEach((disk, index) => {
+      const categoryName = disk.dataset.categoryName
+      const defaultColor = this.getDefaultCategoryColor(categoryName, index)
+      disk.style.backgroundColor = defaultColor
+      console.log(`🔄 Updated legend color for "${categoryName}" to default: ${defaultColor}`)
+    })
+  }
+
+  // Remove reset button
+  removeResetColorsButton(metadataId) {
+    const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataContainer) return
+
+    const resetButton = metadataContainer.querySelector('.reset-colors-btn')
+    if (resetButton) {
+      resetButton.remove()
+      console.log('🎨 Removed reset colors button for metadata', metadataId)
+    }
+  }
+
+  // Hide all reset buttons (when switching to a different metadata)
+  hideAllResetButtons() {
+    const allResetButtons = document.querySelectorAll('.reset-colors-btn')
+    allResetButtons.forEach(button => {
+      button.remove()
+    })
+    console.log('🎨 Hidden all reset buttons')
   }
   
   // Show color picker form
@@ -2292,6 +2685,21 @@ export default class extends Controller {
       const storageKey = `category_color_${metadataId}_${categoryName}`
       localStorage.setItem(storageKey, newColor)
       
+      // Clear the cached color map so plot will use updated colors
+      this._cachedColorMap = null
+      
+      // Re-render the plot with the new color
+      if (this.currentMetadataVector) {
+        console.log('🎨 Color changed, re-rendering plot with updated colors')
+        this.renderPointsWithCurrentColoring()
+      }
+      
+      // Add reset button if it doesn't exist (first customization)
+      const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+      if (metadataContainer) {
+        this.addResetColorsButton(metadataContainer, metadataId)
+      }
+      
       // Close the picker
       picker.remove()
     })
@@ -2308,10 +2716,29 @@ export default class extends Controller {
   }
 
   // Interaction Mode Methods
-  changeInteractionMode(event) {
-    const mode = event.target.value
-    console.log('Changing interaction mode to:', mode)
-    
+  // Set Pan/Zoom mode
+  setPanMode(event) {
+    //console.log('Setting interaction mode to: pan')
+    this.setInteractionMode('pan')
+    this.updateButtonStates('pan')
+  }
+
+  // Set Lasso mode
+  setLassoMode(event) {
+    //console.log('Setting interaction mode to: lasso')
+    this.setInteractionMode('lasso')
+    this.updateButtonStates('lasso')
+  }
+
+  // Set Pick mode
+  setPickMode(event) {
+    //console.log('Setting interaction mode to: pick')
+    this.setInteractionMode('pick')
+    this.updateButtonStates('pick')
+  }
+
+  // Set interaction mode (internal method)
+  setInteractionMode(mode) {
     this.interactionMode = mode
     
     // Clear any existing interaction state
@@ -2325,6 +2752,8 @@ export default class extends Controller {
         canvas.style.cursor = 'crosshair'
       } else if (mode === 'pan') {
         canvas.style.cursor = 'grab'
+      } else if (mode === 'pick') {
+        canvas.style.cursor = 'pointer'
       }
     }
     
@@ -2333,14 +2762,43 @@ export default class extends Controller {
     this.addInteractionEventListeners()
   }
 
+  // Update button visual states
+  updateButtonStates(activeMode) {
+    const panBtn = document.getElementById('pan-mode-btn')
+    const pickBtn = document.getElementById('pick-mode-btn')
+    const lassoBtn = document.getElementById('lasso-mode-btn')
+    
+    if (panBtn && pickBtn && lassoBtn) {
+      // Reset all buttons to inactive state
+      panBtn.style.backgroundColor = '#f3f4f6'
+      panBtn.style.color = '#374151'
+      pickBtn.style.backgroundColor = '#f3f4f6'
+      pickBtn.style.color = '#374151'
+      lassoBtn.style.backgroundColor = '#f3f4f6'
+      lassoBtn.style.color = '#374151'
+      
+      // Set active button
+      if (activeMode === 'pan') {
+        panBtn.style.backgroundColor = '#3b82f6'
+        panBtn.style.color = 'white'
+      } else if (activeMode === 'pick') {
+        pickBtn.style.backgroundColor = '#3b82f6'
+        pickBtn.style.color = 'white'
+      } else if (activeMode === 'lasso') {
+        lassoBtn.style.backgroundColor = '#3b82f6'
+        lassoBtn.style.color = 'white'
+      }
+    }
+  }
+
   addInteractionEventListeners() {
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) {
-      console.log('❌ No canvas available for interaction listeners')
+      //console.log('No canvas available for interaction listeners')
       return
     }
     
-    console.log('✅ Adding interaction event listeners to canvas')
+    //console.log('Adding interaction event listeners to canvas')
     
     this.boundMouseDown = this.onInteractionMouseDown.bind(this)
     this.boundMouseMove = this.onInteractionMouseMove.bind(this)
@@ -2354,21 +2812,24 @@ export default class extends Controller {
     canvas.addEventListener('wheel', this.boundWheel)
     canvas.addEventListener('dblclick', this.boundDoubleClick)
     
-    console.log('✅ Event listeners added:', {
+    /*console.log('Event listeners added:', {
       mousedown: !!this.boundMouseDown,
       mousemove: !!this.boundMouseMove,
       mouseup: !!this.boundMouseUp,
       wheel: !!this.boundWheel,
       dblclick: !!this.boundDoubleClick
-    })
+    })*/
     
     // Set initial cursor
     if (this.interactionMode === 'pan') {
       canvas.style.cursor = 'grab'
-      console.log('🎯 Set cursor to grab (pan mode)')
+      // Set cursor to grab (pan mode)
     } else if (this.interactionMode === 'lasso') {
       canvas.style.cursor = 'crosshair'
-      console.log('🎯 Set cursor to crosshair (lasso mode)')
+      // Set cursor to crosshair (lasso mode)
+    } else if (this.interactionMode === 'pick') {
+      canvas.style.cursor = 'pointer'
+      // Set cursor to pointer (pick mode)
     }
   }
 
@@ -2394,11 +2855,13 @@ export default class extends Controller {
   }
 
   onInteractionMouseDown(event) {
-    console.log('🖱️ Mouse down event:', this.interactionMode)
+    //console.log('Mouse down event:', this.interactionMode)
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseDown(event)
+    } else if (this.interactionMode === 'pick') {
+      this.onPickMouseDown(event)
     }
   }
 
@@ -2419,7 +2882,7 @@ export default class extends Controller {
   }
 
   onInteractionDoubleClick(event) {
-    console.log('🖱️ Double-click event:', this.interactionMode)
+    //console.log('Double-click event:', this.interactionMode)
     if (this.interactionMode === 'lasso') {
       this.onLassoDoubleClick(event)
     } else if (this.interactionMode === 'pan') {
@@ -2428,11 +2891,11 @@ export default class extends Controller {
   }
 
   onInteractionWheel(event) {
-    console.log('🔄 Wheel event:', event.deltaY, 'isPanning:', this.isPanning, 'interactionMode:', this.interactionMode)
+    //console.log('Wheel event:', event.deltaY, 'isPanning:', this.isPanning, 'interactionMode:', this.interactionMode)
     
     // Don't zoom if we're currently panning (but allow zoom in pan mode when not actively panning)
     if (this.isPanning) {
-      console.log('🚫 Ignoring wheel event during active panning')
+      //console.log('Ignoring wheel event during active panning')
       return
     }
     
@@ -2440,11 +2903,11 @@ export default class extends Controller {
     event.preventDefault()
     
     if (!this.currentCoordinates || !this.currentBounds) {
-      console.log('❌ No data available for zoom')
+      //console.log('No data available for zoom')
       return
     }
     
-    console.log('✅ Zooming with data available')
+    //console.log('Zooming with data available')
     
     // Get mouse position relative to canvas
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -2464,7 +2927,7 @@ export default class extends Controller {
       maxY: centerY + (this.currentBounds.maxY - centerY) * delta
     }
     
-    console.log('🔄 Zoom: Updating bounds to:', newBounds, 'Mouse position:', { mouseX, mouseY })
+    //console.log('Zoom: Updating bounds to:', newBounds, 'Mouse position:', { mouseX, mouseY })
     
     // Store the old bounds for translation calculation
     const oldBounds = { ...this.currentBounds }
@@ -2478,7 +2941,7 @@ export default class extends Controller {
 
   // Lasso mode handlers
   onLassoMouseDown(event) {
-    console.log('Lasso mouse down')
+    //console.log('Lasso mouse down')
     this.isDrawingLasso = true
     this.lassoPoints = []
     
@@ -2494,7 +2957,7 @@ export default class extends Controller {
     
     // Create lasso graphics object
     this.lassoGraphics = new this.PIXI.Graphics()
-    this.pixiApp.stage.addChild(this.lassoGraphics)
+    this.scatterContainer.addChild(this.lassoGraphics)
   }
 
   onLassoMouseMove(event) {
@@ -2515,12 +2978,12 @@ export default class extends Controller {
   onLassoMouseUp(event) {
     if (!this.isDrawingLasso) return
     
-    console.log('Lasso mouse up - completing selection')
+    //console.log('Lasso mouse up - completing selection')
     this.isDrawingLasso = false
     
     // Only proceed if we have a PIXI app and coordinates to work with
     if (!this.pixiApp || !this.currentCoordinates) {
-      console.log('No PIXI app or coordinates available for lasso selection')
+      //console.log('No PIXI app or coordinates available for lasso selection')
       this.clearLasso()
       return
     }
@@ -2542,7 +3005,7 @@ export default class extends Controller {
 
   // Pan mode handlers
   onPanMouseDown(event) {
-    console.log('Pan mouse down')
+    //console.log('Pan mouse down')
     this.isPanning = true
     
     // Store starting position
@@ -2603,7 +3066,7 @@ export default class extends Controller {
     const newWidth = newBounds.maxX - newBounds.minX
     const newHeight = newBounds.maxY - newBounds.minY
     
-    console.log('🔄 Pan Debug:', {
+    /*console.log('Pan Debug:', {
       deltaX: deltaX,
       deltaY: deltaY,
       dataDeltaX: dataDeltaX,
@@ -2614,17 +3077,17 @@ export default class extends Controller {
         width: { start: startWidth, new: newWidth, diff: newWidth - startWidth },
         height: { start: startHeight, new: newHeight, diff: newHeight - startHeight }
       }
-    })
+    })*/
     
     // Update visualization with new bounds
-    console.log('🔄 Pan: Updating bounds to:', newBounds)
+    //console.log('Pan: Updating bounds to:', newBounds)
     this.updateVisualizationBounds(newBounds)
   }
 
   onPanMouseUp(event) {
     if (!this.isPanning) return
     
-    console.log('Pan mouse up')
+    //console.log('Pan mouse up')
     this.stopPanning()
   }
 
@@ -2646,12 +3109,12 @@ export default class extends Controller {
 
   // Double-click handlers for pan and lasso modes
   onPanDoubleClick(event) {
-    console.log('🔄 Pan mode double-click: Resetting zoom and pan')
+    //console.log('Pan mode double-click: Resetting zoom and pan')
     this.resetZoomAndPan()
   }
 
   onLassoDoubleClick(event) {
-    console.log('❌ Lasso mode double-click: Canceling current selection')
+    //console.log('Lasso mode double-click: Canceling current selection')
     this.cancelSelection()
   }
 
@@ -2661,11 +3124,11 @@ export default class extends Controller {
   // Reset zoom and pan to original view
   resetZoomAndPan() {
     if (!this.currentCoordinates) {
-      console.log('❌ No data available for reset')
+      //console.log('No data available for reset')
       return
     }
 
-    console.log('🔄 Resetting to original view')
+    //console.log('Resetting to original view')
     
     // Clear any stored original positions to force re-rendering
     this.clearStoredOriginalPositions()
@@ -2678,25 +3141,25 @@ export default class extends Controller {
     this.scatterContainer.removeChildren()
     this.renderPointsWithCurrentColoring()
     
-    console.log('✅ Zoom and pan reset to original view')
+    //console.log('Zoom and pan reset to original view')
   }
 
   updateVisualizationBounds(newBounds) {
-    console.log('🔄 updateVisualizationBounds called with:', newBounds)
+    //console.log('updateVisualizationBounds called with:', newBounds)
     this.currentBounds = newBounds
     
     // Update existing point positions instead of re-rendering
     if (this.currentCoordinates && this.scatterContainer) {
       this.updatePointPositions()
     } else {
-      console.log('❌ Cannot update positions - missing data')
+      console.log('Cannot update positions - missing data')
     }
   }
 
   // Optimized method to update point positions without re-rendering
   updatePointPositions() {
     if (!this.currentCoordinates || !this.currentBounds || !this.scatterContainer) {
-      console.log('❌ Cannot update positions - missing data:', {
+      console.log('Cannot update positions - missing data:', {
         coordinates: !!this.currentCoordinates,
         bounds: !!this.currentBounds,
         container: !!this.scatterContainer
@@ -2704,15 +3167,15 @@ export default class extends Controller {
       return
     }
 
-    console.log('🔄 Updating point positions:', {
+    /*console.log('Updating point positions:', {
       pointCount: this.scatterContainer.children.length,
       coordinateCount: this.currentCoordinates.length
-    })
+    })*/
 
     // For pan operations, we should just translate existing positions
     // For zoom operations, we need to recalculate from coordinates (scale change)
     if (this.isPanning && this.panStartBounds) {
-      console.log('🔄 Panning: Translating existing positions')
+      //console.log('Panning: Translating existing positions')
       this.translatePointPositions()
       return
     }
@@ -2729,11 +3192,11 @@ export default class extends Controller {
       container.children.forEach((child, index) => {
         // Debug: Check what we're working with
         if (index < 3) {
-          console.log(`${containerName} Point ${index}:`, {
+          /*console.log(`${containerName} Point ${index}:`, {
             isPoint: child.isPoint,
             cellId: child.cellId,
             hasPosition: child.x !== undefined && child.y !== undefined
-          })
+          })*/
         }
 
         // Try to update if it's a point with cellId
@@ -2760,15 +3223,15 @@ export default class extends Controller {
     
     // Also check for points in animatedContainer if it exists
     if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children')
+      //console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children')
       updatePointsInContainer(this.animatedContainer, 'Animated')
     }
 
-    console.log(`✅ Updated ${updatedCount} point positions`)
+    //console.log(`Updated ${updatedCount} point positions`)
     
     // Fallback: If no points were updated, fall back to re-rendering
     if (updatedCount === 0 && this.scatterContainer.children.length > 0) {
-      console.log('⚠️ No points updated, falling back to re-rendering')
+      //console.log('No points updated, falling back to re-rendering')
       // Only fall back if we have coordinates and bounds
       if (this.currentCoordinates && this.currentBounds) {
         this.forceReRenderPoints()
@@ -2788,7 +3251,7 @@ export default class extends Controller {
     const deltaX = (this.currentBounds.minX - this.panStartBounds.minX) * (canvas.width / (this.panStartBounds.maxX - this.panStartBounds.minX)) * scaleFactor
     const deltaY = (this.currentBounds.minY - this.panStartBounds.minY) * (canvas.height / (this.panStartBounds.maxY - this.panStartBounds.minY)) * scaleFactor
 
-    console.log('🔄 Pan Translation:', { deltaX, deltaY })
+    //console.log('Pan Translation:', { deltaX, deltaY })
 
     let translatedCount = 0
 
@@ -2813,14 +3276,14 @@ export default class extends Controller {
     
     // Also check for points in animatedContainer if it exists
     if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for pan translation')
+      //console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for pan translation')
       translatePointsInContainer(this.animatedContainer, 'Animated')
     }
 
     // Don't update panStartBounds - keep original reference for sharp direction changes
     // this.panStartBounds = { ...this.currentBounds }
 
-    console.log(`✅ Pan translated ${translatedCount} point positions`)
+    //console.log(`Pan translated ${translatedCount} point positions`)
   }
 
   // Translate existing point positions for zoom operations (like pan but with scale)
@@ -2871,16 +3334,16 @@ export default class extends Controller {
     
     // Also check for points in animatedContainer if it exists
     if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for zoom translation')
+      //console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for zoom translation')
       translatePointsInContainer(this.animatedContainer, 'Animated')
     }
 
-    console.log(`✅ Zoom translated ${translatedCount} point positions`)
+    //console.log(`Zoom translated ${translatedCount} point positions`)
   }
 
   // Clear stored original positions (called when coordinates change)
   clearStoredOriginalPositions() {
-    console.log('🧹 Clearing stored original positions')
+    //console.log('Clearing stored original positions')
     
     // Clear positions in scatterContainer
     this.scatterContainer.children.forEach((child) => {
@@ -2927,7 +3390,7 @@ export default class extends Controller {
   selectPointsInLasso() {
     if (!this.currentCoordinates || this.lassoPoints.length < 3) return
     
-    console.log(`Checking ${this.currentCoordinates.length} points against lasso selection`)
+    //console.log(`Checking ${this.currentCoordinates.length} points against lasso selection`)
     
     const selectedIndices = []
     
@@ -2936,8 +3399,8 @@ export default class extends Controller {
       if (child.isPoint && child.cellId !== undefined) {
         const screenX = child.x
         const screenY = child.y
-        
-        if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+      
+      if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
           selectedIndices.push(child.cellId)
         }
       }
@@ -2957,7 +3420,7 @@ export default class extends Controller {
       })
     }
     
-    console.log(`Selected ${selectedIndices.length} cells with lasso`)
+    //console.log(`Selected ${selectedIndices.length} cells with lasso`)
     
     // Add to selected cells set
     selectedIndices.forEach(index => {
@@ -2975,7 +3438,7 @@ export default class extends Controller {
   updateSelectedPointColors() {
     if (!this.scatterContainer) return
     
-    console.log('🎨 Updating selected point colors without re-rendering')
+    //console.log('Updating selected point colors without re-rendering')
     
     // Update colors in scatterContainer
     this.scatterContainer.children.forEach((child) => {
@@ -3037,7 +3500,7 @@ export default class extends Controller {
 
   clearLasso() {
     if (this.lassoGraphics) {
-      this.pixiApp.stage.removeChild(this.lassoGraphics)
+      this.scatterContainer.removeChild(this.lassoGraphics)
       this.lassoGraphics = null
     }
     this.lassoPoints = []
@@ -3054,7 +3517,7 @@ export default class extends Controller {
   // Tab switching for selections panel
   switchSelectionTab(event) {
     const tab = event.currentTarget.dataset.tab
-    console.log('Switching to tab:', tab)
+    //console.log('Switching to tab:', tab)
     
     // Update tab buttons
     const cellsTab = document.getElementById('cells-tab')
@@ -3083,7 +3546,7 @@ export default class extends Controller {
 
   // Save selection method
   saveSelection() {
-    console.log('💾 Saving selection:', this.selectedCells.size, 'cells')
+    //console.log('Saving selection:', this.selectedCells.size, 'cells')
     
     if (this.selectedCells.size === 0) {
       alert('No cells selected to save')
@@ -3094,15 +3557,136 @@ export default class extends Controller {
     // For now, we'll just show a success message
     const selectionName = prompt('Enter a name for this selection:')
     if (selectionName) {
-      console.log(`Selection "${selectionName}" saved with ${this.selectedCells.size} cells`)
+      //console.log(`Selection "${selectionName}" saved with ${this.selectedCells.size} cells`)
       // TODO: Implement actual saving logic (API call, local storage, etc.)
       alert(`Selection "${selectionName}" saved successfully!`)
     }
   }
 
+  // Save plot as SVG method
+  saveAsSVG() {
+    //console.log('Saving plot as SVG')
+    
+    if (!this.pixiApp || !this.scatterContainer) {
+      alert('No plot available to save')
+      return
+    }
+
+    try {
+      // Get the canvas element
+      const canvas = this.canvas || this.pixiApp.canvas
+      if (!canvas) {
+        alert('Canvas not found')
+        return
+      }
+
+      // Create SVG content
+      const svgContent = this.generateSVGFromPlot(canvas)
+      
+      // Create and download the SVG file
+      this.downloadSVG(svgContent, 'plot.svg')
+      
+      //console.log('SVG saved successfully')
+    } catch (error) {
+      console.error('❌ Error saving SVG:', error)
+      alert('Error saving SVG file')
+    }
+  }
+
+  // Generate SVG content from the current plot
+  generateSVGFromPlot(canvas) {
+    const width = canvas.width
+    const height = canvas.height
+    
+    // Start SVG with proper dimensions
+    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
+    
+    // Add background
+    svg += `<rect width="100%" height="100%" fill="white"/>`
+    
+    // Add points from scatterContainer
+    if (this.scatterContainer && this.scatterContainer.children) {
+      this.scatterContainer.children.forEach((child) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          const x = child.x
+          const y = child.y
+          
+          // Get color (red for selected, original color for others)
+          let color = '#3b82f6' // Default blue
+          if (this.selectedCells && this.selectedCells.has(child.cellId)) {
+            color = '#ff0000' // Red for selected
+          } else if (this.originalPointColors && this.originalPointColors.has(child.cellId)) {
+            const originalColor = this.originalPointColors.get(child.cellId)
+            color = this.hexToRgb(originalColor)
+          }
+          
+          // Add circle for each point
+          svg += `<circle cx="${x}" cy="${y}" r="1" fill="${color}"/>`
+        }
+      })
+    }
+    
+    // Add points from animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children) {
+      this.animatedContainer.children.forEach((child) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          const x = child.x
+          const y = child.y
+          
+          // Get color (red for selected, original color for others)
+          let color = '#3b82f6' // Default blue
+          if (this.selectedCells && this.selectedCells.has(child.cellId)) {
+            color = '#ff0000' // Red for selected
+          } else if (this.originalPointColors && this.originalPointColors.has(child.cellId)) {
+            const originalColor = this.originalPointColors.get(child.cellId)
+            color = this.hexToRgb(originalColor)
+          }
+          
+          // Add circle for each point
+          svg += `<circle cx="${x}" cy="${y}" r="1" fill="${color}"/>`
+        }
+      })
+    }
+    
+    // Add lasso graphics if it exists
+    if (this.lassoGraphics && this.lassoPoints && this.lassoPoints.length > 0) {
+      svg += `<polyline points="${this.lassoPoints.map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.8"/>`
+    }
+    
+    svg += `</svg>`
+    return svg
+  }
+
+  // Convert hex color to RGB
+  hexToRgb(hex) {
+    if (typeof hex === 'string' && hex.startsWith('#')) {
+      return hex
+    }
+    
+    // Convert number to hex string
+    const hexStr = hex.toString(16).padStart(6, '0')
+    return `#${hexStr}`
+  }
+
+  // Download SVG content as file
+  downloadSVG(svgContent, filename) {
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    // Clean up the URL object
+    URL.revokeObjectURL(url)
+  }
+
   // Cancel selection method - resets points to original colors
   cancelSelection() {
-    console.log('❌ Canceling selection, resetting to original colors')
+    //console.log('Canceling selection, resetting to original colors')
     
     // Clear the selected cells
     this.selectedCells.clear()
@@ -3119,7 +3703,7 @@ export default class extends Controller {
       this.lassoGraphics = null
     }
     
-    console.log('✅ Selection canceled, points reset to original colors')
+    //console.log('Selection canceled, points reset to original colors')
   }
 
 
@@ -3137,4 +3721,324 @@ export default class extends Controller {
       countElement.textContent = this.selectedCells.size
     }
   }
+
+  // Tooltip methods
+  showTooltip(cellId, point) {
+    
+    // Force create tooltip if not available
+    if (!this.tooltip || !this.tooltipContent) {
+      console.log('Tooltip elements not found, creating now:', { 
+        tooltip: !!this.tooltip, 
+        tooltipContent: !!this.tooltipContent 
+      })
+      this.createTooltipDynamically()
+    }
+    
+    // Double-check after creation
+    if (!this.tooltip || !this.tooltipContent) {
+      console.log('Failed to create tooltip elements')
+      return
+    }
+    
+    // Get cell information
+    const cellName = `Cell ${cellId + 1}` // Generate cell name from ID
+    
+    // Get category information if available
+    let categoryInfo = ''
+    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
+      const { data_type, values } = this.currentMetadataVector
+      const value = values[cellId]
+      
+      if (data_type === 'DISCRETE') {
+        // For discrete metadata, show the category name
+        categoryInfo = `<br><strong>Category:</strong> ${value}`
+      } else if (data_type === 'CONTINUOUS') {
+        // For continuous metadata, show the numeric value
+        categoryInfo = `<br><strong>Value:</strong> ${value.toFixed(3)}`
+      }
+    }
+    
+    // Set tooltip content
+    const tooltipHTML = `<strong>${cellName}</strong>${categoryInfo}`
+    this.tooltipContent.innerHTML = tooltipHTML
+    // Tooltip content set
+    
+    // Position tooltip near the mouse cursor
+    const plotContainer = document.querySelector('.plot-container')
+    if (!plotContainer) {
+      console.log('Plot container not found')
+      return
+    }
+    
+    const rect = plotContainer.getBoundingClientRect()
+    // Plot container positioned
+    
+    // Get point position in screen coordinates
+    const pointX = point.x + rect.left
+    const pointY = point.y + rect.top
+    
+    // Position tooltip to the right of the point, with some offset
+    let tooltipLeft = pointX + 15
+    let tooltipTop = pointY - 10
+    
+    // Ensure tooltip stays within the plot container bounds
+    const tooltipWidth = 200 // max-width from CSS
+    const tooltipHeight = 50 // estimated height
+    
+    // Check if tooltip would go off the right edge
+    if (tooltipLeft + tooltipWidth > rect.right) {
+      tooltipLeft = pointX - tooltipWidth - 15 // Position to the left instead
+    }
+    
+    // Check if tooltip would go off the bottom edge
+    if (tooltipTop + tooltipHeight > rect.bottom) {
+      tooltipTop = pointY - tooltipHeight - 10 // Position above instead
+    }
+    
+    // Check if tooltip would go off the top edge
+    if (tooltipTop < rect.top) {
+      tooltipTop = rect.top + 10 // Keep it within bounds
+    }
+    
+    this.tooltip.style.left = `${tooltipLeft}px`
+    this.tooltip.style.top = `${tooltipTop}px`
+    this.tooltip.style.display = 'block'
+    
+    // Temporarily make tooltip more visible for debugging
+    this.tooltip.style.backgroundColor = 'red'
+    this.tooltip.style.fontSize = '16px'
+    this.tooltip.style.padding = '12px 16px'
+    
+    // Tooltip positioned
+    
+    // Debug: Check if tooltip is actually visible
+    const computedStyle = window.getComputedStyle(this.tooltip)
+    // Tooltip style computed
+    
+    // Force tooltip to be visible with maximum z-index
+    this.tooltip.style.zIndex = '999999'
+    this.tooltip.style.position = 'fixed'
+    this.tooltip.style.visibility = 'visible'
+    this.tooltip.style.opacity = '1'
+    
+    // Test: Position tooltip in a fixed, visible location
+    this.tooltip.style.left = '50px'
+    this.tooltip.style.top = '50px'
+    this.tooltip.style.backgroundColor = 'red'
+    this.tooltip.style.border = '3px solid yellow'
+    this.tooltip.style.width = '300px'
+    this.tooltip.style.height = '100px'
+    
+    // Tooltip forced to fixed position
+  }
+
+  hideTooltip() {
+    if (this.tooltip) {
+      this.tooltip.style.display = 'none'
+    }
+  }
+
+  showSimpleTooltip(cellName, categoryInfo, point) {
+    // Simple tooltip shown
+    
+    // Remove any existing simple tooltip
+    const existing = document.getElementById('simple-tooltip')
+    if (existing) {
+      existing.remove()
+    }
+    
+    // Get plot container for positioning
+    const plotContainer = document.querySelector('.plot-container')
+    const rect = plotContainer ? plotContainer.getBoundingClientRect() : { left: 0, top: 0, width: 600, height: 400 }
+    
+    // Position tooltip above the plot, centered horizontally
+    const tooltipLeft = rect.left + (rect.width / 2) - 100 // Center horizontally, offset for tooltip width
+    const tooltipTop = rect.top - 80 // Above the plot
+    
+    // Create tooltip container
+    const tooltip = document.createElement('div')
+    tooltip.id = 'simple-tooltip'
+    tooltip.style.cssText = `
+      position: fixed !important;
+      top: ${tooltipTop}px !important;
+      left: ${tooltipLeft}px !important;
+      background: rgba(0, 0, 0, 0.9) !important;
+      color: white !important;
+      padding: 12px 16px !important;
+      font-size: 14px !important;
+      font-weight: normal !important;
+      border: 1px solid rgba(255, 255, 255, 0.2) !important;
+      border-radius: 6px !important;
+      z-index: 9999999 !important;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+      min-width: 200px !important;
+      max-width: 300px !important;
+    `
+    
+    // Create close button
+    const closeButton = document.createElement('button')
+    closeButton.innerHTML = '×'
+    closeButton.style.cssText = `
+      position: absolute !important;
+      top: 4px !important;
+      right: 8px !important;
+      background: none !important;
+      border: none !important;
+      color: white !important;
+      font-size: 18px !important;
+      font-weight: bold !important;
+      cursor: pointer !important;
+      padding: 0 !important;
+      width: 20px !important;
+      height: 20px !important;
+      line-height: 1 !important;
+    `
+    closeButton.onclick = () => {
+      tooltip.remove()
+      console.log('🗑️ Tooltip closed by user')
+    }
+    
+    // Create content
+    const content = document.createElement('div')
+    content.style.cssText = `
+      padding-right: 25px !important;
+      line-height: 1.4 !important;
+    `
+    
+    // Add cell name
+    const cellNameDiv = document.createElement('div')
+    cellNameDiv.style.cssText = `
+      font-weight: 600 !important;
+      margin-bottom: 4px !important;
+    `
+    cellNameDiv.textContent = cellName
+    
+    // Add category info if available
+    if (categoryInfo) {
+      const categoryDiv = document.createElement('div')
+      categoryDiv.style.cssText = `
+        font-size: 12px !important;
+        color: #e5e7eb !important;
+        margin-top: 2px !important;
+      `
+      categoryDiv.textContent = categoryInfo.replace('\n', '')
+      content.appendChild(cellNameDiv)
+      content.appendChild(categoryDiv)
+    } else {
+      content.appendChild(cellNameDiv)
+    }
+    
+    // Assemble tooltip
+    tooltip.appendChild(content)
+    tooltip.appendChild(closeButton)
+    document.body.appendChild(tooltip)
+    
+    // Improved tooltip created and positioned
+  }
+
+  // Pick mode methods
+  onPickMouseDown(event) {
+    // In pick mode, use fallback detection to find clicked points
+    // Pick mode: Canvas clicked
+    this.detectPointClick(event)
+  }
+
+  onPointClick(cellId, point, event) {
+    // Only show tooltip in pick mode
+    if (this.interactionMode === 'pick') {
+      // Point clicked in pick mode
+      
+      // Simple test - show alert first
+      //alert(`Cell ${cellId + 1} clicked!`)
+      
+      this.showTooltip(cellId, point)
+      event.stopPropagation() // Prevent canvas click event
+    }
+  }
+
+  // Fallback method to detect point clicks when PIXI events don't work
+  detectPointClick(event) {
+    if (this.interactionMode !== 'pick') return
+
+    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const clickX = event.clientX - rect.left
+    const clickY = event.clientY - rect.top
+
+    //console.log('Detecting point click at:', { clickX, clickY })
+    //console.log('ScatterContainer children count:', this.scatterContainer.children.length)
+
+    // Check all points in scatterContainer
+    let closestPoint = null
+    let closestDistance = Infinity
+    const maxDistance = 5 // Maximum distance to consider a click
+
+    this.scatterContainer.children.forEach((child, index) => {
+      if (index < 3) { // Debug first 3 children
+        console.log(`Child ${index}:`, { 
+          isPoint: child.isPoint, 
+          cellId: child.cellId, 
+          x: child.x, 
+          y: child.y 
+        })
+      }
+      if (child.isPoint && child.cellId !== undefined) {
+        const distance = Math.sqrt(
+          Math.pow(child.x - clickX, 2) + Math.pow(child.y - clickY, 2)
+        )
+        
+        if (distance < maxDistance && distance < closestDistance) {
+          closestDistance = distance
+          closestPoint = child
+        }
+      }
+    })
+
+    // Also check animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      this.animatedContainer.children.forEach((child) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          const distance = Math.sqrt(
+            Math.pow(child.x - clickX, 2) + Math.pow(child.y - clickY, 2)
+          )
+          
+          if (distance < maxDistance && distance < closestDistance) {
+            closestDistance = distance
+            closestPoint = child
+          }
+        }
+      })
+    }
+
+    if (closestPoint) {
+      // Closest point found
+      
+      // Simple test - show alert with category info
+      const cellName = `Cell ${closestPoint.cellId + 1}`
+      let categoryInfo = ''
+      if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[closestPoint.cellId] !== undefined) {
+        const { data_type, values } = this.currentMetadataVector
+        const value = values[closestPoint.cellId]
+        
+        if (data_type === 'DISCRETE') {
+          categoryInfo = `\nCategory: ${value}`
+        } else if (data_type === 'CONTINUOUS') {
+          categoryInfo = `\nValue: ${value.toFixed(3)}`
+        }
+      }
+      
+      // Show tooltip
+      this.showSimpleTooltip(cellName, categoryInfo, closestPoint)
+    } else {
+      console.log('No point found near click position')
+      this.hideTooltip()
+    }
+  }
+
 }

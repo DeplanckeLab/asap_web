@@ -530,7 +530,8 @@ class ProjectsController < ApplicationController
         begin
           parsed_categories = JSON.parse(metadata.categories_json)
           if parsed_categories.is_a?(Hash)
-            categories = parsed_categories.keys.sort
+            # Sort categories by count (largest to smallest) to match HTML legend ordering
+            categories = parsed_categories.sort_by { |category, count| -count }.map(&:first)
           elsif parsed_categories.is_a?(Array)
             categories = parsed_categories.sort
           end

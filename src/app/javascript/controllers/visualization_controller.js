@@ -18,6 +18,11 @@ export default class extends Controller {
     this.currentVisibleCells = null // Track currently visible cells (null = all visible)
     this.lastFilterState = null // Track last filter state for incremental updates
     this.filterCache = new Map() // Cache for intersection results
+    
+    // Track embedding method for animation decisions
+    this.currentEmbeddingMethod = null
+    this.previousEmbeddingMethod = null
+    
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
     // Simple test - remove this after debugging
@@ -636,24 +641,23 @@ export default class extends Controller {
     // Store current bounds and coordinates for transition
     const currentBounds = this.currentBounds || newBounds
     const previousCoordinates = this.currentCoordinates || coordinates
-    console.log('Using bounds for transition - from:', currentBounds, 'to:', newBounds)
-    console.log('Previous coordinates count:', previousCoordinates.length, 'New coordinates count:', coordinates.length)
+    // console.log('Using bounds for transition - from:', currentBounds, 'to:', newBounds)
+    // console.log('Previous coordinates count:', previousCoordinates.length, 'New coordinates count:', coordinates.length)
     
-    // Check if bounds are actually different
-    const boundsChanged = (
-      Math.abs(currentBounds.minX - newBounds.minX) > 0.001 ||
-      Math.abs(currentBounds.maxX - newBounds.maxX) > 0.001 ||
-      Math.abs(currentBounds.minY - newBounds.minY) > 0.001 ||
-      Math.abs(currentBounds.maxY - newBounds.maxY) > 0.001
-    )
+    // Check if embedding method changed (more accurate than bounds comparison)
+    const embeddingChanged = this.detectEmbeddingMethodChange(coordinates)
     
-    if (!boundsChanged) {
-      console.log('Bounds are the same, no transition needed - re-rendering points with new coordinates')
+    if (!embeddingChanged) {
+      console.log('Same embedding method detected, no animation needed - re-rendering points with new coordinates')
       // Clear existing individual points and re-render
       this.scatterContainer.removeChildren()
       
       // Re-render with new coordinates using current coloring
       this.renderPointsWithCurrentColoring()
+      
+      // Reapply filtering after coordinate update
+      console.log('🔄 Reapplying filtering after coordinate update...')
+      this.updateCellFiltering()
       
       // Update point count display
       const pointCountElement = document.getElementById('point-count')
@@ -663,7 +667,11 @@ export default class extends Controller {
       return
     }
     
-    console.log('Bounds are different, creating animated transition')
+    console.log('Different embedding method detected, creating animated transition')
+    
+    // Clear incremental filtering state when embedding changes
+    // This ensures filtering works correctly with new coordinate indices
+    this.clearIncrementalState()
     
     // Clean up any existing animated container
     if (this.animatedContainer) {
@@ -890,6 +898,10 @@ export default class extends Controller {
     console.log(`Maximum point movement: ${maxMovement.toFixed(2)} pixels`)
     console.log(`Animation will run for ${animationDuration}ms`)
     
+    // Get current filtered indices to respect filtering during animation
+    const currentFilteredIndices = this.getIncrementalFilteredIndices()
+    const filteredSet = currentFilteredIndices ? new Set(currentFilteredIndices) : null
+    
     // Animate all points
     const startTime = Date.now()
     
@@ -905,10 +917,14 @@ export default class extends Controller {
         console.log(`Animation progress: ${(progress * 100).toFixed(1)}% (${elapsed}ms)`)
       }
       
-      // Update all point positions
+      // Update all point positions and visibility
       for (const point of points) {
         point.sprite.x = point.startX + (point.endX - point.startX) * easeProgress
         point.sprite.y = point.startY + (point.endY - point.startY) * easeProgress
+        
+        // Apply filtering during animation - hide points that should be hidden
+        const shouldBeVisible = !filteredSet || filteredSet.has(point.sprite.cellId)
+        point.sprite.visible = shouldBeVisible
       }
       
       if (progress < 1) {
@@ -922,6 +938,10 @@ export default class extends Controller {
         // Update stored coordinates and bounds for next transition
         this.currentBounds = toBounds
         this.currentCoordinates = newCoordinates
+        
+        // Reapply filtering after embedding change
+        console.log('🔄 Reapplying filtering after embedding change...')
+        this.updateCellFiltering()
         
         console.log('Animation finished - keeping animated points in final positions')
       }
@@ -1087,7 +1107,11 @@ export default class extends Controller {
     // Check if already loaded
     if (this.loadedMetadataVectors[metadataId]) {
       console.log(`Metadata vector ${metadataId} already loaded`)
-      return this.loadedMetadataVectors[metadataId]
+      const cachedData = this.loadedMetadataVectors[metadataId]
+      console.log('Cached data:', cachedData)
+      console.log('Cached compressed_data:', cachedData.compressed_data)
+      console.log('Cached compression_info:', cachedData.compression_info)
+      return cachedData
     }
     
     // Check if currently loading
@@ -1184,6 +1208,12 @@ export default class extends Controller {
   // Decompress discrete metadata vector from binary data
   decompressDiscreteMetadataVector(binaryData, compressionInfo) {
     console.log('Decompressing discrete metadata vector:', compressionInfo)
+    console.log('Binary data type:', typeof binaryData, 'Binary data:', binaryData)
+    
+    // Check if binaryData is valid
+    if (!binaryData) {
+      throw new Error('Binary data is null or undefined')
+    }
     
     const { categories, bit_width, cell_count } = compressionInfo
     const indices = []
@@ -1199,7 +1229,14 @@ export default class extends Controller {
         view[i] = binaryString.charCodeAt(i)
       }
     } else {
-      arrayBuffer = binaryData.buffer || binaryData
+      // Check if binaryData has a buffer property
+      if (binaryData.buffer) {
+        arrayBuffer = binaryData.buffer
+      } else if (binaryData instanceof ArrayBuffer) {
+        arrayBuffer = binaryData
+      } else {
+        throw new Error(`Invalid binary data format: ${typeof binaryData}, expected string, ArrayBuffer, or object with buffer property`)
+      }
     }
     
     // Create a DataView for reading binary data
@@ -1314,6 +1351,22 @@ export default class extends Controller {
       return
     }
     
+    // Validate the loaded data
+    if (!vectorData.compressed_data || !vectorData.compression_info) {
+      console.error('Loaded metadata vector is missing required data:', vectorData)
+      // Clear the corrupted cache entry and try to reload
+      delete this.loadedMetadataVectors[metadataId]
+      console.log('Cleared corrupted cache entry, retrying load...')
+      const retryData = await this.loadSingleMetadataVector(metadataId)
+      if (!retryData || !retryData.compressed_data || !retryData.compression_info) {
+        console.error('Retry failed - metadata vector is still corrupted')
+        return
+      }
+      // Use the retry data
+      vectorData.compressed_data = retryData.compressed_data
+      vectorData.compression_info = retryData.compression_info
+    }
+    
     // Decompress the vector data based on type
     let values
     try {
@@ -1327,6 +1380,8 @@ export default class extends Controller {
       }
     } catch (error) {
       console.error('Error decompressing metadata vector:', error)
+      // Clear the corrupted cache entry
+      delete this.loadedMetadataVectors[metadataId]
       return
     }
     
@@ -1873,11 +1928,9 @@ export default class extends Controller {
       if (storedColor) {
         // Convert hex string to number for PIXI.js
         colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
-        console.log(`🎨 Plot using stored color for "${category}" in metadata ${metadataId}: ${storedColor}`)
       } else {
         // Use default color
-      colorMap[category] = colors[index % colors.length]
-        console.log(`🎨 Plot using default color for "${category}" (index ${index}) in metadata ${metadataId}: ${colors[index % colors.length].toString(16)}`)
+        colorMap[category] = colors[index % colors.length]
       }
     })
     
@@ -1976,6 +2029,60 @@ export default class extends Controller {
     this.forceReRenderPoints()
     
     console.log('Successfully cleared metadata coloring')
+  }
+  
+  // Clear all loaded metadata vectors cache (use when switching projects or clearing all data)
+  clearLoadedMetadataVectorsCache() {
+    console.log('Clearing all loaded metadata vectors cache')
+    this.loadedMetadataVectors = {}
+    this.loadingMetadataVectors.clear()
+  }
+  
+  // Detect if embedding method changed by analyzing coordinate patterns
+  detectEmbeddingMethodChange(newCoordinates) {
+    if (!this.currentCoordinates || !newCoordinates) {
+      return true // First load or no previous coordinates
+    }
+    
+    if (this.currentCoordinates.length !== newCoordinates.length) {
+      return true // Different number of points
+    }
+    
+    // Calculate coordinate statistics to detect embedding method changes
+    const currentStats = this.calculateCoordinateStats(this.currentCoordinates)
+    const newStats = this.calculateCoordinateStats(newCoordinates)
+    
+    // If the coordinate distribution is significantly different, it's likely a different embedding
+    const significantChange = (
+      Math.abs(currentStats.meanX - newStats.meanX) > 0.1 ||
+      Math.abs(currentStats.meanY - newStats.meanY) > 0.1 ||
+      Math.abs(currentStats.stdX - newStats.stdX) > 0.1 ||
+      Math.abs(currentStats.stdY - newStats.stdY) > 0.1
+    )
+    
+    if (significantChange) {
+      console.log('🔄 Embedding method changed - animation will be triggered')
+    }
+    
+    return significantChange
+  }
+  
+  // Calculate basic statistics for coordinate arrays
+  calculateCoordinateStats(coordinates) {
+    if (!coordinates || coordinates.length === 0) {
+      return { meanX: 0, meanY: 0, stdX: 0, stdY: 0 }
+    }
+    
+    const xValues = coordinates.map(([x]) => x)
+    const yValues = coordinates.map(([, y]) => y)
+    
+    const meanX = xValues.reduce((sum, x) => sum + x, 0) / xValues.length
+    const meanY = yValues.reduce((sum, y) => sum + y, 0) / yValues.length
+    
+    const stdX = Math.sqrt(xValues.reduce((sum, x) => sum + Math.pow(x - meanX, 2), 0) / xValues.length)
+    const stdY = Math.sqrt(yValues.reduce((sum, y) => sum + Math.pow(y - meanY, 2), 0) / yValues.length)
+    
+    return { meanX, meanY, stdX, stdY }
   }
 
   toggleDropdown(event) {
@@ -2730,9 +2837,11 @@ export default class extends Controller {
       this._cachedColorMap = null
       
       // Re-render the plot with the new color
-      if (this.currentMetadataVector) {
+      if (this.currentMetadataVector && this.currentMetadataId === metadataId) {
         console.log('🎨 Color changed, re-rendering plot with updated colors')
         this.renderPointsWithCurrentColoring()
+      } else {
+        console.log('🎨 Color saved but not re-rendering plot (different metadata active)')
       }
       
       // Add reset button if it doesn't exist (first customization)
@@ -4260,25 +4369,38 @@ export default class extends Controller {
     // Convert filteredIndices to Set for O(1) lookup if it exists
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
 
-    // Iterate through all points and show/hide them based on filtering
-    this.scatterContainer.children.forEach((point) => {
-      if (point.isPoint) {
-        // Use the cellId property instead of array index
-        const shouldBeVisible = !filteredSet || filteredSet.has(point.cellId)
-        
-        if (shouldBeVisible) {
-          point.visible = true
-          point.alpha = point.originalAlpha || 1.0 // Restore original alpha
-          visibleCount++
-        } else {
-          point.visible = false
-          hiddenCount++
+    let pointCount = 0
+    
+    // Helper function to update points in a container
+    const updatePointsInContainer = (container, containerName) => {
+      container.children.forEach((point) => {
+        if (point.isPoint) {
+          pointCount++
+          // Use the cellId property instead of array index
+          const shouldBeVisible = !filteredSet || filteredSet.has(point.cellId)
+          
+          if (shouldBeVisible) {
+            point.visible = true
+            point.alpha = point.originalAlpha || 1.0 // Restore original alpha
+            visibleCount++
+          } else {
+            point.visible = false
+            hiddenCount++
+          }
         }
-      }
-    })
+      })
+    }
+    
+    // Update points in scatterContainer (direct children)
+    updatePointsInContainer(this.scatterContainer, 'Direct')
+    
+    // Also check for points in animatedContainer if it exists
+    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+      updatePointsInContainer(this.animatedContainer, 'Animated')
+    }
 
     const endTime = performance.now()
-    console.log(`⚡ Visibility update completed in ${(endTime - startTime).toFixed(2)}ms: ${visibleCount} visible, ${hiddenCount} hidden`)
+    console.log(`⚡ Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
   }
 
   // Update the point count display with detailed filtering information
@@ -4355,8 +4477,6 @@ export default class extends Controller {
   }
 
   updateCellFiltering() {
-    console.log('🔄 Updating cell filtering based on selected categories:', this.selectedCategories)
-    
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     console.log('🎯 Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
@@ -4576,7 +4696,7 @@ export default class extends Controller {
     this.currentVisibleCells = null
     this.lastFilterState = null
     this.filterCache.clear()
-    console.log('🧹 Cleared incremental filtering state')
+    console.log('🧹 Cleared incremental filtering state after embedding change')
   }
 
   // Clear all checkbox selections when switching metadata

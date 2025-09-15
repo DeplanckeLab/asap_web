@@ -11,6 +11,12 @@ export default class extends Controller {
 
   connect() {
     console.log('🚀 Visualization controller connected')
+    
+    // Initialize selected categories tracking
+    this.selectedCategories = {}
+    this.loadedMetadataVectors = {} // Store all loaded metadata vectors for filtering
+    // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
+    
     // Simple test - remove this after debugging
     setTimeout(() => {
       console.log('Controller test: Water drop buttons found:', document.querySelectorAll('[data-action*="waterDropClicked"]').length)
@@ -1332,6 +1338,12 @@ export default class extends Controller {
       compression_info: vectorData.compression_info
     }
     
+    // Also store in loadedMetadataVectors for filtering
+    this.loadedMetadataVectors[metadataId] = this.currentMetadataVector
+    
+    // Show checkboxes for this metadata now that it's loaded
+    this.showCheckboxesForMetadata(metadataId)
+    
     // Also store the metadata ID for color mapping
     this.currentMetadataId = metadataId
 
@@ -1340,6 +1352,14 @@ export default class extends Controller {
     
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
+    
+    // Initialize checkboxes if not already done
+    if (Object.keys(this.selectedCategories).length === 0) {
+      this.initializeAllCheckboxes()
+    }
+    
+    // Update cell filtering after loading metadata vector
+    this.updateCellFiltering()
   }
 
   // Load all metadata vectors in a single request
@@ -1479,6 +1499,9 @@ export default class extends Controller {
         const info = vectorData.compression_info
         console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
         
+        // Show checkboxes for this metadata now that it's loaded
+        this.showCheckboxesForMetadata(metadataId)
+        
         return vectorData
       } else {
         throw new Error(`Metadata vector ${metadataId} not found in response`)
@@ -1613,6 +1636,9 @@ export default class extends Controller {
     
     const pointSize = 1
 
+    // Get filtered cell indices based on checkbox selections
+    const filteredIndices = this.getFilteredCellIndices()
+
     // Check if we have metadata coloring active
     if (this.currentMetadataVector && this.currentMetadataVector.values) {
       const { data_type, values, compression_info } = this.currentMetadataVector
@@ -1641,6 +1667,11 @@ export default class extends Controller {
         
         // Render points in sorted order (largest categories first)
         sortedPointIndices.forEach(i => {
+          // Skip this point if it's not in the filtered indices
+          if (filteredIndices && !filteredIndices.includes(i)) {
+            return
+          }
+
           const [x, y] = this.currentCoordinates[i]
           const { color, alpha } = this.getColorAndAlpha(i)
           
@@ -1672,12 +1703,18 @@ export default class extends Controller {
           this.scatterContainer.addChild(point)
         })
         
-        // Update point count display
-        this.updatePointCountDisplay(this.currentCoordinates.length, uniqueValues.length)
+        // Update point count display with filtered count
+        const filteredCount = filteredIndices ? filteredIndices.length : this.currentCoordinates.length
+        this.updatePointCountDisplay(filteredCount, uniqueValues.length)
         
       } else if (data_type === 'CONTINUOUS') {
         // Render each point individually to support selection transparency and color reset
         for (let i = 0; i < this.currentCoordinates.length; i++) {
+          // Skip this point if it's not in the filtered indices
+          if (filteredIndices && !filteredIndices.includes(i)) {
+            continue
+          }
+
           const [x, y] = this.currentCoordinates[i]
           const { color, alpha } = this.getColorAndAlpha(i)
           
@@ -1709,12 +1746,18 @@ export default class extends Controller {
           this.scatterContainer.addChild(point)
         }
         
-        // Update point count display
-        this.updatePointCountDisplay(this.currentCoordinates.length, 'continuous')
+        // Update point count display with filtered count
+        const filteredCount = filteredIndices ? filteredIndices.length : this.currentCoordinates.length
+        this.updatePointCountDisplay(filteredCount, 'continuous')
       }
     } else {
       // Render each point individually to support selection transparency and color reset
       for (let i = 0; i < this.currentCoordinates.length; i++) {
+        // Skip this point if it's not in the filtered indices
+        if (filteredIndices && !filteredIndices.includes(i)) {
+          continue
+        }
+
         const [x, y] = this.currentCoordinates[i]
         const { color, alpha } = this.getColorAndAlpha(i)
         
@@ -1740,10 +1783,11 @@ export default class extends Controller {
         this.scatterContainer.addChild(point)
       }
       
-      // Update point count display
+      // Update point count display with filtered count
+      const filteredCount = filteredIndices ? filteredIndices.length : this.currentCoordinates.length
       const pointCountElement = document.getElementById('point-count')
       if (pointCountElement) {
-        pointCountElement.textContent = `${this.currentCoordinates.length.toLocaleString()} points`
+        pointCountElement.textContent = `${filteredCount.toLocaleString()} points`
       }
     }
     
@@ -4039,6 +4083,334 @@ export default class extends Controller {
       console.log('No point found near click position')
       this.hideTooltip()
     }
+  }
+
+  // Checkbox functionality for cell selection
+  toggleMetadataSelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const metadataId = event.currentTarget.dataset.metadataId
+    const checkbox = event.currentTarget
+    const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
+    
+    // Toggle the checkbox state
+    if (isSelected) {
+      // Deselect all categories for this metadata
+      checkbox.style.backgroundColor = '#f3f4f6'
+      checkbox.querySelector('i').style.display = 'none'
+      this.deselectAllCategoriesForMetadata(metadataId)
+    } else {
+      // Select all categories for this metadata
+      checkbox.style.backgroundColor = '#10b981'
+      checkbox.querySelector('i').style.display = 'block'
+      this.selectAllCategoriesForMetadata(metadataId)
+    }
+    
+    // Update cell filtering
+    this.updateCellFiltering()
+  }
+
+  toggleCategorySelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const metadataId = event.currentTarget.dataset.metadataId
+    const category = event.currentTarget.dataset.category
+    const checkbox = event.currentTarget
+    const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
+    
+    // Initialize checkboxes for this metadata if not already done
+    if (!this.selectedCategories[metadataId]) {
+      this.initializeCheckboxesForMetadata(metadataId)
+    }
+    
+    // Toggle the checkbox state
+    if (isSelected) {
+      // Deselect this category
+      checkbox.style.backgroundColor = '#f3f4f6'
+      checkbox.querySelector('i').style.display = 'none'
+      this.deselectCategory(metadataId, category)
+    } else {
+      // Select this category
+      checkbox.style.backgroundColor = '#10b981'
+      checkbox.querySelector('i').style.display = 'block'
+      this.selectCategory(metadataId, category)
+    }
+    
+    // Update the metadata checkbox state
+    this.updateMetadataCheckboxState(metadataId)
+    
+    // Update cell filtering
+    this.updateCellFiltering()
+  }
+
+  selectAllCategoriesForMetadata(metadataId) {
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.backgroundColor = '#10b981'
+      checkbox.querySelector('i').style.display = 'block'
+    })
+  }
+
+  deselectAllCategoriesForMetadata(metadataId) {
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.backgroundColor = '#f3f4f6'
+      checkbox.querySelector('i').style.display = 'none'
+    })
+  }
+
+  selectCategory(metadataId, category) {
+    // This will be used to track selected categories
+    if (!this.selectedCategories) {
+      this.selectedCategories = {}
+    }
+    if (!this.selectedCategories[metadataId]) {
+      this.selectedCategories[metadataId] = new Set()
+    }
+    this.selectedCategories[metadataId].add(category)
+  }
+
+  deselectCategory(metadataId, category) {
+    if (this.selectedCategories && this.selectedCategories[metadataId]) {
+      this.selectedCategories[metadataId].delete(category)
+    }
+  }
+
+  updateMetadataCheckboxState(metadataId) {
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    const selectedCount = Array.from(categoryCheckboxes).filter(cb => 
+      cb.style.backgroundColor === 'rgb(16, 185, 129)'
+    ).length
+    
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    
+    if (selectedCount === 0) {
+      // No categories selected
+      metadataCheckbox.style.backgroundColor = '#f3f4f6'
+      metadataCheckbox.querySelector('i').style.display = 'none'
+    } else if (selectedCount === categoryCheckboxes.length) {
+      // All categories selected
+      metadataCheckbox.style.backgroundColor = '#10b981'
+      metadataCheckbox.querySelector('i').style.display = 'block'
+    } else {
+      // Some categories selected (indeterminate state)
+      metadataCheckbox.style.backgroundColor = '#f59e0b'
+      metadataCheckbox.querySelector('i').style.display = 'block'
+    }
+  }
+
+  initializeAllCheckboxes() {
+    // Initialize checkboxes only for the currently loaded metadata
+    const metadataId = this.currentMetadataId
+    if (!metadataId) {
+      console.log('⚠️ No current metadata ID - skipping checkbox initialization')
+      return
+    }
+
+    this.initializeCheckboxesForMetadata(metadataId)
+  }
+
+  initializeCheckboxesForMetadata(metadataId) {
+    console.log(`🔍 Initializing checkboxes for metadata: ${metadataId}`)
+    
+    // Initialize the selected categories for this metadata
+    this.selectedCategories[metadataId] = new Set()
+    
+    // Get all categories for this metadata
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(categoryCheckbox => {
+      const category = categoryCheckbox.dataset.category
+      this.selectedCategories[metadataId].add(category)
+    })
+    
+    console.log(`✅ Initialized checkboxes for metadata ${metadataId}:`, Array.from(this.selectedCategories[metadataId]))
+  }
+
+  showCheckboxesForMetadata(metadataId) {
+    console.log(`👁️ Showing checkboxes for metadata: ${metadataId}`)
+    
+    // Show the global metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      metadataCheckbox.style.display = 'flex'
+    }
+    
+    // Show all category checkboxes for this metadata
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.display = 'flex'
+    })
+    
+    console.log(`✅ Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+  }
+
+  updateCellFiltering() {
+    console.log('🔄 Updating cell filtering based on selected categories:', this.selectedCategories)
+    
+    // Debug: Check what filtered indices we get
+    const filteredIndices = this.getFilteredCellIndices()
+    console.log('🎯 Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
+    
+    // Re-render the plot with filtered points
+    this.renderPointsWithCurrentColoring()
+  }
+
+  // Get the intersection of selected cells across all metadata
+  getFilteredCellIndices() {
+    if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
+      // No filtering applied, return all cells
+      return null
+    }
+
+    // Check if all categories are selected for all metadata (no filtering needed)
+    const allCategoriesSelected = Object.keys(this.selectedCategories).every(metadataId => {
+      const selectedCategories = this.selectedCategories[metadataId]
+      if (!selectedCategories || selectedCategories.size === 0) {
+        console.log(`🔍 Metadata ${metadataId}: No selections`)
+        return false
+      }
+      
+      // Get all available categories for this metadata
+      const metadataVector = this.getMetadataVectorById(metadataId)
+      if (!metadataVector || !metadataVector.values) {
+        console.log(`🔍 Metadata ${metadataId}: No metadata vector found - assuming all selected`)
+        // If we don't have the metadata vector yet, assume all categories are selected
+        // This prevents filtering when metadata vectors aren't loaded yet
+        return true
+      }
+      
+      const availableCategories = [...new Set(metadataVector.values)]
+      const allSelected = availableCategories.every(category => selectedCategories.has(category))
+      console.log(`🔍 Metadata ${metadataId}: Available categories:`, availableCategories)
+      console.log(`🔍 Metadata ${metadataId}: Selected categories:`, Array.from(selectedCategories))
+      console.log(`🔍 Metadata ${metadataId}: All selected:`, allSelected)
+      return allSelected
+    })
+
+    console.log(`🔍 All categories selected check result:`, allCategoriesSelected)
+
+    if (allCategoriesSelected) {
+      // All categories are selected, no filtering needed
+      console.log('✅ All categories selected - returning null (no filtering)')
+      return null
+    }
+
+    // Get all metadata that have selections AND have loaded vectors
+    const metadataWithSelections = Object.keys(this.selectedCategories).filter(metadataId => {
+      const selections = this.selectedCategories[metadataId]
+      const hasSelections = selections && selections.size > 0
+      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      console.log(`🔍 Metadata ${metadataId}: hasSelections=${hasSelections}, hasLoadedVector=${hasLoadedVector}`)
+      return hasSelections && hasLoadedVector
+    })
+
+    console.log(`🔍 All metadata in selectedCategories:`, Object.keys(this.selectedCategories))
+    console.log(`🔍 Loaded metadata vectors:`, Object.keys(this.loadedMetadataVectors))
+    console.log(`🔍 Current metadata ID:`, this.currentMetadataId)
+
+    console.log(`🔍 Metadata with selections and loaded vectors:`, metadataWithSelections)
+
+    if (metadataWithSelections.length === 0) {
+      // No metadata has selections and loaded vectors, return all cells
+      console.log('🔍 No metadata has selections and loaded vectors - returning null')
+      return null
+    }
+
+    // Start with cells that match the first metadata's selections
+    let filteredIndices = this.getCellsForMetadataCategories(metadataWithSelections[0], this.selectedCategories[metadataWithSelections[0]])
+    console.log(`🔍 First metadata ${metadataWithSelections[0]} filtered indices:`, filteredIndices.length)
+
+    // Intersect with each subsequent metadata's selections
+    for (let i = 1; i < metadataWithSelections.length; i++) {
+      const metadataId = metadataWithSelections[i]
+      const selectedCategories = this.selectedCategories[metadataId]
+      const cellsForThisMetadata = this.getCellsForMetadataCategories(metadataId, selectedCategories)
+      console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
+      
+      // Intersection: keep only cells that are in both sets
+      filteredIndices = filteredIndices.filter(cellIndex => cellsForThisMetadata.includes(cellIndex))
+      console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices.length)
+    }
+
+    console.log(`🎯 Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
+    return filteredIndices
+  }
+
+  // Get cell indices that belong to the specified categories for a given metadata
+  getCellsForMetadataCategories(metadataId, selectedCategories) {
+    // Find the metadata vector for this metadata ID
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector || !metadataVector.values) {
+      console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
+      return []
+    }
+
+    console.log(`🔍 Getting cells for metadata ${metadataId} with selected categories:`, Array.from(selectedCategories))
+    
+    const cellIndices = []
+    metadataVector.values.forEach((value, index) => {
+      if (selectedCategories.has(value)) {
+        cellIndices.push(index)
+      }
+    })
+
+    console.log(`🔍 Found ${cellIndices.length} cells for metadata ${metadataId}`)
+    return cellIndices
+  }
+
+  // Helper method to get metadata vector by ID
+  getMetadataVectorById(metadataId) {
+    // Check if it's the current metadata vector (fully loaded and decompressed)
+    if (this.currentMetadataId === metadataId && this.currentMetadataVector) {
+      return this.currentMetadataVector
+    }
+    
+    // Check stored metadata vectors
+    if (this.loadedMetadataVectors && this.loadedMetadataVectors[metadataId]) {
+      const vectorData = this.loadedMetadataVectors[metadataId]
+      
+      // If it's already decompressed (has values), return it
+      if (vectorData.values) {
+        return vectorData
+      }
+      
+      // If it's compressed, decompress it on demand
+      try {
+        let values
+        if (vectorData.data_type === 'DISCRETE') {
+          values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else if (vectorData.data_type === 'CONTINUOUS') {
+          values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else {
+          console.warn(`Unknown data type for metadata ${metadataId}: ${vectorData.data_type}`)
+          return null
+        }
+        
+        // Create a fully loaded metadata vector object
+        const decompressedVector = {
+          id: metadataId,
+          name: vectorData.name,
+          data_type: vectorData.data_type,
+          values: values,
+          compression_info: vectorData.compression_info
+        }
+        
+        // Store the decompressed version
+        this.loadedMetadataVectors[metadataId] = decompressedVector
+        
+        console.log(`🔧 Decompressed metadata vector ${metadataId} on demand: ${values.length} values`)
+        return decompressedVector
+        
+      } catch (error) {
+        console.error(`Error decompressing metadata vector ${metadataId}:`, error)
+        return null
+      }
+    }
+    
+    console.warn(`Metadata vector not found for ID: ${metadataId}`)
+    return null
   }
 
 }

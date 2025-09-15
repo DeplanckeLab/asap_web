@@ -15,13 +15,13 @@
     console.log('🎨 window.CATEGORY_COLORS set to:', window.CATEGORY_COLORS);
     
     if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
-      console.error('❌ No colors loaded from server configuration!');
+      console.error('No colors loaded from server configuration!');
     } else {
-      console.log('✅ Colors loaded successfully in visualization view!');
+      console.log('Colors loaded successfully in visualization view!');
     }
   } catch (error) {
-    console.error('❌ Error loading colors from server:', error);
-    console.error('❌ Error stack:', error.stack);
+    console.error('Error loading colors from server:', error);
+    console.error('Error stack:', error.stack);
     window.CATEGORY_COLORS = null;
   }
 </script>
@@ -58,11 +58,20 @@
                       <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
                     </svg>
                   </div>
-                  <!-- Content -->
-                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
-                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
-                    <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
-                  </div>
+                <!-- Global Checkbox (hidden by default) -->
+                <div class="metadata-checkbox" 
+                     data-metadata-id="<%= metadata.id %>"
+                     data-action="click->visualization#toggleMetadataSelection"
+                     style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
+                     onmouseover="this.style.borderColor='#059669'"
+                     onmouseout="this.style.borderColor='#d1d5db'">
+                  <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
+                </div>
+                <!-- Content -->
+                <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                  <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                  <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
+                </div>
                   <!-- Hidden Radio -->
                   <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
                   <!-- Water Drop Button -->
@@ -95,9 +104,19 @@
                           %>
                           <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
+                              <!-- Category Checkbox -->
+                              <div class="category-checkbox" 
+                                   data-metadata-id="<%= metadata.id %>"
+                                   data-category="<%= category %>"
+                                   data-action="click->visualization#toggleCategorySelection"
+                                   style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: #10b981; transition: all 0.2s;"
+                                   onmouseover="this.style.borderColor='#059669'"
+                                   onmouseout="this.style.borderColor='#d1d5db'">
+                                <i class="fas fa-check" style="color: white; font-size: 10px; display: block;"></i>
+                              </div>
                               <span style="color: #374151;"><%= category %></span>
                             </div>
-                            <span style="color: #6b7280; font-weight: 500;"><%= count %> cells</span>
+                            <span style="color: #6b7280; font-weight: 500;"><%= count %></span>
                           </div>
                         <% end %>
                       <% elsif categories.is_a?(Array) %>
@@ -109,6 +128,16 @@
                           %>
                           <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
+                              <!-- Category Checkbox -->
+                              <div class="category-checkbox" 
+                                   data-metadata-id="<%= metadata.id %>"
+                                   data-category="<%= category %>"
+                                   data-action="click->visualization#toggleCategorySelection"
+                                   style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: #10b981; transition: all 0.2s;"
+                                   onmouseover="this.style.borderColor='#059669'"
+                                   onmouseout="this.style.borderColor='#d1d5db'">
+                                <i class="fas fa-check" style="color: white; font-size: 10px; display: block;"></i>
+                              </div>
                               <span style="color: #374151;"><%= category %></span>
                             </div>
                             <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
@@ -149,13 +178,13 @@
                    onmouseover="this.style.backgroundColor='#f9fafb'" 
                    onmouseout="this.style.backgroundColor=''">
                 <!-- Radio Button -->
-                <input type="radio" name="color_by" value="<%= metadata.id %>" style="margin-right: 12px;">
+                <!--<input type="radio" name="color_by" value="<%= metadata.id %>" style="margin-right: 12px;">-->
                 <!-- Content -->
                 <div style="flex: 1; min-width: 0; margin-right: 8px;">
                   <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
-                  <div style="font-size: 12px; color: #6b7280;">
+                 <!-- <div style="font-size: 12px; color: #6b7280;">
                     Range: <%= metadata.min_val&.round(2) || 'N/A' %> - <%= metadata.max_val&.round(2) || 'N/A' %>
-                  </div>
+                  </div>-->
                 </div>
                 <!-- Water Drop Button -->
                 <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 

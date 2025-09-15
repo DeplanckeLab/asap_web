@@ -116,6 +116,8 @@ export default class extends Controller {
     setTimeout(() => {
       this.setupInteractionSystem()
       this.initializeTooltip()
+      // Initialize the selection count display
+      this.updateSelectedCellsCount()
     }, 100)
     
     // No automatic loading - metadata will be loaded on-demand when needed
@@ -3694,6 +3696,56 @@ export default class extends Controller {
     }
   }
 
+  // Add all visible cells to selection
+  addAllVisibleCells() {
+    console.log('🎯 Adding all visible cells to selection')
+    
+    // Get currently visible cells
+    const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
+    
+    if (visibleCells.length === 0) {
+      console.log('⚠️ No visible cells to select')
+      return
+    }
+    
+    // Add all visible cells to selection
+    visibleCells.forEach(cellId => {
+      this.selectedCells.add(cellId)
+    })
+    
+    console.log(`✅ Added ${visibleCells.length} visible cells to selection`)
+    
+    // Update the selection count display
+    this.updateSelectedCellsCount()
+    
+    // Update point colors to show selection
+    this.updateSelectedPointColors()
+    
+    // Update button state
+    this.updateAddAllVisibleButtonState()
+  }
+
+  // Update the state of the "Add all visible cells" button
+  updateAddAllVisibleButtonState() {
+    const button = document.getElementById('add-all-visible-btn')
+    if (!button) return
+    
+    const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
+    const allVisibleSelected = visibleCells.length > 0 && visibleCells.every(cellId => this.selectedCells.has(cellId))
+    
+    if (allVisibleSelected) {
+      button.disabled = true
+      button.style.backgroundColor = '#9ca3af'
+      button.style.cursor = 'not-allowed'
+      button.title = 'All visible cells are already selected'
+    } else {
+      button.disabled = false
+      button.style.backgroundColor = '#10b981'
+      button.style.cursor = 'pointer'
+      button.title = 'Add all currently visible cells to selection'
+    }
+  }
+
   // Save selection method
   saveSelection() {
     //console.log('Saving selection:', this.selectedCells.size, 'cells')
@@ -3836,13 +3888,21 @@ export default class extends Controller {
 
   // Cancel selection method - resets points to original colors
   cancelSelection() {
-    //console.log('Canceling selection, resetting to original colors')
+    console.log('🔄 Canceling selection, reverting to previous coloring scheme')
     
     // Clear the selected cells
     this.selectedCells.clear()
     
-    // Update colors without re-rendering (preserves pan/zoom state)
-    this.updateSelectedPointColors()
+    // Revert to the previous coloring scheme if there was one
+    if (this.currentMetadataId && this.currentMetadataVector) {
+      console.log(`🎨 Reverting to metadata coloring: ${this.currentMetadataVector.name}`)
+      // Re-render with the current metadata coloring
+      this.renderPointsWithCurrentColoring()
+    } else {
+      console.log('🎨 No metadata coloring active, using default colors')
+      // Update colors without re-rendering (preserves pan/zoom state)
+      this.updateSelectedPointColors()
+    }
     
     // Update the cell count display
     this.updateSelectedCellsCount()
@@ -3853,7 +3913,7 @@ export default class extends Controller {
       this.lassoGraphics = null
     }
     
-    //console.log('Selection canceled, points reset to original colors')
+    console.log('✅ Selection canceled, reverted to previous coloring scheme')
   }
 
 
@@ -3867,9 +3927,37 @@ export default class extends Controller {
   // Update the selected cells count display
   updateSelectedCellsCount() {
     const countElement = document.getElementById('selected-cells-count')
+    console.log(`🔍 updateSelectedCellsCount called - countElement found:`, !!countElement)
+    
     if (countElement) {
-      countElement.textContent = this.selectedCells.size
+      const selectionCount = this.selectedCells ? this.selectedCells.size : 0
+      const totalVisible = this.currentVisibleCells ? this.currentVisibleCells.length : (this.currentCoordinates?.length || 0)
+      
+      console.log(`🔍 Selection count: ${selectionCount}, Total visible: ${totalVisible}`)
+      
+      if (selectionCount === 0) {
+        countElement.textContent = '0'
+        countElement.title = 'No cells selected'
+        console.log(`📊 Updated display to: 0 cells selected`)
+      } else if (this.currentVisibleCells && this.currentVisibleCells.length < (this.currentCoordinates?.length || 0)) {
+        // Filtering is applied
+        const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
+        countElement.textContent = selectionCount.toLocaleString()
+        countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of visible cells)`
+        console.log(`📊 Updated display to: ${selectionCount} cells selected (${percentage}% of visible cells)`)
+      } else {
+        // No filtering applied
+        const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
+        countElement.textContent = selectionCount.toLocaleString()
+        countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of total cells)`
+        console.log(`📊 Updated display to: ${selectionCount} cells selected (${percentage}% of total cells)`)
+      }
+    } else {
+      console.log(`❌ selected-cells-count element not found!`)
     }
+    
+    // Update the "Add all visible cells" button state
+    this.updateAddAllVisibleButtonState()
   }
 
   // Tooltip methods
@@ -4484,13 +4572,62 @@ export default class extends Controller {
     // Update the current visible cells state
     this.currentVisibleCells = filteredIndices
     
+    // Update current selection to only include visible cells
+    this.updateSelectionBasedOnFiltering(filteredIndices)
+    
     // Update point count display immediately
     this.updatePointCountDisplay(filteredIndices)
+    
+    // Update button state after filtering
+    this.updateAddAllVisibleButtonState()
     
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(() => {
       this.updatePointVisibility(filteredIndices)
     })
+  }
+
+  // Update current selection to only include cells that are currently visible (not filtered out)
+  updateSelectionBasedOnFiltering(filteredIndices) {
+    console.log(`🔍 updateSelectionBasedOnFiltering called with filteredIndices:`, filteredIndices ? filteredIndices.length : 'null')
+    console.log(`🔍 Current selectedCells size:`, this.selectedCells ? this.selectedCells.size : 'null')
+    
+    if (!this.selectedCells || this.selectedCells.size === 0) {
+      // No current selection, nothing to update
+      console.log(`📊 No current selection to update`)
+      return
+    }
+
+    const originalSelectionSize = this.selectedCells.size
+    
+    if (!filteredIndices) {
+      // No filtering applied - all cells are visible, keep current selection
+      console.log(`📊 Selection unchanged: ${originalSelectionSize} cells (no filtering)`)
+      return
+    }
+
+    // Create a set of visible cell indices for O(1) lookup
+    const visibleCellsSet = new Set(filteredIndices)
+    
+    // Filter the current selection to only include visible cells
+    const filteredSelection = new Set()
+    this.selectedCells.forEach(cellId => {
+      if (visibleCellsSet.has(cellId)) {
+        filteredSelection.add(cellId)
+      }
+    })
+    
+    // Update the current selection
+    this.selectedCells = filteredSelection
+    
+    const newSelectionSize = this.selectedCells.size
+    console.log(`📊 Selection updated: ${originalSelectionSize} → ${newSelectionSize} cells (filtered)`)
+    
+    // Update the selection count display
+    this.updateSelectedCellsCount()
+    
+    // Update point colors to reflect the new selection
+    this.updateSelectedPointColors()
   }
 
   // Incremental filtering - much faster for small changes

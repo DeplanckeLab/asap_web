@@ -415,6 +415,19 @@
               </div>
             </div>
 
+            <!-- Add all visible cells button -->
+            <div style="margin-bottom: 16px;">
+              <button id="add-all-visible-btn"
+                      style="width: 100%; padding: 8px 12px; background-color: #10b981; color: white; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;"
+                      title="Add all currently visible cells to selection"
+                      data-action="click->visualization#addAllVisibleCells"
+                      onmouseover="this.style.backgroundColor='#059669'"
+                      onmouseout="this.style.backgroundColor='#10b981'">
+                <i class="fas fa-plus" style="margin-right: 6px;"></i>
+                Add all visible cells to selection
+              </button>
+            </div>
+
             <!-- Saved Selections List -->
             <div>
               <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>

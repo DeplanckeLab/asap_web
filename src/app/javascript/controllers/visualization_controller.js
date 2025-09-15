@@ -15,6 +15,9 @@ export default class extends Controller {
     // Initialize selected categories tracking
     this.selectedCategories = {}
     this.loadedMetadataVectors = {} // Store all loaded metadata vectors for filtering
+    this.currentVisibleCells = null // Track currently visible cells (null = all visible)
+    this.lastFilterState = null // Track last filter state for incremental updates
+    this.filterCache = new Map() // Cache for intersection results
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
     // Simple test - remove this after debugging
@@ -1344,6 +1347,9 @@ export default class extends Controller {
     // Show checkboxes for this metadata now that it's loaded
     this.showCheckboxesForMetadata(metadataId)
     
+    // Clear incremental state when new metadata is loaded
+    this.clearIncrementalState()
+    
     // Also store the metadata ID for color mapping
     this.currentMetadataId = metadataId
 
@@ -1682,6 +1688,7 @@ export default class extends Controller {
           const point = new this.PIXI.Graphics()
           point.beginFill(color)
           point.alpha = alpha
+          point.originalAlpha = alpha // Store original alpha for visibility updates
           point.drawCircle(0, 0, pointSize)
           point.endFill()
           point.x = screenX
@@ -1725,6 +1732,7 @@ export default class extends Controller {
           const point = new this.PIXI.Graphics()
           point.beginFill(color)
           point.alpha = alpha
+          point.originalAlpha = alpha // Store original alpha for visibility updates
           point.drawCircle(0, 0, pointSize)
           point.endFill()
           point.x = screenX
@@ -1768,6 +1776,7 @@ export default class extends Controller {
         const point = new this.PIXI.Graphics()
         point.beginFill(color)
         point.alpha = alpha
+        point.originalAlpha = alpha // Store original alpha for visibility updates
         point.drawCircle(0, 0, pointSize)
         point.endFill()
         point.x = screenX
@@ -4246,22 +4255,146 @@ export default class extends Controller {
     console.log(`✅ Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
   }
 
+  // Optimized method to show/hide points without re-rendering
+  updatePointVisibility(filteredIndices) {
+    if (!this.scatterContainer || !this.scatterContainer.children) {
+      console.log('⚠️ No scatter container or children - cannot update visibility')
+      return
+    }
+
+    const startTime = performance.now()
+    let visibleCount = 0
+    let hiddenCount = 0
+
+    // Convert filteredIndices to Set for O(1) lookup if it exists
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+
+    // Iterate through all points and show/hide them based on filtering
+    this.scatterContainer.children.forEach((point) => {
+      if (point.isPoint) {
+        // Use the cellId property instead of array index
+        const shouldBeVisible = !filteredSet || filteredSet.has(point.cellId)
+        
+        if (shouldBeVisible) {
+          point.visible = true
+          point.alpha = point.originalAlpha || 1.0 // Restore original alpha
+          visibleCount++
+        } else {
+          point.visible = false
+          hiddenCount++
+        }
+      }
+    })
+
+    const endTime = performance.now()
+    console.log(`⚡ Visibility update completed in ${(endTime - startTime).toFixed(2)}ms: ${visibleCount} visible, ${hiddenCount} hidden`)
+
+    // Update point count display
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      const totalPoints = this.currentCoordinates?.length || 0
+      if (filteredIndices) {
+        pointCountElement.textContent = `${filteredIndices.length.toLocaleString()} points`
+      } else {
+        pointCountElement.textContent = `${totalPoints.toLocaleString()} points`
+      }
+    }
+  }
+
   updateCellFiltering() {
     console.log('🔄 Updating cell filtering based on selected categories:', this.selectedCategories)
     
-    // Debug: Check what filtered indices we get
-    const filteredIndices = this.getFilteredCellIndices()
+    // Use incremental filtering for better performance
+    const filteredIndices = this.getIncrementalFilteredIndices()
     console.log('🎯 Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
     
-    // Re-render the plot with filtered points
-    this.renderPointsWithCurrentColoring()
+    // Update the current visible cells state
+    this.currentVisibleCells = filteredIndices
+    
+    // Use requestAnimationFrame for smooth updates
+    requestAnimationFrame(() => {
+      this.updatePointVisibility(filteredIndices)
+    })
   }
 
-  // Get the intersection of selected cells across all metadata
+  // Incremental filtering - much faster for small changes
+  getIncrementalFilteredIndices() {
+    if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
+      // No filtering applied, return all cells
+      return null
+    }
+
+    // Get all metadata that have selections AND have loaded vectors
+    const metadataWithSelections = Object.keys(this.selectedCategories).filter(metadataId => {
+      const selections = this.selectedCategories[metadataId]
+      const hasSelections = selections && selections.size > 0
+      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      return hasSelections && hasLoadedVector
+    })
+
+    if (metadataWithSelections.length === 0) {
+      return null
+    }
+
+    // Create current filter state
+    const currentFilterState = this.createFilterCacheKey()
+    
+    // If this is the same as last state, return current visible cells
+    if (this.lastFilterState === currentFilterState && this.currentVisibleCells) {
+      console.log('🚀 Using cached incremental result')
+      return this.currentVisibleCells
+    }
+
+    // If we have no current visible cells, do full calculation
+    if (!this.currentVisibleCells) {
+      console.log('🔄 No current visible cells - doing full calculation')
+      const result = this.getFilteredCellIndices()
+      this.lastFilterState = currentFilterState
+      return result
+    }
+
+    // Try incremental update based on what changed
+    const incrementalResult = this.tryIncrementalUpdate(metadataWithSelections)
+    if (incrementalResult !== null) {
+      console.log('⚡ Using incremental update')
+      this.lastFilterState = currentFilterState
+      return incrementalResult
+    }
+
+    // Fall back to full calculation
+    console.log('🔄 Fallback to full calculation')
+    const result = this.getFilteredCellIndices()
+    this.lastFilterState = currentFilterState
+    return result
+  }
+
+  // Try to do an incremental update
+  tryIncrementalUpdate(metadataWithSelections) {
+    // For now, let's implement a simple case: single metadata changes
+    if (metadataWithSelections.length === 1) {
+      const metadataId = metadataWithSelections[0]
+      const selectedCategories = this.selectedCategories[metadataId]
+      console.log(`🔄 Single metadata incremental filtering for ${metadataId}`)
+      return this.getCellsForMetadataCategories(metadataId, selectedCategories)
+    }
+
+    // For multiple metadata, we could implement more sophisticated logic
+    // For now, return null to trigger full calculation
+    return null
+  }
+
+  // Get the intersection of selected cells across all metadata (full calculation)
   getFilteredCellIndices() {
     if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
       // No filtering applied, return all cells
       return null
+    }
+
+    // Create cache key from current selections
+    const cacheKey = this.createFilterCacheKey()
+    if (this.filterCache.has(cacheKey)) {
+      console.log('🚀 Using cached filter result')
+      return this.filterCache.get(cacheKey)
     }
 
     // Check if all categories are selected for all metadata (no filtering needed)
@@ -4322,19 +4455,26 @@ export default class extends Controller {
     let filteredIndices = this.getCellsForMetadataCategories(metadataWithSelections[0], this.selectedCategories[metadataWithSelections[0]])
     console.log(`🔍 First metadata ${metadataWithSelections[0]} filtered indices:`, filteredIndices.length)
 
-    // Intersect with each subsequent metadata's selections
+    // Intersect with each subsequent metadata's selections using Set for O(1) lookups
     for (let i = 1; i < metadataWithSelections.length; i++) {
       const metadataId = metadataWithSelections[i]
       const selectedCategories = this.selectedCategories[metadataId]
       const cellsForThisMetadata = this.getCellsForMetadataCategories(metadataId, selectedCategories)
       console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
       
+      // Convert to Set for O(1) lookup instead of O(n) includes()
+      const cellsSet = new Set(cellsForThisMetadata)
+      
       // Intersection: keep only cells that are in both sets
-      filteredIndices = filteredIndices.filter(cellIndex => cellsForThisMetadata.includes(cellIndex))
+      filteredIndices = filteredIndices.filter(cellIndex => cellsSet.has(cellIndex))
       console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices.length)
     }
 
     console.log(`🎯 Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
+    
+    // Cache the result
+    this.filterCache.set(cacheKey, filteredIndices)
+    
     return filteredIndices
   }
 
@@ -4349,15 +4489,38 @@ export default class extends Controller {
 
     console.log(`🔍 Getting cells for metadata ${metadataId} with selected categories:`, Array.from(selectedCategories))
     
+    const startTime = performance.now()
     const cellIndices = []
-    metadataVector.values.forEach((value, index) => {
-      if (selectedCategories.has(value)) {
+    const values = metadataVector.values
+    
+    // Use for loop instead of forEach for better performance
+    for (let index = 0; index < values.length; index++) {
+      if (selectedCategories.has(values[index])) {
         cellIndices.push(index)
       }
-    })
+    }
 
-    console.log(`🔍 Found ${cellIndices.length} cells for metadata ${metadataId}`)
+    const endTime = performance.now()
+    console.log(`🔍 Found ${cellIndices.length} cells for metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
     return cellIndices
+  }
+
+  // Create a cache key from current selections
+  createFilterCacheKey() {
+    const keyParts = []
+    Object.keys(this.selectedCategories).sort().forEach(metadataId => {
+      const categories = Array.from(this.selectedCategories[metadataId]).sort()
+      keyParts.push(`${metadataId}:${categories.join(',')}`)
+    })
+    return keyParts.join('|')
+  }
+
+  // Clear incremental filtering state
+  clearIncrementalState() {
+    this.currentVisibleCells = null
+    this.lastFilterState = null
+    this.filterCache.clear()
+    console.log('🧹 Cleared incremental filtering state')
   }
 
   // Helper method to get metadata vector by ID

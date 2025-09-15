@@ -1350,6 +1350,9 @@ export default class extends Controller {
     // Clear incremental state when new metadata is loaded
     this.clearIncrementalState()
     
+    // Clear all checkbox selections when switching metadata
+    this.clearAllCheckboxSelections()
+    
     // Also store the metadata ID for color mapping
     this.currentMetadataId = metadataId
 
@@ -1359,10 +1362,8 @@ export default class extends Controller {
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
     
-    // Initialize checkboxes if not already done
-    if (Object.keys(this.selectedCategories).length === 0) {
-      this.initializeAllCheckboxes()
-    }
+    // Initialize checkboxes for the new metadata
+    this.initializeAllCheckboxes()
     
     // Update cell filtering after loading metadata vector
     this.updateCellFiltering()
@@ -1711,8 +1712,7 @@ export default class extends Controller {
         })
         
         // Update point count display with filtered count
-        const filteredCount = filteredIndices ? filteredIndices.length : this.currentCoordinates.length
-        this.updatePointCountDisplay(filteredCount, uniqueValues.length)
+        this.updatePointCountDisplay(filteredIndices)
         
       } else if (data_type === 'CONTINUOUS') {
         // Render each point individually to support selection transparency and color reset
@@ -1755,8 +1755,7 @@ export default class extends Controller {
         }
         
         // Update point count display with filtered count
-        const filteredCount = filteredIndices ? filteredIndices.length : this.currentCoordinates.length
-        this.updatePointCountDisplay(filteredCount, 'continuous')
+        this.updatePointCountDisplay(filteredIndices)
       }
     } else {
       // Render each point individually to support selection transparency and color reset
@@ -1840,7 +1839,7 @@ export default class extends Controller {
     this.scatterContainer.addChild(graphics)
     
     // Update point count display
-    this.updatePointCountDisplay(this.currentCoordinates.length, 'continuous')
+    this.updatePointCountDisplay(null)
   }
 
   // Create color map for discrete categories
@@ -1956,17 +1955,6 @@ export default class extends Controller {
     }
   }
 
-  // Update point count display
-  updatePointCountDisplay(totalPoints, categoriesOrType) {
-    const pointCountElement = document.getElementById('point-count')
-    if (pointCountElement) {
-      if (typeof categoriesOrType === 'number') {
-        pointCountElement.textContent = `${totalPoints.toLocaleString()} points, ${categoriesOrType} categories`
-      } else {
-        pointCountElement.textContent = `${totalPoints.toLocaleString()} points (${categoriesOrType})`
-      }
-    }
-  }
 
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
@@ -4235,6 +4223,9 @@ export default class extends Controller {
     })
     
     console.log(`✅ Initialized checkboxes for metadata ${metadataId}:`, Array.from(this.selectedCategories[metadataId]))
+    
+    // Update point count display after initializing checkboxes
+    this.updateCellFiltering()
   }
 
   showCheckboxesForMetadata(metadataId) {
@@ -4288,17 +4279,79 @@ export default class extends Controller {
 
     const endTime = performance.now()
     console.log(`⚡ Visibility update completed in ${(endTime - startTime).toFixed(2)}ms: ${visibleCount} visible, ${hiddenCount} hidden`)
+  }
 
-    // Update point count display
+  // Update the point count display with detailed filtering information
+  updatePointCountDisplay(filteredIndices) {
     const pointCountElement = document.getElementById('point-count')
-    if (pointCountElement) {
-      const totalPoints = this.currentCoordinates?.length || 0
-      if (filteredIndices) {
-        pointCountElement.textContent = `${filteredIndices.length.toLocaleString()} points`
+    if (!pointCountElement) return
+
+    const totalPoints = this.currentCoordinates?.length || 0
+    
+    // Handle undefined or null filteredIndices
+    if (!filteredIndices || filteredIndices === undefined) {
+      // No filtering applied - show total points
+      pointCountElement.textContent = `${totalPoints.toLocaleString()} points`
+      pointCountElement.title = 'All points visible (no filtering applied)'
+      pointCountElement.style.color = '' // Reset to default
+      pointCountElement.style.fontWeight = ''
+    } else {
+      // Filtering applied - show filtered count and percentage
+      const filteredCount = filteredIndices.length || 0
+      const percentage = totalPoints > 0 ? ((filteredCount / totalPoints) * 100).toFixed(1) : 0
+      const filteringSummary = this.getFilteringSummary()
+      
+      pointCountElement.textContent = `${filteredCount.toLocaleString()} points`
+      
+      // Create detailed tooltip
+      let tooltip = `${filteredCount.toLocaleString()} of ${totalPoints.toLocaleString()} points visible (${percentage}%)`
+      if (filteringSummary) {
+        tooltip += `\n\nActive filters: ${filteringSummary}`
+      }
+      pointCountElement.title = tooltip
+      
+      // Add visual indicator if filtering is applied
+      if (filteredCount < totalPoints) {
+        pointCountElement.style.color = '#f59e0b' // Orange to indicate filtering
+        pointCountElement.style.fontWeight = '600'
       } else {
-        pointCountElement.textContent = `${totalPoints.toLocaleString()} points`
+        pointCountElement.style.color = '' // Reset to default
+        pointCountElement.style.fontWeight = ''
       }
     }
+
+    // Ensure the plot info panel is visible
+    this.showPlotInfoPanel()
+  }
+
+  // Show the plot info panel
+  showPlotInfoPanel() {
+    const plotInfo = document.getElementById('plot-info')
+    if (plotInfo) {
+      plotInfo.style.display = 'block'
+    }
+  }
+
+  // Get a summary of current filtering constraints
+  getFilteringSummary() {
+    if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
+      return null
+    }
+
+    const summary = []
+    Object.keys(this.selectedCategories).forEach(metadataId => {
+      const selections = this.selectedCategories[metadataId]
+      if (selections && selections.size > 0) {
+        const metadataVector = this.getMetadataVectorById(metadataId)
+        if (metadataVector) {
+          const metadataName = metadataVector.name
+          const selectedCategories = Array.from(selections)
+          summary.push(`${metadataName}: ${selectedCategories.length} categories`)
+        }
+      }
+    })
+
+    return summary.length > 0 ? summary.join(' • ') : null
   }
 
   updateCellFiltering() {
@@ -4310,6 +4363,9 @@ export default class extends Controller {
     
     // Update the current visible cells state
     this.currentVisibleCells = filteredIndices
+    
+    // Update point count display immediately
+    this.updatePointCountDisplay(filteredIndices)
     
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(() => {
@@ -4521,6 +4577,24 @@ export default class extends Controller {
     this.lastFilterState = null
     this.filterCache.clear()
     console.log('🧹 Cleared incremental filtering state')
+  }
+
+  // Clear all checkbox selections when switching metadata
+  clearAllCheckboxSelections() {
+    // Clear the selected categories for all metadata
+    this.selectedCategories = {}
+    
+    // Reset all checkbox visual states
+    const allCheckboxes = document.querySelectorAll('.metadata-checkbox, .category-checkbox')
+    allCheckboxes.forEach(checkbox => {
+      checkbox.style.backgroundColor = '#10b981' // Green (selected)
+      const icon = checkbox.querySelector('i')
+      if (icon) {
+        icon.style.display = 'block'
+      }
+    })
+    
+    console.log('🧹 Cleared all checkbox selections')
   }
 
   // Helper method to get metadata vector by ID

@@ -90,6 +90,8 @@ export default class extends Controller {
     this.interactionMode = 'pan' // 'pan', 'lasso', 'pick', or 'zoom'
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
+    console.log(`🎯 Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
+    this.currentPointSize = 1.0 // Store current point size for consistent rendering
     this.lassoGraphics = null
     this.lassoPoints = []
     this.isDrawingLasso = false
@@ -530,9 +532,24 @@ export default class extends Controller {
       if (placeholder) placeholder.style.display = 'none'
       if (plotInfo) plotInfo.style.display = 'block'
       
-      // Create main container for the scatter plot
+      // Create grid container (bottom layer)
+      this.gridContainer = new PIXI.Container()
+      this.gridContainer.visible = true // Initially visible
+      this.pixiApp.stage.addChild(this.gridContainer)
+      
+      // Create main container for the scatter plot (middle layer)
       this.scatterContainer = new PIXI.Container()
       this.pixiApp.stage.addChild(this.scatterContainer)
+      
+      // Create axes container (top layer)
+      this.axesContainer = new PIXI.Container()
+      this.axesContainer.visible = true // Initially visible
+      this.pixiApp.stage.addChild(this.axesContainer)
+      
+      // Create category labels container (topmost layer)
+      this.categoryLabelsContainer = new PIXI.Container()
+      this.categoryLabelsContainer.visible = true // Initially visible
+      this.pixiApp.stage.addChild(this.categoryLabelsContainer)
       
       // Store current loom file
       this.currentLoomFile = this.loomFileSelectTarget.value
@@ -557,13 +574,19 @@ export default class extends Controller {
     this.scatterContainer.removeChildren()
     
     // Calculate bounds for normalization
-    const bounds = this.calculateBounds(coordinates)
+    const originalBounds = this.calculateBounds(coordinates)
+    const bounds = this.getAdjustedBounds(originalBounds)
     this.currentBounds = bounds // Store for future transitions
     this.currentCoordinates = coordinates // Store coordinates for future transitions
     console.log('Coordinate bounds:', bounds)
     
+    // Render axes, grid, and category labels
+    this.renderAxes()
+    this.renderGrid()
+    this.renderCategoryLabels()
+    
     // Set point properties
-    const pointSize = 1
+    const pointSize = this.currentPointSize
     const pointColor = 0x3b82f6 // Blue color
     
     // Render points individually to support pan/zoom optimization
@@ -629,7 +652,8 @@ export default class extends Controller {
     console.log('Current bounds:', this.currentBounds)
     
     // Calculate new bounds
-    const newBounds = this.calculateBounds(coordinates)
+    const originalNewBounds = this.calculateBounds(coordinates)
+    const newBounds = this.getAdjustedBounds(originalNewBounds)
     console.log('New coordinate bounds:', newBounds)
     
     // Check if we have existing points to update
@@ -654,6 +678,12 @@ export default class extends Controller {
       // Clear existing individual points and re-render
       this.scatterContainer.removeChildren()
       
+      // Update bounds and render axes, grid, and category labels
+      this.currentBounds = newBounds
+      this.renderAxes()
+      this.renderGrid()
+      this.renderCategoryLabels()
+      
       // Re-render with new coordinates using current coloring
       this.renderPointsWithCurrentColoring()
       
@@ -674,6 +704,12 @@ export default class extends Controller {
     // Clear incremental filtering state when embedding changes
     // This ensures filtering works correctly with new coordinate indices
     this.clearIncrementalState()
+    
+    // Update bounds and render axes, grid, and category labels with new embedding bounds
+    this.currentBounds = newBounds
+    this.renderAxes()
+    this.renderGrid()
+    this.renderCategoryLabels()
     
     // Clean up any existing animated container
     if (this.animatedContainer) {
@@ -697,7 +733,7 @@ export default class extends Controller {
 
   // Update existing graphics object with current coloring scheme
   updatePointsWithCurrentColoring(graphics, coordinates, bounds) {
-    const pointSize = 1
+    const pointSize = this.currentPointSize
 
     // Check if we have metadata coloring active
     if (this.currentMetadataVector && this.currentMetadataVector.values) {
@@ -835,7 +871,7 @@ export default class extends Controller {
 
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
     console.log('Creating animated points from previous to new coordinates')
-    const pointSize = 1 // Keep same size as original plot
+    const pointSize = this.currentPointSize // Use current point size setting
     const animationDuration = 4000 // 4 seconds for very smooth transition
     
     console.log('Creating animated points with current coloring scheme')
@@ -844,6 +880,11 @@ export default class extends Controller {
     const animatedContainer = new this.PIXI.Container()
     this.scatterContainer.addChild(animatedContainer)
     this.animatedContainer = animatedContainer // Store reference for cleanup
+    
+    // Clear existing category labels during animation
+    if (this.categoryLabelsContainer) {
+      this.categoryLabelsContainer.removeChildren()
+    }
     
     // Clear any existing individual points (they're already cleared by removeChildren() in updateScatterPlot)
     
@@ -929,6 +970,7 @@ export default class extends Controller {
         point.sprite.visible = shouldBeVisible
       }
       
+      
       if (progress < 1) {
         requestAnimationFrame(animate)
       } else {
@@ -940,6 +982,14 @@ export default class extends Controller {
         // Update stored coordinates and bounds for next transition
         this.currentBounds = toBounds
         this.currentCoordinates = newCoordinates
+        
+        // Clear animated labels and render final static labels
+        this.categoryLabelsContainer.removeChildren()
+        
+        // Update axes, grid, and category labels with final bounds
+        this.renderAxes()
+        this.renderGrid()
+        this.renderCategoryLabels()
         
         // Reapply filtering after embedding change
         console.log('🔄 Reapplying filtering after embedding change...')
@@ -953,6 +1003,7 @@ export default class extends Controller {
     animate()
   }
 
+
   convertToGraphicsObject(newCoordinates, bounds, animatedContainer) {
     console.log('Converting animated points back to efficient graphics object')
     
@@ -961,7 +1012,7 @@ export default class extends Controller {
     
     // Create new efficient graphics object
     const graphics = new this.PIXI.Graphics()
-    const pointSize = 1
+    const pointSize = this.currentPointSize
     const pointColor = 0x3b82f6
     
     // Render points in batches for performance
@@ -1022,6 +1073,52 @@ export default class extends Controller {
       minY: minY - paddingY,
       maxY: maxY + paddingY
     }
+  }
+
+  // Get bounds adjusted for axes margins
+  getAdjustedBounds(originalBounds) {
+    console.log('🎯 getAdjustedBounds called with:', originalBounds)
+    console.log('🎯 axesContainer exists:', !!this.axesContainer)
+    console.log('🎯 axesContainer visible:', this.axesContainer ? this.axesContainer.visible : 'N/A')
+    
+    if (!originalBounds || !this.axesContainer || !this.axesContainer.visible) {
+      console.log('🎯 Returning original bounds (no adjustment needed)')
+      return originalBounds
+    }
+
+    const { minX, maxX, minY, maxY } = originalBounds
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
+
+    // Calculate margins needed for axes
+    const leftMargin = 60   // Space for Y-axis labels
+    const bottomMargin = 60 // Space for X-axis labels
+
+    // Calculate the data range that fits in the available space
+    const availableWidth = width - leftMargin - 20  // 20px right margin
+    const availableHeight = height - bottomMargin - 20 // 20px top margin
+
+    // Calculate the data range per pixel
+    const dataWidth = maxX - minX
+    const dataHeight = maxY - minY
+    const dataPerPixelX = dataWidth / (width - 100) // Original calculation
+    const dataPerPixelY = dataHeight / (height - 100) // Original calculation
+
+    // Adjust bounds to account for margins
+    const adjustedMinX = minX - (leftMargin * dataPerPixelX)
+    const adjustedMaxX = maxX + (20 * dataPerPixelX) // Right margin
+    const adjustedMinY = minY - (20 * dataPerPixelY) // Top margin
+    const adjustedMaxY = maxY + (bottomMargin * dataPerPixelY)
+
+    const adjustedBounds = {
+      minX: adjustedMinX,
+      maxX: adjustedMaxX,
+      minY: adjustedMinY,
+      maxY: adjustedMaxY
+    }
+    
+    console.log('🎯 Returning adjusted bounds:', adjustedBounds)
+    return adjustedBounds
   }
 
   normalizeX(x, bounds) {
@@ -1410,6 +1507,9 @@ export default class extends Controller {
     // Clear all checkbox selections when switching metadata
     this.clearAllCheckboxSelections()
     
+    // Update settings window state
+    this.updateCategoriesCheckboxState()
+    
     // Also store the metadata ID for color mapping
     this.currentMetadataId = metadataId
 
@@ -1685,6 +1785,9 @@ export default class extends Controller {
     // Use the centralized coloring approach
     this.forceReRenderPoints()
     
+    // Render category labels if this is discrete metadata
+    this.renderCategoryLabels()
+    
     console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
 
@@ -1698,7 +1801,8 @@ export default class extends Controller {
     // Clear existing points
     this.scatterContainer.removeChildren()
     
-    const pointSize = 1
+    const pointSize = this.currentPointSize
+    console.log(`🎯 renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
 
     // Get filtered cell indices based on checkbox selections
     const filteredIndices = this.getFilteredCellIndices()
@@ -1889,7 +1993,7 @@ export default class extends Controller {
       const screenY = this.normalizeY(coord[1], this.currentBounds)
       
       graphics.beginFill(color)
-      graphics.drawCircle(screenX, screenY, 1)
+      graphics.drawCircle(screenX, screenY, this.currentPointSize)
       graphics.endFill()
     })
     
@@ -1932,7 +2036,7 @@ export default class extends Controller {
         colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
       } else {
         // Use default color
-        colorMap[category] = colors[index % colors.length]
+      colorMap[category] = colors[index % colors.length]
       }
     })
     
@@ -2760,6 +2864,9 @@ export default class extends Controller {
   
   // Show color picker form
   showColorPicker(colorDisk, categoryName, metadataId) {
+    console.log(`🎨 showColorPicker called for category: ${categoryName}, metadata: ${metadataId}`)
+    console.log(`🎨 Current point size when opening color picker: ${this.currentPointSize}`)
+    
     // Remove existing color picker
     const existingPicker = document.getElementById('color-picker-form')
     if (existingPicker) {
@@ -2841,6 +2948,7 @@ export default class extends Controller {
       // Re-render the plot with the new color
       if (this.currentMetadataVector && this.currentMetadataId === metadataId) {
         console.log('🎨 Color changed, re-rendering plot with updated colors')
+        console.log(`🎨 Current point size before re-render: ${this.currentPointSize}`)
         this.renderPointsWithCurrentColoring()
       } else {
         console.log('🎨 Color saved but not re-rendering plot (different metadata active)')
@@ -3087,6 +3195,11 @@ export default class extends Controller {
     // Update current bounds
     this.currentBounds = newBounds
     
+    // Update axes, grid, and category labels with new bounds
+    this.renderAxes()
+    this.renderGrid()
+    this.renderCategoryLabels()
+    
     // Use translation approach like pan mode, centered on mouse position
     this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
   }
@@ -3234,6 +3347,9 @@ export default class extends Controller {
     // Update visualization with new bounds
     //console.log('Pan: Updating bounds to:', newBounds)
     this.updateVisualizationBounds(newBounds)
+    
+    // Also update grid during pan for real-time feedback
+    this.renderGrid()
   }
 
   onPanMouseUp(event) {
@@ -3287,7 +3403,7 @@ export default class extends Controller {
     
     // Reset to original bounds
     const originalBounds = this.calculateBounds(this.currentCoordinates)
-    this.currentBounds = originalBounds
+    this.currentBounds = this.getAdjustedBounds(originalBounds)
     
     // Force re-render all points with original bounds
     this.scatterContainer.removeChildren()
@@ -3299,6 +3415,11 @@ export default class extends Controller {
   updateVisualizationBounds(newBounds) {
     //console.log('updateVisualizationBounds called with:', newBounds)
     this.currentBounds = newBounds
+    
+    // Update axes, grid, and category labels with new bounds
+    this.renderAxes()
+    this.renderGrid()
+    this.renderCategoryLabels()
     
     // Update existing point positions instead of re-rendering
     if (this.currentCoordinates && this.scatterContainer) {
@@ -3524,6 +3645,397 @@ export default class extends Controller {
     }
   }
 
+  // Render plot axes with labels
+  renderAxes() {
+    if (!this.axesContainer || !this.currentBounds || !this.pixiApp) {
+      return
+    }
+
+    // Clear existing axes
+    this.axesContainer.removeChildren()
+
+    // Use current view bounds (which change with pan/zoom)
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
+
+    // Create axes graphics
+    const axesGraphics = new PIXI.Graphics()
+    axesGraphics.lineStyle(2, 0x333333, 0.8) // Dark gray lines
+
+    // X-axis (horizontal line at bottom)
+    const xAxisY = height - 50 // Leave space for labels
+    axesGraphics.moveTo(50, xAxisY)
+    axesGraphics.lineTo(width - 50, xAxisY)
+
+    // Y-axis (vertical line at left)
+    const yAxisX = 50 // Leave space for labels
+    axesGraphics.moveTo(yAxisX, 50)
+    axesGraphics.lineTo(yAxisX, height - 50)
+
+    this.axesContainer.addChild(axesGraphics)
+
+    // Add axis labels
+    this.addAxisLabels(minX, maxX, minY, maxY, width, height)
+  }
+
+  // Add axis labels
+  addAxisLabels(minX, maxX, minY, maxY, width, height) {
+    // X-axis label (Dimension 1)
+    const xLabel = new PIXI.Text('Dimension 1', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: 14,
+      fill: 0x333333,
+      align: 'center'
+    })
+    xLabel.x = width / 2
+    xLabel.y = height - 20
+    xLabel.anchor.set(0.5, 0.5)
+    this.axesContainer.addChild(xLabel)
+
+    // Y-axis label (Dimension 2) - rotated 90 degrees
+    const yLabel = new PIXI.Text('Dimension 2', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: 14,
+      fill: 0x333333,
+      align: 'center'
+    })
+    yLabel.x = 20
+    yLabel.y = height / 2
+    yLabel.anchor.set(0.5, 0.5)
+    yLabel.rotation = -Math.PI / 2 // Rotate 90 degrees counter-clockwise
+    this.axesContainer.addChild(yLabel)
+
+    // Add tick marks and values
+    this.addTickMarks(minX, maxX, minY, maxY, width, height)
+  }
+
+  // Add tick marks and values
+  addTickMarks(minX, maxX, minY, maxY, width, height) {
+    const tickLength = 5
+    const xAxisY = height - 50
+    const yAxisX = 50
+
+    // Calculate smart tick spacing based on zoom level
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+
+    // X-axis ticks (bottom)
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const t = (value - minX) / (maxX - minX)
+      const x = 50 + t * (width - 100)
+
+      // Skip if outside visible area
+      if (x < 50 || x > width - 50) continue
+
+      // Tick mark
+      const tickGraphics = new PIXI.Graphics()
+      tickGraphics.lineStyle(1, 0x666666, 0.6)
+      tickGraphics.moveTo(x, xAxisY - tickLength)
+      tickGraphics.lineTo(x, xAxisY + tickLength)
+      this.axesContainer.addChild(tickGraphics)
+
+      // Tick value
+      const tickText = new PIXI.Text(this.formatTickValue(value), {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: 10,
+        fill: 0x666666,
+        align: 'center'
+      })
+      tickText.x = x
+      tickText.y = xAxisY + 15
+      tickText.anchor.set(0.5, 0.5)
+      this.axesContainer.addChild(tickText)
+    }
+
+    // Y-axis ticks (left)
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const t = (value - minY) / (maxY - minY)
+      const y = 50 + t * (height - 100)
+
+      // Skip if outside visible area
+      if (y < 50 || y > height - 50) continue
+
+      // Tick mark
+      const tickGraphics = new PIXI.Graphics()
+      tickGraphics.lineStyle(1, 0x666666, 0.6)
+      tickGraphics.moveTo(yAxisX - tickLength, y)
+      tickGraphics.lineTo(yAxisX + tickLength, y)
+      this.axesContainer.addChild(tickGraphics)
+
+      // Tick value
+      const tickText = new PIXI.Text(this.formatTickValue(value), {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: 10,
+        fill: 0x666666,
+        align: 'center'
+      })
+      tickText.x = yAxisX - 15
+      tickText.y = y
+      tickText.anchor.set(0.5, 0.5)
+      this.axesContainer.addChild(tickText)
+    }
+  }
+
+  // Calculate smart tick spacing based on range
+  calculateTickSpacing(range) {
+    // Target about 5-8 ticks per axis
+    const targetTicks = 6
+    const roughSpacing = range / targetTicks
+    
+    // Find nice round numbers
+    const magnitude = Math.pow(10, Math.floor(Math.log10(roughSpacing)))
+    const normalized = roughSpacing / magnitude
+    
+    let niceSpacing
+    if (normalized <= 1) {
+      niceSpacing = 1
+    } else if (normalized <= 2) {
+      niceSpacing = 2
+    } else if (normalized <= 5) {
+      niceSpacing = 5
+    } else {
+      niceSpacing = 10
+    }
+    
+    return niceSpacing * magnitude
+  }
+
+  // Format tick values nicely
+  formatTickValue(value) {
+    // If it's an integer, don't show decimals
+    if (Number.isInteger(value)) {
+      return value.toString()
+    }
+    
+    // For non-integers, use appropriate precision and remove trailing zeros
+    if (Math.abs(value) >= 100) {
+      return value.toFixed(1).replace(/\.0$/, '')
+    } else if (Math.abs(value) >= 10) {
+      return value.toFixed(2).replace(/\.0+$/, '')
+    } else if (Math.abs(value) >= 1) {
+      return value.toFixed(3).replace(/\.0+$/, '')
+    } else {
+      return value.toFixed(4).replace(/\.0+$/, '')
+    }
+  }
+
+  // Render grid lines aligned with tick marks
+  renderGrid() {
+    if (!this.gridContainer || !this.currentBounds || !this.pixiApp) {
+      return
+    }
+
+    // Clear existing grid
+    this.gridContainer.removeChildren()
+
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
+
+    // Calculate smart tick spacing (same as axes)
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+
+    // Create grid graphics
+    const gridGraphics = new PIXI.Graphics()
+    gridGraphics.lineStyle(1, 0xcccccc, 0.3) // Light grey, semi-transparent
+
+    // Vertical grid lines (aligned with X-axis ticks)
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const t = (value - minX) / (maxX - minX)
+      const x = 50 + t * (width - 100)
+
+      // Skip if outside visible area
+      if (x < 50 || x > width - 50) continue
+
+      // Draw vertical line from top to bottom
+      gridGraphics.moveTo(x, 50)
+      gridGraphics.lineTo(x, height - 50)
+    }
+
+    // Horizontal grid lines (aligned with Y-axis ticks)
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const t = (value - minY) / (maxY - minY)
+      const y = 50 + t * (height - 100)
+
+      // Skip if outside visible area
+      if (y < 50 || y > height - 50) continue
+
+      // Draw horizontal line from left to right
+      gridGraphics.moveTo(50, y)
+      gridGraphics.lineTo(width - 50, y)
+    }
+
+    this.gridContainer.addChild(gridGraphics)
+  }
+
+  // Render category labels at centroids of colored groups
+  renderCategoryLabels() {
+    if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
+      return
+    }
+
+    // Only render labels for discrete metadata
+    if (this.currentMetadataVector.data_type !== 'DISCRETE') {
+      return
+    }
+
+    // Clear existing labels
+    this.categoryLabelsContainer.removeChildren()
+
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
+
+    // Get the metadata values and categories
+    const values = this.currentMetadataVector.values
+    const categories = this.currentMetadataVector.categories
+    
+    // If categories is undefined, try to get unique values from the values array
+    let categoryList = categories
+    if (!categoryList || categoryList.length === 0) {
+      categoryList = [...new Set(values)]
+    }
+
+    // Calculate centroids for each category
+    const centroids = this.calculateCategoryCentroids(values, categoryList)
+
+    // Render labels for each category
+    let labelsAdded = 0
+    Object.entries(centroids).forEach(([category, centroid]) => {
+      if (centroid.count > 0) { // Only show labels for categories with points
+        const screenX = this.normalizeX(centroid.x, this.currentBounds)
+        const screenY = this.normalizeY(centroid.y, this.currentBounds)
+
+        // Skip if outside visible area (with some margin)
+        const margin = 50
+        if (screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin) {
+          return
+        }
+
+        // Create label with background
+        const label = this.createCategoryLabel(category, centroid.count)
+        label.x = screenX
+        label.y = screenY
+        // Center the label by setting anchor on the text object inside the container
+        if (label.children[1] && label.children[1].anchor) {
+          label.children[1].anchor.set(0.5, 0.5)
+        }
+
+        this.categoryLabelsContainer.addChild(label)
+        labelsAdded++
+      }
+    })
+    
+    console.log(`🎯 Total labels added: ${labelsAdded}`)
+  }
+
+  // Calculate centroids for each category
+  calculateCategoryCentroids(values, categories) {
+    console.log('🎯 calculateCategoryCentroids called')
+    console.log('🎯 values length:', values ? values.length : 'undefined')
+    console.log('🎯 categories:', categories)
+    console.log('🎯 currentCoordinates length:', this.currentCoordinates ? this.currentCoordinates.length : 'undefined')
+    
+    if (!categories || !Array.isArray(categories)) {
+      console.log('🎯 Categories is not a valid array, returning empty centroids')
+      return {}
+    }
+    
+    const centroids = {}
+    
+    // Initialize centroids
+    categories.forEach(category => {
+      centroids[category] = { x: 0, y: 0, count: 0 }
+    })
+
+    // Sum up coordinates for each category
+    this.currentCoordinates.forEach(([x, y], index) => {
+      const category = values[index]
+      if (centroids[category]) {
+        centroids[category].x += x
+        centroids[category].y += y
+        centroids[category].count += 1
+      }
+    })
+
+    // Calculate average coordinates (centroids)
+    Object.keys(centroids).forEach(category => {
+      if (centroids[category].count > 0) {
+        centroids[category].x /= centroids[category].count
+        centroids[category].y /= centroids[category].count
+      }
+    })
+
+    return centroids
+  }
+
+  // Create a category label with background
+  createCategoryLabel(categoryName, count) {
+    const container = new PIXI.Container()
+
+    // Create text
+    const text = new PIXI.Text(categoryName, {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: 12,
+      fill: 0x333333,
+      align: 'center',
+      fontWeight: 'bold'
+    })
+
+    // Get the category color for the border
+    // Use the same sorted categories as the plot points to ensure color consistency
+    const rawCategories = this.currentMetadataVector.categories || [...new Set(this.currentMetadataVector.values)]
+    const sortedCategories = this.getSortedCategories(this.currentMetadataVector.values, [...rawCategories])
+    const categoryIndex = sortedCategories.indexOf(categoryName)
+    const categoryColor = this.getCategoryColor(categoryName, categoryIndex, this.currentMetadataId)
+    const borderColor = this.convertHexToPixiColor(categoryColor)
+
+    // Create background rectangle with smaller padding
+    const padding = 3 // Reduced from 6 to 3
+    const background = new PIXI.Graphics()
+    background.beginFill(0xffffff, 0.8) // White background with 80% opacity
+    background.lineStyle(2, borderColor, 0.8) // Colored border matching category
+    background.drawRoundedRect(
+      -text.width / 2 - padding,
+      -text.height / 2 - padding,
+      text.width + padding * 2,
+      text.height + padding * 2,
+      3 // Slightly smaller corner radius
+    )
+    background.endFill()
+
+    // Add background and text to container
+    container.addChild(background)
+    container.addChild(text)
+
+    // Store the category name for reference
+    container.categoryName = categoryName
+
+    return container
+  }
+
+  // Convert hex color to PIXI color number
+  convertHexToPixiColor(hexColor) {
+    if (!hexColor) return 0xcccccc // Default grey if no color
+    // Remove # if present and convert to number
+    const hex = hexColor.replace('#', '')
+    return parseInt(hex, 16)
+  }
+
   updateLassoGraphics() {
     if (!this.lassoGraphics || this.lassoPoints.length < 2) return
     
@@ -3599,7 +4111,7 @@ export default class extends Controller {
           // Set selected color (red) by clearing and redrawing
           child.clear()
           child.beginFill(0xff0000) // Pure red
-          child.drawCircle(0, 0, 1) // Same size as original
+          child.drawCircle(0, 0, this.currentPointSize) // Use current point size
           child.endFill()
         } else {
           // Restore original color
@@ -3607,7 +4119,7 @@ export default class extends Controller {
           if (originalColor !== undefined) {
             child.clear()
             child.beginFill(originalColor)
-            child.drawCircle(0, 0, 1) // Same size as original
+            child.drawCircle(0, 0, this.currentPointSize) // Use current point size
             child.endFill()
           }
         }
@@ -3622,7 +4134,7 @@ export default class extends Controller {
             // Set selected color (red) by clearing and redrawing
             child.clear()
             child.beginFill(0xff0000) // Pure red
-            child.drawCircle(0, 0, 1) // Same size as original
+            child.drawCircle(0, 0, this.currentPointSize) // Use current point size
             child.endFill()
           } else {
             // Restore original color
@@ -3630,7 +4142,7 @@ export default class extends Controller {
             if (originalColor !== undefined) {
               child.clear()
               child.beginFill(originalColor)
-              child.drawCircle(0, 0, 1) // Same size as original
+              child.drawCircle(0, 0, this.currentPointSize) // Use current point size
               child.endFill()
             }
           }
@@ -3743,6 +4255,336 @@ export default class extends Controller {
       button.style.backgroundColor = '#10b981'
       button.style.cursor = 'pointer'
       button.title = 'Add all currently visible cells to selection'
+    }
+  }
+
+  // Settings Window Methods
+  toggleSettingsWindow() {
+    const settingsWindow = document.getElementById('settings-window')
+    if (!settingsWindow) return
+    
+    if (settingsWindow.style.display === 'none' || settingsWindow.style.display === '') {
+      settingsWindow.style.display = 'block'
+      this.initializeSettingsWindow()
+    } else {
+      settingsWindow.style.display = 'none'
+    }
+  }
+
+  initializeSettingsWindow() {
+    // Initialize point size slider value display
+    const slider = document.getElementById('point-size-slider')
+    const valueDisplay = document.getElementById('point-size-value')
+    if (slider && valueDisplay) {
+      // Set slider to current point size
+      slider.value = this.currentPointSize
+      valueDisplay.textContent = this.currentPointSize.toFixed(1)
+      console.log(`🎯 Settings window initialized with point size: ${this.currentPointSize}`)
+      
+      // Add direct event listener to ensure it works
+      slider.addEventListener('input', (e) => {
+        const newSize = parseFloat(e.target.value)
+        valueDisplay.textContent = newSize.toFixed(1)
+        console.log(`🎯 Slider value changed to: ${newSize}`)
+        
+        // CRITICAL: Update this.currentPointSize so it persists across re-renders
+        console.log(`🎯 Direct listener updating currentPointSize: ${this.currentPointSize} -> ${newSize}`)
+        this.currentPointSize = newSize
+        
+        this.updateAllPointSizes(newSize)
+      })
+    }
+    
+    // Add direct event listeners for checkboxes to ensure they work
+    const axesCheckbox = document.getElementById('show-axes-checkbox')
+    if (axesCheckbox) {
+      console.log('🎯 Adding event listener to axes checkbox')
+      // Remove any existing listeners first
+      axesCheckbox.removeEventListener('change', this.boundAxesToggle)
+      // Create bound method for proper cleanup
+      this.boundAxesToggle = (e) => {
+        console.log('🎯 Direct axes checkbox event listener triggered!')
+        this.toggleAxes()
+      }
+      axesCheckbox.addEventListener('change', this.boundAxesToggle)
+    } else {
+      console.log('🎯 Axes checkbox not found during initialization!')
+    }
+    
+    const gridCheckbox = document.getElementById('show-grid-checkbox')
+    if (gridCheckbox) {
+      gridCheckbox.addEventListener('change', (e) => {
+        console.log('🎯 Direct grid checkbox event listener triggered!')
+        this.toggleGrid()
+      })
+    }
+    
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    if (categoriesCheckbox) {
+      categoriesCheckbox.addEventListener('change', (e) => {
+        console.log('🎯 Direct categories checkbox event listener triggered!')
+        this.toggleCategories()
+      })
+    }
+    
+    // Update categories checkbox state based on current metadata
+    this.updateCategoriesCheckboxState()
+    
+    // Make window draggable
+    this.makeSettingsWindowDraggable()
+  }
+
+  makeSettingsWindowDraggable() {
+    const settingsWindow = document.getElementById('settings-window')
+    const header = document.getElementById('settings-header')
+    if (!settingsWindow || !header) return
+    
+    let isDragging = false
+    let startX, startY, startLeft, startTop
+    
+    const startDrag = (e) => {
+      isDragging = true
+      startX = e.clientX
+      startY = e.clientY
+      startLeft = parseInt(settingsWindow.style.left) || 0
+      startTop = parseInt(settingsWindow.style.top) || 0
+      settingsWindow.style.cursor = 'grabbing'
+      e.preventDefault()
+    }
+    
+    const doDrag = (e) => {
+      if (!isDragging) return
+      
+      const deltaX = e.clientX - startX
+      const deltaY = e.clientY - startY
+      
+      settingsWindow.style.left = (startLeft + deltaX) + 'px'
+      settingsWindow.style.top = (startTop + deltaY) + 'px'
+    }
+    
+    const stopDrag = () => {
+      isDragging = false
+      settingsWindow.style.cursor = 'move'
+    }
+    
+    header.addEventListener('mousedown', startDrag)
+    document.addEventListener('mousemove', doDrag)
+    document.addEventListener('mouseup', stopDrag)
+    
+    // Close button functionality
+    const closeBtn = document.getElementById('close-settings-btn')
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        settingsWindow.style.display = 'none'
+      })
+    }
+  }
+
+  updatePointSize() {
+    console.log('🎯 Stimulus updatePointSize method called!')
+    const slider = document.getElementById('point-size-slider')
+    const valueDisplay = document.getElementById('point-size-value')
+    if (!slider || !valueDisplay) {
+      console.log('🎯 Slider or valueDisplay not found')
+      return
+    }
+    
+    const newSize = parseFloat(slider.value)
+    valueDisplay.textContent = newSize.toFixed(1)
+    
+    // Store the new point size for future renders
+    console.log(`🎯 Stimulus updatePointSize: ${this.currentPointSize} -> ${newSize}`)
+    this.currentPointSize = newSize
+    
+    console.log(`🎯 Stimulus updating point size to: ${newSize}`)
+    
+    // Update all existing points
+    this.updateAllPointSizes(newSize)
+  }
+
+  updateAllPointSizes(newSize) {
+    if (!this.scatterContainer) {
+      console.log('⚠️ No scatterContainer found')
+      return
+    }
+    
+    let updatedCount = 0
+    
+    // Update points in scatterContainer
+    this.scatterContainer.children.forEach((child) => {
+      if (child.isPoint) {
+        this.updatePointSize(child, newSize)
+        updatedCount++
+      }
+    })
+    
+    // Update points in animatedContainer if it exists
+    if (this.animatedContainer) {
+      this.animatedContainer.children.forEach((child) => {
+        if (child.isPoint) {
+          this.updatePointSize(child, newSize)
+          updatedCount++
+        }
+      })
+    }
+    
+    console.log(`🎯 Updated ${updatedCount} points to size ${newSize}`)
+    console.log(`🎯 ScatterContainer children: ${this.scatterContainer.children.length}`)
+    console.log(`🎯 AnimatedContainer children: ${this.animatedContainer ? this.animatedContainer.children.length : 'none'}`)
+    
+    // Debug first few points
+    if (this.scatterContainer.children.length > 0) {
+      const firstPoint = this.scatterContainer.children[0]
+      console.log(`🎯 First point properties:`, {
+        isPoint: firstPoint.isPoint,
+        visible: firstPoint.visible,
+        alpha: firstPoint.alpha,
+        x: firstPoint.x,
+        y: firstPoint.y,
+        cellId: firstPoint.cellId
+      })
+    }
+  }
+
+  // Helper method to update a single point's size
+  updatePointSize(point, newSize) {
+    if (!point || !point.isPoint) return
+    
+    // Store the current position and properties
+    const currentX = point.x
+    const currentY = point.y
+    const currentAlpha = point.alpha || 1.0
+    
+    // Get the current color - try different ways to get it
+    let currentColor = 0x3b82f6 // Default blue
+    
+    // Try to get color from the point's stored color or from original colors
+    if (point.cellId !== undefined && this.originalPointColors && this.originalPointColors.has(point.cellId)) {
+      currentColor = this.originalPointColors.get(point.cellId)
+    } else if (point.tint) {
+      currentColor = point.tint
+    } else {
+      // Try to get color from current coloring scheme
+      const { color } = this.getColorAndAlpha(point.cellId || 0)
+      currentColor = color
+    }
+    
+    // Clear and redraw the circle with new size
+    point.clear()
+    point.beginFill(currentColor)
+    point.alpha = currentAlpha
+    point.drawCircle(0, 0, newSize)
+    point.endFill()
+    
+    // Restore position
+    point.x = currentX
+    point.y = currentY
+  }
+
+  toggleAxes() {
+    console.log('🎯 toggleAxes method called!')
+    const checkbox = document.getElementById('show-axes-checkbox')
+    if (!checkbox) {
+      console.log('🎯 Checkbox not found!')
+      return
+    }
+    if (!this.axesContainer) {
+      console.log('🎯 Axes container not found!')
+      return
+    }
+    
+    console.log(`🎯 Toggling axes: ${checkbox.checked}`)
+    console.log(`🎯 Current axes visible: ${this.axesContainer.visible}`)
+    
+    // Recalculate bounds with/without axes margins BEFORE toggling visibility
+    if (this.currentCoordinates) {
+      const originalBounds = this.calculateBounds(this.currentCoordinates)
+      console.log('🎯 Original bounds:', originalBounds)
+      
+      // Temporarily set axes visibility to match checkbox state for bounds calculation
+      const previousVisibility = this.axesContainer.visible
+      this.axesContainer.visible = checkbox.checked
+      
+      const newBounds = this.getAdjustedBounds(originalBounds)
+      console.log('🎯 Adjusted bounds:', newBounds)
+      this.currentBounds = newBounds
+      
+      // Restore the previous visibility state
+      this.axesContainer.visible = previousVisibility
+      
+      // Re-render points with new bounds
+      this.scatterContainer.removeChildren()
+      this.renderPointsWithCurrentColoring()
+      
+      // Now set the final axes visibility
+      this.axesContainer.visible = checkbox.checked
+      console.log(`🎯 Final axes visible: ${this.axesContainer.visible}`)
+      
+      // Re-render axes
+      this.renderAxes()
+      console.log('🎯 Axes toggle complete!')
+    } else {
+      console.log('🎯 No current coordinates found!')
+    }
+  }
+
+  toggleGrid() {
+    const checkbox = document.getElementById('show-grid-checkbox')
+    if (!checkbox || !this.gridContainer) return
+    
+    console.log(`🎯 Toggling grid: ${checkbox.checked}`)
+    console.log(`🎯 Current grid visible: ${this.gridContainer.visible}`)
+    
+    // Toggle grid visibility
+    this.gridContainer.visible = checkbox.checked
+    console.log(`🎯 New grid visible: ${this.gridContainer.visible}`)
+    
+    // Re-render grid to ensure it's up to date
+    this.renderGrid()
+    console.log('🎯 Grid toggle complete!')
+  }
+
+  toggleCategories() {
+    const checkbox = document.getElementById('show-categories-checkbox')
+    if (!checkbox) return
+    
+    console.log(`🎯 Toggling categories: ${checkbox.checked}`)
+    
+    // Toggle category labels on the plot
+    if (this.categoryLabelsContainer) {
+      this.categoryLabelsContainer.visible = checkbox.checked
+      console.log(`🎯 Category labels visible: ${this.categoryLabelsContainer.visible}`)
+      
+      // If turning on, make sure labels are rendered
+      if (checkbox.checked) {
+        console.log('🎯 Re-rendering category labels')
+        this.renderCategoryLabels()
+      }
+    }
+    
+    // Find the categories container in the right panel
+    const categoriesContainer = document.querySelector('.metadata-categories')
+    if (categoriesContainer) {
+      categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
+    }
+    
+    console.log('🎯 Categories toggle complete!')
+  }
+
+  updateCategoriesCheckboxState() {
+    const checkbox = document.getElementById('show-categories-checkbox')
+    if (!checkbox) return
+    
+    // Check if current metadata is discrete
+    const isDiscreteMetadata = this.currentMetadataVector && this.currentMetadataVector.data_type === 'DISCRETE'
+    
+    if (isDiscreteMetadata) {
+      checkbox.disabled = false
+      checkbox.title = 'Toggle category legend visibility'
+    } else {
+      checkbox.disabled = true
+      checkbox.checked = false
+      checkbox.title = 'Categories only available for discrete metadata'
     }
   }
 

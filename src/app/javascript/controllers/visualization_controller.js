@@ -2128,6 +2128,8 @@ export default class extends Controller {
   // Clear the cached color map (call this when metadata changes)
   clearColorMapCache() {
     this._cachedColorMap = null
+    this._cachedCentroids = null
+    this._cachedCentroidsKey = null
     //console.log('Color map cache cleared')
   }
 
@@ -2926,7 +2928,7 @@ export default class extends Controller {
         return
       } else {
         // Different category, remove existing picker and show new one
-        existingPicker.remove()
+      existingPicker.remove()
       }
     }
     
@@ -3361,6 +3363,11 @@ export default class extends Controller {
     // Store original bounds for consistent pan scaling
     this.panOriginalBounds = this.calculateBounds(this.currentCoordinates)
     
+    // Hide category labels during panning to avoid coordinate shift
+    if (this.categoryLabelsContainer) {
+      this.categoryLabelsContainer.visible = false
+    }
+    
     // Change cursor to grabbing
     const panCanvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (panCanvas) {
@@ -3383,13 +3390,13 @@ export default class extends Controller {
     const deltaX = currentX - this.panStartX
     const deltaY = currentY - this.panStartY
     
-    // Convert screen delta to data delta
-    const canvasWidth = canvas.width
-    const canvasHeight = canvas.height
+    // Convert screen delta to data delta using the same coordinate system as normalization
+    const screenWidth = this.pixiApp.screen.width
+    const screenHeight = this.pixiApp.screen.height
     
     // Use current bounds for pan calculation to match current view
-    const dataDeltaX = (deltaX / canvasWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
-    const dataDeltaY = (deltaY / canvasHeight) * (this.panStartBounds.maxY - this.panStartBounds.minY)
+    const dataDeltaX = (deltaX / screenWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
+    const dataDeltaY = (deltaY / screenHeight) * (this.panStartBounds.maxY - this.panStartBounds.minY)
     
     // Update bounds
     const newBounds = {
@@ -3439,6 +3446,16 @@ export default class extends Controller {
     this.panStartY = 0
     this.panStartBounds = null
     this.panOriginalBounds = null
+    
+    // Reposition category labels after panning is finished
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible === false) {
+      // Check if categories should be visible
+      const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+      if (categoriesCheckbox && categoriesCheckbox.checked) {
+        this.categoryLabelsContainer.visible = true
+        this.renderCategoryLabels() // Reposition labels with current bounds
+      }
+    }
     
     // Reset cursor
     const stopCanvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -3984,7 +4001,8 @@ export default class extends Controller {
       categoryList = [...new Set(values)]
     }
 
-    // Calculate centroids for each category
+    // Calculate centroids from currently visible points in the current view
+    // This ensures labels follow the points correctly when panning/zooming
     const centroids = this.calculateCategoryCentroids(values, categoryList)
 
     // Render labels for each category
@@ -4036,15 +4054,23 @@ export default class extends Controller {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
 
-    // Sum up coordinates for each category
-    this.currentCoordinates.forEach(([x, y], index) => {
-      const category = values[index]
-      if (centroids[category]) {
-        centroids[category].x += x
-        centroids[category].y += y
-        centroids[category].count += 1
-      }
-    })
+    // Calculate centroids from actual visible points in the scatter container
+    if (this.scatterContainer && this.scatterContainer.children) {
+      this.scatterContainer.children.forEach((point) => {
+        if (point.isPoint && point.visible && point.cellId !== undefined) {
+          const category = values[point.cellId]
+          if (centroids[category]) {
+            // Convert screen coordinates back to data coordinates for centroid calculation
+            const dataX = this.currentBounds.minX + (point.x / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
+            const dataY = this.currentBounds.minY + (point.y / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
+            
+            centroids[category].x += dataX
+            centroids[category].y += dataY
+            centroids[category].count += 1
+          }
+        }
+      })
+    }
 
     // Calculate average coordinates (centroids)
     Object.keys(centroids).forEach(category => {
@@ -6088,7 +6114,7 @@ export default class extends Controller {
         // Store the decompressed version
         this.loadedMetadataVectors[metadataId] = decompressedVector
         
-        console.log(`🔧 Decompressed metadata vector ${metadataId} on demand: ${values.length} values`)
+        //console.log(`Decompressed metadata vector ${metadataId} on demand: ${values.length} values`)
         return decompressedVector
         
       } catch (error) {

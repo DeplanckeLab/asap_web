@@ -26,7 +26,7 @@ export default class extends Controller {
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
     // Simple test - remove this after debugging
-    setTimeout(() => {
+    /*setTimeout(() => {
       console.log('Controller test: Water drop buttons found:', document.querySelectorAll('[data-action*="waterDropClicked"]').length)
     }, 1000)
     console.log('Available targets:', {
@@ -38,31 +38,31 @@ export default class extends Controller {
       hasEmbeddingsByLoomValue: this.hasEmbeddingsByLoomValue,
       defaultLoomFileValue: this.defaultLoomFileValue
     })
-    
+    */
     // Test color loading immediately
-    console.log('🎨 Controller connecting - testing global colors availability:')
-    console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
-    console.log('🎨 typeof window.CATEGORY_COLORS:', typeof window.CATEGORY_COLORS)
-    console.log('🎨 window.CATEGORY_COLORS length:', window.CATEGORY_COLORS?.length)
-    console.log('🎨 window object keys:', Object.keys(window).filter(k => k.includes('CATEGORY')))
+    //console.log('Controller connecting - testing global colors availability:')
+    //console.log('window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+    //console.log('typeof window.CATEGORY_COLORS:', typeof window.CATEGORY_COLORS)
+    //console.log('window.CATEGORY_COLORS length:', window.CATEGORY_COLORS?.length)
+    //console.log('window object keys:', Object.keys(window).filter(k => k.includes('CATEGORY')))
     
     if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
-      console.error('❌ CRITICAL: No global colors available! This will cause visualization errors.')
-      console.error('❌ Available window properties:', Object.keys(window).slice(0, 10))
+      console.error('CRITICAL: No global colors available! This will cause visualization errors.')
+      console.error('Available window properties:', Object.keys(window).slice(0, 10))
       
       // Try again after a short delay in case colors are loaded asynchronously
       setTimeout(() => {
-        console.log('🎨 Delayed check - window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+        //console.log('Delayed check - window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
         if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-          console.log('✅ Colors loaded after delay!')
+          //console.log('Colors loaded after delay!')
           // Clear cache to get fresh colors
           this.clearCategoryColorsCache()
         } else {
-          console.error('❌ Still no colors after delay')
+          console.error('Still no colors after delay')
         }
       }, 1000)
     } else {
-      console.log('✅ Global colors are available!')
+      //console.log('Global colors are available!')
       // Clear cache to get fresh colors
       this.clearCategoryColorsCache()
     }
@@ -87,10 +87,11 @@ export default class extends Controller {
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
     // Initialize interaction mode state
-    this.interactionMode = 'pan' // 'pan', 'lasso', 'pick', or 'zoom'
+    this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
-    console.log(`🎯 Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
+    this.draggingLabel = null // Track which label is being dragged
+    //console.log(`Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
     this.currentPointSize = 1.0 // Store current point size for consistent rendering
     this.lassoGraphics = null
     this.lassoPoints = []
@@ -146,7 +147,7 @@ export default class extends Controller {
   }
 
   initializeTooltip() {
-    console.log('🔧 Initializing tooltip system')
+    //console.log('🔧 Initializing tooltip system')
     this.tooltip = document.getElementById('point-tooltip')
     this.tooltipContent = document.getElementById('tooltip-content')
     
@@ -163,16 +164,16 @@ export default class extends Controller {
       return
     }
     
-    console.log('Tooltip system initialized successfully:', {
+    /*console.log('Tooltip system initialized successfully:', {
       tooltip: this.tooltip,
       tooltipContent: this.tooltipContent,
       tooltipTagName: this.tooltip.tagName,
       tooltipId: this.tooltip.id
-    })
+    })*/
   }
 
   createTooltipDynamically() {
-    console.log('🔧 Creating tooltip dynamically')
+    //console.log('Creating tooltip dynamically')
     
     // Remove existing tooltip if it exists
     const existingTooltip = document.getElementById('point-tooltip')
@@ -209,11 +210,11 @@ export default class extends Controller {
     // Add to body
     document.body.appendChild(this.tooltip)
     
-    console.log('✅ Tooltip created dynamically:', {
+    /*console.log('Tooltip created dynamically:', {
       tooltip: this.tooltip,
       tooltipContent: this.tooltipContent,
       parentNode: this.tooltip.parentNode
-    })
+    })*/
   }
 
   setupInteractionSystem() {
@@ -224,11 +225,12 @@ export default class extends Controller {
     const pickBtn = document.getElementById('pick-mode-btn')
     const lassoBtn = document.getElementById('lasso-mode-btn')
     if (panBtn && pickBtn && lassoBtn) {
-      console.log('✅ Found interaction mode buttons')
-      // Set initial state (pan mode is default)
-      this.updateButtonStates('pan')
+      //console.log('Found interaction mode buttons')
+      // Set initial state (pick mode is default)
+      this.updateButtonStates('pick')
+      this.updateControlInstructions()
     } else {
-      console.log('❌ Interaction mode buttons not found')
+      console.log('Interaction mode buttons not found')
     }
     
     // Set up canvas event listeners when PIXI app becomes available
@@ -236,21 +238,21 @@ export default class extends Controller {
   }
 
   setupCanvasListeners() {
-    console.log('🔍 Setting up canvas listeners')
+    //console.log('Setting up canvas listeners')
     
     // This will be called when the PIXI app is created
     // For now, we'll set up a polling mechanism to check for the canvas
     const checkForCanvas = () => {
       const canvas = document.querySelector('.plot-container canvas')
-      console.log('🔍 Checking for canvas:', !!canvas, 'Setup done:', !!this.canvasListenersSetup)
+      //console.log('Checking for canvas:', !!canvas, 'Setup done:', !!this.canvasListenersSetup)
       
       if (canvas && !this.canvasListenersSetup) {
-        console.log('✅ Canvas found, setting up interaction listeners')
+        //console.log('Canvas found, setting up interaction listeners')
         this.canvas = canvas
         this.addInteractionEventListeners()
         this.canvasListenersSetup = true
       } else if (!canvas) {
-        console.log('⏳ Canvas not found yet, checking again in 500ms')
+        console.log('Canvas not found yet, checking again in 500ms')
         // Keep checking every 500ms until canvas is available
         setTimeout(checkForCanvas, 500)
       }
@@ -287,7 +289,7 @@ export default class extends Controller {
     }
     
     const selectedMetadataId = this.metadataSelectTarget.value
-    console.log('Selected metadata ID:', selectedMetadataId)
+    //console.log('Selected metadata ID:', selectedMetadataId)
     
     if (selectedMetadataId) {
       this.loadMetadataCoordinates(selectedMetadataId)
@@ -299,7 +301,7 @@ export default class extends Controller {
 
   async loadMetadataCoordinates(metadataId) {
     try {
-      console.log('Loading metadata coordinates for ID:', metadataId)
+      //console.log('Loading metadata coordinates for ID:', metadataId)
       
       // Get the current loom file selection
       const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
@@ -308,16 +310,16 @@ export default class extends Controller {
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
-      console.log('Fetching binary data from URL:', url)
+      //console.log('Fetching binary data from URL:', url)
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
       const csrfToken = csrfMetaTag?.getAttribute('content')
       
-      console.log('CSRF token debug:', {
+      /*console.log('CSRF token debug:', {
         metaTagFound: !!csrfMetaTag,
         tokenValue: csrfToken ? 'present' : 'missing'
-      })
+      })*/
       
       const headers = {
         'Accept': 'application/octet-stream'
@@ -353,26 +355,26 @@ export default class extends Controller {
       const metadataName = response.headers.get('X-Metadata-Name')
       const cellCount = parseInt(response.headers.get('X-Cell-Count'))
       
-      console.log('Received binary metadata data:', {
+      /*console.log('Received binary metadata data:', {
         metadataId: headerMetadataId,
         metadataName,
         cellCount,
         binarySize: response.headers.get('content-length')
-      })
+      })*/
       
       // Get the binary data as ArrayBuffer
       const arrayBuffer = await response.arrayBuffer()
       
-      console.log('ArrayBuffer details:', {
+      /*console.log('ArrayBuffer details:', {
         byteLength: arrayBuffer.byteLength,
         expectedLength: cellCount * 4, // 4 bytes per coordinate pair
         isValid: arrayBuffer.byteLength === cellCount * 4
-      })
+      })*/
       
       // Log first few bytes for debugging
       const view = new Uint8Array(arrayBuffer)
-      console.log('First 20 bytes of binary data:', Array.from(view.slice(0, 20)))
-      console.log('Last 20 bytes of binary data:', Array.from(view.slice(-20)))
+      //console.log('First 20 bytes of binary data:', Array.from(view.slice(0, 20)))
+      //console.log('Last 20 bytes of binary data:', Array.from(view.slice(-20)))
       
       // Store the binary coordinate data
       this.storeBinaryMetadataData({
@@ -405,13 +407,13 @@ export default class extends Controller {
     const expectedSize = data.cellCount * 4 // 4 bytes per coordinate pair (2 coordinates * 2 bytes each)
     const compressionRatio = (data.cellCount * 2 * 8) / (binarySize * 8) // bits comparison
     
-    console.log(`Stored binary metadata data for ${data.name}:`, {
+    /*console.log(`Stored binary metadata data for ${data.name}:`, {
       cellCount: data.cellCount,
       binarySize: binarySize,
       expectedSize: expectedSize,
       compressionRatio: compressionRatio.toFixed(2) + 'x',
       memoryEfficiency: ((1 - binarySize / (data.cellCount * 2 * 8)) * 100).toFixed(1) + '%'
-    })
+    })*/
     
     // Update visualization with the new coordinate data
     this.updateVisualizationWithMetadata()
@@ -419,7 +421,7 @@ export default class extends Controller {
 
   clearMetadataData() {
     this.metadataData = null
-    console.log('Cleared metadata data')
+    //console.log('Cleared metadata data')
     
     // Clear PIXI.js visualization
     if (this.pixiApp) {
@@ -452,7 +454,7 @@ export default class extends Controller {
       return
     }
     
-    console.log('Updating visualization with metadata:', this.metadataData.name)
+    //console.log('Updating visualization with metadata:', this.metadataData.name)
     
     // Decompress the binary coordinate data for visualization
     const decompressedCoords = this.decompressBinaryCoordinates(this.metadataData.binaryData)
@@ -460,7 +462,7 @@ export default class extends Controller {
     // Initialize PIXI.js scatter plot
     this.initializePixiScatterPlot(decompressedCoords)
     
-    console.log(`Decompressed ${decompressedCoords.length} coordinate pairs for visualization`)
+    //console.log(`Decompressed ${decompressedCoords.length} coordinate pairs for visualization`)
   }
 
   async initializePixiScatterPlot(coordinates) {
@@ -471,8 +473,8 @@ export default class extends Controller {
         return
       }
 
-      console.log('Using global PIXI:', PIXI)
-      console.log('PIXI.Application:', PIXI.Application)
+      //console.log('Using global PIXI:', PIXI)
+      //console.log('PIXI.Application:', PIXI.Application)
 
       // Find the plot container
       const plotContainer = document.querySelector('.plot-container')
@@ -481,15 +483,15 @@ export default class extends Controller {
         return
       }
       
-      console.log('DEBUG: Checking conditions for updateScatterPlot')
-      console.log('DEBUG: this.pixiApp exists:', !!this.pixiApp)
-      console.log('DEBUG: this.currentLoomFile:', this.currentLoomFile)
-      console.log('DEBUG: this.loomFileSelectTarget.value:', this.loomFileSelectTarget.value)
-      console.log('DEBUG: Files match:', this.currentLoomFile === this.loomFileSelectTarget.value)
+      //console.log('DEBUG: Checking conditions for updateScatterPlot')
+      //console.log('DEBUG: this.pixiApp exists:', !!this.pixiApp)
+      //console.log('DEBUG: this.currentLoomFile:', this.currentLoomFile)
+      //console.log('DEBUG: this.loomFileSelectTarget.value:', this.loomFileSelectTarget.value)
+      //console.log('DEBUG: Files match:', this.currentLoomFile === this.loomFileSelectTarget.value)
       
       // Check if we already have a PIXI app for this loom file
       if (this.pixiApp && this.currentLoomFile === this.loomFileSelectTarget.value) {
-        console.log('Changing visualization coordinates - animating transition')
+        //console.log('Changing visualization coordinates - animating transition')
         // Clear selection since coordinates might have changed
         this.selectedCells.clear()
         this.updateSelectedCellsCount()
@@ -498,7 +500,7 @@ export default class extends Controller {
         return
       }
       
-      console.log('Creating new PIXI.js scatter plot')
+      //console.log('Creating new PIXI.js scatter plot')
       
       // Clear any existing PIXI app
       if (this.pixiApp) {
@@ -511,7 +513,7 @@ export default class extends Controller {
       // Use global PIXI.Application
       const Application = PIXI.Application
       
-      console.log('Using Application constructor:', Application)
+      //console.log('Using Application constructor:', Application)
       
       this.pixiApp = new Application({
         width: plotContainer.clientWidth,
@@ -537,14 +539,14 @@ export default class extends Controller {
       this.gridContainer.visible = true // Initially visible
       this.pixiApp.stage.addChild(this.gridContainer)
       
-      // Create main container for the scatter plot (middle layer)
-      this.scatterContainer = new PIXI.Container()
-      this.pixiApp.stage.addChild(this.scatterContainer)
-      
-      // Create axes container (top layer)
+      // Create axes container (middle layer)
       this.axesContainer = new PIXI.Container()
       this.axesContainer.visible = true // Initially visible
       this.pixiApp.stage.addChild(this.axesContainer)
+
+      // Create main container for the scatter plot (top layer)
+      this.scatterContainer = new PIXI.Container()
+      this.pixiApp.stage.addChild(this.scatterContainer)
       
       // Create category labels container (topmost layer)
       this.categoryLabelsContainer = new PIXI.Container()
@@ -560,7 +562,10 @@ export default class extends Controller {
       // Add interaction handlers
       this.addInteractionHandlers()
       
-      console.log('PIXI.js scatter plot initialized successfully')
+      // Setup global drag handlers for label dragging
+      this.setupGlobalDragHandlers()
+      
+      //console.log('PIXI.js scatter plot initialized successfully')
       
     } catch (error) {
       console.error('Failed to initialize PIXI.js scatter plot:', error)
@@ -578,7 +583,7 @@ export default class extends Controller {
     const bounds = this.getAdjustedBounds(originalBounds)
     this.currentBounds = bounds // Store for future transitions
     this.currentCoordinates = coordinates // Store coordinates for future transitions
-    console.log('Coordinate bounds:', bounds)
+    //console.log('Coordinate bounds:', bounds)
     
     // Render axes, grid, and category labels
     this.renderAxes()
@@ -633,7 +638,7 @@ export default class extends Controller {
       this.scatterContainer.addChild(point)
     }
     
-    console.log(`Rendered ${coordinates.length} individual points`)
+    //console.log(`Rendered ${coordinates.length} individual points`)
         
         // Update point count display
         const pointCountElement = document.getElementById('point-count')
@@ -648,13 +653,13 @@ export default class extends Controller {
   async updateScatterPlot(coordinates) {
     if (!this.pixiApp || !this.scatterContainer || !this.PIXI) return
     
-    console.log('Updating scatter plot with new coordinates')
-    console.log('Current bounds:', this.currentBounds)
+    //console.log('Updating scatter plot with new coordinates')
+    //console.log('Current bounds:', this.currentBounds)
     
     // Calculate new bounds
     const originalNewBounds = this.calculateBounds(coordinates)
     const newBounds = this.getAdjustedBounds(originalNewBounds)
-    console.log('New coordinate bounds:', newBounds)
+    //console.log('New coordinate bounds:', newBounds)
     
     // Check if we have existing points to update
     const hasExistingPoints = this.scatterContainer.children.length > 0
@@ -688,7 +693,7 @@ export default class extends Controller {
       this.renderPointsWithCurrentColoring()
       
       // Reapply filtering after coordinate update
-      console.log('🔄 Reapplying filtering after coordinate update...')
+      //console.log('Reapplying filtering after coordinate update...')
       this.updateCellFiltering()
       
       // Update point count display
@@ -699,7 +704,7 @@ export default class extends Controller {
       return
     }
     
-    console.log('Different embedding method detected, creating animated transition')
+    //console.log('Different embedding method detected, creating animated transition')
     
     // Clear incremental filtering state when embedding changes
     // This ensures filtering works correctly with new coordinate indices
@@ -722,7 +727,7 @@ export default class extends Controller {
     // Create individual point sprites for animation using previous coordinates
     this.createAnimatedPoints(previousCoordinates, coordinates, currentBounds, newBounds)
     
-    console.log(`Created ${coordinates.length} animated points for transition`)
+    //console.log(`Created ${coordinates.length} animated points for transition`)
     
     // Update point count display
     const pointCountElement = document.getElementById('point-count')
@@ -762,7 +767,7 @@ export default class extends Controller {
           graphics.endFill()
         }
         
-        console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
+        //console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
         
       } else if (data_type === 'CONTINUOUS') {
         // Render each point individually to support selection transparency
@@ -779,11 +784,11 @@ export default class extends Controller {
           graphics.endFill()
         }
         
-        console.log(`Updated ${coordinates.length} points with continuous metadata coloring (${this.currentMetadataVector.name})`)
+        //console.log(`Updated ${coordinates.length} points with continuous metadata coloring (${this.currentMetadataVector.name})`)
       }
     } else {
       // Render each point individually to support selection transparency
-      console.log('Using default blue coloring')
+      //console.log('Using default blue coloring')
       for (let i = 0; i < coordinates.length; i++) {
         const [x, y] = coordinates[i]
         const { color, alpha } = this.getColorAndAlpha(i)
@@ -812,7 +817,7 @@ export default class extends Controller {
     }
     graphics.endFill()
     
-    console.log(`Rendered ${coordinates.length} points with default blue color`)
+    //console.log(`Rendered ${coordinates.length} points with default blue color`)
   }
 
   // Helper method to get color and alpha separately for PIXI.js
@@ -865,16 +870,16 @@ export default class extends Controller {
     // Since we can't easily extract positions from individual PIXI Graphics objects,
     // we'll recreate the positions using the current bounds and coordinates
     // This is a limitation of PIXI Graphics - we need to store positions differently
-    console.log('Extracting current screen positions (recreating from bounds)')
+    //console.log('Extracting current screen positions (recreating from bounds)')
     return currentBounds
   }
 
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
-    console.log('Creating animated points from previous to new coordinates')
+    //console.log('Creating animated points from previous to new coordinates')
     const pointSize = this.currentPointSize // Use current point size setting
     const animationDuration = 4000 // 4 seconds for very smooth transition
     
-    console.log('Creating animated points with current coloring scheme')
+    //console.log('Creating animated points with current coloring scheme')
     
     // Create a container for animated points
     const animatedContainer = new this.PIXI.Container()
@@ -893,7 +898,37 @@ export default class extends Controller {
     let maxMovement = 0
     const minLength = Math.min(previousCoordinates.length, newCoordinates.length)
     
-    for (let i = 0; i < minLength; i++) {
+    // Sort point indices by category size (largest categories first) if we have metadata coloring
+    let sortedIndices = Array.from({ length: minLength }, (_, i) => i)
+    
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'DISCRETE' && this.currentMetadataVector.values) {
+      const values = this.currentMetadataVector.values
+      
+      // Calculate category frequencies for layering (larger categories first)
+      const categoryFrequencies = {}
+      values.forEach(value => {
+        categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
+      })
+      
+      //console.log('Animation: Category frequencies for layering:', categoryFrequencies)
+      
+      // Sort point indices by category size (largest categories first, so they render in background)
+      sortedIndices = sortedIndices.sort((a, b) => {
+        const categoryA = values[a]
+        const categoryB = values[b]
+        const freqA = categoryFrequencies[categoryA]
+        const freqB = categoryFrequencies[categoryB]
+        return freqB - freqA // Descending order (largest first)
+      })
+      
+      // Debug: Log the first few sorted indices and their categories
+      //console.log('Animation: First 10 sorted point indices:', sortedIndices.slice(0, 10))
+      //console.log('Animation: Categories for first 10 points:', sortedIndices.slice(0, 10).map(i => values[i]))
+      //console.log('Animation: Frequencies for first 10 points:', sortedIndices.slice(0, 10).map(i => categoryFrequencies[values[i]]))
+    }
+    
+    // Create points in sorted order (largest categories first)
+    sortedIndices.forEach(i => {
       const [prevX, prevY] = previousCoordinates[i]
       const [newX, newY] = newCoordinates[i]
       
@@ -936,10 +971,10 @@ export default class extends Controller {
       
       animatedContainer.addChild(point)
       points.push({ sprite: point, startX, startY, endX, endY })
-    }
+    })
     
-    console.log(`Maximum point movement: ${maxMovement.toFixed(2)} pixels`)
-    console.log(`Animation will run for ${animationDuration}ms`)
+    //console.log('Maximum point movement: ' + maxMovement.toFixed(2) + ' pixels')
+    //console.log('Animation will run for ' + animationDuration + 'ms')
     
     // Get current filtered indices to respect filtering during animation
     const currentFilteredIndices = this.getIncrementalFilteredIndices()
@@ -957,7 +992,7 @@ export default class extends Controller {
       
       // Log progress every 500ms
       if (Math.floor(elapsed / 500) !== Math.floor((elapsed - 16) / 500)) {
-        console.log(`Animation progress: ${(progress * 100).toFixed(1)}% (${elapsed}ms)`)
+        //console.log(`Animation progress: ${(progress * 100).toFixed(1)}% (${elapsed}ms)`)
       }
       
       // Update all point positions and visibility
@@ -974,7 +1009,7 @@ export default class extends Controller {
       if (progress < 1) {
         requestAnimationFrame(animate)
       } else {
-        console.log('Animation complete!')
+        //console.log('Animation complete!')
         // Animation complete, just keep the animated container
         // No need to convert back to graphics object - the animated points are already in final positions
         animatedContainer.visible = true // Ensure it's visible
@@ -992,10 +1027,10 @@ export default class extends Controller {
         this.renderCategoryLabels()
         
         // Reapply filtering after embedding change
-        console.log('🔄 Reapplying filtering after embedding change...')
+        //console.log('Reapplying filtering after embedding change...')
         this.updateCellFiltering()
         
-        console.log('Animation finished - keeping animated points in final positions')
+        //console.log('Animation finished - keeping animated points in final positions')
       }
     }
     
@@ -1005,7 +1040,7 @@ export default class extends Controller {
 
 
   convertToGraphicsObject(newCoordinates, bounds, animatedContainer) {
-    console.log('Converting animated points back to efficient graphics object')
+    //console.log('Converting animated points back to efficient graphics object')
     
     // Remove animated container
     this.scatterContainer.removeChild(animatedContainer)
@@ -1042,7 +1077,7 @@ export default class extends Controller {
         this.scatterContainer.addChild(graphics)
         this.currentBounds = bounds // Store new bounds for future transitions
         this.currentCoordinates = newCoordinates // Store new coordinates for future transitions
-        console.log(`Converted to efficient graphics object with ${newCoordinates.length} points`)
+        //console.log(`Converted to efficient graphics object with ${newCoordinates.length} points`)
       }
     }
     
@@ -1077,12 +1112,12 @@ export default class extends Controller {
 
   // Get bounds adjusted for axes margins
   getAdjustedBounds(originalBounds) {
-    console.log('🎯 getAdjustedBounds called with:', originalBounds)
-    console.log('🎯 axesContainer exists:', !!this.axesContainer)
-    console.log('🎯 axesContainer visible:', this.axesContainer ? this.axesContainer.visible : 'N/A')
+    //console.log('getAdjustedBounds called with:', originalBounds)
+    //console.log('axesContainer exists:', !!this.axesContainer)
+    //console.log('axesContainer visible:', this.axesContainer ? this.axesContainer.visible : 'N/A')
     
     if (!originalBounds || !this.axesContainer || !this.axesContainer.visible) {
-      console.log('🎯 Returning original bounds (no adjustment needed)')
+      //console.log('Returning original bounds (no adjustment needed)')
       return originalBounds
     }
 
@@ -1117,7 +1152,7 @@ export default class extends Controller {
       maxY: adjustedMaxY
     }
     
-    console.log('🎯 Returning adjusted bounds:', adjustedBounds)
+    //console.log('Returning adjusted bounds:', adjustedBounds)
     return adjustedBounds
   }
 
@@ -1154,10 +1189,10 @@ export default class extends Controller {
     // arrayBuffer contains 16-bit signed integers (little-endian)
     // Each coordinate pair takes 4 bytes (2 bytes for x, 2 bytes for y)
     
-    console.log('Starting binary decompression:', {
+    /*console.log('Starting binary decompression:', {
       arrayBufferSize: arrayBuffer.byteLength,
       expectedPairs: arrayBuffer.byteLength / 4
-    })
+    })*/
     
     const coordinates = []
     const view = new DataView(arrayBuffer)
@@ -1177,7 +1212,7 @@ export default class extends Controller {
         
         // Log first few coordinates for debugging
         if (coordinates.length <= 5) {
-          console.log(`Coordinate ${coordinates.length}: [${x}, ${y}] -> [${xFloat}, ${yFloat}]`)
+          //console.log(`Coordinate ${coordinates.length}: [${x}, ${y}] -> [${xFloat}, ${yFloat}]`)
         }
       }
     }
@@ -1187,13 +1222,13 @@ export default class extends Controller {
       const xValues = coordinates.map(coord => coord[0])
       const yValues = coordinates.map(coord => coord[1])
       
-      console.log('Decompressed coordinate statistics:', {
+      /*console.log('Decompressed coordinate statistics:', {
         totalPairs: coordinates.length,
         xRange: [Math.min(...xValues), Math.max(...xValues)],
         yRange: [Math.min(...yValues), Math.max(...yValues)],
         first5: coordinates.slice(0, 5),
         last5: coordinates.slice(-5)
-      })
+      })*/
     }
     
     return coordinates
@@ -1201,21 +1236,21 @@ export default class extends Controller {
 
   // Load a single metadata vector on demand
   async loadSingleMetadataVector(metadataId) {
-    console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
+    //console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
     
     // Check if already loaded
     if (this.loadedMetadataVectors[metadataId]) {
-      console.log(`Metadata vector ${metadataId} already loaded`)
+      //console.log(`Metadata vector ${metadataId} already loaded`)
       const cachedData = this.loadedMetadataVectors[metadataId]
-      console.log('Cached data:', cachedData)
-      console.log('Cached compressed_data:', cachedData.compressed_data)
-      console.log('Cached compression_info:', cachedData.compression_info)
+      //console.log('Cached data:', cachedData)
+      //console.log('Cached compressed_data:', cachedData.compressed_data)
+      //console.log('Cached compression_info:', cachedData.compression_info)
       return cachedData
     }
     
     // Check if currently loading
     if (this.loadingMetadataVectors.has(metadataId)) {
-      console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
+      //console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
       // Wait for the loading to complete
       while (this.loadingMetadataVectors.has(metadataId)) {
         await new Promise(resolve => setTimeout(resolve, 100))
@@ -1235,7 +1270,7 @@ export default class extends Controller {
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
-      console.log(`Fetching single metadata vector from URL: ${url}`)
+      //console.log(`Fetching single metadata vector from URL: ${url}`)
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -1261,7 +1296,7 @@ export default class extends Controller {
       }
       
       const data = await response.json()
-      console.log('Received single metadata vector data:', data)
+      //console.log('Received single metadata vector data:', data)
       
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
@@ -1270,7 +1305,7 @@ export default class extends Controller {
         this.metadataVectorsLoomFile = data.loom_file
         
         const info = vectorData.compression_info
-        console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        //console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
         
         return vectorData
       } else {
@@ -1300,14 +1335,14 @@ export default class extends Controller {
       return null
     }
     
-    console.log(`Retrieved loaded vector for ${vectorData.name}:`, vectorData.compression_info)
+    //console.log(`Retrieved loaded vector for ${vectorData.name}:`, vectorData.compression_info)
     return vectorData
   }
 
   // Decompress discrete metadata vector from binary data
   decompressDiscreteMetadataVector(binaryData, compressionInfo) {
-    console.log('Decompressing discrete metadata vector:', compressionInfo)
-    console.log('Binary data type:', typeof binaryData, 'Binary data:', binaryData)
+    //console.log('Decompressing discrete metadata vector:', compressionInfo)
+    //console.log('Binary data type:', typeof binaryData, 'Binary data:', binaryData)
     
     // Check if binaryData is valid
     if (!binaryData) {
@@ -1386,7 +1421,7 @@ export default class extends Controller {
 
   // Decompress continuous metadata vector from binary data
   decompressContinuousMetadataVector(binaryData, compressionInfo) {
-    console.log('Decompressing continuous metadata vector:', compressionInfo)
+    //console.log('Decompressing continuous metadata vector:', compressionInfo)
     
     const { min_val, max_val, cell_count, bit_width } = compressionInfo
     const normalizedValues = []
@@ -1429,18 +1464,18 @@ export default class extends Controller {
       return min_val + (normalized / 65535) * range
     })
     
-    console.log(`Decompressed ${cell_count} continuous values:`, {
+    /*console.log(`Decompressed ${cell_count} continuous values:`, {
       first10: numericValues.slice(0, 10),
       range: `${numericValues[0]?.toFixed(3)} to ${numericValues[cell_count-1]?.toFixed(3)}`,
       actualRange: `${Math.min(...numericValues).toFixed(3)} to ${Math.max(...numericValues).toFixed(3)}`
-    })
+    })*/
     
     return numericValues
   }
 
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
-    console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
+    //console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
     
     // Load the metadata vector on-demand
     const vectorData = await this.loadSingleMetadataVector(metadataId)
@@ -1455,7 +1490,7 @@ export default class extends Controller {
       console.error('Loaded metadata vector is missing required data:', vectorData)
       // Clear the corrupted cache entry and try to reload
       delete this.loadedMetadataVectors[metadataId]
-      console.log('Cleared corrupted cache entry, retrying load...')
+      //console.log('Cleared corrupted cache entry, retrying load...')
       const retryData = await this.loadSingleMetadataVector(metadataId)
       if (!retryData || !retryData.compressed_data || !retryData.compression_info) {
         console.error('Retry failed - metadata vector is still corrupted')
@@ -1484,7 +1519,7 @@ export default class extends Controller {
       return
     }
     
-    console.log(`Successfully decompressed ${values.length} values for ${vectorData.name}`)
+    //console.log(`Successfully decompressed ${values.length} values for ${vectorData.name}`)
     
     // Store the decompressed values for visualization
     this.currentMetadataVector = {
@@ -1528,18 +1563,18 @@ export default class extends Controller {
 
   // Load all metadata vectors in a single request
   async loadAllMetadataVectorsInSingleRequest() {
-    console.log('=== LOADING ALL METADATA VECTORS IN SINGLE REQUEST ===')
+    //console.log('=== LOADING ALL METADATA VECTORS IN SINGLE REQUEST ===')
     
     // Get all metadata IDs from the page
     const metadataElements = document.querySelectorAll('[data-metadata-item]')
     const metadataIds = Array.from(metadataElements).map(el => el.dataset.metadataItem)
     
     if (metadataIds.length === 0) {
-      console.log('No metadata items found on page')
+      //console.log('No metadata items found on page')
       return
     }
     
-    console.log(`Found ${metadataIds.length} metadata items to load:`, metadataIds)
+    //console.log(`Found ${metadataIds.length} metadata items to load:`, metadataIds)
     
     try {
       // Get the current loom file
@@ -1549,7 +1584,7 @@ export default class extends Controller {
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataIds.join(',')}&loom_file=${encodeURIComponent(loomFile || '')}`
       
-      console.log('Fetching all metadata vectors in single request from URL:', url)
+      //console.log('Fetching all metadata vectors in single request from URL:', url)
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -1575,18 +1610,18 @@ export default class extends Controller {
       }
       
       const data = await response.json()
-      console.log('Received all metadata vectors data:', data)
+      //console.log('Received all metadata vectors data:', data)
       
       // Store the loaded metadata vectors
       this.loadedMetadataVectors = data.metadata_vectors || {}
       this.metadataVectorsLoomFile = data.loom_file
       
-      console.log(`Successfully loaded ${data.total_loaded} metadata vectors in single request`)
+      //console.log(`Successfully loaded ${data.total_loaded} metadata vectors in single request`)
       
       // Log compression info for each loaded vector
       Object.entries(this.loadedMetadataVectors).forEach(([metadataId, vectorData]) => {
         const info = vectorData.compression_info
-        console.log(`✓ ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        //console.log(`✓ ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
       })
       
     } catch (error) {
@@ -1597,17 +1632,17 @@ export default class extends Controller {
 
   // Load a single metadata vector silently (for preloading)
   async loadSingleMetadataVectorSilently(metadataId) {
-    console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
+    //console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
     
     // Check if already loaded
     if (this.loadedMetadataVectors[metadataId]) {
-      console.log(`Metadata vector ${metadataId} already loaded`)
+      //console.log(`Metadata vector ${metadataId} already loaded`)
       return this.loadedMetadataVectors[metadataId]
     }
     
     // Check if currently loading
     if (this.loadingMetadataVectors.has(metadataId)) {
-      console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
+      //console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
       // Wait for the loading to complete
       while (this.loadingMetadataVectors.has(metadataId)) {
         await new Promise(resolve => setTimeout(resolve, 100))
@@ -1626,7 +1661,7 @@ export default class extends Controller {
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
-      console.log(`Fetching single metadata vector silently from URL: ${url}`)
+      //console.log(`Fetching single metadata vector silently from URL: ${url}`)
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -1652,7 +1687,7 @@ export default class extends Controller {
       }
       
       const data = await response.json()
-      console.log('Received single metadata vector data silently:', data)
+      //console.log('Received single metadata vector data silently:', data)
       
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
@@ -1661,7 +1696,7 @@ export default class extends Controller {
         this.metadataVectorsLoomFile = data.loom_file
         
         const info = vectorData.compression_info
-        console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        //console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
         
         // Show checkboxes for this metadata now that it's loaded
         this.showCheckboxesForMetadata(metadataId)
@@ -1684,7 +1719,7 @@ export default class extends Controller {
   showLoadingSpinner(metadataId) {
     const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
     if (!button) {
-      console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
+      //console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
       return
     }
     
@@ -1720,7 +1755,7 @@ export default class extends Controller {
     button.disabled = true
     button.style.cursor = 'wait'
     
-    console.log(`Showing loading spinner for metadata ${metadataId}`)
+    //console.log(`Showing loading spinner for metadata ${metadataId}`)
   }
 
   // Hide loading spinner for a specific metadata ID
@@ -1740,7 +1775,7 @@ export default class extends Controller {
     button.disabled = false
     button.style.cursor = 'pointer'
     
-    console.log(`Hiding loading spinner for metadata ${metadataId}`)
+    //console.log(`Hiding loading spinner for metadata ${metadataId}`)
   }
 
   // Preload metadata vector on hover for better UX
@@ -1750,7 +1785,7 @@ export default class extends Controller {
     
     // Only preload if not already loaded and not currently loading
     if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
-      console.log(`Preloading metadata vector ${metadataId} on hover`)
+      //console.log(`Preloading metadata vector ${metadataId} on hover`)
       // Load in background without showing spinner
       this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
         console.log(`Preload failed for metadata ${metadataId}:`, error.message)
@@ -1766,7 +1801,7 @@ export default class extends Controller {
       return
     }
     
-    console.log(`Updating visualization with ${this.currentMetadataVector.name} (${this.currentMetadataVector.data_type})`)
+    //console.log(`Updating visualization with ${this.currentMetadataVector.name} (${this.currentMetadataVector.data_type})`)
     
     const { data_type, values, compression_info } = this.currentMetadataVector
     
@@ -1788,7 +1823,7 @@ export default class extends Controller {
     // Render category labels if this is discrete metadata
     this.renderCategoryLabels()
     
-    console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
+    //console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
 
   // Render all points using the current coloring scheme
@@ -1802,7 +1837,7 @@ export default class extends Controller {
     this.scatterContainer.removeChildren()
     
     const pointSize = this.currentPointSize
-    console.log(`🎯 renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
+    //console.log(`renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
 
     // Get filtered cell indices based on checkbox selections
     const filteredIndices = this.getFilteredCellIndices()
@@ -1821,7 +1856,7 @@ export default class extends Controller {
           categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
         })
         
-        console.log('Category frequencies for layering:', categoryFrequencies)
+        //console.log('Category frequencies for layering:', categoryFrequencies)
         
         // Sort point indices by category size (largest categories first, so they render in background)
         const sortedPointIndices = Array.from({ length: this.currentCoordinates.length }, (_, i) => i)
@@ -1832,6 +1867,11 @@ export default class extends Controller {
             const freqB = categoryFrequencies[categoryB]
             return freqB - freqA // Descending order (largest first)
           })
+        
+        // Debug: Log the first few sorted indices and their categories
+        //console.log('First 10 sorted point indices:', sortedPointIndices.slice(0, 10))
+        //console.log('Categories for first 10 points:', sortedPointIndices.slice(0, 10).map(i => values[i]))
+        //console.log('Frequencies for first 10 points:', sortedPointIndices.slice(0, 10).map(i => categoryFrequencies[values[i]]))
         
         // Render points in sorted order (largest categories first)
         sortedPointIndices.forEach(i => {
@@ -1960,7 +2000,7 @@ export default class extends Controller {
       }
     }
     
-    console.log(`Rendered ${this.currentCoordinates.length} points with current coloring scheme`)
+    //console.log(`Rendered ${this.currentCoordinates.length} points with current coloring scheme`)
     
     // Clear any stored original positions since points were recreated
     this.clearStoredOriginalPositions()
@@ -1969,10 +2009,10 @@ export default class extends Controller {
 
   // Color points for continuous metadata
   colorPointsContinuous(values, compressionInfo) {
-    console.log('Coloring points for continuous metadata:', {
+    /*console.log('Coloring points for continuous metadata:', {
       range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
       actualRange: `${Math.min(...values).toFixed(3)} to ${Math.max(...values).toFixed(3)}`
-    })
+    })*/
     
     const minVal = compressionInfo.min_val
     const maxVal = compressionInfo.max_val
@@ -2049,18 +2089,18 @@ export default class extends Controller {
       return this._cachedCategoryColors
     }
     
-    console.log('🎨 getCategoryColors called - converting colors for first time')
-    console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+    //console.log('🎨 getCategoryColors called - converting colors for first time')
+    //console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
     
     // Use colors from the global color palette loaded in layout
     if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      console.log('🎨 Converting colors to JavaScript hex numbers')
+      //console.log('Converting colors to JavaScript hex numbers')
       // Convert CSS hex colors (#1f77b4) to JavaScript hex numbers (0x1f77b4)
       const jsColors = window.CATEGORY_COLORS.map(cssColor => {
         // Remove # and convert to hex number
         return parseInt(cssColor.replace('#', ''), 16)
       })
-      console.log('🎨 Converted colors:', jsColors)
+      //console.log('Converted colors:', jsColors)
       
       // Cache the converted colors
       this._cachedCategoryColors = jsColors
@@ -2068,7 +2108,7 @@ export default class extends Controller {
     }
     
     // Temporary fallback to prevent infinite loop - will be removed once colors are properly loaded
-    console.warn('⚠️ Using temporary fallback colors to prevent infinite loop')
+    console.warn('Using temporary fallback colors to prevent infinite loop')
     const fallbackColors = [
       0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b, 
       0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4
@@ -2082,13 +2122,13 @@ export default class extends Controller {
   // Clear the cached colors (call this when colors are reloaded)
   clearCategoryColorsCache() {
     this._cachedCategoryColors = null
-    console.log('🎨 Category colors cache cleared')
+    //console.log('Category colors cache cleared')
   }
 
   // Clear the cached color map (call this when metadata changes)
   clearColorMapCache() {
     this._cachedColorMap = null
-    console.log('🎨 Color map cache cleared')
+    //console.log('Color map cache cleared')
   }
 
   // Convert normalized value (0-1) to color
@@ -2134,12 +2174,12 @@ export default class extends Controller {
     // Clear existing colored points and re-render with default coloring
     this.forceReRenderPoints()
     
-    console.log('Successfully cleared metadata coloring')
+    //console.log('Successfully cleared metadata coloring')
   }
   
   // Clear all loaded metadata vectors cache (use when switching projects or clearing all data)
   clearLoadedMetadataVectorsCache() {
-    console.log('Clearing all loaded metadata vectors cache')
+    //console.log('Clearing all loaded metadata vectors cache')
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors.clear()
   }
@@ -2167,7 +2207,7 @@ export default class extends Controller {
     )
     
     if (significantChange) {
-      console.log('🔄 Embedding method changed - animation will be triggered')
+      console.log('Embedding method changed - animation will be triggered')
     }
     
     return significantChange
@@ -2394,16 +2434,16 @@ export default class extends Controller {
     document.addEventListener('mouseup', stopDrag)
     document.addEventListener('mouseleave', stopDrag)
     
-    console.log('Draggable divider initialized')
+    //console.log('Draggable divider initialized')
   }
 
   // Handle water drop button clicks
   waterDropClicked(event) {
-    console.log('=== WATER DROP CLICKED ===')
-    console.log('🎨 Event:', event)
-    console.log('🎨 Event target:', event.target)
-    console.log('🎨 Event currentTarget:', event.currentTarget)
-    
+    /*console.log('=== WATER DROP CLICKED ===')
+    console.log('Event:', event)
+    console.log('Event target:', event.target)
+    console.log('Event currentTarget:', event.currentTarget)
+    */
     event.preventDefault()
     event.stopPropagation()
     
@@ -2412,11 +2452,11 @@ export default class extends Controller {
     const metadataId = button.dataset.metadataId
     const isCurrentlyActive = button.dataset.active === 'true'
     
-    console.log('🎨 Button element:', button)
-    console.log('🎨 Metadata name:', metadataName)
-    console.log('🎨 Metadata ID:', metadataId)
-    console.log('🎨 Is currently active:', isCurrentlyActive)
-    
+    /*console.log('Button element:', button)
+    console.log('Metadata name:', metadataName)
+    console.log('Metadata ID:', metadataId)
+    console.log('Is currently active:', isCurrentlyActive)
+    */
     //console.log('Button element:', button)
     //console.log('Metadata name:', metadataName)
     //console.log('Metadata ID:', metadataId)
@@ -2435,38 +2475,38 @@ export default class extends Controller {
     
     // Button is not active - select it
     // 1. Reset all water drop buttons to grey (cancel previous associations)
-    console.log('🎨 Step 1: Resetting all water drop buttons...')
+    //console.log('Step 1: Resetting all water drop buttons...')
     this.resetAllWaterDropButtons()
     
     // 1.5. Hide all reset buttons (since we're switching to a different metadata)
-    console.log('🎨 Step 1.5: Hiding all reset buttons...')
+    //console.log('Step 1.5: Hiding all reset buttons...')
     this.hideAllResetButtons()
     
     // 2. Remove all existing colored disks from all metadata
-    console.log('🎨 Step 2: Removing all existing category colors...')
+    //console.log('Step 2: Removing all existing category colors...')
     this.removeAllCategoryColors()
     
     // 3. Set this button to blue (active)
-    console.log('🎨 Step 3: Setting this button as active...')
+    //console.log('Step 3: Setting this button as active...')
     this.setWaterDropButtonActive(button)
     
     // 4. Find the metadata item container and add colored categories
-    console.log('🎨 Step 4: Finding metadata container...')
+    //console.log('Step 4: Finding metadata container...')
     const metadataContainer = button.closest('[data-metadata-item]')
-    console.log('🎨 Metadata container found:', metadataContainer)
+    //console.log('Metadata container found:', metadataContainer)
     
     if (metadataContainer) {
-      console.log('🎨 Step 5: Adding category colors...')
+      //console.log('Step 5: Adding category colors...')
       this.addCategoryColors(metadataContainer, metadataId)
       
       // 6. Load and visualize metadata vector if available
-      console.log('🎨 Step 6: Loading metadata vector for visualization...')
+      //console.log('Step 6: Loading metadata vector for visualization...')
       this.loadAndVisualizeMetadataVector(metadataId)
     } else {
       console.error('🎨 ERROR: Could not find metadata container!')
     }
     
-    console.log('🎨 === WATER DROP CLICK COMPLETE ===')
+    //console.log('=== WATER DROP CLICK COMPLETE ===')
   }
   
   // Reset all water drop buttons to grey
@@ -2506,21 +2546,21 @@ export default class extends Controller {
   
   // Add colored disks to categories
   addCategoryColors(metadataContainer, metadataId) {
-    console.log('🎨 addCategoryColors called for metadata:', metadataId)
+    //console.log('addCategoryColors called for metadata:', metadataId)
     
     // Remove existing category colors
     const existingColors = metadataContainer.querySelectorAll('.category-color-disk')
-    console.log('🎨 Removing existing colors:', existingColors.length)
+    //console.log('Removing existing colors:', existingColors.length)
     existingColors.forEach(color => color.remove())
     
     // First, make sure the categories are expanded
     const chevron = metadataContainer.querySelector('svg')
     const categoriesDiv = metadataContainer.querySelector('[style*="padding-left: 32px"]')
-    console.log('🎨 Chevron found:', !!chevron)
-    console.log('🎨 Categories div found:', !!categoriesDiv)
+    //console.log('Chevron found:', !!chevron)
+    //console.log('Categories div found:', !!categoriesDiv)
     
     if (chevron && chevron.style.transform !== 'rotate(90deg)') {
-      console.log('🎨 Expanding categories first...')
+      //console.log('Expanding categories first...')
       // Directly expand the categories
       chevron.style.transform = 'rotate(90deg)'
       if (categoriesDiv) {
@@ -2529,31 +2569,31 @@ export default class extends Controller {
     }
     
     // Wait a bit for the categories to expand, then add colors
-    console.log('🎨 Setting timeout for color addition...')
+    //console.log('Setting timeout for color addition...')
     setTimeout(() => {
-      console.log('🎨 Timeout executed - adding colors...')
+      //console.log('Timeout executed - adding colors...')
       // Find categories container
       const categoriesContainer = metadataContainer.querySelector('[style*="padding-left: 32px"]')
-      console.log('🎨 Categories container found:', !!categoriesContainer)
+      //console.log('Categories container found:', !!categoriesContainer)
       
       if (!categoriesContainer || categoriesContainer.style.display === 'none') {
-        console.log('🎨 Categories container not found or hidden')
+        console.log('Categories container not found or hidden')
         return
       }
       
       // Get categories data
-      console.log('🎨 Getting categories for metadata...')
+      //console.log('Getting categories for metadata...')
       const categories = this.getCategoriesForMetadata(metadataId)
-      console.log('🎨 Categories data:', categories)
+      //console.log('Categories data:', categories)
       
       if (!categories || categories.length === 0) {
-        console.log('🎨 No categories found')
+        console.log('No categories found')
         return
       }
     
     // Add colored disks to each category
     const categoryItems = categoriesContainer.querySelectorAll('div[style*="display: flex; justify-content: space-between"]')
-    console.log('🎨 Found category items:', categoryItems.length)
+    //console.log('Found category items:', categoryItems.length)
     
     categoryItems.forEach((item, index) => {
       // Set up the container for absolute positioning
@@ -2563,7 +2603,7 @@ export default class extends Controller {
       const categoryName = item.querySelector('span').textContent.trim()
       const color = this.getCategoryColor(categoryName, index, metadataId)
       
-      console.log(`🎨 Adding color disk for "${categoryName}" (index ${index}) with color ${color}`)
+      //console.log(`Adding color disk for "${categoryName}" (index ${index}) with color ${color}`)
       
       // Create color disk
       const colorDisk = document.createElement('div')
@@ -2645,14 +2685,14 @@ export default class extends Controller {
     const storedColor = localStorage.getItem(storageKey)
     
     if (storedColor) {
-      console.log(`🎨 Using stored color for "${categoryName}" in metadata ${metadataId}: ${storedColor}`)
+      //console.log(`Using stored color for "${categoryName}" in metadata ${metadataId}: ${storedColor}`)
       return storedColor
     }
     
     // Use the same color palette as the plot
     if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
       const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
-      console.log(`🎨 Using default color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${color}`)
+      //console.log(`Using default color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${color}`)
       return color
     }
     
@@ -2669,7 +2709,7 @@ export default class extends Controller {
     ]
     
     const fallbackColor = defaultColors[index % defaultColors.length]
-    console.log(`🎨 Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
+    console.log(`Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
     return fallbackColor
   }
   
@@ -2686,7 +2726,7 @@ export default class extends Controller {
 
   // Clear all stored colors for a metadata
   clearStoredColors(metadataId) {
-    console.log(`🧹 Clearing all stored colors for metadata ${metadataId}`)
+    //console.log(`Clearing all stored colors for metadata ${metadataId}`)
     const keysToRemove = []
     
     // Find all localStorage keys for this metadata
@@ -2700,11 +2740,11 @@ export default class extends Controller {
     // Remove the keys
     keysToRemove.forEach(key => {
       const categoryName = key.replace(`category_color_${metadataId}_`, '')
-      console.log(`🧹 Removing stored color for "${categoryName}"`)
+      //console.log(`Removing stored color for "${categoryName}"`)
       localStorage.removeItem(key)
     })
     
-    console.log(`🧹 Cleared ${keysToRemove.length} stored colors`)
+    //console.log(`Cleared ${keysToRemove.length} stored colors`)
   }
 
   // Add reset colors button for a metadata
@@ -2778,12 +2818,12 @@ export default class extends Controller {
     resetButton.style.height = paletteButtonHeight + 'px'
     resetButton.style.minHeight = paletteButtonHeight + 'px'
     
-    console.log('🎨 Added reset colors button for metadata', metadataId, 'with height:', paletteButtonHeight + 'px')
+    //console.log('Added reset colors button for metadata', metadataId, 'with height:', paletteButtonHeight + 'px')
   }
 
   // Reset colors for a specific metadata
   resetColorsForMetadata(metadataId) {
-    console.log('🔄 Resetting colors for metadata', metadataId)
+    //console.log('Resetting colors for metadata', metadataId)
     
     // Clear stored colors
     this.clearStoredColors(metadataId)
@@ -2793,8 +2833,14 @@ export default class extends Controller {
     
     // Re-render the plot if this is the current metadata
     if (this.currentMetadataId === metadataId && this.currentMetadataVector) {
-      console.log('🔄 Re-rendering plot with default colors')
+      //console.log('Re-rendering plot with default colors')
       this.renderPointsWithCurrentColoring()
+      
+      // Re-render category labels if they are visible
+      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        //console.log('Re-rendering category labels with default colors')
+        this.renderCategoryLabels()
+      }
     }
     
     // Update the legend colors
@@ -2837,7 +2883,7 @@ export default class extends Controller {
       const categoryName = disk.dataset.categoryName
       const defaultColor = this.getDefaultCategoryColor(categoryName, index)
       disk.style.backgroundColor = defaultColor
-      console.log(`🔄 Updated legend color for "${categoryName}" to default: ${defaultColor}`)
+      //console.log(`Updated legend color for "${categoryName}" to default: ${defaultColor}`)
     })
   }
 
@@ -2864,18 +2910,31 @@ export default class extends Controller {
   
   // Show color picker form
   showColorPicker(colorDisk, categoryName, metadataId) {
-    console.log(`🎨 showColorPicker called for category: ${categoryName}, metadata: ${metadataId}`)
-    console.log(`🎨 Current point size when opening color picker: ${this.currentPointSize}`)
+    //console.log(`showColorPicker called for category: ${categoryName}, metadata: ${metadataId}`)
+    //console.log(`Current point size when opening color picker: ${this.currentPointSize}`)
     
-    // Remove existing color picker
+    // Check if there's an existing color picker for the same category
     const existingPicker = document.getElementById('color-picker-form')
     if (existingPicker) {
-      existingPicker.remove()
+      const existingCategory = existingPicker.dataset.category
+      const existingMetadata = existingPicker.dataset.metadata
+      
+      // If clicking the same category disk again, hide the picker (toggle behavior)
+      if (existingCategory === categoryName && existingMetadata === metadataId) {
+        //console.log(`Toggling off color picker for category: ${categoryName}`)
+        existingPicker.remove()
+        return
+      } else {
+        // Different category, remove existing picker and show new one
+        existingPicker.remove()
+      }
     }
     
     // Create color picker form
     const picker = document.createElement('div')
     picker.id = 'color-picker-form'
+    picker.dataset.category = categoryName
+    picker.dataset.metadata = metadataId
     picker.style.cssText = `
       position: fixed;
       background: white;
@@ -2947,11 +3006,17 @@ export default class extends Controller {
       
       // Re-render the plot with the new color
       if (this.currentMetadataVector && this.currentMetadataId === metadataId) {
-        console.log('🎨 Color changed, re-rendering plot with updated colors')
-        console.log(`🎨 Current point size before re-render: ${this.currentPointSize}`)
+        //console.log('Color changed, re-rendering plot with updated colors')
+        //console.log(`Current point size before re-render: ${this.currentPointSize}`)
         this.renderPointsWithCurrentColoring()
+        
+        // Re-render category labels if they are visible
+        if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+          //console.log('Re-rendering category labels with updated colors')
+          this.renderCategoryLabels()
+        }
       } else {
-        console.log('🎨 Color saved but not re-rendering plot (different metadata active)')
+        console.log('Color saved but not re-rendering plot (different metadata active)')
       }
       
       // Add reset button if it doesn't exist (first customization)
@@ -3017,9 +3082,18 @@ export default class extends Controller {
       }
     }
     
+    // Update label interaction behavior
+    this.updateLabelInteractionMode()
+    
+    // Update control instructions
+    this.updateControlInstructions()
+    
     // Remove existing event listeners and add new ones
     this.removeInteractionEventListeners()
     this.addInteractionEventListeners()
+    
+    // Add global drag event handlers for labels
+    this.setupGlobalDragHandlers()
   }
 
   // Update button visual states
@@ -3579,7 +3653,7 @@ export default class extends Controller {
     const centerX = mouseX !== null ? mouseX : canvas.width / 2
     const centerY = mouseY !== null ? mouseY : canvas.height / 2
 
-    console.log('🔄 Zoom Translation:', { scaleX, scaleY, centerX, centerY, mouseX, mouseY })
+    //console.log('Zoom Translation:', { scaleX, scaleY, centerX, centerY, mouseX, mouseY })
 
     let translatedCount = 0
 
@@ -3940,18 +4014,18 @@ export default class extends Controller {
       }
     })
     
-    console.log(`🎯 Total labels added: ${labelsAdded}`)
+    //console.log(`Total labels added: ${labelsAdded}`)
   }
 
   // Calculate centroids for each category
   calculateCategoryCentroids(values, categories) {
-    console.log('🎯 calculateCategoryCentroids called')
-    console.log('🎯 values length:', values ? values.length : 'undefined')
-    console.log('🎯 categories:', categories)
-    console.log('🎯 currentCoordinates length:', this.currentCoordinates ? this.currentCoordinates.length : 'undefined')
+    //console.log('calculateCategoryCentroids called')
+    //console.log('values length:', values ? values.length : 'undefined')
+    //console.log('categories:', categories)
+    //console.log('currentCoordinates length:', this.currentCoordinates ? this.currentCoordinates.length : 'undefined')
     
     if (!categories || !Array.isArray(categories)) {
-      console.log('🎯 Categories is not a valid array, returning empty centroids')
+      console.log('Categories is not a valid array, returning empty centroids')
       return {}
     }
     
@@ -4022,10 +4096,135 @@ export default class extends Controller {
     container.addChild(background)
     container.addChild(text)
 
-    // Store the category name for reference
+    // Store the category name and border color for reference
     container.categoryName = categoryName
+    container.borderColor = borderColor
+
+    // Make the label draggable (only in pick mode)
+    container.interactive = true
+    container.buttonMode = true
+    // Cursor will be set based on interaction mode
+
+    // Add drag functionality
+    let isDragging = false
+    let dragData = null
+    let dragStartPosition = { x: 0, y: 0 }
+
+    container.on('pointerdown', (event) => {
+      // Only allow dragging in pick mode
+      if (this.interactionMode === 'pick') {
+        isDragging = true
+        dragData = event.data
+        dragStartPosition = { x: container.x, y: container.y }
+        container.alpha = 0.8 // Slightly transparent while dragging
+        
+        // Store reference to this label for global event handling
+        this.draggingLabel = container
+        
+        event.stopPropagation() // Prevent event from bubbling to canvas
+        event.stopImmediatePropagation() // Prevent other handlers from running
+      }
+    })
+
+    // Add hover effects to indicate draggability (only in pick mode)
+    container.on('pointerover', () => {
+      if (!isDragging && this.interactionMode === 'pick') {
+        container.scale.set(1.05) // Slightly larger on hover
+        container.alpha = 0.9 // Slightly transparent on hover
+        container.cursor = 'move' // Show move cursor
+      }
+    })
+
+    container.on('pointerout', () => {
+      if (!isDragging) {
+        container.scale.set(1.0) // Back to normal size
+        container.alpha = 1.0 // Back to full opacity
+        container.cursor = 'default' // Reset cursor
+      }
+    })
 
     return container
+  }
+
+  // Update label interaction behavior based on current interaction mode
+  updateLabelInteractionMode() {
+    if (!this.categoryLabelsContainer) return
+
+    this.categoryLabelsContainer.children.forEach(label => {
+      if (label.categoryName) { // Check if it's a category label
+        if (this.interactionMode === 'pick') {
+          label.cursor = 'move'
+        } else {
+          label.cursor = 'default'
+          // Reset any hover effects if not in pick mode
+          label.scale.set(1.0)
+          label.alpha = 1.0
+        }
+      }
+    })
+  }
+
+  // Update control instructions based on current interaction mode
+  updateControlInstructions() {
+    const controlElement = document.getElementById('control-instructions')
+    if (!controlElement) return
+
+    let instructions = ''
+    switch (this.interactionMode) {
+      case 'pick':
+        instructions = 'Click to pick a cell, click and drag to move a label, scroll to zoom'
+        break
+      case 'pan':
+        instructions = 'Drag to pan • Scroll to zoom (mouse-centered)'
+        break
+      case 'lasso':
+        instructions = 'Click and drag to select cells, scroll to zoom'
+        break
+      default:
+        instructions = 'Click to pick a cell, click and drag to move a label, scroll to zoom'
+    }
+    
+    controlElement.textContent = instructions
+  }
+
+  // Setup global drag handlers for label dragging
+  setupGlobalDragHandlers() {
+    if (!this.pixiApp || !this.pixiApp.stage) return
+
+    // Remove existing global drag handlers if they exist
+    if (this.globalDragHandlers) {
+      this.pixiApp.stage.off('pointermove', this.globalDragHandlers.move)
+      this.pixiApp.stage.off('pointerup', this.globalDragHandlers.up)
+      this.pixiApp.stage.off('pointerupoutside', this.globalDragHandlers.upOutside)
+    }
+
+    // Create new global drag handlers
+    this.globalDragHandlers = {
+      move: (event) => {
+        if (this.draggingLabel && this.interactionMode === 'pick') {
+          const newPosition = event.data.getLocalPosition(this.draggingLabel.parent)
+          this.draggingLabel.x = newPosition.x
+          this.draggingLabel.y = newPosition.y
+        }
+      },
+      up: () => {
+        if (this.draggingLabel) {
+          this.draggingLabel.alpha = 1.0
+          this.draggingLabel = null
+        }
+      },
+      upOutside: () => {
+        if (this.draggingLabel) {
+          this.draggingLabel.alpha = 1.0
+          this.draggingLabel = null
+        }
+      }
+    }
+
+    // Add global event listeners
+    this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
+    this.pixiApp.stage.on('pointerup', this.globalDragHandlers.up)
+    this.pixiApp.stage.on('pointerupoutside', this.globalDragHandlers.upOutside)
   }
 
   // Convert hex color to PIXI color number
@@ -4216,7 +4415,7 @@ export default class extends Controller {
     const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
     
     if (visibleCells.length === 0) {
-      console.log('⚠️ No visible cells to select')
+      console.log('No visible cells to select')
       return
     }
     
@@ -4225,7 +4424,7 @@ export default class extends Controller {
       this.selectedCells.add(cellId)
     })
     
-    console.log(`✅ Added ${visibleCells.length} visible cells to selection`)
+    console.log(`Added ${visibleCells.length} visible cells to selection`)
     
     // Update the selection count display
     this.updateSelectedCellsCount()
@@ -4279,16 +4478,16 @@ export default class extends Controller {
       // Set slider to current point size
       slider.value = this.currentPointSize
       valueDisplay.textContent = this.currentPointSize.toFixed(1)
-      console.log(`🎯 Settings window initialized with point size: ${this.currentPointSize}`)
+      //console.log(`Settings window initialized with point size: ${this.currentPointSize}`)
       
       // Add direct event listener to ensure it works
       slider.addEventListener('input', (e) => {
         const newSize = parseFloat(e.target.value)
         valueDisplay.textContent = newSize.toFixed(1)
-        console.log(`🎯 Slider value changed to: ${newSize}`)
+        //console.log(`Slider value changed to: ${newSize}`)
         
         // CRITICAL: Update this.currentPointSize so it persists across re-renders
-        console.log(`🎯 Direct listener updating currentPointSize: ${this.currentPointSize} -> ${newSize}`)
+        //console.log(`Direct listener updating currentPointSize: ${this.currentPointSize} -> ${newSize}`)
         this.currentPointSize = newSize
         
         this.updateAllPointSizes(newSize)
@@ -4298,23 +4497,23 @@ export default class extends Controller {
     // Add direct event listeners for checkboxes to ensure they work
     const axesCheckbox = document.getElementById('show-axes-checkbox')
     if (axesCheckbox) {
-      console.log('🎯 Adding event listener to axes checkbox')
+      //console.log('Adding event listener to axes checkbox')
       // Remove any existing listeners first
       axesCheckbox.removeEventListener('change', this.boundAxesToggle)
       // Create bound method for proper cleanup
       this.boundAxesToggle = (e) => {
-        console.log('🎯 Direct axes checkbox event listener triggered!')
+        //console.log('Direct axes checkbox event listener triggered!')
         this.toggleAxes()
       }
       axesCheckbox.addEventListener('change', this.boundAxesToggle)
     } else {
-      console.log('🎯 Axes checkbox not found during initialization!')
+      console.log('Axes checkbox not found during initialization!')
     }
     
     const gridCheckbox = document.getElementById('show-grid-checkbox')
     if (gridCheckbox) {
       gridCheckbox.addEventListener('change', (e) => {
-        console.log('🎯 Direct grid checkbox event listener triggered!')
+        //console.log('Direct grid checkbox event listener triggered!')
         this.toggleGrid()
       })
     }
@@ -4322,7 +4521,7 @@ export default class extends Controller {
     const categoriesCheckbox = document.getElementById('show-categories-checkbox')
     if (categoriesCheckbox) {
       categoriesCheckbox.addEventListener('change', (e) => {
-        console.log('🎯 Direct categories checkbox event listener triggered!')
+        //console.log('Direct categories checkbox event listener triggered!')
         this.toggleCategories()
       })
     }
@@ -4385,7 +4584,7 @@ export default class extends Controller {
     const slider = document.getElementById('point-size-slider')
     const valueDisplay = document.getElementById('point-size-value')
     if (!slider || !valueDisplay) {
-      console.log('🎯 Slider or valueDisplay not found')
+      console.log('Slider or valueDisplay not found')
       return
     }
     
@@ -4393,10 +4592,10 @@ export default class extends Controller {
     valueDisplay.textContent = newSize.toFixed(1)
     
     // Store the new point size for future renders
-    console.log(`🎯 Stimulus updatePointSize: ${this.currentPointSize} -> ${newSize}`)
+    //console.log(`Stimulus updatePointSize: ${this.currentPointSize} -> ${newSize}`)
     this.currentPointSize = newSize
     
-    console.log(`🎯 Stimulus updating point size to: ${newSize}`)
+    //console.log(`Stimulus updating point size to: ${newSize}`)
     
     // Update all existing points
     this.updateAllPointSizes(newSize)
@@ -4404,7 +4603,7 @@ export default class extends Controller {
 
   updateAllPointSizes(newSize) {
     if (!this.scatterContainer) {
-      console.log('⚠️ No scatterContainer found')
+      console.log('No scatterContainer found')
       return
     }
     
@@ -4428,21 +4627,21 @@ export default class extends Controller {
       })
     }
     
-    console.log(`🎯 Updated ${updatedCount} points to size ${newSize}`)
-    console.log(`🎯 ScatterContainer children: ${this.scatterContainer.children.length}`)
-    console.log(`🎯 AnimatedContainer children: ${this.animatedContainer ? this.animatedContainer.children.length : 'none'}`)
+    //console.log(`Updated ${updatedCount} points to size ${newSize}`)
+    //console.log(`ScatterContainer children: ${this.scatterContainer.children.length}`)
+    //console.log(`AnimatedContainer children: ${this.animatedContainer ? this.animatedContainer.children.length : 'none'}`)
     
     // Debug first few points
     if (this.scatterContainer.children.length > 0) {
       const firstPoint = this.scatterContainer.children[0]
-      console.log(`🎯 First point properties:`, {
+      /*console.log(`First point properties:`, {
         isPoint: firstPoint.isPoint,
         visible: firstPoint.visible,
         alpha: firstPoint.alpha,
         x: firstPoint.x,
         y: firstPoint.y,
         cellId: firstPoint.cellId
-      })
+      })*/
     }
   }
 
@@ -4455,17 +4654,12 @@ export default class extends Controller {
     const currentY = point.y
     const currentAlpha = point.alpha || 1.0
     
-    // Get the current color - try different ways to get it
-    let currentColor = 0x3b82f6 // Default blue
+    // Get the current color from the current coloring scheme
+    let currentColor = 0x3b82f6 // Default blue fallback
     
-    // Try to get color from the point's stored color or from original colors
-    if (point.cellId !== undefined && this.originalPointColors && this.originalPointColors.has(point.cellId)) {
-      currentColor = this.originalPointColors.get(point.cellId)
-    } else if (point.tint) {
-      currentColor = point.tint
-    } else {
-      // Try to get color from current coloring scheme
-      const { color } = this.getColorAndAlpha(point.cellId || 0)
+    if (point.cellId !== undefined) {
+      // Use the current coloring scheme to get the correct color
+      const { color } = this.getColorAndAlpha(point.cellId)
       currentColor = color
     }
     
@@ -4482,31 +4676,31 @@ export default class extends Controller {
   }
 
   toggleAxes() {
-    console.log('🎯 toggleAxes method called!')
+    //console.log('toggleAxes method called!')
     const checkbox = document.getElementById('show-axes-checkbox')
     if (!checkbox) {
-      console.log('🎯 Checkbox not found!')
+      console.log('Checkbox not found!')
       return
     }
     if (!this.axesContainer) {
-      console.log('🎯 Axes container not found!')
+      console.log('Axes container not found!')
       return
     }
     
-    console.log(`🎯 Toggling axes: ${checkbox.checked}`)
-    console.log(`🎯 Current axes visible: ${this.axesContainer.visible}`)
+    //console.log(`Toggling axes: ${checkbox.checked}`)
+    //console.log(`Current axes visible: ${this.axesContainer.visible}`)
     
     // Recalculate bounds with/without axes margins BEFORE toggling visibility
     if (this.currentCoordinates) {
       const originalBounds = this.calculateBounds(this.currentCoordinates)
-      console.log('🎯 Original bounds:', originalBounds)
+      //console.log('Original bounds:', originalBounds)
       
       // Temporarily set axes visibility to match checkbox state for bounds calculation
       const previousVisibility = this.axesContainer.visible
       this.axesContainer.visible = checkbox.checked
       
       const newBounds = this.getAdjustedBounds(originalBounds)
-      console.log('🎯 Adjusted bounds:', newBounds)
+      //console.log('Adjusted bounds:', newBounds)
       this.currentBounds = newBounds
       
       // Restore the previous visibility state
@@ -4518,13 +4712,13 @@ export default class extends Controller {
       
       // Now set the final axes visibility
       this.axesContainer.visible = checkbox.checked
-      console.log(`🎯 Final axes visible: ${this.axesContainer.visible}`)
+      //console.log(`Final axes visible: ${this.axesContainer.visible}`)
       
       // Re-render axes
       this.renderAxes()
-      console.log('🎯 Axes toggle complete!')
+      //console.log('Axes toggle complete!')
     } else {
-      console.log('🎯 No current coordinates found!')
+      console.log('No current coordinates found!')
     }
   }
 
@@ -4532,32 +4726,32 @@ export default class extends Controller {
     const checkbox = document.getElementById('show-grid-checkbox')
     if (!checkbox || !this.gridContainer) return
     
-    console.log(`🎯 Toggling grid: ${checkbox.checked}`)
-    console.log(`🎯 Current grid visible: ${this.gridContainer.visible}`)
+    //console.log(`Toggling grid: ${checkbox.checked}`)
+    //console.log(`Current grid visible: ${this.gridContainer.visible}`)
     
     // Toggle grid visibility
     this.gridContainer.visible = checkbox.checked
-    console.log(`🎯 New grid visible: ${this.gridContainer.visible}`)
+    //console.log(`New grid visible: ${this.gridContainer.visible}`)
     
     // Re-render grid to ensure it's up to date
     this.renderGrid()
-    console.log('🎯 Grid toggle complete!')
+    //console.log('Grid toggle complete!')
   }
 
   toggleCategories() {
     const checkbox = document.getElementById('show-categories-checkbox')
     if (!checkbox) return
     
-    console.log(`🎯 Toggling categories: ${checkbox.checked}`)
+    //console.log(`Toggling categories: ${checkbox.checked}`)
     
     // Toggle category labels on the plot
     if (this.categoryLabelsContainer) {
       this.categoryLabelsContainer.visible = checkbox.checked
-      console.log(`🎯 Category labels visible: ${this.categoryLabelsContainer.visible}`)
+      //console.log(`Category labels visible: ${this.categoryLabelsContainer.visible}`)
       
       // If turning on, make sure labels are rendered
       if (checkbox.checked) {
-        console.log('🎯 Re-rendering category labels')
+        //console.log('Re-rendering category labels')
         this.renderCategoryLabels()
       }
     }
@@ -4568,7 +4762,7 @@ export default class extends Controller {
       categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
     }
     
-    console.log('🎯 Categories toggle complete!')
+    //console.log('Categories toggle complete!')
   }
 
   updateCategoriesCheckboxState() {
@@ -4632,21 +4826,32 @@ export default class extends Controller {
       
       //console.log('SVG saved successfully')
     } catch (error) {
-      console.error('❌ Error saving SVG:', error)
+      console.error('Error saving SVG:', error)
       alert('Error saving SVG file')
     }
   }
 
   // Generate SVG content from the current plot
   generateSVGFromPlot(canvas) {
-    const width = canvas.width
-    const height = canvas.height
+    // Use the same dimensions as the actual plot
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
     
     // Start SVG with proper dimensions
     let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
     
     // Add background
     svg += `<rect width="100%" height="100%" fill="white"/>`
+    
+    // Add grid if visible
+    if (this.gridContainer && this.gridContainer.visible) {
+      svg += this.generateSVGGrid(width, height)
+    }
+    
+    // Add axes if visible
+    if (this.axesContainer && this.axesContainer.visible) {
+      svg += this.generateSVGAxes(width, height)
+    }
     
     // Add points from scatterContainer
     if (this.scatterContainer && this.scatterContainer.children) {
@@ -4655,17 +4860,11 @@ export default class extends Controller {
           const x = child.x
           const y = child.y
           
-          // Get color (red for selected, original color for others)
-          let color = '#3b82f6' // Default blue
-          if (this.selectedCells && this.selectedCells.has(child.cellId)) {
-            color = '#ff0000' // Red for selected
-          } else if (this.originalPointColors && this.originalPointColors.has(child.cellId)) {
-            const originalColor = this.originalPointColors.get(child.cellId)
-            color = this.hexToRgb(originalColor)
-          }
+          // Get the current color and size
+          const { color, size } = this.getPointColorAndSize(child)
           
           // Add circle for each point
-          svg += `<circle cx="${x}" cy="${y}" r="1" fill="${color}"/>`
+          svg += `<circle cx="${x}" cy="${y}" r="${size}" fill="${color}"/>`
         }
       })
     }
@@ -4677,19 +4876,18 @@ export default class extends Controller {
           const x = child.x
           const y = child.y
           
-          // Get color (red for selected, original color for others)
-          let color = '#3b82f6' // Default blue
-          if (this.selectedCells && this.selectedCells.has(child.cellId)) {
-            color = '#ff0000' // Red for selected
-          } else if (this.originalPointColors && this.originalPointColors.has(child.cellId)) {
-            const originalColor = this.originalPointColors.get(child.cellId)
-            color = this.hexToRgb(originalColor)
-          }
+          // Get the current color and size
+          const { color, size } = this.getPointColorAndSize(child)
           
           // Add circle for each point
-          svg += `<circle cx="${x}" cy="${y}" r="1" fill="${color}"/>`
+          svg += `<circle cx="${x}" cy="${y}" r="${size}" fill="${color}"/>`
         }
       })
+    }
+    
+    // Add category labels if visible
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      svg += this.generateSVGCategoryLabels()
     }
     
     // Add lasso graphics if it exists
@@ -4703,6 +4901,10 @@ export default class extends Controller {
 
   // Convert hex color to RGB
   hexToRgb(hex) {
+    if (!hex) {
+      return '#cccccc' // Default grey if undefined/null
+    }
+    
     if (typeof hex === 'string' && hex.startsWith('#')) {
       return hex
     }
@@ -4710,6 +4912,156 @@ export default class extends Controller {
     // Convert number to hex string
     const hexStr = hex.toString(16).padStart(6, '0')
     return `#${hexStr}`
+  }
+
+  // Get point color and size for SVG export
+  getPointColorAndSize(point) {
+    let color = '#3b82f6' // Default blue
+    let size = this.currentPointSize || 1
+    
+    // Check for selection coloring first
+    if (this.selectedCells && this.selectedCells.has(point.cellId)) {
+      color = '#ff0000' // Red for selected
+    } else if (this.currentMetadataVector && this.currentMetadataVector.values) {
+      // Use current metadata coloring
+      const { color: metadataColor } = this.getColorAndAlpha(point.cellId)
+      color = this.hexToRgb(metadataColor)
+    } else if (this.originalPointColors && this.originalPointColors.has(point.cellId)) {
+      const originalColor = this.originalPointColors.get(point.cellId)
+      color = this.hexToRgb(originalColor)
+    }
+    
+    return { color, size }
+  }
+
+  // Generate SVG grid
+  generateSVGGrid(width, height) {
+    if (!this.currentBounds) return ''
+    
+    let svg = ''
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    
+    // Use the same coordinate system as the actual plot
+    const plotWidth = this.pixiApp.screen.width
+    const plotHeight = this.pixiApp.screen.height
+    
+    // Use the same margins as axes
+    const leftMargin = 80
+    const bottomMargin = 20
+    
+    // Calculate tick spacing for each axis
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    // Vertical grid lines
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
+      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
+      svg += `<line x1="${screenX}" y1="0" x2="${screenX}" y2="${plotHeight - bottomMargin}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
+    }
+    
+    // Horizontal grid lines
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
+      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
+      svg += `<line x1="${leftMargin}" y1="${screenY}" x2="${plotWidth}" y2="${screenY}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
+    }
+    
+    return svg
+  }
+
+  // Generate SVG axes
+  generateSVGAxes(width, height) {
+    if (!this.currentBounds) return ''
+    
+    let svg = ''
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    
+    // Use the same coordinate system as the actual plot
+    const plotWidth = this.pixiApp.screen.width
+    const plotHeight = this.pixiApp.screen.height
+    
+    // Add more left margin for Y-axis labels
+    const leftMargin = 80 // Increased from 20 to 80 for better label spacing
+    const bottomMargin = 40
+    
+    // X-axis (bottom)
+    const xAxisY = plotHeight - bottomMargin
+    svg += `<line x1="${leftMargin}" y1="${xAxisY}" x2="${plotWidth}" y2="${xAxisY}" stroke="#374151" stroke-width="2"/>`
+    
+    // Y-axis (left)
+    const yAxisX = leftMargin
+    svg += `<line x1="${yAxisX}" y1="0" x2="${yAxisX}" y2="${plotHeight - bottomMargin}" stroke="#374151" stroke-width="2"/>`
+    
+    // Axis labels
+    svg += `<text x="${(plotWidth/2) + leftMargin}" y="${plotHeight - 5}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151">Dimension 1</text>`
+    svg += `<text x="${leftMargin + 40}" y="${plotHeight/2 - 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151" transform="rotate(-90, ${leftMargin - 15}, ${plotHeight/2})">Dimension 2</text>`
+    
+    // Tick marks and values
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    // X-axis ticks
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
+      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
+      svg += `<line x1="${screenX}" y1="${xAxisY - 5}" x2="${screenX}" y2="${xAxisY + 5}" stroke="#374151" stroke-width="1"/>`
+      svg += `<text x="${screenX}" y="${xAxisY + 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(x)}</text>`
+    }
+    
+    // Y-axis ticks
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
+      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
+      svg += `<line x1="${yAxisX - 5}" y1="${screenY}" x2="${yAxisX + 5}" y2="${screenY}" stroke="#374151" stroke-width="1"/>`
+      svg += `<text x="${yAxisX - 10}" y="${screenY + 3}" text-anchor="end" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(y)}</text>`
+    }
+    
+    return svg
+  }
+
+  // Generate SVG category labels
+  generateSVGCategoryLabels() {
+    if (!this.categoryLabelsContainer || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'DISCRETE') {
+      return ''
+    }
+    
+    let svg = ''
+    
+    this.categoryLabelsContainer.children.forEach(label => {
+      if (label.categoryName) {
+        const x = label.x
+        const y = label.y
+        const text = label.categoryName
+        
+        // Get the text element to get dimensions
+        const textElement = label.children[1] // Text is the second child
+        if (textElement) {
+          const textWidth = textElement.width || text.length * 7 // Approximate width
+          const textHeight = textElement.height || 12
+          const padding = 3
+          
+          // Get border color from stored property
+          const borderColor = label.borderColor ? this.hexToRgb(label.borderColor) : '#cccccc'
+          
+          // Background rectangle
+          svg += `<rect x="${x - textWidth/2 - padding}" y="${y - textHeight/2 - padding}" width="${textWidth + padding*2}" height="${textHeight + padding*2}" fill="white" fill-opacity="0.8" stroke="${borderColor}" stroke-width="2" rx="3"/>`
+          
+          // Text
+          svg += `<text x="${x}" y="${y + 3}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#333333">${text}</text>`
+        }
+      }
+    })
+    
+    return svg
   }
 
   // Download SVG content as file
@@ -4737,11 +5089,11 @@ export default class extends Controller {
     
     // Revert to the previous coloring scheme if there was one
     if (this.currentMetadataId && this.currentMetadataVector) {
-      console.log(`🎨 Reverting to metadata coloring: ${this.currentMetadataVector.name}`)
+      //console.log(`Reverting to metadata coloring: ${this.currentMetadataVector.name}`)
       // Re-render with the current metadata coloring
       this.renderPointsWithCurrentColoring()
     } else {
-      console.log('🎨 No metadata coloring active, using default colors')
+      console.log('No metadata coloring active, using default colors')
       // Update colors without re-rendering (preserves pan/zoom state)
       this.updateSelectedPointColors()
     }
@@ -4755,7 +5107,7 @@ export default class extends Controller {
       this.lassoGraphics = null
     }
     
-    console.log('✅ Selection canceled, reverted to previous coloring scheme')
+    //console.log('Selection canceled, reverted to previous coloring scheme')
   }
 
 
@@ -4769,33 +5121,33 @@ export default class extends Controller {
   // Update the selected cells count display
   updateSelectedCellsCount() {
     const countElement = document.getElementById('selected-cells-count')
-    console.log(`🔍 updateSelectedCellsCount called - countElement found:`, !!countElement)
+    //console.log(`updateSelectedCellsCount called - countElement found:`, !!countElement)
     
     if (countElement) {
       const selectionCount = this.selectedCells ? this.selectedCells.size : 0
       const totalVisible = this.currentVisibleCells ? this.currentVisibleCells.length : (this.currentCoordinates?.length || 0)
       
-      console.log(`🔍 Selection count: ${selectionCount}, Total visible: ${totalVisible}`)
+      //console.log(`Selection count: ${selectionCount}, Total visible: ${totalVisible}`)
       
       if (selectionCount === 0) {
         countElement.textContent = '0'
         countElement.title = 'No cells selected'
-        console.log(`📊 Updated display to: 0 cells selected`)
+        //console.log(`Updated display to: 0 cells selected`)
       } else if (this.currentVisibleCells && this.currentVisibleCells.length < (this.currentCoordinates?.length || 0)) {
         // Filtering is applied
         const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
         countElement.textContent = selectionCount.toLocaleString()
         countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of visible cells)`
-        console.log(`📊 Updated display to: ${selectionCount} cells selected (${percentage}% of visible cells)`)
+        //console.log(`Updated display to: ${selectionCount} cells selected (${percentage}% of visible cells)`)
       } else {
         // No filtering applied
         const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
         countElement.textContent = selectionCount.toLocaleString()
         countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of total cells)`
-        console.log(`📊 Updated display to: ${selectionCount} cells selected (${percentage}% of total cells)`)
+        //console.log(`Updated display to: ${selectionCount} cells selected (${percentage}% of total cells)`)
       }
     } else {
-      console.log(`❌ selected-cells-count element not found!`)
+      console.log(`selected-cells-count element not found!`)
     }
     
     // Update the "Add all visible cells" button state
@@ -5249,7 +5601,7 @@ export default class extends Controller {
   }
 
   initializeCheckboxesForMetadata(metadataId) {
-    console.log(`🔍 Initializing checkboxes for metadata: ${metadataId}`)
+    //console.log(`Initializing checkboxes for metadata: ${metadataId}`)
     
     // Initialize the selected categories for this metadata
     this.selectedCategories[metadataId] = new Set()
@@ -5261,14 +5613,14 @@ export default class extends Controller {
       this.selectedCategories[metadataId].add(category)
     })
     
-    console.log(`✅ Initialized checkboxes for metadata ${metadataId}:`, Array.from(this.selectedCategories[metadataId]))
+    //console.log(`Initialized checkboxes for metadata ${metadataId}:`, Array.from(this.selectedCategories[metadataId]))
     
     // Update point count display after initializing checkboxes
     this.updateCellFiltering()
   }
 
   showCheckboxesForMetadata(metadataId) {
-    console.log(`👁️ Showing checkboxes for metadata: ${metadataId}`)
+    //console.log(`Showing checkboxes for metadata: ${metadataId}`)
     
     // Show the global metadata checkbox
     const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
@@ -5282,13 +5634,13 @@ export default class extends Controller {
       checkbox.style.display = 'flex'
     })
     
-    console.log(`✅ Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+    //console.log(`Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
   }
 
   // Optimized method to show/hide points without re-rendering
   updatePointVisibility(filteredIndices) {
     if (!this.scatterContainer || !this.scatterContainer.children) {
-      console.log('⚠️ No scatter container or children - cannot update visibility')
+      console.log('No scatter container or children - cannot update visibility')
       return
     }
 
@@ -5330,7 +5682,7 @@ export default class extends Controller {
     }
 
     const endTime = performance.now()
-    console.log(`⚡ Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
+    //console.log(`Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
   }
 
   // Update the point count display with detailed filtering information
@@ -5409,7 +5761,7 @@ export default class extends Controller {
   updateCellFiltering() {
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
-    console.log('🎯 Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
+    //console.log('Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
     
     // Update the current visible cells state
     this.currentVisibleCells = filteredIndices
@@ -5431,12 +5783,12 @@ export default class extends Controller {
 
   // Update current selection to only include cells that are currently visible (not filtered out)
   updateSelectionBasedOnFiltering(filteredIndices) {
-    console.log(`🔍 updateSelectionBasedOnFiltering called with filteredIndices:`, filteredIndices ? filteredIndices.length : 'null')
-    console.log(`🔍 Current selectedCells size:`, this.selectedCells ? this.selectedCells.size : 'null')
+    //console.log(`updateSelectionBasedOnFiltering called with filteredIndices:`, filteredIndices ? filteredIndices.length : 'null')
+    //console.log(`Current selectedCells size:`, this.selectedCells ? this.selectedCells.size : 'null')
     
     if (!this.selectedCells || this.selectedCells.size === 0) {
       // No current selection, nothing to update
-      console.log(`📊 No current selection to update`)
+      console.log(`No current selection to update`)
       return
     }
 
@@ -5444,7 +5796,7 @@ export default class extends Controller {
     
     if (!filteredIndices) {
       // No filtering applied - all cells are visible, keep current selection
-      console.log(`📊 Selection unchanged: ${originalSelectionSize} cells (no filtering)`)
+      console.log(`Selection unchanged: ${originalSelectionSize} cells (no filtering)`)
       return
     }
 
@@ -5463,7 +5815,7 @@ export default class extends Controller {
     this.selectedCells = filteredSelection
     
     const newSelectionSize = this.selectedCells.size
-    console.log(`📊 Selection updated: ${originalSelectionSize} → ${newSelectionSize} cells (filtered)`)
+    //console.log(`Selection updated: ${originalSelectionSize} → ${newSelectionSize} cells (filtered)`)
     
     // Update the selection count display
     this.updateSelectedCellsCount()
@@ -5496,13 +5848,13 @@ export default class extends Controller {
     
     // If this is the same as last state, return current visible cells
     if (this.lastFilterState === currentFilterState && this.currentVisibleCells) {
-      console.log('🚀 Using cached incremental result')
+      //console.log('Using cached incremental result')
       return this.currentVisibleCells
     }
 
     // If we have no current visible cells, do full calculation
     if (!this.currentVisibleCells) {
-      console.log('🔄 No current visible cells - doing full calculation')
+      //console.log('No current visible cells - doing full calculation')
       const result = this.getFilteredCellIndices()
       this.lastFilterState = currentFilterState
       return result
@@ -5511,13 +5863,13 @@ export default class extends Controller {
     // Try incremental update based on what changed
     const incrementalResult = this.tryIncrementalUpdate(metadataWithSelections)
     if (incrementalResult !== null) {
-      console.log('⚡ Using incremental update')
+      //console.log('Using incremental update')
       this.lastFilterState = currentFilterState
       return incrementalResult
     }
 
     // Fall back to full calculation
-    console.log('🔄 Fallback to full calculation')
+    //console.log('Fallback to full calculation')
     const result = this.getFilteredCellIndices()
     this.lastFilterState = currentFilterState
     return result
@@ -5529,7 +5881,7 @@ export default class extends Controller {
     if (metadataWithSelections.length === 1) {
       const metadataId = metadataWithSelections[0]
       const selectedCategories = this.selectedCategories[metadataId]
-      console.log(`🔄 Single metadata incremental filtering for ${metadataId}`)
+      //console.log(`Single metadata incremental filtering for ${metadataId}`)
       return this.getCellsForMetadataCategories(metadataId, selectedCategories)
     }
 
@@ -5548,7 +5900,7 @@ export default class extends Controller {
     // Create cache key from current selections
     const cacheKey = this.createFilterCacheKey()
     if (this.filterCache.has(cacheKey)) {
-      console.log('🚀 Using cached filter result')
+      //console.log('Using cached filter result')
       return this.filterCache.get(cacheKey)
     }
 
@@ -5556,14 +5908,14 @@ export default class extends Controller {
     const allCategoriesSelected = Object.keys(this.selectedCategories).every(metadataId => {
       const selectedCategories = this.selectedCategories[metadataId]
       if (!selectedCategories || selectedCategories.size === 0) {
-        console.log(`🔍 Metadata ${metadataId}: No selections`)
+        //console.log(`Metadata ${metadataId}: No selections`)
         return false
       }
       
       // Get all available categories for this metadata
       const metadataVector = this.getMetadataVectorById(metadataId)
       if (!metadataVector || !metadataVector.values) {
-        console.log(`🔍 Metadata ${metadataId}: No metadata vector found - assuming all selected`)
+        //console.log(`Metadata ${metadataId}: No metadata vector found - assuming all selected`)
         // If we don't have the metadata vector yet, assume all categories are selected
         // This prevents filtering when metadata vectors aren't loaded yet
         return true
@@ -5571,17 +5923,17 @@ export default class extends Controller {
       
       const availableCategories = [...new Set(metadataVector.values)]
       const allSelected = availableCategories.every(category => selectedCategories.has(category))
-      console.log(`🔍 Metadata ${metadataId}: Available categories:`, availableCategories)
-      console.log(`🔍 Metadata ${metadataId}: Selected categories:`, Array.from(selectedCategories))
-      console.log(`🔍 Metadata ${metadataId}: All selected:`, allSelected)
+      //console.log(`Metadata ${metadataId}: Available categories:`, availableCategories)
+      //console.log(`Metadata ${metadataId}: Selected categories:`, Array.from(selectedCategories))
+      //console.log(`Metadata ${metadataId}: All selected:`, allSelected)
       return allSelected
     })
 
-    console.log(`🔍 All categories selected check result:`, allCategoriesSelected)
+    //console.log(`All categories selected check result:`, allCategoriesSelected)
 
     if (allCategoriesSelected) {
       // All categories are selected, no filtering needed
-      console.log('✅ All categories selected - returning null (no filtering)')
+      //console.log('All categories selected - returning null (no filtering)')
       return null
     }
 
@@ -5590,42 +5942,42 @@ export default class extends Controller {
       const selections = this.selectedCategories[metadataId]
       const hasSelections = selections && selections.size > 0
       const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
-      console.log(`🔍 Metadata ${metadataId}: hasSelections=${hasSelections}, hasLoadedVector=${hasLoadedVector}`)
+      //console.log(`Metadata ${metadataId}: hasSelections=${hasSelections}, hasLoadedVector=${hasLoadedVector}`)
       return hasSelections && hasLoadedVector
     })
 
-    console.log(`🔍 All metadata in selectedCategories:`, Object.keys(this.selectedCategories))
-    console.log(`🔍 Loaded metadata vectors:`, Object.keys(this.loadedMetadataVectors))
-    console.log(`🔍 Current metadata ID:`, this.currentMetadataId)
+    //console.log(`All metadata in selectedCategories:`, Object.keys(this.selectedCategories))
+    //console.log(`Loaded metadata vectors:`, Object.keys(this.loadedMetadataVectors))
+    //console.log(`Current metadata ID:`, this.currentMetadataId)
 
-    console.log(`🔍 Metadata with selections and loaded vectors:`, metadataWithSelections)
+    //console.log(`Metadata with selections and loaded vectors:`, metadataWithSelections)
 
     if (metadataWithSelections.length === 0) {
       // No metadata has selections and loaded vectors, return all cells
-      console.log('🔍 No metadata has selections and loaded vectors - returning null')
+      //console.log('No metadata has selections and loaded vectors - returning null')
       return null
     }
 
     // Start with cells that match the first metadata's selections
     let filteredIndices = this.getCellsForMetadataCategories(metadataWithSelections[0], this.selectedCategories[metadataWithSelections[0]])
-    console.log(`🔍 First metadata ${metadataWithSelections[0]} filtered indices:`, filteredIndices.length)
+    //console.log(`First metadata ${metadataWithSelections[0]} filtered indices:`, filteredIndices.length)
 
     // Intersect with each subsequent metadata's selections using Set for O(1) lookups
     for (let i = 1; i < metadataWithSelections.length; i++) {
       const metadataId = metadataWithSelections[i]
       const selectedCategories = this.selectedCategories[metadataId]
       const cellsForThisMetadata = this.getCellsForMetadataCategories(metadataId, selectedCategories)
-      console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
+      //console.log(`Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
       
       // Convert to Set for O(1) lookup instead of O(n) includes()
       const cellsSet = new Set(cellsForThisMetadata)
       
       // Intersection: keep only cells that are in both sets
       filteredIndices = filteredIndices.filter(cellIndex => cellsSet.has(cellIndex))
-      console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices.length)
+      //console.log(`After intersection with ${metadataId}:`, filteredIndices.length)
     }
 
-    console.log(`🎯 Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
+    //console.log(`Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
     
     // Cache the result
     this.filterCache.set(cacheKey, filteredIndices)
@@ -5642,7 +5994,7 @@ export default class extends Controller {
       return []
     }
 
-    console.log(`🔍 Getting cells for metadata ${metadataId} with selected categories:`, Array.from(selectedCategories))
+    //console.log(`Getting cells for metadata ${metadataId} with selected categories:`, Array.from(selectedCategories))
     
     const startTime = performance.now()
     const cellIndices = []
@@ -5656,7 +6008,7 @@ export default class extends Controller {
     }
 
     const endTime = performance.now()
-    console.log(`🔍 Found ${cellIndices.length} cells for metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
+    //console.log(`Found ${cellIndices.length} cells for metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
     return cellIndices
   }
 
@@ -5675,7 +6027,7 @@ export default class extends Controller {
     this.currentVisibleCells = null
     this.lastFilterState = null
     this.filterCache.clear()
-    console.log('🧹 Cleared incremental filtering state after embedding change')
+    //console.log('Cleared incremental filtering state after embedding change')
   }
 
   // Clear all checkbox selections when switching metadata
@@ -5693,7 +6045,7 @@ export default class extends Controller {
       }
     })
     
-    console.log('🧹 Cleared all checkbox selections')
+    //console.log('Cleared all checkbox selections')
   }
 
   // Helper method to get metadata vector by ID

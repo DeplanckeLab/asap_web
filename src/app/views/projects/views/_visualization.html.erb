@@ -250,22 +250,22 @@
         <!-- Interaction Mode Buttons -->
         <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
-            <!-- Pan/Zoom Button -->
-            <button id="pan-mode-btn"
-                    style="padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
-                    title="Pan/Zoom Mode"
-                    data-action="click->visualization#setPanMode"
-                    data-mode="pan">
-              <i class="fas fa-arrows-alt" style="font-size: 14px;"></i>
-            </button>
-            
-            <!-- Pick Mode Button -->
+            <!-- Pick Mode Button (Default) -->
             <button id="pick-mode-btn"
-                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
                     title="Pick Mode - Click points for details"
                     data-action="click->visualization#setPickMode"
                     data-mode="pick">
               <i class="fas fa-mouse-pointer" style="font-size: 14px;"></i>
+            </button>
+            
+            <!-- Pan/Zoom Button -->
+            <button id="pan-mode-btn"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    title="Pan/Zoom Mode"
+                    data-action="click->visualization#setPanMode"
+                    data-mode="pan">
+              <i class="fas fa-arrows-alt" style="font-size: 14px;"></i>
             </button>
             
             <!-- Lasso Button -->
@@ -333,7 +333,7 @@
       <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
         <div>
           <span>Controls: </span>
-          <span>Drag to pan • Scroll to zoom (mouse-centered)</span>
+          <span id="control-instructions">Click to pick a cell, click and drag to move a label, scroll to zoom</span>
         </div>
         <div id="plot-info" style="display: none;">
           <span id="point-count">0</span> points

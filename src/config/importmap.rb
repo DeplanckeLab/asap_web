@@ -14,3 +14,4 @@ pin "pixi.js", to: "https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.js"
 
 pin_all_from "app/javascript/controllers", under: "controllers"
 
+

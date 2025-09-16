@@ -3070,7 +3070,18 @@ export default class extends Controller {
     
     // Clear any existing interaction state
     this.clearLasso()
-    this.stopPanning()
+    
+    // Only stop panning if we're actually in a panning state
+    if (this.isPanning) {
+      this.stopPanning()
+    }
+    
+    // Ensure currentBounds is initialized if not already set
+    if (!this.currentBounds && this.currentCoordinates) {
+      const originalBounds = this.calculateBounds(this.currentCoordinates)
+      this.currentBounds = this.getAdjustedBounds(originalBounds)
+      console.log('🔧 Initialized currentBounds in setInteractionMode:', this.currentBounds)
+    }
     
     // Update cursor based on mode
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -3363,9 +3374,25 @@ export default class extends Controller {
     // Store original bounds for consistent pan scaling
     this.panOriginalBounds = this.calculateBounds(this.currentCoordinates)
     
-    // Hide category labels during panning to avoid coordinate shift
+    console.log('🚀 Pan Start Debug:', {
+      panStartBounds: this.panStartBounds,
+      panOriginalBounds: this.panOriginalBounds,
+      currentBounds: this.currentBounds,
+      screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
+    })
+    
+    // Hide points and category labels during panning for smooth performance
+    if (this.scatterContainer) {
+      this.scatterContainer.visible = false
+    }
     if (this.categoryLabelsContainer) {
       this.categoryLabelsContainer.visible = false
+    }
+    
+    // Create and show the panning shape
+    this.panningShape = this.createPanningShape()
+    if (this.panningShape && this.pixiApp) {
+      this.pixiApp.stage.addChild(this.panningShape)
     }
     
     // Change cursor to grabbing
@@ -3425,12 +3452,17 @@ export default class extends Controller {
       }
     })*/
     
-    // Update visualization with new bounds
-    //console.log('Pan: Updating bounds to:', newBounds)
-    this.updateVisualizationBounds(newBounds)
+    // Move the panning shape directly instead of updating bounds
+    if (this.panningShape) {
+      this.panningShape.x = deltaX
+      this.panningShape.y = deltaY
+    }
     
-    // Also update grid during pan for real-time feedback
-    this.renderGrid()
+    console.log('📊 Pan Move Debug:', {
+      deltaX: deltaX,
+      deltaY: deltaY,
+      shapePosition: this.panningShape ? { x: this.panningShape.x, y: this.panningShape.y } : 'No shape'
+    })
   }
 
   onPanMouseUp(event) {
@@ -3442,12 +3474,50 @@ export default class extends Controller {
 
   stopPanning() {
     this.isPanning = false
+    
+    // Store bounds for debug before resetting
+    const debugPanStartBounds = this.panStartBounds
+    const debugPanOriginalBounds = this.panOriginalBounds
+    
+    // Calculate final bounds based on shape movement
+    let finalBounds = this.currentBounds
+    if (this.panningShape && debugPanStartBounds) {
+      // Convert shape movement back to data bounds
+      const deltaX = this.panningShape.x
+      const deltaY = this.panningShape.y
+      
+      // Convert screen delta to data delta
+      const screenWidth = this.pixiApp.screen.width
+      const screenHeight = this.pixiApp.screen.height
+      const dataDeltaX = (deltaX / screenWidth) * (debugPanStartBounds.maxX - debugPanStartBounds.minX)
+      const dataDeltaY = (deltaY / screenHeight) * (debugPanStartBounds.maxY - debugPanStartBounds.minY)
+      
+      finalBounds = {
+        minX: debugPanStartBounds.minX - dataDeltaX,
+        maxX: debugPanStartBounds.maxX - dataDeltaX,
+        minY: debugPanStartBounds.minY - dataDeltaY,
+        maxY: debugPanStartBounds.maxY - dataDeltaY
+      }
+      
+      this.currentBounds = finalBounds
+    }
+    
+    // Remove the panning shape
+    if (this.panningShape && this.pixiApp) {
+      this.pixiApp.stage.removeChild(this.panningShape)
+      this.panningShape = null
+    }
+    
+    // Reset panning state
     this.panStartX = 0
     this.panStartY = 0
     this.panStartBounds = null
     this.panOriginalBounds = null
     
-    // Reposition category labels after panning is finished
+    // Show points and category labels again after panning is finished
+    if (this.scatterContainer) {
+      this.scatterContainer.visible = true
+    }
     if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible === false) {
       // Check if categories should be visible
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
@@ -3455,6 +3525,23 @@ export default class extends Controller {
         this.categoryLabelsContainer.visible = true
         this.renderCategoryLabels() // Reposition labels with current bounds
       }
+    }
+    
+    // Update point positions to match the new bounds after panning
+    console.log('🏁 Pan Stop Debug:', {
+      finalBounds: finalBounds,
+      panStartBounds: debugPanStartBounds,
+      panOriginalBounds: debugPanOriginalBounds,
+      boundsDifference: finalBounds && debugPanStartBounds ? {
+        minX: finalBounds.minX - debugPanStartBounds.minX,
+        maxX: finalBounds.maxX - debugPanStartBounds.maxX,
+        minY: finalBounds.minY - debugPanStartBounds.minY,
+        maxY: finalBounds.maxY - debugPanStartBounds.maxY
+      } : 'Cannot calculate - missing bounds'
+    })
+    
+    if (this.currentCoordinates && this.scatterContainer && this.currentBounds) {
+      this.updatePointPositions()
     }
     
     // Reset cursor
@@ -3507,20 +3594,69 @@ export default class extends Controller {
     //console.log('updateVisualizationBounds called with:', newBounds)
     this.currentBounds = newBounds
     
-    // Update axes, grid, and category labels with new bounds
+    // Update axes and grid with new bounds
     this.renderAxes()
     this.renderGrid()
-    this.renderCategoryLabels()
     
-    // Update existing point positions instead of re-rendering
-    if (this.currentCoordinates && this.scatterContainer) {
-      this.updatePointPositions()
-    } else {
-      console.log('Cannot update positions - missing data')
+    // Skip point updates and category labels during panning (points are hidden)
+    if (!this.isPanning) {
+      this.renderCategoryLabels()
+      
+      // Update existing point positions instead of re-rendering
+      if (this.currentCoordinates && this.scatterContainer) {
+        this.updatePointPositions()
+      } else {
+        console.log('Cannot update positions - missing data')
+      }
     }
   }
 
   // Optimized method to update point positions without re-rendering
+  // Create a shape that mimics the actual plot for smooth panning
+  createPanningShape() {
+    if (!this.pixiApp || !this.currentBounds || !this.currentCoordinates) return null
+    
+    const shape = new PIXI.Graphics()
+    
+    // Get the plot area dimensions (same as axes/grid)
+    const plotWidth = this.pixiApp.screen.width - 100  // 50px margins on each side
+    const plotHeight = this.pixiApp.screen.height - 100
+    
+    // Sample points to create a simplified representation
+    const sampleSize = Math.min(10000, this.currentCoordinates.length) // Sample up to 2000 points
+    const step = Math.max(1, Math.floor(this.currentCoordinates.length / sampleSize))
+    
+    // Create a simplified point cloud representation
+    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+      const [x, y] = this.currentCoordinates[i]
+      
+      // Use the same coordinate system as the actual points
+      const screenX = this.normalizeX(x, this.currentBounds)
+      const screenY = this.normalizeY(y, this.currentBounds)
+      
+      // Get color for this point
+      const colorInfo = this.getColorAndAlpha(i)
+      const color = colorInfo.color
+      const alpha = colorInfo.alpha * 0.8 // Slightly more opaque for better visibility
+      
+      // Draw a small circle for each point with a subtle glow effect
+      shape.beginFill(color, alpha)
+      shape.drawCircle(screenX, screenY, 2) // Slightly larger for better visibility
+      shape.endFill()
+      
+      // Add a subtle glow effect for better visual appeal
+      shape.beginFill(color, alpha * 0.3)
+      shape.drawCircle(screenX, screenY, 3.5)
+      shape.endFill()
+    }
+    
+    // Position the shape at the current plot area
+    shape.x = 0
+    shape.y = 0
+    
+    return shape
+  }
+
   updatePointPositions() {
     if (!this.currentCoordinates || !this.currentBounds || !this.scatterContainer) {
       console.log('Cannot update positions - missing data:', {
@@ -3530,6 +3666,12 @@ export default class extends Controller {
       })
       return
     }
+    
+    console.log('🎯 UpdatePointPositions Debug:', {
+      currentBounds: this.currentBounds,
+      coordinatesCount: this.currentCoordinates.length,
+      scatterContainerChildren: this.scatterContainer.children.length
+    })
 
     /*console.log('Updating point positions:', {
       pointCount: this.scatterContainer.children.length,
@@ -3571,11 +3713,24 @@ export default class extends Controller {
           const normalizedX = (x - bounds.minX) / width
           const normalizedY = (y - bounds.minY) / height
           
-          // Convert to screen coordinates
-          const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-          if (canvas) {
-            child.x = normalizedX * canvas.width
-            child.y = normalizedY * canvas.height
+          // Convert to screen coordinates using the same system as normalizeX/Y
+          if (this.pixiApp) {
+            // Debug: Log coordinate calculation for first few points
+            if (index < 3) {
+              console.log(`🔍 Point ${index} coordinate calculation:`, {
+                originalCoords: [x, y],
+                normalizedCoords: [normalizedX, normalizedY],
+                pixiScreenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height },
+                calculatedPosition: {
+                  x: normalizedX * this.pixiApp.screen.width,
+                  y: normalizedY * this.pixiApp.screen.height
+                },
+                bounds: bounds
+              })
+            }
+            
+            child.x = normalizedX * this.pixiApp.screen.width
+            child.y = normalizedY * this.pixiApp.screen.height
             updatedCount++
           }
         }

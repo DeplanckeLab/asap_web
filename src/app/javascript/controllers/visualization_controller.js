@@ -98,7 +98,7 @@ export default class extends Controller {
     this.isDrawingLasso = false
     this.lastMouseMoveTime = 0
     this.mouseMoveCount = 0
-    this.minLassoPointDistance = 3 // Minimum distance between lasso points in pixels
+    this.minLassoPointDistance = 8 // Minimum distance between lasso points in pixels
     this.lassoAnimationFrame = null // For smooth rendering
     
     // Initialize tooltip state
@@ -3435,18 +3435,6 @@ export default class extends Controller {
       updateStartTime = performance.now()
       this.updateLassoGraphics()
       updateEndTime = performance.now()
-      
-      // Schedule a smooth render using requestAnimationFrame
-      if (this.lassoAnimationFrame) {
-        cancelAnimationFrame(this.lassoAnimationFrame)
-      }
-      this.lassoAnimationFrame = requestAnimationFrame(() => {
-        // Force a render at the optimal time
-        if (this.pixiApp && this.pixiApp.renderer) {
-          this.pixiApp.renderer.render(this.pixiApp.stage)
-        }
-        this.lassoAnimationFrame = null
-      })
     }
     
     const totalEndTime = performance.now()
@@ -3482,18 +3470,8 @@ export default class extends Controller {
     if (this.lassoPoints.length > 2) {
       this.lassoPoints.push(this.lassoPoints[0]) // Close the loop
       
-      // Cancel any pending animation frame and render immediately
-      if (this.lassoAnimationFrame) {
-        cancelAnimationFrame(this.lassoAnimationFrame)
-        this.lassoAnimationFrame = null
-      }
-      
+      // Force final graphics update
       this.updateLassoGraphics()
-      
-      // Force immediate render for final shape
-      if (this.pixiApp && this.pixiApp.renderer) {
-        this.pixiApp.renderer.render(this.pixiApp.stage)
-      }
       
       // Find points inside the lasso
       this.selectPointsInLasso()
@@ -4874,38 +4852,13 @@ export default class extends Controller {
   updateLassoGraphics() {
     if (!this.lassoGraphics || this.lassoPoints.length < 2) return
     
-    const graphicsStartTime = performance.now()
-    
-    const clearStartTime = performance.now()
+    // Simplified rendering - just line, no fill
     this.lassoGraphics.clear()
-    const clearEndTime = performance.now()
-    
-    const styleStartTime = performance.now()
-    this.lassoGraphics.lineStyle(2, 0x3b82f6, 0.8) // Blue line
-    this.lassoGraphics.beginFill(0x3b82f6, 0.1) // Light blue fill
-    const styleEndTime = performance.now()
-    
-    const drawStartTime = performance.now()
+    this.lassoGraphics.lineStyle(1, 0x3b82f6, 0.8) // Blue line
+    this.lassoGraphics.beginFill(0x3b82f6, 0.1)
     this.lassoGraphics.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y)
     for (let i = 1; i < this.lassoPoints.length; i++) {
       this.lassoGraphics.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y)
-    }
-    const drawEndTime = performance.now()
-    
-    const fillStartTime = performance.now()
-    this.lassoGraphics.endFill()
-    const fillEndTime = performance.now()
-    
-    const graphicsEndTime = performance.now()
-    
-    // Log detailed PIXI performance every 10 points
-    if (this.lassoPoints.length % 10 === 0) {
-      console.log(`PIXI Graphics Performance - Points: ${this.lassoPoints.length}`)
-      console.log(`  - Clear: ${(clearEndTime - clearStartTime).toFixed(3)}ms`)
-      console.log(`  - Style setup: ${(styleEndTime - styleStartTime).toFixed(3)}ms`)
-      console.log(`  - Drawing lines: ${(drawEndTime - drawStartTime).toFixed(3)}ms`)
-      console.log(`  - End fill: ${(fillEndTime - fillStartTime).toFixed(3)}ms`)
-      console.log(`  - Total graphics: ${(graphicsEndTime - graphicsStartTime).toFixed(3)}ms`)
     }
   }
 
@@ -5027,12 +4980,6 @@ export default class extends Controller {
     }
     this.lassoPoints = []
     this.isDrawingLasso = false
-    
-    // Cancel any pending animation frame
-    if (this.lassoAnimationFrame) {
-      cancelAnimationFrame(this.lassoAnimationFrame)
-      this.lassoAnimationFrame = null
-    }
   }
 
   // Helper method to calculate distance between two points

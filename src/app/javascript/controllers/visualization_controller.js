@@ -96,6 +96,10 @@ export default class extends Controller {
     this.lassoGraphics = null
     this.lassoPoints = []
     this.isDrawingLasso = false
+    this.lastMouseMoveTime = 0
+    this.mouseMoveCount = 0
+    this.minLassoPointDistance = 3 // Minimum distance between lasso points in pixels
+    this.lassoAnimationFrame = null // For smooth rendering
     
     // Initialize tooltip state
     this.tooltip = null
@@ -3378,9 +3382,11 @@ export default class extends Controller {
 
   // Lasso mode handlers
   onLassoMouseDown(event) {
-    //console.log('Lasso mouse down')
+    console.log('Lasso mouse down - starting detailed performance tracking')
     this.isDrawingLasso = true
     this.lassoPoints = []
+    this.mouseMoveCount = 0
+    this.lastMouseMoveTime = performance.now()
     
     // Get mouse position relative to canvas
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -3400,16 +3406,63 @@ export default class extends Controller {
   onLassoMouseMove(event) {
     if (!this.isDrawingLasso) return
     
+    const totalStartTime = performance.now()
+    this.mouseMoveCount++
+    
+    // Track mouse event frequency
+    const currentTime = performance.now()
+    const timeSinceLastMove = currentTime - this.lastMouseMoveTime
+    this.lastMouseMoveTime = currentTime
+    
     // Get mouse position relative to canvas
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
     
+    const rectStartTime = performance.now()
     const rect = canvas.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
+    const rectEndTime = performance.now()
     
-    this.lassoPoints.push({ x, y })
-    this.updateLassoGraphics()
+    // Only add point if it's far enough from the last point
+    const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
+    let updateStartTime = 0
+    let updateEndTime = 0
+    
+    if (!lastPoint || this.getDistance(lastPoint, { x, y }) >= this.minLassoPointDistance) {
+      this.lassoPoints.push({ x, y })
+      
+      updateStartTime = performance.now()
+      this.updateLassoGraphics()
+      updateEndTime = performance.now()
+      
+      // Schedule a smooth render using requestAnimationFrame
+      if (this.lassoAnimationFrame) {
+        cancelAnimationFrame(this.lassoAnimationFrame)
+      }
+      this.lassoAnimationFrame = requestAnimationFrame(() => {
+        // Force a render at the optimal time
+        if (this.pixiApp && this.pixiApp.renderer) {
+          this.pixiApp.renderer.render(this.pixiApp.stage)
+        }
+        this.lassoAnimationFrame = null
+      })
+    }
+    
+    const totalEndTime = performance.now()
+    
+    // Log detailed performance every 5 points
+    if (this.lassoPoints.length % 5 === 0) {
+      console.log(`Lasso Performance Analysis - Points: ${this.lassoPoints.length}`)
+      console.log(`  - Mouse move count: ${this.mouseMoveCount}`)
+      console.log(`  - Time since last move: ${timeSinceLastMove.toFixed(3)}ms`)
+      console.log(`  - Rect calculation: ${(rectEndTime - rectStartTime).toFixed(3)}ms`)
+      console.log(`  - Graphics update: ${(updateEndTime - updateStartTime).toFixed(3)}ms`)
+      console.log(`  - Total time: ${(totalEndTime - totalStartTime).toFixed(3)}ms`)
+      console.log(`  - Points array length: ${this.lassoPoints.length}`)
+      console.log(`  - PIXI App exists: ${!!this.pixiApp}`)
+      console.log(`  - PIXI Renderer exists: ${!!(this.pixiApp && this.pixiApp.renderer)}`)
+    }
   }
 
   onLassoMouseUp(event) {
@@ -3428,7 +3481,19 @@ export default class extends Controller {
     // Complete the lasso by closing the path
     if (this.lassoPoints.length > 2) {
       this.lassoPoints.push(this.lassoPoints[0]) // Close the loop
+      
+      // Cancel any pending animation frame and render immediately
+      if (this.lassoAnimationFrame) {
+        cancelAnimationFrame(this.lassoAnimationFrame)
+        this.lassoAnimationFrame = null
+      }
+      
       this.updateLassoGraphics()
+      
+      // Force immediate render for final shape
+      if (this.pixiApp && this.pixiApp.renderer) {
+        this.pixiApp.renderer.render(this.pixiApp.stage)
+      }
       
       // Find points inside the lasso
       this.selectPointsInLasso()
@@ -3793,11 +3858,11 @@ export default class extends Controller {
             step2: `${normalizedX} * ${this.pixiApp.screen.width} = ${screenX}`
           }
         })
-        */
-        // Store for comparison with real points
-        if (i === 0) {
-          this.zoomingShapePoint0 = { x: screenX, y: screenY, dataCoords: [x, y] }
-        }
+      }*/
+      
+      // Store for comparison with real points
+      if (i === 0) {
+        this.zoomingShapePoint0 = { x: screenX, y: screenY, dataCoords: [x, y] }
       }
       
       // Get color for this point
@@ -4809,16 +4874,39 @@ export default class extends Controller {
   updateLassoGraphics() {
     if (!this.lassoGraphics || this.lassoPoints.length < 2) return
     
+    const graphicsStartTime = performance.now()
+    
+    const clearStartTime = performance.now()
     this.lassoGraphics.clear()
+    const clearEndTime = performance.now()
+    
+    const styleStartTime = performance.now()
     this.lassoGraphics.lineStyle(2, 0x3b82f6, 0.8) // Blue line
     this.lassoGraphics.beginFill(0x3b82f6, 0.1) // Light blue fill
+    const styleEndTime = performance.now()
     
+    const drawStartTime = performance.now()
     this.lassoGraphics.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y)
     for (let i = 1; i < this.lassoPoints.length; i++) {
       this.lassoGraphics.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y)
     }
+    const drawEndTime = performance.now()
     
+    const fillStartTime = performance.now()
     this.lassoGraphics.endFill()
+    const fillEndTime = performance.now()
+    
+    const graphicsEndTime = performance.now()
+    
+    // Log detailed PIXI performance every 10 points
+    if (this.lassoPoints.length % 10 === 0) {
+      console.log(`PIXI Graphics Performance - Points: ${this.lassoPoints.length}`)
+      console.log(`  - Clear: ${(clearEndTime - clearStartTime).toFixed(3)}ms`)
+      console.log(`  - Style setup: ${(styleEndTime - styleStartTime).toFixed(3)}ms`)
+      console.log(`  - Drawing lines: ${(drawEndTime - drawStartTime).toFixed(3)}ms`)
+      console.log(`  - End fill: ${(fillEndTime - fillStartTime).toFixed(3)}ms`)
+      console.log(`  - Total graphics: ${(graphicsEndTime - graphicsStartTime).toFixed(3)}ms`)
+    }
   }
 
   selectPointsInLasso() {
@@ -4939,6 +5027,19 @@ export default class extends Controller {
     }
     this.lassoPoints = []
     this.isDrawingLasso = false
+    
+    // Cancel any pending animation frame
+    if (this.lassoAnimationFrame) {
+      cancelAnimationFrame(this.lassoAnimationFrame)
+      this.lassoAnimationFrame = null
+    }
+  }
+
+  // Helper method to calculate distance between two points
+  getDistance(point1, point2) {
+    const dx = point2.x - point1.x
+    const dy = point2.y - point1.y
+    return Math.sqrt(dx * dx + dy * dy)
   }
 
   updateSelectionCount() {

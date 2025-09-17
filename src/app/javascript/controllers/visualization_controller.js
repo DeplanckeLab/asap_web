@@ -693,6 +693,12 @@ export default class extends Controller {
       this.currentBounds = newBounds
       this.renderAxes()
       this.renderGrid()
+      
+      // Initialize checkboxes for current metadata if not already done
+      if (this.currentMetadataVector?.id && !this.selectedCategories[this.currentMetadataVector.id]) {
+        this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
+      }
+      
       this.renderCategoryLabels()
       
       // Re-render with new coordinates using current coloring
@@ -892,6 +898,7 @@ export default class extends Controller {
     this.scatterContainer.addChild(animatedContainer)
     this.animatedContainer = animatedContainer // Store reference for cleanup
     
+    
     // Clear existing category labels during animation
     if (this.categoryLabelsContainer) {
       this.categoryLabelsContainer.removeChildren()
@@ -1016,9 +1023,25 @@ export default class extends Controller {
         requestAnimationFrame(animate)
       } else {
         //console.log('Animation complete!')
-        // Animation complete, just keep the animated container
-        // No need to convert back to graphics object - the animated points are already in final positions
-        animatedContainer.visible = true // Ensure it's visible
+        // Animation complete - move individual points back to scatter container for proper filtering
+        console.log('Animation complete - moving points back to scatter container')
+        console.log('Animated container children before move:', animatedContainer.children.length)
+        
+        this.scatterContainer.removeChildren()
+        
+        // Move individual animated points from animatedContainer back to scatterContainer
+        // This is more efficient than creating new points and ensures filtering works correctly
+        let movedPoints = 0
+        while (animatedContainer.children.length > 0) {
+          const point = animatedContainer.children[0]
+          animatedContainer.removeChild(point)
+          this.scatterContainer.addChild(point)
+          movedPoints++
+        }
+        
+        console.log('Moved', movedPoints, 'points back to scatter container')
+        console.log('Scatter container children after move:', this.scatterContainer.children.length)
+        
         
         // Update stored coordinates and bounds for next transition
         this.currentBounds = toBounds
@@ -1026,10 +1049,16 @@ export default class extends Controller {
         
         // Clear animated labels and render final static labels
         this.categoryLabelsContainer.removeChildren()
-        
+
         // Update axes, grid, and category labels with final bounds
         this.renderAxes()
         this.renderGrid()
+
+        // Initialize checkboxes for current metadata if not already done
+        if (this.currentMetadataVector?.id && !this.selectedCategories[this.currentMetadataVector.id]) {
+          this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
+        }
+
         this.renderCategoryLabels()
         
         // Reapply filtering after embedding change
@@ -3715,6 +3744,11 @@ export default class extends Controller {
     this.scatterContainer.removeChildren()
     this.renderPointsWithCurrentColoring()
     
+    // Re-render category labels after resetting view
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      this.renderCategoryLabels()
+    }
+    
     //console.log('Zoom and pan reset to original view')
   }
 
@@ -4305,6 +4339,11 @@ export default class extends Controller {
     if (this.currentCoordinates && this.scatterContainer) {
       this.scatterContainer.removeChildren()
       this.renderPointsWithCurrentColoring()
+      
+      // Re-render category labels after force re-render
+      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        this.renderCategoryLabels()
+      }
     }
   }
 
@@ -4571,6 +4610,7 @@ export default class extends Controller {
     if (this.currentMetadataVector.data_type !== 'DISCRETE') {
       return
     }
+    
 
     // Clear existing labels
     this.categoryLabelsContainer.removeChildren()
@@ -4592,11 +4632,22 @@ export default class extends Controller {
     // Calculate centroids from currently visible points in the current view
     // This ensures labels follow the points correctly when panning/zooming
     const centroids = this.calculateCategoryCentroids(values, categoryList)
+    console.log('Centroids calculated, now rendering labels...')
 
     // Render labels for each category
     let labelsAdded = 0
     Object.entries(centroids).forEach(([category, centroid]) => {
       if (centroid.count > 0) { // Only show labels for categories with points
+        // Check if this category is selected by looking at the checkbox state
+        const categoryCheckbox = document.querySelector(`.category-checkbox[data-metadata-id="${this.currentMetadataVector.id}"][data-category="${category}"]`)
+        const bgColor = categoryCheckbox ? categoryCheckbox.style.backgroundColor : ''
+        // Check if NOT unselected (unselected is #f3f4f6 or rgb(243, 244, 246))
+        const isCategorySelected = categoryCheckbox && bgColor !== '#f3f4f6' && bgColor !== 'rgb(243, 244, 246)'
+        
+        if (!isCategorySelected) {
+          return // Skip rendering label for unselected categories
+        }
+
         const screenX = this.normalizeX(centroid.x, this.currentBounds)
         const screenY = this.normalizeY(centroid.y, this.currentBounds)
 
@@ -4620,7 +4671,14 @@ export default class extends Controller {
       }
     })
     
-    //console.log(`Total labels added: ${labelsAdded}`)
+    console.log(`Total labels added: ${labelsAdded}`)
+    console.log(`Category labels container children count: ${this.categoryLabelsContainer.children.length}`)
+    console.log(`Category labels container visible: ${this.categoryLabelsContainer.visible}`)
+    
+    // Debug: log each label that was added
+    this.categoryLabelsContainer.children.forEach((label, index) => {
+      console.log(`Label ${index}: visible=${label.visible}, x=${label.x.toFixed(2)}, y=${label.y.toFixed(2)}`)
+    })
   }
 
   // Calculate centroids for each category
@@ -4642,32 +4700,70 @@ export default class extends Controller {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
 
-    // Calculate centroids from actual visible points in the scatter container
-    if (this.scatterContainer && this.scatterContainer.children) {
-      this.scatterContainer.children.forEach((point) => {
-        if (point.isPoint && point.visible && point.cellId !== undefined) {
-          const category = values[point.cellId]
-          if (centroids[category]) {
-            // Convert screen coordinates back to data coordinates for centroid calculation
-            const dataX = this.currentBounds.minX + (point.x / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
-            const dataY = this.currentBounds.minY + (point.y / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
-            
-            centroids[category].x += dataX
-            centroids[category].y += dataY
-            centroids[category].count += 1
+      // Calculate centroids from actual visible points in the scatter container
+      if (this.scatterContainer && this.scatterContainer.children) {
+        console.log(`Scatter container has ${this.scatterContainer.children.length} children`)
+        let validPoints = 0
+        let visiblePoints = 0
+        let pointsWithCellId = 0
+
+        // Check if we have a nested container (after animation) or individual points (before animation)
+        const pointsToCheck = []
+        this.scatterContainer.children.forEach((child) => {
+          if (child.isPoint) {
+            // Individual point (before animation)
+            pointsToCheck.push(child)
+          } else if (child.children) {
+            // Nested container (after animation) - check its children
+            console.log(`Found nested container with ${child.children.length} children`)
+            child.children.forEach((point) => {
+              if (point.isPoint) {
+                pointsToCheck.push(point)
+              }
+            })
           }
-        }
-      })
-    }
+        })
+
+        console.log(`Total points to check: ${pointsToCheck.length}`)
+
+        pointsToCheck.forEach((point) => {
+          if (point.visible) {
+            visiblePoints++
+          }
+          if (point.cellId !== undefined) {
+            pointsWithCellId++
+          }
+          if (point.visible && point.cellId !== undefined) {
+            validPoints++
+            const category = values[point.cellId]
+            if (centroids[category]) {
+              // Convert screen coordinates back to data coordinates for centroid calculation
+              const dataX = this.currentBounds.minX + (point.x / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
+              const dataY = this.currentBounds.minY + (point.y / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
+
+              centroids[category].x += dataX
+              centroids[category].y += dataY
+              centroids[category].count += 1
+            }
+          }
+        })
+        console.log(`Found ${validPoints} valid points (${visiblePoints} visible, ${pointsWithCellId} with cellId) in scatter container`)
+      } else {
+        console.log('Scatter container or children not available')
+      }
 
     // Calculate average coordinates (centroids)
     Object.keys(centroids).forEach(category => {
       if (centroids[category].count > 0) {
         centroids[category].x /= centroids[category].count
         centroids[category].y /= centroids[category].count
+        console.log(`Centroid for ${category}: count=${centroids[category].count}, x=${centroids[category].x.toFixed(2)}, y=${centroids[category].y.toFixed(2)}`)
+      } else {
+        console.log(`Centroid for ${category}: count=0 (no points found)`)
       }
     })
 
+    console.log('Calculated centroids:', centroids)
     return centroids
   }
 
@@ -5329,6 +5425,11 @@ export default class extends Controller {
       this.scatterContainer.removeChildren()
       this.renderPointsWithCurrentColoring()
       
+      // Re-render category labels after axes toggle
+      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        this.renderCategoryLabels()
+      }
+      
       // Now set the final axes visibility
       this.axesContainer.visible = checkbox.checked
       //console.log(`Final axes visible: ${this.axesContainer.visible}`)
@@ -5711,6 +5812,11 @@ export default class extends Controller {
       //console.log(`Reverting to metadata coloring: ${this.currentMetadataVector.name}`)
       // Re-render with the current metadata coloring
       this.renderPointsWithCurrentColoring()
+      
+      // Re-render category labels after reverting to metadata coloring
+      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        this.renderCategoryLabels()
+      }
     } else {
       console.log('No metadata coloring active, using default colors')
       // Update colors without re-rendering (preserves pan/zoom state)
@@ -6150,6 +6256,11 @@ export default class extends Controller {
     
     // Update cell filtering
     this.updateCellFiltering()
+    
+    // Re-render category labels to reflect selection changes
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      this.renderCategoryLabels()
+    }
   }
 
   selectAllCategoriesForMetadata(metadataId) {
@@ -6157,7 +6268,14 @@ export default class extends Controller {
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.backgroundColor = '#10b981'
       checkbox.querySelector('i').style.display = 'block'
+      const category = checkbox.dataset.category
+      this.selectCategory(metadataId, category)
     })
+    
+    // Re-render category labels to reflect selection changes
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      this.renderCategoryLabels()
+    }
   }
 
   deselectAllCategoriesForMetadata(metadataId) {
@@ -6165,7 +6283,14 @@ export default class extends Controller {
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.backgroundColor = '#f3f4f6'
       checkbox.querySelector('i').style.display = 'none'
+      const category = checkbox.dataset.category
+      this.deselectCategory(metadataId, category)
     })
+    
+    // Re-render category labels to reflect selection changes
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      this.renderCategoryLabels()
+    }
   }
 
   selectCategory(metadataId, category) {
@@ -6184,6 +6309,7 @@ export default class extends Controller {
       this.selectedCategories[metadataId].delete(category)
     }
   }
+
 
   updateMetadataCheckboxState(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)

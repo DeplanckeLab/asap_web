@@ -91,6 +91,7 @@ export default class extends Controller {
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
+    this.clickingOnLabel = false // Track if we're clicking on a label
     //console.log(`Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
     this.currentPointSize = 1.0 // Store current point size for consistent rendering
     this.lassoGraphics = null
@@ -554,6 +555,7 @@ export default class extends Controller {
       this.categoryLabelsContainer.visible = true // Initially visible
       this.pixiApp.stage.addChild(this.categoryLabelsContainer)
       
+      
       // Create axes container (middle layer)
       this.axesContainer = new PIXI.Container()
       this.axesContainer.visible = true // Initially visible
@@ -893,10 +895,10 @@ export default class extends Controller {
     
     //console.log('Creating animated points with current coloring scheme')
     
-    // Create a container for animated points
-    const animatedContainer = new this.PIXI.Container()
-    this.scatterContainer.addChild(animatedContainer)
-    this.animatedContainer = animatedContainer // Store reference for cleanup
+    // Create a container for points (this will be our standard structure)
+    const pointsContainer = new this.PIXI.Container()
+    this.scatterContainer.addChild(pointsContainer)
+    this.animatedContainer = pointsContainer // Store reference for cleanup
     
     
     // Clear existing category labels during animation
@@ -982,7 +984,7 @@ export default class extends Controller {
       point.on('pointerout', () => this.hideTooltip())
       point.on('pointerdown', (event) => this.onPointClick(i, point, event))
       
-      animatedContainer.addChild(point)
+      pointsContainer.addChild(point)
       points.push({ sprite: point, startX, startY, endX, endY })
     })
     
@@ -1023,21 +1025,15 @@ export default class extends Controller {
         requestAnimationFrame(animate)
       } else {
         //console.log('Animation complete!')
-        // Animation complete - make animation container the main scatter container
+        // Animation complete - keep the nested structure, no point movement needed
         const moveStartTime = performance.now()
         
-        // Remove animation container from scatterContainer
-        this.scatterContainer.removeChild(animatedContainer)
-        
-        // Clear scatterContainer and add animation container as the main container
-        this.scatterContainer.removeChildren()
-        this.scatterContainer.addChild(animatedContainer)
-        
-        // Update reference so filtering works on the animation container
-        this.animatedContainer = null // Clear the reference since it's now the main container
+        // Animation container now contains the final positioned points
+        // We keep the structure: scatterContainer -> animatedContainer -> points
+        // This is much more efficient and maintains consistency
         
         const moveEndTime = performance.now()
-        console.log(`⏱️ Point movement took: ${(moveEndTime - moveStartTime).toFixed(2)}ms`)
+        console.log(`⏱️ Point structure maintained (no movement needed): ${(moveEndTime - moveStartTime).toFixed(2)}ms`)
         
         
         // Update stored coordinates and bounds for next transition
@@ -1047,7 +1043,7 @@ export default class extends Controller {
         // Clear animated labels
         const labelStartTime = performance.now()
         this.categoryLabelsContainer.removeChildren()
-
+        
         // Update axes and grid with final bounds
         const axesStartTime = performance.now()
         this.renderAxes()
@@ -1529,35 +1525,48 @@ export default class extends Controller {
       return
     }
     
-    // Validate the loaded data
-    if (!vectorData.compressed_data || !vectorData.compression_info) {
+    // Validate the loaded data - handle both compressed and uncompressed data
+    const hasCompressedData = vectorData.compressed_data && vectorData.compression_info
+    const hasUncompressedData = vectorData.values && vectorData.data_type
+    
+    if (!hasCompressedData && !hasUncompressedData) {
       console.error('Loaded metadata vector is missing required data:', vectorData)
+      console.error('Available properties:', Object.keys(vectorData))
       // Clear the corrupted cache entry and try to reload
       delete this.loadedMetadataVectors[metadataId]
       //console.log('Cleared corrupted cache entry, retrying load...')
       const retryData = await this.loadSingleMetadataVector(metadataId)
-      if (!retryData || !retryData.compressed_data || !retryData.compression_info) {
+      if (!retryData) {
         console.error('Retry failed - metadata vector is still corrupted')
         return
       }
       // Use the retry data
-      vectorData.compressed_data = retryData.compressed_data
-      vectorData.compression_info = retryData.compression_info
+      vectorData = retryData
     }
     
     // Decompress the vector data based on type
     let values
     try {
-      if (vectorData.data_type === 'DISCRETE') {
-        values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
-      } else if (vectorData.data_type === 'CONTINUOUS') {
-        values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+      if (hasUncompressedData) {
+        // Data is already uncompressed, use it directly
+        values = vectorData.values
+        console.log(`Using uncompressed data: ${values.length} values for ${vectorData.name}`)
+      } else if (hasCompressedData) {
+        // Data is compressed, decompress it
+        if (vectorData.data_type === 'DISCRETE') {
+          values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else if (vectorData.data_type === 'CONTINUOUS') {
+          values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else {
+          console.error('Unknown data type:', vectorData.data_type)
+          return
+        }
       } else {
-        console.error('Unknown data type:', vectorData.data_type)
+        console.error('No valid data found in metadata vector')
         return
       }
     } catch (error) {
-      console.error('Error decompressing metadata vector:', error)
+      console.error('Error processing metadata vector:', error)
       // Clear the corrupted cache entry
       delete this.loadedMetadataVectors[metadataId]
       return
@@ -1880,6 +1889,11 @@ export default class extends Controller {
     // Clear existing points
     this.scatterContainer.removeChildren()
     
+    // Always create the nested structure for consistency
+    const pointsContainer = new PIXI.Container()
+    this.scatterContainer.addChild(pointsContainer)
+    this.animatedContainer = pointsContainer // Store reference for consistency
+    
     const pointSize = this.currentPointSize
     //console.log(`renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
 
@@ -1963,7 +1977,7 @@ export default class extends Controller {
           point.on('pointerover', () => this.showTooltip(i, point))
           point.on('pointerout', () => this.hideTooltip())
           
-          this.scatterContainer.addChild(point)
+          pointsContainer.addChild(point)
         })
         
         // Update point count display with filtered count
@@ -2006,7 +2020,7 @@ export default class extends Controller {
           point.on('pointerover', () => this.showTooltip(i, point))
           point.on('pointerout', () => this.hideTooltip())
           
-          this.scatterContainer.addChild(point)
+          pointsContainer.addChild(point)
         }
         
         // Update point count display with filtered count
@@ -3583,6 +3597,10 @@ export default class extends Controller {
     const deltaX = currentX - this.panStartX
     const deltaY = currentY - this.panStartY
     
+    // Store the mouse delta for label movement
+    this.panMouseDeltaX = deltaX
+    this.panMouseDeltaY = deltaY
+    
     // Convert screen delta to data delta using the same coordinate system as normalization
     const screenWidth = this.pixiApp.screen.width
     const screenHeight = this.pixiApp.screen.height
@@ -3618,7 +3636,19 @@ export default class extends Controller {
       }
     })*/
     
-    // Move the panning shape directly instead of updating bounds
+    // Update bounds in real-time during panning
+    this.currentBounds = newBounds
+    
+    // Update axes and grid with new bounds
+    this.renderAxes()
+    this.renderGrid()
+    
+    // Move the points to match the new bounds during panning
+    this.updatePointPositions()
+    
+    // Don't update category labels during panning - they will be updated when panning stops
+    
+    // Move the panning shape as well
     if (this.panningShape) {
       this.panningShape.x = deltaX
       this.panningShape.y = deltaY
@@ -3645,28 +3675,7 @@ export default class extends Controller {
     const debugPanStartBounds = this.panStartBounds
     const debugPanOriginalBounds = this.panOriginalBounds
     
-    // Calculate final bounds based on shape movement
-    let finalBounds = this.currentBounds
-    if (this.panningShape && debugPanStartBounds) {
-      // Convert shape movement back to data bounds
-      const deltaX = this.panningShape.x
-      const deltaY = this.panningShape.y
-      
-      // Convert screen delta to data delta
-      const screenWidth = this.pixiApp.screen.width
-      const screenHeight = this.pixiApp.screen.height
-      const dataDeltaX = (deltaX / screenWidth) * (debugPanStartBounds.maxX - debugPanStartBounds.minX)
-      const dataDeltaY = (deltaY / screenHeight) * (debugPanStartBounds.maxY - debugPanStartBounds.minY)
-      
-      finalBounds = {
-        minX: debugPanStartBounds.minX - dataDeltaX,
-        maxX: debugPanStartBounds.maxX - dataDeltaX,
-        minY: debugPanStartBounds.minY - dataDeltaY,
-        maxY: debugPanStartBounds.maxY - dataDeltaY
-      }
-      
-      this.currentBounds = finalBounds
-    }
+    // Bounds are already updated in real-time during panning, no need to recalculate
     
     // Remove the panning shape
     if (this.panningShape && this.pixiApp) {
@@ -3674,22 +3683,29 @@ export default class extends Controller {
       this.panningShape = null
     }
     
+
     // Reset panning state
     this.panStartX = 0
     this.panStartY = 0
     this.panStartBounds = null
     this.panOriginalBounds = null
+    this.panMouseDeltaX = undefined
+    this.panMouseDeltaY = undefined
     
     // Show points and category labels again after panning is finished
     if (this.scatterContainer) {
       this.scatterContainer.visible = true
     }
-    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible === false) {
+    // Refresh labels after panning with a delay to ensure all position updates are complete
+    if (this.categoryLabelsContainer) {
       // Check if categories should be visible
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox && categoriesCheckbox.checked) {
-        this.categoryLabelsContainer.visible = true
-        this.renderCategoryLabels() // Reposition labels with current bounds
+        // Use delayed refresh to ensure all position updates are complete
+        setTimeout(() => {
+          console.log(`🏷️ Refreshing labels after panning (delayed)`)
+          this.renderCategoryLabels()
+        }, 200)
       }
     }
     
@@ -3769,10 +3785,11 @@ export default class extends Controller {
     this.renderAxes()
     this.renderGrid()
     
-    // Skip point updates and category labels during panning (points are hidden)
+    // Don't update category labels during panning to avoid coordinate issues
+    // Labels will be updated when panning stops
+    
+    // Update point positions when not panning (during panning, points are updated in onPanMouseMove)
     if (!this.isPanning) {
-      this.renderCategoryLabels()
-      
       // Update existing point positions instead of re-rendering
       if (this.currentCoordinates && this.scatterContainer) {
         this.updatePointPositions()
@@ -4030,8 +4047,12 @@ export default class extends Controller {
       // Check if categories should be visible
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox && categoriesCheckbox.checked) {
-        this.categoryLabelsContainer.visible = true
-        this.renderCategoryLabels()
+        //this.categoryLabelsContainer.visible = true
+        setTimeout(() => {
+          console.log(`🏷️ Refreshing labels after panning (delayed)`)
+          this.renderCategoryLabels()
+        }, 200)
+        //this.renderCategoryLabels()
       }
     }
     
@@ -4346,14 +4367,66 @@ export default class extends Controller {
   // Force re-render when colors or metadata change
   forceReRenderPoints() {
     if (this.currentCoordinates && this.scatterContainer) {
-      this.scatterContainer.removeChildren()
-      this.renderPointsWithCurrentColoring()
+      // Check if we have the nested structure (animatedContainer)
+      if (this.animatedContainer && this.scatterContainer.children.includes(this.animatedContainer)) {
+        // Preserve nested structure: clear points from animatedContainer, not scatterContainer
+        this.animatedContainer.removeChildren()
+        
+        // Re-render points in the animatedContainer (preserving nested structure)
+        this.renderPointsWithCurrentColoringInContainer(this.animatedContainer)
+      } else {
+        // Fallback to old method if no nested structure
+        this.scatterContainer.removeChildren()
+        this.renderPointsWithCurrentColoring()
+      }
       
       // Re-render category labels after force re-render
       if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
         this.renderCategoryLabels()
       }
     }
+  }
+
+  // Render points with current coloring in a specific container (preserves nested structure)
+  renderPointsWithCurrentColoringInContainer(container) {
+    if (!this.currentCoordinates || !container) {
+      console.log('Cannot render points - missing coordinates or container')
+      return
+    }
+
+    // Get filtered indices for current filtering state
+    const filteredIndices = this.getIncrementalFilteredIndices()
+    
+    // Create points in the specified container using the same method as the main rendering
+    this.currentCoordinates.forEach((coord, i) => {
+      // If no filtering is applied (filteredIndices is null), show all points
+      if (!filteredIndices || filteredIndices.includes(i)) {
+        const { color, alpha } = this.getColorAndAlpha(i)
+        
+        // Extract x, y from coordinate array
+        const [x, y] = coord
+        
+        // Convert data coordinates to screen coordinates
+        const screenX = this.normalizeX(x, this.currentBounds)
+        const screenY = this.normalizeY(y, this.currentBounds)
+        
+        // Create individual point graphics using the same pattern as the main rendering
+        const point = new PIXI.Graphics()
+        point.beginFill(color)
+        point.alpha = alpha
+        point.originalAlpha = alpha // Store original alpha for visibility updates
+        point.drawCircle(0, 0, this.currentPointSize)
+        point.endFill()
+        point.x = screenX
+        point.y = screenY
+        
+        // Store cell ID and mark as point for later reference
+        point.cellId = i
+        point.isPoint = true
+        
+        container.addChild(point)
+      }
+    })
   }
 
   // Render plot axes with labels
@@ -4609,17 +4682,30 @@ export default class extends Controller {
     this.gridContainer.addChild(gridGraphics)
   }
 
+
   // Render category labels at centroids of colored groups
   renderCategoryLabels() {
     const renderStartTime = performance.now()
-    console.log('🏷️ Starting renderCategoryLabels...')
+    
+    // Debug: Track where this function is called from
+    const stack = new Error().stack
+    const caller = stack.split('\n')[2] || 'unknown'
+    console.log(`🏷️ renderCategoryLabels called from:`, caller.trim())
+    console.log(`🏷️ isPanning: ${this.isPanning}`)
     
     if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
+      console.log('🏷️ Missing required components, returning early')
       return
     }
 
     // Only render labels for discrete metadata
     if (this.currentMetadataVector.data_type !== 'DISCRETE') {
+      return
+    }
+
+    // During panning, don't update labels at all - let them stay in their original positions
+    if (this.isPanning) {
+      console.log(`🏷️ Skipping label updates during panning`)
       return
     }
     
@@ -4644,13 +4730,33 @@ export default class extends Controller {
     // Calculate centroids from currently visible points in the current view
     // This ensures labels follow the points correctly when panning/zooming
     const centroidStartTime = performance.now()
-    const centroids = this.calculateCategoryCentroids(values, categoryList)
+    console.log(`🏷️ Calculating centroids - isPanning: ${this.isPanning}, bounds:`, this.currentBounds)
+    
+    let centroids
+    if (this.isPanning && this.storedCentroids) {
+      // During panning, use stored centroids to avoid coordinate mismatch
+      console.log(`🏷️ Using stored centroids during panning:`, this.storedCentroids)
+      centroids = this.storedCentroids
+    } else {
+      // Normal calculation when not panning
+      centroids = this.calculateCategoryCentroids(values, categoryList)
+      // Store centroids for use during panning
+      this.storedCentroids = centroids
+      console.log(`🏷️ Stored centroids for future panning:`, this.storedCentroids)
+    }
+    
+    // Note: We don't pre-calculate centroids for unselected categories
+    // because centroids should only be calculated from visible points
+    // When a category is re-selected, the points become visible and we can calculate centroids then
+    
     const centroidEndTime = performance.now()
-    console.log(`⏱️ Centroid calculation took: ${(centroidEndTime - centroidStartTime).toFixed(2)}ms`)
+
+    this.categoryLabelsContainer.visible = false
 
     // Render labels for each category
     const labelCreationStartTime = performance.now()
     let labelsAdded = 0
+    // First, process categories with visible points
     Object.entries(centroids).forEach(([category, centroid]) => {
       if (centroid.count > 0) { // Only show labels for categories with points
         // Check if this category is selected by looking at the checkbox state
@@ -4659,12 +4765,24 @@ export default class extends Controller {
         // Check if NOT unselected (unselected is #f3f4f6 or rgb(243, 244, 246))
         const isCategorySelected = categoryCheckbox && bgColor !== '#f3f4f6' && bgColor !== 'rgb(243, 244, 246)'
         
+        
         if (!isCategorySelected) {
           return // Skip rendering label for unselected categories
         }
 
+        
         const screenX = this.normalizeX(centroid.x, this.currentBounds)
         const screenY = this.normalizeY(centroid.y, this.currentBounds)
+        
+        console.log(`🏷️ Label positioning for ${category}:`, {
+          centroidData: { x: centroid.x, y: centroid.y, count: centroid.count },
+          currentBounds: this.currentBounds,
+          screenPosition: { x: screenX, y: screenY },
+          isPanning: this.isPanning,
+          storedCentroids: this.storedCentroids ? 'exists' : 'missing',
+          screenWidth: this.pixiApp.screen.width,
+          screenHeight: this.pixiApp.screen.height
+        })
 
         // Skip if outside visible area (with some margin)
         const margin = 50
@@ -4673,9 +4791,22 @@ export default class extends Controller {
         }
 
         // Create label with background
-        const label = this.createCategoryLabel(category, centroid.count)
+        let label
+        try {
+          label = this.createCategoryLabel(category, centroid.count)
+        } catch (error) {
+          console.error(`🏷️ Error creating label for ${category}:`, error)
+          return
+        }
+        
+        // Position the label at the centroid
         label.x = screenX
         label.y = screenY
+        
+        // Store original position for panning
+        label.originalX = screenX
+        label.originalY = screenY
+        
         // Center the label by setting anchor on the text object inside the container
         if (label.children[1] && label.children[1].anchor) {
           label.children[1].anchor.set(0.5, 0.5)
@@ -4683,21 +4814,28 @@ export default class extends Controller {
 
         this.categoryLabelsContainer.addChild(label)
         labelsAdded++
+        
+        // Debug: Check label position after creation
+        console.log(`🏷️ Label ${category} created at position:`, { x: label.x, y: label.y, screenX, screenY })
+        
       }
     })
     
+    this.categoryLabelsContainer.visible = true
+
+    // Update label interaction behavior for newly created labels
+    this.updateLabelInteractionMode()
+
     const labelCreationEndTime = performance.now()
-    console.log(`⏱️ Label creation took: ${(labelCreationEndTime - labelCreationStartTime).toFixed(2)}ms`)
-    console.log(`🏷️ Total labels added: ${labelsAdded}`)
     
     const renderEndTime = performance.now()
-    console.log(`⏱️ Total renderCategoryLabels took: ${(renderEndTime - renderStartTime).toFixed(2)}ms`)
+    
+    
   }
 
   // Calculate centroids for each category
   calculateCategoryCentroids(values, categories) {
     const calcStartTime = performance.now()
-    console.log('🧮 Starting calculateCategoryCentroids...')
     
     if (!categories || !Array.isArray(categories)) {
       console.log('Categories is not a valid array, returning empty centroids')
@@ -4711,18 +4849,21 @@ export default class extends Controller {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
 
-      // Calculate centroids from actual visible points in the scatter container
-      if (this.scatterContainer && this.scatterContainer.children) {
+    // Calculate centroids from actual visible points in the scatter container
+    if (this.scatterContainer && this.scatterContainer.children) {
         let validPoints = 0
 
-        // Check if we have a nested container (after animation) or individual points (before animation)
+        // Always look for points in the nested container structure
         const pointsToCheck = []
-        this.scatterContainer.children.forEach((child) => {
+        
+        this.scatterContainer.children.forEach((child, index) => {
+          //console.log(`Child ${index}: isPoint=${child.isPoint}, hasChildren=${!!child.children}, childrenCount=${child.children?.length || 0}`)
+          
           if (child.isPoint) {
-            // Individual point (before animation)
+            // Individual point (shouldn't happen with new structure)
             pointsToCheck.push(child)
           } else if (child.children) {
-            // Nested container (after animation) - check its children
+            // Nested container - check its children (this is our standard structure)
             child.children.forEach((point) => {
               if (point.isPoint) {
                 pointsToCheck.push(point)
@@ -4731,35 +4872,62 @@ export default class extends Controller {
           }
         })
         
-        console.log(`Found ${pointsToCheck.length} points to check for centroids`)
 
-        pointsToCheck.forEach((point) => {
+        // Calculate centroids from visible points using currentCoordinates for accuracy
+        const categoryCounts = {}
+        let debugCount = 0
+        pointsToCheck.forEach((point, index) => {
           if (point.visible && point.cellId !== undefined) {
             validPoints++
-            const category = values[point.cellId]
-            if (centroids[category]) {
-              // Convert screen coordinates back to data coordinates for centroid calculation
-              const dataX = this.currentBounds.minX + (point.x / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
-              const dataY = this.currentBounds.minY + (point.y / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
-
-              centroids[category].x += dataX
-              centroids[category].y += dataY
-              centroids[category].count += 1
+          const category = values[point.cellId]
+          if (centroids[category]) {
+            // Debug first few points to see their positions
+            if (index < 3) {
+              // Get world position instead of local position
+              const worldPos = point.getGlobalPosition()
+              console.log(`🏷️ Point ${index} (${category}):`, {
+                localPosition: { x: point.x, y: point.y },
+                worldPosition: { x: worldPos.x, y: worldPos.y },
+                currentBounds: this.currentBounds,
+                isPanning: this.isPanning,
+                screenWidth: this.pixiApp.screen.width,
+                screenHeight: this.pixiApp.screen.height
+              })
             }
+              // Use original data coordinates for accurate centroid calculation
+              const coord = this.currentCoordinates[point.cellId]
+              if (coord && coord.length >= 2) {
+                centroids[category].x += coord[0]
+                centroids[category].y += coord[1]
+                centroids[category].count += 1
+              } else {
+                // Fallback to screen coordinate conversion (should not happen)
+                console.warn(`No coordinate found for point ${point.cellId}`)
+              }
+              
+              // Track category counts for debugging
+              categoryCounts[category] = (categoryCounts[category] || 0) + 1
           }
-        })
-      }
+        }
+      })
+        
+    }
 
     // Calculate average coordinates (centroids)
     Object.keys(centroids).forEach(category => {
       if (centroids[category].count > 0) {
         centroids[category].x /= centroids[category].count
         centroids[category].y /= centroids[category].count
+        console.log(`🏷️ Final centroid for ${category}:`, {
+          count: centroids[category].count,
+          x: centroids[category].x.toFixed(2),
+          y: centroids[category].y.toFixed(2),
+          isPanning: this.isPanning
+        })
       }
     })
-    
+
     const calcEndTime = performance.now()
-    console.log(`⏱️ calculateCategoryCentroids took: ${(calcEndTime - calcStartTime).toFixed(2)}ms`)
     return centroids
   }
 
@@ -4768,89 +4936,180 @@ export default class extends Controller {
   createCategoryLabel(categoryName, count) {
     const container = new PIXI.Container()
 
-    // Create text
-    const text = new PIXI.Text(categoryName, {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: 12,
-      fill: 0x333333,
-      align: 'center',
-      fontWeight: 'bold'
-    })
-
+    // Create text - try to fix the PIXI.js constructor issue
+    let text
+    try {
+      // Try creating with explicit PIXI namespace
+      text = new window.PIXI.Text(categoryName, {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: 12,
+        fill: 0x333333,
+        align: 'center',
+        fontWeight: 'bold'
+      })
+    } catch (error) {
+      console.error('🏷️ Error creating PIXI.Text with window.PIXI:', error)
+      try {
+        // Fallback to direct PIXI reference
+        text = new PIXI.Text(categoryName, {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: 12,
+          fill: 0x333333,
+          align: 'center',
+          fontWeight: 'bold'
+        })
+      } catch (error2) {
+        console.error('🏷️ Error creating PIXI.Text with PIXI:', error2)
+        // Last resort: create a simple container
+        text = new PIXI.Container()
+        text.text = categoryName
+      }
+    }
+    
+    
     // Get the category color for the border
-    // Use the same sorted categories as the plot points to ensure color consistency
     const rawCategories = this.currentMetadataVector.categories || [...new Set(this.currentMetadataVector.values)]
     const sortedCategories = this.getSortedCategories(this.currentMetadataVector.values, [...rawCategories])
     const categoryIndex = sortedCategories.indexOf(categoryName)
     const categoryColor = this.getCategoryColor(categoryName, categoryIndex, this.currentMetadataId)
     const borderColor = this.convertHexToPixiColor(categoryColor)
 
-    // Create background rectangle with smaller padding
-    const padding = 3 // Reduced from 6 to 3
-    const background = new PIXI.Graphics()
-    background.beginFill(0xffffff, 0.8) // White background with 80% opacity
-    background.lineStyle(2, borderColor, 0.8) // Colored border matching category
-    background.drawRoundedRect(
-      -text.width / 2 - padding,
-      -text.height / 2 - padding,
-      text.width + padding * 2,
-      text.height + padding * 2,
-      3 // Slightly smaller corner radius
-    )
-    background.endFill()
+    // Create background rectangle
+    const padding = 3
+    let background
+    try {
+      background = new window.PIXI.Graphics()
+      background.beginFill(0xffffff, 0.8)
+      background.lineStyle(2, borderColor, 0.8)
+      background.drawRoundedRect(
+        -text.width / 2 - padding,
+        -text.height / 2 - padding,
+        text.width + padding * 2,
+        text.height + padding * 2,
+        3
+      )
+      background.endFill()
+    } catch (error) {
+      console.error('🏷️ Error creating PIXI.Graphics with window.PIXI:', error)
+      try {
+        background = new PIXI.Graphics()
+        background.beginFill(0xffffff, 0.8)
+        background.lineStyle(2, borderColor, 0.8)
+        background.drawRoundedRect(
+          -text.width / 2 - padding,
+          -text.height / 2 - padding,
+          text.width + padding * 2,
+          text.height + padding * 2,
+          3
+        )
+        background.endFill()
+      } catch (error2) {
+        console.error('🏷️ Error creating PIXI.Graphics with PIXI:', error2)
+        background = new PIXI.Container()
+      }
+    }
+    
 
     // Add background and text to container
     container.addChild(background)
     container.addChild(text)
+    
 
     // Store the category name and border color for reference
     container.categoryName = categoryName
     container.borderColor = borderColor
 
-    // Make the label draggable (only in pick mode)
+    // Make the label interactive for dragging in pick mode
     container.interactive = true
-    container.buttonMode = true
-    // Cursor will be set based on interaction mode
-
-    // Add drag functionality
-    let isDragging = false
-    let dragData = null
-    let dragStartPosition = { x: 0, y: 0 }
-
-    container.on('pointerdown', (event) => {
-      // Only allow dragging in pick mode
-      if (this.interactionMode === 'pick') {
-        isDragging = true
-        dragData = event.data
-        dragStartPosition = { x: container.x, y: container.y }
-        container.alpha = 0.8 // Slightly transparent while dragging
-        
-        // Store reference to this label for global event handling
-        this.draggingLabel = container
-        
-        event.stopPropagation() // Prevent event from bubbling to canvas
-        event.stopImmediatePropagation() // Prevent other handlers from running
-      }
-    })
-
-    // Add hover effects to indicate draggability (only in pick mode)
-    container.on('pointerover', () => {
-      if (!isDragging && this.interactionMode === 'pick') {
-        container.scale.set(1.05) // Slightly larger on hover
-        container.alpha = 0.9 // Slightly transparent on hover
-        container.cursor = 'move' // Show move cursor
-      }
-    })
-
-    container.on('pointerout', () => {
-      if (!isDragging) {
-        container.scale.set(1.0) // Back to normal size
-        container.alpha = 1.0 // Back to full opacity
-        container.cursor = 'default' // Reset cursor
-      }
-    })
+    container.buttonMode = false
+    container.cursor = 'default'
 
     return container
+  }
+
+  // Get total count for a category (unfiltered)
+  getTotalCountForCategory(categoryName) {
+    if (!this.currentMetadataVector || !this.currentMetadataVector.values) {
+      return 0
+    }
+    
+    let count = 0
+    for (let i = 0; i < this.currentMetadataVector.values.length; i++) {
+      if (this.currentMetadataVector.values[i] === categoryName) {
+        count++
+      }
+    }
+    return count
+  }
+
+
+  // Update sidebar category counts with visual indicators
+  updateSidebarCategoryCounts() {
+    if (!this.currentMetadataVector || !this.currentMetadataVector.id) {
+      return
+    }
+
+    const metadataId = this.currentMetadataVector.id
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    
+    categoryCheckboxes.forEach(checkbox => {
+      const category = checkbox.dataset.category
+      
+      // Find the count span - it's the second span in the parent container
+      const parentContainer = checkbox.parentElement.parentElement
+      const spans = parentContainer.querySelectorAll('span')
+      const countSpan = spans[spans.length - 1] // Last span is the count
+      
+      if (countSpan) {
+        // Get total count from the original data
+        const totalCount = this.getTotalCountForCategory(category)
+        
+        // Get visible count (current count displayed)
+        const visibleCount = this.getVisibleCountForCategory(category)
+        
+        // Update the count display
+        countSpan.textContent = visibleCount.toLocaleString()
+        
+        // Add visual indicators
+        if (totalCount > visibleCount) {
+          // Some cells are filtered out - show in red
+          countSpan.style.color = '#dc2626'
+          countSpan.style.fontWeight = '600'
+          
+          // Add hover tooltip
+          const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
+          countSpan.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% selected)`
+        } else {
+          // No filtering - normal appearance
+          countSpan.style.color = '#6b7280'
+          countSpan.style.fontWeight = '500'
+          countSpan.title = `${totalCount.toLocaleString()} cells (100% selected)`
+        }
+      }
+    })
+  }
+
+  // Get visible count for a category (considering current filtering)
+  getVisibleCountForCategory(categoryName) {
+    if (!this.currentMetadataVector || !this.currentMetadataVector.values) {
+      return 0
+    }
+    
+    // If no filtering is applied, return total count
+    if (!this.currentVisibleCells || this.currentVisibleCells.length === this.currentMetadataVector.values.length) {
+      return this.getTotalCountForCategory(categoryName)
+    }
+    
+    // Count visible cells for this category
+    let visibleCount = 0
+    for (let i = 0; i < this.currentVisibleCells.length; i++) {
+      const cellIndex = this.currentVisibleCells[i]
+      if (this.currentMetadataVector.values[cellIndex] === categoryName) {
+        visibleCount++
+      }
+    }
+    
+    return visibleCount
   }
 
   // Update label interaction behavior based on current interaction mode
@@ -4861,11 +5120,20 @@ export default class extends Controller {
       if (label.categoryName) { // Check if it's a category label
         if (this.interactionMode === 'pick') {
           label.cursor = 'move'
+          // Add drag event handlers for pick mode
+          label.on('pointerdown', (event) => {
+            event.stopPropagation()
+            this.clickingOnLabel = true
+            this.draggingLabel = label
+            label.alpha = 0.7
+          })
         } else {
           label.cursor = 'default'
           // Reset any hover effects if not in pick mode
           label.scale.set(1.0)
           label.alpha = 1.0
+          // Remove drag event handlers
+          label.off('pointerdown')
         }
       }
     })
@@ -4914,17 +5182,21 @@ export default class extends Controller {
           this.draggingLabel.y = newPosition.y
         }
       },
-      up: () => {
+      up: (event) => {
         if (this.draggingLabel) {
+          event.stopPropagation()
           this.draggingLabel.alpha = 1.0
           this.draggingLabel = null
         }
+        this.clickingOnLabel = false
       },
-      upOutside: () => {
+      upOutside: (event) => {
         if (this.draggingLabel) {
+          event.stopPropagation()
           this.draggingLabel.alpha = 1.0
           this.draggingLabel = null
         }
+        this.clickingOnLabel = false
       }
     }
 
@@ -5121,7 +5393,7 @@ export default class extends Controller {
 
   // Add all visible cells to selection
   addAllVisibleCells() {
-    console.log('🎯 Adding all visible cells to selection')
+    //console.log('Adding all visible cells to selection')
     
     // Get currently visible cells
     const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
@@ -5136,7 +5408,7 @@ export default class extends Controller {
       this.selectedCells.add(cellId)
     })
     
-    console.log(`Added ${visibleCells.length} visible cells to selection`)
+    //(`Added ${visibleCells.length} visible cells to selection`)
     
     // Update the selection count display
     this.updateSelectedCellsCount()
@@ -5292,7 +5564,7 @@ export default class extends Controller {
   }
 
   updatePointSize() {
-    console.log('🎯 Stimulus updatePointSize method called!')
+    //console.log('Stimulus updatePointSize method called!')
     const slider = document.getElementById('point-size-slider')
     const valueDisplay = document.getElementById('point-size-value')
     if (!slider || !valueDisplay) {
@@ -6097,6 +6369,11 @@ export default class extends Controller {
   // Pick mode methods
   onPickMouseDown(event) {
     // In pick mode, use fallback detection to find clicked points
+    // But don't detect points if we're clicking on a label
+    if (this.clickingOnLabel) {
+      return
+    }
+    
     // Pick mode: Canvas clicked
     this.detectPointClick(event)
   }
@@ -6230,6 +6507,8 @@ export default class extends Controller {
     const checkbox = event.currentTarget
     const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
     
+    console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
+    
     // Initialize checkboxes for this metadata if not already done
     if (!this.selectedCategories[metadataId]) {
       this.initializeCheckboxesForMetadata(metadataId)
@@ -6252,12 +6531,38 @@ export default class extends Controller {
     this.updateMetadataCheckboxState(metadataId)
     
     // Update cell filtering
+    console.log(`🔄 About to call updateCellFiltering`)
+    console.log(`🔄 Labels before updateCellFiltering:`, this.categoryLabelsContainer.children.length)
     this.updateCellFiltering()
+    console.log(`🔄 updateCellFiltering completed`)
+    console.log(`🔄 Labels after updateCellFiltering:`, this.categoryLabelsContainer.children.length)
     
     // Re-render category labels to reflect selection changes
-    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-      this.renderCategoryLabels()
-    }
+    // Use requestAnimationFrame to ensure points are visible before calculating centroids
+    requestAnimationFrame(() => {
+      console.log(`🔄 Checking category labels container:`, {
+        exists: !!this.categoryLabelsContainer,
+        visible: this.categoryLabelsContainer?.visible,
+        children: this.categoryLabelsContainer?.children?.length
+      })
+      
+      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        console.log(`🔄 Re-rendering labels after category selection change`)
+        console.log(`🔄 Current metadata vector:`, this.currentMetadataVector?.id, this.currentMetadataVector?.type)
+        console.log(`🔄 Current bounds:`, this.currentBounds)
+        console.log(`🔄 Current coordinates:`, this.currentCoordinates?.length)
+        try {
+          this.renderCategoryLabels()
+          console.log(`🔄 renderCategoryLabels completed successfully`)
+        } catch (error) {
+          console.error(`🔄 Error in renderCategoryLabels:`, error)
+        }
+      } else {
+        console.log(`🔄 Category labels container not visible, skipping label re-render`)
+      }
+    })
+    
+    console.log(`🔄 toggleCategorySelection function completed`)
   }
 
   selectAllCategoriesForMetadata(metadataId) {
@@ -6422,6 +6727,14 @@ export default class extends Controller {
     if (this.animatedContainer && this.animatedContainer.children.length > 0) {
       updatePointsInContainer(this.animatedContainer, 'Animated')
     }
+    
+    // Check for nested containers (our standard structure)
+    this.scatterContainer.children.forEach((child) => {
+      if (child.children && child.children.length > 1000 && !child.isPoint) {
+        // This is likely our main points container, update its children
+        updatePointsInContainer(child, 'Nested')
+      }
+    })
 
     const endTime = performance.now()
     //console.log(`Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
@@ -6513,6 +6826,9 @@ export default class extends Controller {
     
     // Update point count display immediately
     this.updatePointCountDisplay(filteredIndices)
+    
+    // Update sidebar category counts with visual indicators
+    this.updateSidebarCategoryCounts()
     
     // Update button state after filtering
     this.updateAddAllVisibleButtonState()

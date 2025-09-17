@@ -539,10 +539,7 @@ export default class extends Controller {
       this.gridContainer.visible = true // Initially visible
       this.pixiApp.stage.addChild(this.gridContainer)
       
-      // Create axes container (middle layer)
-      this.axesContainer = new PIXI.Container()
-      this.axesContainer.visible = true // Initially visible
-      this.pixiApp.stage.addChild(this.axesContainer)
+     
 
       // Create main container for the scatter plot (top layer)
       this.scatterContainer = new PIXI.Container()
@@ -553,6 +550,11 @@ export default class extends Controller {
       this.categoryLabelsContainer.visible = true // Initially visible
       this.pixiApp.stage.addChild(this.categoryLabelsContainer)
       
+      // Create axes container (middle layer)
+      this.axesContainer = new PIXI.Container()
+      this.axesContainer.visible = true // Initially visible
+      this.pixiApp.stage.addChild(this.axesContainer)
+
       // Store current loom file
       this.currentLoomFile = this.loomFileSelectTarget.value
       
@@ -1886,6 +1888,16 @@ export default class extends Controller {
           const screenX = this.normalizeX(x, this.currentBounds)
           const screenY = this.normalizeY(y, this.currentBounds)
           
+          // Debug: Log coordinates for first few points to compare with zooming shape
+          if (i < 5) {
+            console.log(`🔍 Real Point ${i}:`, {
+              dataCoords: [x, y],
+              screenCoords: [screenX, screenY],
+              bounds: this.currentBounds,
+              screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
+            })
+          }
+          
           // Create individual point graphics
           const point = new this.PIXI.Graphics()
           point.beginFill(color)
@@ -1971,6 +1983,7 @@ export default class extends Controller {
         
         const screenX = this.normalizeX(x, this.currentBounds)
         const screenY = this.normalizeY(y, this.currentBounds)
+        
         
         // Create individual point graphics
         const point = new this.PIXI.Graphics()
@@ -2897,7 +2910,7 @@ export default class extends Controller {
     const resetButton = metadataContainer.querySelector('.reset-colors-btn')
     if (resetButton) {
       resetButton.remove()
-      console.log('🎨 Removed reset colors button for metadata', metadataId)
+      //console.log('Removed reset colors button for metadata', metadataId)
     }
   }
 
@@ -2907,7 +2920,7 @@ export default class extends Controller {
     allResetButtons.forEach(button => {
       button.remove()
     })
-    console.log('🎨 Hidden all reset buttons')
+    //console.log('Hidden all reset buttons')
   }
   
   // Show color picker form
@@ -3073,14 +3086,14 @@ export default class extends Controller {
     
     // Only stop panning if we're actually in a panning state
     if (this.isPanning) {
-      this.stopPanning()
+    this.stopPanning()
     }
     
     // Ensure currentBounds is initialized if not already set
     if (!this.currentBounds && this.currentCoordinates) {
       const originalBounds = this.calculateBounds(this.currentCoordinates)
       this.currentBounds = this.getAdjustedBounds(originalBounds)
-      console.log('🔧 Initialized currentBounds in setInteractionMode:', this.currentBounds)
+      //console.log('Initialized currentBounds in setInteractionMode:', this.currentBounds)
     }
     
     // Update cursor based on mode
@@ -3262,16 +3275,19 @@ export default class extends Controller {
     const mouseX = event.clientX - rect.left
     const mouseY = event.clientY - rect.top
     
-    // Basic zoom implementation
-    const delta = event.deltaY > 0 ? 1.1 : 0.9
-    const centerX = (this.currentBounds.minX + this.currentBounds.maxX) / 2
-    const centerY = (this.currentBounds.minY + this.currentBounds.maxY) / 2
+    // Basic zoom implementation with faster increments, zooming around mouse cursor
+    const delta = event.deltaY > 0 ? 1.05 : 0.95
     
+    // Convert mouse position to data coordinates
+    const mouseDataX = this.currentBounds.minX + (mouseX / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
+    const mouseDataY = this.currentBounds.minY + (mouseY / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
+    
+    // Zoom around mouse cursor position
     const newBounds = {
-      minX: centerX - (centerX - this.currentBounds.minX) * delta,
-      maxX: centerX + (this.currentBounds.maxX - centerX) * delta,
-      minY: centerY - (centerY - this.currentBounds.minY) * delta,
-      maxY: centerY + (this.currentBounds.maxY - centerY) * delta
+      minX: mouseDataX - (mouseDataX - this.currentBounds.minX) * delta,
+      maxX: mouseDataX + (this.currentBounds.maxX - mouseDataX) * delta,
+      minY: mouseDataY - (mouseDataY - this.currentBounds.minY) * delta,
+      maxY: mouseDataY + (this.currentBounds.maxY - mouseDataY) * delta
     }
     
     //console.log('Zoom: Updating bounds to:', newBounds, 'Mouse position:', { mouseX, mouseY })
@@ -3282,13 +3298,82 @@ export default class extends Controller {
     // Update current bounds
     this.currentBounds = newBounds
     
-    // Update axes, grid, and category labels with new bounds
-    this.renderAxes()
-    this.renderGrid()
-    this.renderCategoryLabels()
+    // Check if we should use shape-based zooming for performance
+    // Use a faster estimation instead of counting all points
+    const boundsArea = (newBounds.maxX - newBounds.minX) * (newBounds.maxY - newBounds.minY)
+    const totalArea = (this.currentBounds.maxX - this.currentBounds.minX) * (this.currentBounds.maxY - this.currentBounds.minY)
+    const estimatedVisiblePoints = Math.floor((boundsArea / totalArea) * this.currentCoordinates.length)
+    const useShapeZooming = estimatedVisiblePoints > 10000
     
-    // Use translation approach like pan mode, centered on mouse position
-    this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
+    if (useShapeZooming) {
+      //console.log('Using shape-based zooming for ~', estimatedVisiblePoints, 'visible points')
+      
+      // Hide points and show zooming shape
+      if (this.scatterContainer) {
+        this.scatterContainer.visible = false
+      }
+      if (this.categoryLabelsContainer) {
+        this.categoryLabelsContainer.visible = false
+      }
+      
+      // Store the bounds for this zooming operation
+      const zoomingBounds = newBounds
+      //console.log('Using zoomingBounds for this operation:', zoomingBounds)
+      
+      // Create or reuse zooming shape
+      if (!this.zoomingShape) {
+        // Create the zooming shape with the zooming bounds
+        this.zoomingShape = this.createZoomingShapeWithBounds(zoomingBounds)
+        if (this.zoomingShape && this.pixiApp) {
+          this.pixiApp.stage.addChild(this.zoomingShape)
+          // Start pulsing animation
+          this.startZoomingAnimation()
+        }
+      } else {
+        // Transform the existing shape instead of recreating it
+        this.transformZoomingShape(oldBounds, newBounds)
+        // Restart animation for the transformed shape
+        this.startZoomingAnimation()
+      }
+      
+      // Update axes and grid
+      this.renderAxes()
+      this.renderGrid()
+      
+      // Clear any existing timeout
+      if (this.zoomTimeout) {
+        clearTimeout(this.zoomTimeout)
+      }
+      
+      // Schedule a delayed update to show actual points
+      this.zoomTimeout = setTimeout(() => {
+        this.finishZooming()
+      }, 200) // Increased delay for better performance
+      
+    } else {
+      // Use normal zooming for smaller datasets
+      //console.log('Using normal zooming for ~', estimatedVisiblePoints, 'visible points')
+      
+      // Remove any existing zooming shape (in case we switched from shape-based to normal)
+      if (this.zoomingShape && this.pixiApp) {
+        this.pixiApp.stage.removeChild(this.zoomingShape)
+        this.zoomingShape = null
+      }
+      
+      // Clear any existing timeout
+      if (this.zoomTimeout) {
+        clearTimeout(this.zoomTimeout)
+        this.zoomTimeout = null
+      }
+      
+      // Update axes, grid, and category labels with new bounds
+      this.renderAxes()
+      this.renderGrid()
+      this.renderCategoryLabels()
+      
+      // Use translation approach like pan mode, centered on mouse position
+      this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
+    }
   }
 
   // Lasso mode handlers
@@ -3374,12 +3459,12 @@ export default class extends Controller {
     // Store original bounds for consistent pan scaling
     this.panOriginalBounds = this.calculateBounds(this.currentCoordinates)
     
-    console.log('🚀 Pan Start Debug:', {
+    /*console.log('Pan Start Debug:', {
       panStartBounds: this.panStartBounds,
       panOriginalBounds: this.panOriginalBounds,
       currentBounds: this.currentBounds,
       screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
-    })
+    })*/
     
     // Hide points and category labels during panning for smooth performance
     if (this.scatterContainer) {
@@ -3458,11 +3543,11 @@ export default class extends Controller {
       this.panningShape.y = deltaY
     }
     
-    console.log('📊 Pan Move Debug:', {
+    /*console.log('Pan Move Debug:', {
       deltaX: deltaX,
       deltaY: deltaY,
       shapePosition: this.panningShape ? { x: this.panningShape.x, y: this.panningShape.y } : 'No shape'
-    })
+    })*/
   }
 
   onPanMouseUp(event) {
@@ -3528,7 +3613,7 @@ export default class extends Controller {
     }
     
     // Update point positions to match the new bounds after panning
-    console.log('🏁 Pan Stop Debug:', {
+    /*console.log('Pan Stop Debug:', {
       finalBounds: finalBounds,
       panStartBounds: debugPanStartBounds,
       panOriginalBounds: debugPanOriginalBounds,
@@ -3538,7 +3623,7 @@ export default class extends Controller {
         minY: finalBounds.minY - debugPanStartBounds.minY,
         maxY: finalBounds.maxY - debugPanStartBounds.maxY
       } : 'Cannot calculate - missing bounds'
-    })
+    })*/
     
     if (this.currentCoordinates && this.scatterContainer && this.currentBounds) {
       this.updatePointPositions()
@@ -3612,6 +3697,264 @@ export default class extends Controller {
   }
 
   // Optimized method to update point positions without re-rendering
+  // Count how many points are visible in the given bounds
+  countVisiblePoints(bounds) {
+    if (!this.currentCoordinates || !bounds) return 0
+    
+    let visibleCount = 0
+    for (let i = 0; i < this.currentCoordinates.length; i++) {
+      const [x, y] = this.currentCoordinates[i]
+      if (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY) {
+        visibleCount++
+      }
+    }
+    return visibleCount
+  }
+
+  // Transform existing zooming shape instead of recreating it
+  transformZoomingShape(oldBounds, newBounds) {
+    if (!this.zoomingShape) return
+    
+    // Reset container scale to avoid double transformation
+    this.zoomingShape.scale.x = 1
+    this.zoomingShape.scale.y = 1
+    
+    // Update individual point positions based on new bounds (same calculation as updatePointPositions)
+    const transformedWidth = newBounds.maxX - newBounds.minX
+    const transformedHeight = newBounds.maxY - newBounds.minY
+    this.zoomingShape.children.forEach((pointSprite, index) => {
+      if (this.currentCoordinates && index < this.currentCoordinates.length) {
+        const [x, y] = this.currentCoordinates[index]
+        const normalizedX = (x - newBounds.minX) / transformedWidth
+        const normalizedY = (y - newBounds.minY) / transformedHeight
+        const newScreenX = normalizedX * this.pixiApp.screen.width
+        const newScreenY = normalizedY * this.pixiApp.screen.height
+        pointSprite.x = newScreenX
+        pointSprite.y = newScreenY
+        
+        // Update the stored comparison point for index 0
+        if (index === 0) {
+          this.zoomingShapePoint0 = { 
+            x: newScreenX, 
+            y: newScreenY, 
+            dataCoords: [x, y] 
+          }
+          //console.log('Updated zoomingShapePoint0 in transformZoomingShape:', this.zoomingShapePoint0)
+        }
+      }
+    })
+  }
+
+  // Create a shape for zooming with specific bounds
+  createZoomingShapeWithBounds(bounds) {
+    if (!this.pixiApp || !bounds || !this.currentCoordinates) return null
+    
+    const container = new PIXI.Container()
+    
+    // Sample points to create a simplified representation
+    const sampleSize = Math.min(10000, this.currentCoordinates.length)
+    const step = Math.max(1, Math.floor(this.currentCoordinates.length / sampleSize))
+    
+    // Cache bounds calculations for performance (same as updatePointPositions)
+    const width = bounds.maxX - bounds.minX
+    const height = bounds.maxY - bounds.minY
+    
+    // Debug: Log bounds being used for zooming shape
+    /*console.log('Zooming Shape Bounds:', {
+      bounds: bounds,
+      width: width,
+      height: height,
+      screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height },
+      timestamp: Date.now()
+    })*/
+    
+    // Create individual animated point sprites
+    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+      const [x, y] = this.currentCoordinates[i]
+      
+      // Use the exact same coordinate calculation as updatePointPositions
+      const normalizedX = (x - bounds.minX) / width
+      const normalizedY = (y - bounds.minY) / height
+      const screenX = normalizedX * this.pixiApp.screen.width
+      const screenY = normalizedY * this.pixiApp.screen.height
+      
+      // Debug: Log coordinates for first few points to understand the shift
+      /*if (i < 5) {
+        console.log(`Zooming Shape Point ${i}:`, {
+          dataCoords: [x, y],
+          normalizedCoords: [normalizedX, normalizedY],
+          screenCoords: [screenX, screenY],
+          bounds: bounds,
+          width: width,
+          height: height,
+          screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height },
+          calculation: {
+            step1: `(${x} - ${bounds.minX}) / ${width} = ${normalizedX}`,
+            step2: `${normalizedX} * ${this.pixiApp.screen.width} = ${screenX}`
+          }
+        })
+        */
+        // Store for comparison with real points
+        if (i === 0) {
+          this.zoomingShapePoint0 = { x: screenX, y: screenY, dataCoords: [x, y] }
+        }
+      }
+      
+      // Get color for this point
+      const colorInfo = this.getColorAndAlpha(i)
+      const color = colorInfo.color
+      const alpha = colorInfo.alpha * 0.8
+      
+      // Create individual point graphics
+      const pointGraphics = new PIXI.Graphics()
+      
+      // Create multi-layer point with glow
+      const baseSize = 2
+      const glowSize = 4
+      const pulseSize = 6
+      
+      // Outer pulse ring
+      pointGraphics.beginFill(color, alpha * 0.1)
+      pointGraphics.drawCircle(0, 0, pulseSize)
+      pointGraphics.endFill()
+      
+      // Glow effect
+      pointGraphics.beginFill(color, alpha * 0.3)
+      pointGraphics.drawCircle(0, 0, glowSize)
+      pointGraphics.endFill()
+      
+      // Main point
+      pointGraphics.beginFill(color, alpha)
+      pointGraphics.drawCircle(0, 0, baseSize)
+      pointGraphics.endFill()
+      
+      // Position the point
+      pointGraphics.x = screenX
+      pointGraphics.y = screenY
+      
+      // Store animation properties
+      pointGraphics.originalAlpha = alpha
+      pointGraphics.originalScale = 1.0
+      pointGraphics.animationOffset = i * 0.1 // Stagger animation timing
+      
+      container.addChild(pointGraphics)
+    }
+    
+    // Position the container
+    container.x = 0
+    container.y = 0
+    
+    // Debug: Log container positioning
+    /*console.log('Zooming Shape Container Position:', {
+      containerX: container.x,
+      containerY: container.y,
+      containerScale: { x: container.scale.x, y: container.scale.y }
+    })*/
+    
+    return container
+  }
+
+  // Create a shape for zooming (backward compatibility - uses current bounds)
+  createZoomingShape() {
+    return this.createZoomingShapeWithBounds(this.currentBounds)
+  }
+
+  // Start pulsing animation for the zooming shape
+  startZoomingAnimation() {
+    if (!this.zoomingShape || this.zoomingAnimationId) return
+    
+    let time = 0
+    const animate = () => {
+      if (!this.zoomingShape || !this.zoomingShape.visible) {
+        this.stopZoomingAnimation()
+        return
+      }
+      
+      // Animate each individual point sprite
+      this.zoomingShape.children.forEach((pointSprite, index) => {
+        if (pointSprite.originalAlpha !== undefined) {
+          // Create staggered pulsing effect
+          const animationTime = time + pointSprite.animationOffset
+          /*
+          // Pulsing alpha (more dramatic)
+          const alphaPulse = Math.sin(animationTime * 0.008) * 0.3 + 0.7 // 0.4 to 1.0
+          pointSprite.alpha = alphaPulse
+          
+          // Pulsing scale (more noticeable)
+          const scalePulse = Math.sin(animationTime * 0.006) * 0.2 + 1.0 // 0.8 to 1.2
+          pointSprite.scale.set(scalePulse)
+          
+          // Subtle rotation for extra dynamism
+          const rotation = Math.sin(animationTime * 0.003) * 0.1
+          pointSprite.rotation = rotation
+          */
+          pointSprite.alpha = 0.7
+          
+        }
+      })
+      
+      time += 16 // ~60fps
+      this.zoomingAnimationId = requestAnimationFrame(animate)
+    }
+    
+    this.zoomingAnimationId = requestAnimationFrame(animate)
+  }
+
+  // Stop the zooming animation
+  stopZoomingAnimation() {
+    if (this.zoomingAnimationId) {
+      cancelAnimationFrame(this.zoomingAnimationId)
+      this.zoomingAnimationId = null
+    }
+    
+    // Reset all point sprite properties
+    if (this.zoomingShape && this.zoomingShape.children) {
+      this.zoomingShape.children.forEach(pointSprite => {
+        if (pointSprite.originalAlpha !== undefined) {
+          pointSprite.alpha = pointSprite.originalAlpha
+          pointSprite.scale.set(pointSprite.originalScale)
+          pointSprite.rotation = 0
+        }
+      })
+    }
+  }
+
+  // Finish zooming by removing the shape and showing actual points
+  finishZooming() {
+    // Clear the timeout
+    if (this.zoomTimeout) {
+      clearTimeout(this.zoomTimeout)
+      this.zoomTimeout = null
+    }
+    
+    // Stop animation
+    this.stopZoomingAnimation()
+    
+    // Remove the zooming shape
+    if (this.zoomingShape && this.pixiApp) {
+      this.pixiApp.stage.removeChild(this.zoomingShape)
+      this.zoomingShape = null
+    }
+    
+    // Show points and category labels again
+    if (this.scatterContainer) {
+      this.scatterContainer.visible = true
+    }
+    if (this.categoryLabelsContainer) {
+      // Check if categories should be visible
+      const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+      if (categoriesCheckbox && categoriesCheckbox.checked) {
+        this.categoryLabelsContainer.visible = true
+        this.renderCategoryLabels()
+      }
+    }
+    
+    // Update point positions (bounds should already be correct)
+    if (this.currentCoordinates && this.scatterContainer && this.currentBounds) {
+      this.updatePointPositions()
+    }
+  }
+
   // Create a shape that mimics the actual plot for smooth panning
   createPanningShape() {
     if (!this.pixiApp || !this.currentBounds || !this.currentCoordinates) return null
@@ -3623,7 +3966,7 @@ export default class extends Controller {
     const plotHeight = this.pixiApp.screen.height - 100
     
     // Sample points to create a simplified representation
-    const sampleSize = Math.min(10000, this.currentCoordinates.length) // Sample up to 2000 points
+    const sampleSize = Math.min(10000, this.currentCoordinates.length) // Sample up to 10000 points
     const step = Math.max(1, Math.floor(this.currentCoordinates.length / sampleSize))
     
     // Create a simplified point cloud representation
@@ -3667,11 +4010,11 @@ export default class extends Controller {
       return
     }
     
-    console.log('🎯 UpdatePointPositions Debug:', {
+   /* console.log('UpdatePointPositions Debug:', {
       currentBounds: this.currentBounds,
       coordinatesCount: this.currentCoordinates.length,
       scatterContainerChildren: this.scatterContainer.children.length
-    })
+    })*/
 
     /*console.log('Updating point positions:', {
       pointCount: this.scatterContainer.children.length,
@@ -3690,6 +4033,16 @@ export default class extends Controller {
     const bounds = this.currentBounds
     const width = bounds.maxX - bounds.minX
     const height = bounds.maxY - bounds.minY
+    
+    // Debug: Log bounds being used for real points
+    /*console.log('Real Points Bounds:', {
+      bounds: bounds,
+      width: width,
+      height: height,
+      screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height },
+      timestamp: Date.now(),
+      callStack: new Error().stack
+    })*/
 
     let updatedCount = 0
 
@@ -3717,16 +4070,37 @@ export default class extends Controller {
           if (this.pixiApp) {
             // Debug: Log coordinate calculation for first few points
             if (index < 3) {
-              console.log(`🔍 Point ${index} coordinate calculation:`, {
+              const realScreenX = normalizedX * this.pixiApp.screen.width
+              const realScreenY = normalizedY * this.pixiApp.screen.height
+              
+              /*console.log(`Real Point ${index} coordinate calculation:`, {
                 originalCoords: [x, y],
                 normalizedCoords: [normalizedX, normalizedY],
                 pixiScreenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height },
                 calculatedPosition: {
-                  x: normalizedX * this.pixiApp.screen.width,
-                  y: normalizedY * this.pixiApp.screen.height
+                  x: realScreenX,
+                  y: realScreenY
                 },
-                bounds: bounds
-              })
+                bounds: bounds,
+                width: width,
+                height: height,
+                calculation: {
+                  step1: `(${x} - ${bounds.minX}) / ${width} = ${normalizedX}`,
+                  step2: `${normalizedX} * ${this.pixiApp.screen.width} = ${realScreenX}`
+                }
+              })*/
+              
+              // Compare with zooming shape point 0
+              /*if (index === 0 && this.zoomingShapePoint0) {
+                const deltaX = realScreenX - this.zoomingShapePoint0.x
+                const deltaY = realScreenY - this.zoomingShapePoint0.y
+                console.log(`Point 0 Comparison:`, {
+                  zoomingShape: this.zoomingShapePoint0,
+                  realPoint: { x: realScreenX, y: realScreenY, dataCoords: [x, y] },
+                  delta: { x: deltaX, y: deltaY },
+                  sameDataCoords: x === this.zoomingShapePoint0.dataCoords[0] && y === this.zoomingShapePoint0.dataCoords[1]
+                })
+              }*/
             }
             
             child.x = normalizedX * this.pixiApp.screen.width
@@ -3919,6 +4293,22 @@ export default class extends Controller {
     axesGraphics.moveTo(yAxisX, 50)
     axesGraphics.lineTo(yAxisX, height - 50)
 
+    // Add white rectangles to cover margin areas (below x-axis and left of y-axis)
+    const marginGraphics = new PIXI.Graphics()
+    marginGraphics.beginFill(0xffffff, 1.0) // White background
+    
+    // Rectangle below x-axis (covers bottom margin)
+    marginGraphics.drawRect(0, xAxisY, width, height - xAxisY)
+    
+    // Rectangle left of y-axis (covers left margin)
+    marginGraphics.drawRect(0, 0, yAxisX, height)
+    
+    marginGraphics.endFill()
+    
+    // Add margin rectangles first (behind axes)
+    this.axesContainer.addChild(marginGraphics)
+    
+    // Add axes on top
     this.axesContainer.addChild(axesGraphics)
 
     // Add axis labels

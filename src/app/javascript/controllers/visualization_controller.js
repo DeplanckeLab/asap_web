@@ -1023,47 +1023,56 @@ export default class extends Controller {
         requestAnimationFrame(animate)
       } else {
         //console.log('Animation complete!')
-        // Animation complete - move individual points back to scatter container for proper filtering
-        console.log('Animation complete - moving points back to scatter container')
-        console.log('Animated container children before move:', animatedContainer.children.length)
+        // Animation complete - make animation container the main scatter container
+        const moveStartTime = performance.now()
         
+        // Remove animation container from scatterContainer
+        this.scatterContainer.removeChild(animatedContainer)
+        
+        // Clear scatterContainer and add animation container as the main container
         this.scatterContainer.removeChildren()
+        this.scatterContainer.addChild(animatedContainer)
         
-        // Move individual animated points from animatedContainer back to scatterContainer
-        // This is more efficient than creating new points and ensures filtering works correctly
-        let movedPoints = 0
-        while (animatedContainer.children.length > 0) {
-          const point = animatedContainer.children[0]
-          animatedContainer.removeChild(point)
-          this.scatterContainer.addChild(point)
-          movedPoints++
-        }
+        // Update reference so filtering works on the animation container
+        this.animatedContainer = null // Clear the reference since it's now the main container
         
-        console.log('Moved', movedPoints, 'points back to scatter container')
-        console.log('Scatter container children after move:', this.scatterContainer.children.length)
+        const moveEndTime = performance.now()
+        console.log(`⏱️ Point movement took: ${(moveEndTime - moveStartTime).toFixed(2)}ms`)
         
         
         // Update stored coordinates and bounds for next transition
         this.currentBounds = toBounds
         this.currentCoordinates = newCoordinates
         
-        // Clear animated labels and render final static labels
+        // Clear animated labels
+        const labelStartTime = performance.now()
         this.categoryLabelsContainer.removeChildren()
 
-        // Update axes, grid, and category labels with final bounds
+        // Update axes and grid with final bounds
+        const axesStartTime = performance.now()
         this.renderAxes()
         this.renderGrid()
+        const axesEndTime = performance.now()
+        console.log(`⏱️ Axes/grid rendering took: ${(axesEndTime - axesStartTime).toFixed(2)}ms`)
 
         // Initialize checkboxes for current metadata if not already done
         if (this.currentMetadataVector?.id && !this.selectedCategories[this.currentMetadataVector.id]) {
           this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
         }
 
+        const categoryLabelsStartTime = performance.now()
         this.renderCategoryLabels()
+        const categoryLabelsEndTime = performance.now()
+        console.log(`⏱️ Category labels rendering took: ${(categoryLabelsEndTime - categoryLabelsStartTime).toFixed(2)}ms`)
+        
+        const labelEndTime = performance.now()
+        console.log(`⏱️ Total label setup took: ${(labelEndTime - labelStartTime).toFixed(2)}ms`)
         
         // Reapply filtering after embedding change
-        //console.log('Reapplying filtering after embedding change...')
+        const filteringStartTime = performance.now()
         this.updateCellFiltering()
+        const filteringEndTime = performance.now()
+        console.log(`⏱️ Cell filtering took: ${(filteringEndTime - filteringStartTime).toFixed(2)}ms`)
         
         //console.log('Animation finished - keeping animated points in final positions')
       }
@@ -4602,6 +4611,9 @@ export default class extends Controller {
 
   // Render category labels at centroids of colored groups
   renderCategoryLabels() {
+    const renderStartTime = performance.now()
+    console.log('🏷️ Starting renderCategoryLabels...')
+    
     if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
       return
     }
@@ -4631,10 +4643,13 @@ export default class extends Controller {
 
     // Calculate centroids from currently visible points in the current view
     // This ensures labels follow the points correctly when panning/zooming
+    const centroidStartTime = performance.now()
     const centroids = this.calculateCategoryCentroids(values, categoryList)
-    console.log('Centroids calculated, now rendering labels...')
+    const centroidEndTime = performance.now()
+    console.log(`⏱️ Centroid calculation took: ${(centroidEndTime - centroidStartTime).toFixed(2)}ms`)
 
     // Render labels for each category
+    const labelCreationStartTime = performance.now()
     let labelsAdded = 0
     Object.entries(centroids).forEach(([category, centroid]) => {
       if (centroid.count > 0) { // Only show labels for categories with points
@@ -4671,22 +4686,18 @@ export default class extends Controller {
       }
     })
     
-    console.log(`Total labels added: ${labelsAdded}`)
-    console.log(`Category labels container children count: ${this.categoryLabelsContainer.children.length}`)
-    console.log(`Category labels container visible: ${this.categoryLabelsContainer.visible}`)
+    const labelCreationEndTime = performance.now()
+    console.log(`⏱️ Label creation took: ${(labelCreationEndTime - labelCreationStartTime).toFixed(2)}ms`)
+    console.log(`🏷️ Total labels added: ${labelsAdded}`)
     
-    // Debug: log each label that was added
-    this.categoryLabelsContainer.children.forEach((label, index) => {
-      console.log(`Label ${index}: visible=${label.visible}, x=${label.x.toFixed(2)}, y=${label.y.toFixed(2)}`)
-    })
+    const renderEndTime = performance.now()
+    console.log(`⏱️ Total renderCategoryLabels took: ${(renderEndTime - renderStartTime).toFixed(2)}ms`)
   }
 
   // Calculate centroids for each category
   calculateCategoryCentroids(values, categories) {
-    //console.log('calculateCategoryCentroids called')
-    //console.log('values length:', values ? values.length : 'undefined')
-    //console.log('categories:', categories)
-    //console.log('currentCoordinates length:', this.currentCoordinates ? this.currentCoordinates.length : 'undefined')
+    const calcStartTime = performance.now()
+    console.log('🧮 Starting calculateCategoryCentroids...')
     
     if (!categories || !Array.isArray(categories)) {
       console.log('Categories is not a valid array, returning empty centroids')
@@ -4702,10 +4713,7 @@ export default class extends Controller {
 
       // Calculate centroids from actual visible points in the scatter container
       if (this.scatterContainer && this.scatterContainer.children) {
-        console.log(`Scatter container has ${this.scatterContainer.children.length} children`)
         let validPoints = 0
-        let visiblePoints = 0
-        let pointsWithCellId = 0
 
         // Check if we have a nested container (after animation) or individual points (before animation)
         const pointsToCheck = []
@@ -4715,7 +4723,6 @@ export default class extends Controller {
             pointsToCheck.push(child)
           } else if (child.children) {
             // Nested container (after animation) - check its children
-            console.log(`Found nested container with ${child.children.length} children`)
             child.children.forEach((point) => {
               if (point.isPoint) {
                 pointsToCheck.push(point)
@@ -4723,16 +4730,10 @@ export default class extends Controller {
             })
           }
         })
-
-        console.log(`Total points to check: ${pointsToCheck.length}`)
+        
+        console.log(`Found ${pointsToCheck.length} points to check for centroids`)
 
         pointsToCheck.forEach((point) => {
-          if (point.visible) {
-            visiblePoints++
-          }
-          if (point.cellId !== undefined) {
-            pointsWithCellId++
-          }
           if (point.visible && point.cellId !== undefined) {
             validPoints++
             const category = values[point.cellId]
@@ -4747,9 +4748,6 @@ export default class extends Controller {
             }
           }
         })
-        console.log(`Found ${validPoints} valid points (${visiblePoints} visible, ${pointsWithCellId} with cellId) in scatter container`)
-      } else {
-        console.log('Scatter container or children not available')
       }
 
     // Calculate average coordinates (centroids)
@@ -4757,15 +4755,14 @@ export default class extends Controller {
       if (centroids[category].count > 0) {
         centroids[category].x /= centroids[category].count
         centroids[category].y /= centroids[category].count
-        console.log(`Centroid for ${category}: count=${centroids[category].count}, x=${centroids[category].x.toFixed(2)}, y=${centroids[category].y.toFixed(2)}`)
-      } else {
-        console.log(`Centroid for ${category}: count=0 (no points found)`)
       }
     })
-
-    console.log('Calculated centroids:', centroids)
+    
+    const calcEndTime = performance.now()
+    console.log(`⏱️ calculateCategoryCentroids took: ${(calcEndTime - calcStartTime).toFixed(2)}ms`)
     return centroids
   }
+
 
   // Create a category label with background
   createCategoryLabel(categoryName, count) {

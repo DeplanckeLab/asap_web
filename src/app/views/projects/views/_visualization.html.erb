@@ -81,6 +81,7 @@
                           data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
                           data-metadata-name="<%= metadata.display_name %>"
                           data-metadata-id="<%= metadata.id %>"
+                          data-metadata-type="DISCRETE"
                           data-active="false"
                           onclick="event.stopPropagation()">
                     <i class="fas fa-palette" style="font-size: 16px;"></i>
@@ -174,26 +175,81 @@
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
             <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].each do |metadata| %>
-              <div style="display: flex; align-items: center; padding: 8px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; margin-bottom: 4px;"
-                   onmouseover="this.style.backgroundColor='#f9fafb'" 
-                   onmouseout="this.style.backgroundColor=''">
-                <!-- Radio Button -->
-                <!--<input type="radio" name="color_by" value="<%= metadata.id %>" style="margin-right: 12px;">-->
-                <!-- Content -->
-                <div style="flex: 1; min-width: 0; margin-right: 8px;">
-                  <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
-                 <!-- <div style="font-size: 12px; color: #6b7280;">
-                    Range: <%= metadata.min_val&.round(2) || 'N/A' %> - <%= metadata.max_val&.round(2) || 'N/A' %>
-                  </div>-->
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
+                <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f9fafb'" 
+                     onmouseout="this.style.backgroundColor=''"
+                     data-action="click->visualization#toggleMetadata">
+                  <!-- Chevron -->
+                  <div class="metadata-chevron" style="margin-right: 8px; color: #6b7280; transition: transform 0.2s; font-size: 12px;">
+                    <i class="fas fa-chevron-right"></i>
+                  </div>
+                  <!-- Content -->
+                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                    <!--<div style="font-size: 12px; color: #6b7280;">Continuous data</div>-->
+                  </div>
+                  <!-- Water Drop Button -->
+                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-metadata-type="NUMERIC"
+                          data-active="false"
+                          onclick="event.stopPropagation()">
+                    <i class="fas fa-palette" style="font-size: 16px;"></i>
+                  </button>
                 </div>
-                <!-- Water Drop Button -->
-                <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
-                        onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'" 
-                        onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor=''"
-                        data-action="click->visualization#waterDropClicked"
-                        data-metadata-name="<%= metadata.display_name %>">
-                  <i class="fas fa-palette" style="font-size: 16px;"></i>
-                </button>
+                <!-- Range Slider Section (initially hidden) -->
+                <div class="metadata-range-section" style="padding: 12px; border-top: 1px solid #f3f4f6; display: none; background-color: #fafafa;">
+                  <!-- Range Slider -->
+                  <div data-controller="range-slider" 
+                       data-range-slider-metadata-id-value="<%= metadata.id %>"
+                       data-range-slider-min-value="0"
+                       data-range-slider-max-value="1"
+                       data-range-slider-current-min-value="0"
+                       data-range-slider-current-max-value="1"
+                       style="margin-bottom: 12px;">
+                    
+                    <!-- Min Value, Slider, Max Value on Same Line -->
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                      <!-- Min Value -->
+                      <input data-range-slider-target="minInput" type="number" class="range-min-input" 
+                             style="width: 60px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; text-align: center;"
+                             data-action="change->range-slider#minInputChanged">
+                      
+                      <!-- Slider -->
+                      <div style="flex: 1; position: relative; height: 20px;">
+                        <div data-range-slider-target="track" class="range-slider-track" style="position: absolute; top: 50%; left: 0; right: 0; height: 4px; background-color: #e5e7eb; border-radius: 2px; transform: translateY(-50%);"></div>
+                        <div data-range-slider-target="activeTrack" class="range-slider-active" style="position: absolute; top: 50%; height: 4px; background-color: #3b82f6; border-radius: 2px; transform: translateY(-50%);"></div>
+                        <div data-range-slider-target="minHandle" class="range-slider-min-handle" style="position: absolute; top: 50%; width: 16px; height: 16px; background-color: #3b82f6; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" 
+                             data-action="mousedown->range-slider#startDrag touchstart->range-slider#startDrag"
+                             data-range-slider-handle-param="min"></div>
+                        <div data-range-slider-target="maxHandle" class="range-slider-max-handle" style="position: absolute; top: 50%; width: 16px; height: 16px; background-color: #3b82f6; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" 
+                             data-action="mousedown->range-slider#startDrag touchstart->range-slider#startDrag"
+                             data-range-slider-handle-param="max"></div>
+                      </div>
+                      
+                      <!-- Max Value -->
+                      <input data-range-slider-target="maxInput" type="number" class="range-max-input" 
+                             style="width: 60px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; text-align: center;"
+                             data-action="change->range-slider#maxInputChanged">
+                    </div>
+                    
+                    <!-- Selected Cells Count -->
+                    <div style="text-align: center; margin-bottom: 8px; font-size: 12px; color: #6b7280;">
+                      <span class="selected-cells-count" style="font-weight: 500;">Selected: <span data-range-slider-target="selectedCount" class="selected-count-number">0</span> cells</span>
+                    </div>
+                    
+                    <!-- Histogram with Highlighted Range -->
+                    <div style="margin-bottom: 8px;">
+                      <canvas data-range-slider-target="canvas" class="density-plot-canvas" data-metadata-id="<%= metadata.id %>" 
+                              style="width: 100%; height: 80px; border: 1px solid #e5e7eb; border-radius: 4px; background-color: white;"></canvas>
+                    </div>
+                  </div>
+                </div>
               </div>
             <% end %>
           <% else %>
@@ -651,4 +707,779 @@ document.addEventListener('DOMContentLoaded', function() {
     
   </div>
 </div>
+
+<!-- Range Slider Modal for Numeric Metadata -->
+<div id="range-slider-modal" data-controller="visualization" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000; justify-content: center; align-items: center;">
+  <div style="background: white; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+    <!-- Header -->
+    <div id="range-slider-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; cursor: move; user-select: none; padding: 8px; margin: -8px -8px 20px -8px; border-radius: 8px 8px 0 0;" onmousedown="startModalDrag(event)" ontouchstart="startModalDrag(event)">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; color: #6b7280;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/>
+          </svg>
+        </div>
+        <h3 id="range-slider-title" style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Range Selection</h3>
+      </div>
+      <button id="close-range-slider" style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px;" title="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    
+    <!-- Metadata Info -->
+    <div id="range-slider-metadata-info" style="margin-bottom: 20px; padding: 12px; background-color: #f9fafb; border-radius: 8px;">
+      <div style="font-size: 14px; color: #6b7280;">Metadata: <span id="range-slider-metadata-name" style="font-weight: 500; color: #111827;"></span></div>
+      <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Range: <span id="range-slider-current-range"></span></div>
+    </div>
+    
+    <!-- Range Slider Container -->
+    <div style="margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <label style="font-size: 14px; font-weight: 500; color: #374151;">Value Range:</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="number" id="range-min-input" style="width: 80px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;" step="any">
+          <span style="color: #6b7280; font-size: 12px;">to</span>
+          <input type="number" id="range-max-input" style="width: 80px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;" step="any">
+        </div>
+      </div>
+      
+      <!-- Double Range Slider -->
+      <div style="position: relative; height: 40px; margin: 20px 0;">
+        <div id="range-slider-track" style="position: absolute; top: 50%; left: 0; right: 0; height: 4px; background-color: #e5e7eb; border-radius: 2px; transform: translateY(-50%);"></div>
+        <div id="range-slider-active" style="position: absolute; top: 50%; height: 4px; background-color: #3b82f6; border-radius: 2px; transform: translateY(-50%);"></div>
+        
+        <!-- Min Handle -->
+        <div id="range-slider-min-handle" style="position: absolute; top: 50%; width: 20px; height: 20px; background-color: #3b82f6; border: 2px solid white; border-radius: 50%; cursor: grab; transform: translate(-50%, -50%); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); transition: all 0.2s;" 
+             onmousedown="startRangeSliderDrag(event, 'min')" 
+             ontouchstart="startRangeSliderDrag(event, 'min')">
+        </div>
+        
+        <!-- Max Handle -->
+        <div id="range-slider-max-handle" style="position: absolute; top: 50%; width: 20px; height: 20px; background-color: #3b82f6; border: 2px solid white; border-radius: 50%; cursor: grab; transform: translate(-50%, -50%); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); transition: all 0.2s;" 
+             onmousedown="startRangeSliderDrag(event, 'max')" 
+             ontouchstart="startRangeSliderDrag(event, 'max')">
+        </div>
+      </div>
+      
+      <!-- Range Values Display -->
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-top: 8px;">
+        <span id="range-slider-min-value">0</span>
+        <span id="range-slider-max-value">100</span>
+      </div>
+    </div>
+    
+    <!-- Plot Container -->
+    <div style="margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <label style="font-size: 14px; font-weight: 500; color: #374151;">Distribution:</label>
+        <div style="display: flex; gap: 8px;">
+          <button id="density-plot-btn" class="plot-type-btn active" style="padding: 4px 12px; font-size: 12px; border: 1px solid #3b82f6; background-color: #3b82f6; color: white; border-radius: 4px; cursor: pointer;">Density</button>
+          <button id="violin-plot-btn" class="plot-type-btn" style="padding: 4px 12px; font-size: 12px; border: 1px solid #d1d5db; background-color: white; color: #374151; border-radius: 4px; cursor: pointer;">Violin</button>
+        </div>
+      </div>
+      
+      <!-- Plot Canvas -->
+      <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; background-color: #fafafa;">
+        <canvas id="range-slider-plot" width="550" height="200" style="width: 100%; height: 200px; border-radius: 4px;"></canvas>
+      </div>
+    </div>
+    
+    <!-- Action Buttons -->
+    <div style="display: flex; justify-content: flex-end; gap: 12px;">
+      <button id="reset-range-btn" style="padding: 8px 16px; font-size: 14px; border: 1px solid #d1d5db; background-color: white; color: #374151; border-radius: 6px; cursor: pointer; transition: all 0.2s;" 
+              onmouseover="this.style.backgroundColor='#f9fafb'" 
+              onmouseout="this.style.backgroundColor='white'">
+        Reset Range
+      </button>
+      <button id="apply-range-btn" style="padding: 8px 16px; font-size: 14px; border: none; background-color: #3b82f6; color: white; border-radius: 6px; cursor: pointer; transition: all 0.2s;" 
+              onmouseover="this.style.backgroundColor='#2563eb'" 
+              onmouseout="this.style.backgroundColor='#3b82f6'">
+        Apply Range
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Global range slider drag functionality
+let isDragging = false
+let dragHandle = null
+
+// Modal drag functionality
+let isModalDragging = false
+let modalDragStartX = 0
+let modalDragStartY = 0
+let modalStartLeft = 0
+let modalStartTop = 0
+
+function startRangeSliderDrag(event, handleType) {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  console.log('🎚️ Global startRangeSliderDrag called for:', handleType)
+  
+  isDragging = true
+  dragHandle = handleType
+  
+  // Get the main visualization controller
+  const mainController = document.querySelector('[data-controller*="visualization"]:not(#range-slider-modal)')
+  if (!mainController) {
+    console.error('❌ Main visualization controller not found')
+    return
+  }
+  
+  // Get the controller using the global variable
+  const controller = window.visualizationController
+  if (!controller) {
+    console.error('❌ Controller not found')
+    return
+  }
+  
+  if (!controller.rangeSliderData) {
+    console.error('❌ rangeSliderData not found')
+    console.error('Controller properties:', Object.keys(controller))
+    console.error('Current metadata vector:', controller.currentMetadataVector)
+    console.error('Current metadata ID:', controller.currentMetadataId)
+    
+    // Check if this is the same controller instance that was used to show the modal
+    console.log('🎚️ Checking controller instance...')
+    console.log('🎚️ Global controller:', window.visualizationController)
+    console.log('🎚️ Are they the same?', controller === window.visualizationController)
+    
+    if (controller !== window.visualizationController) {
+      console.log('🎚️ Using global controller instead...')
+      const globalController = window.visualizationController
+      if (globalController && globalController.rangeSliderData) {
+        console.log('🎚️ Found rangeSliderData on global controller!')
+        controller = globalController
+      } else {
+        console.error('❌ Global controller also missing rangeSliderData')
+      }
+    }
+    
+    // Check if we have global range slider data as fallback
+    if (window.globalRangeSliderData) {
+      console.log('🎚️ Found global range slider data as fallback!')
+      controller.rangeSliderData = window.globalRangeSliderData
+    } else {
+      // Try to initialize range slider data if modal is visible but data is missing
+      console.log('🎚️ Attempting to initialize range slider data...')
+      const modal = document.getElementById('range-slider-modal')
+      if (modal && modal.style.display !== 'none') {
+        console.log('🎚️ Modal is visible, trying to reinitialize...')
+        // Try to get metadata info from the modal
+        const metadataName = document.getElementById('range-slider-metadata-name')?.textContent
+        const metadataId = controller.currentRangeSliderMetadataId
+        
+        if (metadataId && metadataName) {
+          console.log('🎚️ Found metadata info, calling showRangeSlider...')
+          controller.showRangeSlider(metadataId, metadataName)
+          return
+        } else {
+          console.error('❌ Cannot reinitialize - missing metadata info')
+        }
+      }
+      
+      return
+    }
+  }
+  
+  // Cache slider dimensions for better performance
+  window.cachedSliderRange = controller.rangeSliderData.max - controller.rangeSliderData.min
+  window.cachedSliderMin = controller.rangeSliderData.min
+  
+  console.log('🎚️ Drag started - handle:', handleType)
+  
+  document.addEventListener('mousemove', handleRangeSliderDrag)
+  document.addEventListener('mouseup', stopRangeSliderDrag)
+  document.addEventListener('touchmove', handleRangeSliderDrag)
+  document.addEventListener('touchend', stopRangeSliderDrag)
+  
+  // Change cursor
+  document.body.style.cursor = 'grabbing'
+}
+
+function handleRangeSliderDrag(event) {
+  if (!isDragging) return
+  
+  event.preventDefault()
+  
+  // Get the controller using the global variable
+  const controller = window.visualizationController
+  if (!controller || !controller.rangeSliderData) return
+  
+  const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
+  
+  // Get the slider track element and its position
+  const slider = document.getElementById('range-slider-modal')
+  const sliderTrack = document.getElementById('range-slider-track')
+  const trackRect = sliderTrack.getBoundingClientRect()
+  
+  // Calculate position relative to the track
+  const relativeX = currentX - trackRect.left
+  const trackWidth = trackRect.width
+  
+  // Use cached values for better performance
+  const range = window.cachedSliderRange || 1
+  const min = window.cachedSliderMin || 0
+  const max = min + range
+  
+  // Calculate value based on position within the track
+  const percent = Math.max(0, Math.min(1, relativeX / trackWidth))
+  let newValue = min + (percent * range)
+  newValue = Math.max(min, Math.min(max, newValue))
+  
+  if (dragHandle === 'min') {
+    newValue = Math.min(newValue, controller.rangeSliderData.currentMax)
+    controller.rangeSliderData.currentMin = newValue
+    // Update input field immediately
+    document.getElementById('range-min-input').value = newValue.toFixed(3)
+  } else {
+    newValue = Math.max(newValue, controller.rangeSliderData.currentMin)
+    controller.rangeSliderData.currentMax = newValue
+    // Update input field immediately
+    document.getElementById('range-max-input').value = newValue.toFixed(3)
+  }
+  
+  // Keep global fallback in sync
+  if (window.globalRangeSliderData) {
+    window.globalRangeSliderData.currentMin = controller.rangeSliderData.currentMin
+    window.globalRangeSliderData.currentMax = controller.rangeSliderData.currentMax
+  }
+  
+  // Update handles immediately for smooth dragging (no throttling)
+  controller.updateRangeSliderHandles()
+  
+  // Throttle plot updates to reduce lag
+  if (!window.plotUpdateScheduled) {
+    window.plotUpdateScheduled = true
+    requestAnimationFrame(() => {
+      controller.updatePlot()
+      window.plotUpdateScheduled = false
+    })
+  }
+}
+
+function stopRangeSliderDrag() {
+  isDragging = false
+  dragHandle = null
+  
+  document.removeEventListener('mousemove', handleRangeSliderDrag)
+  document.removeEventListener('mouseup', stopRangeSliderDrag)
+  document.removeEventListener('touchmove', handleRangeSliderDrag)
+  document.removeEventListener('touchend', stopRangeSliderDrag)
+  
+  // Reset cursor
+  document.body.style.cursor = ''
+}
+
+// Modal drag functions
+function startModalDrag(event) {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  isModalDragging = true
+  modalDragStartX = event.type === 'mousedown' ? event.clientX : event.touches[0].clientX
+  modalDragStartY = event.type === 'mousedown' ? event.clientY : event.touches[0].clientY
+  
+  const modal = document.getElementById('range-slider-modal')
+  const modalContent = modal.querySelector('div')
+  const rect = modalContent.getBoundingClientRect()
+  
+  modalStartLeft = rect.left
+  modalStartTop = rect.top
+  
+  document.addEventListener('mousemove', handleModalDrag)
+  document.addEventListener('mouseup', stopModalDrag)
+  document.addEventListener('touchmove', handleModalDrag)
+  document.addEventListener('touchend', stopModalDrag)
+  document.body.style.cursor = 'grabbing'
+}
+
+function handleModalDrag(event) {
+  if (!isModalDragging) return
+  event.preventDefault()
+  
+  const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
+  const currentY = event.type === 'mousemove' ? event.clientY : event.touches[0].clientY
+  
+  const deltaX = currentX - modalDragStartX
+  const deltaY = currentY - modalDragStartY
+  
+  const modal = document.getElementById('range-slider-modal')
+  const modalContent = modal.querySelector('div')
+  
+  const newLeft = modalStartLeft + deltaX
+  const newTop = modalStartTop + deltaY
+  
+  // Keep modal within viewport bounds
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const modalWidth = modalContent.offsetWidth
+  const modalHeight = modalContent.offsetHeight
+  
+  const boundedLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+  const boundedTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+  
+  modalContent.style.position = 'fixed'
+  modalContent.style.left = boundedLeft + 'px'
+  modalContent.style.top = boundedTop + 'px'
+  modalContent.style.transform = 'none'
+  modalContent.style.margin = '0'
+}
+
+function stopModalDrag() {
+  isModalDragging = false
+  document.removeEventListener('mousemove', handleModalDrag)
+  document.removeEventListener('mouseup', stopModalDrag)
+  document.removeEventListener('touchmove', handleModalDrag)
+  document.removeEventListener('touchend', stopModalDrag)
+  document.body.style.cursor = ''
+}
+
+
+function handleInlineRangeSliderDrag(event) {
+  if (!isInlineDragging) return
+  event.preventDefault()
+  
+  const controller = window.visualizationController
+  if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[inlineDragMetadataId]) {
+    console.error('❌ Missing controller or inline range slider data')
+    return
+  }
+  
+  const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
+  
+  // Get the slider track element
+  const metadataCard = document.querySelector(`[data-metadata-item="${inlineDragMetadataId}"]`)
+  if (!metadataCard) {
+    console.error('❌ Metadata card not found:', inlineDragMetadataId)
+    return
+  }
+  
+  const sliderTrack = metadataCard.querySelector('.range-slider-track')
+  if (!sliderTrack) {
+    console.error('❌ Slider track not found')
+    return
+  }
+  
+  const trackRect = sliderTrack.getBoundingClientRect()
+  
+  // Calculate position relative to the track
+  const relativeX = currentX - trackRect.left
+  const trackWidth = trackRect.width
+  
+  const sliderData = controller.inlineRangeSliderData[inlineDragMetadataId]
+  const range = sliderData.max - sliderData.min
+  const min = sliderData.min
+  
+  // Calculate value based on position within the track
+  const percent = Math.max(0, Math.min(1, relativeX / trackWidth))
+  let newValue = min + (percent * range)
+  newValue = Math.max(min, Math.min(sliderData.max, newValue))
+  
+  if (inlineDragHandle === 'min') {
+    newValue = Math.min(newValue, sliderData.currentMax)
+    sliderData.currentMin = newValue
+  } else {
+    newValue = Math.max(newValue, sliderData.currentMin)
+    sliderData.currentMax = newValue
+  }
+  
+  // Update UI
+  updateInlineRangeSlider(inlineDragMetadataId)
+  
+  // Update the density plot to show the new range selection
+  const controller = window.visualizationController
+  if (controller && controller.inlineRangeSliderData && controller.inlineRangeSliderData[inlineDragMetadataId]) {
+    const values = controller.inlineRangeSliderData[inlineDragMetadataId].values
+    drawInlineDensityPlot(inlineDragMetadataId, values)
+  }
+}
+
+function stopInlineRangeSliderDrag() {
+  isInlineDragging = false
+  inlineDragHandle = null
+  inlineDragMetadataId = null
+  document.removeEventListener('mousemove', handleInlineRangeSliderDrag)
+  document.removeEventListener('mouseup', stopInlineRangeSliderDrag)
+  document.removeEventListener('touchmove', handleInlineRangeSliderDrag)
+  document.removeEventListener('touchend', stopInlineRangeSliderDrag)
+  document.body.style.cursor = ''
+}
+
+function updateInlineRangeSlider(metadataId) {
+  const controller = window.visualizationController
+  if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[metadataId]) {
+    console.error('❌ Cannot update inline range slider - missing data')
+    return
+  }
+  
+  const sliderData = controller.inlineRangeSliderData[metadataId]
+  const { min, max, currentMin, currentMax } = sliderData
+  const range = max - min
+  
+  const minPercent = ((currentMin - min) / range) * 100
+  const maxPercent = ((currentMax - min) / range) * 100
+  
+  const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+  if (!metadataCard) {
+    console.error('❌ Metadata card not found for update:', metadataId)
+    return
+  }
+  
+  const minHandle = metadataCard.querySelector('.range-slider-min-handle')
+  const maxHandle = metadataCard.querySelector('.range-slider-max-handle')
+  const activeTrack = metadataCard.querySelector('.range-slider-active')
+  const minInput = metadataCard.querySelector('.range-min-input')
+  const maxInput = metadataCard.querySelector('.range-max-input')
+  
+  if (minHandle) minHandle.style.left = `${minPercent}%`
+  if (maxHandle) maxHandle.style.left = `${maxPercent}%`
+  if (activeTrack) {
+    activeTrack.style.left = `${minPercent}%`
+    activeTrack.style.width = `${maxPercent - minPercent}%`
+  }
+  if (minInput) minInput.value = currentMin.toFixed(3)
+  if (maxInput) maxInput.value = currentMax.toFixed(3)
+  
+  console.log('🎚️ Updated inline range slider:', { minPercent, maxPercent, currentMin, currentMax })
+}
+
+function drawInlineDensityPlot(metadataId, values) {
+  const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+  const canvas = metadataCard.querySelector('.density-plot-canvas')
+  const ctx = canvas.getContext('2d')
+  
+  // Set canvas size
+  canvas.width = canvas.offsetWidth * window.devicePixelRatio
+  canvas.height = canvas.offsetHeight * window.devicePixelRatio
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+  
+  const width = canvas.offsetWidth
+  const height = canvas.offsetHeight
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height)
+  
+  // Create histogram
+  const bins = 30
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const binWidth = (max - min) / bins
+  const histogram = new Array(bins).fill(0)
+  
+  values.forEach(value => {
+    const binIndex = Math.min(Math.floor((value - min) / binWidth), bins - 1)
+    histogram[binIndex]++
+  })
+  
+  const maxCount = Math.max(...histogram)
+  
+  // Draw histogram
+  ctx.fillStyle = '#3b82f6'
+  ctx.strokeStyle = '#1d4ed8'
+  ctx.lineWidth = 1
+  
+  histogram.forEach((count, i) => {
+    const x = (i / bins) * width
+    const barWidth = width / bins
+    const barHeight = (count / maxCount) * (height - 20)
+    const y = height - 10 - barHeight
+    
+    ctx.fillRect(x, y, barWidth - 1, barHeight)
+    ctx.strokeRect(x, y, barWidth - 1, barHeight)
+  })
+  
+  // Draw range selection
+  const controller = window.visualizationController
+  if (controller && controller.inlineRangeSliderData && controller.inlineRangeSliderData[metadataId]) {
+    const { currentMin, currentMax } = controller.inlineRangeSliderData[metadataId]
+    const minX = ((currentMin - min) / (max - min)) * width
+    const maxX = ((currentMax - min) / (max - min)) * width
+    
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.2)'
+    ctx.fillRect(minX, 0, maxX - minX, height)
+    
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(minX, 0)
+    ctx.lineTo(minX, height)
+    ctx.moveTo(maxX, 0)
+    ctx.lineTo(maxX, height)
+    ctx.stroke()
+  }
+}
+
+// Add event listeners for inline range slider buttons
+document.addEventListener('DOMContentLoaded', function() {
+  // Apply range button
+  document.addEventListener('click', function(event) {
+    if (event.target.classList.contains('apply-range-btn')) {
+      const metadataId = event.target.dataset.metadataId
+      const controller = window.visualizationController
+      if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[metadataId]) return
+      
+      const sliderData = controller.inlineRangeSliderData[metadataId]
+      controller.setColorRange(sliderData.currentMin, sliderData.currentMax)
+      controller.loadAndVisualizeMetadataVector(metadataId)
+    }
+  })
+  
+  
+})
+
+// Test script loading
+console.log('🎚️ Inline range slider script loading...')
+
+// Simple test function
+window.testFunction = function() {
+  console.log('🎚️ Test function works!')
+}
+
+// Global variables for inline range slider dragging
+let isInlineDragging = false
+let inlineDragHandle = null
+let inlineDragMetadataId = null
+
+// Global functions for inline range slider
+function startInlineRangeSliderDrag(event, handleType, metadataId) {
+  console.log('🎚️ Inline startRangeSliderDrag called for:', handleType, 'metadata:', metadataId)
+  
+  event.preventDefault()
+  event.stopPropagation()
+  
+  const controller = window.visualizationController
+  if (!controller) {
+    console.error('❌ Controller not found')
+    return
+  }
+  
+  // Check if we have the data for this metadata
+  if (!controller.inlineRangeSliderData || !controller.inlineRangeSliderData[metadataId]) {
+    console.warn('⚠️ Missing inline range slider data for metadata:', metadataId)
+    console.log('🎚️ Available data:', controller.inlineRangeSliderData)
+    
+    // Try to load the metadata if not already loaded
+    controller.loadSingleMetadataVector(metadataId).then(vectorData => {
+      if (vectorData && vectorData.values) {
+        console.log('🎚️ Successfully loaded metadata, initializing inline range slider...')
+        const values = vectorData.values
+        const minVal = Math.min(...values)
+        const maxVal = Math.max(...values)
+        
+        // Initialize the inline range slider data
+        controller.inlineRangeSliderData[metadataId] = {
+          min: minVal,
+          max: maxVal,
+          currentMin: minVal,
+          currentMax: maxVal,
+          values: values
+        }
+        
+        // Copy to global controller if different instance
+        if (controller !== window.visualizationController) {
+          window.visualizationController.inlineRangeSliderData[metadataId] = controller.inlineRangeSliderData[metadataId]
+        }
+        
+        // Now start the drag
+        startInlineRangeSliderDrag(event, handleType, metadataId)
+      } else {
+        console.error('❌ Failed to load metadata for inline range slider')
+      }
+    }).catch(error => {
+      console.error('❌ Error loading metadata for inline range slider:', error)
+    })
+    return
+  }
+  
+  isInlineDragging = true
+  inlineDragHandle = handleType
+  inlineDragMetadataId = metadataId
+  
+  console.log('🎚️ Inline drag started for', handleType, 'on metadata', metadataId)
+  
+  // Add event listeners for mouse/touch events
+  document.addEventListener('mousemove', handleInlineRangeSliderDrag)
+  document.addEventListener('mouseup', stopInlineRangeSliderDrag)
+  document.addEventListener('touchmove', handleInlineRangeSliderDrag)
+  document.addEventListener('touchend', stopInlineRangeSliderDrag)
+}
+
+function handleInlineRangeSliderDrag(event) {
+  if (!isInlineDragging) return
+  
+  event.preventDefault()
+  
+  const controller = window.visualizationController
+  if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[inlineDragMetadataId]) {
+    console.error('❌ Missing controller or inline range slider data')
+    return
+  }
+  
+  const sliderData = controller.inlineRangeSliderData[inlineDragMetadataId]
+  const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
+  
+  // Find the metadata card and slider track
+  const metadataCard = document.querySelector(`[data-metadata-item="${inlineDragMetadataId}"]`)
+  if (!metadataCard) {
+    console.error('❌ Could not find metadata card for:', inlineDragMetadataId)
+    return
+  }
+  
+  const sliderTrack = metadataCard.querySelector('.range-slider-track')
+  if (!sliderTrack) {
+    console.error('❌ Could not find slider track in metadata card')
+    return
+  }
+  
+  const trackRect = sliderTrack.getBoundingClientRect()
+  const relativeX = currentX - trackRect.left
+  const trackWidth = trackRect.width
+  
+  const range = sliderData.max - sliderData.min
+  const percent = Math.max(0, Math.min(1, relativeX / trackWidth))
+  let newValue = sliderData.min + (percent * range)
+  newValue = Math.max(sliderData.min, Math.min(sliderData.max, newValue))
+  
+  if (inlineDragHandle === 'min') {
+    newValue = Math.min(newValue, sliderData.currentMax)
+    sliderData.currentMin = newValue
+  } else {
+    newValue = Math.max(newValue, sliderData.currentMin)
+    sliderData.currentMax = newValue
+  }
+  
+  // Update the UI
+  updateInlineRangeSlider(inlineDragMetadataId)
+  
+  // Redraw the density plot with the new range
+  if (sliderData.values) {
+    drawInlineDensityPlot(inlineDragMetadataId, sliderData.values)
+  }
+}
+
+function stopInlineRangeSliderDrag() {
+  if (!isInlineDragging) return
+  
+  isInlineDragging = false
+  inlineDragHandle = null
+  inlineDragMetadataId = null
+  
+  // Remove event listeners
+  document.removeEventListener('mousemove', handleInlineRangeSliderDrag)
+  document.removeEventListener('mouseup', stopInlineRangeSliderDrag)
+  document.removeEventListener('touchmove', handleInlineRangeSliderDrag)
+  document.removeEventListener('touchend', stopInlineRangeSliderDrag)
+  
+  console.log('🎚️ Inline drag stopped')
+}
+
+function updateInlineRangeSlider(metadataId) {
+  const controller = window.visualizationController
+  if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[metadataId]) {
+    console.error('❌ Missing controller or inline range slider data for update')
+    return
+  }
+  
+  const sliderData = controller.inlineRangeSliderData[metadataId]
+  const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+  if (!metadataCard) return
+  
+  const sliderTrack = metadataCard.querySelector('.range-slider-track')
+  const activeTrack = metadataCard.querySelector('.range-slider-active')
+  const minHandle = metadataCard.querySelector('.range-slider-min-handle')
+  const maxHandle = metadataCard.querySelector('.range-slider-max-handle')
+  const minInput = metadataCard.querySelector('.range-min-input')
+  const maxInput = metadataCard.querySelector('.range-max-input')
+  
+  if (!sliderTrack || !activeTrack || !minHandle || !maxHandle) return
+  
+  const range = sliderData.max - sliderData.min
+  const minPercent = (sliderData.currentMin - sliderData.min) / range
+  const maxPercent = (sliderData.currentMax - sliderData.min) / range
+  
+  minHandle.style.left = `${minPercent * 100}%`
+  maxHandle.style.left = `${maxPercent * 100}%`
+  activeTrack.style.left = `${minPercent * 100}%`
+  activeTrack.style.width = `${(maxPercent - minPercent) * 100}%`
+  
+  if (minInput) minInput.value = sliderData.currentMin.toFixed(3)
+  if (maxInput) maxInput.value = sliderData.currentMax.toFixed(3)
+}
+
+function drawInlineDensityPlot(metadataId, values) {
+  const controller = window.visualizationController
+  if (!controller || !controller.inlineRangeSliderData || !controller.inlineRangeSliderData[metadataId]) {
+    console.error('❌ Missing controller or inline range slider data for plot')
+    return
+  }
+  
+  const sliderData = controller.inlineRangeSliderData[metadataId]
+  const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+  if (!metadataCard) return
+  
+  const canvas = metadataCard.querySelector('.density-plot-canvas')
+  if (!canvas) return
+  
+  const ctx = canvas.getContext('2d')
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  ctx.scale(dpr, dpr)
+  canvas.style.width = rect.width + 'px'
+  canvas.style.height = rect.height + 'px'
+  
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  
+  // Create histogram
+  const numBins = 50
+  const binWidth = (sliderData.max - sliderData.min) / numBins
+  const bins = new Array(numBins).fill(0)
+  
+  values.forEach(value => {
+    const binIndex = Math.min(Math.floor((value - sliderData.min) / binWidth), numBins - 1)
+    bins[binIndex]++
+  })
+  
+  const maxCount = Math.max(...bins)
+  const barWidth = rect.width / numBins
+  
+  // Draw bars
+  ctx.fillStyle = '#e0e0e0'
+  bins.forEach((count, i) => {
+    const barHeight = (count / maxCount) * (rect.height - 20)
+    const x = i * barWidth
+    const y = rect.height - barHeight - 10
+    ctx.fillRect(x, y, barWidth - 1, barHeight)
+  })
+  
+  // Draw range selection overlay
+  const range = sliderData.max - sliderData.min
+  const minPercent = (sliderData.currentMin - sliderData.min) / range
+  const maxPercent = (sliderData.currentMax - sliderData.min) / range
+  
+  ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'
+  const overlayX = minPercent * rect.width
+  const overlayWidth = (maxPercent - minPercent) * rect.width
+  ctx.fillRect(overlayX, 10, overlayWidth, rect.height - 20)
+}
+
+// Test that the function is available
+console.log('🎚️ startInlineRangeSliderDrag function available:', typeof startInlineRangeSliderDrag)
+
+// Explicitly add to window object to ensure global availability
+window.startInlineRangeSliderDrag = startInlineRangeSliderDrag
+window.handleInlineRangeSliderDrag = handleInlineRangeSliderDrag
+window.stopInlineRangeSliderDrag = stopInlineRangeSliderDrag
+window.updateInlineRangeSlider = updateInlineRangeSlider
+window.drawInlineDensityPlot = drawInlineDensityPlot
+
+console.log('🎚️ Functions added to window object')
+</script>
+
+
 

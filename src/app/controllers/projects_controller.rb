@@ -512,7 +512,7 @@ class ProjectsController < ApplicationController
       case data_type
       when 'DISCRETE'
         compress_discrete_metadata_vector(raw_vector, metadata)
-      when 'CONTINUOUS'
+      when 'NUMERIC'
         compress_continuous_metadata_vector(raw_vector, metadata)
       else
         Rails.logger.warn "Unknown data type for compression: #{data_type}"

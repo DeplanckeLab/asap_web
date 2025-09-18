@@ -23,6 +23,18 @@ export default class extends Controller {
     this.currentEmbeddingMethod = null
     this.previousEmbeddingMethod = null
     
+    // Initialize color scheme for continuous metadata
+    this.currentColorScheme = 'blue-green-red'
+    
+    // Initialize color range controls for continuous metadata
+    this.customColorRange = null // { min: number, max: number } or null for auto
+    
+    // Initialize inline range slider data storage
+    this.inlineRangeSliderData = {} // Store range slider data for each metadata
+    
+    // Expose controller globally for range slider access
+    window.visualizationController = this
+    
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
     // Simple test - remove this after debugging
@@ -783,7 +795,7 @@ export default class extends Controller {
         
         //console.log(`Updated ${coordinates.length} points with discrete metadata coloring (${this.currentMetadataVector.name})`)
         
-      } else if (data_type === 'CONTINUOUS') {
+      } else if (data_type === 'NUMERIC') {
         // Render each point individually to support selection transparency
         for (let i = 0; i < coordinates.length; i++) {
           const [x, y] = coordinates[i]
@@ -857,12 +869,21 @@ export default class extends Controller {
           this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
         }
         baseColor = this._cachedColorMap[value] || 0x3b82f6
-      } else if (data_type === 'CONTINUOUS') {
-        const minVal = compression_info.min_val
-        const maxVal = compression_info.max_val
-        const range = maxVal - minVal
-        const normalizedValue = (value - minVal) / range
-        baseColor = this.valueToColor(normalizedValue)
+      } else if (data_type === 'NUMERIC') {
+        const effectiveRange = this.getEffectiveColorRange()
+        if (effectiveRange) {
+          const { min: minVal, max: maxVal } = effectiveRange
+          const range = maxVal - minVal
+          const normalizedValue = (value - minVal) / range
+          baseColor = this.valueToColor(normalizedValue)
+        } else {
+          // Fallback to original compression info
+          const minVal = compression_info.min_val
+          const maxVal = compression_info.max_val
+          const range = maxVal - minVal
+          const normalizedValue = (value - minVal) / range
+          baseColor = this.valueToColor(normalizedValue)
+        }
       }
     }
 
@@ -1276,15 +1297,15 @@ export default class extends Controller {
 
   // Load a single metadata vector on demand
   async loadSingleMetadataVector(metadataId) {
-    //console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
+    console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
     
     // Check if already loaded
     if (this.loadedMetadataVectors[metadataId]) {
-      //console.log(`Metadata vector ${metadataId} already loaded`)
+      console.log(`Metadata vector ${metadataId} already loaded`)
       const cachedData = this.loadedMetadataVectors[metadataId]
-      //console.log('Cached data:', cachedData)
-      //console.log('Cached compressed_data:', cachedData.compressed_data)
-      //console.log('Cached compression_info:', cachedData.compression_info)
+      console.log('Cached data:', cachedData)
+      console.log('Cached compressed_data:', cachedData.compressed_data)
+      console.log('Cached compression_info:', cachedData.compression_info)
       return cachedData
     }
     
@@ -1336,7 +1357,7 @@ export default class extends Controller {
       }
       
       const data = await response.json()
-      //console.log('Received single metadata vector data:', data)
+      console.log('Received single metadata vector data:', data)
       
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
@@ -1345,10 +1366,12 @@ export default class extends Controller {
         this.metadataVectorsLoomFile = data.loom_file
         
         const info = vectorData.compression_info
-        //console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
         
         return vectorData
       } else {
+        console.error(`Metadata vector ${metadataId} not found in response`)
+        console.error('Available metadata IDs in response:', Object.keys(data.metadata_vectors || {}))
         throw new Error(`Metadata vector ${metadataId} not found in response`)
       }
       
@@ -1513,12 +1536,13 @@ export default class extends Controller {
     return numericValues
   }
 
+
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
     //console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
     
     // Load the metadata vector on-demand
-    const vectorData = await this.loadSingleMetadataVector(metadataId)
+    let vectorData = await this.loadSingleMetadataVector(metadataId)
     
     if (!vectorData) {
       console.error('Failed to load metadata vector')
@@ -1526,22 +1550,59 @@ export default class extends Controller {
     }
     
     // Validate the loaded data - handle both compressed and uncompressed data
-    const hasCompressedData = vectorData.compressed_data && vectorData.compression_info
-    const hasUncompressedData = vectorData.values && vectorData.data_type
+    // Check if compression_info is a valid object (not an error string)
+    const isValidCompressionInfo = vectorData.compression_info && 
+                                  typeof vectorData.compression_info === 'object' && 
+                                  !vectorData.compression_info.toString().includes('Unknown data type')
+    
+    let hasCompressedData = vectorData.compressed_data && isValidCompressionInfo
+    let hasUncompressedData = vectorData.values && vectorData.data_type
     
     if (!hasCompressedData && !hasUncompressedData) {
       console.error('Loaded metadata vector is missing required data:', vectorData)
       console.error('Available properties:', Object.keys(vectorData))
-      // Clear the corrupted cache entry and try to reload
-      delete this.loadedMetadataVectors[metadataId]
-      //console.log('Cleared corrupted cache entry, retrying load...')
-      const retryData = await this.loadSingleMetadataVector(metadataId)
-      if (!retryData) {
-        console.error('Retry failed - metadata vector is still corrupted')
-        return
+      
+      // Check if this is a NUMERIC metadata with invalid compression_info
+      if (vectorData.data_type === 'NUMERIC' && vectorData.compression_info && 
+          typeof vectorData.compression_info === 'string' && 
+          vectorData.compression_info.includes('Unknown data type')) {
+        console.warn('NUMERIC metadata has invalid compression_info, attempting to create mock data...')
+        
+        // Try to create mock compression_info for NUMERIC data
+        if (vectorData.values && Array.isArray(vectorData.values)) {
+          const numericValues = vectorData.values.filter(v => typeof v === 'number' && !isNaN(v))
+          if (numericValues.length > 0) {
+            const minVal = Math.min(...numericValues)
+            const maxVal = Math.max(...numericValues)
+            vectorData.compression_info = {
+              min_val: minVal,
+              max_val: maxVal,
+              data_type: 'NUMERIC'
+            }
+            hasUncompressedData = true
+            console.log('Created mock compression_info for NUMERIC data:', vectorData.compression_info)
+          }
+        }
       }
-      // Use the retry data
-      vectorData = retryData
+      
+      // If still no valid data, try to reload
+      if (!hasCompressedData && !hasUncompressedData) {
+        // Clear the corrupted cache entry and try to reload
+        delete this.loadedMetadataVectors[metadataId]
+        //console.log('Cleared corrupted cache entry, retrying load...')
+        const retryData = await this.loadSingleMetadataVector(metadataId)
+        if (!retryData) {
+          console.error('Retry failed - metadata vector is still corrupted')
+          return
+        }
+        // Use the retry data
+        vectorData = retryData
+        const retryIsValidCompressionInfo = vectorData.compression_info && 
+                                           typeof vectorData.compression_info === 'object' && 
+                                           !vectorData.compression_info.toString().includes('Unknown data type')
+        hasCompressedData = vectorData.compressed_data && retryIsValidCompressionInfo
+        hasUncompressedData = vectorData.values && vectorData.data_type
+      }
     }
     
     // Decompress the vector data based on type
@@ -1555,7 +1616,7 @@ export default class extends Controller {
         // Data is compressed, decompress it
         if (vectorData.data_type === 'DISCRETE') {
           values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
-        } else if (vectorData.data_type === 'CONTINUOUS') {
+        } else if (vectorData.data_type === 'NUMERIC') {
           values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else {
           console.error('Unknown data type:', vectorData.data_type)
@@ -1873,8 +1934,12 @@ export default class extends Controller {
     // Use the centralized coloring approach
     this.forceReRenderPoints()
     
-    // Render category labels if this is discrete metadata
-    this.renderCategoryLabels()
+    // Render category labels if this is discrete metadata, or color legend if continuous
+    if (this.currentMetadataVector.data_type === 'DISCRETE') {
+      this.renderCategoryLabels()
+    } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+      this.renderContinuousColorLegend()
+    }
     
     //console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
@@ -1983,7 +2048,7 @@ export default class extends Controller {
         // Update point count display with filtered count
         this.updatePointCountDisplay(filteredIndices)
         
-      } else if (data_type === 'CONTINUOUS') {
+      } else if (data_type === 'NUMERIC') {
         // Render each point individually to support selection transparency and color reset
         for (let i = 0; i < this.currentCoordinates.length; i++) {
           // Skip this point if it's not in the filtered indices
@@ -2202,22 +2267,45 @@ export default class extends Controller {
     //console.log('Color map cache cleared')
   }
 
-  // Convert normalized value (0-1) to color
-  valueToColor(normalizedValue) {
+  // Convert normalized value (0-1) to color using the current color scheme
+  valueToColor(normalizedValue, colorScheme = null) {
     // Clamp to 0-1 range
     const clamped = Math.max(0, Math.min(1, normalizedValue))
     
-    // Blue to red gradient
-    if (clamped < 0.5) {
+    // Use the specified color scheme or default to the current one
+    const scheme = colorScheme || this.currentColorScheme || 'blue-green-red'
+    
+    switch (scheme) {
+      case 'viridis':
+        return this.viridisColor(clamped)
+      case 'plasma':
+        return this.plasmaColor(clamped)
+      case 'inferno':
+        return this.infernoColor(clamped)
+      case 'magma':
+        return this.magmaColor(clamped)
+      case 'cividis':
+        return this.cividisColor(clamped)
+      case 'blue-white-red':
+        return this.blueWhiteRedColor(clamped)
+      case 'blue-green-red':
+      default:
+        return this.blueGreenRedColor(clamped)
+    }
+  }
+
+  // Blue to green to red gradient (original)
+  blueGreenRedColor(normalizedValue) {
+    if (normalizedValue < 0.5) {
       // Blue to green
-      const t = clamped * 2
+      const t = normalizedValue * 2
       const r = Math.round(0 * (1 - t) + 0 * t)
       const g = Math.round(0 * (1 - t) + 255 * t)
       const b = Math.round(255 * (1 - t) + 0 * t)
       return (r << 16) | (g << 8) | b
     } else {
       // Green to red
-      const t = (clamped - 0.5) * 2
+      const t = (normalizedValue - 0.5) * 2
       const r = Math.round(0 * (1 - t) + 255 * t)
       const g = Math.round(255 * (1 - t) + 0 * t)
       const b = Math.round(0 * (1 - t) + 0 * t)
@@ -2225,6 +2313,494 @@ export default class extends Controller {
     }
   }
 
+  // Blue to white to red gradient
+  blueWhiteRedColor(normalizedValue) {
+    if (normalizedValue < 0.5) {
+      // Blue to white
+      const t = normalizedValue * 2
+      const r = Math.round(0 * (1 - t) + 255 * t)
+      const g = Math.round(0 * (1 - t) + 255 * t)
+      const b = Math.round(255 * (1 - t) + 255 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // White to red
+      const t = (normalizedValue - 0.5) * 2
+      const r = Math.round(255 * (1 - t) + 255 * t)
+      const g = Math.round(255 * (1 - t) + 0 * t)
+      const b = Math.round(255 * (1 - t) + 0 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Viridis color scheme (purple to blue to green to yellow)
+  viridisColor(normalizedValue) {
+    // Simplified viridis approximation
+    if (normalizedValue < 0.25) {
+      // Purple to blue
+      const t = normalizedValue * 4
+      const r = Math.round(68 * (1 - t) + 72 * t)
+      const g = Math.round(1 * (1 - t) + 40 * t)
+      const b = Math.round(84 * (1 - t) + 120 * t)
+      return (r << 16) | (g << 8) | b
+    } else if (normalizedValue < 0.5) {
+      // Blue to green
+      const t = (normalizedValue - 0.25) * 4
+      const r = Math.round(72 * (1 - t) + 33 * t)
+      const g = Math.round(40 * (1 - t) + 144 * t)
+      const b = Math.round(120 * (1 - t) + 140 * t)
+      return (r << 16) | (g << 8) | b
+    } else if (normalizedValue < 0.75) {
+      // Green to yellow-green
+      const t = (normalizedValue - 0.5) * 4
+      const r = Math.round(33 * (1 - t) + 92 * t)
+      const g = Math.round(144 * (1 - t) + 201 * t)
+      const b = Math.round(140 * (1 - t) + 99 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Yellow-green to yellow
+      const t = (normalizedValue - 0.75) * 4
+      const r = Math.round(92 * (1 - t) + 253 * t)
+      const g = Math.round(201 * (1 - t) + 231 * t)
+      const b = Math.round(99 * (1 - t) + 37 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Plasma color scheme (purple to pink to yellow)
+  plasmaColor(normalizedValue) {
+    // Simplified plasma approximation
+    if (normalizedValue < 0.33) {
+      // Purple to pink
+      const t = normalizedValue * 3
+      const r = Math.round(13 * (1 - t) + 140 * t)
+      const g = Math.round(8 * (1 - t) + 81 * t)
+      const b = Math.round(135 * (1 - t) + 10 * t)
+      return (r << 16) | (g << 8) | b
+    } else if (normalizedValue < 0.66) {
+      // Pink to orange
+      const t = (normalizedValue - 0.33) * 3
+      const r = Math.round(140 * (1 - t) + 240 * t)
+      const g = Math.round(81 * (1 - t) + 249 * t)
+      const b = Math.round(10 * (1 - t) + 33 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Orange to yellow
+      const t = (normalizedValue - 0.66) * 3
+      const r = Math.round(240 * (1 - t) + 252 * t)
+      const g = Math.round(249 * (1 - t) + 255 * t)
+      const b = Math.round(33 * (1 - t) + 164 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Inferno color scheme (black to red to yellow)
+  infernoColor(normalizedValue) {
+    // Simplified inferno approximation
+    if (normalizedValue < 0.33) {
+      // Black to red
+      const t = normalizedValue * 3
+      const r = Math.round(0 * (1 - t) + 128 * t)
+      const g = Math.round(0 * (1 - t) + 0 * t)
+      const b = Math.round(4 * (1 - t) + 38 * t)
+      return (r << 16) | (g << 8) | b
+    } else if (normalizedValue < 0.66) {
+      // Red to orange
+      const t = (normalizedValue - 0.33) * 3
+      const r = Math.round(128 * (1 - t) + 255 * t)
+      const g = Math.round(0 * (1 - t) + 69 * t)
+      const b = Math.round(38 * (1 - t) + 10 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Orange to yellow
+      const t = (normalizedValue - 0.66) * 3
+      const r = Math.round(255 * (1 - t) + 252 * t)
+      const g = Math.round(69 * (1 - t) + 255 * t)
+      const b = Math.round(10 * (1 - t) + 164 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Magma color scheme (black to purple to white)
+  magmaColor(normalizedValue) {
+    // Simplified magma approximation
+    if (normalizedValue < 0.33) {
+      // Black to purple
+      const t = normalizedValue * 3
+      const r = Math.round(0 * (1 - t) + 64 * t)
+      const g = Math.round(0 * (1 - t) + 0 * t)
+      const b = Math.round(4 * (1 - t) + 130 * t)
+      return (r << 16) | (g << 8) | b
+    } else if (normalizedValue < 0.66) {
+      // Purple to pink
+      const t = (normalizedValue - 0.33) * 3
+      const r = Math.round(64 * (1 - t) + 255 * t)
+      const g = Math.round(0 * (1 - t) + 255 * t)
+      const b = Math.round(130 * (1 - t) + 255 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Pink to white
+      const t = (normalizedValue - 0.66) * 3
+      const r = Math.round(255 * (1 - t) + 252 * t)
+      const g = Math.round(255 * (1 - t) + 255 * t)
+      const b = Math.round(255 * (1 - t) + 164 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Cividis color scheme (dark blue to yellow, colorblind-friendly)
+  cividisColor(normalizedValue) {
+    // Simplified cividis approximation
+    if (normalizedValue < 0.5) {
+      // Dark blue to green
+      const t = normalizedValue * 2
+      const r = Math.round(0 * (1 - t) + 0 * t)
+      const g = Math.round(32 * (1 - t) + 150 * t)
+      const b = Math.round(76 * (1 - t) + 100 * t)
+      return (r << 16) | (g << 8) | b
+    } else {
+      // Green to yellow
+      const t = (normalizedValue - 0.5) * 2
+      const r = Math.round(0 * (1 - t) + 255 * t)
+      const g = Math.round(150 * (1 - t) + 255 * t)
+      const b = Math.round(100 * (1 - t) + 0 * t)
+      return (r << 16) | (g << 8) | b
+    }
+  }
+
+  // Change the color scheme for continuous metadata
+  setColorScheme(scheme) {
+    if (!['blue-green-red', 'blue-white-red', 'viridis', 'plasma', 'inferno', 'magma', 'cividis'].includes(scheme)) {
+      console.error('Invalid color scheme:', scheme)
+      return
+    }
+    
+    this.currentColorScheme = scheme
+    
+    // If we have continuous metadata active, re-render the visualization and legend
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
+      this.forceReRenderPoints()
+      this.renderContinuousColorLegend()
+    }
+    
+    console.log('🎨 Color scheme changed to:', scheme)
+  }
+
+  // Get available color schemes
+  getAvailableColorSchemes() {
+    return [
+      { id: 'blue-green-red', name: 'Blue-Green-Red', description: 'Classic blue to green to red gradient' },
+      { id: 'blue-white-red', name: 'Blue-White-Red', description: 'Blue to white to red gradient' },
+      { id: 'viridis', name: 'Viridis', description: 'Purple to blue to green to yellow (perceptually uniform)' },
+      { id: 'plasma', name: 'Plasma', description: 'Purple to pink to yellow' },
+      { id: 'inferno', name: 'Inferno', description: 'Black to red to yellow' },
+      { id: 'magma', name: 'Magma', description: 'Black to purple to white' },
+      { id: 'cividis', name: 'Cividis', description: 'Dark blue to yellow (colorblind-friendly)' }
+    ]
+  }
+
+  // Set custom color range for continuous metadata
+  setColorRange(min, max) {
+    if (min >= max) {
+      console.error('Invalid color range: min must be less than max')
+      return
+    }
+    
+    this.customColorRange = { min, max }
+    
+    // If we have continuous metadata active, re-render the visualization and legend
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
+      this.forceReRenderPoints()
+      this.renderContinuousColorLegend()
+    }
+    
+    console.log('🎨 Color range set to:', { min, max })
+  }
+
+  // Reset color range to auto (use data min/max)
+  resetColorRange() {
+    this.customColorRange = null
+    
+    // If we have continuous metadata active, re-render the visualization and legend
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
+      this.forceReRenderPoints()
+      this.renderContinuousColorLegend()
+    }
+    
+    console.log('🎨 Color range reset to auto')
+  }
+
+  // Update color range for a specific metadata (used by inline range slider)
+  updateColorRange(metadataId, min, max) {
+    console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max })
+    
+    // Set the custom color range
+    this.setColorRange(min, max)
+    
+    // If this is the currently active metadata, update the visualization
+    if (this.currentMetadataVector && this.currentMetadataVector.id === metadataId) {
+      this.forceReRenderPoints()
+      this.renderContinuousColorLegend()
+    }
+  }
+
+  // Redraw the entire visualization (used by inline range slider)
+  redrawVisualization() {
+    console.log('🎨 Redrawing visualization...')
+    
+    if (this.currentMetadataVector) {
+      this.forceReRenderPoints()
+      
+      // Update the appropriate legend
+      if (this.currentMetadataVector.data_type === 'NUMERIC') {
+        this.renderContinuousColorLegend()
+      } else {
+        this.renderDiscreteColorLegend()
+      }
+    }
+  }
+
+  // Filter and redraw visualization with only cells in the specified range
+  filterAndRedrawWithRange(metadataId, minValue, maxValue) {
+    console.log('🎚️ Filtering visualization with range:', { metadataId, minValue, maxValue })
+    
+    // Only filter if this is the currently active metadata
+    if (this.currentMetadataId !== metadataId) {
+      console.log('🎚️ Not the active metadata, skipping filter')
+      return
+    }
+    
+    // Get the metadata values
+    const sliderData = this.inlineRangeSliderData?.[metadataId]
+    if (!sliderData || !sliderData.values) {
+      console.log('🎚️ No slider data available for filtering')
+      return
+    }
+    
+    // Get indices of cells within the range
+    const filteredIndices = []
+    for (let i = 0; i < sliderData.values.length; i++) {
+      const value = sliderData.values[i]
+      if (value >= minValue && value <= maxValue) {
+        filteredIndices.push(i)
+      }
+    }
+    
+    console.log('🎚️ Filtered indices:', {
+      totalCells: sliderData.values.length,
+      filteredCells: filteredIndices.length,
+      range: `${minValue} to ${maxValue}`
+    })
+    
+    // Re-render points with filtered indices
+    this.renderPointsWithFilteredIndices(filteredIndices)
+  }
+
+  // Render points with filtered indices (only show selected cells)
+  renderPointsWithFilteredIndices(filteredIndices) {
+    if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
+      console.log('Cannot render filtered points - missing PIXI app or coordinates')
+      return
+    }
+
+    // Clear existing points
+    this.scatterContainer.removeChildren()
+    
+    const pointSize = this.currentPointSize
+    
+    // Create a container for the filtered points
+    const pointsContainer = new PIXI.Container()
+    this.scatterContainer.addChild(pointsContainer)
+    
+    // Render only the filtered points
+    for (const i of filteredIndices) {
+      const [x, y] = this.currentCoordinates[i]
+      const { color, alpha } = this.getColorAndAlpha(i)
+      
+      const screenX = this.normalizeX(x, this.currentBounds)
+      const screenY = this.normalizeY(y, this.currentBounds)
+      
+      // Create individual point graphics
+      const point = new this.PIXI.Graphics()
+      point.beginFill(color)
+      point.alpha = alpha
+      point.originalAlpha = alpha
+      point.drawCircle(0, 0, pointSize)
+      point.endFill()
+      point.x = screenX
+      point.y = screenY
+      
+      // Store cell ID and mark as point for later reference
+      point.cellId = i
+      point.isPoint = true
+      
+      // Store original color for reset functionality
+      this.storeOriginalPointColor(i, color)
+      
+      pointsContainer.addChild(point)
+    }
+    
+    // Update point count display
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      pointCountElement.textContent = `${filteredIndices.length.toLocaleString()} points`
+    }
+    
+    console.log(`🎚️ Rendered ${filteredIndices.length} filtered points`)
+  }
+
+  // Restore all points (used when range slider is reset to full range)
+  restoreAllPoints() {
+    console.log('🎚️ Restoring all points')
+    
+    if (this.currentMetadataVector) {
+      this.forceReRenderPoints()
+      
+      // Update the appropriate legend
+      if (this.currentMetadataVector.data_type === 'NUMERIC') {
+        this.renderContinuousColorLegend()
+      } else {
+        this.renderDiscreteColorLegend()
+      }
+    }
+  }
+
+  // Initialize inline range slider with metadata values
+  initializeInlineRangeSlider(metadataId, values) {
+    console.log('🎚️ Initializing inline range slider for metadata:', metadataId)
+    
+    if (!values || !Array.isArray(values)) {
+      console.error('❌ Invalid values provided to initializeInlineRangeSlider:', values)
+      return
+    }
+    
+    const minVal = Math.min(...values)
+    const maxVal = Math.max(...values)
+    
+    console.log('🎚️ Calculated min/max values:', { minVal, maxVal, valuesLength: values.length })
+    
+    // Store the data
+    this.inlineRangeSliderData[metadataId] = {
+      min: minVal,
+      max: maxVal,
+      currentMin: minVal,
+      currentMax: maxVal,
+      values: values
+    }
+    
+    // Find the range slider controller and update its values
+    const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${metadataId}"]`)
+    console.log('🎚️ Looking for range slider element:', rangeSliderElement)
+    
+    if (rangeSliderElement) {
+      const controller = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
+      console.log('🎚️ Found range slider controller:', controller)
+      
+      if (controller) {
+        controller.minValue = minVal
+        controller.maxValue = maxVal
+        controller.currentMinValue = minVal
+        controller.currentMaxValue = maxVal
+        controller.initializeSlider()
+        console.log('🎚️ Range slider controller initialized successfully')
+      } else {
+        console.error('❌ Range slider controller not found for element:', rangeSliderElement)
+      }
+    } else {
+      console.error('❌ Range slider element not found for metadata ID:', metadataId)
+    }
+  }
+
+  // Get effective color range (custom or data range)
+  getEffectiveColorRange() {
+    if (!this.currentMetadataVector || this.currentMetadataVector.data_type !== 'NUMERIC') {
+      return null
+    }
+    
+    if (this.customColorRange) {
+      return this.customColorRange
+    }
+    
+    // Return data range from compression info
+    const compressionInfo = this.currentMetadataVector.compression_info
+    return {
+      min: compressionInfo.min_val,
+      max: compressionInfo.max_val
+    }
+  }
+
+  // Debug function to help identify DOM structure issues
+  debugMetadataContainerStructure(button) {
+    console.log('🔍 Debugging metadata container structure...')
+    console.log('Button element:', button)
+    console.log('Button tagName:', button.tagName)
+    console.log('Button className:', button.className)
+    console.log('Button dataset:', button.dataset)
+    console.log('Button parentElement:', button.parentElement)
+    console.log('Button parentElement tagName:', button.parentElement?.tagName)
+    console.log('Button parentElement className:', button.parentElement?.className)
+    console.log('Button parentElement dataset:', button.parentElement?.dataset)
+    
+    // Check all parent elements
+    let current = button.parentElement
+    let level = 1
+    while (current && level <= 5) {
+      console.log(`Parent level ${level}:`, {
+        tagName: current.tagName,
+        className: current.className,
+        dataset: current.dataset,
+        id: current.id
+      })
+      current = current.parentElement
+      level++
+    }
+    
+    // Check for any metadata-related elements in the document
+    const metadataElements = document.querySelectorAll('[data-metadata-item], .metadata-item, [data-metadata-id], .metadata')
+    console.log('All metadata-related elements found:', metadataElements.length)
+    metadataElements.forEach((el, index) => {
+      console.log(`Metadata element ${index}:`, {
+        tagName: el.tagName,
+        className: el.className,
+        dataset: el.dataset,
+        id: el.id
+      })
+    })
+  }
+
+  // Test function to verify continuous metadata coloring implementation
+  testContinuousMetadataColoring() {
+    console.log('🧪 Testing continuous metadata coloring implementation...')
+    
+    // Test 1: Check if color schemes are available
+    const schemes = this.getAvailableColorSchemes()
+    console.log('✅ Available color schemes:', schemes.length)
+    
+    // Test 2: Test color conversion for different schemes
+    const testValue = 0.5
+    const colors = {}
+    schemes.forEach(scheme => {
+      colors[scheme.id] = this.valueToColor(testValue, scheme.id)
+    })
+    console.log('✅ Color conversion test:', colors)
+    
+    // Test 3: Test color range functionality
+    this.setColorRange(0, 10)
+    const range = this.getEffectiveColorRange()
+    console.log('✅ Color range test:', range)
+    
+    this.resetColorRange()
+    console.log('✅ Color range reset test:', this.getEffectiveColorRange())
+    
+    // Test 4: Check if continuous legend function exists
+    if (typeof this.renderContinuousColorLegend === 'function') {
+      console.log('✅ Continuous legend function exists')
+    } else {
+      console.error('❌ Continuous legend function missing')
+    }
+    
+    console.log('🧪 Continuous metadata coloring test completed')
+    return true
+  }
 
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
@@ -2239,11 +2815,20 @@ export default class extends Controller {
     this.currentMetadataVector = null
     this.currentMetadataId = null
     
+    // Clear custom color range
+    this.customColorRange = null
+    
     // Clear the cached color map since we're clearing metadata
     this.clearColorMapCache()
     
     // Clear existing colored points and re-render with default coloring
     this.forceReRenderPoints()
+    
+    // Clear any existing legend (both discrete and continuous)
+    if (this.categoryLabelsContainer) {
+      this.categoryLabelsContainer.removeChildren()
+      this.categoryLabelsContainer.visible = false
+    }
     
     //console.log('Successfully cleared metadata coloring')
   }
@@ -2520,19 +3105,80 @@ export default class extends Controller {
     
     const button = event.currentTarget
     const metadataName = button.dataset.metadataName
-    const metadataId = button.dataset.metadataId
+    let metadataId = button.dataset.metadataId
     const isCurrentlyActive = button.dataset.active === 'true'
     
-    /*console.log('Button element:', button)
+    // Debug: Check what attributes the button actually has
+    console.log('🔍 Button debugging:')
+    console.log('Button element:', button)
+    console.log('Button dataset:', button.dataset)
+    console.log('Button attributes:', Array.from(button.attributes).map(attr => `${attr.name}="${attr.value}"`))
+    console.log('metadataId from dataset:', metadataId)
+    console.log('metadataName from dataset:', metadataName)
+    
+    // Check if metadataId is undefined and try alternative ways to get it
+    if (!metadataId) {
+      console.warn('⚠️ metadataId is undefined, trying alternative methods...')
+      
+      // Try different attribute names
+      const altMetadataId = button.dataset.metadataId || 
+                           button.dataset.metadata_id || 
+                           button.dataset.metadataitem ||
+                           button.dataset.metadataItem ||
+                           button.getAttribute('data-metadata-id') ||
+                           button.getAttribute('data-metadata_id') ||
+                           button.getAttribute('data-metadataitem')
+      
+      console.log('Alternative metadataId found:', altMetadataId)
+      
+      if (altMetadataId) {
+        // Use the alternative metadataId
+        metadataId = altMetadataId
+        console.log('Using alternative metadataId:', metadataId)
+      } else {
+        // Try to get metadataId from parent containers
+        console.log('Trying to find metadataId in parent containers...')
+        let parent = button.parentElement
+        let attempts = 0
+        while (parent && attempts < 5) {
+          const parentMetadataId = parent.dataset.metadataId || 
+                                  parent.dataset.metadata_id || 
+                                  parent.dataset.metadataitem ||
+                                  parent.dataset.metadataItem ||
+                                  parent.getAttribute('data-metadata-id') ||
+                                  parent.getAttribute('data-metadata_id') ||
+                                  parent.getAttribute('data-metadataitem')
+          
+          if (parentMetadataId) {
+            metadataId = parentMetadataId
+            console.log('Found metadataId in parent container:', metadataId)
+            break
+          }
+          
+          parent = parent.parentElement
+          attempts++
+        }
+        
+        if (!metadataId) {
+          console.error('❌ Could not find metadataId in any form!')
+          console.error('Available dataset keys:', Object.keys(button.dataset))
+          console.error('Available attributes:', Array.from(button.attributes).map(attr => attr.name))
+          return // Exit early if we can't find the metadataId
+        }
+      }
+    }
+    
+    // Final validation
+    if (!metadataId || metadataId === 'undefined' || metadataId === 'null') {
+      console.error('❌ Final validation failed: metadataId is still invalid:', metadataId)
+      console.error('Button element:', button)
+      console.error('Button dataset:', button.dataset)
+      return
+    }
+    
+    console.log('✅ Valid metadataId found:', metadataId)
     console.log('Metadata name:', metadataName)
-    console.log('Metadata ID:', metadataId)
     console.log('Is currently active:', isCurrentlyActive)
-    */
-    //console.log('Button element:', button)
-    //console.log('Metadata name:', metadataName)
-    //console.log('Metadata ID:', metadataId)
-    //console.log('Is currently active:', isCurrentlyActive)
-    //console.log('Button dataset:', button.dataset)
     
     if (isCurrentlyActive) {
       // Button is already active - deselect it
@@ -2561,21 +3207,57 @@ export default class extends Controller {
     //console.log('Step 3: Setting this button as active...')
     this.setWaterDropButtonActive(button)
     
-    // 4. Find the metadata item container and add colored categories
-    //console.log('Step 4: Finding metadata container...')
-    const metadataContainer = button.closest('[data-metadata-item]')
-    //console.log('Metadata container found:', metadataContainer)
+    // 4. Find the metadata item container and add colored categories (optional for continuous metadata)
+    console.log('Step 4: Finding metadata container...')
+    console.log('Button element:', button)
+    console.log('Button parent elements:', button.parentElement, button.parentElement?.parentElement)
+    
+    // Try multiple selectors to find the metadata container
+    let metadataContainer = button.closest('[data-metadata-item]')
+    if (!metadataContainer) {
+      // Try alternative selectors
+      metadataContainer = button.closest('.metadata-item')
+      if (!metadataContainer) {
+        metadataContainer = button.closest('[data-metadata-id]')
+      }
+      if (!metadataContainer) {
+        // Look for any parent with metadata-related classes
+        metadataContainer = button.closest('.metadata')
+      }
+    }
+    
+    console.log('Metadata container found:', metadataContainer)
+    console.log('Available data attributes on button:', Object.keys(button.dataset))
     
     if (metadataContainer) {
-      //console.log('Step 5: Adding category colors...')
-      this.addCategoryColors(metadataContainer, metadataId)
+      // Check if this is continuous metadata - if so, skip category colors
+      const isContinuousMetadata = button.dataset.metadataType === 'NUMERIC' || 
+                                   metadataContainer.dataset.metadataType === 'NUMERIC'
       
-      // 6. Load and visualize metadata vector if available
-      //console.log('Step 6: Loading metadata vector for visualization...')
-      this.loadAndVisualizeMetadataVector(metadataId)
+      if (isContinuousMetadata) {
+        console.log('Step 5: Continuous metadata detected - toggling inline range slider')
+        // Toggle inline range slider for numeric metadata
+        this.toggleInlineRangeSlider(metadataId, metadataName)
+        return // Don't load metadata vector yet, wait for range selection
+      } else {
+        console.log('Step 5: Adding category colors for discrete metadata...')
+        this.addCategoryColors(metadataContainer, metadataId)
+      }
+      
+      // Category colors will be handled above, metadata vector loading happens below
     } else {
-      console.error('🎨 ERROR: Could not find metadata container!')
+      console.warn('🎨 WARNING: Could not find metadata container, but continuing with metadata loading...')
+      
+      // Use the debug function to get detailed information
+      this.debugMetadataContainerStructure(button)
+      
+      // This is not necessarily an error - we can still load the metadata vector
+      console.log('Proceeding with metadata vector loading without container...')
     }
+    
+    // Always try to load and visualize the metadata vector (this is the main goal)
+    console.log('Step 6: Loading metadata vector for visualization...')
+    this.loadAndVisualizeMetadataVector(metadataId)
     
     //console.log('=== WATER DROP CLICK COMPLETE ===')
   }
@@ -5027,6 +5709,133 @@ export default class extends Controller {
     return container
   }
 
+  // Render continuous color legend for continuous metadata
+  renderContinuousColorLegend() {
+    console.log('🎨 Rendering continuous color legend')
+    
+    if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
+      console.log('🎨 Missing required components for continuous legend, returning early')
+      return
+    }
+
+    // Only render legend for continuous metadata
+    if (this.currentMetadataVector.data_type !== 'NUMERIC') {
+      return
+    }
+
+    // During panning, don't update legend
+    if (this.isPanning) {
+      console.log('🎨 Skipping legend updates during panning')
+      return
+    }
+
+    // Clear existing legend
+    this.categoryLabelsContainer.removeChildren()
+
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.pixiApp.screen.width
+    const height = this.pixiApp.screen.height
+
+    // Get metadata values and effective color range
+    const values = this.currentMetadataVector.values
+    const effectiveRange = this.getEffectiveColorRange()
+    const minVal = effectiveRange.min
+    const maxVal = effectiveRange.max
+
+    // Create legend container
+    const legendContainer = new PIXI.Container()
+    
+    // Legend dimensions
+    const legendWidth = 200
+    const legendHeight = 20
+    const legendX = width - legendWidth - 20 // Position on right side
+    const legendY = 20 // Position at top
+
+    // Create color gradient bar
+    const gradientBar = new PIXI.Graphics()
+    const numSteps = 100
+    
+    for (let i = 0; i < numSteps; i++) {
+      const normalizedValue = i / (numSteps - 1)
+      const color = this.valueToColor(normalizedValue)
+      
+      const stepX = legendX + (i * legendWidth / numSteps)
+      const stepWidth = legendWidth / numSteps
+      
+      gradientBar.beginFill(color)
+      gradientBar.drawRect(stepX, legendY, stepWidth, legendHeight)
+      gradientBar.endFill()
+    }
+
+    // Create border around gradient bar
+    const border = new PIXI.Graphics()
+    border.lineStyle(1, 0x333333, 1)
+    border.drawRect(legendX, legendY, legendWidth, legendHeight)
+    
+    // Create min/max value labels
+    const minLabel = this.createLegendLabel(minVal.toFixed(2), legendX, legendY + legendHeight + 5)
+    const maxLabel = this.createLegendLabel(maxVal.toFixed(2), legendX + legendWidth, legendY + legendHeight + 5)
+    
+    // Center the max label
+    if (maxLabel.children[1] && maxLabel.children[1].anchor) {
+      maxLabel.children[1].anchor.set(1, 0) // Right-align
+    }
+
+    // Create metadata name label
+    const nameLabel = this.createLegendLabel(this.currentMetadataVector.name, legendX, legendY - 20)
+    if (nameLabel.children[1] && nameLabel.children[1].anchor) {
+      nameLabel.children[1].anchor.set(0, 0.5) // Left-align
+    }
+
+    // Add all elements to legend container
+    legendContainer.addChild(gradientBar)
+    legendContainer.addChild(border)
+    legendContainer.addChild(minLabel)
+    legendContainer.addChild(maxLabel)
+    legendContainer.addChild(nameLabel)
+
+    // Add legend to the category labels container
+    this.categoryLabelsContainer.addChild(legendContainer)
+    this.categoryLabelsContainer.visible = true
+
+    console.log('🎨 Continuous color legend rendered successfully')
+  }
+
+  // Create a label for the continuous legend
+  createLegendLabel(text, x, y) {
+    const container = new PIXI.Container()
+
+    // Create text
+    let textObj
+    try {
+      textObj = new window.PIXI.Text(text, {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: 10,
+        fill: 0x333333,
+        align: 'left'
+      })
+    } catch (error) {
+      try {
+        textObj = new PIXI.Text(text, {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: 10,
+          fill: 0x333333,
+          align: 'left'
+        })
+      } catch (error2) {
+        console.error('🎨 Error creating legend text:', error2)
+        textObj = new PIXI.Container()
+        textObj.text = text
+      }
+    }
+
+    container.addChild(textObj)
+    container.x = x
+    container.y = y
+
+    return container
+  }
+
   // Get total count for a category (unfiltered)
   getTotalCountForCategory(categoryName) {
     if (!this.currentMetadataVector || !this.currentMetadataVector.values) {
@@ -5114,7 +5923,7 @@ export default class extends Controller {
 
   // Update label interaction behavior based on current interaction mode
   updateLabelInteractionMode() {
-    if (!this.categoryLabelsContainer) return
+    if (!this.categoryLabelsContainer || !this.pixiApp) return
 
     this.categoryLabelsContainer.children.forEach(label => {
       if (label.categoryName) { // Check if it's a category label
@@ -6178,7 +6987,7 @@ export default class extends Controller {
       if (data_type === 'DISCRETE') {
         // For discrete metadata, show the category name
         categoryInfo = `<br><strong>Category:</strong> ${value}`
-      } else if (data_type === 'CONTINUOUS') {
+      } else if (data_type === 'NUMERIC') {
         // For continuous metadata, show the numeric value
         categoryInfo = `<br><strong>Value:</strong> ${value.toFixed(3)}`
       }
@@ -6374,6 +7183,12 @@ export default class extends Controller {
       return
     }
     
+    // Safety check for PIXI app and scatterContainer
+    if (!this.pixiApp || !this.scatterContainer) {
+      console.log('PIXI app or scatterContainer not available for point detection')
+      return
+    }
+    
     // Pick mode: Canvas clicked
     this.detectPointClick(event)
   }
@@ -6397,6 +7212,12 @@ export default class extends Controller {
 
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
+
+    // Safety check for scatterContainer
+    if (!this.scatterContainer || !this.scatterContainer.children) {
+      console.log('ScatterContainer not available for point detection')
+      return
+    }
 
     const rect = canvas.getBoundingClientRect()
     const clickX = event.clientX - rect.left
@@ -6459,7 +7280,7 @@ export default class extends Controller {
         
         if (data_type === 'DISCRETE') {
           categoryInfo = `\nCategory: ${value}`
-        } else if (data_type === 'CONTINUOUS') {
+        } else if (data_type === 'NUMERIC') {
           categoryInfo = `\nValue: ${value.toFixed(3)}`
         }
       }
@@ -7127,7 +7948,7 @@ export default class extends Controller {
         let values
         if (vectorData.data_type === 'DISCRETE') {
           values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
-        } else if (vectorData.data_type === 'CONTINUOUS') {
+        } else if (vectorData.data_type === 'NUMERIC') {
           values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else {
           console.warn(`Unknown data type for metadata ${metadataId}: ${vectorData.data_type}`)
@@ -7157,6 +7978,792 @@ export default class extends Controller {
     
     console.warn(`Metadata vector not found for ID: ${metadataId}`)
     return null
+  }
+
+  // ===== RANGE SLIDER FUNCTIONALITY =====
+  
+  // Decompress metadata vector based on data type
+  decompressMetadataVector(vectorData) {
+    if (!vectorData.compressed_data || !vectorData.compression_info) {
+      console.error('Missing compressed data or compression info')
+      return null
+    }
+    
+    try {
+      let values
+      if (vectorData.data_type === 'DISCRETE') {
+        values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+      } else if (vectorData.data_type === 'NUMERIC') {
+        values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+      } else {
+        console.error('Unknown data type for decompression:', vectorData.data_type)
+        return null
+      }
+      
+      return values
+    } catch (error) {
+      console.error('Error decompressing metadata vector:', error)
+      return null
+    }
+  }
+  
+  // Toggle inline range slider for numeric metadata
+  toggleInlineRangeSlider(metadataId, metadataName) {
+    console.log('🎚️ Toggling inline range slider for metadata:', metadataId, metadataName)
+    
+    const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataCard) {
+      console.error('❌ Metadata card not found for ID:', metadataId)
+      return
+    }
+    
+    const rangeSection = metadataCard.querySelector('.metadata-range-section')
+    const chevron = metadataCard.querySelector('.metadata-chevron i')
+    
+    if (!rangeSection || !chevron) {
+      console.error('❌ Range section or chevron not found')
+      console.log('Range section:', rangeSection)
+      console.log('Chevron:', chevron)
+      return
+    }
+    
+    const isVisible = rangeSection.style.display !== 'none'
+    console.log('🎚️ Range section currently visible:', isVisible)
+    
+    if (isVisible) {
+      // Hide the range section
+      rangeSection.style.display = 'none'
+      chevron.style.transform = 'rotate(0deg)'
+      console.log('🎚️ Range section hidden')
+    } else {
+      // Show the range section
+      rangeSection.style.display = 'block'
+      chevron.style.transform = 'rotate(90deg)'
+      console.log('🎚️ Range section shown')
+      
+      // Wait a bit for the DOM to update, then load and initialize the range slider data
+      setTimeout(() => {
+        console.log('🎚️ Loading metadata for inline range slider...')
+        this.loadSingleMetadataVector(metadataId).then(vectorData => {
+        console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
+        if (!vectorData) {
+          console.error('❌ No vector data loaded for inline range slider')
+          return
+        }
+        
+        let values = vectorData.values
+        if (!values && vectorData.compressed_data) {
+          console.log('🎚️ Decompressing metadata for inline range slider...')
+          values = this.decompressMetadataVector(vectorData)
+        }
+        
+        if (!values) {
+          console.error('❌ No values available for inline range slider')
+          return
+        }
+        
+        console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
+        
+        // Initialize the inline range slider with the loaded values
+        this.initializeInlineRangeSlider(metadataId, values)
+        
+        // Apply the metadata coloring to the main visualization
+        console.log('🎚️ Applying metadata coloring to main visualization...')
+        const minVal = Math.min(...values)
+        const maxVal = Math.max(...values)
+        this.setColorRange(minVal, maxVal)
+        this.loadAndVisualizeMetadataVector(metadataId)
+        
+        console.log('🎚️ Inline range slider fully initialized and ready for interaction')
+        }).catch(error => {
+          console.error('❌ Error loading metadata for inline range slider:', error)
+        })
+      }, 100) // Wait 100ms for DOM to update
+    }
+  }
+
+  // Update inline range slider UI
+  updateInlineRangeSlider(metadataId) {
+    if (!this.inlineRangeSliderData || !this.inlineRangeSliderData[metadataId]) return
+    
+    const sliderData = this.inlineRangeSliderData[metadataId]
+    const { min, max, currentMin, currentMax } = sliderData
+    const range = max - min
+    
+    const minPercent = ((currentMin - min) / range) * 100
+    const maxPercent = ((currentMax - min) / range) * 100
+    
+    const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataCard) return
+    
+    const minHandle = metadataCard.querySelector('.range-slider-min-handle')
+    const maxHandle = metadataCard.querySelector('.range-slider-max-handle')
+    const activeTrack = metadataCard.querySelector('.range-slider-active')
+    const minInput = metadataCard.querySelector('.range-min-input')
+    const maxInput = metadataCard.querySelector('.range-max-input')
+    
+    if (minHandle) minHandle.style.left = `${minPercent}%`
+    if (maxHandle) maxHandle.style.left = `${maxPercent}%`
+    if (activeTrack) {
+      activeTrack.style.left = `${minPercent}%`
+      activeTrack.style.width = `${maxPercent - minPercent}%`
+    }
+    if (minInput) minInput.value = currentMin.toFixed(3)
+    if (maxInput) maxInput.value = currentMax.toFixed(3)
+  }
+
+
+  // Show range slider modal for numeric metadata
+  showRangeSlider(metadataId, metadataName) {
+    console.log('🎚️ Showing range slider for metadata:', metadataId, metadataName)
+    
+    // Store current metadata info
+    this.currentRangeSliderMetadataId = metadataId
+    this.currentRangeSliderMetadataName = metadataName
+    
+    console.log('🎚️ Stored metadata info:', {
+      currentRangeSliderMetadataId: this.currentRangeSliderMetadataId,
+      currentRangeSliderMetadataName: this.currentRangeSliderMetadataName
+    })
+    
+    // Load metadata vector first to get the data range
+    this.loadSingleMetadataVector(metadataId).then(vectorData => {
+      console.log('🎚️ Loaded vector data for range slider:', vectorData)
+      
+      if (!vectorData) {
+        console.error('❌ Failed to load metadata vector for range slider - vectorData is null')
+        alert('Failed to load metadata vector. Please try again.')
+        return
+      }
+      
+      // Check if we need to decompress the data
+      let values = vectorData.values
+      if (!values && vectorData.compressed_data) {
+        console.log('🎚️ Decompressing metadata vector data...')
+        values = this.decompressMetadataVector(vectorData)
+        if (!values) {
+          console.error('❌ Failed to decompress metadata vector')
+          alert('Failed to decompress metadata values. Please try again.')
+          return
+        }
+        console.log('🎚️ Successfully decompressed', values.length, 'values')
+      }
+      
+      if (!values) {
+        console.error('❌ Failed to load metadata vector for range slider - no values property')
+        console.error('Available properties:', Object.keys(vectorData))
+        alert('Failed to load metadata values. Please try again.')
+        return
+      }
+      
+      // Calculate data range
+      console.log('🎚️ Values loaded:', values.length, 'values, range:', Math.min(...values), 'to', Math.max(...values))
+      
+      const minVal = Math.min(...values)
+      const maxVal = Math.max(...values)
+      
+      // Update modal content
+      document.getElementById('range-slider-metadata-name').textContent = metadataName
+      document.getElementById('range-slider-current-range').textContent = `${minVal.toFixed(3)} to ${maxVal.toFixed(3)}`
+      
+      // Initialize modal range slider
+      this.initializeModalRangeSlider(minVal, maxVal, values)
+      
+      // Show modal
+      const modal = document.getElementById('range-slider-modal')
+      console.log('🎚️ Modal element found:', modal)
+      if (modal) {
+        modal.style.display = 'flex'
+        console.log('🎚️ Modal display set to flex')
+        
+        // Check computed styles
+        const computedStyle = window.getComputedStyle(modal)
+        console.log('🎚️ Modal computed styles:', {
+          display: computedStyle.display,
+          visibility: computedStyle.visibility,
+          opacity: computedStyle.opacity,
+          zIndex: computedStyle.zIndex,
+          position: computedStyle.position
+        })
+        
+        // Check if modal is actually visible
+        console.log('🎚️ Modal offsetParent:', modal.offsetParent)
+        console.log('🎚️ Modal clientWidth:', modal.clientWidth)
+        console.log('🎚️ Modal clientHeight:', modal.clientHeight)
+      } else {
+        console.error('❌ Range slider modal not found!')
+      }
+      
+      // Setup event listeners
+      this.setupRangeSliderEventListeners()
+      
+      // Automatically apply the full range to show the visualization
+      console.log('🎚️ Applying full range to visualization...')
+      this.setColorRange(minVal, maxVal)
+      this.loadAndVisualizeMetadataVector(metadataId)
+      
+    }).catch(error => {
+      console.error('❌ Error loading metadata for range slider:', error)
+      alert('Error loading metadata: ' + error.message)
+    })
+  }
+  
+  // Initialize modal range slider with data
+  initializeModalRangeSlider(minVal, maxVal, values) {
+    console.log('🎚️ Initializing range slider with:', { minVal, maxVal, valuesLength: values.length })
+    
+    this.rangeSliderData = {
+      min: minVal,
+      max: maxVal,
+      values: values,
+      currentMin: minVal,
+      currentMax: maxVal
+    }
+    
+    // Store globally as fallback in case controller data gets cleared
+    window.globalRangeSliderData = this.rangeSliderData
+    
+    console.log('🎚️ rangeSliderData set:', this.rangeSliderData)
+    console.log('🎚️ Global fallback also set:', window.globalRangeSliderData)
+    
+    // Update input fields
+    document.getElementById('range-min-input').value = minVal.toFixed(3)
+    document.getElementById('range-max-input').value = maxVal.toFixed(3)
+    
+    // Update slider handles
+    this.updateRangeSliderHandles()
+    
+    // Draw initial plot
+    this.drawDensityPlot(values)
+  }
+  
+  // Update range slider handle positions
+  updateRangeSliderHandles() {
+    const { min, max, currentMin, currentMax } = this.rangeSliderData
+    const range = max - min
+    
+    const minPercent = ((currentMin - min) / range) * 100
+    const maxPercent = ((currentMax - min) / range) * 100
+    
+    // Cache DOM elements to avoid repeated queries
+    if (!this._cachedSliderElements) {
+      this._cachedSliderElements = {
+        minHandle: document.getElementById('range-slider-min-handle'),
+        maxHandle: document.getElementById('range-slider-max-handle'),
+        activeTrack: document.getElementById('range-slider-active'),
+        minValue: document.getElementById('range-slider-min-value'),
+        maxValue: document.getElementById('range-slider-max-value')
+      }
+    }
+    
+    const { minHandle, maxHandle, activeTrack, minValue, maxValue } = this._cachedSliderElements
+    
+    // Update positions immediately (no throttling for smooth dragging)
+    minHandle.style.left = `${minPercent}%`
+    maxHandle.style.left = `${maxPercent}%`
+    activeTrack.style.left = `${minPercent}%`
+    activeTrack.style.width = `${maxPercent - minPercent}%`
+    
+    // Update value displays (throttled to reduce DOM updates)
+    if (!this._valueUpdateScheduled) {
+      this._valueUpdateScheduled = true
+      requestAnimationFrame(() => {
+        minValue.textContent = currentMin.toFixed(3)
+        maxValue.textContent = currentMax.toFixed(3)
+        this._valueUpdateScheduled = false
+      })
+    }
+    
+    // Keep global fallback in sync
+    if (window.globalRangeSliderData) {
+      window.globalRangeSliderData.currentMin = currentMin
+      window.globalRangeSliderData.currentMax = currentMax
+    }
+  }
+  
+  // Setup event listeners for range slider
+  setupRangeSliderEventListeners() {
+    console.log('🎚️ Setting up range slider event listeners...')
+    
+    // Close button
+    const closeBtn = document.getElementById('close-range-slider')
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        this.hideRangeSlider()
+      }
+      console.log('🎚️ Close button event listener set')
+    } else {
+      console.error('❌ Close button not found')
+    }
+    
+    // Modal background click
+    document.getElementById('range-slider-modal').onclick = (e) => {
+      if (e.target.id === 'range-slider-modal') {
+        this.hideRangeSlider()
+      }
+    }
+    
+    // Input field changes
+    document.getElementById('range-min-input').onchange = (e) => {
+      const value = parseFloat(e.target.value)
+      if (!isNaN(value)) {
+        this.rangeSliderData.currentMin = Math.max(this.rangeSliderData.min, Math.min(value, this.rangeSliderData.currentMax))
+        this.updateRangeSliderHandles()
+        this.updatePlot()
+      }
+    }
+    
+    document.getElementById('range-max-input').onchange = (e) => {
+      const value = parseFloat(e.target.value)
+      if (!isNaN(value)) {
+        this.rangeSliderData.currentMax = Math.min(this.rangeSliderData.max, Math.max(value, this.rangeSliderData.currentMin))
+        this.updateRangeSliderHandles()
+        this.updatePlot()
+      }
+    }
+    
+    // Plot type buttons
+    document.getElementById('density-plot-btn').onclick = () => {
+      this.setActivePlotType('density')
+      this.drawDensityPlot(this.rangeSliderData.values)
+    }
+    
+    document.getElementById('violin-plot-btn').onclick = () => {
+      this.setActivePlotType('violin')
+      this.drawViolinPlot(this.rangeSliderData.values)
+    }
+    
+    // Action buttons
+    document.getElementById('reset-range-btn').onclick = () => {
+      this.resetRangeSlider()
+    }
+    
+    document.getElementById('apply-range-btn').onclick = () => {
+      this.applyRangeSelection()
+    }
+  }
+  
+  // Set active plot type button
+  setActivePlotType(type) {
+    const densityBtn = document.getElementById('density-plot-btn')
+    const violinBtn = document.getElementById('violin-plot-btn')
+    
+    if (type === 'density') {
+      densityBtn.classList.add('active')
+      densityBtn.style.backgroundColor = '#3b82f6'
+      densityBtn.style.color = 'white'
+      densityBtn.style.borderColor = '#3b82f6'
+      
+      violinBtn.classList.remove('active')
+      violinBtn.style.backgroundColor = 'white'
+      violinBtn.style.color = '#374151'
+      violinBtn.style.borderColor = '#d1d5db'
+    } else {
+      violinBtn.classList.add('active')
+      violinBtn.style.backgroundColor = '#3b82f6'
+      violinBtn.style.color = 'white'
+      violinBtn.style.borderColor = '#3b82f6'
+      
+      densityBtn.classList.remove('active')
+      densityBtn.style.backgroundColor = 'white'
+      densityBtn.style.color = '#374151'
+      densityBtn.style.borderColor = '#d1d5db'
+    }
+  }
+  
+  // Draw density plot
+  drawDensityPlot(values) {
+    // Cache canvas and context for better performance
+    if (!this._cachedPlotCanvas) {
+      this._cachedPlotCanvas = document.getElementById('range-slider-plot')
+      this._cachedPlotContext = this._cachedPlotCanvas.getContext('2d')
+    }
+    
+    const canvas = this._cachedPlotCanvas
+    const ctx = this._cachedPlotContext
+    const width = canvas.width
+    const height = canvas.height
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height)
+    
+    // Create histogram with optimized binning
+    const bins = 50
+    const { min, max } = this.rangeSliderData
+    const binWidth = (max - min) / bins
+    const histogram = new Array(bins).fill(0)
+    
+    // Optimize histogram creation
+    const invBinWidth = 1 / binWidth
+    for (let i = 0; i < values.length; i++) {
+      const binIndex = Math.min(Math.floor((values[i] - min) * invBinWidth), bins - 1)
+      histogram[binIndex]++
+    }
+    
+    const maxCount = Math.max(...histogram)
+    
+    // Draw histogram
+    ctx.fillStyle = '#3b82f6'
+    ctx.strokeStyle = '#1d4ed8'
+    ctx.lineWidth = 1
+    
+    histogram.forEach((count, i) => {
+      const x = (i / bins) * width
+      const barWidth = width / bins
+      const barHeight = (count / maxCount) * (height - 40)
+      const y = height - 20 - barHeight
+      
+      ctx.fillRect(x, y, barWidth - 1, barHeight)
+      ctx.strokeRect(x, y, barWidth - 1, barHeight)
+    })
+    
+    // Draw range selection
+    const { currentMin, currentMax } = this.rangeSliderData
+    const minX = ((currentMin - min) / (max - min)) * width
+    const maxX = ((currentMax - min) / (max - min)) * width
+    
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'
+    ctx.fillRect(minX, 0, maxX - minX, height)
+    
+    // Draw range lines
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(minX, 0)
+    ctx.lineTo(minX, height)
+    ctx.moveTo(maxX, 0)
+    ctx.lineTo(maxX, height)
+    ctx.stroke()
+    
+    // Draw labels
+    ctx.fillStyle = '#374151'
+    ctx.font = '12px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(currentMin.toFixed(3), minX, height - 5)
+    ctx.fillText(currentMax.toFixed(3), maxX, height - 5)
+  }
+  
+  // Draw violin plot showing distribution per discrete category
+  drawViolinPlot(values) {
+    const canvas = document.getElementById('range-slider-plot')
+    const ctx = canvas.getContext('2d')
+    const width = canvas.width
+    const height = canvas.height
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height)
+    
+    // Check if we have discrete metadata loaded
+    if (!this.currentMetadataVector || this.currentMetadataVector.data_type !== 'DISCRETE') {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('Violin plot requires discrete metadata to be active', width / 2, height / 2)
+      ctx.fillText('Please select a discrete metadata first', width / 2, height / 2 + 20)
+      return
+    }
+    
+    // Get discrete categories and their corresponding numeric values
+    const discreteValues = this.currentMetadataVector.values
+    const categories = this.currentMetadataVector.categories || [...new Set(discreteValues)]
+    
+    // Group numeric values by discrete category
+    const categoryGroups = {}
+    categories.forEach(category => {
+      categoryGroups[category] = []
+    })
+    
+    values.forEach((numericValue, index) => {
+      const category = discreteValues[index]
+      if (categoryGroups[category]) {
+        categoryGroups[category].push(numericValue)
+      }
+    })
+    
+    // Calculate statistics for each category
+    const categoryStats = {}
+    Object.keys(categoryGroups).forEach(category => {
+      const groupValues = categoryGroups[category]
+      if (groupValues.length > 0) {
+        const sorted = groupValues.sort((a, b) => a - b)
+        const q1 = sorted[Math.floor(sorted.length * 0.25)]
+        const median = sorted[Math.floor(sorted.length * 0.5)]
+        const q3 = sorted[Math.floor(sorted.length * 0.75)]
+        const min = sorted[0]
+        const max = sorted[sorted.length - 1]
+        
+        categoryStats[category] = {
+          values: groupValues,
+          min, max, q1, median, q3,
+          count: groupValues.length
+        }
+      }
+    })
+    
+    // Draw violin plots
+    const numCategories = Object.keys(categoryStats).length
+    if (numCategories === 0) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('No data available for violin plot', width / 2, height / 2)
+      return
+    }
+    
+    const plotWidth = width - 80 // Leave space for labels
+    const plotHeight = height - 60
+    const categoryWidth = plotWidth / numCategories
+    const startX = 40
+    const startY = 30
+    
+    // Get color palette
+    const colors = this.getCategoryColors()
+    
+    Object.keys(categoryStats).forEach((category, index) => {
+      const stats = categoryStats[category]
+      const x = startX + (index * categoryWidth) + (categoryWidth / 2)
+      const color = colors[index % colors.length]
+      
+      // Draw violin shape (simplified box plot with density)
+      const { min, max, q1, median, q3 } = stats
+      const { currentMin, currentMax } = this.rangeSliderData
+      
+      // Scale values to plot coordinates
+      const scaleY = (value) => startY + plotHeight - ((value - currentMin) / (currentMax - currentMin)) * plotHeight
+      
+      // Draw box plot elements
+      const boxTop = scaleY(q3)
+      const boxBottom = scaleY(q1)
+      const boxHeight = boxBottom - boxTop
+      const boxWidth = categoryWidth * 0.6
+      
+      // Box
+      ctx.fillStyle = color + '40' // Add transparency
+      ctx.fillRect(x - boxWidth/2, boxTop, boxWidth, boxHeight)
+      
+      // Box border
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1
+      ctx.strokeRect(x - boxWidth/2, boxTop, boxWidth, boxHeight)
+      
+      // Median line
+      const medianY = scaleY(median)
+      ctx.strokeStyle = color
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(x - boxWidth/2, medianY)
+      ctx.lineTo(x + boxWidth/2, medianY)
+      ctx.stroke()
+      
+      // Whiskers
+      const minY = scaleY(min)
+      const maxY = scaleY(max)
+      
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      // Lower whisker
+      ctx.moveTo(x, boxBottom)
+      ctx.lineTo(x, minY)
+      ctx.moveTo(x - boxWidth/4, minY)
+      ctx.lineTo(x + boxWidth/4, minY)
+      // Upper whisker
+      ctx.moveTo(x, boxTop)
+      ctx.lineTo(x, maxY)
+      ctx.moveTo(x - boxWidth/4, maxY)
+      ctx.lineTo(x + boxWidth/4, maxY)
+      ctx.stroke()
+      
+      // Category label
+      ctx.fillStyle = '#374151'
+      ctx.font = '10px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(category, x, startY + plotHeight + 15)
+      
+      // Count label
+      ctx.fillStyle = '#6b7280'
+      ctx.font = '8px sans-serif'
+      ctx.fillText(`n=${stats.count}`, x, startY + plotHeight + 25)
+    })
+    
+    // Draw range selection overlay
+    const { currentMin, currentMax } = this.rangeSliderData
+    const { min, max } = this.rangeSliderData
+    const minY = startY + plotHeight - ((currentMin - min) / (max - min)) * plotHeight
+    const maxY = startY + plotHeight - ((currentMax - min) / (max - min)) * plotHeight
+    
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.2)'
+    ctx.fillRect(startX, Math.min(minY, maxY), plotWidth, Math.abs(maxY - minY))
+    
+    // Draw range lines
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(startX, minY)
+    ctx.lineTo(startX + plotWidth, minY)
+    ctx.moveTo(startX, maxY)
+    ctx.lineTo(startX + plotWidth, maxY)
+    ctx.stroke()
+    
+    // Y-axis labels
+    ctx.fillStyle = '#374151'
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'right'
+    ctx.fillText(currentMin.toFixed(2), startX - 5, startY + plotHeight)
+    ctx.fillText(currentMax.toFixed(2), startX - 5, startY)
+  }
+  
+  // Update plot when range changes
+  updatePlot() {
+    const activeBtn = document.querySelector('.plot-type-btn.active')
+    if (activeBtn.id === 'density-plot-btn') {
+      this.drawDensityPlot(this.rangeSliderData.values)
+    } else {
+      this.drawViolinPlot(this.rangeSliderData.values)
+    }
+  }
+  
+  // Reset range slider to full range
+  resetRangeSlider() {
+    this.rangeSliderData.currentMin = this.rangeSliderData.min
+    this.rangeSliderData.currentMax = this.rangeSliderData.max
+    
+    document.getElementById('range-min-input').value = this.rangeSliderData.min.toFixed(3)
+    document.getElementById('range-max-input').value = this.rangeSliderData.max.toFixed(3)
+    
+    this.updateRangeSliderHandles()
+    this.updatePlot()
+  }
+  
+  // Apply range selection and load metadata
+  applyRangeSelection() {
+    const { currentMin, currentMax } = this.rangeSliderData
+    
+    // Set custom color range
+    this.setColorRange(currentMin, currentMax)
+    
+    // Hide modal
+    this.hideRangeSlider()
+    
+    // Load and visualize metadata with the selected range
+    this.loadAndVisualizeMetadataVector(this.currentRangeSliderMetadataId)
+  }
+  
+  // Hide range slider modal
+  hideRangeSlider() {
+    const modal = document.getElementById('range-slider-modal')
+    modal.style.display = 'none'
+    
+    // Clean up
+    this.currentRangeSliderMetadataId = null
+    this.currentRangeSliderMetadataName = null
+    this.rangeSliderData = null
+  }
+
+  // ===== RANGE SLIDER DRAG FUNCTIONALITY =====
+  
+  // Start dragging a range slider handle
+  startRangeSliderDrag(event) {
+    console.log('🎚️ startRangeSliderDrag called!', event)
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const handleType = event.currentTarget.dataset.handleType
+    console.log('🎚️ Starting drag for handle:', handleType)
+    console.log('🎚️ rangeSliderData exists:', !!this.rangeSliderData)
+    
+    if (!this.rangeSliderData) {
+      console.error('❌ No rangeSliderData available for dragging')
+      return
+    }
+    
+    this.rangeSliderDragState = {
+      isDragging: true,
+      handleType: handleType,
+      startX: event.type === 'mousedown' ? event.clientX : event.touches[0].clientX,
+      startValue: handleType === 'min' ? this.rangeSliderData.currentMin : this.rangeSliderData.currentMax
+    }
+    
+    console.log('🎚️ Drag state initialized:', this.rangeSliderDragState)
+    
+    // Bind the event handlers to preserve 'this' context
+    this.boundHandleDrag = this.handleRangeSliderDrag.bind(this)
+    this.boundStopDrag = this.stopRangeSliderDrag.bind(this)
+    
+    // Add global event listeners
+    document.addEventListener('mousemove', this.boundHandleDrag)
+    document.addEventListener('mouseup', this.boundStopDrag)
+    document.addEventListener('touchmove', this.boundHandleDrag)
+    document.addEventListener('touchend', this.boundStopDrag)
+    
+    console.log('🎚️ Event listeners added')
+    
+    // Change cursor
+    document.body.style.cursor = 'grabbing'
+  }
+  
+  // Handle range slider drag movement
+  handleRangeSliderDrag(event) {
+    console.log('🎚️ handleRangeSliderDrag called', event.type)
+    
+    if (!this.rangeSliderDragState || !this.rangeSliderDragState.isDragging) {
+      console.log('🎚️ Not dragging or no drag state')
+      return
+    }
+    
+    event.preventDefault()
+    
+    const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
+    const deltaX = currentX - this.rangeSliderDragState.startX
+    
+    console.log('🎚️ Mouse movement - deltaX:', deltaX)
+    
+    const slider = document.getElementById('range-slider-modal')
+    const rect = slider.getBoundingClientRect()
+    const sliderWidth = rect.width - 40 // Account for padding
+    
+    const { min, max } = this.rangeSliderData
+    const range = max - min
+    const deltaValue = (deltaX / sliderWidth) * range
+    
+    let newValue = this.rangeSliderDragState.startValue + deltaValue
+    newValue = Math.max(min, Math.min(max, newValue))
+    
+    console.log('🎚️ New value calculated:', newValue)
+    
+    if (this.rangeSliderDragState.handleType === 'min') {
+      newValue = Math.min(newValue, this.rangeSliderData.currentMax)
+      this.rangeSliderData.currentMin = newValue
+      document.getElementById('range-min-input').value = newValue.toFixed(3)
+    } else {
+      newValue = Math.max(newValue, this.rangeSliderData.currentMin)
+      this.rangeSliderData.currentMax = newValue
+      document.getElementById('range-max-input').value = newValue.toFixed(3)
+    }
+    
+    this.updateRangeSliderHandles()
+    this.updatePlot()
+  }
+  
+  // Stop range slider drag
+  stopRangeSliderDrag() {
+    if (!this.rangeSliderDragState) return
+    
+    this.rangeSliderDragState.isDragging = false
+    this.rangeSliderDragState = null
+    
+    // Remove global event listeners using the bound functions
+    if (this.boundHandleDrag) {
+      document.removeEventListener('mousemove', this.boundHandleDrag)
+      document.removeEventListener('touchmove', this.boundHandleDrag)
+    }
+    if (this.boundStopDrag) {
+      document.removeEventListener('mouseup', this.boundStopDrag)
+      document.removeEventListener('touchend', this.boundStopDrag)
+    }
+    
+    // Reset cursor
+    document.body.style.cursor = ''
   }
 
 }

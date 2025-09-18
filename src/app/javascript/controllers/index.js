@@ -23,5 +23,9 @@ import VisualizationController from "controllers/visualization_controller"
 application.register("visualization", VisualizationController)
 console.log('Visualization controller registered')
 
+import RangeSliderController from "controllers/range_slider_controller"
+application.register("range-slider", RangeSliderController)
+console.log('Range slider controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier)) 

@@ -382,6 +382,19 @@ export default class extends Controller {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     
+    // Clear stored canvas data for tooltip
+    this.originalCanvasData = null
+    
+    // Define margins for axis titles
+    const leftMargin = 30
+    const bottomMargin = 25
+    const topMargin = 10
+    const rightMargin = 10
+    
+    // Calculate plot area
+    const plotWidth = rect.width - leftMargin - rightMargin
+    const plotHeight = rect.height - topMargin - bottomMargin
+    
     // Create histogram
     const numBins = 50
     const binWidth = (this.maxValue - this.minValue) / numBins
@@ -393,15 +406,26 @@ export default class extends Controller {
     })
     
     const maxCount = Math.max(...bins)
-    const barWidth = rect.width / numBins
+    const barWidth = plotWidth / numBins
+    
+    // Store bin data for hover tooltip
+    this.binData = bins.map((count, i) => ({
+      count,
+      density: (count / sliderData.values.length) * 100,
+      range: {
+        min: this.minValue + i * binWidth,
+        max: this.minValue + (i + 1) * binWidth
+      },
+      x: leftMargin + i * barWidth,
+      y: topMargin + plotHeight - (count / maxCount) * plotHeight,
+      width: barWidth - 1,
+      height: (count / maxCount) * plotHeight
+    }))
     
     // Draw bars
     ctx.fillStyle = '#e0e0e0'
-    bins.forEach((count, i) => {
-      const barHeight = (count / maxCount) * (rect.height - 20)
-      const x = i * barWidth
-      const y = rect.height - barHeight - 10
-      ctx.fillRect(x, y, barWidth - 1, barHeight)
+    this.binData.forEach((bin, i) => {
+      ctx.fillRect(bin.x, bin.y, bin.width, bin.height)
     })
     
     // Draw range selection overlay
@@ -410,9 +434,112 @@ export default class extends Controller {
     const maxPercent = (this.currentMaxValue - this.minValue) / range
     
     ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'
-    const overlayX = minPercent * rect.width
-    const overlayWidth = (maxPercent - minPercent) * rect.width
-    ctx.fillRect(overlayX, 10, overlayWidth, rect.height - 20)
+    const overlayX = leftMargin + minPercent * plotWidth
+    const overlayWidth = (maxPercent - minPercent) * plotWidth
+    ctx.fillRect(overlayX, topMargin, overlayWidth, plotHeight)
+    
+    // Draw axis titles
+    ctx.fillStyle = '#374151'
+    ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    
+    // X-axis title (bottom) - moved closer to axis
+    const xAxisTitle = 'Value bins'
+    ctx.fillText(xAxisTitle, rect.width / 2, rect.height - 15)
+    
+    // Y-axis title (left side, rotated) - moved up
+    ctx.save()
+    ctx.translate(15, rect.height / 2 - 10)
+    ctx.rotate(-Math.PI / 2)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const yAxisTitle = 'Density'
+    ctx.fillText(yAxisTitle, 0, 0)
+    ctx.restore()
+    
+    // Add mouse event listeners for hover tooltip
+    this.setupDensityPlotHover(canvas, rect)
+  }
+
+  // Setup hover tooltip for density plot
+  setupDensityPlotHover(canvas, rect) {
+    // Remove existing event listeners to avoid duplicates
+    canvas.removeEventListener('mousemove', this.handleDensityPlotHover)
+    canvas.removeEventListener('mouseleave', this.handleDensityPlotLeave)
+    
+    // Add new event listeners
+    canvas.addEventListener('mousemove', this.handleDensityPlotHover.bind(this))
+    canvas.addEventListener('mouseleave', this.handleDensityPlotLeave.bind(this))
+  }
+
+  // Handle mouse hover over density plot
+  handleDensityPlotHover(event) {
+    if (!this.binData) return
+    
+    const canvas = this.canvasTarget
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    
+    // Find which bin the mouse is over based only on horizontal position
+    const hoveredBin = this.binData.find(bin => 
+      x >= bin.x && x <= bin.x + bin.width
+    )
+    
+    if (hoveredBin) {
+      // Show tooltip
+      this.showDensityPlotTooltip(hoveredBin, x, 0)
+    } else {
+      // Hide tooltip
+      this.hideDensityPlotTooltip()
+    }
+  }
+
+  // Handle mouse leave from density plot
+  handleDensityPlotLeave() {
+    this.hideDensityPlotTooltip()
+  }
+
+  // Show tooltip with bin information
+  showDensityPlotTooltip(bin, mouseX, mouseY) {
+    const canvas = this.canvasTarget
+    const rect = canvas.getBoundingClientRect()
+    const ctx = canvas.getContext('2d')
+    
+    // Store original canvas state if not already stored
+    if (!this.originalCanvasData) {
+      this.originalCanvasData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    }
+    
+    // Tooltip content
+    const rangeText = `${bin.range.min.toFixed(3)} - ${bin.range.max.toFixed(3)}`
+    const densityText = `${bin.density.toFixed(1)}%`
+    
+    // Calculate tooltip position (top right corner of plot)
+    const tooltipX = rect.width - 10
+    const tooltipY = 10
+    
+    // Draw tooltip background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+    ctx.fillRect(tooltipX - 80, tooltipY, 80, 40)
+    
+    // Draw tooltip text
+    ctx.fillStyle = 'white'
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    
+    ctx.fillText(rangeText, tooltipX - 5, tooltipY + 5)
+    ctx.fillText(densityText, tooltipX - 5, tooltipY + 20)
+  }
+
+  // Hide tooltip
+  hideDensityPlotTooltip() {
+    if (this.originalCanvasData) {
+      const canvas = this.canvasTarget
+      const ctx = canvas.getContext('2d')
+      ctx.putImageData(this.originalCanvasData, 0, 0)
+    }
   }
 
   // Handle input field changes

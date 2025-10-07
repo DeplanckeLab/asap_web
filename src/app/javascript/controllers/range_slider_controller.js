@@ -230,19 +230,34 @@ export default class extends Controller {
     const isFullRange = this.currentMinValue <= this.minValue && this.currentMaxValue >= this.maxValue
     
     if (isFullRange) {
-      // Restore all points
-      if (this.visualizationController.restoreAllPoints) {
-        this.visualizationController.restoreAllPoints()
+      // Remove from selectedRanges to disable filtering
+      if (this.visualizationController.selectedRanges) {
+        delete this.visualizationController.selectedRanges[this.metadataIdValue]
       }
     } else {
-      // Filter and redraw the visualization with only selected cells
-      if (this.visualizationController.filterAndRedrawWithRange) {
-        this.visualizationController.filterAndRedrawWithRange(
-          this.metadataIdValue,
-          this.currentMinValue,
-          this.currentMaxValue
-        )
+      // Store the range in selectedRanges for unified filtering
+      if (!this.visualizationController.selectedRanges) {
+        this.visualizationController.selectedRanges = {}
       }
+      this.visualizationController.selectedRanges[this.metadataIdValue] = {
+        min: this.currentMinValue,
+        max: this.currentMaxValue
+      }
+      console.log('🎚️ Stored range in selectedRanges:', {
+        metadataId: this.metadataIdValue,
+        range: this.visualizationController.selectedRanges[this.metadataIdValue],
+        allSelectedRanges: this.visualizationController.selectedRanges
+      })
+    }
+    
+    // Clear the filter cache and trigger a re-render with unified filtering
+    if (this.visualizationController.filterCache) {
+      this.visualizationController.filterCache.clear()
+    }
+    
+    // Re-render with unified filtering
+    if (this.visualizationController.renderPointsWithCurrentColoring) {
+      this.visualizationController.renderPointsWithCurrentColoring()
     }
   }
 

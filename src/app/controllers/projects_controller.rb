@@ -462,15 +462,15 @@ class ProjectsController < ApplicationController
     # Compress coordinate data to binary format for maximum efficiency
     def compress_coordinates_to_binary(coordinates)
       # coordinates is an array of arrays: [[x1, y1], [x2, y2], ...]
-      # We'll round to 3 decimal places and store as 16-bit signed integers
+      # We'll round to 2 decimal places and store as 16-bit signed integers
       
       Rails.logger.info "Starting binary compression of #{coordinates.length} coordinate pairs"
       
-      # Convert to integers (multiply by 1000 for 3 decimal precision)
+      # Convert to integers (multiply by 100 for 2 decimal precision, allowing larger coordinate ranges)
       integer_coords = coordinates.map do |coord_pair|
         if coord_pair.is_a?(Array) && coord_pair.length >= 2
-          x = (coord_pair[0].to_f * 1000).round
-          y = (coord_pair[1].to_f * 1000).round
+          x = (coord_pair[0].to_f * 100).round
+          y = (coord_pair[1].to_f * 100).round
           # Clamp to 16-bit signed integer range (-32,768 to 32,767)
           x = [[x, -32768].max, 32767].min
           y = [[y, -32768].max, 32767].min
@@ -490,7 +490,7 @@ class ProjectsController < ApplicationController
       Rails.logger.info "First 5 integer coordinates: #{integer_coords.first(5).inspect}"
       
       # Create binary data using 16-bit signed integers (2 bytes per coordinate)
-      # This gives us a range of -32.768 to 32.767 with 3 decimal precision
+      # This gives us a range of -327.68 to 327.67 with 2 decimal precision
       binary_data = String.new(encoding: 'ASCII-8BIT')
       
       integer_coords.each do |x, y|

@@ -14,6 +14,7 @@ export default class extends Controller {
     
     // Initialize selected categories tracking
     this.selectedCategories = {}
+    this.selectedRanges = {} // Store continuous metadata ranges for filtering
     this.loadedMetadataVectors = {} // Store all loaded metadata vectors for filtering
     this.currentVisibleCells = null // Track currently visible cells (null = all visible)
     this.lastFilterState = null // Track last filter state for incremental updates
@@ -485,6 +486,7 @@ export default class extends Controller {
   async initializePixiScatterPlot(coordinates) {
     try {
       // Check if PIXI.js is loaded globally
+      console.log('Checking PIXI availability:', typeof PIXI, PIXI)
       if (typeof PIXI === 'undefined') {
         console.error('PIXI.js is not loaded. Please ensure the script tag is present.')
         return
@@ -544,6 +546,7 @@ export default class extends Controller {
       // Add PIXI canvas to the container
       plotContainer.innerHTML = ''
       plotContainer.appendChild(this.pixiApp.view)
+      console.log('PIXI canvas added to container:', this.pixiApp.view)
       
       // Hide placeholder and show plot info
       const placeholder = document.getElementById('plot-placeholder')
@@ -708,8 +711,8 @@ export default class extends Controller {
       this.renderAxes()
       this.renderGrid()
       
-      // Initialize checkboxes for current metadata if not already done
-      if (this.currentMetadataVector?.id && !this.selectedCategories[this.currentMetadataVector.id]) {
+      // Initialize checkboxes for current metadata if not already done (only for discrete)
+      if (this.currentMetadataVector?.id && this.currentMetadataVector.data_type === 'DISCRETE' && !this.selectedCategories[this.currentMetadataVector.id]) {
         this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
       }
       
@@ -753,6 +756,7 @@ export default class extends Controller {
     // Create individual point sprites for animation using previous coordinates
     this.createAnimatedPoints(previousCoordinates, coordinates, currentBounds, newBounds)
     
+
     //console.log(`Created ${coordinates.length} animated points for transition`)
     
     // Update point count display
@@ -1072,8 +1076,8 @@ export default class extends Controller {
         const axesEndTime = performance.now()
         console.log(`⏱️ Axes/grid rendering took: ${(axesEndTime - axesStartTime).toFixed(2)}ms`)
 
-        // Initialize checkboxes for current metadata if not already done
-        if (this.currentMetadataVector?.id && !this.selectedCategories[this.currentMetadataVector.id]) {
+        // Initialize checkboxes for current metadata if not already done (only for discrete)
+        if (this.currentMetadataVector?.id && this.currentMetadataVector.data_type === 'DISCRETE' && !this.selectedCategories[this.currentMetadataVector.id]) {
           this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
         }
 
@@ -1171,6 +1175,16 @@ export default class extends Controller {
     }
   }
 
+  // Get standardized margins for the plot
+  getPlotMargins() {
+    return {
+      left: 60,    // Space for Y-axis labels
+      right: 20,   // Right margin
+      top: 20,     // Top margin
+      bottom: 60   // Space for X-axis labels
+    }
+  }
+
   // Get bounds adjusted for axes margins
   getAdjustedBounds(originalBounds) {
     //console.log('getAdjustedBounds called with:', originalBounds)
@@ -1185,26 +1199,23 @@ export default class extends Controller {
     const { minX, maxX, minY, maxY } = originalBounds
     const width = this.pixiApp.screen.width
     const height = this.pixiApp.screen.height
-
-    // Calculate margins needed for axes
-    const leftMargin = 60   // Space for Y-axis labels
-    const bottomMargin = 60 // Space for X-axis labels
+    const margins = this.getPlotMargins()
 
     // Calculate the data range that fits in the available space
-    const availableWidth = width - leftMargin - 20  // 20px right margin
-    const availableHeight = height - bottomMargin - 20 // 20px top margin
+    const availableWidth = width - margins.left - margins.right
+    const availableHeight = height - margins.top - margins.bottom
 
     // Calculate the data range per pixel
     const dataWidth = maxX - minX
     const dataHeight = maxY - minY
-    const dataPerPixelX = dataWidth / (width - 100) // Original calculation
-    const dataPerPixelY = dataHeight / (height - 100) // Original calculation
+    const dataPerPixelX = dataWidth / availableWidth
+    const dataPerPixelY = dataHeight / availableHeight
 
     // Adjust bounds to account for margins
-    const adjustedMinX = minX - (leftMargin * dataPerPixelX)
-    const adjustedMaxX = maxX + (20 * dataPerPixelX) // Right margin
-    const adjustedMinY = minY - (20 * dataPerPixelY) // Top margin
-    const adjustedMaxY = maxY + (bottomMargin * dataPerPixelY)
+    const adjustedMinX = minX - (margins.left * dataPerPixelX)
+    const adjustedMaxX = maxX + (margins.right * dataPerPixelX)
+    const adjustedMinY = minY - (margins.top * dataPerPixelY)
+    const adjustedMaxY = maxY + (margins.bottom * dataPerPixelY)
 
     const adjustedBounds = {
       minX: adjustedMinX,
@@ -1218,11 +1229,16 @@ export default class extends Controller {
   }
 
   normalizeX(x, bounds) {
-    return ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * this.pixiApp.screen.width
+    const margins = this.getPlotMargins()
+    const availableWidth = this.pixiApp.screen.width - margins.left - margins.right
+    return margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
   }
 
   normalizeY(y, bounds) {
-    return ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * this.pixiApp.screen.height
+    // Invert Y-axis: higher Y values appear at the top, lower Y values at the bottom
+    const margins = this.getPlotMargins()
+    const availableHeight = this.pixiApp.screen.height - margins.top - margins.bottom
+    return margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
   }
 
   addInteractionHandlers() {
@@ -1265,15 +1281,16 @@ export default class extends Controller {
         const x = view.getInt16(i, true)     // true = little-endian
         const y = view.getInt16(i + 2, true)
         
-        // Convert back to original precision (divide by 1000)
-        const xFloat = x / 1000
-        const yFloat = y / 1000
+        // Convert back to original precision (divide by 100 to allow larger coordinate ranges)
+        // This allows coordinates up to ±327.67 instead of ±32.767
+        const xFloat = x / 100
+        const yFloat = y / 100
         
         coordinates.push([xFloat, yFloat])
         
         // Log first few coordinates for debugging
         if (coordinates.length <= 5) {
-          //console.log(`Coordinate ${coordinates.length}: [${x}, ${y}] -> [${xFloat}, ${yFloat}]`)
+          console.log(`Coordinate ${coordinates.length}: [${x}, ${y}] -> [${xFloat}, ${yFloat}]`)
         }
       }
     }
@@ -1283,13 +1300,13 @@ export default class extends Controller {
       const xValues = coordinates.map(coord => coord[0])
       const yValues = coordinates.map(coord => coord[1])
       
-      /*console.log('Decompressed coordinate statistics:', {
+      console.log('Decompressed coordinate statistics:', {
         totalPairs: coordinates.length,
         xRange: [Math.min(...xValues), Math.max(...xValues)],
         yRange: [Math.min(...yValues), Math.max(...yValues)],
         first5: coordinates.slice(0, 5),
         last5: coordinates.slice(-5)
-      })*/
+      })
     }
     
     return coordinates
@@ -1668,8 +1685,10 @@ export default class extends Controller {
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
     
-    // Initialize checkboxes for the new metadata
-    this.initializeAllCheckboxes()
+    // Initialize checkboxes for the new metadata (only for discrete)
+    if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+      this.initializeAllCheckboxes()
+    }
     
     // Update cell filtering after loading metadata vector
     this.updateCellFiltering()
@@ -2559,110 +2578,6 @@ export default class extends Controller {
     }
   }
 
-  // Filter and redraw visualization with only cells in the specified range
-  filterAndRedrawWithRange(metadataId, minValue, maxValue) {
-    console.log('🎚️ Filtering visualization with range:', { metadataId, minValue, maxValue })
-    
-    // Only filter if this is the currently active metadata
-    if (this.currentMetadataId !== metadataId) {
-      console.log('🎚️ Not the active metadata, skipping filter')
-      return
-    }
-    
-    // Get the metadata values
-    const sliderData = this.inlineRangeSliderData?.[metadataId]
-    if (!sliderData || !sliderData.values) {
-      console.log('🎚️ No slider data available for filtering')
-      return
-    }
-    
-    // Get indices of cells within the range
-    const filteredIndices = []
-    for (let i = 0; i < sliderData.values.length; i++) {
-      const value = sliderData.values[i]
-      if (value >= minValue && value <= maxValue) {
-        filteredIndices.push(i)
-      }
-    }
-    
-    console.log('🎚️ Filtered indices:', {
-      totalCells: sliderData.values.length,
-      filteredCells: filteredIndices.length,
-      range: `${minValue} to ${maxValue}`
-    })
-    
-    // Re-render points with filtered indices
-    this.renderPointsWithFilteredIndices(filteredIndices)
-  }
-
-  // Render points with filtered indices (only show selected cells)
-  renderPointsWithFilteredIndices(filteredIndices) {
-    if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
-      console.log('Cannot render filtered points - missing PIXI app or coordinates')
-      return
-    }
-
-    // Clear existing points
-    this.scatterContainer.removeChildren()
-    
-    const pointSize = this.currentPointSize
-    
-    // Create a container for the filtered points
-    const pointsContainer = new PIXI.Container()
-    this.scatterContainer.addChild(pointsContainer)
-    
-    // Render only the filtered points
-    for (const i of filteredIndices) {
-      const [x, y] = this.currentCoordinates[i]
-      const { color, alpha } = this.getColorAndAlpha(i)
-      
-      const screenX = this.normalizeX(x, this.currentBounds)
-      const screenY = this.normalizeY(y, this.currentBounds)
-      
-      // Create individual point graphics
-      const point = new this.PIXI.Graphics()
-      point.beginFill(color)
-      point.alpha = alpha
-      point.originalAlpha = alpha
-      point.drawCircle(0, 0, pointSize)
-      point.endFill()
-      point.x = screenX
-      point.y = screenY
-      
-      // Store cell ID and mark as point for later reference
-      point.cellId = i
-      point.isPoint = true
-      
-      // Store original color for reset functionality
-      this.storeOriginalPointColor(i, color)
-      
-      pointsContainer.addChild(point)
-    }
-    
-    // Update point count display
-    const pointCountElement = document.getElementById('point-count')
-    if (pointCountElement) {
-      pointCountElement.textContent = `${filteredIndices.length.toLocaleString()} points`
-    }
-    
-    console.log(`🎚️ Rendered ${filteredIndices.length} filtered points`)
-  }
-
-  // Restore all points (used when range slider is reset to full range)
-  restoreAllPoints() {
-    console.log('🎚️ Restoring all points')
-    
-    if (this.currentMetadataVector) {
-      this.forceReRenderPoints()
-      
-      // Update the appropriate legend
-      if (this.currentMetadataVector.data_type === 'NUMERIC') {
-        this.renderContinuousColorLegend()
-      } else {
-        this.renderDiscreteColorLegend()
-      }
-    }
-  }
 
   // Initialize inline range slider with metadata values
   initializeInlineRangeSlider(metadataId, values) {
@@ -4094,6 +4009,12 @@ export default class extends Controller {
       
       // Remove any existing zooming shape (in case we switched from shape-based to normal)
       if (this.zoomingShape && this.pixiApp) {
+        // Remove the mask first
+        if (this.zoomingShape.maskGraphics) {
+          this.pixiApp.stage.removeChild(this.zoomingShape.maskGraphics)
+          this.zoomingShape.maskGraphics = null
+        }
+        // Remove the shape
         this.pixiApp.stage.removeChild(this.zoomingShape)
         this.zoomingShape = null
       }
@@ -4291,12 +4212,12 @@ export default class extends Controller {
     const dataDeltaX = (deltaX / screenWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
     const dataDeltaY = (deltaY / screenHeight) * (this.panStartBounds.maxY - this.panStartBounds.minY)
     
-    // Update bounds
+    // Update bounds - invert Y delta to match the inverted Y-axis in normalizeY
     const newBounds = {
       minX: this.panStartBounds.minX - dataDeltaX,
       maxX: this.panStartBounds.maxX - dataDeltaX,
-      minY: this.panStartBounds.minY - dataDeltaY, // Invert Y axis
-      maxY: this.panStartBounds.maxY - dataDeltaY
+      minY: this.panStartBounds.minY + dataDeltaY, // Invert Y delta to match coordinate system
+      maxY: this.panStartBounds.maxY + dataDeltaY
     }
     
     // Debug: Check if bounds are changing size (indicating zoom)
@@ -4327,7 +4248,7 @@ export default class extends Controller {
     
     // Move the points to match the new bounds during panning
     this.updatePointPositions()
-    
+
     // Don't update category labels during panning - they will be updated when panning stops
     
     // Move the panning shape as well
@@ -4359,8 +4280,14 @@ export default class extends Controller {
     
     // Bounds are already updated in real-time during panning, no need to recalculate
     
-    // Remove the panning shape
+    // Remove the panning shape and its mask
     if (this.panningShape && this.pixiApp) {
+      // Remove the mask first
+      if (this.panningShape.maskGraphics) {
+        this.pixiApp.stage.removeChild(this.panningShape.maskGraphics)
+        this.panningShape.maskGraphics = null
+      }
+      // Remove the shape
       this.pixiApp.stage.removeChild(this.panningShape)
       this.panningShape = null
     }
@@ -4504,24 +4431,19 @@ export default class extends Controller {
     this.zoomingShape.scale.x = 1
     this.zoomingShape.scale.y = 1
     
-    // Update individual point positions based on new bounds (same calculation as updatePointPositions)
-    const transformedWidth = newBounds.maxX - newBounds.minX
-    const transformedHeight = newBounds.maxY - newBounds.minY
+    // Update individual point positions based on new bounds using proper coordinate system
     this.zoomingShape.children.forEach((pointSprite, index) => {
       if (this.currentCoordinates && index < this.currentCoordinates.length) {
         const [x, y] = this.currentCoordinates[index]
-        const normalizedX = (x - newBounds.minX) / transformedWidth
-        const normalizedY = (y - newBounds.minY) / transformedHeight
-        const newScreenX = normalizedX * this.pixiApp.screen.width
-        const newScreenY = normalizedY * this.pixiApp.screen.height
-        pointSprite.x = newScreenX
-        pointSprite.y = newScreenY
+        // Use the same coordinate system as normalizeX/Y with proper margins and Y-axis inversion
+        pointSprite.x = this.normalizeX(x, newBounds)
+        pointSprite.y = this.normalizeY(y, newBounds)
         
         // Update the stored comparison point for index 0
         if (index === 0) {
           this.zoomingShapePoint0 = { 
-            x: newScreenX, 
-            y: newScreenY, 
+            x: pointSprite.x, 
+            y: pointSprite.y, 
             dataCoords: [x, y] 
           }
           //console.log('Updated zoomingShapePoint0 in transformZoomingShape:', this.zoomingShapePoint0)
@@ -4557,11 +4479,9 @@ export default class extends Controller {
     for (let i = 0; i < this.currentCoordinates.length; i += step) {
       const [x, y] = this.currentCoordinates[i]
       
-      // Use the exact same coordinate calculation as updatePointPositions
-      const normalizedX = (x - bounds.minX) / width
-      const normalizedY = (y - bounds.minY) / height
-      const screenX = normalizedX * this.pixiApp.screen.width
-      const screenY = normalizedY * this.pixiApp.screen.height
+      // Use the same coordinate system as normalizeX/Y with proper margins and Y-axis inversion
+      const screenX = this.normalizeX(x, bounds)
+      const screenY = this.normalizeY(y, bounds)
       
       // Debug: Log coordinates for first few points to understand the shift
       /*if (i < 5) {
@@ -4628,6 +4548,26 @@ export default class extends Controller {
     // Position the container
     container.x = 0
     container.y = 0
+    
+    // Create a mask to clip the container to the plot area only
+    const margins = this.getPlotMargins()
+    const plotWidth = this.pixiApp.screen.width - margins.left - margins.right
+    const plotHeight = this.pixiApp.screen.height - margins.top - margins.bottom
+    
+    const mask = new PIXI.Graphics()
+    mask.beginFill(0xffffff, 1.0)
+    mask.drawRect(margins.left, margins.top, plotWidth, plotHeight)
+    mask.endFill()
+    
+    // Apply the mask to the container
+    container.mask = mask
+    
+    // Add the mask to the stage so it's rendered
+    if (this.pixiApp && this.pixiApp.stage) {
+      this.pixiApp.stage.addChild(mask)
+      // Store reference to mask for cleanup
+      container.maskGraphics = mask
+    }
     
     // Debug: Log container positioning
     /*console.log('Zooming Shape Container Position:', {
@@ -4715,8 +4655,14 @@ export default class extends Controller {
     // Stop animation
     this.stopZoomingAnimation()
     
-    // Remove the zooming shape
+    // Remove the zooming shape and its mask
     if (this.zoomingShape && this.pixiApp) {
+      // Remove the mask first
+      if (this.zoomingShape.maskGraphics) {
+        this.pixiApp.stage.removeChild(this.zoomingShape.maskGraphics)
+        this.zoomingShape.maskGraphics = null
+      }
+      // Remove the shape
       this.pixiApp.stage.removeChild(this.zoomingShape)
       this.zoomingShape = null
     }
@@ -4749,10 +4695,11 @@ export default class extends Controller {
     if (!this.pixiApp || !this.currentBounds || !this.currentCoordinates) return null
     
     const shape = new PIXI.Graphics()
+    const margins = this.getPlotMargins()
     
     // Get the plot area dimensions (same as axes/grid)
-    const plotWidth = this.pixiApp.screen.width - 100  // 50px margins on each side
-    const plotHeight = this.pixiApp.screen.height - 100
+    const plotWidth = this.pixiApp.screen.width - margins.left - margins.right
+    const plotHeight = this.pixiApp.screen.height - margins.top - margins.bottom
     
     // Sample points to create a simplified representation
     const sampleSize = Math.min(10000, this.currentCoordinates.length) // Sample up to 10000 points
@@ -4785,6 +4732,22 @@ export default class extends Controller {
     // Position the shape at the current plot area
     shape.x = 0
     shape.y = 0
+    
+    // Create a mask to clip the shape to the plot area only
+    const mask = new PIXI.Graphics()
+    mask.beginFill(0xffffff, 1.0)
+    mask.drawRect(margins.left, margins.top, plotWidth, plotHeight)
+    mask.endFill()
+    
+    // Apply the mask to the shape
+    shape.mask = mask
+    
+    // Add the mask to the stage so it's rendered
+    if (this.pixiApp && this.pixiApp.stage) {
+      this.pixiApp.stage.addChild(mask)
+      // Store reference to mask for cleanup
+      shape.maskGraphics = mask
+    }
     
     return shape
   }
@@ -4892,8 +4855,9 @@ export default class extends Controller {
               }*/
             }
             
-            child.x = normalizedX * this.pixiApp.screen.width
-            child.y = normalizedY * this.pixiApp.screen.height
+            // Use the same coordinate system as normalizeX/Y with proper margins and Y-axis inversion
+            child.x = this.normalizeX(x, bounds)
+            child.y = this.normalizeY(y, bounds)
             updatedCount++
           }
         }
@@ -5124,20 +5088,21 @@ export default class extends Controller {
     const { minX, maxX, minY, maxY } = this.currentBounds
     const width = this.pixiApp.screen.width
     const height = this.pixiApp.screen.height
+    const margins = this.getPlotMargins()
 
     // Create axes graphics
     const axesGraphics = new PIXI.Graphics()
     axesGraphics.lineStyle(2, 0x333333, 0.8) // Dark gray lines
 
     // X-axis (horizontal line at bottom)
-    const xAxisY = height - 50 // Leave space for labels
-    axesGraphics.moveTo(50, xAxisY)
-    axesGraphics.lineTo(width - 50, xAxisY)
+    const xAxisY = height - margins.bottom
+    axesGraphics.moveTo(margins.left, xAxisY)
+    axesGraphics.lineTo(width - margins.right, xAxisY)
 
     // Y-axis (vertical line at left)
-    const yAxisX = 50 // Leave space for labels
-    axesGraphics.moveTo(yAxisX, 50)
-    axesGraphics.lineTo(yAxisX, height - 50)
+    const yAxisX = margins.left
+    axesGraphics.moveTo(yAxisX, margins.top)
+    axesGraphics.lineTo(yAxisX, height - margins.bottom)
 
     // Add white rectangles to cover margin areas (below x-axis and left of y-axis)
     const marginGraphics = new PIXI.Graphics()
@@ -5163,6 +5128,8 @@ export default class extends Controller {
 
   // Add axis labels
   addAxisLabels(minX, maxX, minY, maxY, width, height) {
+    const margins = this.getPlotMargins()
+    
     // X-axis label (Dimension 1)
     const xLabel = new PIXI.Text('Dimension 1', {
       fontFamily: 'Arial, sans-serif',
@@ -5171,7 +5138,7 @@ export default class extends Controller {
       align: 'center'
     })
     xLabel.x = width / 2
-    xLabel.y = height - 20
+    xLabel.y = height - margins.bottom / 2
     xLabel.anchor.set(0.5, 0.5)
     this.axesContainer.addChild(xLabel)
 
@@ -5182,7 +5149,7 @@ export default class extends Controller {
       fill: 0x333333,
       align: 'center'
     })
-    yLabel.x = 20
+    yLabel.x = margins.left / 2
     yLabel.y = height / 2
     yLabel.anchor.set(0.5, 0.5)
     yLabel.rotation = -Math.PI / 2 // Rotate 90 degrees counter-clockwise
@@ -5195,8 +5162,9 @@ export default class extends Controller {
   // Add tick marks and values
   addTickMarks(minX, maxX, minY, maxY, width, height) {
     const tickLength = 5
-    const xAxisY = height - 50
-    const yAxisX = 50
+    const margins = this.getPlotMargins()
+    const xAxisY = height - margins.bottom
+    const yAxisX = margins.left
 
     // Calculate smart tick spacing based on zoom level
     const xRange = maxX - minX
@@ -5209,10 +5177,11 @@ export default class extends Controller {
     const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
     for (let value = xStart; value <= xEnd; value += xTickSpacing) {
       const t = (value - minX) / (maxX - minX)
-      const x = 50 + t * (width - 100)
+      const availableWidth = width - margins.left - margins.right
+      const x = margins.left + t * availableWidth
 
       // Skip if outside visible area
-      if (x < 50 || x > width - 50) continue
+      if (x < margins.left || x > width - margins.right) continue
 
       // Tick mark
       const tickGraphics = new PIXI.Graphics()
@@ -5234,15 +5203,17 @@ export default class extends Controller {
       this.axesContainer.addChild(tickText)
     }
 
-    // Y-axis ticks (left)
+    // Y-axis ticks (left) - inverted to match inverted Y-axis
     const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
     const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
     for (let value = yStart; value <= yEnd; value += yTickSpacing) {
       const t = (value - minY) / (maxY - minY)
-      const y = 50 + t * (height - 100)
+      // Invert Y-axis tick positioning to match inverted Y-axis
+      const availableHeight = height - margins.top - margins.bottom
+      const y = margins.top + availableHeight - t * availableHeight
 
       // Skip if outside visible area
-      if (y < 50 || y > height - 50) continue
+      if (y < margins.top || y > height - margins.bottom) continue
 
       // Tick mark
       const tickGraphics = new PIXI.Graphics()
@@ -5320,6 +5291,7 @@ export default class extends Controller {
     const { minX, maxX, minY, maxY } = this.currentBounds
     const width = this.pixiApp.screen.width
     const height = this.pixiApp.screen.height
+    const margins = this.getPlotMargins()
 
     // Calculate smart tick spacing (same as axes)
     const xRange = maxX - minX
@@ -5336,29 +5308,31 @@ export default class extends Controller {
     const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
     for (let value = xStart; value <= xEnd; value += xTickSpacing) {
       const t = (value - minX) / (maxX - minX)
-      const x = 50 + t * (width - 100)
+      const availableWidth = width - margins.left - margins.right
+      const x = margins.left + t * availableWidth
 
       // Skip if outside visible area
-      if (x < 50 || x > width - 50) continue
+      if (x < margins.left || x > width - margins.right) continue
 
       // Draw vertical line from top to bottom
-      gridGraphics.moveTo(x, 50)
-      gridGraphics.lineTo(x, height - 50)
+      gridGraphics.moveTo(x, margins.top)
+      gridGraphics.lineTo(x, height - margins.bottom)
     }
 
-    // Horizontal grid lines (aligned with Y-axis ticks)
+    // Horizontal grid lines (aligned with Y-axis ticks) - inverted to match inverted Y-axis
     const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
     const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
     for (let value = yStart; value <= yEnd; value += yTickSpacing) {
       const t = (value - minY) / (maxY - minY)
-      const y = 50 + t * (height - 100)
+      const availableHeight = height - margins.top - margins.bottom
+      const y = margins.top + availableHeight - t * availableHeight
 
       // Skip if outside visible area
-      if (y < 50 || y > height - 50) continue
+      if (y < margins.top || y > height - margins.bottom) continue
 
       // Draw horizontal line from left to right
-      gridGraphics.moveTo(50, y)
-      gridGraphics.lineTo(width - 50, y)
+      gridGraphics.moveTo(margins.left, y)
+      gridGraphics.lineTo(width - margins.right, y)
     }
 
     this.gridContainer.addChild(gridGraphics)
@@ -5467,7 +5441,8 @@ export default class extends Controller {
         })
 
         // Skip if outside visible area (with some margin)
-        const margin = 50
+        const margins = this.getPlotMargins()
+        const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
         if (screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin) {
           return
         }
@@ -5746,10 +5721,11 @@ export default class extends Controller {
     const legendContainer = new PIXI.Container()
     
     // Legend dimensions
+    const margins = this.getPlotMargins()
     const legendWidth = 200
     const legendHeight = 20
-    const legendX = width - legendWidth - 20 // Position on right side
-    const legendY = 20 // Position at top
+    const legendX = width - legendWidth - margins.right // Position on right side
+    const legendY = margins.top // Position at top
 
     // Create color gradient bar
     const gradientBar = new PIXI.Graphics()
@@ -5782,7 +5758,7 @@ export default class extends Controller {
     }
 
     // Create metadata name label
-    const nameLabel = this.createLegendLabel(this.currentMetadataVector.name, legendX, legendY - 20)
+    const nameLabel = this.createLegendLabel(this.currentMetadataVector.name, legendX, legendY - margins.top)
     if (nameLabel.children[1] && nameLabel.children[1].anchor) {
       nameLabel.children[1].anchor.set(0, 0.5) // Left-align
     }
@@ -6738,14 +6714,11 @@ export default class extends Controller {
     
     let svg = ''
     const { minX, maxX, minY, maxY } = this.currentBounds
+    const margins = this.getPlotMargins()
     
     // Use the same coordinate system as the actual plot
     const plotWidth = this.pixiApp.screen.width
     const plotHeight = this.pixiApp.screen.height
-    
-    // Use the same margins as axes
-    const leftMargin = 80
-    const bottomMargin = 20
     
     // Calculate tick spacing for each axis
     const xRange = maxX - minX
@@ -6757,16 +6730,18 @@ export default class extends Controller {
     const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
     const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
     for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
-      svg += `<line x1="${screenX}" y1="0" x2="${screenX}" y2="${plotHeight - bottomMargin}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
+      const availableWidth = plotWidth - margins.left - margins.right
+      const screenX = margins.left + ((x - minX) / (maxX - minX)) * availableWidth
+      svg += `<line x1="${screenX}" y1="${margins.top}" x2="${screenX}" y2="${plotHeight - margins.bottom}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
     }
     
-    // Horizontal grid lines
+    // Horizontal grid lines - inverted to match inverted Y-axis
     const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
     const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
     for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
-      svg += `<line x1="${leftMargin}" y1="${screenY}" x2="${plotWidth}" y2="${screenY}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
+      const availableHeight = plotHeight - margins.top - margins.bottom
+      const screenY = margins.top + availableHeight - ((y - minY) / (maxY - minY)) * availableHeight
+      svg += `<line x1="${margins.left}" y1="${screenY}" x2="${plotWidth - margins.right}" y2="${screenY}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
     }
     
     return svg
@@ -6778,26 +6753,23 @@ export default class extends Controller {
     
     let svg = ''
     const { minX, maxX, minY, maxY } = this.currentBounds
+    const margins = this.getPlotMargins()
     
     // Use the same coordinate system as the actual plot
     const plotWidth = this.pixiApp.screen.width
     const plotHeight = this.pixiApp.screen.height
     
-    // Add more left margin for Y-axis labels
-    const leftMargin = 80 // Increased from 20 to 80 for better label spacing
-    const bottomMargin = 40
-    
     // X-axis (bottom)
-    const xAxisY = plotHeight - bottomMargin
-    svg += `<line x1="${leftMargin}" y1="${xAxisY}" x2="${plotWidth}" y2="${xAxisY}" stroke="#374151" stroke-width="2"/>`
+    const xAxisY = plotHeight - margins.bottom
+    svg += `<line x1="${margins.left}" y1="${xAxisY}" x2="${plotWidth - margins.right}" y2="${xAxisY}" stroke="#374151" stroke-width="2"/>`
     
     // Y-axis (left)
-    const yAxisX = leftMargin
-    svg += `<line x1="${yAxisX}" y1="0" x2="${yAxisX}" y2="${plotHeight - bottomMargin}" stroke="#374151" stroke-width="2"/>`
+    const yAxisX = margins.left
+    svg += `<line x1="${yAxisX}" y1="${margins.top}" x2="${yAxisX}" y2="${plotHeight - margins.bottom}" stroke="#374151" stroke-width="2"/>`
     
     // Axis labels
-    svg += `<text x="${(plotWidth/2) + leftMargin}" y="${plotHeight - 5}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151">Dimension 1</text>`
-    svg += `<text x="${leftMargin + 40}" y="${plotHeight/2 - 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151" transform="rotate(-90, ${leftMargin - 15}, ${plotHeight/2})">Dimension 2</text>`
+    svg += `<text x="${plotWidth/2}" y="${plotHeight - margins.bottom/2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151">Dimension 1</text>`
+    svg += `<text x="${margins.left/2}" y="${plotHeight/2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151" transform="rotate(-90, ${margins.left/2}, ${plotHeight/2})">Dimension 2</text>`
     
     // Tick marks and values
     const xRange = maxX - minX
@@ -6809,16 +6781,18 @@ export default class extends Controller {
     const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
     const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
     for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
+      const availableWidth = plotWidth - margins.left - margins.right
+      const screenX = margins.left + ((x - minX) / (maxX - minX)) * availableWidth
       svg += `<line x1="${screenX}" y1="${xAxisY - 5}" x2="${screenX}" y2="${xAxisY + 5}" stroke="#374151" stroke-width="1"/>`
       svg += `<text x="${screenX}" y="${xAxisY + 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(x)}</text>`
     }
     
-    // Y-axis ticks
+    // Y-axis ticks - inverted to match inverted Y-axis
     const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
     const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
     for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
+      const availableHeight = plotHeight - margins.top - margins.bottom
+      const screenY = margins.top + availableHeight - ((y - minY) / (maxY - minY)) * availableHeight
       svg += `<line x1="${yAxisX - 5}" y1="${screenY}" x2="${yAxisX + 5}" y2="${screenY}" stroke="#374151" stroke-width="1"/>`
       svg += `<text x="${yAxisX - 10}" y="${screenY + 3}" text-anchor="end" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(y)}</text>`
     }
@@ -7087,8 +7061,9 @@ export default class extends Controller {
     const rect = plotContainer ? plotContainer.getBoundingClientRect() : { left: 0, top: 0, width: 600, height: 400 }
     
     // Position tooltip above the plot, centered horizontally
+    const margins = this.getPlotMargins()
     const tooltipLeft = rect.left + (rect.width / 2) - 100 // Center horizontally, offset for tooltip width
-    const tooltipTop = rect.top - 80 // Above the plot
+    const tooltipTop = rect.top - margins.top - 20 // Above the plot with margin
     
     // Create tooltip container
     const tooltip = document.createElement('div')
@@ -7330,8 +7305,9 @@ export default class extends Controller {
     
     console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
-    // Initialize checkboxes for this metadata if not already done
-    if (!this.selectedCategories[metadataId]) {
+    // Initialize checkboxes for this metadata if not already done (only for discrete)
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (metadataVector?.data_type === 'DISCRETE' && !this.selectedCategories[metadataId]) {
       this.initializeCheckboxesForMetadata(metadataId)
     }
     
@@ -7470,6 +7446,13 @@ export default class extends Controller {
 
   initializeCheckboxesForMetadata(metadataId) {
     //console.log(`Initializing checkboxes for metadata: ${metadataId}`)
+    
+    // Only initialize for discrete metadata
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector || metadataVector.data_type !== 'DISCRETE') {
+      console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
+      return
+    }
     
     // Initialize the selected categories for this metadata
     this.selectedCategories[metadataId] = new Set()
@@ -7771,8 +7754,19 @@ export default class extends Controller {
 
   // Get the intersection of selected cells across all metadata (full calculation)
   getFilteredCellIndices() {
-    if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
+    const hasDiscreteSelections = this.selectedCategories && Object.keys(this.selectedCategories).length > 0
+    const hasContinuousSelections = this.selectedRanges && Object.keys(this.selectedRanges).length > 0
+    
+    console.log('🔍 getFilteredCellIndices called:', {
+      hasDiscreteSelections,
+      hasContinuousSelections,
+      selectedCategories: this.selectedCategories,
+      selectedRanges: this.selectedRanges
+    })
+    
+    if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells
+      console.log('🔍 No selections found, returning null (no filtering)')
       return null
     }
 
@@ -7783,85 +7777,104 @@ export default class extends Controller {
       return this.filterCache.get(cacheKey)
     }
 
-    // Check if all categories are selected for all metadata (no filtering needed)
-    const allCategoriesSelected = Object.keys(this.selectedCategories).every(metadataId => {
-      const selectedCategories = this.selectedCategories[metadataId]
-      if (!selectedCategories || selectedCategories.size === 0) {
-        //console.log(`Metadata ${metadataId}: No selections`)
-        return false
-      }
-      
-      // Get all available categories for this metadata
-      const metadataVector = this.getMetadataVectorById(metadataId)
-      if (!metadataVector || !metadataVector.values) {
-        //console.log(`Metadata ${metadataId}: No metadata vector found - assuming all selected`)
-        // If we don't have the metadata vector yet, assume all categories are selected
-        // This prevents filtering when metadata vectors aren't loaded yet
-        return true
-      }
-      
-      const availableCategories = [...new Set(metadataVector.values)]
-      const allSelected = availableCategories.every(category => selectedCategories.has(category))
-      //console.log(`Metadata ${metadataId}: Available categories:`, availableCategories)
-      //console.log(`Metadata ${metadataId}: Selected categories:`, Array.from(selectedCategories))
-      //console.log(`Metadata ${metadataId}: All selected:`, allSelected)
-      return allSelected
-    })
+    // Check if there are any actual constraints (this will be done more precisely below)
+    // We'll check for constraints in the filtering logic below
 
-    //console.log(`All categories selected check result:`, allCategoriesSelected)
-
-    if (allCategoriesSelected) {
-      // All categories are selected, no filtering needed
-      //console.log('All categories selected - returning null (no filtering)')
-      return null
-    }
-
-    // Get all metadata that have selections AND have loaded vectors
-    const metadataWithSelections = Object.keys(this.selectedCategories).filter(metadataId => {
+    // Get all metadata that have actual constraints (not all categories/values selected)
+    const discreteMetadataWithConstraints = Object.keys(this.selectedCategories).filter(metadataId => {
       const selections = this.selectedCategories[metadataId]
       const hasSelections = selections && selections.size > 0
       const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
-      //console.log(`Metadata ${metadataId}: hasSelections=${hasSelections}, hasLoadedVector=${hasLoadedVector}`)
-      return hasSelections && hasLoadedVector
+      
+      if (!hasSelections || !hasLoadedVector) return false
+      
+      // Check if all categories are selected (no constraint)
+      const metadataVector = this.getMetadataVectorById(metadataId)
+      if (metadataVector && metadataVector.values) {
+        const availableCategories = [...new Set(metadataVector.values)]
+        const allSelected = availableCategories.every(category => selections.has(category))
+        return !allSelected // Only include if not all categories are selected
+      }
+      
+      return true
     })
+
+    const continuousMetadataWithConstraints = Object.keys(this.selectedRanges).filter(metadataId => {
+      const range = this.selectedRanges[metadataId]
+      const hasRange = range && (range.min !== undefined && range.max !== undefined)
+      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      
+      if (!hasRange || !hasLoadedVector) return false
+      
+      // Check if range covers the full range (no constraint)
+      const metadataVector = this.getMetadataVectorById(metadataId)
+      if (metadataVector && metadataVector.values) {
+        const values = metadataVector.values
+        const minVal = Math.min(...values)
+        const maxVal = Math.max(...values)
+        const isFullRange = range.min <= minVal && range.max >= maxVal
+        return !isFullRange // Only include if range is not full
+      }
+      
+      return true
+    })
+
+    // Combine all metadata with actual constraints
+    const allMetadataWithConstraints = [...new Set([...discreteMetadataWithConstraints, ...continuousMetadataWithConstraints])]
 
     //console.log(`All metadata in selectedCategories:`, Object.keys(this.selectedCategories))
     //console.log(`Loaded metadata vectors:`, Object.keys(this.loadedMetadataVectors))
     //console.log(`Current metadata ID:`, this.currentMetadataId)
 
-    //console.log(`Metadata with selections and loaded vectors:`, metadataWithSelections)
-
-    if (metadataWithSelections.length === 0) {
-      // No metadata has selections and loaded vectors, return all cells
-      //console.log('No metadata has selections and loaded vectors - returning null')
+    if (allMetadataWithConstraints.length === 0) {
+      // No metadata has actual constraints, return all cells
+      console.log('🔍 No metadata with constraints found, returning null (no filtering)')
       return null
     }
 
-    // Start with cells that match the first metadata's selections
-    let filteredIndices = this.getCellsForMetadataCategories(metadataWithSelections[0], this.selectedCategories[metadataWithSelections[0]])
-    //console.log(`First metadata ${metadataWithSelections[0]} filtered indices:`, filteredIndices.length)
+    console.log('🔍 Metadata with constraints:', allMetadataWithConstraints)
 
-    // Intersect with each subsequent metadata's selections using Set for O(1) lookups
-    for (let i = 1; i < metadataWithSelections.length; i++) {
-      const metadataId = metadataWithSelections[i]
-      const selectedCategories = this.selectedCategories[metadataId]
-      const cellsForThisMetadata = this.getCellsForMetadataCategories(metadataId, selectedCategories)
-      //console.log(`Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
+    // Start with cells that match the first metadata's constraints
+    const firstMetadataId = allMetadataWithConstraints[0]
+    let filteredIndices = this.getCellsForMetadata(firstMetadataId)
+    console.log(`🔍 First metadata ${firstMetadataId} filtered indices:`, filteredIndices.length)
+
+    // Intersect with each subsequent metadata's constraints using Set for O(1) lookups
+    for (let i = 1; i < allMetadataWithConstraints.length; i++) {
+      const metadataId = allMetadataWithConstraints[i]
+      const cellsForThisMetadata = this.getCellsForMetadata(metadataId)
+      console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
       
       // Convert to Set for O(1) lookup instead of O(n) includes()
       const cellsSet = new Set(cellsForThisMetadata)
       
       // Intersection: keep only cells that are in both sets
       filteredIndices = filteredIndices.filter(cellIndex => cellsSet.has(cellIndex))
-      //console.log(`After intersection with ${metadataId}:`, filteredIndices.length)
+      console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices.length)
     }
 
-    //console.log(`Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
+    console.log(`🔍 Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
     
     // Cache the result
     this.filterCache.set(cacheKey, filteredIndices)
     
     return filteredIndices
+  }
+
+  // Get cell indices for a given metadata (handles both discrete and continuous)
+  getCellsForMetadata(metadataId) {
+    // Check if this is discrete metadata with actual selections
+    if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
+      return this.getCellsForMetadataCategories(metadataId, this.selectedCategories[metadataId])
+    }
+    
+    // Check if this is continuous metadata with actual range
+    if (this.selectedRanges[metadataId]) {
+      return this.getCellsForMetadataRange(metadataId, this.selectedRanges[metadataId])
+    }
+    
+    console.warn(`No selection found for metadata ID: ${metadataId}`)
+    return []
   }
 
   // Get cell indices that belong to the specified categories for a given metadata
@@ -7873,8 +7886,6 @@ export default class extends Controller {
       return []
     }
 
-    //console.log(`Getting cells for metadata ${metadataId} with selected categories:`, Array.from(selectedCategories))
-    
     const startTime = performance.now()
     const cellIndices = []
     const values = metadataVector.values
@@ -7887,17 +7898,59 @@ export default class extends Controller {
     }
 
     const endTime = performance.now()
-    //console.log(`Found ${cellIndices.length} cells for metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
+    console.log(`Found ${cellIndices.length} cells for discrete metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
+    return cellIndices
+  }
+
+  // Get cell indices that fall within the specified range for continuous metadata
+  getCellsForMetadataRange(metadataId, range) {
+    // Find the metadata vector for this metadata ID
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector || !metadataVector.values) {
+      console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
+      return []
+    }
+
+    console.log(`🔍 getCellsForMetadataRange called for metadata ${metadataId}:`, {
+      range,
+      valuesLength: metadataVector.values.length,
+      firstFewValues: metadataVector.values.slice(0, 10)
+    })
+
+    const startTime = performance.now()
+    const cellIndices = []
+    const values = metadataVector.values
+    
+    // Use for loop instead of forEach for better performance
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index]
+      if (value >= range.min && value <= range.max) {
+        cellIndices.push(index)
+      }
+    }
+
+    const endTime = performance.now()
+    console.log(`🔍 Found ${cellIndices.length} cells for continuous metadata ${metadataId} in range [${range.min}, ${range.max}] in ${(endTime - startTime).toFixed(2)}ms`)
+    console.log(`🔍 First 10 filtered indices:`, cellIndices.slice(0, 10))
     return cellIndices
   }
 
   // Create a cache key from current selections
   createFilterCacheKey() {
     const keyParts = []
+    
+    // Add discrete metadata selections
     Object.keys(this.selectedCategories).sort().forEach(metadataId => {
       const categories = Array.from(this.selectedCategories[metadataId]).sort()
-      keyParts.push(`${metadataId}:${categories.join(',')}`)
+      keyParts.push(`d:${metadataId}:${categories.join(',')}`)
     })
+    
+    // Add continuous metadata ranges
+    Object.keys(this.selectedRanges).sort().forEach(metadataId => {
+      const range = this.selectedRanges[metadataId]
+      keyParts.push(`c:${metadataId}:${range.min}-${range.max}`)
+    })
+    
     return keyParts.join('|')
   }
 
@@ -8407,11 +8460,12 @@ export default class extends Controller {
     ctx.strokeStyle = '#1d4ed8'
     ctx.lineWidth = 1
     
+    const margins = this.getPlotMargins()
     histogram.forEach((count, i) => {
       const x = (i / bins) * width
       const barWidth = width / bins
-      const barHeight = (count / maxCount) * (height - 40)
-      const y = height - 20 - barHeight
+      const barHeight = (count / maxCount) * (height - margins.top - margins.bottom)
+      const y = height - margins.bottom - barHeight
       
       ctx.fillRect(x, y, barWidth - 1, barHeight)
       ctx.strokeRect(x, y, barWidth - 1, barHeight)
@@ -8510,11 +8564,12 @@ export default class extends Controller {
       return
     }
     
-    const plotWidth = width - 80 // Leave space for labels
-    const plotHeight = height - 60
+    const margins = this.getPlotMargins()
+    const plotWidth = width - margins.left - margins.right
+    const plotHeight = height - margins.top - margins.bottom
     const categoryWidth = plotWidth / numCategories
-    const startX = 40
-    const startY = 30
+    const startX = margins.left
+    const startY = margins.top
     
     // Get color palette
     const colors = this.getCategoryColors()

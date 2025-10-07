@@ -1090,7 +1090,6 @@ function handleInlineRangeSliderDrag(event) {
   updateInlineRangeSlider(inlineDragMetadataId)
   
   // Update the density plot to show the new range selection
-  const controller = window.visualizationController
   if (controller && controller.inlineRangeSliderData && controller.inlineRangeSliderData[inlineDragMetadataId]) {
     const values = controller.inlineRangeSliderData[inlineDragMetadataId].values
     drawInlineDensityPlot(inlineDragMetadataId, values)

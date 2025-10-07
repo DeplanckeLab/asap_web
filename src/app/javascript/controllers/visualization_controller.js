@@ -20,6 +20,10 @@ export default class extends Controller {
     this.lastFilterState = null // Track last filter state for incremental updates
     this.filterCache = new Map() // Cache for intersection results
     
+    // Performance optimization: throttling for range slider updates
+    this.rangeSliderUpdateScheduled = false
+    this.lastLegendUpdate = 0
+    
     // Track embedding method for animation decisions
     this.currentEmbeddingMethod = null
     this.previousEmbeddingMethod = null
@@ -32,6 +36,12 @@ export default class extends Controller {
     
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
+    
+    // Performance optimization: store existing points for visibility updates
+    this.existingPoints = null // Array of existing PIXI point objects
+    this.lastMetadataVector = null // Track last metadata for optimization
+    this.lastPointSize = null // Track last point size for optimization
+    this.visibilityOnlyUpdate = false // When true, try to only toggle visibility
     
     // Expose controller globally for range slider access
     window.visualizationController = this
@@ -1965,24 +1975,53 @@ export default class extends Controller {
 
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
+    const startTime = performance.now()
+    console.log('🚀 [PERF] renderPointsWithCurrentColoring started')
+    
     if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
       console.log('Cannot render points - missing PIXI app or coordinates')
+      const totalTime = performance.now() - startTime
+      console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed (early return) in ${totalTime.toFixed(2)}ms`)
       return
     }
 
-    // Clear existing points
-    this.scatterContainer.removeChildren()
-    
-    // Always create the nested structure for consistency
-    const pointsContainer = new PIXI.Container()
-    this.scatterContainer.addChild(pointsContainer)
-    this.animatedContainer = pointsContainer // Store reference for consistency
-    
+    // Decide whether we can do a visibility-only update
     const pointSize = this.currentPointSize
+    const canVisibilityUpdate = Boolean(
+      this.visibilityOnlyUpdate &&
+      this.existingPoints &&
+      this.existingPoints.length === this.currentCoordinates.length &&
+      this.lastMetadataVector === this.currentMetadataVector &&
+      this.lastPointSize === pointSize &&
+      this.scatterContainer && this.scatterContainer.children && this.scatterContainer.children.length > 0
+    )
+
+    // Prepare container only when a full re-render is needed
+    let pointsContainer
+    if (!canVisibilityUpdate) {
+      const clearStart = performance.now()
+      this.scatterContainer.removeChildren()
+      this.existingPoints = null // Clear existing points reference
+      
+      // Always create the nested structure for consistency
+      pointsContainer = new PIXI.Container()
+      this.scatterContainer.addChild(pointsContainer)
+      this.animatedContainer = pointsContainer // Store reference for consistency
+      const clearTime = performance.now() - clearStart
+      console.log(`🚀 [PERF] Container clear/setup took ${clearTime.toFixed(2)}ms`)
+    } else {
+      pointsContainer = this.animatedContainer || this.scatterContainer
+      console.log('🚀 [PERF] Skipping container clear - visibility-only update')
+    }
+    
     //console.log(`renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
 
     // Get filtered cell indices based on checkbox selections
+    const filterStart = performance.now()
     const filteredIndices = this.getFilteredCellIndices()
+    const filterTime = performance.now() - filterStart
+    const cellCount = filteredIndices ? filteredIndices.length : 'all'
+    console.log(`🚀 [PERF] getFilteredCellIndices took ${filterTime.toFixed(2)}ms, found ${cellCount} cells`)
 
     // Check if we have metadata coloring active
     if (this.currentMetadataVector && this.currentMetadataVector.values) {
@@ -2068,7 +2107,45 @@ export default class extends Controller {
         this.updatePointCountDisplay(filteredIndices)
         
       } else if (data_type === 'NUMERIC') {
-        // Render each point individually to support selection transparency and color reset
+        // Check if we can optimize by just showing/hiding existing points
+        const renderStart = performance.now()
+        console.log(`🚀 [PERF] Starting point rendering for ${this.currentCoordinates.length} points`)
+        
+        if (canVisibilityUpdate) {
+          console.log(`🚀 [PERF] Optimizing: updating visibility of existing points`)
+          const visibilityStart = performance.now()
+          
+          // Build a Set for O(1) membership checks
+          let visibleSet = null
+          if (filteredIndices) {
+            visibleSet = new Set(filteredIndices)
+          }
+          
+          // Update visibility of existing points
+          for (let i = 0; i < this.existingPoints.length; i++) {
+            const point = this.existingPoints[i]
+            const shouldShow = !visibleSet || visibleSet.has(i)
+            if (point.visible !== shouldShow) point.visible = shouldShow
+          }
+          
+          const visibilityTime = performance.now() - visibilityStart
+          console.log(`🚀 [PERF] Visibility update completed in ${visibilityTime.toFixed(2)}ms`)
+          
+          // Update point count display
+          this.updatePointCountDisplay(filteredIndices)
+          
+          const totalTime = performance.now() - renderStart
+          console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed (optimized) in ${totalTime.toFixed(2)}ms`)
+          
+          // Reset the hint flag until next request
+          this.visibilityOnlyUpdate = false
+          return
+        }
+        
+        // Full render: create all points from scratch
+        console.log(`🚀 [PERF] Full render: creating ${this.currentCoordinates.length} points`)
+        this.existingPoints = [] // Store reference to existing points
+        
         for (let i = 0; i < this.currentCoordinates.length; i++) {
           // Skip this point if it's not in the filtered indices
           if (filteredIndices && !filteredIndices.includes(i)) {
@@ -2105,7 +2182,12 @@ export default class extends Controller {
           point.on('pointerout', () => this.hideTooltip())
           
           pointsContainer.addChild(point)
+          this.existingPoints[i] = point // Store reference for future optimization
         }
+        
+        // Store metadata for optimization checks
+        this.lastMetadataVector = this.currentMetadataVector
+        this.lastPointSize = pointSize
         
         // Update point count display with filtered count
         this.updatePointCountDisplay(filteredIndices)
@@ -2157,6 +2239,9 @@ export default class extends Controller {
     
     // Clear any stored original positions since points were recreated
     this.clearStoredOriginalPositions()
+    
+    const totalTime = performance.now() - startTime
+    console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed in ${totalTime.toFixed(2)}ms`)
   }
 
 
@@ -2549,16 +2634,17 @@ export default class extends Controller {
   }
 
   // Update color range for a specific metadata (used by inline range slider)
-  updateColorRange(metadataId, min, max) {
-    console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max })
+  updateColorRange(metadataId, min, max, shouldAdaptColorRange = false) {
+    console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max }, 'adapt:', shouldAdaptColorRange)
     
-    // Set the custom color range
-    this.setColorRange(min, max)
-    
-    // If this is the currently active metadata, update the visualization
-    if (this.currentMetadataVector && this.currentMetadataVector.id === metadataId) {
-      this.forceReRenderPoints()
-      this.renderContinuousColorLegend()
+    if (shouldAdaptColorRange) {
+      // Set the custom color range to adapt to the selected range
+      this.customColorRange = { min, max }
+      console.log('🎨 Color range adapted to selected range:', { min, max })
+    } else {
+      // Clear the custom color range to use the full data range
+      this.customColorRange = null
+      console.log('🎨 Color range reset to full data range')
     }
   }
 
@@ -5718,7 +5804,16 @@ export default class extends Controller {
 
   // Render continuous color legend for continuous metadata
   renderContinuousColorLegend() {
+    const startTime = performance.now()
     console.log('🎨 Rendering continuous color legend')
+    
+    // Throttle legend updates to avoid redundant work
+    const now = Date.now()
+    if (this.lastLegendUpdate && now - this.lastLegendUpdate < 100) { // 100ms throttle
+      console.log('🎨 Throttling legend update (too soon)')
+      return
+    }
+    this.lastLegendUpdate = now
     
     if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
       console.log('🎨 Missing required components for continuous legend, returning early')
@@ -5806,7 +5901,8 @@ export default class extends Controller {
     this.categoryLabelsContainer.addChild(legendContainer)
     this.categoryLabelsContainer.visible = true
 
-    console.log('🎨 Continuous color legend rendered successfully')
+    const totalTime = performance.now() - startTime
+    console.log(`🎨 Continuous color legend rendered successfully in ${totalTime.toFixed(2)}ms`)
   }
 
   // Create a label for the continuous legend
@@ -7786,6 +7882,7 @@ export default class extends Controller {
 
   // Get the intersection of selected cells across all metadata (full calculation)
   getFilteredCellIndices() {
+    const startTime = performance.now()
     const hasDiscreteSelections = this.selectedCategories && Object.keys(this.selectedCategories).length > 0
     const hasContinuousSelections = this.selectedRanges && Object.keys(this.selectedRanges).length > 0
     
@@ -7869,26 +7966,29 @@ export default class extends Controller {
     // Start with cells that match the first metadata's constraints
     const firstMetadataId = allMetadataWithConstraints[0]
     let filteredIndices = this.getCellsForMetadata(firstMetadataId)
-    console.log(`🔍 First metadata ${firstMetadataId} filtered indices:`, filteredIndices.length)
+    console.log(`🔍 First metadata ${firstMetadataId} filtered indices:`, filteredIndices ? filteredIndices.length : 'null')
 
     // Intersect with each subsequent metadata's constraints using Set for O(1) lookups
     for (let i = 1; i < allMetadataWithConstraints.length; i++) {
       const metadataId = allMetadataWithConstraints[i]
       const cellsForThisMetadata = this.getCellsForMetadata(metadataId)
-      console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata.length)
+      console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata ? cellsForThisMetadata.length : 'null')
       
       // Convert to Set for O(1) lookup instead of O(n) includes()
       const cellsSet = new Set(cellsForThisMetadata)
       
       // Intersection: keep only cells that are in both sets
       filteredIndices = filteredIndices.filter(cellIndex => cellsSet.has(cellIndex))
-      console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices.length)
+      console.log(`🔍 After intersection with ${metadataId}:`, filteredIndices ? filteredIndices.length : 'null')
     }
 
-    console.log(`🔍 Final filtered ${filteredIndices.length} cells from ${this.currentCoordinates?.length || 0} total cells`)
+    console.log(`🔍 Final filtered ${filteredIndices ? filteredIndices.length : 'null'} cells from ${this.currentCoordinates?.length || 0} total cells`)
     
     // Cache the result
     this.filterCache.set(cacheKey, filteredIndices)
+    
+    const totalTime = performance.now() - startTime
+    console.log(`🚀 [PERF] getFilteredCellIndices completed in ${totalTime.toFixed(2)}ms`)
     
     return filteredIndices
   }
@@ -8690,12 +8790,24 @@ export default class extends Controller {
   
   // Update plot when range changes
   updatePlot() {
+    const startTime = performance.now()
+    console.log('🚀 [PERF] updatePlot started')
+    
     const activeBtn = document.querySelector('.plot-type-btn.active')
     if (activeBtn.id === 'density-plot-btn') {
+      const densityStart = performance.now()
       this.drawDensityPlot(this.rangeSliderData.values)
+      const densityTime = performance.now() - densityStart
+      console.log(`🚀 [PERF] drawDensityPlot took ${densityTime.toFixed(2)}ms`)
     } else {
+      const violinStart = performance.now()
       this.drawViolinPlot(this.rangeSliderData.values)
+      const violinTime = performance.now() - violinStart
+      console.log(`🚀 [PERF] drawViolinPlot took ${violinTime.toFixed(2)}ms`)
     }
+    
+    const totalTime = performance.now() - startTime
+    console.log(`🚀 [PERF] updatePlot completed in ${totalTime.toFixed(2)}ms`)
   }
   
   // Reset range slider to full range
@@ -8779,19 +8891,15 @@ export default class extends Controller {
   
   // Handle range slider drag movement
   handleRangeSliderDrag(event) {
-    console.log('🎚️ handleRangeSliderDrag called', event.type)
-    
     if (!this.rangeSliderDragState || !this.rangeSliderDragState.isDragging) {
-      console.log('🎚️ Not dragging or no drag state')
       return
     }
     
+    const dragStartTime = performance.now()
     event.preventDefault()
     
     const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
     const deltaX = currentX - this.rangeSliderDragState.startX
-    
-    console.log('🎚️ Mouse movement - deltaX:', deltaX)
     
     const slider = document.getElementById('range-slider-modal')
     const rect = slider.getBoundingClientRect()
@@ -8804,8 +8912,6 @@ export default class extends Controller {
     let newValue = this.rangeSliderDragState.startValue + deltaValue
     newValue = Math.max(min, Math.min(max, newValue))
     
-    console.log('🎚️ New value calculated:', newValue)
-    
     if (this.rangeSliderDragState.handleType === 'min') {
       newValue = Math.min(newValue, this.rangeSliderData.currentMax)
       this.rangeSliderData.currentMin = newValue
@@ -8816,8 +8922,28 @@ export default class extends Controller {
       document.getElementById('range-max-input').value = newValue.toFixed(3)
     }
     
+    const handleUpdateStart = performance.now()
     this.updateRangeSliderHandles()
-    this.updatePlot()
+    const handleUpdateTime = performance.now() - handleUpdateStart
+    console.log(`🚀 [PERF] updateRangeSliderHandles took ${handleUpdateTime.toFixed(2)}ms`)
+    
+    // Throttle plot updates during dragging for better performance
+    if (!this.rangeSliderUpdateScheduled) {
+      this.rangeSliderUpdateScheduled = true
+      requestAnimationFrame(() => {
+        this.rangeSliderUpdateScheduled = false
+        console.log('🚀 [PERF] Scheduled modal range slider plot update')
+        const plotUpdateStart = performance.now()
+        this.updatePlot()
+        const plotUpdateTime = performance.now() - plotUpdateStart
+        console.log(`🚀 [PERF] Modal range slider updatePlot took ${plotUpdateTime.toFixed(2)}ms`)
+      })
+    } else {
+      console.log('🚀 [PERF] Throttled modal range slider plot update (already scheduled)')
+    }
+    
+    const totalDragTime = performance.now() - dragStartTime
+    console.log(`🚀 [PERF] Modal range slider handleRangeSliderDrag completed in ${totalDragTime.toFixed(2)}ms`)
   }
   
   // Stop range slider drag
@@ -8839,6 +8965,9 @@ export default class extends Controller {
     
     // Reset cursor
     document.body.style.cursor = ''
+    
+    // Ensure final update is performed when dragging stops
+    this.updatePlot()
   }
 
 }

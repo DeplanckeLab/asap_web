@@ -217,7 +217,7 @@
                        data-range-slider-current-max-value="1"
                        style="margin-bottom: 12px;">
                     
-                    <!-- Min Value, Slider, Max Value on Same Line -->
+                    <!-- Min Value, Slider, Max Value, and Palette Button on Same Line -->
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                       <!-- Min Value -->
                       <input data-range-slider-target="minInput" type="number" class="range-min-input" 
@@ -240,6 +240,16 @@
                       <input data-range-slider-target="maxInput" type="number" class="range-max-input" 
                              style="width: 60px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; text-align: center;"
                              data-action="change->range-slider#maxInputChanged">
+                      
+                      <!-- Color Range Adaptation Button -->
+                      <button data-range-slider-target="adaptColorRangeButton"
+                              data-action="click->range-slider#adaptColorRangeChanged"
+                              style="padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; background-color: #f9fafb; color: #6b7280; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center;"
+                              title="Adapt color range to selected range - When enabled, the color legend will adjust to show the full range of selected values"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af';"
+                              onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db';">
+                        <i class="fas fa-palette" style="font-size: 14px;"></i>
+                      </button>
                     </div>
                     
                     <!-- Selected Cells Count -->

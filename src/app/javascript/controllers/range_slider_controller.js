@@ -4,7 +4,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas"]
+  static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas", "adaptColorRangeButton"]
   static values = { 
     metadataId: String,
     min: Number,
@@ -28,9 +28,21 @@ export default class extends Controller {
     this.dragStartX = 0
     this.dragStartValue = 0
     
+    // Performance optimization: throttling for plot updates
+    this.plotUpdateScheduled = false
+    this.lastPlotUpdate = 0
+    this.plotUpdateThrottle = 16 // ~60fps (16ms)
+    this.dragUpdateScheduled = false
+    
+    // Color range adaptation button state
+    this.adaptColorRangeEnabled = false
+    
     // Get the main visualization controller
     this.visualizationController = window.visualizationController
     console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
+    
+    // Initialize button appearance
+    this.updateButtonAppearance()
     
     // Don't initialize immediately - wait for values to be set by the main controller
     console.log('🎚️ Range slider controller ready, waiting for initialization')
@@ -98,6 +110,7 @@ export default class extends Controller {
   handleDrag(event) {
     if (!this.isDragging) return
     
+    const dragStartTime = performance.now()
     event.preventDefault()
     
     const currentX = event.type === 'mousemove' ? event.clientX : event.touches[0].clientX
@@ -126,11 +139,28 @@ export default class extends Controller {
       this.currentMaxValue = newValue
     }
     
-    // Update UI and trigger callbacks
+    // Update UI immediately for responsive feel
+    const uiStartTime = performance.now()
     this.updateSliderUI()
     this.updateSelectedCellsCount()
-    this.updateMainPlot()
-    this.drawDensityPlot()
+    const uiTime = performance.now() - uiStartTime
+    console.log(`🚀 [PERF] UI update took ${uiTime.toFixed(2)}ms`)
+    
+    // Throttle expensive operations during dragging
+    if (!this.dragUpdateScheduled) {
+      this.dragUpdateScheduled = true
+      requestAnimationFrame(() => {
+        this.dragUpdateScheduled = false
+        console.log('🚀 [PERF] Scheduled expensive operations for metadata:', this.metadataIdValue)
+        this.updateMainPlot()
+        this.drawDensityPlot()
+      })
+    } else {
+      console.log('🚀 [PERF] Throttled expensive operations (already scheduled)')
+    }
+    
+    const totalDragTime = performance.now() - dragStartTime
+    console.log(`🚀 [PERF] handleDrag completed in ${totalDragTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
 
   // Stop dragging
@@ -145,6 +175,10 @@ export default class extends Controller {
     document.removeEventListener('mouseup', this.stopDrag.bind(this))
     document.removeEventListener('touchmove', this.handleDrag.bind(this))
     document.removeEventListener('touchend', this.stopDrag.bind(this))
+    
+    // Ensure final update is performed when dragging stops
+    this.updateMainPlot()
+    this.drawDensityPlot()
     
     console.log('🎚️ Drag stopped')
   }
@@ -213,18 +247,71 @@ export default class extends Controller {
     }
   }
 
-  // Update the main plot with the new range
+  // Update the main plot with the new range (throttled for performance)
   updateMainPlot() {
     if (!this.visualizationController) return
     
+    const startTime = performance.now()
+    const now = Date.now()
+    
+    // If we're dragging, throttle the updates to improve performance
+    if (this.isDragging) {
+      if (now - this.lastPlotUpdate < this.plotUpdateThrottle) {
+        // Schedule an update if one isn't already scheduled
+        if (!this.plotUpdateScheduled) {
+          this.plotUpdateScheduled = true
+          requestAnimationFrame(() => {
+            this.plotUpdateScheduled = false
+            console.log('🚀 [PERF] Scheduled plot update for metadata:', this.metadataIdValue)
+            this.performPlotUpdate()
+          })
+        }
+        console.log('🚀 [PERF] Throttled plot update (too soon), metadata:', this.metadataIdValue)
+        return
+      }
+    }
+    
+    console.log('🚀 [PERF] Starting plot update for metadata:', this.metadataIdValue)
+    this.performPlotUpdate()
+    this.lastPlotUpdate = now
+    
+    const endTime = performance.now()
+    console.log(`🚀 [PERF] updateMainPlot completed in ${(endTime - startTime).toFixed(2)}ms for metadata:`, this.metadataIdValue)
+  }
+  
+  // Perform the actual plot update (separated for throttling)
+  performPlotUpdate() {
+    if (!this.visualizationController) return
+    
+    const startTime = performance.now()
+    console.log('🚀 [PERF] performPlotUpdate started for metadata:', this.metadataIdValue)
+    
     // Update the color range in the main visualization
+    const colorRangeStart = performance.now()
     if (this.visualizationController.updateColorRange) {
+      // Check if we should adapt the color range to the selected range
+      const shouldAdaptColorRange = this.adaptColorRangeEnabled
+      
+      if (shouldAdaptColorRange) {
+        // Full color range adaptation - use the full rendering approach
+        console.log('🎨 Adapting color range to selected range')
+        this.visualizationController.visibilityOnlyUpdate = false // Force full render
+      } else {
+        // Fast path - just visibility updates
+        if (typeof this.visualizationController.visibilityOnlyUpdate === 'boolean') {
+          this.visualizationController.visibilityOnlyUpdate = true
+        }
+      }
+      
       this.visualizationController.updateColorRange(
         this.metadataIdValue, 
         this.currentMinValue, 
-        this.currentMaxValue
+        this.currentMaxValue,
+        shouldAdaptColorRange
       )
     }
+    const colorRangeTime = performance.now() - colorRangeStart
+    console.log(`🚀 [PERF] updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
     
     // Check if we're showing the full range (no filtering needed)
     const isFullRange = this.currentMinValue <= this.minValue && this.currentMaxValue >= this.maxValue
@@ -243,22 +330,34 @@ export default class extends Controller {
         min: this.currentMinValue,
         max: this.currentMaxValue
       }
-      console.log('🎚️ Stored range in selectedRanges:', {
-        metadataId: this.metadataIdValue,
-        range: this.visualizationController.selectedRanges[this.metadataIdValue],
-        allSelectedRanges: this.visualizationController.selectedRanges
-      })
     }
     
     // Clear the filter cache and trigger a re-render with unified filtering
+    const cacheClearStart = performance.now()
     if (this.visualizationController.filterCache) {
       this.visualizationController.filterCache.clear()
     }
+    const cacheClearTime = performance.now() - cacheClearStart
+    console.log(`🚀 [PERF] filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
     // Re-render with unified filtering
+    const renderStart = performance.now()
     if (this.visualizationController.renderPointsWithCurrentColoring) {
       this.visualizationController.renderPointsWithCurrentColoring()
     }
+    const renderTime = performance.now() - renderStart
+    console.log(`🚀 [PERF] renderPointsWithCurrentColoring took ${renderTime.toFixed(2)}ms`)
+    
+    // Update the color legend after rendering
+    const legendStart = performance.now()
+    if (this.visualizationController.renderContinuousColorLegend) {
+      this.visualizationController.renderContinuousColorLegend()
+    }
+    const legendTime = performance.now() - legendStart
+    console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
+    
+    const totalTime = performance.now() - startTime
+    console.log(`🚀 [PERF] performPlotUpdate completed in ${totalTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
 
   // Draw the density plot
@@ -358,5 +457,86 @@ export default class extends Controller {
     this.updateSelectedCellsCount()
     this.updateMainPlot()
     this.drawDensityPlot()
+  }
+
+  // Handle color range adaptation button click
+  adaptColorRangeChanged() {
+    console.log('🎨 adaptColorRangeChanged method called!')
+    console.log('🎨 Has button target:', this.hasAdaptColorRangeButtonTarget)
+    
+    if (!this.hasAdaptColorRangeButtonTarget) {
+      console.error('🎨 Button target not found!')
+      return
+    }
+    
+    // Toggle the state
+    this.adaptColorRangeEnabled = !this.adaptColorRangeEnabled
+    console.log('🎨 Color range adaptation changed:', this.adaptColorRangeEnabled ? 'enabled' : 'disabled')
+    console.log('🎨 Current range:', { min: this.currentMinValue, max: this.currentMaxValue })
+    
+    // Update button appearance
+    this.updateButtonAppearance()
+    
+    if (!this.visualizationController) {
+      console.error('🎨 Visualization controller not found!')
+      return
+    }
+    
+    // Force a full re-render to update colors and legend
+    this.visualizationController.visibilityOnlyUpdate = false
+    
+    // Update the color range with the new setting
+    this.visualizationController.updateColorRange(
+      this.metadataIdValue, 
+      this.currentMinValue, 
+      this.currentMaxValue,
+      this.adaptColorRangeEnabled
+    )
+    
+    // Trigger a full re-render of the plot and legend
+    if (this.visualizationController.renderPointsWithCurrentColoring) {
+      console.log('🎨 Triggering full plot re-render...')
+      this.visualizationController.renderPointsWithCurrentColoring()
+    }
+    
+    if (this.visualizationController.renderContinuousColorLegend) {
+      console.log('🎨 Triggering legend re-render...')
+      this.visualizationController.renderContinuousColorLegend()
+    }
+    
+    console.log('🎨 Button click handling completed!')
+  }
+
+  // Update button appearance based on state
+  updateButtonAppearance() {
+    if (!this.hasAdaptColorRangeButtonTarget) {
+      console.log('🎨 Button target not found for appearance update')
+      return
+    }
+    
+    const button = this.adaptColorRangeButtonTarget
+    console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled)
+    
+    if (this.adaptColorRangeEnabled) {
+      // Active state - green colors
+      console.log('🎨 Setting green colors for active state')
+      button.style.backgroundColor = '#f0fdf4'
+      button.style.borderColor = '#86efac'
+      button.style.color = '#16a34a'
+      button.title = 'Color range adapted to selected range - Click to use full data range'
+    } else {
+      // Inactive state - grey colors
+      console.log('🎨 Setting grey colors for inactive state')
+      button.style.backgroundColor = '#f9fafb'
+      button.style.borderColor = '#d1d5db'
+      button.style.color = '#6b7280'
+      button.title = 'Adapt color range to selected range - When enabled, the color legend will adjust to show the full range of selected values'
+    }
+    
+    console.log('🎨 Button appearance updated:', {
+      backgroundColor: button.style.backgroundColor,
+      borderColor: button.style.borderColor,
+      color: button.style.color
+    })
   }
 }

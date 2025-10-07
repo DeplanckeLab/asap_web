@@ -2617,6 +2617,9 @@ export default class extends Controller {
         controller.currentMaxValue = maxVal
         controller.initializeSlider()
         console.log('🎚️ Range slider controller initialized successfully')
+        
+        // Draw the initial histogram
+        controller.drawDensityPlot()
       } else {
         console.error('❌ Range slider controller not found for element:', rangeSliderElement)
       }
@@ -2887,35 +2890,64 @@ export default class extends Controller {
   async toggleMetadata(event) {
     const headerElement = event.currentTarget
     const chevron = headerElement.querySelector('svg')
-    const categoriesDiv = headerElement.nextElementSibling
+    const nextSibling = headerElement.nextElementSibling
     const radioInput = headerElement.querySelector('input[type="radio"]')
     
-    if (!chevron || !categoriesDiv || !radioInput) {
+    if (!chevron || !nextSibling || !radioInput) {
       console.error('Required elements not found')
       return
     }
+    
+    // Check if this is continuous metadata (has range section) or categorical metadata (has categories)
+    const isContinuousMetadata = nextSibling.classList.contains('metadata-range-section')
+    const categoriesDiv = isContinuousMetadata ? null : nextSibling
+    const rangeSection = isContinuousMetadata ? nextSibling : null
     
     // Toggle the chevron rotation
     const isExpanding = chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)'
     
     if (isExpanding) {
       chevron.style.transform = 'rotate(90deg)'
-      categoriesDiv.style.display = 'block'
       
-      // Load metadata vector when expanding categories (for future coloring)
-      const metadataItem = headerElement.closest('[data-metadata-item]')
-      if (metadataItem) {
-        const metadataId = metadataItem.dataset.metadataItem
-        //console.log(`Loading metadata vector for ${metadataId} on category expansion`)
+      if (isContinuousMetadata) {
+        // Handle continuous metadata - show range section
+        rangeSection.style.display = 'block'
         
-        // Load silently in background (no spinner for category expansion)
-        this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-          //console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
-        })
+        // Get metadata info and initialize the range slider
+        const metadataItem = headerElement.closest('[data-metadata-item]')
+        if (metadataItem) {
+          const metadataId = metadataItem.dataset.metadataItem
+          const metadataName = headerElement.querySelector('[data-metadata-name]')?.dataset.metadataName || 'Unknown'
+          
+          console.log('🎚️ Expanding continuous metadata:', metadataId, metadataName)
+          
+          // Initialize the inline range slider
+          this.toggleInlineRangeSlider(metadataId, metadataName)
+        }
+      } else {
+        // Handle categorical metadata - show categories
+        categoriesDiv.style.display = 'block'
+        
+        // Load metadata vector when expanding categories (for future coloring)
+        const metadataItem = headerElement.closest('[data-metadata-item]')
+        if (metadataItem) {
+          const metadataId = metadataItem.dataset.metadataItem
+          //console.log(`Loading metadata vector for ${metadataId} on category expansion`)
+          
+          // Load silently in background (no spinner for category expansion)
+          this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+            //console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+          })
+        }
       }
     } else {
       chevron.style.transform = 'rotate(0deg)'
-      categoriesDiv.style.display = 'none'
+      
+      if (isContinuousMetadata) {
+        rangeSection.style.display = 'none'
+      } else {
+        categoriesDiv.style.display = 'none'
+      }
     }
     
     // Select this metadata option
@@ -8071,7 +8103,7 @@ export default class extends Controller {
     }
     
     const rangeSection = metadataCard.querySelector('.metadata-range-section')
-    const chevron = metadataCard.querySelector('.metadata-chevron i')
+    const chevron = metadataCard.querySelector('svg')
     
     if (!rangeSection || !chevron) {
       console.error('❌ Range section or chevron not found')
@@ -8080,24 +8112,13 @@ export default class extends Controller {
       return
     }
     
-    const isVisible = rangeSection.style.display !== 'none'
-    console.log('🎚️ Range section currently visible:', isVisible)
+    // Since toggleMetadata already handles visibility, we just need to initialize the range slider
+    console.log('🎚️ Initializing inline range slider data...')
     
-    if (isVisible) {
-      // Hide the range section
-      rangeSection.style.display = 'none'
-      chevron.style.transform = 'rotate(0deg)'
-      console.log('🎚️ Range section hidden')
-    } else {
-      // Show the range section
-      rangeSection.style.display = 'block'
-      chevron.style.transform = 'rotate(90deg)'
-      console.log('🎚️ Range section shown')
-      
-      // Wait a bit for the DOM to update, then load and initialize the range slider data
-      setTimeout(() => {
-        console.log('🎚️ Loading metadata for inline range slider...')
-        this.loadSingleMetadataVector(metadataId).then(vectorData => {
+    // Wait a bit for the DOM to update, then load and initialize the range slider data
+    setTimeout(() => {
+      console.log('🎚️ Loading metadata for inline range slider...')
+      this.loadSingleMetadataVector(metadataId).then(vectorData => {
         console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
         if (!vectorData) {
           console.error('❌ No vector data loaded for inline range slider')
@@ -8128,11 +8149,10 @@ export default class extends Controller {
         this.loadAndVisualizeMetadataVector(metadataId)
         
         console.log('🎚️ Inline range slider fully initialized and ready for interaction')
-        }).catch(error => {
-          console.error('❌ Error loading metadata for inline range slider:', error)
-        })
-      }, 100) // Wait 100ms for DOM to update
-    }
+      }).catch(error => {
+        console.error('❌ Error loading metadata for inline range slider:', error)
+      })
+    }, 100) // Wait 100ms for DOM to update
   }
 
   // Update inline range slider UI

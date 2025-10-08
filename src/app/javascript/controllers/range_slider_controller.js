@@ -53,6 +53,26 @@ export default class extends Controller {
     this.stopDrag()
   }
 
+  // Helper methods for safely calculating min/max on large arrays
+  // Using spread operator with Math.min/max fails with arrays > ~65k-100k elements
+  safeMin(arr) {
+    if (!arr || arr.length === 0) return undefined
+    let min = arr[0]
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] < min) min = arr[i]
+    }
+    return min
+  }
+  
+  safeMax(arr) {
+    if (!arr || arr.length === 0) return undefined
+    let max = arr[0]
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] > max) max = arr[i]
+    }
+    return max
+  }
+
   // Initialize the slider with data
   initializeSlider() {
     console.log('🎚️ Initializing range slider with values:', {
@@ -405,7 +425,7 @@ export default class extends Controller {
       bins[binIndex]++
     })
     
-    const maxCount = Math.max(...bins)
+    const maxCount = this.safeMax(bins)
     const barWidth = plotWidth / numBins
     
     // Store bin data for hover tooltip

@@ -170,6 +170,26 @@ export default class extends Controller {
     }
   }
   
+  // Helper methods for safely calculating min/max on large arrays
+  // Using spread operator with Math.min/max fails with arrays > ~65k-100k elements
+  safeMin(arr) {
+    if (!arr || arr.length === 0) return undefined
+    let min = arr[0]
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] < min) min = arr[i]
+    }
+    return min
+  }
+  
+  safeMax(arr) {
+    if (!arr || arr.length === 0) return undefined
+    let max = arr[0]
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] > max) max = arr[i]
+    }
+    return max
+  }
+  
   testAction() {
     alert('Stimulus controller is working!')
   }
@@ -1307,13 +1327,24 @@ export default class extends Controller {
     
     // Log coordinate statistics
     if (coordinates.length > 0) {
-      const xValues = coordinates.map(coord => coord[0])
-      const yValues = coordinates.map(coord => coord[1])
+      // For large arrays, we can't use spread operator with Math.min/max
+      // Find min/max by iterating
+      let xMin = coordinates[0][0], xMax = coordinates[0][0]
+      let yMin = coordinates[0][1], yMax = coordinates[0][1]
+      
+      for (let i = 1; i < coordinates.length; i++) {
+        const x = coordinates[i][0]
+        const y = coordinates[i][1]
+        if (x < xMin) xMin = x
+        if (x > xMax) xMax = x
+        if (y < yMin) yMin = y
+        if (y > yMax) yMax = y
+      }
       
       console.log('Decompressed coordinate statistics:', {
         totalPairs: coordinates.length,
-        xRange: [Math.min(...xValues), Math.max(...xValues)],
-        yRange: [Math.min(...yValues), Math.max(...yValues)],
+        xRange: [xMin, xMax],
+        yRange: [yMin, yMax],
         first5: coordinates.slice(0, 5),
         last5: coordinates.slice(-5)
       })
@@ -1575,7 +1606,7 @@ export default class extends Controller {
     /*console.log(`Decompressed ${cell_count} continuous values:`, {
       first10: numericValues.slice(0, 10),
       range: `${numericValues[0]?.toFixed(3)} to ${numericValues[cell_count-1]?.toFixed(3)}`,
-      actualRange: `${Math.min(...numericValues).toFixed(3)} to ${Math.max(...numericValues).toFixed(3)}`
+      actualRange: `${this.safeMin(numericValues).toFixed(3)} to ${this.safeMax(numericValues).toFixed(3)}`
     })*/
     
     return numericValues
@@ -1629,8 +1660,8 @@ export default class extends Controller {
         if (vectorData.values && Array.isArray(vectorData.values)) {
           const numericValues = vectorData.values.filter(v => typeof v === 'number' && !isNaN(v))
           if (numericValues.length > 0) {
-            const minVal = Math.min(...numericValues)
-            const maxVal = Math.max(...numericValues)
+            const minVal = this.safeMin(numericValues)
+            const maxVal = this.safeMax(numericValues)
             vectorData.compression_info = {
               min_val: minVal,
               max_val: maxVal,
@@ -2289,7 +2320,7 @@ export default class extends Controller {
   colorPointsContinuous(values, compressionInfo) {
     /*console.log('Coloring points for continuous metadata:', {
       range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
-      actualRange: `${Math.min(...values).toFixed(3)} to ${Math.max(...values).toFixed(3)}`
+      actualRange: `${this.safeMin(values).toFixed(3)} to ${this.safeMax(values).toFixed(3)}`
     })*/
     
     const minVal = compressionInfo.min_val
@@ -2714,8 +2745,8 @@ export default class extends Controller {
       return
     }
     
-    const minVal = Math.min(...values)
-    const maxVal = Math.max(...values)
+    const minVal = this.safeMin(values)
+    const maxVal = this.safeMax(values)
     
     console.log('🎚️ Calculated min/max values:', { minVal, maxVal, valuesLength: values.length })
     
@@ -7979,8 +8010,8 @@ export default class extends Controller {
       const metadataVector = this.getMetadataVectorById(metadataId)
       if (metadataVector && metadataVector.values) {
         const values = metadataVector.values
-        const minVal = Math.min(...values)
-        const maxVal = Math.max(...values)
+        const minVal = this.safeMin(values)
+        const maxVal = this.safeMax(values)
         const isFullRange = range.min <= minVal && range.max >= maxVal
         return !isFullRange // Only include if range is not full
       }
@@ -8283,8 +8314,8 @@ export default class extends Controller {
         
         // Apply the metadata coloring to the main visualization
         console.log('🎚️ Applying metadata coloring to main visualization...')
-        const minVal = Math.min(...values)
-        const maxVal = Math.max(...values)
+        const minVal = this.safeMin(values)
+        const maxVal = this.safeMax(values)
         this.setColorRange(minVal, maxVal)
         this.loadAndVisualizeMetadataVector(metadataId)
         
@@ -8370,10 +8401,10 @@ export default class extends Controller {
       }
       
       // Calculate data range
-      console.log('🎚️ Values loaded:', values.length, 'values, range:', Math.min(...values), 'to', Math.max(...values))
+      //console.log('🎚️ Values loaded:', values.length, 'values, range:', this.safeMin(values), 'to', this.safeMax(values))
       
-      const minVal = Math.min(...values)
-      const maxVal = Math.max(...values)
+      const minVal = this.safeMin(values)
+      const maxVal = this.safeMax(values)
       
       // Update modal content
       document.getElementById('range-slider-metadata-name').textContent = metadataName
@@ -8384,25 +8415,25 @@ export default class extends Controller {
       
       // Show modal
       const modal = document.getElementById('range-slider-modal')
-      console.log('🎚️ Modal element found:', modal)
+      //console.log('🎚️ Modal element found:', modal)
       if (modal) {
         modal.style.display = 'flex'
-        console.log('🎚️ Modal display set to flex')
+        //console.log('🎚️ Modal display set to flex')
         
         // Check computed styles
         const computedStyle = window.getComputedStyle(modal)
-        console.log('🎚️ Modal computed styles:', {
+        /*console.log('🎚️ Modal computed styles:', {
           display: computedStyle.display,
           visibility: computedStyle.visibility,
           opacity: computedStyle.opacity,
           zIndex: computedStyle.zIndex,
           position: computedStyle.position
-        })
+        })*/
         
         // Check if modal is actually visible
-        console.log('🎚️ Modal offsetParent:', modal.offsetParent)
-        console.log('🎚️ Modal clientWidth:', modal.clientWidth)
-        console.log('🎚️ Modal clientHeight:', modal.clientHeight)
+        //console.log('🎚️ Modal offsetParent:', modal.offsetParent)
+        //console.log('🎚️ Modal clientWidth:', modal.clientWidth)
+        //console.log('🎚️ Modal clientHeight:', modal.clientHeight)
       } else {
         console.error('❌ Range slider modal not found!')
       }
@@ -8411,7 +8442,7 @@ export default class extends Controller {
       this.setupRangeSliderEventListeners()
       
       // Automatically apply the full range to show the visualization
-      console.log('🎚️ Applying full range to visualization...')
+      //console.log('🎚️ Applying full range to visualization...')
       this.setColorRange(minVal, maxVal)
       this.loadAndVisualizeMetadataVector(metadataId)
       
@@ -8423,7 +8454,7 @@ export default class extends Controller {
   
   // Initialize modal range slider with data
   initializeModalRangeSlider(minVal, maxVal, values) {
-    console.log('🎚️ Initializing range slider with:', { minVal, maxVal, valuesLength: values.length })
+    //console.log('🎚️ Initializing range slider with:', { minVal, maxVal, valuesLength: values.length })
     
     this.rangeSliderData = {
       min: minVal,
@@ -8436,8 +8467,8 @@ export default class extends Controller {
     // Store globally as fallback in case controller data gets cleared
     window.globalRangeSliderData = this.rangeSliderData
     
-    console.log('🎚️ rangeSliderData set:', this.rangeSliderData)
-    console.log('🎚️ Global fallback also set:', window.globalRangeSliderData)
+    //console.log('🎚️ rangeSliderData set:', this.rangeSliderData)
+    //console.log('🎚️ Global fallback also set:', window.globalRangeSliderData)
     
     // Update input fields
     document.getElementById('range-min-input').value = minVal.toFixed(3)
@@ -8613,7 +8644,7 @@ export default class extends Controller {
       histogram[binIndex]++
     }
     
-    const maxCount = Math.max(...histogram)
+    const maxCount = this.safeMax(histogram)
     
     // Draw histogram
     ctx.fillStyle = '#3b82f6'

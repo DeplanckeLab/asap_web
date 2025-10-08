@@ -303,11 +303,10 @@
             <option value="">Select metadata...</option>
             <% if @h_metadata[@default_loom_file] && @h_metadata[@default_loom_file]['cell'] && @h_metadata[@default_loom_file]['cell']['NUMERIC'] %>
               <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| 
-                   metadata.nber_rows && metadata.nber_rows >= 2 && metadata.nber_rows <= 50 && 
-                   metadata.nber_cols && metadata.nber_cols == @project.nber_cols 
+                   metadata.nber_rows && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
                  }.each do |metadata| %>
                 <option value="<%= metadata.id %>">
-                  <%= metadata.display_name %> (<%= metadata.nber_rows %> rows)
+                  <%= metadata.display_name %> (<%= metadata.nber_rows %>D)
                 </option>
               <% end %>
             <% end %>

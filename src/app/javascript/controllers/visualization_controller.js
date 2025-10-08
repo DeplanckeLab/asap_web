@@ -926,7 +926,7 @@ export default class extends Controller {
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
     //console.log('Creating animated points from previous to new coordinates')
     const pointSize = this.currentPointSize // Use current point size setting
-    const animationDuration = 4000 // 4 seconds for very smooth transition
+    const animationDuration = 1000 // 1 second for faster transitions
     
     //console.log('Creating animated points with current coloring scheme')
     
@@ -1389,6 +1389,15 @@ export default class extends Controller {
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
       if (vectorData) {
+        // Parse compression_info if it's a JSON string
+        if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
+          try {
+            vectorData.compression_info = JSON.parse(vectorData.compression_info)
+          } catch (e) {
+            console.error('Failed to parse compression_info:', e)
+          }
+        }
+        
         this.loadedMetadataVectors[metadataId] = vectorData
         this.metadataVectorsLoomFile = data.loom_file
         
@@ -1433,6 +1442,15 @@ export default class extends Controller {
   decompressDiscreteMetadataVector(binaryData, compressionInfo) {
     //console.log('Decompressing discrete metadata vector:', compressionInfo)
     //console.log('Binary data type:', typeof binaryData, 'Binary data:', binaryData)
+    
+    // Handle optimized case: single category (no data needed)
+    if (compressionInfo.single_category) {
+      const { categories, category_index, length } = compressionInfo
+      const categoryValue = categories[category_index] || 'Unknown'
+      const categoryValues = new Array(length).fill(categoryValue)
+      console.log(`Optimized single-category metadata: ${length} cells, all "${categoryValue}"`)
+      return categoryValues
+    }
     
     // Check if binaryData is valid
     if (!binaryData) {
@@ -1577,12 +1595,24 @@ export default class extends Controller {
     }
     
     // Validate the loaded data - handle both compressed and uncompressed data
+    // Parse compression_info if it's a JSON string
+    if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
+      try {
+        vectorData.compression_info = JSON.parse(vectorData.compression_info)
+      } catch (e) {
+        console.error('Failed to parse compression_info:', e)
+      }
+    }
+    
     // Check if compression_info is a valid object (not an error string)
     const isValidCompressionInfo = vectorData.compression_info && 
                                   typeof vectorData.compression_info === 'object' && 
                                   !vectorData.compression_info.toString().includes('Unknown data type')
     
-    let hasCompressedData = vectorData.compressed_data && isValidCompressionInfo
+    // Handle single-category optimization (compressed_data can be null)
+    const isSingleCategory = isValidCompressionInfo && vectorData.compression_info.single_category
+    
+    let hasCompressedData = (vectorData.compressed_data || isSingleCategory) && isValidCompressionInfo
     let hasUncompressedData = vectorData.values && vectorData.data_type
     
     if (!hasCompressedData && !hasUncompressedData) {
@@ -1627,7 +1657,8 @@ export default class extends Controller {
         const retryIsValidCompressionInfo = vectorData.compression_info && 
                                            typeof vectorData.compression_info === 'object' && 
                                            !vectorData.compression_info.toString().includes('Unknown data type')
-        hasCompressedData = vectorData.compressed_data && retryIsValidCompressionInfo
+        const retryIsSingleCategory = retryIsValidCompressionInfo && vectorData.compression_info.single_category
+        hasCompressedData = (vectorData.compressed_data || retryIsSingleCategory) && retryIsValidCompressionInfo
         hasUncompressedData = vectorData.values && vectorData.data_type
       }
     }
@@ -1835,6 +1866,15 @@ export default class extends Controller {
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
       if (vectorData) {
+        // Parse compression_info if it's a JSON string
+        if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
+          try {
+            vectorData.compression_info = JSON.parse(vectorData.compression_info)
+          } catch (e) {
+            console.error('Failed to parse compression_info:', e)
+          }
+        }
+        
         this.loadedMetadataVectors[metadataId] = vectorData
         this.metadataVectorsLoomFile = data.loom_file
         

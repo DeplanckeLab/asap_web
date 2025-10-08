@@ -127,7 +127,22 @@ export class DataManager {
 
   // Decompress discrete metadata vector
   decompressDiscreteMetadataVector(binaryData, compressionInfo) {
-    if (!binaryData || !compressionInfo) return null
+    if (!compressionInfo) return null
+    
+    // Handle optimized case: single category (no data needed)
+    if (compressionInfo.single_category) {
+      const { categories, category_index, length } = compressionInfo
+      const categoryValue = categories[category_index] || 'Unknown'
+      const values = new Array(length).fill(categoryValue)
+      console.log(`Optimized single-category metadata: ${length} cells, all "${categoryValue}"`)
+      return {
+        values: values,
+        categories: categories,
+        data_type: 'DISCRETE'
+      }
+    }
+    
+    if (!binaryData) return null
 
     try {
       // Convert ArrayBuffer to Uint8Array

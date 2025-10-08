@@ -61,19 +61,28 @@ class ProjectsController < ApplicationController
     @view_type = params[:view] || 'visualization'
     
     # Get available loom files and metadata for the project
-    @available_loom_files = Annot.available_loom_files(@project.id)
+    all_loom_files = Annot.available_loom_files(@project.id)
     available_metadata = Annot.available_metadata(@project.id)
     
     @h_metadata = organize_metadata(available_metadata)
 
+    # Filter loom files to only include those with 2D/3D visualizations (UMAP/tSNE with 2 or 3 rows)
+    @available_loom_files = all_loom_files.select do |filepath|
+      @h_metadata[filepath] && 
+      @h_metadata[filepath]['cell'] && 
+      @h_metadata[filepath]['cell']['NUMERIC'] &&
+      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2 || m.nber_rows == 3) }
+    end
+    
     # Get all embeddings for all loom files
     #@all_embeddings_by_loom = {}
     #@available_loom_files.each do |filepath|
     #  @all_embeddings_by_loom[filepath] = Annot.available_embeddings_for_loom(@project.id, filepath)
     #end
     
-    # Get default embeddings (for the first loom file that has embeddings)
-    @default_loom_file = 'parsing/output.loom'
+    # Get default loom file - use the first loom file with visualizations
+    @default_loom_file = @available_loom_files.first || all_loom_files.first || 'parsing/output.loom'
+    
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 
     # Variables for summary view
@@ -332,7 +341,6 @@ class ProjectsController < ApplicationController
   # GET /projects/1/metadata_coordinates.json
   def metadata_coordinates
     metadata_id = params[:metadata_id]
-    loom_file = params[:loom_file] || @default_loom_file
     
     # Find the metadata annotation
     metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
@@ -341,6 +349,9 @@ class ProjectsController < ApplicationController
       render json: { error: 'Metadata not found' }, status: 404
       return
     end
+    
+    # Use the metadata's own filepath to find the correct loom file
+    loom_file = params[:loom_file] || metadata.filepath
     
     # Get the full path to the loom file
     loom_path = @project_dir + loom_file
@@ -393,18 +404,20 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/metadata_vectors.json
   def metadata_vectors
-    loom_file = params[:loom_file] || @default_loom_file
     metadata_ids = params[:metadata_ids]&.split(',') || []
-    
-    # Get the full path to the loom file
-    loom_path = @project_dir + loom_file
     
     begin
       metadata_vectors_data = {}
+      loom_files_used = []
       
       metadata_ids.each do |metadata_id|
         metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
         next unless metadata
+        
+        # Use the metadata's own filepath to find the correct loom file
+        loom_file = params[:loom_file] || metadata.filepath
+        loom_path = @project_dir + loom_file
+        loom_files_used << loom_file unless loom_files_used.include?(loom_file)
         
         Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"
         Rails.logger.info "Metadata path: #{metadata.name}, Data type: #{metadata.data_type.name}"
@@ -439,7 +452,7 @@ class ProjectsController < ApplicationController
       render json: { 
         metadata_vectors: metadata_vectors_data,
         total_loaded: metadata_vectors_data.size,
-        loom_file: loom_file
+        loom_files: loom_files_used
       }
     rescue => e
       Rails.logger.error "Error loading metadata vectors: #{e.message}"
@@ -563,10 +576,19 @@ class ProjectsController < ApplicationController
       unique_indices = indices.uniq.sort
       num_categories = unique_indices.length
       
-      # Handle edge cases
+      # Handle edge case: only 1 category - no data needed, all cells are the same
       if num_categories <= 1
-        Rails.logger.info "Only #{num_categories} unique category(ies) found - no compression needed"
-        return { data: nil, info: "Only #{num_categories} category - no compression needed" }
+        Rails.logger.info "Only #{num_categories} unique category(ies) found - no data needed (all cells same category)"
+        return { 
+          data: nil, 
+          info: {
+            single_category: true,
+            category_index: unique_indices.first || 0,
+            length: indices.length,
+            categories: categories,
+            num_categories: num_categories
+          }.to_json
+        }
       end
       
       # Calculate minimum bits needed

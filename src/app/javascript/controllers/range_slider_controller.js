@@ -246,19 +246,61 @@ export default class extends Controller {
       return
     }
     
-    // Count cells within the selected range
-    const selectedCount = sliderData.values.filter(value => 
-      value >= this.currentMinValue && value <= this.currentMaxValue
-    ).length
+    // Count cells within the selected range (considering ALL filters)
+    let selectedByRangeCount = 0
+    let selectedByAllFiltersCount = 0
+    
+    // Get currently visible cells (after ALL filters)
+    const currentVisibleCells = this.visualizationController?.currentVisibleCells
+    
+    if (currentVisibleCells) {
+      // Convert to Set for O(1) lookups instead of O(n) includes()
+      const visibleSet = new Set(currentVisibleCells)
+      
+      // Count cells that pass both range and other filters
+      for (let i = 0; i < sliderData.values.length; i++) {
+        const value = sliderData.values[i]
+        const inRange = value >= this.currentMinValue && value <= this.currentMaxValue
+        
+        if (inRange) {
+          selectedByRangeCount++
+          // O(1) lookup instead of O(n) includes()
+          if (visibleSet.has(i)) {
+            selectedByAllFiltersCount++
+          }
+        }
+      }
+    } else {
+      // No other filters - just count cells in range
+      selectedByRangeCount = sliderData.values.filter(value => 
+        value >= this.currentMinValue && value <= this.currentMaxValue
+      ).length
+      selectedByAllFiltersCount = selectedByRangeCount
+    }
     
     console.log('🎚️ Updating selected count:', {
-      selectedCount,
+      selectedByRangeCount,
+      selectedByAllFiltersCount,
       currentMin: this.currentMinValue,
       currentMax: this.currentMaxValue,
-      totalValues: sliderData.values.length
+      totalValues: sliderData.values.length,
+      hasOtherFilters: selectedByRangeCount !== selectedByAllFiltersCount
     })
     
-    this.selectedCountTarget.textContent = selectedCount.toLocaleString()
+    // Show count with visual indicator if other filters are active
+    if (selectedByRangeCount > selectedByAllFiltersCount) {
+      // Other filters are reducing the count - show both counts in red
+      this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
+      this.selectedCountTarget.style.color = '#dc2626'
+      this.selectedCountTarget.style.fontWeight = '600'
+      this.selectedCountTarget.title = `${selectedByAllFiltersCount.toLocaleString()} cells (${selectedByRangeCount.toLocaleString()} in range, but ${selectedByRangeCount - selectedByAllFiltersCount} filtered out by other metadata)`
+    } else {
+      // No other filters active
+      this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
+      this.selectedCountTarget.style.color = '#6b7280'
+      this.selectedCountTarget.style.fontWeight = '500'
+      this.selectedCountTarget.title = `${selectedByAllFiltersCount.toLocaleString()} cells selected by range`
+    }
     
     // Update total count if the target exists (for backward compatibility)
     if (this.hasTotalCountTarget) {

@@ -6951,17 +6951,34 @@ export default class extends Controller {
   }
 
 
-  // Update sidebar category counts with visual indicators
-  updateSidebarCategoryCounts() {
-    if (!this.currentMetadataVector || !this.currentMetadataVector.id) {
-      return
-    }
+  // Update all range slider counts to reflect combined filtering
+  updateAllRangeSliderCounts() {
+    // Find all range slider controllers and trigger their count updates
+    const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
+    rangeSliderElements.forEach(element => {
+      // Get the Stimulus controller instance
+      const controller = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+      if (controller && typeof controller.updateSelectedCellsCount === 'function') {
+        controller.updateSelectedCellsCount()
+      }
+    })
+  }
 
-    const metadataId = this.currentMetadataVector.id
-    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+  // Update sidebar category counts with visual indicators for ALL categorical metadata
+  updateSidebarCategoryCounts() {
+    // Update counts for ALL categorical metadata, not just the currently colored one
+    // This is important when continuous metadata is used for coloring
     
-    categoryCheckboxes.forEach(checkbox => {
+    // Find all category checkboxes
+    const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
+    
+    allCategoryCheckboxes.forEach(checkbox => {
+      const metadataId = checkbox.dataset.metadataId
       const category = checkbox.dataset.category
+      
+      // Get the metadata vector for this metadata ID
+      const metadataVector = this.getMetadataVectorById(metadataId)
+      if (!metadataVector || !metadataVector.values) return
       
       // Find the count span - it's the second span in the parent container
       const parentContainer = checkbox.parentElement.parentElement
@@ -6969,11 +6986,28 @@ export default class extends Controller {
       const countSpan = spans[spans.length - 1] // Last span is the count
       
       if (countSpan) {
-        // Get total count from the original data
-        const totalCount = this.getTotalCountForCategory(category)
+        // Get total count for this category in this metadata
+        let totalCount = 0
+        for (let i = 0; i < metadataVector.values.length; i++) {
+          if (metadataVector.values[i] === category) {
+            totalCount++
+          }
+        }
         
-        // Get visible count (current count displayed)
-        const visibleCount = this.getVisibleCountForCategory(category)
+        // Get visible count (considering current filtering from ALL sources)
+        let visibleCount = 0
+        if (this.currentVisibleCells) {
+          // We have filtering active - count only visible cells
+          for (let i = 0; i < this.currentVisibleCells.length; i++) {
+            const cellIndex = this.currentVisibleCells[i]
+            if (metadataVector.values[cellIndex] === category) {
+              visibleCount++
+            }
+          }
+        } else {
+          // No filtering - all cells are visible
+          visibleCount = totalCount
+        }
         
         // Update the count display
         countSpan.textContent = visibleCount.toLocaleString()
@@ -6986,12 +7020,12 @@ export default class extends Controller {
           
           // Add hover tooltip
           const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
-          countSpan.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% selected)`
+          countSpan.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% visible after filtering)`
         } else {
           // No filtering - normal appearance
           countSpan.style.color = '#6b7280'
           countSpan.style.fontWeight = '500'
-          countSpan.title = `${totalCount.toLocaleString()} cells (100% selected)`
+          countSpan.title = `${totalCount.toLocaleString()} cells (100% visible)`
         }
       }
     })
@@ -8988,6 +9022,9 @@ export default class extends Controller {
     
     // Update sidebar category counts with visual indicators
     this.updateSidebarCategoryCounts()
+    
+    // Update all range slider counts to reflect combined filtering
+    this.updateAllRangeSliderCounts()
     
     // Update button state after filtering
     this.updateAddAllVisibleButtonState()

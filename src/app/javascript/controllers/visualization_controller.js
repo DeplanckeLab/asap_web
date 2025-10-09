@@ -2463,10 +2463,7 @@ export default class extends Controller {
     
     // Render category labels if this is discrete metadata, or color legend if continuous
     if (this.currentMetadataVector.data_type === 'DISCRETE') {
-      // Make sure category labels container is visible
-      if (this.categoryLabelsContainer) {
-        this.categoryLabelsContainer.visible = true
-      }
+      // renderCategoryLabels will handle visibility based on checkbox state
       this.renderCategoryLabels()
     } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
       // Hide category labels for numeric metadata
@@ -5306,8 +5303,8 @@ export default class extends Controller {
     } else {
       // Fallback: no sprites to update, need full render
       console.log('🔄 No sprites available, doing full render')
-      this.scatterContainer.removeChildren()
-      this.renderPointsWithCurrentColoring()
+    this.scatterContainer.removeChildren()
+    this.renderPointsWithCurrentColoring()
     }
     
     // Re-render axes and grid with new bounds
@@ -5955,7 +5952,7 @@ export default class extends Controller {
       console.log('🔄 Calling renderPointsWithCurrentColoring (sprites will be reused with zIndex updates)')
       
       // Just re-render with current sprites
-      this.renderPointsWithCurrentColoring()
+        this.renderPointsWithCurrentColoring()
       
       // Re-render category labels after force re-render
       if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
@@ -6272,6 +6269,19 @@ export default class extends Controller {
       return
     }
     
+    // Check if the user wants to see category labels
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
+    
+    console.log(`🏷️ Category labels checkbox state: ${shouldShowLabels}`)
+    
+    // If checkbox is unchecked, hide the container and return early
+    if (!shouldShowLabels) {
+      this.categoryLabelsContainer.visible = false
+      this.categoryLabelsContainer.removeChildren()
+      console.log('🏷️ Category labels hidden by user preference')
+      return
+    }
 
     // Clear existing labels and make container visible
     this.categoryLabelsContainer.removeChildren()
@@ -6314,8 +6324,6 @@ export default class extends Controller {
     // When a category is re-selected, the points become visible and we can calculate centroids then
     
     const centroidEndTime = performance.now()
-
-    this.categoryLabelsContainer.visible = false
 
     // Render labels for each category
     const labelCreationStartTime = performance.now()
@@ -6381,7 +6389,7 @@ export default class extends Controller {
       }
     })
     
-    this.categoryLabelsContainer.visible = true
+    // Note: visibility is already set at the top of this function based on checkbox state
     
     console.log(`🏷️ Labels render complete:`, {
       labelsAdded,

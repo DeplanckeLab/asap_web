@@ -37,6 +37,9 @@ export default class extends Controller {
     // Initialize color range controls for continuous metadata
     this.customColorRange = null // { min: number, max: number } or null for auto
     
+    // Initialize category display order preference
+    this.categoryOrder = 'largest-first' // 'largest-first' or 'smallest-first'
+    
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
     
@@ -1214,7 +1217,8 @@ export default class extends Controller {
       if (data_type === 'DISCRETE') {
         // Cache the color map to avoid recalculating for every point
         if (!this._cachedColorMap) {
-          const sortedCategories = this.getSortedCategories(values, [...compression_info.categories])
+          // Use stable sorting for consistent color assignment
+          const sortedCategories = this.getStableSortedCategories(values, [...compression_info.categories])
           this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
         }
         baseColor = this._cachedColorMap[value] || 0x3b82f6
@@ -1301,7 +1305,7 @@ export default class extends Controller {
     if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'DISCRETE' && this.currentMetadataVector.values) {
       const values = this.currentMetadataVector.values
       
-      // Calculate category frequencies for layering (larger categories first)
+      // Calculate category frequencies for layering
       const categoryFrequencies = {}
       values.forEach(value => {
         categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
@@ -1309,13 +1313,18 @@ export default class extends Controller {
       
       //console.log('Animation: Category frequencies for layering:', categoryFrequencies)
       
-      // Sort point indices by category size (largest categories first, so they render in background)
+      // Sort point indices by category size based on user preference
       sortedIndices = sortedIndices.sort((a, b) => {
         const categoryA = values[a]
         const categoryB = values[b]
         const freqA = categoryFrequencies[categoryA]
         const freqB = categoryFrequencies[categoryB]
-        return freqB - freqA // Descending order (largest first)
+        
+        if (this.categoryOrder === 'smallest-first') {
+          return freqA - freqB // Ascending order (smallest first)
+        } else {
+          return freqB - freqA // Descending order (largest first) - default
+        }
       })
       
       // Debug: Log the first few sorted indices and their categories
@@ -2549,14 +2558,19 @@ export default class extends Controller {
         
         //console.log('Category frequencies for layering:', categoryFrequencies)
         
-        // Sort point indices by category size (largest categories first, so they render in background)
+        // Sort point indices by category size based on user preference
         const sortedPointIndices = Array.from({ length: this.currentCoordinates.length }, (_, i) => i)
           .sort((a, b) => {
             const categoryA = values[a]
             const categoryB = values[b]
             const freqA = categoryFrequencies[categoryA]
             const freqB = categoryFrequencies[categoryB]
-            return freqB - freqA // Descending order (largest first)
+            
+            if (this.categoryOrder === 'smallest-first') {
+              return freqA - freqB // Ascending order (smallest first)
+            } else {
+              return freqB - freqA // Descending order (largest first) - default
+            }
           })
         
         // Debug: Log the first few sorted indices and their categories
@@ -2581,7 +2595,8 @@ export default class extends Controller {
           
           // Pre-calculate discrete color map if needed
           if (!this._cachedColorMap) {
-            const sortedCategories = this.getSortedCategories(values, [...compression_info.categories])
+            // Use stable sorting for consistent color assignment
+            const sortedCategories = this.getStableSortedCategories(values, [...compression_info.categories])
             this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
           }
           const colorMap = this._cachedColorMap
@@ -2648,9 +2663,15 @@ export default class extends Controller {
                 sprite.alpha = hasSelection ? 0.3 : 1.0
               }
               
-              // Update z-order: larger categories = lower zIndex = render first (background)
+              // Update z-order based on user preference
               const freq = categoryFrequencies[category] || 0
-              sprite.zIndex = maxFreq - freq // Invert so large categories have low zIndex
+              if (this.categoryOrder === 'smallest-first') {
+                // Smallest first: small categories in background
+                sprite.zIndex = freq // Small freq = low zIndex = background
+              } else {
+                // Largest first (default): large categories in background
+                sprite.zIndex = maxFreq - freq // Large freq = low zIndex = background
+              }
               
               sprite.visible = !visibleSet || visibleSet.has(i)
             }
@@ -2705,10 +2726,16 @@ export default class extends Controller {
             sprite.cellId = i
             sprite.isPoint = true
             
-            // Set z-order based on category frequency (larger = background)
+            // Set z-order based on user preference
             const category = values[i]
             const freq = categoryFrequencies[category] || 0
-            sprite.zIndex = maxFreq - freq
+            if (this.categoryOrder === 'smallest-first') {
+              // Smallest first: small categories in background
+              sprite.zIndex = freq
+            } else {
+              // Largest first (default): large categories in background
+              sprite.zIndex = maxFreq - freq
+            }
           
           // Store original color for reset functionality
           this.storeOriginalPointColor(i, color)
@@ -3073,7 +3100,7 @@ export default class extends Controller {
   }
 
   // Create color map for discrete categories
-  // Get categories sorted by frequency (largest to smallest) to match HTML legend ordering
+  // Get categories sorted by frequency based on user preference
   getSortedCategories(values, categories) {
     // Calculate category frequencies
     const categoryFrequencies = {}
@@ -3081,11 +3108,33 @@ export default class extends Controller {
       categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
     })
     
-    // Sort categories by frequency (largest to smallest)
+    // Sort categories by frequency based on user preference
     const sorted = categories.sort((a, b) => {
       const freqA = categoryFrequencies[a] || 0
       const freqB = categoryFrequencies[b] || 0
-      return freqB - freqA // Descending order (largest first)
+      
+      if (this.categoryOrder === 'smallest-first') {
+        return freqA - freqB // Ascending order (smallest first)
+      } else {
+        return freqB - freqA // Descending order (largest first) - default
+      }
+    })
+    return sorted
+  }
+
+  // Get categories in a STABLE order for color assignment (always largest-first)
+  // This ensures colors are consistent regardless of user's display preference
+  getStableSortedCategories(values, categories) {
+    const categoryFrequencies = {}
+    values.forEach(value => {
+      categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
+    })
+    
+    // Always sort largest-first for stable color assignment
+    const sorted = [...categories].sort((a, b) => {
+      const freqA = categoryFrequencies[a] || 0
+      const freqB = categoryFrequencies[b] || 0
+      return freqB - freqA // Always descending (largest first)
     })
     return sorted
   }
@@ -7261,6 +7310,19 @@ export default class extends Controller {
       })
     }
     
+    // Add event listeners for category order radio buttons and set current value
+    const categoryOrderRadios = document.querySelectorAll('input[name="category-order"]')
+    categoryOrderRadios.forEach(radio => {
+      // Set the checked state based on current preference
+      radio.checked = (radio.value === this.categoryOrder)
+      
+      // Add event listener
+      radio.addEventListener('change', (e) => {
+        console.log('📊 Category order radio changed:', e.target.value)
+        this.changeCategoryOrder(e)
+      })
+    })
+    
     // Update categories checkbox state based on current metadata
     this.updateCategoriesCheckboxState()
     
@@ -7506,6 +7568,127 @@ export default class extends Controller {
       checkbox.checked = false
       checkbox.title = 'Categories only available for discrete metadata'
     }
+  }
+
+  changeCategoryOrder(event) {
+    const newOrder = event.target.value
+    console.log(`📊 Changing category order from '${this.categoryOrder}' to '${newOrder}'`)
+    
+    if (newOrder === this.categoryOrder) {
+      console.log('📊 Order unchanged, skipping update')
+      return
+    }
+    
+    this.categoryOrder = newOrder
+    
+    // Update ALL unfolded categorical metadata panels in the left sidebar
+    this.updateAllCategoryDisplayOrders()
+    
+    // If we have discrete metadata currently displayed, re-render the plot
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'DISCRETE') {
+      console.log('📊 Re-rendering plot with new category order...')
+      
+      // IMPORTANT: Don't recreate color map - keep existing color assignments!
+      // The color map should remain stable regardless of sort order
+      // We only need to update the z-order
+      
+      // Re-render points with new z-order (colors stay the same)
+      this.renderPointsWithCurrentColoring()
+      
+      // Re-render category labels
+      this.renderCategoryLabels()
+      
+      console.log('📊 Category order change complete')
+    } else {
+      console.log('📊 No discrete metadata active, order preference saved for next use')
+    }
+  }
+
+  // Update category display order in ALL unfolded metadata panels
+  updateAllCategoryDisplayOrders() {
+    console.log('📊 Updating category order in all unfolded metadata panels...')
+    
+    // Find all metadata containers with visible categories
+    const metadataContainers = document.querySelectorAll('[data-metadata-item]')
+    let updatedCount = 0
+    
+    metadataContainers.forEach(container => {
+      // Find the categories div (the one with padding-left: 32px)
+      const categoriesDiv = container.querySelector('div[style*="padding-left: 32px"]')
+      
+      // Only update if categories are visible (unfolded)
+      if (categoriesDiv && categoriesDiv.style.display !== 'none') {
+        // Get all category items
+        const categoryItems = Array.from(categoriesDiv.children)
+        
+        if (categoryItems.length === 0) return
+        
+        // Extract categories and their counts
+        const categoriesData = []
+        categoryItems.forEach(item => {
+          const checkbox = item.querySelector('.category-checkbox')
+          if (checkbox) {
+            const category = checkbox.dataset.category
+            // Extract count from the item's text content
+            const countSpan = item.querySelector('span[style*="font-weight: 500"]')
+            const count = countSpan ? parseInt(countSpan.textContent) : 0
+            categoriesData.push({ category, count, element: item })
+          }
+        })
+        
+        // Sort based on current preference
+        categoriesData.sort((a, b) => {
+          if (this.categoryOrder === 'smallest-first') {
+            return a.count - b.count // Ascending (smallest first)
+          } else {
+            return b.count - a.count // Descending (largest first)
+          }
+        })
+        
+        // Re-append in the new sorted order
+        categoriesData.forEach(data => {
+          categoriesDiv.appendChild(data.element)
+        })
+        
+        updatedCount++
+      }
+    })
+    
+    console.log(`📊 Updated category order in ${updatedCount} metadata panel(s)`)
+  }
+
+  // Update category display order in the left panel
+  updateCategoryDisplayInLeftPanel(metadataId, sortedCategories) {
+    // Find the metadata item container
+    const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataContainer) return
+    
+    // Find the categories div (the one with padding-left: 32px)
+    const categoriesDiv = metadataContainer.querySelector('div[style*="padding-left: 32px"]')
+    if (!categoriesDiv) return
+    
+    // Get all category items
+    const categoryItems = Array.from(categoriesDiv.children)
+    
+    // Create a map of category name to element
+    const categoryMap = new Map()
+    categoryItems.forEach(item => {
+      const checkbox = item.querySelector('.category-checkbox')
+      if (checkbox) {
+        const category = checkbox.dataset.category
+        categoryMap.set(category, item)
+      }
+    })
+    
+    // Re-append in the new sorted order
+    sortedCategories.forEach(category => {
+      const item = categoryMap.get(String(category))
+      if (item) {
+        categoriesDiv.appendChild(item)
+      }
+    })
+    
+    console.log('📊 Updated left panel category order')
   }
 
   // Save selection method

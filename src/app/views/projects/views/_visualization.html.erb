@@ -649,6 +649,33 @@
                data-action="change->visualization#toggleCategories">
       </div>
       
+      <!-- Category Order -->
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+        <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+          Category Display Order
+        </label>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #374151; cursor: pointer;">
+            <input type="radio" 
+                   name="category-order" 
+                   value="largest-first"
+                   checked
+                   style="cursor: pointer;">
+            <span>Largest to smallest</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #374151; cursor: pointer;">
+            <input type="radio" 
+                   name="category-order" 
+                   value="smallest-first"
+                   style="cursor: pointer;">
+            <span>Smallest to largest</span>
+          </label>
+        </div>
+        <div style="font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.4;">
+          Affects: Category list order and point layering (larger categories in background)
+        </div>
+      </div>
+      
     </div>
     
   </div>

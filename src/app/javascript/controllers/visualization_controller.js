@@ -8939,18 +8939,36 @@ export default class extends Controller {
 
   // Incremental filtering - much faster for small changes
   getIncrementalFilteredIndices() {
-    if (!this.selectedCategories || Object.keys(this.selectedCategories).length === 0) {
+    const hasDiscreteSelections = this.selectedCategories && Object.keys(this.selectedCategories).length > 0
+    const hasContinuousSelections = this.selectedRanges && Object.keys(this.selectedRanges).length > 0
+    
+    if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells
       return null
     }
 
-    // Get all metadata that have selections AND have loaded vectors
-    const metadataWithSelections = Object.keys(this.selectedCategories).filter(metadataId => {
-      const selections = this.selectedCategories[metadataId]
-      const hasSelections = selections && selections.size > 0
-      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
-      return hasSelections && hasLoadedVector
-    })
+    // Get all metadata that have selections AND have loaded vectors (categorical)
+    const discreteMetadataWithSelections = hasDiscreteSelections 
+      ? Object.keys(this.selectedCategories).filter(metadataId => {
+          const selections = this.selectedCategories[metadataId]
+          const hasSelections = selections && selections.size > 0
+          const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+          return hasSelections && hasLoadedVector
+        })
+      : []
+    
+    // Get all metadata that have range selections AND have loaded vectors (continuous)
+    const continuousMetadataWithSelections = hasContinuousSelections
+      ? Object.keys(this.selectedRanges).filter(metadataId => {
+          const range = this.selectedRanges[metadataId]
+          const hasRange = range && (range.min !== undefined && range.max !== undefined)
+          const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+          return hasRange && hasLoadedVector
+        })
+      : []
+
+    // Combine both types of metadata with selections
+    const metadataWithSelections = [...new Set([...discreteMetadataWithSelections, ...continuousMetadataWithSelections])]
 
     if (metadataWithSelections.length === 0) {
       return null
@@ -8993,9 +9011,9 @@ export default class extends Controller {
     // For now, let's implement a simple case: single metadata changes
     if (metadataWithSelections.length === 1) {
       const metadataId = metadataWithSelections[0]
-      const selectedCategories = this.selectedCategories[metadataId]
       //console.log(`Single metadata incremental filtering for ${metadataId}`)
-      return this.getCellsForMetadataCategories(metadataId, selectedCategories)
+      // Use getCellsForMetadata which handles both discrete and continuous metadata
+      return this.getCellsForMetadata(metadataId)
     }
 
     // For multiple metadata, we could implement more sophisticated logic

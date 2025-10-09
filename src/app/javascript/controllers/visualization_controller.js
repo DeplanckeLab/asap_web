@@ -8005,7 +8005,13 @@ export default class extends Controller {
       this.selectedCells.clear()
       
       // Restore the metadata state from before the selection
-      this.restoreMetadataStateAfterSelection()
+      const wasRestored = this.restoreMetadataStateAfterSelection()
+      
+      // If no metadata was restored, just update colors to default
+      if (!wasRestored) {
+        console.log('No metadata to restore after save, updating colors to default')
+        this.updateSelectedPointColors()
+      }
       
       // Update the cell count display
       this.updateSelectedCellsCount()
@@ -8298,6 +8304,12 @@ export default class extends Controller {
   // Cancel selection method - resets points to original colors
   // Store metadata state before making a selection
   storeMetadataStateBeforeSelection() {
+    // Only store if we haven't already stored (for multiple selections)
+    if (this.lastActiveMetadata) {
+      console.log('📦 Metadata state already stored, keeping original:', this.lastActiveMetadata)
+      return
+    }
+    
     // Store the current metadata state so we can restore it after cancel/save
     this.lastActiveMetadata = {
       metadataId: this.currentMetadataId,
@@ -8313,7 +8325,7 @@ export default class extends Controller {
   restoreMetadataStateAfterSelection() {
     if (!this.lastActiveMetadata) {
       console.log('No previous metadata state to restore')
-      return
+      return false
     }
     
     const { metadataId, metadataVector, customColorRange, activeButton } = this.lastActiveMetadata
@@ -8325,6 +8337,9 @@ export default class extends Controller {
       this.currentMetadataId = metadataId
       this.currentMetadataVector = metadataVector
       this.customColorRange = customColorRange
+      
+      // Clear the color map cache to force fresh color assignment
+      this.clearColorMapCache()
       
       // Re-activate the water drop button
       if (activeButton) {
@@ -8339,12 +8354,14 @@ export default class extends Controller {
         }
       }
       
-      // Re-render with the restored metadata coloring
+      // Update sprite colors using existing rendering logic (no sprite recreation)
+      console.log('🎨 Updating sprite colors with restored metadata')
       this.renderPointsWithCurrentColoring()
       
       // Re-render category labels or color legend
       if (metadataVector.data_type === 'DISCRETE') {
-        if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+        if (this.categoryLabelsContainer) {
+          this.categoryLabelsContainer.visible = true
           this.renderCategoryLabels()
         }
       } else if (metadataVector.data_type === 'NUMERIC') {
@@ -8352,12 +8369,16 @@ export default class extends Controller {
       }
       
       console.log('✅ Metadata coloring restored successfully')
+      
+      // Clear the stored state
+      this.lastActiveMetadata = null
+      return true
     } else {
       console.log('No metadata was active before selection')
+      // Clear the stored state
+      this.lastActiveMetadata = null
+      return false
     }
-    
-    // Clear the stored state
-    this.lastActiveMetadata = null
   }
 
   cancelSelection() {
@@ -8367,7 +8388,13 @@ export default class extends Controller {
     this.selectedCells.clear()
     
     // Restore the metadata state from before the selection
-    this.restoreMetadataStateAfterSelection()
+    const wasRestored = this.restoreMetadataStateAfterSelection()
+    
+    // If no metadata was restored, just update colors to remove selection highlighting
+    if (!wasRestored) {
+      console.log('No metadata to restore, updating colors to default')
+      this.updateSelectedPointColors()
+    }
     
     // Update the cell count display
     this.updateSelectedCellsCount()

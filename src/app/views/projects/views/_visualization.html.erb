@@ -650,30 +650,29 @@
       </div>
       
       <!-- Category Order -->
-      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-        <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
-          Category Display Order
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+        <label style="font-size: 13px; font-weight: 500; color: #374151;">
+          Category order
         </label>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #374151; cursor: pointer;">
-            <input type="radio" 
-                   name="category-order" 
-                   value="largest-first"
-                   checked
-                   style="cursor: pointer;">
-            <span>Largest to smallest</span>
-          </label>
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #374151; cursor: pointer;">
-            <input type="radio" 
-                   name="category-order" 
-                   value="smallest-first"
-                   style="cursor: pointer;">
-            <span>Smallest to largest</span>
-          </label>
-        </div>
-        <div style="font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.4;">
-          Affects: Category list order and point layering (larger categories in background)
-        </div>
+        <select id="category-order-select"
+                style="width: 140px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+          <option value="largest-first">Large to small</option>
+          <option value="smallest-first">Small to large</option>
+        </select>
+      </div>
+      
+      <!-- Numerical Order -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+        <label style="font-size: 13px; font-weight: 500; color: #374151;">
+          Numerical order
+        </label>
+        <select id="numerical-order-select"
+                style="width: 140px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+          <option value="negative-to-positive">Negative to positive</option>
+          <option value="positive-to-negative">Positive to negative</option>
+          <option value="abs-min-to-max">Absolute min to max</option>
+          <option value="abs-max-to-min">Absolute max to min</option>
+        </select>
       </div>
       
     </div>

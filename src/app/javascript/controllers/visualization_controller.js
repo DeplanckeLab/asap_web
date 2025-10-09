@@ -40,6 +40,9 @@ export default class extends Controller {
     // Initialize category display order preference
     this.categoryOrder = 'largest-first' // 'largest-first' or 'smallest-first'
     
+    // Initialize numerical display order preference for continuous metadata
+    this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
+    
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
     
@@ -2818,6 +2821,13 @@ export default class extends Controller {
           // Build visibility set for O(1) lookups
           const visibleSet = filteredIndices ? new Set(filteredIndices) : null
           
+          // Pre-compute all z-indices for performance (avoid 500k+ function calls)
+          console.log(`🚀 [PERF] Pre-computing z-indices for all values...`)
+          const zIndexStart = performance.now()
+          const zIndices = this.precomputeNumericZIndices(values, minVal, maxVal)
+          const zIndexTime = performance.now() - zIndexStart
+          console.log(`🚀 [PERF] Z-index pre-computation took ${zIndexTime.toFixed(2)}ms`)
+          
           // Batch add sprites first if needed (much faster than individual addChild)
           let addedToContainer = 0
           if (pointsContainer.children.length === 0 && this.pointSprites.length > 0) {
@@ -2881,7 +2891,8 @@ export default class extends Controller {
                 sprite.alpha = hasSelection ? 0.3 : 1.0
               }
               
-              sprite.zIndex = 0 // Numeric doesn't need special z-ordering
+              // Use pre-computed z-index for performance
+              sprite.zIndex = zIndices[i]
               sprite.visible = !visibleSet || visibleSet.has(i)
             }
           }
@@ -2906,6 +2917,17 @@ export default class extends Controller {
           }
           
           this.pointSprites = new Array(this.currentCoordinates.length)
+          
+          // Pre-calculate range and z-indices for all values (performance optimization)
+          const effectiveRange = this.getEffectiveColorRange()
+          const minVal = effectiveRange ? effectiveRange.min : compression_info.min_val
+          const maxVal = effectiveRange ? effectiveRange.max : compression_info.max_val
+          
+          console.log(`🚀 [PERF] Pre-computing z-indices for all values...`)
+          const zIndexStart = performance.now()
+          const zIndices = this.precomputeNumericZIndices(values, minVal, maxVal)
+          const zIndexTime = performance.now() - zIndexStart
+          console.log(`🚀 [PERF] Z-index pre-computation took ${zIndexTime.toFixed(2)}ms`)
         
         for (let i = 0; i < this.currentCoordinates.length; i++) {
           // Skip this point if it's not in the filtered indices
@@ -2927,7 +2949,9 @@ export default class extends Controller {
             sprite.tint = color
             sprite.alpha = alpha
             sprite.originalAlpha = alpha
-            sprite.zIndex = 0 // Numeric doesn't need special z-ordering
+            
+            // Use pre-computed z-index for performance
+            sprite.zIndex = zIndices[i]
           
           // Store cell ID and mark as point for later reference
             sprite.cellId = i
@@ -7310,18 +7334,31 @@ export default class extends Controller {
       })
     }
     
-    // Add event listeners for category order radio buttons and set current value
-    const categoryOrderRadios = document.querySelectorAll('input[name="category-order"]')
-    categoryOrderRadios.forEach(radio => {
-      // Set the checked state based on current preference
-      radio.checked = (radio.value === this.categoryOrder)
+    // Add event listener for category order dropdown and set current value
+    const categoryOrderSelect = document.getElementById('category-order-select')
+    if (categoryOrderSelect) {
+      // Set the selected option based on current preference
+      categoryOrderSelect.value = this.categoryOrder
       
       // Add event listener
-      radio.addEventListener('change', (e) => {
-        console.log('📊 Category order radio changed:', e.target.value)
+      categoryOrderSelect.addEventListener('change', (e) => {
+        console.log('📊 Category order changed:', e.target.value)
         this.changeCategoryOrder(e)
       })
-    })
+    }
+    
+    // Add event listener for numerical order dropdown and set current value
+    const numericalOrderSelect = document.getElementById('numerical-order-select')
+    if (numericalOrderSelect) {
+      // Set the selected option based on current preference
+      numericalOrderSelect.value = this.numericalOrder
+      
+      // Add event listener
+      numericalOrderSelect.addEventListener('change', (e) => {
+        console.log('📊 Numerical order changed:', e.target.value)
+        this.changeNumericalOrder(e)
+      })
+    }
     
     // Update categories checkbox state based on current metadata
     this.updateCategoriesCheckboxState()
@@ -7655,6 +7692,85 @@ export default class extends Controller {
     })
     
     console.log(`📊 Updated category order in ${updatedCount} metadata panel(s)`)
+  }
+
+  changeNumericalOrder(event) {
+    const newOrder = event.target.value
+    console.log(`📊 Changing numerical order from '${this.numericalOrder}' to '${newOrder}'`)
+    
+    if (newOrder === this.numericalOrder) {
+      console.log('📊 Order unchanged, skipping update')
+      return
+    }
+    
+    this.numericalOrder = newOrder
+    
+    // If we have numeric metadata currently displayed, re-render the plot
+    if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
+      console.log('📊 Re-rendering plot with new numerical order...')
+      
+      // Re-render points with new z-order (colors stay the same)
+      this.renderPointsWithCurrentColoring()
+      
+      console.log('📊 Numerical order change complete')
+    } else {
+      console.log('📊 No numeric metadata active, order preference saved for next use')
+    }
+  }
+
+  // Pre-compute z-indices for all values at once (much faster than calling calculateNumericZIndex 500k times)
+  precomputeNumericZIndices(values, minVal, maxVal) {
+    const range = maxVal - minVal
+    if (range === 0) {
+      // All values are the same, return array of zeros
+      return new Array(values.length).fill(0)
+    }
+    
+    const zIndices = new Array(values.length)
+    const maxZIndex = 1000
+    const invRange = 1.0 / range
+    
+    switch (this.numericalOrder) {
+      case 'negative-to-positive':
+        // Lower values = lower z-index = background
+        for (let i = 0; i < values.length; i++) {
+          zIndices[i] = Math.round((values[i] - minVal) * invRange * maxZIndex)
+        }
+        break
+        
+      case 'positive-to-negative':
+        // Higher values = lower z-index = background
+        for (let i = 0; i < values.length; i++) {
+          zIndices[i] = Math.round((maxVal - values[i]) * invRange * maxZIndex)
+        }
+        break
+        
+      case 'abs-min-to-max':
+        // Smaller absolute values = lower z-index = background
+        const absMax = Math.max(Math.abs(minVal), Math.abs(maxVal))
+        const invAbsMax = 1.0 / absMax
+        for (let i = 0; i < values.length; i++) {
+          const absValue = Math.abs(values[i])
+          zIndices[i] = Math.round(absValue * invAbsMax * maxZIndex)
+        }
+        break
+        
+      case 'abs-max-to-min':
+        // Larger absolute values = lower z-index = background
+        const absMax2 = Math.max(Math.abs(minVal), Math.abs(maxVal))
+        const invAbsMax2 = 1.0 / absMax2
+        for (let i = 0; i < values.length; i++) {
+          const absValue = Math.abs(values[i])
+          zIndices[i] = Math.round((absMax2 - absValue) * invAbsMax2 * maxZIndex)
+        }
+        break
+        
+      default:
+        // Fallback: all zeros
+        zIndices.fill(0)
+    }
+    
+    return zIndices
   }
 
   // Update category display order in the left panel

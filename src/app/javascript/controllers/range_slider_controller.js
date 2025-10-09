@@ -382,10 +382,25 @@ export default class extends Controller {
 
   // Draw the density plot
   drawDensityPlot() {
-    if (!this.hasCanvasTarget) return
+    console.log('🎨 drawDensityPlot called for metadata:', this.metadataIdValue)
+    console.log('🎨 hasCanvasTarget:', this.hasCanvasTarget)
+    
+    if (!this.hasCanvasTarget) {
+      console.log('🎨 No canvas target, returning')
+      return
+    }
     
     const sliderData = this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]
-    if (!sliderData || !sliderData.values) return
+    console.log('🎨 Slider data available:', !!sliderData)
+    console.log('🎨 Values available:', !!sliderData?.values)
+    console.log('🎨 inlineRangeSliderData keys:', Object.keys(this.visualizationController?.inlineRangeSliderData || {}))
+    
+    if (!sliderData || !sliderData.values) {
+      console.log('🎨 No slider data or values, returning')
+      return
+    }
+    
+    console.log('🎨 Drawing density plot with', sliderData.values.length, 'values')
     
     const canvas = this.canvasTarget
     const ctx = canvas.getContext('2d')

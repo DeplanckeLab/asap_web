@@ -43,6 +43,9 @@ export default class extends Controller {
     // Initialize numerical display order preference for continuous metadata
     this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
     
+    // Initialize auto-preload preference (disabled by default for better performance)
+    this.autoPreloadMetadata = false
+    
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
     
@@ -581,7 +584,17 @@ export default class extends Controller {
     //console.log('Selected metadata ID:', selectedMetadataId)
     
     if (selectedMetadataId) {
+      // Show loading spinner
+      this.showMetadataDropdownSpinner()
+      
+      // Load metadata and hide spinner when done
       this.loadMetadataCoordinates(selectedMetadataId)
+        .catch(error => {
+          console.error('❌ Error loading metadata coordinates:', error)
+        })
+        .finally(() => {
+          this.hideMetadataDropdownSpinner()
+        })
     } else {
       // Clear any existing metadata data
       this.clearMetadataData()
@@ -862,12 +875,16 @@ export default class extends Controller {
       
       //console.log('PIXI.js scatter plot initialized successfully')
       
-      // Start preloading all metadata in background for instant switching
-      setTimeout(() => {
-        this.preloadAllMetadata().catch(error => {
-          console.log('Background metadata preload encountered an error:', error)
-        })
-      }, 1000) // Start after 1 second delay to let initial render complete
+      // Only auto-preload if the option is enabled
+      if (this.autoPreloadMetadata) {
+        setTimeout(() => {
+          this.preloadAllMetadata().catch(error => {
+            console.log('Background metadata preload encountered an error:', error)
+          })
+        }, 1000) // Start after 1 second delay to let initial render complete
+      } else {
+        console.log('🚀 Auto-preload disabled - metadata will load on hover/click only')
+      }
       
       // Initial memory health check
       setTimeout(() => {
@@ -1976,6 +1993,33 @@ export default class extends Controller {
     return numericValues
   }
 
+  // Show spinner next to metadata dropdown
+  showMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = true
+      dropdown.style.opacity = '0.6'
+    }
+    if (spinner) {
+      spinner.style.display = 'block'
+    }
+  }
+
+  // Hide spinner and re-enable metadata dropdown
+  hideMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = false
+      dropdown.style.opacity = '1'
+    }
+    if (spinner) {
+      spinner.style.display = 'none'
+    }
+  }
 
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
@@ -3011,11 +3055,6 @@ export default class extends Controller {
             
             sprite.zIndex = 0 // Default doesn't need special z-ordering
             sprite.visible = !visibleSet || visibleSet.has(i)
-            
-            // Only add to container if it's not already there
-            if (sprite.parent !== this.scatterContainer) {
-              this.scatterContainer.addChild(sprite)
-            }
           }
         }
         
@@ -3900,12 +3939,8 @@ export default class extends Controller {
       }
     }
     
-    // Select this metadata option
-    radioInput.checked = true
-    
-    // Trigger change event to update visualization if needed
-    const changeEvent = new Event('change', { bubbles: true })
-    radioInput.dispatchEvent(changeEvent)
+    // Don't automatically select or color - just expand/collapse the panel
+    // The water drop button is used for coloring
   }
 
   // Initialize draggable divider (moved from inline JS)
@@ -4132,16 +4167,14 @@ export default class extends Controller {
                                    metadataContainer.dataset.metadataType === 'NUMERIC'
       
       if (isContinuousMetadata) {
-        console.log('Step 5: Continuous metadata detected - toggling inline range slider')
-        // Toggle inline range slider for numeric metadata
-        this.toggleInlineRangeSlider(metadataId, metadataName)
-        return // Don't load metadata vector yet, wait for range selection
+        console.log('Step 5: Continuous metadata detected - expanding panel')
+        // Expand the continuous metadata panel to show histogram
+        this.expandContinuousMetadataPanel(metadataId, metadataName)
+        // Continue to load and visualize below
       } else {
         console.log('Step 5: Adding category colors for discrete metadata...')
         this.addCategoryColors(metadataContainer, metadataId)
       }
-      
-      // Category colors will be handled above, metadata vector loading happens below
     } else {
       console.warn('🎨 WARNING: Could not find metadata container, but continuing with metadata loading...')
       
@@ -4154,7 +4187,57 @@ export default class extends Controller {
     
     // Always try to load and visualize the metadata vector (this is the main goal)
     console.log('Step 6: Loading metadata vector for visualization...')
-    this.loadAndVisualizeMetadataVector(metadataId)
+    
+    // Show loading spinner immediately
+    this.showMetadataDropdownSpinner()
+    
+    // For continuous metadata, set the color range to full range before visualizing
+    if (button.dataset.metadataType === 'NUMERIC') {
+      console.log('🎚️ Handling NUMERIC metadata for coloring')
+      // Load the metadata first to get the range
+      this.loadSingleMetadataVector(metadataId).then(vectorData => {
+        console.log('🎚️ Metadata loaded:', vectorData)
+        if (vectorData) {
+          // Decompress if needed
+          let values = vectorData.values
+          if (!values && vectorData.compressed_data) {
+            console.log('🎚️ Decompressing numeric metadata...')
+            values = this.decompressMetadataVector(vectorData)
+          }
+          
+          if (values) {
+            const minVal = this.safeMin(values)
+            const maxVal = this.safeMax(values)
+            console.log('🎚️ Setting color range for continuous metadata:', minVal, maxVal)
+            this.setColorRange(minVal, maxVal)
+            
+            // Now load and visualize
+            console.log('🎚️ Calling loadAndVisualizeMetadataVector...')
+            return this.loadAndVisualizeMetadataVector(metadataId)
+          } else {
+            console.error('❌ No values available after decompression')
+          }
+        } else {
+          console.error('❌ No vector data loaded')
+        }
+      })
+      .catch(error => {
+        console.error('❌ Error loading/visualizing metadata:', error)
+      })
+      .finally(() => {
+        console.log('🎚️ Hiding spinner after continuous metadata processing')
+        this.hideMetadataDropdownSpinner()
+      })
+    } else {
+      // For discrete metadata, just load and visualize directly
+      this.loadAndVisualizeMetadataVector(metadataId)
+        .catch(error => {
+          console.error('❌ Error loading metadata:', error)
+        })
+        .finally(() => {
+          this.hideMetadataDropdownSpinner()
+        })
+    }
     
     //console.log('=== WATER DROP CLICK COMPLETE ===')
   }
@@ -7360,6 +7443,27 @@ export default class extends Controller {
       })
     }
     
+    // Add event listener for auto-preload checkbox
+    const autoPreloadCheckbox = document.getElementById('auto-preload-checkbox')
+    if (autoPreloadCheckbox) {
+      // Set checkbox based on current preference
+      autoPreloadCheckbox.checked = this.autoPreloadMetadata
+      
+      // Add event listener
+      autoPreloadCheckbox.addEventListener('change', (e) => {
+        this.autoPreloadMetadata = e.target.checked
+        console.log('📊 Auto-preload metadata:', this.autoPreloadMetadata)
+        
+        // If enabled, start preloading now
+        if (this.autoPreloadMetadata) {
+          console.log('🚀 Starting background preload...')
+          this.preloadAllMetadata().catch(error => {
+            console.log('Background metadata preload encountered an error:', error)
+          })
+        }
+      })
+    }
+    
     // Update categories checkbox state based on current metadata
     this.updateCategoriesCheckboxState()
     
@@ -9334,8 +9438,9 @@ export default class extends Controller {
   }
   
   // Toggle inline range slider for numeric metadata
-  toggleInlineRangeSlider(metadataId, metadataName) {
-    console.log('🎚️ Toggling inline range slider for metadata:', metadataId, metadataName)
+  // Expand continuous metadata panel and show histogram (no coloring)
+  expandContinuousMetadataPanel(metadataId, metadataName) {
+    console.log('🎚️ Expanding continuous metadata panel for:', metadataId, metadataName)
     
     const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataCard) {
@@ -9348,52 +9453,51 @@ export default class extends Controller {
     
     if (!rangeSection || !chevron) {
       console.error('❌ Range section or chevron not found')
-      console.log('Range section:', rangeSection)
-      console.log('Chevron:', chevron)
       return
     }
     
-    // Since toggleMetadata already handles visibility, we just need to initialize the range slider
-    console.log('🎚️ Initializing inline range slider data...')
+    // Expand the panel if not already expanded
+    if (rangeSection.style.display !== 'block') {
+      rangeSection.style.display = 'block'
+      chevron.style.transform = 'rotate(90deg)'
+    }
     
-    // Wait a bit for the DOM to update, then load and initialize the range slider data
-    setTimeout(() => {
-      console.log('🎚️ Loading metadata for inline range slider...')
-      this.loadSingleMetadataVector(metadataId).then(vectorData => {
-        console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
-        if (!vectorData) {
-          console.error('❌ No vector data loaded for inline range slider')
-          return
-        }
-        
-        let values = vectorData.values
-        if (!values && vectorData.compressed_data) {
-          console.log('🎚️ Decompressing metadata for inline range slider...')
-          values = this.decompressMetadataVector(vectorData)
-        }
-        
-        if (!values) {
-          console.error('❌ No values available for inline range slider')
-          return
-        }
-        
-        console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
-        
-        // Initialize the inline range slider with the loaded values
-        this.initializeInlineRangeSlider(metadataId, values)
-        
-        // Apply the metadata coloring to the main visualization
-        console.log('🎚️ Applying metadata coloring to main visualization...')
-        const minVal = this.safeMin(values)
-        const maxVal = this.safeMax(values)
-        this.setColorRange(minVal, maxVal)
-        this.loadAndVisualizeMetadataVector(metadataId)
-        
-        console.log('🎚️ Inline range slider fully initialized and ready for interaction')
-      }).catch(error => {
-        console.error('❌ Error loading metadata for inline range slider:', error)
-      })
-    }, 100) // Wait 100ms for DOM to update
+    // Initialize the range slider data (just for histogram, no coloring)
+    this.toggleInlineRangeSlider(metadataId, metadataName)
+  }
+
+  toggleInlineRangeSlider(metadataId, metadataName) {
+    console.log('🎚️ Initializing inline range slider for metadata:', metadataId, metadataName)
+    
+    // Load and initialize the range slider data
+    console.log('🎚️ Loading metadata for inline range slider...')
+    this.loadSingleMetadataVector(metadataId).then(vectorData => {
+      console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
+      if (!vectorData) {
+        console.error('❌ No vector data loaded for inline range slider')
+        return
+      }
+      
+      let values = vectorData.values
+      if (!values && vectorData.compressed_data) {
+        console.log('🎚️ Decompressing metadata for inline range slider...')
+        values = this.decompressMetadataVector(vectorData)
+      }
+      
+      if (!values) {
+        console.error('❌ No values available for inline range slider')
+        return
+      }
+      
+      console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
+      
+      // Initialize the inline range slider with the loaded values (just the histogram, no coloring)
+      this.initializeInlineRangeSlider(metadataId, values)
+      
+      console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
+    }).catch(error => {
+      console.error('❌ Error loading metadata for inline range slider:', error)
+    })
   }
 
   // Update inline range slider UI
@@ -9514,11 +9618,22 @@ export default class extends Controller {
       // Automatically apply the full range to show the visualization
       //console.log('🎚️ Applying full range to visualization...')
       this.setColorRange(minVal, maxVal)
+      
+      // Show loading spinner
+      this.showMetadataDropdownSpinner()
+      
       this.loadAndVisualizeMetadataVector(metadataId)
+        .catch(error => {
+          console.error('❌ Error visualizing metadata:', error)
+        })
+        .finally(() => {
+          this.hideMetadataDropdownSpinner()
+        })
       
     }).catch(error => {
       console.error('❌ Error loading metadata for range slider:', error)
       alert('Error loading metadata: ' + error.message)
+      this.hideMetadataDropdownSpinner()
     })
   }
   
@@ -9973,8 +10088,17 @@ export default class extends Controller {
     // Hide modal
     this.hideRangeSlider()
     
+    // Show loading spinner
+    this.showMetadataDropdownSpinner()
+    
     // Load and visualize metadata with the selected range
     this.loadAndVisualizeMetadataVector(this.currentRangeSliderMetadataId)
+      .catch(error => {
+        console.error('❌ Error visualizing metadata:', error)
+      })
+      .finally(() => {
+        this.hideMetadataDropdownSpinner()
+      })
   }
   
   // Hide range slider modal

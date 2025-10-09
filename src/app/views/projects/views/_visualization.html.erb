@@ -297,7 +297,8 @@
         </div>
         
         <div style="display: flex; align-items: center; gap: 8px;">
-          <select data-visualization-target="metadataSelect" 
+          <select id="metadata-select-dropdown"
+                  data-visualization-target="metadataSelect" 
                   data-action="change->visualization#updateMetadata"
                   style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
             <option value="">Select metadata...</option>
@@ -311,7 +312,19 @@
               <% end %>
             <% end %>
           </select>
+          <svg id="metadata-loading-spinner" style="display: none; width: 16px; height: 16px; color: #6b7280; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+              <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+            </circle>
+          </svg>
         </div>
+        <style>
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        </style>
       </div>
 
       <!-- Right side: Actions -->
@@ -673,6 +686,16 @@
           <option value="abs-min-to-max">Absolute min to max</option>
           <option value="abs-max-to-min">Absolute max to min</option>
         </select>
+      </div>
+      
+      <!-- Auto Preload Metadata -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+        <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+          Auto preload metadata
+        </label>
+        <input type="checkbox" 
+               id="auto-preload-checkbox" 
+               style="width: 16px; height: 16px; cursor: pointer;">
       </div>
       
     </div>

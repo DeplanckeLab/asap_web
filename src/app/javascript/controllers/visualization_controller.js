@@ -12,10 +12,13 @@ export default class extends Controller {
   connect() {
     console.log('🚀 Visualization controller connected')
     
+    // Initialize IndexedDB for storing metadata on disk instead of memory
+    this.initializeIndexedDB()
+    
     // Initialize selected categories tracking
     this.selectedCategories = {}
     this.selectedRanges = {} // Store continuous metadata ranges for filtering
-    this.loadedMetadataVectors = {} // Store all loaded metadata vectors for filtering
+    this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
     this.currentVisibleCells = null // Track currently visible cells (null = all visible)
     this.lastFilterState = null // Track last filter state for incremental updates
     this.filterCache = new Map() // Cache for intersection results
@@ -37,11 +40,13 @@ export default class extends Controller {
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
     
-    // Performance optimization: store existing points for visibility updates
-    this.existingPoints = null // Array of existing PIXI point objects
+    // Performance optimization: store existing points for visibility updates and fast color switching
+    this.pointSprites = null // Array of sprite objects for fast updates (replaces existingPoints)
+    this.pointTexture = null // Shared texture for all point sprites
     this.lastMetadataVector = null // Track last metadata for optimization
     this.lastPointSize = null // Track last point size for optimization
     this.visibilityOnlyUpdate = false // When true, try to only toggle visibility
+    this.spritesRenderType = null // Track what type of rendering created current sprites: 'discrete', 'numeric', or 'default'
     
     // Expose controller globally for range slider access
     window.visualizationController = this
@@ -188,6 +193,236 @@ export default class extends Controller {
       if (arr[i] > max) max = arr[i]
     }
     return max
+  }
+  
+  // Log memory usage for debugging
+  logMemoryUsage(context = '') {
+    if (performance.memory) {
+      const used = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2)
+      const total = (performance.memory.totalJSHeapSize / 1024 / 1024).toFixed(2)
+      const limit = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(2)
+      const percent = ((performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit) * 100).toFixed(1)
+      
+      console.log(`💾 [MEMORY] ${context}: ${used}MB / ${total}MB (${percent}% of ${limit}MB limit)`)
+      
+      // Warn if memory usage is high
+      if (percent > 80) {
+        console.warn(`⚠️ [MEMORY] High memory usage: ${percent}% - performance may be degraded`)
+      }
+      
+      return { used: parseFloat(used), total: parseFloat(total), limit: parseFloat(limit), percent: parseFloat(percent) }
+    } else {
+      console.log(`💾 [MEMORY] ${context}: performance.memory not available (use Chrome/Edge for memory stats)`)
+      return null
+    }
+  }
+  
+  // Check for potential memory leaks and report sprite/object counts
+  checkMemoryHealth() {
+    console.log('🔍 [MEMORY HEALTH CHECK]')
+    console.log(`  Sprites: ${this.pointSprites?.length || 0}`)
+    console.log(`  Scatter container children: ${this.scatterContainer?.children.length || 0}`)
+    console.log(`  Animated container children: ${this.animatedContainer?.children.length || 0}`)
+    console.log(`  Loaded metadata vectors IN MEMORY: ${Object.keys(this.loadedMetadataVectors || {}).length}`)
+    console.log(`  Selected categories: ${Object.keys(this.selectedCategories || {}).length}`)
+    console.log(`  Selected ranges: ${Object.keys(this.selectedRanges || {}).length}`)
+    console.log(`  Filter cache size: ${this.filterCache?.size || 0}`)
+    console.log(`  Original point colors: ${this.originalPointColors?.size || 0}`)
+    
+    this.logMemoryUsage('Current state')
+    
+    // Check IndexedDB usage
+    if (this.db) {
+      console.log('💾 IndexedDB initialized and available for disk storage')
+    }
+    
+    // Expose function globally for easy console access
+    console.log('💡 To run this check anytime, type: visualizationController.checkMemoryHealth()')
+  }
+  
+  // Initialize IndexedDB for storing metadata on disk
+  initializeIndexedDB() {
+    const dbName = 'VisualizationMetadataCache'
+    const dbVersion = 1
+    
+    const request = indexedDB.open(dbName, dbVersion)
+    
+    request.onerror = () => {
+      console.error('💾 Failed to open IndexedDB, will keep metadata in memory')
+      this.db = null
+    }
+    
+    request.onsuccess = (event) => {
+      this.db = event.target.result
+      console.log('💾 IndexedDB initialized successfully - metadata will be stored on disk')
+    }
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result
+      
+      // Create object store for metadata vectors
+      if (!db.objectStoreNames.contains('metadataVectors')) {
+        const objectStore = db.createObjectStore('metadataVectors', { keyPath: 'id' })
+        objectStore.createIndex('loomFile', 'loomFile', { unique: false })
+        console.log('💾 Created IndexedDB object store for metadata vectors')
+      }
+    }
+  }
+  
+  // Store metadata vector in IndexedDB (disk storage)
+  async storeMetadataInIndexedDB(metadataId, vectorData) {
+    if (!this.db) return false
+    
+    try {
+      const transaction = this.db.transaction(['metadataVectors'], 'readwrite')
+      const objectStore = transaction.objectStore('metadataVectors')
+      
+      // Add loom file info for cache invalidation
+      const dataToStore = {
+        id: metadataId,
+        loomFile: this.currentLoomFile,
+        timestamp: Date.now(),
+        ...vectorData
+      }
+      
+      objectStore.put(dataToStore)
+      
+      return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => {
+          console.log(`💾 Stored metadata ${metadataId} in IndexedDB`)
+          resolve(true)
+        }
+        transaction.onerror = () => {
+          console.error(`💾 Failed to store metadata ${metadataId} in IndexedDB`)
+          reject(false)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error storing in IndexedDB:', error)
+      return false
+    }
+  }
+  
+  // Load metadata vector from IndexedDB (disk storage)
+  async loadMetadataFromIndexedDB(metadataId) {
+    if (!this.db) {
+      console.log(`💾 IndexedDB not available for metadata ${metadataId}`)
+      return null
+    }
+    
+    try {
+      const transaction = this.db.transaction(['metadataVectors'], 'readonly')
+      const objectStore = transaction.objectStore('metadataVectors')
+      const request = objectStore.get(metadataId)
+      
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+          if (request.result) {
+            const currentLoom = this.currentLoomFile || this.loomFileSelectTarget?.value || this.defaultLoomFileValue
+            
+            console.log(`💾 IndexedDB lookup for ${metadataId}:`, {
+              found: true,
+              storedLoomFile: request.result.loomFile,
+              currentLoomFile: currentLoom,
+              match: request.result.loomFile === currentLoom
+            })
+            
+            if (request.result.loomFile === currentLoom) {
+              console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
+              resolve(request.result)
+            } else {
+              console.log(`💾 ⚠️ Loom file mismatch, ignoring cached data for ${metadataId}`)
+              resolve(null) // Wrong loom file
+            }
+          } else {
+            console.log(`💾 Metadata ${metadataId} not found in IndexedDB`)
+            resolve(null)
+          }
+        }
+        request.onerror = () => {
+          console.error(`💾 Failed to load metadata ${metadataId} from IndexedDB:`, request.error)
+          resolve(null)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error loading from IndexedDB:', error)
+      return null
+    }
+  }
+  
+  // Clear old metadata from memory (keep only current one)
+  clearOldMetadataFromMemory(currentMetadataId) {
+    const beforeCount = Object.keys(this.loadedMetadataVectors).length
+    const beforeMem = this.logMemoryUsage('Before clearing old metadata')
+    
+    // Keep only the current metadata in memory
+    Object.keys(this.loadedMetadataVectors).forEach(id => {
+      if (id !== currentMetadataId) {
+        delete this.loadedMetadataVectors[id]
+      }
+    })
+    
+    const afterCount = Object.keys(this.loadedMetadataVectors).length
+    console.log(`💾 Cleared ${beforeCount - afterCount} old metadata vectors from memory, kept ${afterCount}`)
+    
+    // Force garbage collection hint
+    if (window.gc) {
+      window.gc()
+      console.log('💾 Triggered manual garbage collection')
+    }
+    
+    setTimeout(() => {
+      const afterMem = this.logMemoryUsage('After clearing old metadata')
+      if (beforeMem && afterMem) {
+        const freed = beforeMem.used - afterMem.used
+        console.log(`💾 Freed approximately ${freed.toFixed(2)}MB of memory`)
+      }
+    }, 100)
+  }
+  
+  // Clear all IndexedDB cache (useful for debugging or when data is corrupted)
+  async clearIndexedDBCache() {
+    if (!this.db) {
+      console.log('💾 IndexedDB not available')
+      return
+    }
+    
+    try {
+      const transaction = this.db.transaction(['metadataVectors'], 'readwrite')
+      const objectStore = transaction.objectStore('metadataVectors')
+      const request = objectStore.clear()
+      
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+          console.log('💾 Cleared all metadata from IndexedDB')
+          resolve(true)
+        }
+        request.onerror = () => {
+          console.error('💾 Failed to clear IndexedDB')
+          reject(false)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error clearing IndexedDB:', error)
+      return false
+    }
+  }
+  
+  // Create a reusable point texture for sprite-based rendering
+  // This is much faster than creating Graphics objects for each point
+  createPointTexture(radius) {
+    const graphics = new this.PIXI.Graphics()
+    graphics.beginFill(0xFFFFFF) // White circle, will be tinted
+    graphics.drawCircle(radius, radius, radius)
+    graphics.endFill()
+    
+    const texture = this.pixiApp.renderer.generateTexture(graphics, {
+      resolution: 2, // Higher resolution for sharp edges
+      scaleMode: this.PIXI.SCALE_MODES.LINEAR
+    })
+    
+    graphics.destroy()
+    return texture
   }
   
   testAction() {
@@ -593,6 +828,7 @@ export default class extends Controller {
 
       // Create main container for the scatter plot (top layer)
       this.scatterContainer = new PIXI.Container()
+      this.scatterContainer.sortableChildren = true // Enable z-index sorting for layering
       this.pixiApp.stage.addChild(this.scatterContainer)
       
       // Create category labels container (topmost layer)
@@ -619,6 +855,18 @@ export default class extends Controller {
       this.setupGlobalDragHandlers()
       
       //console.log('PIXI.js scatter plot initialized successfully')
+      
+      // Start preloading all metadata in background for instant switching
+      setTimeout(() => {
+        this.preloadAllMetadata().catch(error => {
+          console.log('Background metadata preload encountered an error:', error)
+        })
+      }, 1000) // Start after 1 second delay to let initial render complete
+      
+      // Initial memory health check
+      setTimeout(() => {
+        this.checkMemoryHealth()
+      }, 2000)
       
     } catch (error) {
       console.error('Failed to initialize PIXI.js scatter plot:', error)
@@ -647,7 +895,20 @@ export default class extends Controller {
     const pointSize = this.currentPointSize
     const pointColor = 0x3b82f6 // Blue color
     
-    // Render points individually to support pan/zoom optimization
+    // Create shared point texture if it doesn't exist or size changed
+    if (!this.pointTexture || this.lastPointSize !== pointSize) {
+      if (this.pointTexture) this.pointTexture.destroy(true)
+      this.pointTexture = this.createPointTexture(pointSize)
+      this.lastPointSize = pointSize
+    }
+    
+    // Initialize sprite array
+    this.pointSprites = new Array(coordinates.length)
+    
+    console.log(`🚀 [PERF] Creating ${coordinates.length} sprite-based points...`)
+    const startTime = performance.now()
+    
+    // Render points using sprites for better performance
     for (let i = 0; i < coordinates.length; i++) {
         const [x, y] = coordinates[i]
         
@@ -655,41 +916,51 @@ export default class extends Controller {
         const screenX = this.normalizeX(x, bounds)
         const screenY = this.normalizeY(y, bounds)
         
-      // Create individual point graphics
-      const point = new PIXI.Graphics()
-      point.beginFill(pointColor)
-      point.drawCircle(0, 0, pointSize)
-      point.endFill()
-      point.x = screenX
-      point.y = screenY
+      // Create sprite using shared texture (much faster than Graphics)
+      const sprite = new PIXI.Sprite(this.pointTexture)
+      sprite.anchor.set(0.5) // Center the sprite
+      sprite.x = screenX
+      sprite.y = screenY
+      sprite.tint = pointColor
+      sprite.zIndex = 0 // Initial z-order (can be changed later)
       
       // Store cell ID and mark as point for later reference
-      point.cellId = i
-      point.isPoint = true
+      sprite.cellId = i
+      sprite.isPoint = true
       
       // Store original color for reset functionality
       this.storeOriginalPointColor(i, pointColor)
       
       // Add hover functionality
-      point.interactive = true
-      point.buttonMode = false
-      point.on('pointerover', () => this.showTooltip(i, point))
-      point.on('pointerout', () => this.hideTooltip())
-      point.on('pointerdown', (event) => this.onPointClick(i, point, event))
+      sprite.interactive = true
+      sprite.buttonMode = false
+      sprite.on('pointerover', () => this.showTooltip(i, sprite))
+      sprite.on('pointerout', () => this.hideTooltip())
+      sprite.on('pointerdown', (event) => this.onPointClick(i, sprite, event))
       
       // Debug: Log point creation
       if (i < 5) { // Only log first 5 points to avoid spam
-        console.log(`Created point ${i}:`, { 
-          cellId: point.cellId, 
-          isPoint: point.isPoint, 
-          interactive: point.interactive,
-          x: point.x, 
-          y: point.y 
+        console.log(`Created sprite point ${i}:`, { 
+          cellId: sprite.cellId, 
+          isPoint: sprite.isPoint, 
+          interactive: sprite.interactive,
+          x: sprite.x, 
+          y: sprite.y 
         })
       }
       
-      this.scatterContainer.addChild(point)
+      this.scatterContainer.addChild(sprite)
+      this.pointSprites[i] = sprite
     }
+    
+    const createTime = performance.now() - startTime
+    console.log(`🚀 [PERF] Created ${coordinates.length} sprites in ${createTime.toFixed(2)}ms`)
+    
+    // Mark initial sprites as default coloring
+    this.spritesRenderType = 'default'
+    
+    // Log memory usage after creating sprites
+    this.logMemoryUsage('After creating initial sprites')
     
     //console.log(`Rendered ${coordinates.length} individual points`)
         
@@ -736,8 +1007,14 @@ export default class extends Controller {
       // Clear existing individual points and re-render
       this.scatterContainer.removeChildren()
       
-      // Update bounds and render axes, grid, and category labels
+      // Clear sprite cache to force recreation with new positions
+      this.pointSprites = null
+      this.existingPoints = null
+      this.spritesRenderType = null
+      
+      // Update bounds and coordinates
       this.currentBounds = newBounds
+      this.currentCoordinates = coordinates
       this.renderAxes()
       this.renderGrid()
       
@@ -763,14 +1040,52 @@ export default class extends Controller {
       return
     }
     
+    // Check if we should skip animation for large datasets (> 100k cells)
+    const skipAnimation = coordinates.length > 100000
+    
+    if (skipAnimation) {
+      console.log(`🚀 [PERF] Large dataset (${coordinates.length} cells) - skipping animation for performance`)
+      
+      // Clear incremental filtering state when embedding changes
+      this.clearIncrementalState()
+      
+      // Clear existing points and re-render without animation
+      this.scatterContainer.removeChildren()
+      
+      // IMPORTANT: Clear sprite cache to force recreation with new positions
+      this.pointSprites = null
+      this.existingPoints = null
+      
+      // Update bounds and render axes, grid, and category labels
+      this.currentBounds = newBounds
+      this.currentCoordinates = coordinates // Update to new coordinates
+      this.renderAxes()
+      this.renderGrid()
+      this.renderCategoryLabels()
+      
+      // Re-render with new coordinates using current coloring (will create new sprites)
+      this.renderPointsWithCurrentColoring()
+      
+      // Reapply filtering
+      this.updateCellFiltering()
+      
+      // Update point count display
+      const pointCountElement = document.getElementById('point-count')
+      if (pointCountElement) {
+        pointCountElement.textContent = coordinates.length.toLocaleString()
+      }
+      return
+    }
+    
     //console.log('Different embedding method detected, creating animated transition')
     
     // Clear incremental filtering state when embedding changes
     // This ensures filtering works correctly with new coordinate indices
     this.clearIncrementalState()
     
-    // Update bounds and render axes, grid, and category labels with new embedding bounds
+    // Update bounds and coordinates for the new embedding
     this.currentBounds = newBounds
+    this.currentCoordinates = coordinates
     this.renderAxes()
     this.renderGrid()
     this.renderCategoryLabels()
@@ -944,6 +1259,18 @@ export default class extends Controller {
   }
 
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
+    // Safety check: Don't animate large datasets (> 100k cells)
+    if (newCoordinates.length > 100000) {
+      console.log(`🚀 [PERF] Skipping animation in createAnimatedPoints - dataset too large (${newCoordinates.length} cells)`)
+      // Clear sprite cache to force recreation with new positions
+      this.pointSprites = null
+      this.existingPoints = null
+      this.spritesRenderType = null
+      // Render the points directly without animation
+      this.renderPointsWithCurrentColoring()
+      return
+    }
+    
     //console.log('Creating animated points from previous to new coordinates')
     const pointSize = this.currentPointSize // Use current point size setting
     const animationDuration = 1000 // 1 second for faster transitions
@@ -1357,14 +1684,33 @@ export default class extends Controller {
   async loadSingleMetadataVector(metadataId) {
     console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
     
-    // Check if already loaded
+    // Check if already loaded in memory
     if (this.loadedMetadataVectors[metadataId]) {
-      console.log(`Metadata vector ${metadataId} already loaded`)
+      console.log(`💾 Metadata vector ${metadataId} already in memory`)
       const cachedData = this.loadedMetadataVectors[metadataId]
       console.log('Cached data:', cachedData)
       console.log('Cached compressed_data:', cachedData.compressed_data)
       console.log('Cached compression_info:', cachedData.compression_info)
       return cachedData
+    }
+    
+    // Try to load from IndexedDB (disk storage) - ONLY on cold start (nothing in memory yet)
+    // This avoids race conditions during active preloading
+    const isSessionColdStart = Object.keys(this.loadedMetadataVectors).length === 0
+    
+    if (isSessionColdStart && !this.loadingMetadataVectors.has(metadataId)) {
+      const diskData = await this.loadMetadataFromIndexedDB(metadataId)
+      if (diskData) {
+        console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`)
+        
+        // Remove IndexedDB metadata fields before returning
+        const cleanData = { ...diskData }
+        delete cleanData.loomFile
+        delete cleanData.timestamp
+        
+        this.loadedMetadataVectors[metadataId] = cleanData
+        return cleanData
+      }
     }
     
     // Check if currently loading
@@ -1429,11 +1775,17 @@ export default class extends Controller {
           }
         }
         
+        // FIRST: Store in memory cache immediately
         this.loadedMetadataVectors[metadataId] = vectorData
         this.metadataVectorsLoomFile = data.loom_file
         
         const info = vectorData.compression_info
         console.log(`Successfully loaded metadata ${vectorData.name} (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        
+        // THEN: Store in IndexedDB asynchronously for future use (don't await - fire and forget)
+        this.storeMetadataInIndexedDB(metadataId, vectorData).catch(error => {
+          console.warn('Failed to store in IndexedDB, but will keep in memory:', error)
+        })
         
         return vectorData
       } else {
@@ -1621,9 +1973,20 @@ export default class extends Controller {
     let vectorData = await this.loadSingleMetadataVector(metadataId)
     
     if (!vectorData) {
-      console.error('Failed to load metadata vector')
+      console.error('Failed to load metadata vector for:', metadataId)
+      console.error('loadedMetadataVectors:', Object.keys(this.loadedMetadataVectors))
+      console.error('IndexedDB available:', !!this.db)
       return
     }
+    
+    console.log('✅ Successfully loaded metadata vector:', {
+      id: vectorData.id || metadataId,
+      name: vectorData.name,
+      dataType: vectorData.data_type,
+      hasValues: !!vectorData.values,
+      hasCompressedData: !!vectorData.compressed_data,
+      valuesLength: vectorData.values?.length
+    })
     
     // Validate the loaded data - handle both compressed and uncompressed data
     // Parse compression_info if it's a JSON string
@@ -1736,6 +2099,10 @@ export default class extends Controller {
     // Also store in loadedMetadataVectors for filtering
     this.loadedMetadataVectors[metadataId] = this.currentMetadataVector
     
+    // Note: We keep metadata in memory during the session for fast switching
+    // IndexedDB is used for persistence across page reloads
+    // Memory will be managed by browser's garbage collector
+    
     // Show checkboxes for this metadata now that it's loaded
     this.showCheckboxesForMetadata(metadataId)
     
@@ -1753,6 +2120,11 @@ export default class extends Controller {
 
     // Clear the cached color map since we have new metadata
     this.clearColorMapCache()
+    
+    // Clear old category labels before rendering new metadata
+    if (this.categoryLabelsContainer) {
+      this.categoryLabelsContainer.removeChildren()
+    }
     
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
@@ -1839,9 +2211,9 @@ export default class extends Controller {
   async loadSingleMetadataVectorSilently(metadataId) {
     //console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
     
-    // Check if already loaded
+    // Check if already loaded in memory
     if (this.loadedMetadataVectors[metadataId]) {
-      //console.log(`Metadata vector ${metadataId} already loaded`)
+      //console.log(`💾 Metadata ${metadataId} already in memory`)
       return this.loadedMetadataVectors[metadataId]
     }
     
@@ -1906,11 +2278,17 @@ export default class extends Controller {
           }
         }
         
+        // FIRST: Store in memory cache immediately to avoid race conditions
         this.loadedMetadataVectors[metadataId] = vectorData
         this.metadataVectorsLoomFile = data.loom_file
         
         const info = vectorData.compression_info
         //console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
+        
+        // THEN: Store in IndexedDB for disk storage (fire and forget)
+        this.storeMetadataInIndexedDB(metadataId, vectorData).catch(error => {
+          console.warn('Failed to store in IndexedDB:', error)
+        })
         
         // Show checkboxes for this metadata now that it's loaded
         this.showCheckboxesForMetadata(metadataId)
@@ -2007,6 +2385,48 @@ export default class extends Controller {
       })
     }
   }
+  
+  // Preload all metadata vectors for instant switching
+  async preloadAllMetadata() {
+    console.log('🚀 [PERF] Starting background preload of all metadata vectors...')
+    
+    // Find all metadata buttons
+    const metadataButtons = document.querySelectorAll('[data-metadata-id]')
+    const metadataIds = Array.from(metadataButtons).map(btn => btn.dataset.metadataId).filter(Boolean)
+    
+    console.log(`🚀 [PERF] Found ${metadataIds.length} metadata vectors to preload`)
+    
+    // Preload in batches to avoid overwhelming the server
+    const batchSize = 3
+    let loadedCount = 0
+    
+    for (let i = 0; i < metadataIds.length; i += batchSize) {
+      const batch = metadataIds.slice(i, i + batchSize)
+      
+      // Load batch in parallel
+      await Promise.all(batch.map(metadataId => {
+        // Skip if already loaded in memory
+        if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
+          return Promise.resolve()
+        }
+        
+        // Load from server (will auto-store to IndexedDB)
+        return this.loadSingleMetadataVectorSilently(metadataId).then(() => {
+          loadedCount++
+        }).catch(error => {
+          console.log(`Preload failed for metadata ${metadataId}:`, error.message)
+        })
+      }))
+      
+      // Small delay between batches
+      if (i + batchSize < metadataIds.length) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    }
+    
+    console.log(`🚀 [PERF] Completed preloading ${loadedCount} metadata vectors`)
+    this.logMemoryUsage('After preloading all metadata')
+  }
 
   // Update visualization with metadata vector coloring
   updateVisualizationWithMetadataVector() {
@@ -2031,13 +2451,29 @@ export default class extends Controller {
       return
     }
     
-    // Use the centralized coloring approach
-    this.forceReRenderPoints()
+    // Smart re-render: Sprites can ALWAYS be reused, just update colors and z-order!
+    // No need to recreate sprites when switching metadata
+    console.log(`🔄 Switching to ${data_type} metadata, will reuse sprites and update colors/z-order`)
+    
+    // Store for next comparison
+    this.lastMetadataVector = this.currentMetadataVector
+    
+    // Render with current coloring (will reuse sprites if type matches)
+    this.renderPointsWithCurrentColoring()
     
     // Render category labels if this is discrete metadata, or color legend if continuous
     if (this.currentMetadataVector.data_type === 'DISCRETE') {
+      // Make sure category labels container is visible
+      if (this.categoryLabelsContainer) {
+        this.categoryLabelsContainer.visible = true
+      }
       this.renderCategoryLabels()
     } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+      // Hide category labels for numeric metadata
+      if (this.categoryLabelsContainer) {
+        this.categoryLabelsContainer.visible = false
+        this.categoryLabelsContainer.removeChildren()
+      }
       this.renderContinuousColorLegend()
     }
     
@@ -2056,33 +2492,39 @@ export default class extends Controller {
       return
     }
 
-    // Decide whether we can do a visibility-only update
+    // NEW STRATEGY: NEVER recreate container once sprites exist!
+    // Just update sprite properties (color, zIndex, visibility, etc.)
     const pointSize = this.currentPointSize
-    const canVisibilityUpdate = Boolean(
-      this.visibilityOnlyUpdate &&
-      this.existingPoints &&
-      this.existingPoints.length === this.currentCoordinates.length &&
-      this.lastMetadataVector === this.currentMetadataVector &&
-      this.lastPointSize === pointSize &&
-      this.scatterContainer && this.scatterContainer.children && this.scatterContainer.children.length > 0
-    )
-
-    // Prepare container only when a full re-render is needed
+    
     let pointsContainer
-    if (!canVisibilityUpdate) {
+    
+    // If we have sprites and container, ALWAYS reuse them
+    if (this.pointSprites && this.pointSprites.length === this.currentCoordinates.length && this.animatedContainer) {
+      pointsContainer = this.animatedContainer
+      
+      // Ensure container is in scene graph
+      if (!this.scatterContainer.children.includes(this.animatedContainer)) {
+        this.scatterContainer.addChild(this.animatedContainer)
+        console.log(`🚀 [PERF] Re-added animatedContainer to scatterContainer`)
+      }
+      
+      console.log(`🚀 [PERF] Reusing sprites and container - NO recreation, just property updates`)
+      console.log(`🚀 [PERF] Container has ${pointsContainer.children.length} children, ${this.pointSprites.length} sprites`)
+    } else {
+      // First time or coordinates changed - create new container and sprites
       const clearStart = performance.now()
       this.scatterContainer.removeChildren()
-      this.existingPoints = null // Clear existing points reference
+      this.existingPoints = null
       
-      // Always create the nested structure for consistency
+      // Create new container
       pointsContainer = new PIXI.Container()
+      pointsContainer.sortableChildren = true // Enable z-index sorting
       this.scatterContainer.addChild(pointsContainer)
-      this.animatedContainer = pointsContainer // Store reference for consistency
+      this.animatedContainer = pointsContainer
+      
       const clearTime = performance.now() - clearStart
-      console.log(`🚀 [PERF] Container clear/setup took ${clearTime.toFixed(2)}ms`)
-    } else {
-      pointsContainer = this.animatedContainer || this.scatterContainer
-      console.log('🚀 [PERF] Skipping container clear - visibility-only update')
+      console.log(`🚀 [PERF] First render or coordinates changed - creating new container`)
+      console.log(`🚀 [PERF] New pointsContainer created`)
     }
     
     //console.log(`renderPointsWithCurrentColoring using pointSize: ${pointSize}`)
@@ -2125,8 +2567,123 @@ export default class extends Controller {
         //console.log('Categories for first 10 points:', sortedPointIndices.slice(0, 10).map(i => values[i]))
         //console.log('Frequencies for first 10 points:', sortedPointIndices.slice(0, 10).map(i => categoryFrequencies[values[i]]))
         
-        // Render points in sorted order (largest categories first)
-        sortedPointIndices.forEach(i => {
+        // Check if we can reuse existing sprites - can reuse from any type now that we use zIndex
+        const canReuseSprites = this.pointSprites && 
+                                 this.pointSprites.length === this.currentCoordinates.length
+        
+        console.log(`🚀 [PERF] Discrete sprite reuse check:`, {
+          hasPointSprites: !!this.pointSprites,
+          spritesLength: this.pointSprites?.length,
+          coordsLength: this.currentCoordinates.length,
+          canReuse: canReuseSprites
+        })
+        
+        if (canReuseSprites) {
+          console.log(`🚀 [PERF] Fast discrete update: reusing ${this.pointSprites.length} sprites, updating colors and z-order`)
+          const colorUpdateStart = performance.now()
+          
+          // Pre-calculate discrete color map if needed
+          if (!this._cachedColorMap) {
+            const sortedCategories = this.getSortedCategories(values, [...compression_info.categories])
+            this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
+          }
+          const colorMap = this._cachedColorMap
+          const hasSelection = this.selectedCells && this.selectedCells.size > 0
+          
+          // Calculate category frequencies for z-ordering (larger categories have lower zIndex = background)
+          const freqStart = performance.now()
+          const categoryFrequencies = {}
+          for (let i = 0; i < values.length; i++) {
+            const value = values[i]
+            categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
+          }
+          const freqTime = performance.now() - freqStart
+          console.log(`🚀 [PERF] Category frequency calculation took ${freqTime.toFixed(2)}ms`)
+          
+          // Find max frequency for normalization
+          const maxFreq = this.safeMax(Object.values(categoryFrequencies))
+          console.log(`🚀 [PERF] Max frequency: ${maxFreq}`)
+          
+          // Build visibility set for O(1) lookups
+          const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+          
+          // Batch add sprites first if needed (much faster than individual addChild)
+          let addedToContainer = 0
+          if (pointsContainer.children.length === 0 && this.pointSprites.length > 0) {
+            console.log(`🚀 [PERF] Container is empty, batch-adding all ${this.pointSprites.length} sprites...`)
+            const batchStart = performance.now()
+            
+            // Temporarily disable sorting during batch add for maximum performance
+            const wasSortable = pointsContainer.sortableChildren
+            pointsContainer.sortableChildren = false
+            
+            for (let i = 0; i < this.pointSprites.length; i++) {
+              const sprite = this.pointSprites[i]
+              if (sprite && !sprite.parent) {
+                pointsContainer.addChild(sprite)
+                addedToContainer++
+              }
+            }
+            
+            // Re-enable sorting after batch add
+            pointsContainer.sortableChildren = wasSortable
+            
+            const batchTime = performance.now() - batchStart
+            console.log(`🚀 [PERF] Batch-added ${addedToContainer} sprites in ${batchTime.toFixed(2)}ms`)
+          }
+          
+          console.log(`🚀 [PERF] Starting discrete color and z-order update for ${this.pointSprites.length} sprites...`)
+          
+          // Update sprite colors, visibility, and z-order
+          const updateStart = performance.now()
+          for (let i = 0; i < this.pointSprites.length; i++) {
+            const sprite = this.pointSprites[i]
+            if (sprite) {
+              const category = values[i]
+              const isSelected = this.selectedCells && this.selectedCells.has(i)
+              
+              // Update color
+              if (isSelected) {
+                sprite.tint = 0xff0000
+                sprite.alpha = 1.0
+              } else {
+                sprite.tint = colorMap[category] || 0x3b82f6
+                sprite.alpha = hasSelection ? 0.3 : 1.0
+              }
+              
+              // Update z-order: larger categories = lower zIndex = render first (background)
+              const freq = categoryFrequencies[category] || 0
+              sprite.zIndex = maxFreq - freq // Invert so large categories have low zIndex
+              
+              sprite.visible = !visibleSet || visibleSet.has(i)
+            }
+          }
+          
+          const updateTime = performance.now() - updateStart
+          console.log(`🚀 [PERF] Color and z-order update completed in ${updateTime.toFixed(2)}ms`)
+          
+          const colorUpdateTime = performance.now() - colorUpdateStart
+          console.log(`🚀 [PERF] Total discrete update completed in ${colorUpdateTime.toFixed(2)}ms`)
+          this.logMemoryUsage('After discrete metadata update')
+        } else {
+          // Full render: create sprites in sorted order (largest categories first)
+          console.log(`🚀 [PERF] Full discrete render: creating ${sortedPointIndices.length} sprites`)
+          
+          // Mark that these sprites are for discrete metadata
+          this.spritesRenderType = 'discrete'
+          
+          if (!this.pointTexture || this.lastPointSize !== pointSize) {
+            if (this.pointTexture) this.pointTexture.destroy(true)
+            this.pointTexture = this.createPointTexture(pointSize)
+            this.lastPointSize = pointSize
+          }
+          
+          this.pointSprites = new Array(this.currentCoordinates.length)
+          
+          // Calculate category frequencies for z-ordering
+          const maxFreq = this.safeMax(Object.values(categoryFrequencies))
+          
+          sortedPointIndices.forEach((i, sortIndex) => {
           // Skip this point if it's not in the filtered indices
           if (filteredIndices && !filteredIndices.includes(i)) {
             return
@@ -2138,84 +2695,193 @@ export default class extends Controller {
           const screenX = this.normalizeX(x, this.currentBounds)
           const screenY = this.normalizeY(y, this.currentBounds)
           
-          // Debug: Log coordinates for first few points to compare with zooming shape
-          if (i < 5) {
-            console.log(`🔍 Real Point ${i}:`, {
-              dataCoords: [x, y],
-              screenCoords: [screenX, screenY],
-              bounds: this.currentBounds,
-              screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
-            })
-          }
-          
-          // Create individual point graphics
-          const point = new this.PIXI.Graphics()
-          point.beginFill(color)
-          point.alpha = alpha
-          point.originalAlpha = alpha // Store original alpha for visibility updates
-          point.drawCircle(0, 0, pointSize)
-          point.endFill()
-          point.x = screenX
-          point.y = screenY
+            // Create sprite using shared texture
+            const sprite = new this.PIXI.Sprite(this.pointTexture)
+            sprite.anchor.set(0.5)
+            sprite.x = screenX
+            sprite.y = screenY
+            sprite.tint = color
+            sprite.alpha = alpha
+            sprite.originalAlpha = alpha
           
           // Store cell ID and mark as point for later reference
-          point.cellId = i
-          point.isPoint = true
+            sprite.cellId = i
+            sprite.isPoint = true
+            
+            // Set z-order based on category frequency (larger = background)
+            const category = values[i]
+            const freq = categoryFrequencies[category] || 0
+            sprite.zIndex = maxFreq - freq
           
           // Store original color for reset functionality
           this.storeOriginalPointColor(i, color)
           
           // Add hover functionality
-          point.interactive = true
-          point.buttonMode = false
-          point.on('pointerover', () => this.showTooltip(i, point))
-          point.on('pointerout', () => this.hideTooltip())
-          
-          pointsContainer.addChild(point)
-        })
+            sprite.interactive = true
+            sprite.buttonMode = false
+            sprite.on('pointerover', () => this.showTooltip(i, sprite))
+            sprite.on('pointerout', () => this.hideTooltip())
+            
+            pointsContainer.addChild(sprite)
+            this.pointSprites[i] = sprite
+          })
+        }
         
         // Update point count display with filtered count
         this.updatePointCountDisplay(filteredIndices)
         
       } else if (data_type === 'NUMERIC') {
-        // Check if we can optimize by just showing/hiding existing points
-        const renderStart = performance.now()
-        console.log(`🚀 [PERF] Starting point rendering for ${this.currentCoordinates.length} points`)
+        // Check for ultra-fast visibility-only update (no color changes)
+        const canVisibilityOnlyUpdate = Boolean(
+          this.visibilityOnlyUpdate &&
+          this.pointSprites &&
+          this.pointSprites.length === this.currentCoordinates.length
+        )
         
-        if (canVisibilityUpdate) {
-          console.log(`🚀 [PERF] Optimizing: updating visibility of existing points`)
+        if (canVisibilityOnlyUpdate) {
+          console.log(`🚀 [PERF] Ultra-fast visibility-only update: ${this.pointSprites.length} sprites`)
           const visibilityStart = performance.now()
           
-          // Build a Set for O(1) membership checks
-          let visibleSet = null
-          if (filteredIndices) {
-            visibleSet = new Set(filteredIndices)
-          }
+          // Build visibility set for O(1) lookups
+          const visibleSet = filteredIndices ? new Set(filteredIndices) : null
           
-          // Update visibility of existing points
-          for (let i = 0; i < this.existingPoints.length; i++) {
-            const point = this.existingPoints[i]
-            const shouldShow = !visibleSet || visibleSet.has(i)
-            if (point.visible !== shouldShow) point.visible = shouldShow
+          // Only update visibility, skip color recalculation
+          for (let i = 0; i < this.pointSprites.length; i++) {
+            const sprite = this.pointSprites[i]
+            if (sprite) {
+              sprite.visible = !visibleSet || visibleSet.has(i)
+            }
           }
           
           const visibilityTime = performance.now() - visibilityStart
-          console.log(`🚀 [PERF] Visibility update completed in ${visibilityTime.toFixed(2)}ms`)
+          console.log(`🚀 [PERF] Visibility-only update completed in ${visibilityTime.toFixed(2)}ms`)
           
           // Update point count display
           this.updatePointCountDisplay(filteredIndices)
           
-          const totalTime = performance.now() - renderStart
-          console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed (optimized) in ${totalTime.toFixed(2)}ms`)
-          
-          // Reset the hint flag until next request
+          // Reset the flag
           this.visibilityOnlyUpdate = false
+          
+          const totalTime = performance.now() - startTime
+          console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed (visibility-only) in ${totalTime.toFixed(2)}ms`)
           return
         }
         
-        // Full render: create all points from scratch
-        console.log(`🚀 [PERF] Full render: creating ${this.currentCoordinates.length} points`)
-        this.existingPoints = [] // Store reference to existing points
+        // Check if we can reuse existing sprites - can reuse from any type now that we use zIndex
+        const canReuseSprites = this.pointSprites && 
+                                 this.pointSprites.length === this.currentCoordinates.length
+        
+        console.log(`🚀 [PERF] Numeric sprite reuse check:`, {
+          hasPointSprites: !!this.pointSprites,
+          spritesLength: this.pointSprites?.length,
+          coordsLength: this.currentCoordinates.length,
+          canReuse: canReuseSprites
+        })
+        
+        if (canReuseSprites) {
+          console.log(`🚀 [PERF] Fast numeric update: reusing ${this.pointSprites.length} sprites, just updating colors`)
+          const colorUpdateStart = performance.now()
+          
+          // Pre-calculate range values to avoid calling getEffectiveColorRange 500k times
+          const effectiveRange = this.getEffectiveColorRange()
+          const minVal = effectiveRange ? effectiveRange.min : compression_info.min_val
+          const maxVal = effectiveRange ? effectiveRange.max : compression_info.max_val
+          const range = maxVal - minVal
+          const invRange = 1.0 / range // Pre-calculate inverse for faster division
+          const hasSelection = this.selectedCells && this.selectedCells.size > 0
+          const useDefaultScheme = this.currentColorScheme === 'blue-green-red' || !this.currentColorScheme
+          
+          // Build visibility set for O(1) lookups
+          const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+          
+          // Batch add sprites first if needed (much faster than individual addChild)
+          let addedToContainer = 0
+          if (pointsContainer.children.length === 0 && this.pointSprites.length > 0) {
+            console.log(`🚀 [PERF] Container is empty, batch-adding all sprites...`)
+            const batchStart = performance.now()
+            
+            // Temporarily disable sorting during batch add for maximum performance
+            const wasSortable = pointsContainer.sortableChildren
+            pointsContainer.sortableChildren = false
+            
+            for (let i = 0; i < this.pointSprites.length; i++) {
+              const sprite = this.pointSprites[i]
+              if (sprite && !sprite.parent) {
+                pointsContainer.addChild(sprite)
+                addedToContainer++
+              }
+            }
+            
+            // Re-enable sorting after batch add
+            pointsContainer.sortableChildren = wasSortable
+            
+            const batchTime = performance.now() - batchStart
+            console.log(`🚀 [PERF] Batch-added ${addedToContainer} sprites in ${batchTime.toFixed(2)}ms`)
+          }
+          
+          console.log(`🚀 [PERF] Starting color update loop for ${this.pointSprites.length} sprites...`)
+          const loopStart = performance.now()
+          
+          // Update sprite colors and visibility
+          for (let i = 0; i < this.pointSprites.length; i++) {
+            const sprite = this.pointSprites[i]
+            if (sprite) {
+              // Inline color calculation for performance (avoid function call overhead)
+              const isSelected = this.selectedCells && this.selectedCells.has(i)
+              
+              if (isSelected) {
+                sprite.tint = 0xff0000
+                sprite.alpha = 1.0
+              } else {
+                const value = values[i]
+                const normalizedValue = (value - minVal) * invRange
+                
+                // Inline blue-green-red gradient for maximum performance
+                if (useDefaultScheme) {
+                  const clamped = Math.max(0, Math.min(1, normalizedValue))
+                  if (clamped < 0.5) {
+                    const t = clamped * 2
+                    const g = Math.round(255 * t)
+                    const b = Math.round(255 * (1 - t))
+                    sprite.tint = (g << 8) | b
+                  } else {
+                    const t = (clamped - 0.5) * 2
+                    const r = Math.round(255 * t)
+                    const g = Math.round(255 * (1 - t))
+                    sprite.tint = (r << 16) | (g << 8)
+                  }
+                } else {
+                  sprite.tint = this.valueToColor(normalizedValue)
+                }
+                
+                sprite.alpha = hasSelection ? 0.3 : 1.0
+              }
+              
+              sprite.zIndex = 0 // Numeric doesn't need special z-ordering
+              sprite.visible = !visibleSet || visibleSet.has(i)
+            }
+          }
+          
+          const loopTime = performance.now() - loopStart
+          console.log(`🚀 [PERF] Color update loop completed in ${loopTime.toFixed(2)}ms`)
+          
+          const colorUpdateTime = performance.now() - colorUpdateStart
+          console.log(`🚀 [PERF] Total numeric update completed in ${colorUpdateTime.toFixed(2)}ms`)
+          this.logMemoryUsage('After numeric metadata update')
+        } else {
+          // Full render: create sprites from scratch
+          console.log(`🚀 [PERF] Full numeric render: creating ${this.currentCoordinates.length} sprites`)
+          
+          // Mark that these sprites are for numeric metadata
+          this.spritesRenderType = 'numeric'
+          
+          if (!this.pointTexture || this.lastPointSize !== pointSize) {
+            if (this.pointTexture) this.pointTexture.destroy(true)
+            this.pointTexture = this.createPointTexture(pointSize)
+            this.lastPointSize = pointSize
+          }
+          
+          this.pointSprites = new Array(this.currentCoordinates.length)
         
         for (let i = 0; i < this.currentCoordinates.length; i++) {
           // Skip this point if it's not in the filtered indices
@@ -2229,42 +2895,98 @@ export default class extends Controller {
           const screenX = this.normalizeX(x, this.currentBounds)
           const screenY = this.normalizeY(y, this.currentBounds)
           
-          // Create individual point graphics
-          const point = new this.PIXI.Graphics()
-          point.beginFill(color)
-          point.alpha = alpha
-          point.originalAlpha = alpha // Store original alpha for visibility updates
-          point.drawCircle(0, 0, pointSize)
-          point.endFill()
-          point.x = screenX
-          point.y = screenY
+            // Create sprite using shared texture
+            const sprite = new this.PIXI.Sprite(this.pointTexture)
+            sprite.anchor.set(0.5)
+            sprite.x = screenX
+            sprite.y = screenY
+            sprite.tint = color
+            sprite.alpha = alpha
+            sprite.originalAlpha = alpha
+            sprite.zIndex = 0 // Numeric doesn't need special z-ordering
           
           // Store cell ID and mark as point for later reference
-          point.cellId = i
-          point.isPoint = true
+            sprite.cellId = i
+            sprite.isPoint = true
           
           // Store original color for reset functionality
           this.storeOriginalPointColor(i, color)
           
           // Add hover functionality
-          point.interactive = true
-          point.buttonMode = false
-          point.on('pointerover', () => this.showTooltip(i, point))
-          point.on('pointerout', () => this.hideTooltip())
-          
-          pointsContainer.addChild(point)
-          this.existingPoints[i] = point // Store reference for future optimization
+            sprite.interactive = true
+            sprite.buttonMode = false
+            sprite.on('pointerover', () => this.showTooltip(i, sprite))
+            sprite.on('pointerout', () => this.hideTooltip())
+            
+            pointsContainer.addChild(sprite)
+            this.pointSprites[i] = sprite
+          }
         }
         
-        // Store metadata for optimization checks
-        this.lastMetadataVector = this.currentMetadataVector
+        this.existingPoints = this.pointSprites // Maintain compatibility
+        
+        // Store point size for optimization checks
         this.lastPointSize = pointSize
         
         // Update point count display with filtered count
         this.updatePointCountDisplay(filteredIndices)
       }
     } else {
-      // Render each point individually to support selection transparency and color reset
+      // No metadata - default coloring
+      // Check if we can reuse existing sprites - can reuse from any type now
+      const canReuseSprites = this.pointSprites && 
+                               this.pointSprites.length === this.currentCoordinates.length
+      
+      if (canReuseSprites) {
+        console.log(`🚀 [PERF] Fast default color update: reusing ${this.pointSprites.length} sprites`)
+        const colorUpdateStart = performance.now()
+        
+        const hasSelection = this.selectedCells && this.selectedCells.size > 0
+        
+        // Build visibility set for O(1) lookups
+        const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+        
+        // Update sprite colors and visibility
+        for (let i = 0; i < this.pointSprites.length; i++) {
+          const sprite = this.pointSprites[i]
+          if (sprite) {
+            // Inline color calculation for performance
+            const isSelected = this.selectedCells && this.selectedCells.has(i)
+            
+            if (isSelected) {
+              sprite.tint = 0xff0000
+              sprite.alpha = 1.0
+            } else {
+              sprite.tint = 0x3b82f6 // Default blue
+              sprite.alpha = hasSelection ? 0.3 : 1.0
+            }
+            
+            sprite.zIndex = 0 // Default doesn't need special z-ordering
+            sprite.visible = !visibleSet || visibleSet.has(i)
+            
+            // Only add to container if it's not already there
+            if (sprite.parent !== this.scatterContainer) {
+              this.scatterContainer.addChild(sprite)
+            }
+          }
+        }
+        
+        const colorUpdateTime = performance.now() - colorUpdateStart
+        console.log(`🚀 [PERF] Default color update completed in ${colorUpdateTime.toFixed(2)}ms`)
+      } else {
+        console.log(`🚀 [PERF] Full default render: creating ${this.currentCoordinates.length} sprites`)
+        
+        // Mark that these sprites are for default coloring
+        this.spritesRenderType = 'default'
+        
+        if (!this.pointTexture || this.lastPointSize !== pointSize) {
+          if (this.pointTexture) this.pointTexture.destroy(true)
+          this.pointTexture = this.createPointTexture(pointSize)
+          this.lastPointSize = pointSize
+        }
+        
+        this.pointSprites = new Array(this.currentCoordinates.length)
+        
       for (let i = 0; i < this.currentCoordinates.length; i++) {
         // Skip this point if it's not in the filtered indices
         if (filteredIndices && !filteredIndices.includes(i)) {
@@ -2277,25 +2999,26 @@ export default class extends Controller {
         const screenX = this.normalizeX(x, this.currentBounds)
         const screenY = this.normalizeY(y, this.currentBounds)
         
-        
-        // Create individual point graphics
-        const point = new this.PIXI.Graphics()
-        point.beginFill(color)
-        point.alpha = alpha
-        point.originalAlpha = alpha // Store original alpha for visibility updates
-        point.drawCircle(0, 0, pointSize)
-        point.endFill()
-        point.x = screenX
-        point.y = screenY
+          // Create sprite using shared texture
+          const sprite = new this.PIXI.Sprite(this.pointTexture)
+          sprite.anchor.set(0.5)
+          sprite.x = screenX
+          sprite.y = screenY
+          sprite.tint = color
+          sprite.alpha = alpha
+          sprite.originalAlpha = alpha
+          sprite.zIndex = 0 // Default doesn't need special z-ordering
         
         // Store cell ID and mark as point for later reference
-        point.cellId = i
-        point.isPoint = true
+          sprite.cellId = i
+          sprite.isPoint = true
         
         // Store original color for reset functionality
         this.storeOriginalPointColor(i, color)
         
-        this.scatterContainer.addChild(point)
+          this.scatterContainer.addChild(sprite)
+          this.pointSprites[i] = sprite
+        }
       }
       
       // Update point count display with filtered count
@@ -4554,18 +5277,42 @@ export default class extends Controller {
       return
     }
 
-    //console.log('Resetting to original view')
+    console.log('🔄 Resetting zoom and pan to original view')
     
-    // Clear any stored original positions to force re-rendering
+    // Clear any stored original positions
     this.clearStoredOriginalPositions()
     
     // Reset to original bounds
     const originalBounds = this.calculateBounds(this.currentCoordinates)
     this.currentBounds = this.getAdjustedBounds(originalBounds)
     
-    // Force re-render all points with original bounds
-    this.scatterContainer.removeChildren()
-    this.renderPointsWithCurrentColoring()
+    console.log('🔄 Updating sprite positions for reset view')
+    
+    // Update sprite positions without recreation (much faster!)
+    if (this.pointSprites && this.pointSprites.length === this.currentCoordinates.length) {
+      const updateStart = performance.now()
+      
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (sprite) {
+          const [x, y] = this.currentCoordinates[i]
+          sprite.x = this.normalizeX(x, this.currentBounds)
+          sprite.y = this.normalizeY(y, this.currentBounds)
+        }
+      }
+      
+      const updateTime = performance.now() - updateStart
+      console.log(`🔄 Updated ${this.pointSprites.length} sprite positions in ${updateTime.toFixed(2)}ms`)
+    } else {
+      // Fallback: no sprites to update, need full render
+      console.log('🔄 No sprites available, doing full render')
+      this.scatterContainer.removeChildren()
+      this.renderPointsWithCurrentColoring()
+    }
+    
+    // Re-render axes and grid with new bounds
+    this.renderAxes()
+    this.renderGrid()
     
     // Re-render category labels after resetting view
     if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
@@ -5201,19 +5948,14 @@ export default class extends Controller {
 
   // Force re-render when colors or metadata change
   forceReRenderPoints() {
+    console.log('🔄 forceReRenderPoints called')
     if (this.currentCoordinates && this.scatterContainer) {
-      // Check if we have the nested structure (animatedContainer)
-      if (this.animatedContainer && this.scatterContainer.children.includes(this.animatedContainer)) {
-        // Preserve nested structure: clear points from animatedContainer, not scatterContainer
-        this.animatedContainer.removeChildren()
-        
-        // Re-render points in the animatedContainer (preserving nested structure)
-        this.renderPointsWithCurrentColoringInContainer(this.animatedContainer)
-      } else {
-        // Fallback to old method if no nested structure
-        this.scatterContainer.removeChildren()
-        this.renderPointsWithCurrentColoring()
-      }
+      // With zIndex support, we can reuse sprites - just update colors and z-order
+      // No need to clear sprite cache anymore!
+      console.log('🔄 Calling renderPointsWithCurrentColoring (sprites will be reused with zIndex updates)')
+      
+      // Just re-render with current sprites
+      this.renderPointsWithCurrentColoring()
       
       // Re-render category labels after force re-render
       if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
@@ -5229,39 +5971,15 @@ export default class extends Controller {
       return
     }
 
-    // Get filtered indices for current filtering state
-    const filteredIndices = this.getIncrementalFilteredIndices()
+    // Just delegate to the main rendering function which handles sprites properly
+    // The main function will use the scatterContainer, so we need to temporarily swap it
+    const originalContainer = this.scatterContainer
+    this.scatterContainer = container
     
-    // Create points in the specified container using the same method as the main rendering
-    this.currentCoordinates.forEach((coord, i) => {
-      // If no filtering is applied (filteredIndices is null), show all points
-      if (!filteredIndices || filteredIndices.includes(i)) {
-        const { color, alpha } = this.getColorAndAlpha(i)
-        
-        // Extract x, y from coordinate array
-        const [x, y] = coord
-        
-        // Convert data coordinates to screen coordinates
-        const screenX = this.normalizeX(x, this.currentBounds)
-        const screenY = this.normalizeY(y, this.currentBounds)
-        
-        // Create individual point graphics using the same pattern as the main rendering
-        const point = new PIXI.Graphics()
-        point.beginFill(color)
-        point.alpha = alpha
-        point.originalAlpha = alpha // Store original alpha for visibility updates
-        point.drawCircle(0, 0, this.currentPointSize)
-        point.endFill()
-        point.x = screenX
-        point.y = screenY
-        
-        // Store cell ID and mark as point for later reference
-        point.cellId = i
-        point.isPoint = true
-        
-        container.addChild(point)
-      }
-    })
+    this.renderPointsWithCurrentColoring()
+    
+    // Restore original container
+    this.scatterContainer = originalContainer
   }
 
   // Render plot axes with labels
@@ -5555,8 +6273,9 @@ export default class extends Controller {
     }
     
 
-    // Clear existing labels
+    // Clear existing labels and make container visible
     this.categoryLabelsContainer.removeChildren()
+    this.categoryLabelsContainer.visible = true
 
     const { minX, maxX, minY, maxY } = this.currentBounds
     const width = this.pixiApp.screen.width
@@ -5602,37 +6321,35 @@ export default class extends Controller {
     const labelCreationStartTime = performance.now()
     let labelsAdded = 0
     // First, process categories with visible points
+    console.log(`🏷️ Total centroids to process: ${Object.keys(centroids).length}`)
     Object.entries(centroids).forEach(([category, centroid]) => {
+      
       if (centroid.count > 0) { // Only show labels for categories with points
         // Check if this category is selected by looking at the checkbox state
         const categoryCheckbox = document.querySelector(`.category-checkbox[data-metadata-id="${this.currentMetadataVector.id}"][data-category="${category}"]`)
-        const bgColor = categoryCheckbox ? categoryCheckbox.style.backgroundColor : ''
-        // Check if NOT unselected (unselected is #f3f4f6 or rgb(243, 244, 246))
-        const isCategorySelected = categoryCheckbox && bgColor !== '#f3f4f6' && bgColor !== 'rgb(243, 244, 246)'
         
+        // If checkbox doesn't exist yet (e.g., when first loading metadata), assume all categories are selected
+        if (!categoryCheckbox) {
+          // Category is selected by default
+        } else {
+          const bgColor = categoryCheckbox.style.backgroundColor
+        // Check if NOT unselected (unselected is #f3f4f6 or rgb(243, 244, 246))
+          const isCategorySelected = bgColor !== '#f3f4f6' && bgColor !== 'rgb(243, 244, 246)'
         
         if (!isCategorySelected) {
           return // Skip rendering label for unselected categories
+          }
         }
 
         
         const screenX = this.normalizeX(centroid.x, this.currentBounds)
         const screenY = this.normalizeY(centroid.y, this.currentBounds)
-        
-        console.log(`🏷️ Label positioning for ${category}:`, {
-          centroidData: { x: centroid.x, y: centroid.y, count: centroid.count },
-          currentBounds: this.currentBounds,
-          screenPosition: { x: screenX, y: screenY },
-          isPanning: this.isPanning,
-          storedCentroids: this.storedCentroids ? 'exists' : 'missing',
-          screenWidth: this.pixiApp.screen.width,
-          screenHeight: this.pixiApp.screen.height
-        })
 
         // Skip if outside visible area (with some margin)
         const margins = this.getPlotMargins()
         const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
-        if (screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin) {
+        const isOffScreen = screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin
+        if (isOffScreen) {
           return
         }
 
@@ -5641,7 +6358,7 @@ export default class extends Controller {
         try {
           label = this.createCategoryLabel(category, centroid.count)
         } catch (error) {
-          console.error(`🏷️ Error creating label for ${category}:`, error)
+          console.error(`🏷️ ERROR creating label for ${category}:`, error)
           return
         }
         
@@ -5661,13 +6378,19 @@ export default class extends Controller {
         this.categoryLabelsContainer.addChild(label)
         labelsAdded++
         
-        // Debug: Check label position after creation
-        console.log(`🏷️ Label ${category} created at position:`, { x: label.x, y: label.y, screenX, screenY })
-        
       }
     })
     
     this.categoryLabelsContainer.visible = true
+    
+    console.log(`🏷️ Labels render complete:`, {
+      labelsAdded,
+      containerVisible: this.categoryLabelsContainer.visible,
+      containerChildren: this.categoryLabelsContainer.children.length,
+      containerAlpha: this.categoryLabelsContainer.alpha,
+      containerX: this.categoryLabelsContainer.x,
+      containerY: this.categoryLabelsContainer.y
+    })
 
     // Update label interaction behavior for newly created labels
     this.updateLabelInteractionMode()
@@ -5683,6 +6406,8 @@ export default class extends Controller {
   calculateCategoryCentroids(values, categories) {
     const calcStartTime = performance.now()
     
+    console.log(`🏷️ calculateCategoryCentroids called with ${categories?.length} categories`)
+    
     if (!categories || !Array.isArray(categories)) {
       console.log('Categories is not a valid array, returning empty centroids')
       return {}
@@ -5694,6 +6419,37 @@ export default class extends Controller {
     categories.forEach(category => {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
+    
+    // FAST PATH: Use pointSprites array if available (much faster for large datasets)
+    if (this.pointSprites && this.pointSprites.length > 0) {
+      console.log(`🏷️ Using fast path with pointSprites array (${this.pointSprites.length} sprites)`)
+      
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (sprite && sprite.visible && sprite.cellId !== undefined) {
+          const category = values[sprite.cellId]
+          if (centroids[category]) {
+            const coord = this.currentCoordinates[sprite.cellId]
+            if (coord && coord.length >= 2) {
+              centroids[category].x += coord[0]
+              centroids[category].y += coord[1]
+              centroids[category].count += 1
+            }
+          }
+        }
+      }
+      
+      // Calculate averages
+      Object.keys(centroids).forEach(category => {
+        if (centroids[category].count > 0) {
+          centroids[category].x /= centroids[category].count
+          centroids[category].y /= centroids[category].count
+          console.log(`🏷️ Fast path centroid for ${category}: count=${centroids[category].count}, pos=(${centroids[category].x.toFixed(2)}, ${centroids[category].y.toFixed(2)})`)
+        }
+      })
+      
+      return centroids
+    }
 
     // Calculate centroids from actual visible points in the scatter container
     if (this.scatterContainer && this.scatterContainer.children) {
@@ -5703,8 +6459,6 @@ export default class extends Controller {
         const pointsToCheck = []
         
         this.scatterContainer.children.forEach((child, index) => {
-          //console.log(`Child ${index}: isPoint=${child.isPoint}, hasChildren=${!!child.children}, childrenCount=${child.children?.length || 0}`)
-          
           if (child.isPoint) {
             // Individual point (shouldn't happen with new structure)
             pointsToCheck.push(child)
@@ -5876,7 +6630,7 @@ export default class extends Controller {
   // Render continuous color legend for continuous metadata
   renderContinuousColorLegend() {
     const startTime = performance.now()
-    console.log('🎨 Rendering continuous color legend')
+    console.log('🎨 Rendering continuous color legend START')
     
     // Throttle legend updates to avoid redundant work
     const now = Date.now()
@@ -5893,6 +6647,7 @@ export default class extends Controller {
 
     // Only render legend for continuous metadata
     if (this.currentMetadataVector.data_type !== 'NUMERIC') {
+      console.log('🎨 Not numeric metadata, skipping legend')
       return
     }
 
@@ -5902,6 +6657,7 @@ export default class extends Controller {
       return
     }
 
+    console.log('🎨 Clearing existing legend...')
     // Clear existing legend
     this.categoryLabelsContainer.removeChildren()
 
@@ -5909,11 +6665,13 @@ export default class extends Controller {
     const width = this.pixiApp.screen.width
     const height = this.pixiApp.screen.height
 
+    console.log('🎨 Getting metadata values and effective range...')
     // Get metadata values and effective color range
     const values = this.currentMetadataVector.values
     const effectiveRange = this.getEffectiveColorRange()
     const minVal = effectiveRange.min
     const maxVal = effectiveRange.max
+    console.log('🎨 Effective range:', { minVal, maxVal })
 
     // Create legend container
     const legendContainer = new PIXI.Container()
@@ -5968,12 +6726,14 @@ export default class extends Controller {
     legendContainer.addChild(maxLabel)
     legendContainer.addChild(nameLabel)
 
+    console.log('🎨 Adding legend to container...')
     // Add legend to the category labels container
     this.categoryLabelsContainer.addChild(legendContainer)
     this.categoryLabelsContainer.visible = true
 
     const totalTime = performance.now() - startTime
     console.log(`🎨 Continuous color legend rendered successfully in ${totalTime.toFixed(2)}ms`)
+    console.log('🎨 renderContinuousColorLegend COMPLETE')
   }
 
   // Create a label for the continuous legend
@@ -6264,50 +7024,49 @@ export default class extends Controller {
     
     //console.log('Updating selected point colors without re-rendering')
     
-    // Update colors in scatterContainer
-    this.scatterContainer.children.forEach((child) => {
-      if (child.isPoint && child.cellId !== undefined) {
-        if (this.selectedCells.has(child.cellId)) {
-          // Set selected color (red) by clearing and redrawing
-          child.clear()
-          child.beginFill(0xff0000) // Pure red
-          child.drawCircle(0, 0, this.currentPointSize) // Use current point size
-          child.endFill()
+    // With sprites, we just update the tint property (much faster than Graphics)
+    const updateSprite = (sprite) => {
+      if (sprite.isPoint && sprite.cellId !== undefined) {
+        if (this.selectedCells.has(sprite.cellId)) {
+          // Set selected color (red)
+          sprite.tint = 0xff0000
+          sprite.alpha = 1.0
         } else {
           // Restore original color
-          const originalColor = this.originalPointColors.get(child.cellId)
+          const originalColor = this.originalPointColors.get(sprite.cellId)
           if (originalColor !== undefined) {
-            child.clear()
-            child.beginFill(originalColor)
-            child.drawCircle(0, 0, this.currentPointSize) // Use current point size
-            child.endFill()
+            sprite.tint = originalColor
           }
+          // Restore alpha based on selection state
+          const hasOtherSelections = this.selectedCells.size > 0
+          sprite.alpha = hasOtherSelections ? 0.3 : 1.0
         }
       }
-    })
+    }
     
-    // Also update colors in animatedContainer if it exists
-    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      this.animatedContainer.children.forEach((child) => {
-        if (child.isPoint && child.cellId !== undefined) {
-          if (this.selectedCells.has(child.cellId)) {
-            // Set selected color (red) by clearing and redrawing
-            child.clear()
-            child.beginFill(0xff0000) // Pure red
-            child.drawCircle(0, 0, this.currentPointSize) // Use current point size
-            child.endFill()
-          } else {
-            // Restore original color
-            const originalColor = this.originalPointColors.get(child.cellId)
-            if (originalColor !== undefined) {
-              child.clear()
-              child.beginFill(originalColor)
-              child.drawCircle(0, 0, this.currentPointSize) // Use current point size
-              child.endFill()
-            }
-          }
+    // Update sprites directly from sprite array (fastest method)
+    if (this.pointSprites && this.pointSprites.length > 0) {
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (sprite) {
+          updateSprite(sprite)
+        }
+      }
+    } else {
+      // Fallback: update via container traversal
+      this.scatterContainer.children.forEach((child) => {
+        if (child.isPoint) {
+          updateSprite(child)
+        } else if (child.children) {
+          // Nested container
+          child.children.forEach(updateSprite)
         }
       })
+      
+      // Also check animatedContainer
+      if (this.animatedContainer && this.animatedContainer.children.length > 0) {
+        this.animatedContainer.children.forEach(updateSprite)
+      }
     }
   }
 
@@ -6617,30 +7376,16 @@ export default class extends Controller {
   updatePointSize(point, newSize) {
     if (!point || !point.isPoint) return
     
-    // Store the current position and properties
-    const currentX = point.x
-    const currentY = point.y
-    const currentAlpha = point.alpha || 1.0
+    // For sprites, we need to update the scale based on the texture size
+    // The texture was created at this.currentPointSize radius
+    // So scale = newSize / originalTextureSize
+    const originalSize = this.currentPointSize
+    const scaleFactor = newSize / originalSize
     
-    // Get the current color from the current coloring scheme
-    let currentColor = 0x3b82f6 // Default blue fallback
+    point.scale.set(scaleFactor)
     
-    if (point.cellId !== undefined) {
-      // Use the current coloring scheme to get the correct color
-      const { color } = this.getColorAndAlpha(point.cellId)
-      currentColor = color
-    }
-    
-    // Clear and redraw the circle with new size
-    point.clear()
-    point.beginFill(currentColor)
-    point.alpha = currentAlpha
-    point.drawCircle(0, 0, newSize)
-    point.endFill()
-    
-    // Restore position
-    point.x = currentX
-    point.y = currentY
+    // Note: For a more proper implementation, we'd recreate the texture at the new size
+    // But scaling works well enough for small size changes
   }
 
   toggleAxes() {
@@ -6674,11 +7419,11 @@ export default class extends Controller {
       // Restore the previous visibility state
       this.axesContainer.visible = previousVisibility
       
-      // Re-render points with new bounds
-      this.scatterContainer.removeChildren()
-      this.renderPointsWithCurrentColoring()
+      // Re-render axes and grid with new bounds
+      this.renderAxes()
+      this.renderGrid()
       
-      // Re-render category labels after axes toggle
+      // Re-render category labels after axes toggle (bounds may have changed)
       if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
         this.renderCategoryLabels()
       }

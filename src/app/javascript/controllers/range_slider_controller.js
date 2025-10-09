@@ -624,31 +624,56 @@ export default class extends Controller {
     // Update button appearance
     this.updateButtonAppearance()
     
+    console.log('🎨 After updateButtonAppearance, checking visualization controller...')
+    
     if (!this.visualizationController) {
       console.error('🎨 Visualization controller not found!')
       return
     }
     
+    console.log('🎨 Visualization controller found, proceeding with re-render')
+    
     // Force a full re-render to update colors and legend
     this.visualizationController.visibilityOnlyUpdate = false
+    console.log('🎨 Set visibilityOnlyUpdate to false')
     
     // Update the color range with the new setting
+    console.log('🎨 Calling updateColorRange with:', {
+      metadataId: this.metadataIdValue,
+      min: this.currentMinValue,
+      max: this.currentMaxValue,
+      adapt: this.adaptColorRangeEnabled
+    })
     this.visualizationController.updateColorRange(
       this.metadataIdValue, 
       this.currentMinValue, 
       this.currentMaxValue,
       this.adaptColorRangeEnabled
     )
+    console.log('🎨 updateColorRange completed')
     
     // Trigger a full re-render of the plot and legend
+    console.log('🎨 About to trigger re-render, method exists?', !!this.visualizationController.renderPointsWithCurrentColoring)
     if (this.visualizationController.renderPointsWithCurrentColoring) {
       console.log('🎨 Triggering full plot re-render...')
-      this.visualizationController.renderPointsWithCurrentColoring()
+      try {
+        this.visualizationController.renderPointsWithCurrentColoring()
+        console.log('🎨 Plot re-render completed')
+      } catch (error) {
+        console.error('🎨 ERROR during plot re-render:', error)
+        console.error('🎨 Error stack:', error.stack)
+      }
+    } else {
+      console.error('🎨 renderPointsWithCurrentColoring method not found!')
     }
     
+    console.log('🎨 About to trigger legend re-render, method exists?', !!this.visualizationController.renderContinuousColorLegend)
     if (this.visualizationController.renderContinuousColorLegend) {
       console.log('🎨 Triggering legend re-render...')
       this.visualizationController.renderContinuousColorLegend()
+      console.log('🎨 Legend re-render completed')
+    } else {
+      console.error('🎨 renderContinuousColorLegend method not found!')
     }
     
     console.log('🎨 Button click handling completed!')

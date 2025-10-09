@@ -402,13 +402,15 @@ export default class extends Controller {
     const cacheClearTime = performance.now() - cacheClearStart
     console.log(`🚀 [PERF] filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
-    // Re-render with unified filtering
-    const renderStart = performance.now()
-    if (this.visualizationController.renderPointsWithCurrentColoring) {
-      this.visualizationController.renderPointsWithCurrentColoring()
+    // Trigger unified filtering (which will update ALL counts and render)
+    const filterStart = performance.now()
+    if (this.visualizationController.updateCellFiltering) {
+      // Pass shouldUpdateColors=true if we're adapting the color range
+      const shouldUpdateColors = this.adaptColorRangeEnabled
+      this.visualizationController.updateCellFiltering(shouldUpdateColors)
     }
-    const renderTime = performance.now() - renderStart
-    console.log(`🚀 [PERF] renderPointsWithCurrentColoring took ${renderTime.toFixed(2)}ms`)
+    const filterTime = performance.now() - filterStart
+    console.log(`🚀 [PERF] updateCellFiltering took ${filterTime.toFixed(2)}ms`)
     
     // Update the color legend after rendering
     const legendStart = performance.now()

@@ -33,16 +33,11 @@
   
   <!-- Left Panel: Metadata -->
   <div style="width: 380px; height: 100vh; background-color: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column;">
-    
-    <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
-      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Cell Metadata</h2>
-      <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Select metadata to color the plot</p>
-    </div>
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Categorical Metadata</h3>
+          <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
@@ -170,7 +165,7 @@
       <!-- Continuous Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-          <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Continuous Metadata</h3>
+          <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
@@ -278,10 +273,6 @@
 
   <!-- Main Content: UMAP Plot -->
   <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column;">
-    <div style="padding: 15px; background-color: white; border-bottom: 1px solid #e5e7eb;">
-      <h2 style="margin: 0; font-size: 18px; font-weight: 600;">UMAP Visualization</h2>
-    </div>
-    
     <!-- Menu Bar -->
     <div style="display: flex; align-items: center; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->

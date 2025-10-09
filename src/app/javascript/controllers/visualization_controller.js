@@ -2165,8 +2165,8 @@ export default class extends Controller {
     // Clear incremental state when new metadata is loaded
     this.clearIncrementalState()
     
-    // Clear all checkbox selections when switching metadata
-    this.clearAllCheckboxSelections()
+    // Don't clear checkbox selections - preserve them when switching metadata
+    // This allows users to maintain their filter selections across different visualizations
     
     // Update settings window state
     this.updateCategoriesCheckboxState()
@@ -2191,7 +2191,9 @@ export default class extends Controller {
     }
     
     // Update cell filtering after loading metadata vector
-    this.updateCellFiltering()
+    // Pass shouldUpdateColors=true for continuous metadata to ensure colors are rendered after filtering
+    const shouldUpdateColors = this.currentMetadataVector?.data_type === 'NUMERIC'
+    this.updateCellFiltering(shouldUpdateColors)
   }
 
   // Load all metadata vectors in a single request
@@ -3582,12 +3584,21 @@ export default class extends Controller {
     
     console.log('🎚️ Calculated min/max values:', { minVal, maxVal, valuesLength: values.length })
     
-    // Store the data
+    // Check if there's an existing selected range for this metadata - preserve it!
+    const existingRange = this.selectedRanges?.[metadataId]
+    const currentMin = existingRange?.min ?? minVal
+    const currentMax = existingRange?.max ?? maxVal
+    
+    if (existingRange) {
+      console.log('🎚️ Preserving existing range for slider:', existingRange)
+    }
+    
+    // Store the data with preserved range if it exists
     this.inlineRangeSliderData[metadataId] = {
       min: minVal,
       max: maxVal,
-      currentMin: minVal,
-      currentMax: maxVal,
+      currentMin: currentMin,
+      currentMax: currentMax,
       values: values
     }
     
@@ -3602,10 +3613,10 @@ export default class extends Controller {
       if (controller) {
         controller.minValue = minVal
         controller.maxValue = maxVal
-        controller.currentMinValue = minVal
-        controller.currentMaxValue = maxVal
+        controller.currentMinValue = currentMin  // Use preserved value
+        controller.currentMaxValue = currentMax  // Use preserved value
         controller.initializeSlider()
-        console.log('🎚️ Range slider controller initialized successfully')
+        console.log('🎚️ Range slider controller initialized successfully with range:', { currentMin, currentMax })
         
         // Draw the initial histogram
         controller.drawDensityPlot()
@@ -4191,7 +4202,7 @@ export default class extends Controller {
     // Show loading spinner immediately
     this.showMetadataDropdownSpinner()
     
-    // For continuous metadata, set the color range to full range before visualizing
+    // For continuous metadata, set the color range before visualizing
     if (button.dataset.metadataType === 'NUMERIC') {
       console.log('🎚️ Handling NUMERIC metadata for coloring')
       // Load the metadata first to get the range
@@ -4206,10 +4217,20 @@ export default class extends Controller {
           }
           
           if (values) {
-            const minVal = this.safeMin(values)
-            const maxVal = this.safeMax(values)
-            console.log('🎚️ Setting color range for continuous metadata:', minVal, maxVal)
-            this.setColorRange(minVal, maxVal)
+            // Check if there's already a selected range for this metadata - preserve it!
+            const existingRange = this.selectedRanges?.[metadataId]
+            
+            if (existingRange) {
+              // Preserve the existing range
+              console.log('🎚️ Preserving existing range for continuous metadata:', existingRange)
+              this.setColorRange(existingRange.min, existingRange.max)
+            } else {
+              // No existing range - use full range
+              const minVal = this.safeMin(values)
+              const maxVal = this.safeMax(values)
+              console.log('🎚️ Setting full color range for continuous metadata:', minVal, maxVal)
+              this.setColorRange(minVal, maxVal)
+            }
             
             // Now load and visualize
             console.log('🎚️ Calling loadAndVisualizeMetadataVector...')
@@ -4230,7 +4251,7 @@ export default class extends Controller {
       })
     } else {
       // For discrete metadata, just load and visualize directly
-      this.loadAndVisualizeMetadataVector(metadataId)
+    this.loadAndVisualizeMetadataVector(metadataId)
         .catch(error => {
           console.error('❌ Error loading metadata:', error)
         })
@@ -6434,7 +6455,7 @@ export default class extends Controller {
     // If checkbox is unchecked, hide the container and return early
     if (!shouldShowLabels) {
       this.categoryLabelsContainer.visible = false
-      this.categoryLabelsContainer.removeChildren()
+    this.categoryLabelsContainer.removeChildren()
       console.log('🏷️ Category labels hidden by user preference')
       return
     }
@@ -6972,6 +6993,9 @@ export default class extends Controller {
     // Find all category checkboxes
     const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
     
+    // Convert currentVisibleCells to Set once for O(1) lookups
+    const visibleSet = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
+    
     allCategoryCheckboxes.forEach(checkbox => {
       const metadataId = checkbox.dataset.metadataId
       const category = checkbox.dataset.category
@@ -6986,27 +7010,18 @@ export default class extends Controller {
       const countSpan = spans[spans.length - 1] // Last span is the count
       
       if (countSpan) {
-        // Get total count for this category in this metadata
+        // Count total and visible cells for this category
         let totalCount = 0
+        let visibleCount = 0
+        
         for (let i = 0; i < metadataVector.values.length; i++) {
           if (metadataVector.values[i] === category) {
             totalCount++
-          }
-        }
-        
-        // Get visible count (considering current filtering from ALL sources)
-        let visibleCount = 0
-        if (this.currentVisibleCells) {
-          // We have filtering active - count only visible cells
-          for (let i = 0; i < this.currentVisibleCells.length; i++) {
-            const cellIndex = this.currentVisibleCells[i]
-            if (metadataVector.values[cellIndex] === category) {
+            // O(1) lookup with Set instead of array iteration
+            if (!visibleSet || visibleSet.has(i)) {
               visibleCount++
             }
           }
-        } else {
-          // No filtering - all cells are visible
-          visibleCount = totalCount
         }
         
         // Update the count display
@@ -7209,6 +7224,14 @@ export default class extends Controller {
       this.selectedCells.add(index)
     })
     
+    // Store the current metadata state before deactivating (for restore on cancel/save)
+    this.storeMetadataStateBeforeSelection()
+    
+    // Deactivate the coloring button (turn blue palette button to grey)
+    this.resetAllWaterDropButtons()
+    this.removeAllCategoryColors()
+    this.clearMetadataColoring()
+    
     // Update selection count display
     this.updateSelectionCount()
     
@@ -7350,6 +7373,14 @@ export default class extends Controller {
     })
     
     //(`Added ${visibleCells.length} visible cells to selection`)
+    
+    // Store the current metadata state before deactivating (for restore on cancel/save)
+    this.storeMetadataStateBeforeSelection()
+    
+    // Deactivate the coloring button (turn blue palette button to grey)
+    this.resetAllWaterDropButtons()
+    this.removeAllCategoryColors()
+    this.clearMetadataColoring()
     
     // Update the selection count display
     this.updateSelectedCellsCount()
@@ -7517,8 +7548,16 @@ export default class extends Controller {
       isDragging = true
       startX = e.clientX
       startY = e.clientY
-      startLeft = parseInt(settingsWindow.style.left) || 0
-      startTop = parseInt(settingsWindow.style.top) || 0
+      
+      // Get the actual current position of the window using computed position
+      const rect = settingsWindow.getBoundingClientRect()
+      startLeft = rect.left
+      startTop = rect.top
+      
+      // Set explicit positioning to prevent jump
+      settingsWindow.style.left = startLeft + 'px'
+      settingsWindow.style.top = startTop + 'px'
+      
       settingsWindow.style.cursor = 'grabbing'
       e.preventDefault()
     }
@@ -7961,6 +8000,21 @@ export default class extends Controller {
       //console.log(`Selection "${selectionName}" saved with ${this.selectedCells.size} cells`)
       // TODO: Implement actual saving logic (API call, local storage, etc.)
       alert(`Selection "${selectionName}" saved successfully!`)
+      
+      // Clear the selection after saving
+      this.selectedCells.clear()
+      
+      // Restore the metadata state from before the selection
+      this.restoreMetadataStateAfterSelection()
+      
+      // Update the cell count display
+      this.updateSelectedCellsCount()
+      
+      // Clear any lasso graphics
+      if (this.lassoGraphics) {
+        this.lassoGraphics.clear()
+        this.lassoGraphics = null
+      }
     }
   }
 
@@ -8242,27 +8296,78 @@ export default class extends Controller {
   }
 
   // Cancel selection method - resets points to original colors
+  // Store metadata state before making a selection
+  storeMetadataStateBeforeSelection() {
+    // Store the current metadata state so we can restore it after cancel/save
+    this.lastActiveMetadata = {
+      metadataId: this.currentMetadataId,
+      metadataVector: this.currentMetadataVector,
+      customColorRange: this.customColorRange,
+      // Find the currently active water drop button
+      activeButton: document.querySelector('[data-action*="waterDropClicked"][data-active="true"]')
+    }
+    console.log('📦 Stored metadata state before selection:', this.lastActiveMetadata)
+  }
+  
+  // Restore metadata state after cancel/save selection
+  restoreMetadataStateAfterSelection() {
+    if (!this.lastActiveMetadata) {
+      console.log('No previous metadata state to restore')
+      return
+    }
+    
+    const { metadataId, metadataVector, customColorRange, activeButton } = this.lastActiveMetadata
+    
+    if (metadataId && metadataVector) {
+      console.log('🔄 Restoring metadata coloring:', metadataVector.name)
+      
+      // Restore the metadata state
+      this.currentMetadataId = metadataId
+      this.currentMetadataVector = metadataVector
+      this.customColorRange = customColorRange
+      
+      // Re-activate the water drop button
+      if (activeButton) {
+        this.setWaterDropButtonActive(activeButton)
+        
+        // Re-add category colors if it's discrete metadata
+        if (metadataVector.data_type === 'DISCRETE') {
+          const metadataContainer = activeButton.closest('[data-metadata-item]')
+          if (metadataContainer) {
+            this.addCategoryColors(metadataContainer, metadataId)
+          }
+        }
+      }
+      
+      // Re-render with the restored metadata coloring
+      this.renderPointsWithCurrentColoring()
+      
+      // Re-render category labels or color legend
+      if (metadataVector.data_type === 'DISCRETE') {
+        if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+          this.renderCategoryLabels()
+        }
+      } else if (metadataVector.data_type === 'NUMERIC') {
+        this.renderContinuousColorLegend()
+      }
+      
+      console.log('✅ Metadata coloring restored successfully')
+    } else {
+      console.log('No metadata was active before selection')
+    }
+    
+    // Clear the stored state
+    this.lastActiveMetadata = null
+  }
+
   cancelSelection() {
     console.log('🔄 Canceling selection, reverting to previous coloring scheme')
     
     // Clear the selected cells
     this.selectedCells.clear()
     
-    // Revert to the previous coloring scheme if there was one
-    if (this.currentMetadataId && this.currentMetadataVector) {
-      //console.log(`Reverting to metadata coloring: ${this.currentMetadataVector.name}`)
-      // Re-render with the current metadata coloring
-      this.renderPointsWithCurrentColoring()
-      
-      // Re-render category labels after reverting to metadata coloring
-      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-        this.renderCategoryLabels()
-      }
-    } else {
-      console.log('No metadata coloring active, using default colors')
-      // Update colors without re-rendering (preserves pan/zoom state)
-      this.updateSelectedPointColors()
-    }
+    // Restore the metadata state from before the selection
+    this.restoreMetadataStateAfterSelection()
     
     // Update the cell count display
     this.updateSelectedCellsCount()
@@ -8290,27 +8395,47 @@ export default class extends Controller {
     //console.log(`updateSelectedCellsCount called - countElement found:`, !!countElement)
     
     if (countElement) {
-      const selectionCount = this.selectedCells ? this.selectedCells.size : 0
-      const totalVisible = this.currentVisibleCells ? this.currentVisibleCells.length : (this.currentCoordinates?.length || 0)
+      const totalSelectedCount = this.selectedCells ? this.selectedCells.size : 0
       
-      //console.log(`Selection count: ${selectionCount}, Total visible: ${totalVisible}`)
-      
-      if (selectionCount === 0) {
+      if (totalSelectedCount === 0) {
         countElement.textContent = '0'
         countElement.title = 'No cells selected'
+        countElement.style.color = ''
+        countElement.style.fontWeight = ''
         //console.log(`Updated display to: 0 cells selected`)
       } else if (this.currentVisibleCells && this.currentVisibleCells.length < (this.currentCoordinates?.length || 0)) {
-        // Filtering is applied
-        const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
-        countElement.textContent = selectionCount.toLocaleString()
-        countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of visible cells)`
-        //console.log(`Updated display to: ${selectionCount} cells selected (${percentage}% of visible cells)`)
+        // Filtering is active - count only selected cells that are also visible
+        const visibleSet = new Set(this.currentVisibleCells)
+        let visibleSelectedCount = 0
+        
+        for (const cellId of this.selectedCells) {
+          if (visibleSet.has(cellId)) {
+            visibleSelectedCount++
+          }
+        }
+        
+        // Show visible count in main display
+        countElement.textContent = visibleSelectedCount.toLocaleString()
+        
+        // Visual indicator if some selected cells are filtered out
+        if (visibleSelectedCount < totalSelectedCount) {
+          countElement.style.color = '#dc2626'
+          countElement.style.fontWeight = '600'
+          const filteredOut = totalSelectedCount - visibleSelectedCount
+          countElement.title = `${visibleSelectedCount.toLocaleString()} cells visible (${totalSelectedCount.toLocaleString()} selected, but ${filteredOut} filtered out by metadata)`
       } else {
-        // No filtering applied
-        const percentage = totalVisible > 0 ? ((selectionCount / totalVisible) * 100).toFixed(1) : 0
-        countElement.textContent = selectionCount.toLocaleString()
-        countElement.title = `${selectionCount.toLocaleString()} cells selected (${percentage}% of total cells)`
-        //console.log(`Updated display to: ${selectionCount} cells selected (${percentage}% of total cells)`)
+          countElement.style.color = ''
+          countElement.style.fontWeight = ''
+          countElement.title = `${visibleSelectedCount.toLocaleString()} cells selected (all visible)`
+        }
+        //console.log(`Updated display to: ${visibleSelectedCount} visible of ${totalSelectedCount} selected`)
+      } else {
+        // No filtering applied - show all selected cells
+        countElement.textContent = totalSelectedCount.toLocaleString()
+        countElement.style.color = ''
+        countElement.style.fontWeight = ''
+        countElement.title = `${totalSelectedCount.toLocaleString()} cells selected`
+        //console.log(`Updated display to: ${totalSelectedCount} cells selected`)
       }
     } else {
       console.log(`selected-cells-count element not found!`)
@@ -9006,7 +9131,7 @@ export default class extends Controller {
     return summary.length > 0 ? summary.join(' • ') : null
   }
 
-  updateCellFiltering() {
+  updateCellFiltering(shouldUpdateColors = false) {
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     //console.log('Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
@@ -9020,18 +9145,27 @@ export default class extends Controller {
     // Update point count display immediately
     this.updatePointCountDisplay(filteredIndices)
     
-    // Update sidebar category counts with visual indicators
+    // Update sidebar category counts with visual indicators (for ALL categorical metadata)
     this.updateSidebarCategoryCounts()
     
-    // Update all range slider counts to reflect combined filtering
+    // Update all range slider counts to reflect combined filtering (for ALL continuous metadata)
     this.updateAllRangeSliderCounts()
+    
+    // Update manual selection count to show only visible selected cells
+    this.updateSelectedCellsCount()
     
     // Update button state after filtering
     this.updateAddAllVisibleButtonState()
     
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(() => {
-      this.updatePointVisibility(filteredIndices)
+      // If we need to update colors (e.g., color range adapted), render colors first
+      if (shouldUpdateColors && this.currentMetadataVector) {
+        this.renderPointsWithCurrentColoring()
+      } else {
+        // Otherwise just update visibility
+        this.updatePointVisibility(filteredIndices)
+      }
     })
   }
 
@@ -9091,11 +9225,11 @@ export default class extends Controller {
     // Get all metadata that have selections AND have loaded vectors (categorical)
     const discreteMetadataWithSelections = hasDiscreteSelections 
       ? Object.keys(this.selectedCategories).filter(metadataId => {
-          const selections = this.selectedCategories[metadataId]
-          const hasSelections = selections && selections.size > 0
-          const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
-          return hasSelections && hasLoadedVector
-        })
+      const selections = this.selectedCategories[metadataId]
+      const hasSelections = selections && selections.size > 0
+      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      return hasSelections && hasLoadedVector
+    })
       : []
     
     // Get all metadata that have range selections AND have loaded vectors (continuous)
@@ -9507,34 +9641,34 @@ export default class extends Controller {
     console.log('🎚️ Initializing inline range slider for metadata:', metadataId, metadataName)
     
     // Load and initialize the range slider data
-    console.log('🎚️ Loading metadata for inline range slider...')
-    this.loadSingleMetadataVector(metadataId).then(vectorData => {
-      console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
-      if (!vectorData) {
-        console.error('❌ No vector data loaded for inline range slider')
-        return
-      }
-      
-      let values = vectorData.values
-      if (!values && vectorData.compressed_data) {
-        console.log('🎚️ Decompressing metadata for inline range slider...')
-        values = this.decompressMetadataVector(vectorData)
-      }
-      
-      if (!values) {
-        console.error('❌ No values available for inline range slider')
-        return
-      }
-      
-      console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
-      
+      console.log('🎚️ Loading metadata for inline range slider...')
+      this.loadSingleMetadataVector(metadataId).then(vectorData => {
+        console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
+        if (!vectorData) {
+          console.error('❌ No vector data loaded for inline range slider')
+          return
+        }
+        
+        let values = vectorData.values
+        if (!values && vectorData.compressed_data) {
+          console.log('🎚️ Decompressing metadata for inline range slider...')
+          values = this.decompressMetadataVector(vectorData)
+        }
+        
+        if (!values) {
+          console.error('❌ No values available for inline range slider')
+          return
+        }
+        
+        console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
+        
       // Initialize the inline range slider with the loaded values (just the histogram, no coloring)
-      this.initializeInlineRangeSlider(metadataId, values)
-      
+        this.initializeInlineRangeSlider(metadataId, values)
+        
       console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
-    }).catch(error => {
-      console.error('❌ Error loading metadata for inline range slider:', error)
-    })
+      }).catch(error => {
+        console.error('❌ Error loading metadata for inline range slider:', error)
+      })
   }
 
   // Update inline range slider UI

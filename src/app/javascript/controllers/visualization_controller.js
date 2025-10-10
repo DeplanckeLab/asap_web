@@ -142,7 +142,7 @@ export default class extends Controller {
     this.isDrawingLasso = false
     this.lastMouseMoveTime = 0
     this.mouseMoveCount = 0
-    this.minLassoPointDistance = 8 // Minimum distance between lasso points in pixels
+    this.minLassoPointDistance = 0 // Accept ALL events (remote desktop sends very few)
     this.lassoAnimationFrame = null // For smooth rendering
     
     // Initialize tooltip state
@@ -1162,7 +1162,7 @@ export default class extends Controller {
         const updated = this.updateSpritePositions(coordinates, newBounds)
         
         if (updated) {
-          this.clearIncrementalState()
+      this.clearIncrementalState()
           this.currentBounds = newBounds
           this.currentCoordinates = coordinates
           this.renderAxes()
@@ -1772,10 +1772,10 @@ export default class extends Controller {
       coordinates[i] = [x, y]
       
       // Track min/max in same loop (no need for second pass)
-      if (x < xMin) xMin = x
-      if (x > xMax) xMax = x
-      if (y < yMin) yMin = y
-      if (y > yMax) yMax = y
+        if (x < xMin) xMin = x
+        if (x > xMax) xMax = x
+        if (y < yMin) yMin = y
+        if (y > yMax) yMax = y
       
       // Log first few coordinates for debugging
       if (i < 3) {
@@ -2523,14 +2523,14 @@ export default class extends Controller {
     }
     
     this.preloadTimeout = setTimeout(() => {
-      // Only preload if not already loaded and not currently loading
-      if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
-        //console.log(`Preloading metadata vector ${metadataId} on hover`)
-        // Load in background without showing spinner
-        this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-          console.log(`Preload failed for metadata ${metadataId}:`, error.message)
-          // Don't show error to user for preloading failures
-        })
+    // Only preload if not already loaded and not currently loading
+    if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
+      //console.log(`Preloading metadata vector ${metadataId} on hover`)
+      // Load in background without showing spinner
+      this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+        console.log(`Preload failed for metadata ${metadataId}:`, error.message)
+        // Don't show error to user for preloading failures
+      })
       }
     }, 300) // 300ms delay - only preload if user hovers for a bit
   }
@@ -2653,7 +2653,9 @@ export default class extends Controller {
     let pointsContainer
     
     // If we have sprites and container, ALWAYS reuse them
-    if (this.pointSprites && this.pointSprites.length === this.currentCoordinates.length && this.animatedContainer) {
+    if (this.pointSprites && this.pointSprites.length === this.currentCoordinates.length) {
+      // Check if animatedContainer exists and is still valid
+      if (this.animatedContainer && this.animatedContainer.destroyed === false) {
       pointsContainer = this.animatedContainer
       
       // Ensure container is in scene graph
@@ -2664,11 +2666,37 @@ export default class extends Controller {
       
       console.log(`🚀 [PERF] Reusing sprites and container - NO recreation, just property updates`)
       console.log(`🚀 [PERF] Container has ${pointsContainer.children.length} children, ${this.pointSprites.length} sprites`)
+      } else {
+        // Container was destroyed but sprites still exist - recreate container and add sprites to it
+        console.log(`🚀 [PERF] Container destroyed but sprites exist - recreating container only`)
+        
+        // Remove any invalid children
+        this.scatterContainer.removeChildren()
+        
+        // Create new container
+        pointsContainer = new PIXI.Container()
+        pointsContainer.sortableChildren = true
+        this.scatterContainer.addChild(pointsContainer)
+        this.animatedContainer = pointsContainer
+        
+        // Re-add existing sprites to new container
+        for (let i = 0; i < this.pointSprites.length; i++) {
+          const sprite = this.pointSprites[i]
+          if (sprite && !sprite.destroyed) {
+            pointsContainer.addChild(sprite)
+          }
+        }
+        
+        console.log(`🚀 [PERF] Re-added ${this.pointSprites.length} existing sprites to new container`)
+      }
     } else {
       // First time or coordinates changed - create new container and sprites
+      console.log(`🚀 [PERF] Creating new sprites - sprite count: ${this.pointSprites?.length}, coord count: ${this.currentCoordinates?.length}`)
+      
       const clearStart = performance.now()
       this.scatterContainer.removeChildren()
       this.existingPoints = null
+      this.pointSprites = null // Clear sprite array too
       
       // Create new container
       pointsContainer = new PIXI.Container()
@@ -3826,7 +3854,7 @@ export default class extends Controller {
       return
     }
     
-    //console.log('Clearing metadata coloring, returning to default blue points')
+    console.log('🎨 Clearing metadata coloring, returning to default blue')
     
     // Clear current metadata vector
     this.currentMetadataVector = null
@@ -3838,8 +3866,27 @@ export default class extends Controller {
     // Clear the cached color map since we're clearing metadata
     this.clearColorMapCache()
     
-    // Clear existing colored points and re-render with default coloring
+    // OPTIMIZED: Just update sprite colors directly instead of recreating!
+    if (this.pointSprites && this.pointSprites.length > 0) {
+      console.log('🎨 Using fast color update path (no recreation)')
+      const defaultColor = 0x3b82f6 // Default blue
+      
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (sprite && !sprite.destroyed) {
+          sprite.tint = defaultColor
+          sprite.zIndex = 0
+          this.originalPointColors.set(i, defaultColor)
+        }
+      }
+      
+      // Mark sprites as default coloring
+      this.spritesRenderType = 'default'
+    } else {
+      // Fallback: full re-render if sprites don't exist
+      console.log('🎨 Sprites not available, using full re-render')
     this.forceReRenderPoints()
+    }
     
     // Clear any existing legend (both discrete and continuous)
     if (this.categoryLabelsContainer) {
@@ -3847,7 +3894,7 @@ export default class extends Controller {
       this.categoryLabelsContainer.visible = false
     }
     
-    //console.log('Successfully cleared metadata coloring')
+    console.log('🎨 Successfully cleared metadata coloring')
   }
   
   // Clear all loaded metadata vectors cache (use when switching projects or clearing all data)
@@ -4899,6 +4946,14 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: pan')
     this.setInteractionMode('pan')
     this.updateButtonStates('pan')
+    
+    // Re-enable sprite interactivity
+    if (this.scatterContainer) {
+      this.scatterContainer.interactiveChildren = true
+    }
+    if (this.animatedContainer) {
+      this.animatedContainer.interactiveChildren = true
+    }
   }
 
   // Set Lasso mode
@@ -4906,6 +4961,14 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: lasso')
     this.setInteractionMode('lasso')
     this.updateButtonStates('lasso')
+    
+    // Disable sprite interactivity for smooth mouse movements
+    if (this.scatterContainer) {
+      this.scatterContainer.interactiveChildren = false
+    }
+    if (this.animatedContainer) {
+      this.animatedContainer.interactiveChildren = false
+    }
   }
 
   // Set Pick mode
@@ -4913,6 +4976,14 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: pick')
     this.setInteractionMode('pick')
     this.updateButtonStates('pick')
+    
+    // Re-enable sprite interactivity
+    if (this.scatterContainer) {
+      this.scatterContainer.interactiveChildren = true
+    }
+    if (this.animatedContainer) {
+      this.animatedContainer.interactiveChildren = true
+    }
   }
 
   // Set interaction mode (internal method)
@@ -5007,11 +5078,29 @@ export default class extends Controller {
     this.boundWheel = this.onInteractionWheel.bind(this)
     this.boundDoubleClick = this.onInteractionDoubleClick.bind(this)
     
-    canvas.addEventListener('mousedown', this.boundMouseDown)
-    canvas.addEventListener('mousemove', this.boundMouseMove)
-    canvas.addEventListener('mouseup', this.boundMouseUp)
-    canvas.addEventListener('wheel', this.boundWheel, { passive: false }) // Only on canvas, no capture
+    // WORKAROUND: Attach to document with capture to intercept before PIXI gets them!
+    console.log('Adding event listeners to canvas AND document:', canvas)
+    console.log('Canvas element:', canvas.tagName, canvas.width, canvas.height)
+    
+    canvas.addEventListener('pointerdown', this.boundMouseDown)
+    canvas.addEventListener('pointerup', this.boundMouseUp)
+    canvas.addEventListener('wheel', this.boundWheel, { passive: false })
     canvas.addEventListener('dblclick', this.boundDoubleClick)
+    
+    // Add pointermove to DOCUMENT with capture=true to intercept BEFORE PIXI
+    document.addEventListener('pointermove', this.boundMouseMove, { capture: true })
+    this.documentMoveListenerAdded = true
+    
+    // Test if events are reaching handlers
+    let testCount = 0
+    document.addEventListener('pointermove', (e) => {
+      testCount++
+      if (testCount % 50 === 0) {
+        console.log(`✅ TEST: Document received ${testCount} pointermove events`)
+      }
+    }, { capture: true })
+    
+    console.log('✅ Event listeners registered - pointermove on DOCUMENT with capture=true')
     
     // Store reference to plot container for cleanup (but don't add wheel listener)
     if (plotContainer) {
@@ -5052,17 +5141,20 @@ export default class extends Controller {
     if (!canvas) return
     
     if (this.boundMouseDown) {
-      canvas.removeEventListener('mousedown', this.boundMouseDown)
+      canvas.removeEventListener('pointerdown', this.boundMouseDown)
     }
     if (this.boundMouseMove) {
-      canvas.removeEventListener('mousemove', this.boundMouseMove)
+      // Remove from document if we added it there
+      if (this.documentMoveListenerAdded) {
+        document.removeEventListener('pointermove', this.boundMouseMove, { capture: true })
+        this.documentMoveListenerAdded = false
+      }
     }
     if (this.boundMouseUp) {
-      canvas.removeEventListener('mouseup', this.boundMouseUp)
+      canvas.removeEventListener('pointerup', this.boundMouseUp)
     }
     if (this.boundWheel) {
       canvas.removeEventListener('wheel', this.boundWheel, { passive: false })
-      // Wheel listener is only on canvas now, not on containers
     }
     if (this.boundDoubleClick) {
       canvas.removeEventListener('dblclick', this.boundDoubleClick)
@@ -5081,6 +5173,14 @@ export default class extends Controller {
   }
 
   onInteractionMouseMove(event) {
+    // DEBUG: Log to verify events are being received
+    if (this.isDrawingLasso) {
+      this.interactionMoveCount = (this.interactionMoveCount || 0) + 1
+      if (this.interactionMoveCount % 20 === 0) {
+        console.log(`⏱️ [DEBUG] onInteractionMouseMove called ${this.interactionMoveCount} times (lasso mode)`)
+      }
+    }
+    
     // Only process if actually drawing/panning (not just hovering)
     if (this.interactionMode === 'lasso' && this.isDrawingLasso) {
       this.onLassoMouseMove(event)
@@ -5243,10 +5343,45 @@ export default class extends Controller {
 
   // Lasso mode handlers
   onLassoMouseDown(event) {
-    console.log('Lasso mouse down - starting detailed performance tracking')
+    console.log('========================================')
+    console.log('⏱️ [LASSO] Starting lasso selection')
+    
+    // Detect browser and store it
+    this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
+    
+    // Stop PIXI render loop during lasso drawing to free up main thread
+    if (this.pixiApp) {
+      this.pixiApp.ticker.stop()
+    }
+    
+    // Create HTML canvas overlay to bypass PIXI completely
+    const plotContainer = document.querySelector('.plot-container')
+    if (plotContainer && !this.lassoCanvas) {
+      this.lassoCanvas = document.createElement('canvas')
+      this.lassoCanvas.width = this.pixiApp.view.width
+      this.lassoCanvas.height = this.pixiApp.view.height
+      this.lassoCanvas.style.position = 'absolute'
+      this.lassoCanvas.style.top = '0'
+      this.lassoCanvas.style.left = '0'
+      this.lassoCanvas.style.pointerEvents = 'none'
+      this.lassoCanvas.style.zIndex = '1000'
+      plotContainer.appendChild(this.lassoCanvas)
+      
+      this.lassoCanvasCtx = this.lassoCanvas.getContext('2d')
+    }
+    
+    // Remove PIXI's event system for smooth drawing
+    if (this.pixiApp?.renderer?.events) {
+      this.pixiApp.renderer.events.removeEvents()
+    }
+    if (this.globalDragHandlers && this.pixiApp?.stage) {
+      this.pixiApp.stage.off('pointermove', this.globalDragHandlers.move)
+    }
+    
     this.isDrawingLasso = true
     this.lassoPoints = []
     this.mouseMoveCount = 0
+    this.interactionMoveCount = 0
     this.lastMouseMoveTime = performance.now()
     
     // Get mouse position relative to canvas
@@ -5262,72 +5397,125 @@ export default class extends Controller {
     
     this.lassoPoints.push({ x, y })
     
-    // Create lasso graphics object
-    this.lassoGraphics = new this.PIXI.Graphics()
-    this.scatterContainer.addChild(this.lassoGraphics)
+    // Clear the overlay canvas
+    if (this.lassoCanvasCtx) {
+      this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
+    }
+    
+    // Firefox workaround: Poll mouse position at high frequency for smooth drawing
+    if (this.isFirefox) {
+      this.lastMouseX = x + rect.left
+      this.lastMouseY = y + rect.top
+      
+      // Track last mouse position from any move event
+      this.firefoxMouseHandler = (e) => {
+        this.lastMouseX = e.clientX
+        this.lastMouseY = e.clientY
+      }
+      document.addEventListener('pointermove', this.firefoxMouseHandler, { capture: true })
+      
+      // Poll at 250fps
+      this.firefoxPollInterval = setInterval(() => {
+        if (!this.isDrawingLasso) return
+        
+        const x = this.lastMouseX - rect.left
+        const y = this.lastMouseY - rect.top
+        
+        const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
+        const distance = this.getDistance(lastPoint, { x, y })
+        
+        if (distance > 1) {
+          this.lassoPoints.push({ x, y })
+          this.updateLassoGraphics()
+        }
+      }, 4)
+    }
   }
 
   onLassoMouseMove(event) {
     if (!this.isDrawingLasso) return
     
-    const totalStartTime = performance.now()
-    this.mouseMoveCount++
+    this.mouseMoveCount = (this.mouseMoveCount || 0) + 1
     
-    // Track mouse event frequency
-    const currentTime = performance.now()
-    const timeSinceLastMove = currentTime - this.lastMouseMoveTime
-    this.lastMouseMoveTime = currentTime
+    // Firefox uses polling, so skip event-based processing
+    if (this.isFirefox) {
+      return
+    }
     
-    // Get mouse position relative to canvas
+    // Get coalesced events - these contain ALL positions since last callback!
+    const coalescedEvents = event.getCoalescedEvents ? event.getCoalescedEvents() : [event]
+    
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
     
-    const rectStartTime = performance.now()
-    // Use cached rect if available (set when lasso starts)
-    const rect = this.cachedCanvasRect || canvas.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    const rectEndTime = performance.now()
+    const rect = this.cachedCanvasRect
+    if (!rect) return
     
-    // Only add point if it's far enough from the last point
-    const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
-    let updateStartTime = 0
-    let updateEndTime = 0
-    
-    if (!lastPoint || this.getDistance(lastPoint, { x, y }) >= this.minLassoPointDistance) {
-      this.lassoPoints.push({ x, y })
+    // Process EVERY coalesced event for maximum smoothness!
+    let pointsAdded = 0
+    for (const evt of coalescedEvents) {
+      const x = evt.clientX - rect.left
+      const y = evt.clientY - rect.top
       
-      updateStartTime = performance.now()
-      this.updateLassoGraphics()
-      updateEndTime = performance.now()
+    const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
+      const distance = lastPoint ? this.getDistance(lastPoint, { x, y }) : Infinity
+    
+      // Add every coalesced point (no interpolation needed!)
+      if (!lastPoint || distance > 0.5) {
+      this.lassoPoints.push({ x, y })
+        pointsAdded++
+      }
     }
     
-    const totalEndTime = performance.now()
-    
-    // Log detailed performance every 5 points
-    if (this.lassoPoints.length % 5 === 0) {
-      console.log(`Lasso Performance Analysis - Points: ${this.lassoPoints.length}`)
-      console.log(`  - Mouse move count: ${this.mouseMoveCount}`)
-      console.log(`  - Time since last move: ${timeSinceLastMove.toFixed(3)}ms`)
-      console.log(`  - Rect calculation: ${(rectEndTime - rectStartTime).toFixed(3)}ms`)
-      console.log(`  - Graphics update: ${(updateEndTime - updateStartTime).toFixed(3)}ms`)
-      console.log(`  - Total time: ${(totalEndTime - totalStartTime).toFixed(3)}ms`)
-      console.log(`  - Points array length: ${this.lassoPoints.length}`)
-      console.log(`  - PIXI App exists: ${!!this.pixiApp}`)
-      console.log(`  - PIXI Renderer exists: ${!!(this.pixiApp && this.pixiApp.renderer)}`)
+    if (pointsAdded > 0) {
+      // Log progress
+      if (this.lassoPoints.length % 50 === 0) {
+        console.log(`⏱️ [LASSO] ${this.lassoPoints.length} points from ${this.mouseMoveCount} callbacks`)
+      }
+      
+      // Update graphics once per callback
+      this.updateLassoGraphics()
     }
   }
 
   onLassoMouseUp(event) {
     if (!this.isDrawingLasso) return
+    const completionStart = performance.now()
     
-    //console.log('Lasso mouse up - completing selection')
     this.isDrawingLasso = false
-    this.cachedCanvasRect = null // Clear cached rect
+    this.cachedCanvasRect = null
+    
+    // Clear the HTML canvas overlay
+    if (this.lassoCanvasCtx) {
+      this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
+    }
+    
+    // Re-enable PIXI event system
+    if (this.pixiApp?.renderer?.events) {
+      this.pixiApp.renderer.events.setTargetElement(this.pixiApp.view)
+    }
+    if (this.globalDragHandlers && this.pixiApp?.stage) {
+      this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
+    }
+    
+    // Clean up Firefox polling
+    if (this.firefoxPollInterval) {
+      clearInterval(this.firefoxPollInterval)
+      this.firefoxPollInterval = null
+    }
+    
+    if (this.firefoxMouseHandler) {
+      document.removeEventListener('pointermove', this.firefoxMouseHandler, { capture: true })
+      this.firefoxMouseHandler = null
+    }
+    
+    // Restart PIXI render loop now that drawing is complete
+    if (this.pixiApp && !this.pixiApp.ticker.started) {
+      this.pixiApp.ticker.start()
+    }
     
     // Only proceed if we have a PIXI app and coordinates to work with
     if (!this.pixiApp || !this.currentCoordinates) {
-      //console.log('No PIXI app or coordinates available for lasso selection')
       this.clearLasso()
       return
     }
@@ -5341,6 +5529,9 @@ export default class extends Controller {
       
       // Find points inside the lasso
       this.selectPointsInLasso()
+      
+      const completionTime = performance.now() - completionStart
+      console.log(`⏱️ [LASSO] Total completion: ${completionTime.toFixed(2)}ms`)
     }
     
     // Clear lasso after a short delay
@@ -7292,6 +7483,12 @@ export default class extends Controller {
     // Create new global drag handlers
     this.globalDragHandlers = {
       move: (event) => {
+        // Skip if drawing lasso (shouldn't be called anyway due to .off())
+        if (this.isDrawingLasso) {
+          console.warn('⚠️ PIXI stage handler called during lasso! This should not happen.')
+          return
+        }
+        
         if (this.draggingLabel && this.interactionMode === 'pick') {
           const newPosition = event.data.getLocalPosition(this.draggingLabel.parent)
           this.draggingLabel.x = newPosition.x
@@ -7331,52 +7528,97 @@ export default class extends Controller {
   }
 
   updateLassoGraphics() {
-    if (!this.lassoGraphics || this.lassoPoints.length < 2) return
+    if (!this.lassoCanvasCtx || this.lassoPoints.length < 2) return
     
-    // Simplified rendering - just line, no fill
-    this.lassoGraphics.clear()
-    this.lassoGraphics.lineStyle(1, 0x3b82f6, 0.8) // Blue line
-    this.lassoGraphics.beginFill(0x3b82f6, 0.1)
-    this.lassoGraphics.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y)
+    // Draw on HTML canvas overlay (bypasses PIXI entirely)
+    const ctx = this.lassoCanvasCtx
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
+    
+    // Draw lasso path
+    ctx.strokeStyle = '#3b82f6'
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
+    ctx.lineWidth = 2
+    
+    ctx.beginPath()
+    ctx.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y)
     for (let i = 1; i < this.lassoPoints.length; i++) {
-      this.lassoGraphics.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y)
+      ctx.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y)
     }
+    ctx.stroke()
+    ctx.fill()
   }
 
   selectPointsInLasso() {
     if (!this.currentCoordinates || this.lassoPoints.length < 3) return
     
-    //console.log(`Checking ${this.currentCoordinates.length} points against lasso selection`)
+    console.log(`⏱️ [LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
+    const selectionStart = performance.now()
     
     const selectedIndices = []
     
-    // Check points by their actual screen positions (after pan/zoom transformations)
-    this.scatterContainer.children.forEach((child, index) => {
-      if (child.isPoint && child.cellId !== undefined) {
-        const screenX = child.x
-        const screenY = child.y
+    // OPTIMIZED: Calculate lasso bounding box for fast rejection
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const p of this.lassoPoints) {
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.y > maxY) maxY = p.y
+    }
+    
+    console.log(`⏱️ [LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}]`)
+    
+    // OPTIMIZED: Use pointSprites array directly (much faster!)
+    if (this.pointSprites && this.pointSprites.length > 0) {
+      let bboxRejected = 0
+      let polygonChecked = 0
       
-      if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (!sprite || sprite.destroyed || !sprite.visible) continue
+        
+        const x = sprite.x
+        const y = sprite.y
+        
+        // Quick bounding box rejection (90%+ of points skip expensive polygon test)
+        if (x < minX || x > maxX || y < minY || y > maxY) {
+          bboxRejected++
+          continue
+        }
+        
+        // Expensive polygon test only for points in bounding box
+        polygonChecked++
+        if (this.isPointInPolygon(x, y, this.lassoPoints)) {
+          selectedIndices.push(i)
+        }
+      }
+      
+      console.log(`⏱️ [LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+    } else {
+      // Fallback to container iteration if sprites not available
+      console.log('⚠️ Using fallback container iteration (slower)')
+      this.scatterContainer.children.forEach((child) => {
+        if (child.isPoint && child.cellId !== undefined) {
+          if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
           selectedIndices.push(child.cellId)
         }
       }
     })
     
-    // Also check points in animatedContainer if they exist
-    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      this.animatedContainer.children.forEach((child, index) => {
+      if (this.animatedContainer) {
+        this.animatedContainer.children.forEach((child) => {
         if (child.isPoint && child.cellId !== undefined) {
-          const screenX = child.x
-          const screenY = child.y
-          
-          if (this.isPointInPolygon(screenX, screenY, this.lassoPoints)) {
+            if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
             selectedIndices.push(child.cellId)
           }
         }
       })
+      }
     }
     
-    //console.log(`Selected ${selectedIndices.length} cells with lasso`)
+    const selectionTime = performance.now() - selectionStart
+    console.log(`⏱️ [LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
     
     // Add to selected cells set
     selectedIndices.forEach(index => {
@@ -7400,54 +7642,77 @@ export default class extends Controller {
 
   // Update colors of selected points without re-rendering (preserves pan/zoom state)
   updateSelectedPointColors() {
-    if (!this.scatterContainer) return
+    console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${this.pointSprites?.length || 0} total`)
+    const updateStart = performance.now()
     
-    //console.log('Updating selected point colors without re-rendering')
+    if (!this.pointSprites || this.pointSprites.length === 0) {
+      console.log('⚠️ No sprites available for color update')
+      return
+    }
     
-    // With sprites, we just update the tint property (much faster than Graphics)
-    const updateSprite = (sprite) => {
-      if (sprite.isPoint && sprite.cellId !== undefined) {
-        if (this.selectedCells.has(sprite.cellId)) {
-          // Set selected color (red)
+    const hasSelections = this.selectedCells.size > 0
+    const wasEmpty = !this.previouslySelectedCells || this.previouslySelectedCells.size === 0
+    const isFirstSelection = wasEmpty && hasSelections
+    
+    console.log(`⏱️ [PERF] isFirstSelection=${isFirstSelection}, hasSelections=${hasSelections}`)
+    
+    if (isFirstSelection) {
+      // First selection: need to update ALL sprites (fade unselected + highlight selected)
+      console.log(`⏱️ [PERF] First selection - updating all ${this.pointSprites.length} sprites`)
+      const allUpdateStart = performance.now()
+      
+      for (let i = 0; i < this.pointSprites.length; i++) {
+        const sprite = this.pointSprites[i]
+        if (!sprite || sprite.destroyed) continue
+        
+        if (this.selectedCells.has(i)) {
           sprite.tint = 0xff0000
           sprite.alpha = 1.0
         } else {
-          // Restore original color
-          const originalColor = this.originalPointColors.get(sprite.cellId)
-          if (originalColor !== undefined) {
-            sprite.tint = originalColor
-          }
-          // Restore alpha based on selection state
-          const hasOtherSelections = this.selectedCells.size > 0
-          sprite.alpha = hasOtherSelections ? 0.3 : 1.0
+          sprite.alpha = 0.3 // Fade unselected (keep existing color)
         }
       }
-    }
-    
-    // Update sprites directly from sprite array (fastest method)
-    if (this.pointSprites && this.pointSprites.length > 0) {
+      
+      const allUpdateTime = performance.now() - allUpdateStart
+      console.log(`  Updated all sprites in ${allUpdateTime.toFixed(2)}ms (${Math.round(this.pointSprites.length / allUpdateTime * 1000).toLocaleString()} sprites/sec)`)
+    } else if (hasSelections) {
+      // Adding to existing selection: only update newly selected cells
+      console.log(`⏱️ [PERF] Incremental selection - updating only ${this.selectedCells.size} selected cells`)
+      const incrementalStart = performance.now()
+      
+      for (const cellId of this.selectedCells) {
+        const sprite = this.pointSprites[cellId]
+        if (sprite && !sprite.destroyed) {
+          sprite.tint = 0xff0000
+          sprite.alpha = 1.0
+        }
+      }
+      
+      const incrementalTime = performance.now() - incrementalStart
+      console.log(`  Updated ${this.selectedCells.size} sprites in ${incrementalTime.toFixed(2)}ms`)
+    } else {
+      // Clearing selection: restore all to normal
+      console.log(`⏱️ [PERF] Clearing selection - restoring all sprites`)
+      const clearStart = performance.now()
+      
       for (let i = 0; i < this.pointSprites.length; i++) {
         const sprite = this.pointSprites[i]
-        if (sprite) {
-          updateSprite(sprite)
-        }
+        if (!sprite || sprite.destroyed) continue
+        
+        const originalColor = this.originalPointColors.get(i) || 0x3b82f6
+        sprite.tint = originalColor
+        sprite.alpha = 1.0
       }
-    } else {
-      // Fallback: update via container traversal
-      this.scatterContainer.children.forEach((child) => {
-        if (child.isPoint) {
-          updateSprite(child)
-        } else if (child.children) {
-          // Nested container
-          child.children.forEach(updateSprite)
-        }
-      })
       
-      // Also check animatedContainer
-      if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-        this.animatedContainer.children.forEach(updateSprite)
-      }
+      const clearTime = performance.now() - clearStart
+      console.log(`  Restored all sprites in ${clearTime.toFixed(2)}ms`)
     }
+    
+    // Store current selection for next comparison
+    this.previouslySelectedCells = new Set(this.selectedCells)
+    
+    const updateTime = performance.now() - updateStart
+    console.log(`⏱️ [PERF] Color update completed in ${updateTime.toFixed(2)}ms`)
   }
 
   isPointInPolygon(x, y, polygon) {
@@ -7462,12 +7727,33 @@ export default class extends Controller {
   }
 
   clearLasso() {
-    if (this.lassoGraphics) {
-      this.scatterContainer.removeChild(this.lassoGraphics)
-      this.lassoGraphics = null
+    // Clear HTML canvas overlay
+    if (this.lassoCanvasCtx) {
+      this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
     }
+    
     this.lassoPoints = []
     this.isDrawingLasso = false
+    
+    // Re-enable PIXI event system (but sprite interactivity stays OFF - still in lasso mode)
+    if (this.pixiApp?.renderer?.events) {
+      this.pixiApp.renderer.events.setTargetElement(this.pixiApp.view)
+    }
+    if (this.globalDragHandlers && this.pixiApp?.stage) {
+      this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
+    }
+    // Note: sprite interactivity is NOT re-enabled here - it stays disabled until user switches modes
+    
+    // Clean up Firefox polling if active
+    if (this.firefoxPollInterval) {
+      clearInterval(this.firefoxPollInterval)
+      this.firefoxPollInterval = null
+    }
+    
+    if (this.firefoxMouseHandler) {
+      document.removeEventListener('pointermove', this.firefoxMouseHandler, { capture: true })
+      this.firefoxMouseHandler = null
+    }
   }
 
   // Helper method to calculate distance between two points
@@ -7772,63 +8058,35 @@ export default class extends Controller {
   }
 
   updateAllPointSizes(newSize) {
-    if (!this.scatterContainer) {
-      console.log('No scatterContainer found')
+    console.log(`⏱️ [PERF] Updating point size to ${newSize}`)
+    const updateStart = performance.now()
+    
+    if (!this.pointSprites || this.pointSprites.length === 0) {
+      console.log('No sprites found, will apply on next render')
       return
     }
     
+    // Recreate texture at new size for crisp rendering
+    if (this.pointTexture) {
+      this.pointTexture.destroy(true)
+    }
+    this.pointTexture = this.createPointTexture(newSize)
+    this.lastPointSize = newSize
+    
+    // Update all sprites to use new texture
     let updatedCount = 0
-    
-    // Update points in scatterContainer
-    this.scatterContainer.children.forEach((child) => {
-      if (child.isPoint) {
-        this.updatePointSize(child, newSize)
-        updatedCount++
-      }
-    })
-    
-    // Update points in animatedContainer if it exists
-    if (this.animatedContainer) {
-      this.animatedContainer.children.forEach((child) => {
-        if (child.isPoint) {
-          this.updatePointSize(child, newSize)
+    for (let i = 0; i < this.pointSprites.length; i++) {
+      const sprite = this.pointSprites[i]
+      if (sprite && sprite.isPoint && !sprite.destroyed) {
+        sprite.texture = this.pointTexture
+        // Reset scale to 1.0 since texture is at correct size
+        sprite.scale.set(1.0)
           updatedCount++
         }
-      })
     }
     
-    //console.log(`Updated ${updatedCount} points to size ${newSize}`)
-    //console.log(`ScatterContainer children: ${this.scatterContainer.children.length}`)
-    //console.log(`AnimatedContainer children: ${this.animatedContainer ? this.animatedContainer.children.length : 'none'}`)
-    
-    // Debug first few points
-    if (this.scatterContainer.children.length > 0) {
-      const firstPoint = this.scatterContainer.children[0]
-      /*console.log(`First point properties:`, {
-        isPoint: firstPoint.isPoint,
-        visible: firstPoint.visible,
-        alpha: firstPoint.alpha,
-        x: firstPoint.x,
-        y: firstPoint.y,
-        cellId: firstPoint.cellId
-      })*/
-    }
-  }
-
-  // Helper method to update a single point's size
-  updatePointSize(point, newSize) {
-    if (!point || !point.isPoint) return
-    
-    // For sprites, we need to update the scale based on the texture size
-    // The texture was created at this.currentPointSize radius
-    // So scale = newSize / originalTextureSize
-    const originalSize = this.currentPointSize
-    const scaleFactor = newSize / originalSize
-    
-    point.scale.set(scaleFactor)
-    
-    // Note: For a more proper implementation, we'd recreate the texture at the new size
-    // But scaling works well enough for small size changes
+    const updateTime = performance.now() - updateStart
+    console.log(`⏱️ [PERF] Updated ${updatedCount.toLocaleString()} sprites to size ${newSize} in ${updateTime.toFixed(2)}ms`)
   }
 
   toggleAxes() {

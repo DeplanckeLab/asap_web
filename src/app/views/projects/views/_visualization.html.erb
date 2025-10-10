@@ -1,6 +1,17 @@
 <!-- Load PIXI.js globally -->
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
 
+<!-- Prevent page scrolling for full-screen visualization -->
+<style>
+  html, body {
+    overflow: hidden !important;
+    height: 100vh;
+    width: 100vw;
+    margin: 0;
+    padding: 0;
+  }
+</style>
+
 <!-- Global color palette for visualization -->
 <script>
   console.log('🎨 Visualization view script executing...');
@@ -29,7 +40,7 @@
 <div data-controller="visualization" 
      data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
      data-visualization-default-loom-file-value="<%= @default_loom_file %>"
-     style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0;">
+     style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
   <div style="width: 380px; height: 100vh; background-color: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column;">
@@ -73,7 +84,7 @@
                   <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
                           onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
                           onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
                           data-metadata-name="<%= metadata.display_name %>"
                           data-metadata-id="<%= metadata.id %>"
                           data-metadata-type="DISCRETE"
@@ -192,7 +203,7 @@
                   <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
                           onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
                           onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
                           data-metadata-name="<%= metadata.display_name %>"
                           data-metadata-id="<%= metadata.id %>"
                           data-metadata-type="NUMERIC"
@@ -272,7 +283,7 @@
   </div>
 
   <!-- Main Content: UMAP Plot -->
-  <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column;">
+  <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
     <!-- Menu Bar -->
     <div style="display: flex; align-items: center; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
@@ -392,7 +403,7 @@
     </div>
     <div style="flex: 1; padding: 20px; display: flex; flex-direction: column;">
       <!-- Plot Container -->
-      <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px;">
+      <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px; overflow: hidden;">
         <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
           <h3 style="margin: 0 0 10px 0;">UMAP Plot</h3>
           <p style="margin: 0;">Select metadata from the dropdown to visualize</p>

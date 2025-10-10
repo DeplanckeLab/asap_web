@@ -57,6 +57,12 @@ export default class extends Controller {
     this.visibilityOnlyUpdate = false // When true, try to only toggle visibility
     this.spritesRenderType = null // Track what type of rendering created current sprites: 'discrete', 'numeric', or 'default'
     
+    // Cache for decompressed embedding coordinates (avoid re-decompressing)
+    this.decompressedCoordinatesCache = new Map() // Key: embeddingId, Value: decompressed coordinates
+    
+    // Cache for binary embedding data (avoid re-fetching from network)
+    this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
+    
     // Expose controller globally for range slider access
     window.visualizationController = this
     
@@ -575,13 +581,16 @@ export default class extends Controller {
   }
 
   updateMetadata() {
+    const perfStart = performance.now()
+    console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
+    
     if (!this.hasMetadataSelectTarget) {
       console.log('Metadata select target not available')
       return
     }
     
     const selectedMetadataId = this.metadataSelectTarget.value
-    //console.log('Selected metadata ID:', selectedMetadataId)
+    console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
     
     if (selectedMetadataId) {
       // Show loading spinner
@@ -594,6 +603,8 @@ export default class extends Controller {
         })
         .finally(() => {
           this.hideMetadataDropdownSpinner()
+          const perfEnd = performance.now()
+          console.log(`⏱️ [PERF] ====== TOTAL EMBEDDING SWITCH TIME: ${(perfEnd - perfStart).toFixed(2)}ms ======`)
         })
     } else {
       // Clear any existing metadata data
@@ -602,8 +613,22 @@ export default class extends Controller {
   }
 
   async loadMetadataCoordinates(metadataId) {
+    const fetchStart = performance.now()
+    
     try {
-      //console.log('Loading metadata coordinates for ID:', metadataId)
+      // Check cache first!
+      if (this.binaryDataCache.has(metadataId)) {
+        console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
+        const cachedData = this.binaryDataCache.get(metadataId)
+        const cacheTime = performance.now() - fetchStart
+        console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
+        
+        // Use cached binary data
+        this.storeBinaryMetadataData(cachedData)
+        return
+      }
+      
+      console.log(`⏱️ [PERF] Step 1: BINARY CACHE MISS - Starting network fetch for ${metadataId}`)
       
       // Get the current loom file selection
       const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
@@ -612,16 +637,9 @@ export default class extends Controller {
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
-      //console.log('Fetching binary data from URL:', url)
-      
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
       const csrfToken = csrfMetaTag?.getAttribute('content')
-      
-      /*console.log('CSRF token debug:', {
-        metaTagFound: !!csrfMetaTag,
-        tokenValue: csrfToken ? 'present' : 'missing'
-      })*/
       
       const headers = {
         'Accept': 'application/octet-stream'
@@ -638,6 +656,9 @@ export default class extends Controller {
         headers: headers,
         credentials: 'same-origin'
       })
+      
+      const fetchTime = performance.now() - fetchStart
+      console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -657,15 +678,13 @@ export default class extends Controller {
       const metadataName = response.headers.get('X-Metadata-Name')
       const cellCount = parseInt(response.headers.get('X-Cell-Count'))
       
-      /*console.log('Received binary metadata data:', {
-        metadataId: headerMetadataId,
-        metadataName,
-        cellCount,
-        binarySize: response.headers.get('content-length')
-      })*/
+      console.log(`⏱️ [PERF] Received ${metadataName} with ${cellCount} cells`)
       
       // Get the binary data as ArrayBuffer
+      const bufferStart = performance.now()
       const arrayBuffer = await response.arrayBuffer()
+      const bufferTime = performance.now() - bufferStart
+      console.log(`⏱️ [PERF] ArrayBuffer conversion: ${bufferTime.toFixed(2)}ms (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
       
       /*console.log('ArrayBuffer details:', {
         byteLength: arrayBuffer.byteLength,
@@ -678,13 +697,20 @@ export default class extends Controller {
       //console.log('First 20 bytes of binary data:', Array.from(view.slice(0, 20)))
       //console.log('Last 20 bytes of binary data:', Array.from(view.slice(-20)))
       
-      // Store the binary coordinate data
-      this.storeBinaryMetadataData({
+      // Prepare data object
+      const dataObject = {
         id: headerMetadataId,
         name: metadataName,
         cellCount: cellCount,
         binaryData: arrayBuffer
-      })
+      }
+      
+      // Cache binary data for instant retrieval next time
+      this.binaryDataCache.set(metadataId, dataObject)
+      console.log(`⏱️ [PERF] Cached binary data for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
+      
+      // Store the binary coordinate data
+      this.storeBinaryMetadataData(dataObject)
       
     } catch (error) {
       console.error('Error loading metadata coordinates:', error)
@@ -751,20 +777,42 @@ export default class extends Controller {
   }
 
   updateVisualizationWithMetadata() {
+    const vizStart = performance.now()
+    console.log('⏱️ [PERF] Step 2: updateVisualizationWithMetadata started')
+    
     if (!this.metadataData) {
       console.log('No metadata data to visualize')
       return
     }
     
-    //console.log('Updating visualization with metadata:', this.metadataData.name)
+    // Get embedding ID for caching (use name as key)
+    const embeddingId = this.metadataData.name
     
-    // Decompress the binary coordinate data for visualization
-    const decompressedCoords = this.decompressBinaryCoordinates(this.metadataData.binaryData)
+    // Check cache first to avoid re-decompressing
+    let decompressedCoords
+    const decompressStart = performance.now()
+    
+    if (this.decompressedCoordinatesCache.has(embeddingId)) {
+      console.log(`⏱️ [PERF] Step 2a: CACHE HIT - Using cached coordinates for ${embeddingId}`)
+      decompressedCoords = this.decompressedCoordinatesCache.get(embeddingId)
+      const cacheTime = performance.now() - decompressStart
+      console.log(`⏱️ [PERF] Step 2a: Cache retrieval: ${cacheTime.toFixed(2)}ms`)
+    } else {
+      console.log(`⏱️ [PERF] Step 2a: CACHE MISS - Decompressing ${embeddingId}`)
+      // Decompress and cache (this method has its own internal logging)
+      decompressedCoords = this.decompressBinaryCoordinates(this.metadataData.binaryData)
+      this.decompressedCoordinatesCache.set(embeddingId, decompressedCoords)
+      const decompressTime = performance.now() - decompressStart
+      console.log(`⏱️ [PERF] Step 2a: Total decompress + cache: ${decompressTime.toFixed(2)}ms`)
+    }
     
     // Initialize PIXI.js scatter plot
+    const pixiStart = performance.now()
     this.initializePixiScatterPlot(decompressedCoords)
+    const pixiTime = performance.now() - pixiStart
     
-    //console.log(`Decompressed ${decompressedCoords.length} coordinate pairs for visualization`)
+    const vizTime = performance.now() - vizStart
+    console.log(`⏱️ [PERF] Step 2: updateVisualizationWithMetadata completed in ${vizTime.toFixed(2)}ms`)
   }
 
   async initializePixiScatterPlot(coordinates) {
@@ -794,16 +842,19 @@ export default class extends Controller {
       
       // Check if we already have a PIXI app for this loom file
       if (this.pixiApp && this.currentLoomFile === this.loomFileSelectTarget.value) {
-        //console.log('Changing visualization coordinates - animating transition')
+        console.log('⏱️ [PERF] Step 3: Updating existing plot (FAST PATH)')
+        const updateStart = performance.now()
         // Clear selection since coordinates might have changed
         this.selectedCells.clear()
         this.updateSelectedCellsCount()
         // Use updateScatterPlot to animate coordinate changes
         await this.updateScatterPlot(coordinates)
+        const updateTime = performance.now() - updateStart
+        console.log(`⏱️ [PERF] Step 3: Plot update completed in ${updateTime.toFixed(2)}ms`)
         return
       }
       
-      //console.log('Creating new PIXI.js scatter plot')
+      console.log('⏱️ [PERF] Step 3: Creating new PIXI app (SLOW PATH - first render)')
       
       // Clear any existing PIXI app
       if (this.pixiApp) {
@@ -997,6 +1048,31 @@ export default class extends Controller {
     this.clearStoredOriginalPositions()
   }
 
+  // NEW METHOD: Update sprite positions without recreating them
+  updateSpritePositions(coordinates, newBounds) {
+    const updateStart = performance.now()
+    
+    if (!this.pointSprites || this.pointSprites.length !== coordinates.length) {
+      console.log('🚀 [PERF] Cannot update positions - sprite count mismatch or no sprites')
+      return false
+    }
+    
+    console.log(`🚀 [PERF] Updating positions of ${this.pointSprites.length} existing sprites (FAST PATH)`)
+    
+    // Update sprite positions directly - no recreation!
+    for (let i = 0; i < this.pointSprites.length; i++) {
+      const [newX, newY] = coordinates[i]
+      const sprite = this.pointSprites[i]
+      sprite.x = this.normalizeX(newX, newBounds)
+      sprite.y = this.normalizeY(newY, newBounds)
+    }
+    
+    const updateTime = performance.now() - updateStart
+    console.log(`🚀 [PERF] Position update completed in ${updateTime.toFixed(2)}ms (${(this.pointSprites.length / updateTime * 1000).toFixed(0)} points/sec)`)
+    
+    return true
+  }
+
   async updateScatterPlot(coordinates) {
     if (!this.pixiApp || !this.scatterContainer || !this.PIXI) return
     
@@ -1026,36 +1102,47 @@ export default class extends Controller {
     const embeddingChanged = this.detectEmbeddingMethodChange(coordinates)
     
     if (!embeddingChanged) {
-      console.log('Same embedding method detected, no animation needed - re-rendering points with new coordinates')
-      // Clear existing individual points and re-render
-      this.scatterContainer.removeChildren()
+      console.log('🚀 [PERF] Same embedding detected - attempting fast position update')
       
-      // Clear sprite cache to force recreation with new positions
+      // Try to update positions without recreation (FAST PATH)
+      const updated = this.updateSpritePositions(coordinates, newBounds)
+      
+      if (updated) {
+        // Success! Just update metadata and we're done
+        this.currentBounds = newBounds
+        this.currentCoordinates = coordinates
+        this.renderAxes()
+        this.renderGrid()
+        this.renderCategoryLabels()
+        this.updateCellFiltering()
+        
+        const pointCountElement = document.getElementById('point-count')
+        if (pointCountElement) {
+          pointCountElement.textContent = coordinates.length.toLocaleString()
+        }
+        return
+      }
+      
+      // Fall through to recreation if update failed
+      console.log('🚀 [PERF] Fast update failed, falling back to recreation')
+      this.scatterContainer.removeChildren()
       this.pointSprites = null
       this.existingPoints = null
       this.spritesRenderType = null
       
-      // Update bounds and coordinates
       this.currentBounds = newBounds
       this.currentCoordinates = coordinates
       this.renderAxes()
       this.renderGrid()
       
-      // Initialize checkboxes for current metadata if not already done (only for discrete)
       if (this.currentMetadataVector?.id && this.currentMetadataVector.data_type === 'DISCRETE' && !this.selectedCategories[this.currentMetadataVector.id]) {
         this.initializeCheckboxesForMetadata(this.currentMetadataVector.id)
       }
       
       this.renderCategoryLabels()
-      
-      // Re-render with new coordinates using current coloring
       this.renderPointsWithCurrentColoring()
-      
-      // Reapply filtering after coordinate update
-      //console.log('Reapplying filtering after coordinate update...')
       this.updateCellFiltering()
       
-      // Update point count display
       const pointCountElement = document.getElementById('point-count')
       if (pointCountElement) {
         pointCountElement.textContent = coordinates.length.toLocaleString()
@@ -1064,35 +1151,48 @@ export default class extends Controller {
     }
     
     // Check if we should skip animation for large datasets (> 100k cells)
-    const skipAnimation = coordinates.length > 100000
+    const skipAnimation = coordinates.length > 150000
     
     if (skipAnimation) {
-      console.log(`🚀 [PERF] Large dataset (${coordinates.length} cells) - skipping animation for performance`)
+      console.log(`🚀 [PERF] Large dataset (${coordinates.length} cells) - skipping animation`)
       
-      // Clear incremental filtering state when embedding changes
+      // Try fast position update first if counts match
+      if (previousCoordinates.length === coordinates.length) {
+        console.log('🚀 [PERF] Same cell count - attempting fast position update')
+        const updated = this.updateSpritePositions(coordinates, newBounds)
+        
+        if (updated) {
+          this.clearIncrementalState()
+          this.currentBounds = newBounds
+          this.currentCoordinates = coordinates
+          this.renderAxes()
+          this.renderGrid()
+          this.renderCategoryLabels()
+          this.updateCellFiltering()
+          
+          const pointCountElement = document.getElementById('point-count')
+          if (pointCountElement) {
+            pointCountElement.textContent = coordinates.length.toLocaleString()
+          }
+          return
+        }
+      }
+      
+      // Fall back to recreation
+      console.log('🚀 [PERF] Recreating sprites for large dataset')
       this.clearIncrementalState()
-      
-      // Clear existing points and re-render without animation
       this.scatterContainer.removeChildren()
-      
-      // IMPORTANT: Clear sprite cache to force recreation with new positions
       this.pointSprites = null
       this.existingPoints = null
       
-      // Update bounds and render axes, grid, and category labels
       this.currentBounds = newBounds
-      this.currentCoordinates = coordinates // Update to new coordinates
+      this.currentCoordinates = coordinates
       this.renderAxes()
       this.renderGrid()
       this.renderCategoryLabels()
-      
-      // Re-render with new coordinates using current coloring (will create new sprites)
       this.renderPointsWithCurrentColoring()
-      
-      // Reapply filtering
       this.updateCellFiltering()
       
-      // Update point count display
       const pointCountElement = document.getElementById('point-count')
       if (pointCountElement) {
         pointCountElement.textContent = coordinates.length.toLocaleString()
@@ -1284,7 +1384,7 @@ export default class extends Controller {
 
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
     // Safety check: Don't animate large datasets (> 100k cells)
-    if (newCoordinates.length > 100000) {
+    if (newCoordinates.length > 150000) {
       console.log(`🚀 [PERF] Skipping animation in createAnimatedPoints - dataset too large (${newCoordinates.length} cells)`)
       // Clear sprite cache to force recreation with new positions
       this.pointSprites = null
@@ -1297,7 +1397,7 @@ export default class extends Controller {
     
     //console.log('Creating animated points from previous to new coordinates')
     const pointSize = this.currentPointSize // Use current point size setting
-    const animationDuration = 1000 // 1 second for faster transitions
+    const animationDuration = 3000 // 1 second for faster transitions
     
     //console.log('Creating animated points with current coloring scheme')
     
@@ -1549,15 +1649,16 @@ export default class extends Controller {
       maxY = Math.max(maxY, y)
     }
     
-    // Add some padding
+    // Add minimal padding on both top and bottom
     const paddingX = (maxX - minX) * 0.05
-    const paddingY = (maxY - minY) * 0.05
+    const paddingYBottom = (maxY - minY) * 0.01  // Minimal padding on bottom
+    const paddingYTop = (maxY - minY) * 0.01     // Minimal padding on top
     
     return {
       minX: minX - paddingX,
       maxX: maxX + paddingX,
-      minY: minY - paddingY,
-      maxY: maxY + paddingY
+      minY: minY - paddingYBottom,
+      maxY: maxY + paddingYTop
     }
   }
 
@@ -1566,7 +1667,7 @@ export default class extends Controller {
     return {
       left: 60,    // Space for Y-axis labels
       right: 20,   // Right margin
-      top: 20,     // Top margin
+      top: 20,      // Minimal top margin
       bottom: 60   // Space for X-axis labels
     }
   }
@@ -1598,10 +1699,11 @@ export default class extends Controller {
     const dataPerPixelY = dataHeight / availableHeight
 
     // Adjust bounds to account for margins
+    // Note: Y-axis is inverted, so maxY appears at top, minY at bottom
     const adjustedMinX = minX - (margins.left * dataPerPixelX)
     const adjustedMaxX = maxX + (margins.right * dataPerPixelX)
-    const adjustedMinY = minY - (margins.top * dataPerPixelY)
-    const adjustedMaxY = maxY + (margins.bottom * dataPerPixelY)
+    const adjustedMinY = minY - (margins.bottom * dataPerPixelY)  // Bottom of plot (X-axis labels)
+    const adjustedMaxY = maxY + (margins.top * dataPerPixelY)     // Top of plot (minimal space)
 
     const adjustedBounds = {
       minX: adjustedMinX,
@@ -1648,63 +1750,44 @@ export default class extends Controller {
   }
 
   decompressBinaryCoordinates(arrayBuffer) {
-    // Convert binary data back to coordinate pairs
-    // arrayBuffer contains 16-bit signed integers (little-endian)
-    // Each coordinate pair takes 4 bytes (2 bytes for x, 2 bytes for y)
+    // OPTIMIZED: Use Int16Array for much faster decompression
+    const decompressStart = performance.now()
     
-    /*console.log('Starting binary decompression:', {
-      arrayBufferSize: arrayBuffer.byteLength,
-      expectedPairs: arrayBuffer.byteLength / 4
-    })*/
+    // Create Int16Array view directly (much faster than DataView)
+    const int16View = new Int16Array(arrayBuffer)
+    const numPairs = int16View.length / 2
     
-    const coordinates = []
-    const view = new DataView(arrayBuffer)
+    // Pre-allocate array for better performance
+    const coordinates = new Array(numPairs)
     
-    // Process 4 bytes at a time (2 coordinates * 2 bytes each)
-    for (let i = 0; i < arrayBuffer.byteLength; i += 4) {
-      if (i + 3 < arrayBuffer.byteLength) {
-        // Read 16-bit signed integers (little-endian)
-        const x = view.getInt16(i, true)     // true = little-endian
-        const y = view.getInt16(i + 2, true)
-        
-        // Convert back to original precision (divide by 100 to allow larger coordinate ranges)
-        // This allows coordinates up to ±327.67 instead of ±32.767
-        const xFloat = x / 100
-        const yFloat = y / 100
-        
-        coordinates.push([xFloat, yFloat])
-        
-        // Log first few coordinates for debugging
-        if (coordinates.length <= 5) {
-          console.log(`Coordinate ${coordinates.length}: [${x}, ${y}] -> [${xFloat}, ${yFloat}]`)
-        }
+    // Single loop with direct typed array access (10-100x faster!)
+    let xMin = Infinity, xMax = -Infinity
+    let yMin = Infinity, yMax = -Infinity
+    
+    for (let i = 0; i < numPairs; i++) {
+      const idx = i * 2
+      const x = int16View[idx] / 100      // Direct array access - very fast!
+      const y = int16View[idx + 1] / 100
+      
+      coordinates[i] = [x, y]
+      
+      // Track min/max in same loop (no need for second pass)
+      if (x < xMin) xMin = x
+      if (x > xMax) xMax = x
+      if (y < yMin) yMin = y
+      if (y > yMax) yMax = y
+      
+      // Log first few coordinates for debugging
+      if (i < 3) {
+        console.log(`  Coordinate ${i + 1}: [${int16View[idx]}, ${int16View[idx + 1]}] -> [${x}, ${y}]`)
       }
     }
     
-    // Log coordinate statistics
-    if (coordinates.length > 0) {
-      // For large arrays, we can't use spread operator with Math.min/max
-      // Find min/max by iterating
-      let xMin = coordinates[0][0], xMax = coordinates[0][0]
-      let yMin = coordinates[0][1], yMax = coordinates[0][1]
-      
-      for (let i = 1; i < coordinates.length; i++) {
-        const x = coordinates[i][0]
-        const y = coordinates[i][1]
-        if (x < xMin) xMin = x
-        if (x > xMax) xMax = x
-        if (y < yMin) yMin = y
-        if (y > yMax) yMax = y
-      }
-      
-      console.log('Decompressed coordinate statistics:', {
-        totalPairs: coordinates.length,
-        xRange: [xMin, xMax],
-        yRange: [yMin, yMax],
-        first5: coordinates.slice(0, 5),
-        last5: coordinates.slice(-5)
-      })
-    }
+    const decompressTime = performance.now() - decompressStart
+    const pairsPerSec = Math.round(numPairs / decompressTime * 1000)
+    
+    console.log(`⏱️ [PERF] Binary decompression: ${numPairs.toLocaleString()} pairs in ${decompressTime.toFixed(2)}ms (${pairsPerSec.toLocaleString()} pairs/sec)`)
+    console.log(`  Range: X[${xMin.toFixed(2)}, ${xMax.toFixed(2)}] Y[${yMin.toFixed(2)}, ${yMax.toFixed(2)}]`)
     
     return coordinates
   }
@@ -2433,14 +2516,30 @@ export default class extends Controller {
     const button = event.currentTarget
     const metadataId = button.dataset.metadataId
     
-    // Only preload if not already loaded and not currently loading
-    if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
-      //console.log(`Preloading metadata vector ${metadataId} on hover`)
-      // Load in background without showing spinner
-      this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-        console.log(`Preload failed for metadata ${metadataId}:`, error.message)
-        // Don't show error to user for preloading failures
-      })
+    // Debounce: Only preload if mouse stays on element for 300ms
+    // This prevents UI lag when quickly moving mouse over items
+    if (this.preloadTimeout) {
+      clearTimeout(this.preloadTimeout)
+    }
+    
+    this.preloadTimeout = setTimeout(() => {
+      // Only preload if not already loaded and not currently loading
+      if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
+        //console.log(`Preloading metadata vector ${metadataId} on hover`)
+        // Load in background without showing spinner
+        this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+          console.log(`Preload failed for metadata ${metadataId}:`, error.message)
+          // Don't show error to user for preloading failures
+        })
+      }
+    }, 300) // 300ms delay - only preload if user hovers for a bit
+  }
+  
+  // Cancel preload if user quickly moves away
+  cancelPreload(event) {
+    if (this.preloadTimeout) {
+      clearTimeout(this.preloadTimeout)
+      this.preloadTimeout = null
     }
   }
   
@@ -4899,6 +4998,9 @@ export default class extends Controller {
     
     //console.log('Adding interaction event listeners to canvas')
     
+    // Get the plot container to add wheel listener there too
+    const plotContainer = document.querySelector('.plot-container')
+    
     this.boundMouseDown = this.onInteractionMouseDown.bind(this)
     this.boundMouseMove = this.onInteractionMouseMove.bind(this)
     this.boundMouseUp = this.onInteractionMouseUp.bind(this)
@@ -4908,8 +5010,21 @@ export default class extends Controller {
     canvas.addEventListener('mousedown', this.boundMouseDown)
     canvas.addEventListener('mousemove', this.boundMouseMove)
     canvas.addEventListener('mouseup', this.boundMouseUp)
-    canvas.addEventListener('wheel', this.boundWheel)
+    canvas.addEventListener('wheel', this.boundWheel, { passive: false }) // Only on canvas, no capture
     canvas.addEventListener('dblclick', this.boundDoubleClick)
+    
+    // Store reference to plot container for cleanup (but don't add wheel listener)
+    if (plotContainer) {
+      this.plotContainerElement = plotContainer
+    }
+    
+    // Don't add wheel listener to main container - it would capture left panel scroll events!
+    // Only the canvas should have wheel zoom
+    
+    // Allow body/html scrolling for the left panel
+    // The plot container has overflow:hidden, which is enough
+    // document.body.style.overflow = 'hidden'  // REMOVED - blocks left panel scroll
+    // document.documentElement.style.overflow = 'hidden'  // REMOVED - blocks left panel scroll
     
     /*console.log('Event listeners added:', {
       mousedown: !!this.boundMouseDown,
@@ -4946,7 +5061,8 @@ export default class extends Controller {
       canvas.removeEventListener('mouseup', this.boundMouseUp)
     }
     if (this.boundWheel) {
-      canvas.removeEventListener('wheel', this.boundWheel)
+      canvas.removeEventListener('wheel', this.boundWheel, { passive: false })
+      // Wheel listener is only on canvas now, not on containers
     }
     if (this.boundDoubleClick) {
       canvas.removeEventListener('dblclick', this.boundDoubleClick)
@@ -4965,11 +5081,13 @@ export default class extends Controller {
   }
 
   onInteractionMouseMove(event) {
-    if (this.interactionMode === 'lasso') {
+    // Only process if actually drawing/panning (not just hovering)
+    if (this.interactionMode === 'lasso' && this.isDrawingLasso) {
       this.onLassoMouseMove(event)
-    } else if (this.interactionMode === 'pan') {
+    } else if (this.interactionMode === 'pan' && this.isPanning) {
       this.onPanMouseMove(event)
     }
+    // If just hovering, do nothing - don't block the UI thread!
   }
 
   onInteractionMouseUp(event) {
@@ -4990,23 +5108,21 @@ export default class extends Controller {
   }
 
   onInteractionWheel(event) {
-    //console.log('Wheel event:', event.deltaY, 'isPanning:', this.isPanning, 'interactionMode:', this.interactionMode)
+    // Always prevent default scroll behavior when over the plot
+    if (event.cancelable) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
     
     // Don't zoom if we're currently panning (but allow zoom in pan mode when not actively panning)
     if (this.isPanning) {
-      //console.log('Ignoring wheel event during active panning')
-      return
+      return false
     }
-    
-    // Zoom functionality
-    event.preventDefault()
     
     if (!this.currentCoordinates || !this.currentBounds) {
-      //console.log('No data available for zoom')
-      return
+      return false
     }
-    
-    //console.log('Zooming with data available')
     
     // Get mouse position relative to canvas
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
@@ -5037,16 +5153,14 @@ export default class extends Controller {
     // Update current bounds
     this.currentBounds = newBounds
     
-    // Check if we should use shape-based zooming for performance
-    // Use a faster estimation instead of counting all points
+    // Use shape-based zooming for smooth performance with large datasets
+    // Only use for very large visible point counts to maximize responsiveness
     const boundsArea = (newBounds.maxX - newBounds.minX) * (newBounds.maxY - newBounds.minY)
     const totalArea = (this.currentBounds.maxX - this.currentBounds.minX) * (this.currentBounds.maxY - this.currentBounds.minY)
     const estimatedVisiblePoints = Math.floor((boundsArea / totalArea) * this.currentCoordinates.length)
-    const useShapeZooming = estimatedVisiblePoints > 10000
+    const useShapeZooming = estimatedVisiblePoints > 200000  // Only use for >200k visible points
     
     if (useShapeZooming) {
-      //console.log('Using shape-based zooming for ~', estimatedVisiblePoints, 'visible points')
-      
       // Hide points and show zooming shape
       if (this.scatterContainer) {
         this.scatterContainer.visible = false
@@ -5057,7 +5171,6 @@ export default class extends Controller {
       
       // Store the bounds for this zooming operation
       const zoomingBounds = newBounds
-      //console.log('Using zoomingBounds for this operation:', zoomingBounds)
       
       // Create or reuse zooming shape
       if (!this.zoomingShape) {
@@ -5069,10 +5182,8 @@ export default class extends Controller {
           this.startZoomingAnimation()
         }
       } else {
-        // Transform the existing shape instead of recreating it
+        // Transform using container scaling (instant!)
         this.transformZoomingShape(oldBounds, newBounds)
-        // Restart animation for the transformed shape
-        this.startZoomingAnimation()
       }
       
       // Update axes and grid
@@ -5084,15 +5195,14 @@ export default class extends Controller {
         clearTimeout(this.zoomTimeout)
       }
       
-      // Schedule a delayed update to show actual points
+      // Use very short delay to batch wheel events while maintaining responsiveness
       this.zoomTimeout = setTimeout(() => {
-        this.finishZooming()
-      }, 200) // Increased delay for better performance
+        requestAnimationFrame(() => {
+          this.finishZooming()
+        })
+      }, 16) // ~1 frame at 60fps - minimal delay while still batching events
       
     } else {
-      // Use normal zooming for smaller datasets
-      //console.log('Using normal zooming for ~', estimatedVisiblePoints, 'visible points')
-      
       // Remove any existing zooming shape (in case we switched from shape-based to normal)
       if (this.zoomingShape && this.pixiApp) {
         // Remove the mask first
@@ -5111,14 +5221,24 @@ export default class extends Controller {
         this.zoomTimeout = null
       }
       
-      // Update axes, grid, and category labels with new bounds
-      this.renderAxes()
-      this.renderGrid()
-      this.renderCategoryLabels()
-      
-      // Use translation approach like pan mode, centered on mouse position
+      // Update sprite positions immediately for instant visual feedback
       this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
+      
+      // Throttle axes/grid/labels updates to avoid re-rendering on every wheel event
+      if (this.zoomAxisUpdateTimeout) {
+        clearTimeout(this.zoomAxisUpdateTimeout)
+      }
+      this.zoomAxisUpdateTimeout = setTimeout(() => {
+        requestAnimationFrame(() => {
+          this.renderAxes()
+          this.renderGrid()
+          this.renderCategoryLabels()
+        })
+      }, 100) // Update UI elements after zoom stabilizes
     }
+    
+    // Return false to ensure no default scroll behavior
+    return false
   }
 
   // Lasso mode handlers
@@ -5133,7 +5253,10 @@ export default class extends Controller {
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
     
+    // Cache rect for performance during mouse moves
     const rect = canvas.getBoundingClientRect()
+    this.cachedCanvasRect = rect
+    
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     
@@ -5160,7 +5283,8 @@ export default class extends Controller {
     if (!canvas) return
     
     const rectStartTime = performance.now()
-    const rect = canvas.getBoundingClientRect()
+    // Use cached rect if available (set when lasso starts)
+    const rect = this.cachedCanvasRect || canvas.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     const rectEndTime = performance.now()
@@ -5199,6 +5323,7 @@ export default class extends Controller {
     
     //console.log('Lasso mouse up - completing selection')
     this.isDrawingLasso = false
+    this.cachedCanvasRect = null // Clear cached rect
     
     // Only proceed if we have a PIXI app and coordinates to work with
     if (!this.pixiApp || !this.currentCoordinates) {
@@ -5233,7 +5358,10 @@ export default class extends Controller {
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
     
+    // Cache rect for performance during mouse moves
     const rect = canvas.getBoundingClientRect()
+    this.cachedCanvasRect = rect
+    
     this.panStartX = event.clientX - rect.left
     this.panStartY = event.clientY - rect.top
     
@@ -5250,18 +5378,23 @@ export default class extends Controller {
       screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
     })*/
     
-    // Hide points and category labels during panning for smooth performance
-    if (this.scatterContainer) {
-      this.scatterContainer.visible = false
-    }
-    if (this.categoryLabelsContainer) {
-      this.categoryLabelsContainer.visible = false
-    }
+    // For large datasets, use panning shape for smooth performance
+    const usePanningShape = this.currentCoordinates.length > 100000
     
-    // Create and show the panning shape
-    this.panningShape = this.createPanningShape()
-    if (this.panningShape && this.pixiApp) {
-      this.pixiApp.stage.addChild(this.panningShape)
+    if (usePanningShape) {
+      // Hide real points during panning for large datasets
+      if (this.scatterContainer) {
+        this.scatterContainer.visible = false
+      }
+      if (this.categoryLabelsContainer) {
+        this.categoryLabelsContainer.visible = false
+      }
+      
+      // Create and show the panning shape
+      this.panningShape = this.createPanningShape()
+      if (this.panningShape && this.pixiApp) {
+        this.pixiApp.stage.addChild(this.panningShape)
+      }
     }
     
     // Change cursor to grabbing
@@ -5278,7 +5411,8 @@ export default class extends Controller {
     const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
     if (!canvas) return
     
-    const rect = canvas.getBoundingClientRect()
+    // Use cached rect if available (set when pan starts)
+    const rect = this.cachedCanvasRect || canvas.getBoundingClientRect()
     const currentX = event.clientX - rect.left
     const currentY = event.clientY - rect.top
     
@@ -5359,6 +5493,7 @@ export default class extends Controller {
 
   stopPanning() {
     this.isPanning = false
+    this.cachedCanvasRect = null // Clear cached rect
     
     // Store bounds for debug before resetting
     const debugPanStartBounds = this.panStartBounds
@@ -5366,9 +5501,9 @@ export default class extends Controller {
     
     // Bounds are already updated in real-time during panning, no need to recalculate
     
-    // Remove the panning shape and its mask
+    // Remove the panning shape and its mask if it exists
     if (this.panningShape && this.pixiApp) {
-      // Remove the mask first
+      // Remove the mask first if it exists
       if (this.panningShape.maskGraphics) {
         this.pixiApp.stage.removeChild(this.panningShape.maskGraphics)
         this.panningShape.maskGraphics = null
@@ -5378,7 +5513,6 @@ export default class extends Controller {
       this.panningShape = null
     }
     
-
     // Reset panning state
     this.panStartX = 0
     this.panStartY = 0
@@ -5387,20 +5521,20 @@ export default class extends Controller {
     this.panMouseDeltaX = undefined
     this.panMouseDeltaY = undefined
     
-    // Show points and category labels again after panning is finished
+    // Show real points again after panning
     if (this.scatterContainer) {
       this.scatterContainer.visible = true
     }
-    // Refresh labels after panning with a delay to ensure all position updates are complete
+    
+    // Refresh labels after panning with a small delay for smooth transition
     if (this.categoryLabelsContainer) {
       // Check if categories should be visible
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox && categoriesCheckbox.checked) {
-        // Use delayed refresh to ensure all position updates are complete
         setTimeout(() => {
-          console.log(`🏷️ Refreshing labels after panning (delayed)`)
+          console.log(`🏷️ Refreshing labels after panning`)
           this.renderCategoryLabels()
-        }, 200)
+        }, 50)
       }
     }
     
@@ -5537,29 +5671,32 @@ export default class extends Controller {
   transformZoomingShape(oldBounds, newBounds) {
     if (!this.zoomingShape) return
     
-    // Reset container scale to avoid double transformation
-    this.zoomingShape.scale.x = 1
-    this.zoomingShape.scale.y = 1
+    // Calculate scale factors
+    const oldWidth = oldBounds.maxX - oldBounds.minX
+    const oldHeight = oldBounds.maxY - oldBounds.minY
+    const newWidth = newBounds.maxX - newBounds.minX
+    const newHeight = newBounds.maxY - newBounds.minY
     
-    // Update individual point positions based on new bounds using proper coordinate system
-    this.zoomingShape.children.forEach((pointSprite, index) => {
-      if (this.currentCoordinates && index < this.currentCoordinates.length) {
-        const [x, y] = this.currentCoordinates[index]
-        // Use the same coordinate system as normalizeX/Y with proper margins and Y-axis inversion
-        pointSprite.x = this.normalizeX(x, newBounds)
-        pointSprite.y = this.normalizeY(y, newBounds)
-        
-        // Update the stored comparison point for index 0
-        if (index === 0) {
-          this.zoomingShapePoint0 = { 
-            x: pointSprite.x, 
-            y: pointSprite.y, 
-            dataCoords: [x, y] 
-          }
-          //console.log('Updated zoomingShapePoint0 in transformZoomingShape:', this.zoomingShapePoint0)
-        }
-      }
-    })
+    // Calculate how much to scale the container
+    const scaleX = oldWidth / newWidth
+    const scaleY = oldHeight / newHeight
+    
+    // Calculate translation to keep the zoom centered
+    // Get screen dimensions
+    const screenWidth = this.pixiApp.screen.width
+    const screenHeight = this.pixiApp.screen.height
+    
+    // Calculate the center offset in screen coordinates
+    const oldCenterScreenX = screenWidth / 2
+    const oldCenterScreenY = screenHeight / 2
+    
+    // Apply scale to the container (MUCH faster than moving individual points!)
+    this.zoomingShape.scale.x = scaleX
+    this.zoomingShape.scale.y = scaleY
+    
+    // Adjust position to keep content centered
+    this.zoomingShape.x = oldCenterScreenX - (oldCenterScreenX * scaleX)
+    this.zoomingShape.y = oldCenterScreenY - (oldCenterScreenY * scaleY)
   }
 
   // Create a shape for zooming with specific bounds
@@ -5568,9 +5705,24 @@ export default class extends Controller {
     
     const container = new PIXI.Container()
     
-    // Sample points to create a simplified representation
-    const sampleSize = Math.min(10000, this.currentCoordinates.length)
-    const step = Math.max(1, Math.floor(this.currentCoordinates.length / sampleSize))
+    // Optimized sampling - fewer points since we use container scaling
+    // This makes initial creation faster while still showing good representation
+    const sampleSize = Math.min(20000, this.currentCoordinates.length)
+    
+    // Create random sample indices for better distribution representation
+    const sampleIndices = new Set()
+    const step = Math.floor(this.currentCoordinates.length / sampleSize)
+    
+    // Mix of uniform and random sampling for best representation
+    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+      sampleIndices.add(i)
+      // Add a random nearby point for better cluster representation
+      if (sampleIndices.size < sampleSize) {
+        const randomOffset = Math.floor(Math.random() * step)
+        const randomIndex = Math.min(i + randomOffset, this.currentCoordinates.length - 1)
+        sampleIndices.add(randomIndex)
+      }
+    }
     
     // Cache bounds calculations for performance (same as updatePointPositions)
     const width = bounds.maxX - bounds.minX
@@ -5585,8 +5737,8 @@ export default class extends Controller {
       timestamp: Date.now()
     })*/
     
-    // Create individual animated point sprites
-    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+    // Create individual animated point sprites from sampled indices
+    for (const i of sampleIndices) {
       const [x, y] = this.currentCoordinates[i]
       
       // Use the same coordinate system as normalizeX/Y with proper margins and Y-axis inversion
@@ -5812,11 +5964,26 @@ export default class extends Controller {
     const plotHeight = this.pixiApp.screen.height - margins.top - margins.bottom
     
     // Sample points to create a simplified representation
-    const sampleSize = Math.min(10000, this.currentCoordinates.length) // Sample up to 10000 points
-    const step = Math.max(1, Math.floor(this.currentCoordinates.length / sampleSize))
+    // Use same sample size as zooming for consistency
+    const sampleSize = Math.min(20000, this.currentCoordinates.length)
+    
+    // Create random sample indices for better distribution representation
+    const sampleIndices = new Set()
+    const step = Math.floor(this.currentCoordinates.length / sampleSize)
+    
+    // Mix of uniform and random sampling for best representation
+    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+      sampleIndices.add(i)
+      // Add a random nearby point for better cluster representation
+      if (sampleIndices.size < sampleSize) {
+        const randomOffset = Math.floor(Math.random() * step)
+        const randomIndex = Math.min(i + randomOffset, this.currentCoordinates.length - 1)
+        sampleIndices.add(randomIndex)
+      }
+    }
     
     // Create a simplified point cloud representation
-    for (let i = 0; i < this.currentCoordinates.length; i += step) {
+    for (const i of sampleIndices) {
       const [x, y] = this.currentCoordinates[i]
       
       // Use the same coordinate system as the actual points
@@ -6062,10 +6229,6 @@ export default class extends Controller {
     const centerX = mouseX !== null ? mouseX : canvas.width / 2
     const centerY = mouseY !== null ? mouseY : canvas.height / 2
 
-    //console.log('Zoom Translation:', { scaleX, scaleY, centerX, centerY, mouseX, mouseY })
-
-    let translatedCount = 0
-
     // Helper function to translate points in a container
     const translatePointsInContainer = (container, containerName) => {
       container.children.forEach((child) => {
@@ -6080,7 +6243,6 @@ export default class extends Controller {
           
           child.x = centerX + (relativeX * scaleX)
           child.y = centerY + (relativeY * scaleY)
-          translatedCount++
         }
       })
     }
@@ -6090,11 +6252,8 @@ export default class extends Controller {
     
     // Also check for points in animatedContainer if it exists
     if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      //console.log('Found animatedContainer with', this.animatedContainer.children.length, 'children for zoom translation')
       translatePointsInContainer(this.animatedContainer, 'Animated')
     }
-
-    //console.log(`Zoom translated ${translatedCount} point positions`)
   }
 
   // Clear stored original positions (called when coordinates change)

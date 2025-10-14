@@ -412,13 +412,18 @@ export default class extends Controller {
     const filterTime = performance.now() - filterStart
     console.log(`🚀 [PERF] updateCellFiltering took ${filterTime.toFixed(2)}ms`)
     
-    // Update the color legend after rendering
-    const legendStart = performance.now()
-    if (this.visualizationController.renderContinuousColorLegend) {
-      this.visualizationController.renderContinuousColorLegend()
+    // Only update the color legend if we're adapting the color range
+    // (otherwise the legend doesn't change, so no need to redraw)
+    if (this.adaptColorRangeEnabled) {
+      const legendStart = performance.now()
+      if (this.visualizationController.renderContinuousColorLegend) {
+        this.visualizationController.renderContinuousColorLegend()
+      }
+      const legendTime = performance.now() - legendStart
+      console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
+    } else {
+      console.log(`🚀 [PERF] Skipping legend update (adapt range not enabled)`)
     }
-    const legendTime = performance.now() - legendStart
-    console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
     
     const totalTime = performance.now() - startTime
     console.log(`🚀 [PERF] performPlotUpdate completed in ${totalTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
@@ -696,17 +701,67 @@ export default class extends Controller {
     this.visualizationController.visibilityOnlyUpdate = false
     console.log('🎨 Set visibilityOnlyUpdate to false')
     
+    // Calculate the effective range based on visible cells when adapt is enabled
+    let effectiveMin = this.currentMinValue
+    let effectiveMax = this.currentMaxValue
+    
+    if (this.adaptColorRangeEnabled) {
+      // Get the metadata vector and calculate range from visible cells only
+      const metadataVector = this.visualizationController.getMetadataVectorById(this.metadataIdValue)
+      if (metadataVector && metadataVector.values) {
+        const visibleCells = this.visualizationController.currentVisibleCells
+        
+        if (visibleCells && visibleCells.length > 0) {
+          // Calculate min/max from visible cells only
+          let minVal = Infinity
+          let maxVal = -Infinity
+          
+          for (let i = 0; i < visibleCells.length; i++) {
+            const cellIndex = visibleCells[i]
+            const value = metadataVector.values[cellIndex]
+            if (!isNaN(value)) {
+              if (value < minVal) minVal = value
+              if (value > maxVal) maxVal = value
+            }
+          }
+          
+          if (minVal !== Infinity && maxVal !== -Infinity) {
+            effectiveMin = minVal
+            effectiveMax = maxVal
+            console.log('🎨 Adapted color range to visible cells:', { min: effectiveMin, max: effectiveMax })
+            
+            // Update the slider to show the new range
+            this.currentMinValue = effectiveMin
+            this.currentMaxValue = effectiveMax
+            this.updateSliderUI()
+            this.updateSelectedCellsCount()
+          }
+        } else {
+          console.log('🎨 No filtering applied, using full data range')
+          // Use the full data range when no filtering is applied
+          effectiveMin = this.minValue
+          effectiveMax = this.maxValue
+          
+          // Update the slider to show the full range
+          this.currentMinValue = effectiveMin
+          this.currentMaxValue = effectiveMax
+          this.updateSliderUI()
+          this.updateSelectedCellsCount()
+        }
+      }
+    }
+    
     // Update the color range with the new setting
     console.log('🎨 Calling updateColorRange with:', {
       metadataId: this.metadataIdValue,
-      min: this.currentMinValue,
-      max: this.currentMaxValue,
+      min: effectiveMin,
+      max: effectiveMax,
       adapt: this.adaptColorRangeEnabled
     })
     this.visualizationController.updateColorRange(
       this.metadataIdValue, 
-      this.currentMinValue, 
-      this.currentMaxValue,
+      effectiveMin, 
+      effectiveMax,
       this.adaptColorRangeEnabled
     )
     console.log('🎨 updateColorRange completed')
@@ -734,6 +789,9 @@ export default class extends Controller {
     } else {
       console.error('🎨 renderContinuousColorLegend method not found!')
     }
+    
+    // Redraw the histogram to reflect the new range
+    this.drawDensityPlot()
     
     console.log('🎨 Button click handling completed!')
   }

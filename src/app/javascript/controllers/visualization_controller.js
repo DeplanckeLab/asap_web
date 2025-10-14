@@ -1,6 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
+import { ReglRenderer } from "visualization/regl_renderer"
 
-console.log('Visualization controller file loaded - VERSION 2.0 WITH NEW LOGGING')
+console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
 export default class extends Controller {
   static targets = ["loomFileSelect", "embeddingSelect", "metadataSelect"]
@@ -11,6 +12,10 @@ export default class extends Controller {
 
   connect() {
     console.log('🚀 Visualization controller connected')
+    
+    // RENDERER CHOICE: 'pixi' or 'regl'
+    this.rendererType = 'regl' // 🎯 Using ReGL for better performance
+    this.reglRenderer = null // Will hold ReGL renderer instance
     
     // Initialize IndexedDB for storing metadata on disk instead of memory
     this.initializeIndexedDB()
@@ -43,8 +48,8 @@ export default class extends Controller {
     // Initialize numerical display order preference for continuous metadata
     this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
     
-    // Initialize auto-preload preference (disabled by default for better performance)
-    this.autoPreloadMetadata = false
+    // Initialize auto-preload preference (enabled by default for better UX)
+    this.autoPreloadMetadata = true
     
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
@@ -775,7 +780,6 @@ export default class extends Controller {
       `
     }
   }
-
   updateVisualizationWithMetadata() {
     const vizStart = performance.now()
     console.log('⏱️ [PERF] Step 2: updateVisualizationWithMetadata started')
@@ -854,20 +858,82 @@ export default class extends Controller {
         return
       }
       
-      console.log('⏱️ [PERF] Step 3: Creating new PIXI app (SLOW PATH - first render)')
+      console.log(`⏱️ [PERF] Step 3: Creating new ${this.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
       
-      // Clear any existing PIXI app
+      // Clear existing renderers
       if (this.pixiApp) {
         this.pixiApp.destroy(true)
+        this.pixiApp = null
+      }
+      if (this.reglRenderer) {
+        this.reglRenderer.destroy()
+        this.reglRenderer = null
       }
       
+      // Clear plot container
+      plotContainer.innerHTML = ''
+      
+      if (this.rendererType === 'regl') {
+        // ===== ReGL RENDERER =====
+        console.log('🎯 Initializing ReGL renderer for WebGL performance')
+        
+        // Ensure container is positioned for absolute children
+        plotContainer.style.position = 'relative'
+        
+        // Create ReGL canvas for points (layer 1)
+        const canvas = document.createElement('canvas')
+        canvas.width = plotContainer.clientWidth
+        canvas.height = plotContainer.clientHeight
+        canvas.style.width = '100%'
+        canvas.style.height = '100%'
+        canvas.style.position = 'absolute'
+        canvas.style.top = '0'
+        canvas.style.left = '0'
+        canvas.style.zIndex = '1' // Bottom layer
+        plotContainer.appendChild(canvas)
+        
+        // Initialize ReGL renderer
+        this.reglRenderer = new ReglRenderer(canvas)
+        this.canvas = canvas
+        
+        console.log('ReGL canvas added to container:', canvas)
+        
+        // Create HTML Canvas 2D overlay for axes/grid/labels
+        // (Simple and efficient - no need for PixiJS!)
+        const overlayCanvas = document.createElement('canvas')
+        overlayCanvas.width = plotContainer.clientWidth
+        overlayCanvas.height = plotContainer.clientHeight
+        overlayCanvas.style.width = '100%'
+        overlayCanvas.style.height = '100%'
+        overlayCanvas.style.position = 'absolute'
+        overlayCanvas.style.top = '0'
+        overlayCanvas.style.left = '0'
+        overlayCanvas.style.zIndex = '2' // Top layer
+        overlayCanvas.style.pointerEvents = 'none' // Let events pass through
+        plotContainer.appendChild(overlayCanvas)
+        
+        this.overlayCanvas = overlayCanvas
+        this.overlayCtx = overlayCanvas.getContext('2d')
+        
+        // Store PIXI reference for compatibility (but don't create app)
+        this.PIXI = PIXI
+        this.pixiApp = null // No PixiJS app in ReGL mode
+        
+        console.log('✅ Canvas 2D overlay created for UI elements (axes/grid/labels)')
+        console.log('📊 Canvas 2D overlay details:', {
+          width: overlayCanvas.width,
+          height: overlayCanvas.height,
+          zIndex: overlayCanvas.style.zIndex,
+          pointerEvents: overlayCanvas.style.pointerEvents
+        })
+        
+      } else {
+        // ===== PIXI RENDERER (original) =====
       // Store PIXI reference for later use
       this.PIXI = PIXI
       
       // Use global PIXI.Application
       const Application = PIXI.Application
-      
-      //console.log('Using Application constructor:', Application)
       
       this.pixiApp = new Application({
         width: plotContainer.clientWidth,
@@ -879,9 +945,9 @@ export default class extends Controller {
       })
       
       // Add PIXI canvas to the container
-      plotContainer.innerHTML = ''
       plotContainer.appendChild(this.pixiApp.view)
       console.log('PIXI canvas added to container:', this.pixiApp.view)
+      }
       
       // Hide placeholder and show plot info
       const placeholder = document.getElementById('plot-placeholder')
@@ -889,34 +955,50 @@ export default class extends Controller {
       if (placeholder) placeholder.style.display = 'none'
       if (plotInfo) plotInfo.style.display = 'block'
       
-      // Create grid container (bottom layer)
+      // Create containers based on renderer type
+      if (this.rendererType === 'pixi') {
+        // PixiJS mode: Create PixiJS containers
       this.gridContainer = new PIXI.Container()
-      this.gridContainer.visible = true // Initially visible
+        this.gridContainer.visible = true
       this.pixiApp.stage.addChild(this.gridContainer)
       
-     
-
-      // Create main container for the scatter plot (top layer)
       this.scatterContainer = new PIXI.Container()
-      this.scatterContainer.sortableChildren = true // Enable z-index sorting for layering
+        this.scatterContainer.sortableChildren = true
       this.pixiApp.stage.addChild(this.scatterContainer)
       
-      // Create category labels container (topmost layer)
       this.categoryLabelsContainer = new PIXI.Container()
-      this.categoryLabelsContainer.visible = true // Initially visible
+        this.categoryLabelsContainer.visible = true
       this.pixiApp.stage.addChild(this.categoryLabelsContainer)
       
-      
-      // Create axes container (middle layer)
       this.axesContainer = new PIXI.Container()
-      this.axesContainer.visible = true // Initially visible
+        this.axesContainer.visible = true
       this.pixiApp.stage.addChild(this.axesContainer)
+        
+        console.log(`✅ PixiJS containers created`)
+      } else {
+        // ReGL mode: No PixiJS containers needed, using Canvas 2D overlay
+        this.scatterContainer = { children: [] } // Dummy for compatibility
+        this.gridContainer = null
+        this.categoryLabelsContainer = null
+        this.axesContainer = null
+        console.log(`✅ ReGL mode - using Canvas 2D overlay (no PixiJS containers)`)
+      }
 
       // Store current loom file
       this.currentLoomFile = this.loomFileSelectTarget.value
       
       // Render the scatter plot
       await this.renderScatterPlot(coordinates)
+      
+      // Reapply current metadata coloring if any is active
+      if (this.currentMetadataVector && this.currentMetadataVector.values) {
+        console.log(`🎨 Reapplying metadata coloring after embedding switch: ${this.currentMetadataVector.name}`)
+        if (this.rendererType === 'regl') {
+          await this.renderPointsWithCurrentColoringReGL()
+        } else {
+          this.updateVisualizationWithMetadataVector()
+        }
+      }
       
       // Add interaction handlers
       this.addInteractionHandlers()
@@ -948,6 +1030,11 @@ export default class extends Controller {
   }
 
   async renderScatterPlot(coordinates) {
+    // Dispatch to ReGL if using ReGL renderer
+    if (this.rendererType === 'regl') {
+      return this.renderScatterPlotReGL(coordinates)
+    }
+    
     if (!this.pixiApp || !this.scatterContainer || !this.PIXI) return
     
     // Clear existing points
@@ -1046,6 +1133,69 @@ export default class extends Controller {
     
     // Clear any stored original positions since points were recreated
     this.clearStoredOriginalPositions()
+  }
+
+  // ReGL version of renderScatterPlot
+  async renderScatterPlotReGL(coordinates) {
+    if (!this.reglRenderer) return
+    
+    const startTime = performance.now()
+    console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
+    
+    // Calculate bounds for normalization
+    const originalBounds = this.calculateBounds(coordinates)
+    const bounds = this.getAdjustedBounds(originalBounds)
+    this.currentBounds = bounds
+    this.currentCoordinates = coordinates
+    
+    // Reset ordering flags so they'll be reapplied for this new embedding
+    this._lastCategoryOrderApplied = null
+    this._lastNumericOrderApplied = null
+    
+    // Initialize display order array (identity mapping initially)
+    // displayOrder[drawPosition] = originalCellIndex
+    this.displayOrder = new Array(coordinates.length)
+    for (let i = 0; i < coordinates.length; i++) {
+      this.displayOrder[i] = i
+    }
+    console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
+    
+    // Normalize coordinates to screen space (0 to canvas size)
+    const canvas = this.canvas
+    const screenCoordinates = new Float32Array(coordinates.length * 2)
+    
+    for (let i = 0; i < coordinates.length; i++) {
+      const [x, y] = coordinates[i]
+      screenCoordinates[i * 2] = this.normalizeX(x, bounds)
+      screenCoordinates[i * 2 + 1] = this.normalizeY(y, bounds)
+    }
+    
+    // Set positions in ReGL renderer
+    this.reglRenderer.setPositions(screenCoordinates)
+    
+    // Set initial point size
+    this.reglRenderer.setPointSize(this.currentPointSize || 4)
+    
+    // Render first frame
+    this.reglRenderer.render()
+    
+    // Render grid and axes using PixiJS overlay
+    this.renderGrid()
+    this.renderAxes()
+    this.renderCategoryLabels() // ✅ Category labels work in ReGL mode!
+    
+    // Update point count display
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      pointCountElement.textContent = coordinates.length.toLocaleString()
+    }
+    
+    // Store for tracking
+    this.numPoints = coordinates.length
+    this.spritesRenderType = 'default'
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
   }
 
   // NEW METHOD: Update sprite positions without recreating them
@@ -1348,14 +1498,14 @@ export default class extends Controller {
           const { min: minVal, max: maxVal } = effectiveRange
           const range = maxVal - minVal
           const normalizedValue = (value - minVal) / range
-          baseColor = this.valueToColor(normalizedValue)
+          baseColor = this.getColorFromGradient(normalizedValue)
         } else {
           // Fallback to original compression info
           const minVal = compression_info.min_val
           const maxVal = compression_info.max_val
           const range = maxVal - minVal
           const normalizedValue = (value - minVal) / range
-          baseColor = this.valueToColor(normalizedValue)
+          baseColor = this.getColorFromGradient(normalizedValue)
         }
       }
     }
@@ -1381,7 +1531,6 @@ export default class extends Controller {
     //console.log('Extracting current screen positions (recreating from bounds)')
     return currentBounds
   }
-
   createAnimatedPoints(previousCoordinates, newCoordinates, fromBounds, toBounds) {
     // Safety check: Don't animate large datasets (> 100k cells)
     if (newCoordinates.length > 150000) {
@@ -1718,25 +1867,27 @@ export default class extends Controller {
 
   normalizeX(x, bounds) {
     const margins = this.getPlotMargins()
-    const availableWidth = this.pixiApp.screen.width - margins.left - margins.right
+    const screenWidth = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const availableWidth = screenWidth - margins.left - margins.right
     return margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
   }
 
   normalizeY(y, bounds) {
     // Invert Y-axis: higher Y values appear at the top, lower Y values at the bottom
     const margins = this.getPlotMargins()
-    const availableHeight = this.pixiApp.screen.height - margins.top - margins.bottom
+    const screenHeight = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
+    const availableHeight = screenHeight - margins.top - margins.bottom
     return margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
   }
 
   addInteractionHandlers() {
-    if (!this.pixiApp) return
-    
-    // Make the stage interactive
+    // Make the stage interactive (PixiJS mode only)
+    if (this.rendererType === 'pixi' && this.pixiApp) {
     this.pixiApp.stage.interactive = true
+    }
     
     // Set initial cursor based on interaction mode
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
     if (canvas) {
       if (this.interactionMode === 'pan') {
         canvas.style.cursor = 'grab'
@@ -1745,7 +1896,7 @@ export default class extends Controller {
       }
     }
     
-    // Add our new interaction event listeners
+    // Add our new interaction event listeners (works for both ReGL and PixiJS)
     this.addInteractionEventListeners()
   }
 
@@ -2103,7 +2254,6 @@ export default class extends Controller {
       spinner.style.display = 'none'
     }
   }
-
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
     //console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
@@ -2265,6 +2415,12 @@ export default class extends Controller {
       this.categoryLabelsContainer.removeChildren()
     }
     
+    // Initialize gradient BEFORE updating visualization for continuous metadata
+    if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      // Initialize default gradient based on data distribution
+      this.initializeDefaultGradient()
+    }
+    
     // Update visualization with metadata coloring
     this.updateVisualizationWithMetadataVector()
     
@@ -2277,6 +2433,17 @@ export default class extends Controller {
     // Pass shouldUpdateColors=true for continuous metadata to ensure colors are rendered after filtering
     const shouldUpdateColors = this.currentMetadataVector?.data_type === 'NUMERIC'
     this.updateCellFiltering(shouldUpdateColors)
+
+    // Initialize gradient legend listeners for continuous metadata
+    if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      this.initializeGradientLegendListeners()
+    } else {
+      // Disable pointer events on overlay for discrete metadata
+      // This allows interactions with the plot below
+      if (this.overlayCanvas) {
+        this.overlayCanvas.style.pointerEvents = 'none'
+      }
+    }
   }
 
   // Load all metadata vectors in a single request
@@ -2547,21 +2714,61 @@ export default class extends Controller {
   async preloadAllMetadata() {
     console.log('🚀 [PERF] Starting background preload of all metadata vectors...')
     
-    // Find all metadata buttons
+    // Separate metadata by type for ordered preloading
+    const visualizationEmbeddings = []
+    const categoricalMetadata = []
+    const continuousMetadata = []
+    
+    // 1. Get visualization embeddings from dropdown
+    const embeddingDropdown = document.getElementById('metadata-select-dropdown')
+    if (embeddingDropdown) {
+      const options = embeddingDropdown.querySelectorAll('option[value]:not([value=""])')
+      options.forEach(option => {
+        const metadataId = option.value
+        if (metadataId) {
+          visualizationEmbeddings.push(metadataId)
+        }
+      })
+    }
+    
+    // 2. Get categorical and continuous metadata from buttons
     const metadataButtons = document.querySelectorAll('[data-metadata-id]')
-    const metadataIds = Array.from(metadataButtons).map(btn => btn.dataset.metadataId).filter(Boolean)
+    metadataButtons.forEach(btn => {
+      const metadataId = btn.dataset.metadataId
+      const metadataType = btn.dataset.metadataType
+      
+      if (!metadataId) return
+      
+      if (metadataType === 'DISCRETE') {
+        categoricalMetadata.push(metadataId)
+      } else if (metadataType === 'NUMERIC') {
+        continuousMetadata.push(metadataId)
+      }
+    })
     
-    console.log(`🚀 [PERF] Found ${metadataIds.length} metadata vectors to preload`)
+    console.log(`🚀 [PERF] Found metadata to preload:`)
+    console.log(`  - ${visualizationEmbeddings.length} visualization embeddings`)
+    console.log(`  - ${categoricalMetadata.length} categorical metadata`)
+    console.log(`  - ${continuousMetadata.length} continuous metadata`)
     
-    // Preload in batches to avoid overwhelming the server
+    // Preload in order: embeddings, then categorical, then continuous
+    const orderedMetadata = [
+      ...visualizationEmbeddings,
+      ...categoricalMetadata,
+      ...continuousMetadata
+    ]
+    
     const batchSize = 3
     let loadedCount = 0
+    let embeddingCount = 0
+    let categoricalCount = 0
+    let continuousCount = 0
     
-    for (let i = 0; i < metadataIds.length; i += batchSize) {
-      const batch = metadataIds.slice(i, i + batchSize)
+    for (let i = 0; i < orderedMetadata.length; i += batchSize) {
+      const batch = orderedMetadata.slice(i, i + batchSize)
       
       // Load batch in parallel
-      await Promise.all(batch.map(metadataId => {
+      await Promise.all(batch.map(async (metadataId, batchIndex) => {
         // Skip if already loaded in memory
         if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
           return Promise.resolve()
@@ -2570,25 +2777,42 @@ export default class extends Controller {
         // Load from server (will auto-store to IndexedDB)
         return this.loadSingleMetadataVectorSilently(metadataId).then(() => {
           loadedCount++
+          const globalIndex = i + batchIndex
+          
+          // Log progress for each type
+          if (globalIndex < visualizationEmbeddings.length) {
+            embeddingCount++
+            console.log(`📊 [Preload] Loaded embedding ${embeddingCount}/${visualizationEmbeddings.length}`)
+          } else if (globalIndex < visualizationEmbeddings.length + categoricalMetadata.length) {
+            categoricalCount++
+            console.log(`🏷️ [Preload] Loaded categorical metadata ${categoricalCount}/${categoricalMetadata.length}`)
+          } else {
+            continuousCount++
+            console.log(`📈 [Preload] Loaded continuous metadata ${continuousCount}/${continuousMetadata.length}`)
+          }
         }).catch(error => {
           console.log(`Preload failed for metadata ${metadataId}:`, error.message)
         })
       }))
       
       // Small delay between batches
-      if (i + batchSize < metadataIds.length) {
+      if (i + batchSize < orderedMetadata.length) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
     }
     
-    console.log(`🚀 [PERF] Completed preloading ${loadedCount} metadata vectors`)
+    console.log(`🚀 [PERF] Completed preloading ${loadedCount} metadata vectors in order:`)
+    console.log(`  ✅ ${embeddingCount} Embeddings → ${categoricalCount} Categorical → ${continuousCount} Continuous`)
     this.logMemoryUsage('After preloading all metadata')
   }
 
   // Update visualization with metadata vector coloring
   updateVisualizationWithMetadataVector() {
-    if (!this.currentMetadataVector || !this.pixiApp || !this.scatterContainer) {
-      console.log('Cannot update visualization - missing data or PIXI app')
+    // Check for renderer availability (either ReGL or PixiJS)
+    const hasRenderer = this.rendererType === 'regl' ? !!this.reglRenderer : (!!this.pixiApp && !!this.scatterContainer)
+    
+    if (!this.currentMetadataVector || !hasRenderer) {
+      console.log('Cannot update visualization - missing data or renderer')
       return
     }
     
@@ -2619,6 +2843,8 @@ export default class extends Controller {
     this.renderPointsWithCurrentColoring()
     
     // Render category labels if this is discrete metadata, or color legend if continuous
+    // Note: In ReGL mode, renderPointsWithCurrentColoringReGL() already renders labels
+    if (this.rendererType === 'pixi') {
     if (this.currentMetadataVector.data_type === 'DISCRETE') {
       // renderCategoryLabels will handle visibility based on checkbox state
       this.renderCategoryLabels()
@@ -2629,13 +2855,18 @@ export default class extends Controller {
         this.categoryLabelsContainer.removeChildren()
       }
       this.renderContinuousColorLegend()
+      }
     }
     
     //console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
-
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
+    // Dispatch to ReGL if using ReGL renderer
+    if (this.rendererType === 'regl') {
+      return this.renderPointsWithCurrentColoringReGL()
+    }
+    
     const startTime = performance.now()
     console.log('🚀 [PERF] renderPointsWithCurrentColoring started')
     
@@ -3253,6 +3484,197 @@ export default class extends Controller {
     const totalTime = performance.now() - startTime
     console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed in ${totalTime.toFixed(2)}ms`)
   }
+  // ReGL version of renderPointsWithCurrentColoring
+  renderPointsWithCurrentColoringReGL() {
+    console.log('🎨 [ReGL] Updating point colors based on metadata')
+    const startTime = performance.now()
+    
+    if (!this.reglRenderer || !this.currentCoordinates) {
+      console.log('⚠️ [ReGL] Cannot update colors - missing renderer or coordinates')
+      return
+    }
+    
+    const colorMap = new Map()
+    
+    // Get current filtered indices to hide invisible points
+    const filteredIndices = this.getIncrementalFilteredIndices()
+    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+    console.log(`🎨 [ReGL] Filtered indices:`, filteredIndices ? `${filteredIndices.length} visible cells` : 'all visible')
+    
+    // Check if we have metadata coloring active
+    if (this.currentMetadataVector) {
+      console.log(`🎨 [ReGL] Applying ${this.currentMetadataVector.data_type} metadata colors`)
+      
+      if (this.currentMetadataVector.data_type === 'DISCRETE') {
+        // Discrete metadata coloring with category ordering
+        const categoryColors = this.getCategoryColors()
+        
+        // Build category-to-index map
+        const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
+        const categoryToIndex = {}
+        uniqueCategories.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+        
+        console.log(`🎨 [ReGL] ${uniqueCategories.length} categories, ${categoryColors.length} colors available`)
+        
+        // Assign colors using displayOrder, hiding filtered-out cells
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          
+          if (isVisible) {
+            const category = this.currentMetadataVector.values[cellIndex]
+            const categoryIndex = categoryToIndex[category] || 0
+            const colorValue = categoryColors[categoryIndex % categoryColors.length]
+            
+            const color = typeof colorValue === 'string' 
+              ? parseInt(colorValue.replace('#', ''), 16)
+              : colorValue
+            
+            colorMap.set(drawPos, color)
+            this.originalPointColors.set(cellIndex, color) // Store by cell index
+          } else {
+            // Hide filtered-out points
+            colorMap.set(drawPos, 0x00000000)
+          }
+        }
+        
+        // Update colors in ReGL
+        this.reglRenderer.updateColors(colorMap)
+        this.reglRenderer.render()
+        
+        // Check if we need to reorder points for category display
+        // Only reorder if this is the first time loading this metadata or if order preference changed
+        const needsReordering = !this._lastCategoryOrderApplied || this._lastCategoryOrderApplied !== this.categoryOrder
+        
+        if (needsReordering) {
+          console.log('📊 [ReGL] Applying category display order (first time or order changed)...')
+          this._lastCategoryOrderApplied = this.categoryOrder
+          
+          // Reorder points in buffer (this will re-render and redraw overlay)
+          this.reorderPointsForCategoryDisplay()
+          
+          // Redraw overlay is handled by reorderPointsForCategoryDisplay
+          const elapsed = performance.now() - startTime
+          console.log(`🎨 [ReGL] Color update with reordering completed in ${elapsed.toFixed(2)}ms`)
+          return // Early exit - reordering already rendered everything
+        }
+        
+      } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+        // Continuous/numeric metadata coloring
+        const values = this.currentMetadataVector.values
+        const compressionInfo = this.currentMetadataVector.compression_info
+        
+        console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
+        
+        // Get effective color range (respects user-set range slider)
+        const effectiveRange = this.getEffectiveColorRange()
+        let minVal, maxVal
+        
+        if (effectiveRange) {
+          minVal = effectiveRange.min
+          maxVal = effectiveRange.max
+          console.log(`🎨 [ReGL] Using user-defined range: [${minVal}, ${maxVal}]`)
+        } else if (compressionInfo) {
+          minVal = compressionInfo.min_val
+          maxVal = compressionInfo.max_val
+          console.log(`🎨 [ReGL] Using compression info range: [${minVal}, ${maxVal}]`)
+        } else {
+          // Fallback: calculate range from values (avoid spreading large arrays)
+          minVal = values[0]
+          maxVal = values[0]
+          for (let i = 1; i < values.length; i++) {
+            if (values[i] < minVal) minVal = values[i]
+            if (values[i] > maxVal) maxVal = values[i]
+          }
+          console.log(`🎨 [ReGL] Calculated range from values: [${minVal}, ${maxVal}]`)
+        }
+        
+        const range = maxVal - minVal
+        
+        // Apply colors using displayOrder, hiding filtered-out cells
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          
+          if (isVisible) {
+            const value = values[cellIndex]
+            const normalizedValue = range > 0 ? (value - minVal) / range : 0.5
+            const color = this.getColorFromGradient(normalizedValue)
+            
+            colorMap.set(drawPos, color)
+            this.originalPointColors.set(cellIndex, color) // Store by cell index
+          } else {
+            // Hide filtered-out points
+            colorMap.set(drawPos, 0x00000000)
+          }
+        }
+        
+        console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
+        
+        // Update colors in ReGL (but don't render yet, we'll reorder first)
+        this.reglRenderer.updateColors(colorMap)
+        
+        // Check if we need to reorder points for numeric display
+        const needsReordering = !this._lastNumericOrderApplied || this._lastNumericOrderApplied !== this.numericalOrder
+        
+        if (needsReordering) {
+          console.log('📊 [ReGL] Applying numeric display order (first time or order changed)...')
+          this._lastNumericOrderApplied = this.numericalOrder
+          
+          // Reorder points in buffer based on z-index (this will re-render and redraw overlay)
+          this.reorderPointsForNumericDisplay(values, minVal, maxVal)
+          
+          // Redraw overlay and legend is handled by reorderPointsForNumericDisplay
+          const elapsed = performance.now() - startTime
+          console.log(`🎨 [ReGL] Color update with numeric reordering completed in ${elapsed.toFixed(2)}ms`)
+          return // Early exit - reordering already rendered everything
+        } else {
+          // Just render without reordering
+          this.reglRenderer.render()
+          
+          // Render continuous color legend
+          this.renderContinuousColorLegend()
+        }
+      }
+    } else {
+      // Default blue coloring
+      console.log('🎨 [ReGL] Applying default blue colors')
+      const defaultColor = 0x3b82f6
+      for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+        const cellIndex = this.displayOrder[drawPos]
+        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        
+        if (isVisible) {
+          colorMap.set(drawPos, defaultColor)
+          this.originalPointColors.set(cellIndex, defaultColor) // Store by cell index
+        } else {
+          // Hide filtered-out points
+          colorMap.set(drawPos, 0x00000000)
+        }
+      }
+      
+      // Update colors in ReGL
+      this.reglRenderer.updateColors(colorMap)
+      this.reglRenderer.render()
+    }
+    
+    // Redraw the Canvas 2D overlay (grid, axes, labels/legend) to ensure everything is visible
+    // Order matters: grid first (clears), then axes, then labels/legend
+    this.renderGrid()
+    this.renderAxes()
+    if (this.currentMetadataVector) {
+      if (this.currentMetadataVector.data_type === 'DISCRETE') {
+        this.renderCategoryLabels()
+      } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+        this.renderContinuousColorLegend()
+      }
+    }
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
+  }
 
 
   // Color points for continuous metadata
@@ -3846,7 +4268,6 @@ export default class extends Controller {
     console.log('🧪 Continuous metadata coloring test completed')
     return true
   }
-
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
     if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
@@ -4646,7 +5067,6 @@ export default class extends Controller {
     
     //console.log(`Cleared ${keysToRemove.length} stored colors`)
   }
-
   // Add reset colors button for a metadata
   addResetColorsButton(metadataContainer, metadataId) {
     // Check if there are customized colors
@@ -5061,9 +5481,9 @@ export default class extends Controller {
   }
 
   addInteractionEventListeners() {
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
     if (!canvas) {
-      //console.log('No canvas available for interaction listeners')
+      console.log('⚠️ No canvas available for interaction listeners')
       return
     }
     
@@ -5173,6 +5593,31 @@ export default class extends Controller {
   }
 
   onInteractionMouseMove(event) {
+    // Handle label dragging in pick mode (ReGL)
+    if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
+      const canvas = this.canvas
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+      
+      // Calculate drag delta
+      const deltaX = mouseX - this.labelDragStartX
+      const deltaY = mouseY - this.labelDragStartY
+      
+      // Update label offset
+      this.draggingLabel.offsetX = this.labelStartOffsetX + deltaX
+      this.draggingLabel.offsetY = this.labelStartOffsetY + deltaY
+      
+      console.log(`🏷️ [Drag] Moving label "${this.draggingLabel.category}" - offset: (${this.draggingLabel.offsetX}, ${this.draggingLabel.offsetY})`)
+      
+      // Redraw the overlay (grid, axes, labels)
+      this.renderGrid()
+      this.renderAxes()
+      this.renderCategoryLabels()
+      
+      return
+    }
+    
     // DEBUG: Log to verify events are being received
     if (this.isDrawingLasso) {
       this.interactionMoveCount = (this.interactionMoveCount || 0) + 1
@@ -5191,6 +5636,14 @@ export default class extends Controller {
   }
 
   onInteractionMouseUp(event) {
+    // Handle label drag end in pick mode (ReGL)
+    if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
+      console.log(`🏷️ Finished dragging label: ${this.draggingLabel.category}`)
+      this.draggingLabel = null
+      this.clickingOnLabel = false
+      return
+    }
+    
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseUp(event)
     } else if (this.interactionMode === 'pan') {
@@ -5199,10 +5652,13 @@ export default class extends Controller {
   }
 
   onInteractionDoubleClick(event) {
-    //console.log('Double-click event:', this.interactionMode)
+    console.log('Double-click event:', this.interactionMode)
     if (this.interactionMode === 'lasso') {
       this.onLassoDoubleClick(event)
     } else if (this.interactionMode === 'pan') {
+      this.onPanDoubleClick(event)
+    } else if (this.interactionMode === 'pick') {
+      // In pick mode, double-click also resets zoom/pan
       this.onPanDoubleClick(event)
     }
   }
@@ -5225,7 +5681,7 @@ export default class extends Controller {
     }
     
     // Get mouse position relative to canvas
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
     const rect = canvas.getBoundingClientRect()
     const mouseX = event.clientX - rect.left
     const mouseY = event.clientY - rect.top
@@ -5233,9 +5689,13 @@ export default class extends Controller {
     // Basic zoom implementation with faster increments, zooming around mouse cursor
     const delta = event.deltaY > 0 ? 1.05 : 0.95
     
+    // Get canvas dimensions
+    const canvasWidth = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const canvasHeight = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
+    
     // Convert mouse position to data coordinates
-    const mouseDataX = this.currentBounds.minX + (mouseX / this.pixiApp.screen.width) * (this.currentBounds.maxX - this.currentBounds.minX)
-    const mouseDataY = this.currentBounds.minY + (mouseY / this.pixiApp.screen.height) * (this.currentBounds.maxY - this.currentBounds.minY)
+    const mouseDataX = this.currentBounds.minX + (mouseX / canvasWidth) * (this.currentBounds.maxX - this.currentBounds.minX)
+    const mouseDataY = this.currentBounds.minY + (mouseY / canvasHeight) * (this.currentBounds.maxY - this.currentBounds.minY)
     
     // Zoom around mouse cursor position
     const newBounds = {
@@ -5254,11 +5714,11 @@ export default class extends Controller {
     this.currentBounds = newBounds
     
     // Use shape-based zooming for smooth performance with large datasets
-    // Only use for very large visible point counts to maximize responsiveness
+    // Only use for PixiJS mode with very large visible point counts
     const boundsArea = (newBounds.maxX - newBounds.minX) * (newBounds.maxY - newBounds.minY)
     const totalArea = (this.currentBounds.maxX - this.currentBounds.minX) * (this.currentBounds.maxY - this.currentBounds.minY)
     const estimatedVisiblePoints = Math.floor((boundsArea / totalArea) * this.currentCoordinates.length)
-    const useShapeZooming = estimatedVisiblePoints > 200000  // Only use for >200k visible points
+    const useShapeZooming = this.rendererType === 'pixi' && estimatedVisiblePoints > 200000  // Only use for >200k visible points in PixiJS mode
     
     if (useShapeZooming) {
       // Hide points and show zooming shape
@@ -5330,9 +5790,19 @@ export default class extends Controller {
       }
       this.zoomAxisUpdateTimeout = setTimeout(() => {
         requestAnimationFrame(() => {
-          this.renderAxes()
+          // For Canvas 2D overlay (ReGL mode), order matters:
+          // 1. renderGrid() - clears canvas and draws grid
+          // 2. renderAxes() - draws axes on top
+          // 3. renderCategoryLabels() or renderContinuousColorLegend() - draws labels/legend on top
           this.renderGrid()
-          this.renderCategoryLabels()
+          this.renderAxes()
+          
+          // Re-render the appropriate legend/labels based on metadata type
+          if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+            this.renderCategoryLabels()
+          } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+            this.renderContinuousColorLegend()
+          }
         })
       }, 100) // Update UI elements after zoom stabilizes
     }
@@ -5340,7 +5810,6 @@ export default class extends Controller {
     // Return false to ensure no default scroll behavior
     return false
   }
-
   // Lasso mode handlers
   onLassoMouseDown(event) {
     console.log('========================================')
@@ -5349,33 +5818,37 @@ export default class extends Controller {
     // Detect browser and store it
     this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
     
-    // Stop PIXI render loop during lasso drawing to free up main thread
-    if (this.pixiApp) {
+    // Stop PIXI render loop during lasso drawing to free up main thread (PixiJS mode only)
+    if (this.rendererType === 'pixi' && this.pixiApp) {
       this.pixiApp.ticker.stop()
     }
     
-    // Create HTML canvas overlay to bypass PIXI completely
+    // Create HTML canvas overlay for lasso drawing
     const plotContainer = document.querySelector('.plot-container')
     if (plotContainer && !this.lassoCanvas) {
+      const canvas = this.rendererType === 'regl' ? this.canvas : this.pixiApp.view
+      
       this.lassoCanvas = document.createElement('canvas')
-      this.lassoCanvas.width = this.pixiApp.view.width
-      this.lassoCanvas.height = this.pixiApp.view.height
+      this.lassoCanvas.width = canvas.width
+      this.lassoCanvas.height = canvas.height
       this.lassoCanvas.style.position = 'absolute'
       this.lassoCanvas.style.top = '0'
       this.lassoCanvas.style.left = '0'
       this.lassoCanvas.style.pointerEvents = 'none'
-      this.lassoCanvas.style.zIndex = '1000'
+      this.lassoCanvas.style.zIndex = '1000' // On top of everything
       plotContainer.appendChild(this.lassoCanvas)
       
       this.lassoCanvasCtx = this.lassoCanvas.getContext('2d')
     }
     
-    // Remove PIXI's event system for smooth drawing
-    if (this.pixiApp?.renderer?.events) {
-      this.pixiApp.renderer.events.removeEvents()
-    }
-    if (this.globalDragHandlers && this.pixiApp?.stage) {
-      this.pixiApp.stage.off('pointermove', this.globalDragHandlers.move)
+    // Remove PIXI's event system for smooth drawing (PixiJS mode only)
+    if (this.rendererType === 'pixi') {
+      if (this.pixiApp?.renderer?.events) {
+        this.pixiApp.renderer.events.removeEvents()
+      }
+      if (this.globalDragHandlers && this.pixiApp?.stage) {
+        this.pixiApp.stage.off('pointermove', this.globalDragHandlers.move)
+      }
     }
     
     this.isDrawingLasso = true
@@ -5490,12 +5963,19 @@ export default class extends Controller {
       this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
     }
     
-    // Re-enable PIXI event system
-    if (this.pixiApp?.renderer?.events) {
-      this.pixiApp.renderer.events.setTargetElement(this.pixiApp.view)
-    }
-    if (this.globalDragHandlers && this.pixiApp?.stage) {
-      this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
+    // Re-enable PIXI event system (PixiJS mode only)
+    if (this.rendererType === 'pixi') {
+      if (this.pixiApp?.renderer?.events) {
+        this.pixiApp.renderer.events.setTargetElement(this.pixiApp.view)
+      }
+      if (this.globalDragHandlers && this.pixiApp?.stage) {
+        this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
+      }
+      
+      // Restart PIXI render loop now that drawing is complete
+      if (this.pixiApp && !this.pixiApp.ticker.started) {
+        this.pixiApp.ticker.start()
+      }
     }
     
     // Clean up Firefox polling
@@ -5509,13 +5989,8 @@ export default class extends Controller {
       this.firefoxMouseHandler = null
     }
     
-    // Restart PIXI render loop now that drawing is complete
-    if (this.pixiApp && !this.pixiApp.ticker.started) {
-      this.pixiApp.ticker.start()
-    }
-    
-    // Only proceed if we have a PIXI app and coordinates to work with
-    if (!this.pixiApp || !this.currentCoordinates) {
+    // Only proceed if we have coordinates to work with
+    if (!this.currentCoordinates) {
       this.clearLasso()
       return
     }
@@ -5599,7 +6074,7 @@ export default class extends Controller {
     if (!this.isPanning) return
     
     // Get current mouse position
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
     if (!canvas) return
     
     // Use cached rect if available (set when pan starts)
@@ -5616,8 +6091,8 @@ export default class extends Controller {
     this.panMouseDeltaY = deltaY
     
     // Convert screen delta to data delta using the same coordinate system as normalization
-    const screenWidth = this.pixiApp.screen.width
-    const screenHeight = this.pixiApp.screen.height
+    const screenWidth = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const screenHeight = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
     
     // Use current bounds for pan calculation to match current view
     const dataDeltaX = (deltaX / screenWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
@@ -5654,13 +6129,27 @@ export default class extends Controller {
     this.currentBounds = newBounds
     
     // Update axes and grid with new bounds
-    this.renderAxes()
+    // For Canvas 2D overlay (ReGL mode), order matters: grid first (clears), then axes, then labels
     this.renderGrid()
+    this.renderAxes()
+    
+    // In ReGL mode, we need to redraw labels/legend too since renderGrid() clears the canvas
+    if (this.rendererType === 'regl') {
+      if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+        const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+        if (categoriesCheckbox && categoriesCheckbox.checked) {
+          this.renderCategoryLabels()
+        }
+      } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+        // Re-render continuous color legend during panning
+        this.renderContinuousColorLegend()
+      }
+    }
     
     // Move the points to match the new bounds during panning
     this.updatePointPositions()
 
-    // Don't update category labels during panning - they will be updated when panning stops
+    // Don't update category labels during panning in PixiJS mode - they move automatically as PIXI objects
     
     // Move the panning shape as well
     if (this.panningShape) {
@@ -5717,9 +6206,8 @@ export default class extends Controller {
       this.scatterContainer.visible = true
     }
     
-    // Refresh labels after panning with a small delay for smooth transition
-    if (this.categoryLabelsContainer) {
-      // Check if categories should be visible
+    // Refresh labels/legend after panning with a small delay for smooth transition
+    if (this.currentMetadataVector?.data_type === 'DISCRETE') {
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox && categoriesCheckbox.checked) {
         setTimeout(() => {
@@ -5727,6 +6215,12 @@ export default class extends Controller {
           this.renderCategoryLabels()
         }, 50)
       }
+    } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      // Refresh continuous color legend after panning
+      setTimeout(() => {
+        console.log(`🎨 Refreshing legend after panning`)
+        this.renderContinuousColorLegend()
+      }, 50)
     }
     
     // Update point positions to match the new bounds after panning
@@ -5772,7 +6266,7 @@ export default class extends Controller {
   // Reset zoom and pan to original view
   resetZoomAndPan() {
     if (!this.currentCoordinates) {
-      //console.log('No data available for reset')
+      console.log('No data available for reset')
       return
     }
 
@@ -5783,8 +6277,43 @@ export default class extends Controller {
     
     // Reset to original bounds
     const originalBounds = this.calculateBounds(this.currentCoordinates)
-    this.currentBounds = this.getAdjustedBounds(originalBounds)
+    const newBounds = this.getAdjustedBounds(originalBounds)
+    this.currentBounds = newBounds
     
+    // ReGL PATH: Re-normalize all coordinates with original bounds
+    if (this.rendererType === 'regl') {
+      console.log('🔄 [ReGL] Resetting view - re-normalizing all coordinates')
+      
+      if (this.reglRenderer) {
+        const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+        
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const [x, y] = this.currentCoordinates[cellIndex]
+          screenCoordinates[drawPos * 2] = this.normalizeX(x, newBounds)
+          screenCoordinates[drawPos * 2 + 1] = this.normalizeY(y, newBounds)
+        }
+        
+        // Update positions in ReGL
+        this.reglRenderer.updatePositions(screenCoordinates)
+        this.reglRenderer.render()
+        
+        // Redraw overlay (grid, axes, labels)
+        this.renderGrid()
+        this.renderAxes()
+        
+        // Re-render category labels if visible
+        const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+        if (categoriesCheckbox && categoriesCheckbox.checked && this.currentMetadataVector?.data_type === 'DISCRETE') {
+          this.renderCategoryLabels()
+        }
+        
+        console.log('🔄 [ReGL] View reset complete')
+      }
+      return
+    }
+    
+    // PixiJS PATH (original)
     console.log('🔄 Updating sprite positions for reset view')
     
     // Update sprite positions without recreation (much faster!)
@@ -5818,7 +6347,7 @@ export default class extends Controller {
       this.renderCategoryLabels()
     }
     
-    //console.log('Zoom and pan reset to original view')
+    console.log('🔄 Zoom and pan reset to original view')
   }
 
   updateVisualizationBounds(newBounds) {
@@ -6077,7 +6606,6 @@ export default class extends Controller {
     
     this.zoomingAnimationId = requestAnimationFrame(animate)
   }
-
   // Stop the zooming animation
   stopZoomingAnimation() {
     if (this.zoomingAnimationId) {
@@ -6120,21 +6648,29 @@ export default class extends Controller {
       this.zoomingShape = null
     }
     
-    // Show points and category labels again
+    // Show points and labels/legend again
     if (this.scatterContainer) {
       this.scatterContainer.visible = true
     }
-    if (this.categoryLabelsContainer) {
-      // Check if categories should be visible
-      const categoriesCheckbox = document.getElementById('show-categories-checkbox')
-      if (categoriesCheckbox && categoriesCheckbox.checked) {
-        //this.categoryLabelsContainer.visible = true
-        setTimeout(() => {
-          console.log(`🏷️ Refreshing labels after panning (delayed)`)
-          this.renderCategoryLabels()
-        }, 200)
-        //this.renderCategoryLabels()
+    
+    // Re-render labels or legend based on metadata type
+    if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+      if (this.categoryLabelsContainer) {
+        // Check if categories should be visible
+        const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+        if (categoriesCheckbox && categoriesCheckbox.checked) {
+          setTimeout(() => {
+            console.log(`🏷️ Refreshing labels after zooming (delayed)`)
+            this.renderCategoryLabels()
+          }, 200)
+        }
       }
+    } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      // Refresh continuous color legend after zooming
+      setTimeout(() => {
+        console.log(`🎨 Refreshing legend after zooming (delayed)`)
+        this.renderContinuousColorLegend()
+      }, 200)
     }
     
     // Update point positions (bounds should already be correct)
@@ -6221,6 +6757,30 @@ export default class extends Controller {
   }
 
   updatePointPositions() {
+    // ===== ReGL PATH: Re-normalize all positions with current bounds =====
+    if (this.rendererType === 'regl') {
+      if (!this.currentCoordinates || !this.currentBounds || !this.reglRenderer) {
+        console.log('Cannot update positions - missing data (ReGL)')
+        return
+      }
+      
+      // Re-normalize all coordinates to screen space with current bounds
+      // Use displayOrder to maintain proper draw order
+      const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+      for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+        const cellIndex = this.displayOrder[drawPos]
+        const [x, y] = this.currentCoordinates[cellIndex]
+        screenCoordinates[drawPos * 2] = this.normalizeX(x, this.currentBounds)
+        screenCoordinates[drawPos * 2 + 1] = this.normalizeY(y, this.currentBounds)
+      }
+      
+      // Fast update using buffer.subdata()
+      this.reglRenderer.updatePositions(screenCoordinates)
+      this.reglRenderer.render()
+      return
+    }
+    
+    // ===== PixiJS PATH (original) =====
     if (!this.currentCoordinates || !this.currentBounds || !this.scatterContainer) {
       console.log('Cannot update positions - missing data:', {
         coordinates: !!this.currentCoordinates,
@@ -6404,9 +6964,43 @@ export default class extends Controller {
   translatePointsForZoom(oldBounds, newBounds, mouseX = null, mouseY = null) {
     if (!oldBounds || !newBounds) return
 
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
     if (!canvas) return
 
+    // ===== ReGL PATH: Re-normalize all positions with new bounds =====
+    if (this.rendererType === 'regl') {
+      if (!this.currentCoordinates || !this.reglRenderer) {
+        console.log('⚠️ [ZOOM] Missing coordinates or bounds')
+        return
+      }
+      
+      console.log('🔍 [ZOOM] translatePointsForZoom called', {
+        hasCoordinates: !!this.currentCoordinates,
+        coordinatesLength: this.currentCoordinates.length,
+        hasRenderer: !!this.reglRenderer,
+        oldBounds,
+        newBounds
+      })
+      
+      // Re-normalize all coordinates to screen space with new bounds
+      // Use displayOrder to maintain proper draw order
+      const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+      for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+        const cellIndex = this.displayOrder[drawPos]
+        const [x, y] = this.currentCoordinates[cellIndex]
+        screenCoordinates[drawPos * 2] = this.normalizeX(x, newBounds)
+        screenCoordinates[drawPos * 2 + 1] = this.normalizeY(y, newBounds)
+      }
+      
+      // Fast update using buffer.subdata()
+      this.reglRenderer.updatePositions(screenCoordinates)
+      this.reglRenderer.render()
+      
+      console.log('✅ [ZOOM] ReGL zoom complete')
+      return
+    }
+
+    // ===== PixiJS PATH (original) =====
     // Calculate scale factors for zoom
     const oldWidth = oldBounds.maxX - oldBounds.minX
     const oldHeight = oldBounds.maxY - oldBounds.minY
@@ -6508,6 +7102,11 @@ export default class extends Controller {
 
   // Render plot axes with labels
   renderAxes() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderAxesCanvas2D()
+    }
+    
     if (!this.axesContainer || !this.currentBounds || !this.pixiApp) {
       return
     }
@@ -6712,6 +7311,11 @@ export default class extends Controller {
 
   // Render grid lines aligned with tick marks
   renderGrid() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderGridCanvas2D()
+    }
+    
     if (!this.gridContainer || !this.currentBounds || !this.pixiApp) {
       return
     }
@@ -6768,10 +7372,13 @@ export default class extends Controller {
 
     this.gridContainer.addChild(gridGraphics)
   }
-
-
   // Render category labels at centroids of colored groups
   renderCategoryLabels() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderCategoryLabelsCanvas2D()
+    }
+    
     const renderStartTime = performance.now()
     
     // Debug: Track where this function is called from
@@ -6779,6 +7386,17 @@ export default class extends Controller {
     const caller = stack.split('\n')[2] || 'unknown'
     console.log(`🏷️ renderCategoryLabels called from:`, caller.trim())
     console.log(`🏷️ isPanning: ${this.isPanning}`)
+    console.log(`🏷️ rendererType: ${this.rendererType}`)
+    
+    // Detailed component check
+    console.log(`🏷️ Component check:`, {
+      hasCategoryLabelsContainer: !!this.categoryLabelsContainer,
+      hasCurrentBounds: !!this.currentBounds,
+      hasPixiApp: !!this.pixiApp,
+      hasCurrentMetadataVector: !!this.currentMetadataVector,
+      hasCurrentCoordinates: !!this.currentCoordinates,
+      metadataType: this.currentMetadataVector?.data_type
+    })
     
     if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
       console.log('🏷️ Missing required components, returning early')
@@ -6924,17 +7542,374 @@ export default class extends Controller {
       containerChildren: this.categoryLabelsContainer.children.length,
       containerAlpha: this.categoryLabelsContainer.alpha,
       containerX: this.categoryLabelsContainer.x,
-      containerY: this.categoryLabelsContainer.y
+      containerY: this.categoryLabelsContainer.y,
+      containerOnStage: this.categoryLabelsContainer.parent === this.pixiApp.stage,
+      stageChildren: this.pixiApp.stage.children.length
     })
+    
+    // Debug: Log first few label positions
+    if (labelsAdded > 0) {
+      console.log(`🏷️ First 3 label positions:`)
+      for (let i = 0; i < Math.min(3, this.categoryLabelsContainer.children.length); i++) {
+        const label = this.categoryLabelsContainer.children[i]
+        console.log(`  Label ${i}: x=${label.x}, y=${label.y}, visible=${label.visible}, alpha=${label.alpha}`)
+      }
+    }
 
     // Update label interaction behavior for newly created labels
     this.updateLabelInteractionMode()
 
     const labelCreationEndTime = performance.now()
     
+    // In ReGL mode, manually trigger PixiJS render to update overlay
+    if (this.rendererType === 'regl' && this.pixiApp) {
+      console.log('🏷️ Triggering PixiJS overlay render...')
+      this.pixiApp.renderer.render(this.pixiApp.stage)
+      console.log('🏷️ PixiJS overlay rendered')
+    }
+    
     const renderEndTime = performance.now()
     
     
+  }
+
+  // Canvas 2D version of renderAxes for ReGL mode
+  renderAxesCanvas2D() {
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
+    
+    const ctx = this.overlayCtx
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    const margins = this.getPlotMargins()
+    
+    const xAxisY = height - margins.bottom
+    const yAxisX = margins.left
+    
+    // Draw white rectangles to cover margin areas (below x-axis and left of y-axis)
+    ctx.fillStyle = '#ffffff'
+    
+    // Rectangle below x-axis (covers bottom margin)
+    ctx.fillRect(0, xAxisY, width, height - xAxisY)
+    
+    // Rectangle left of y-axis (covers left margin)
+    ctx.fillRect(0, 0, yAxisX, height)
+    
+    // Draw axes lines
+    ctx.strokeStyle = '#333333'
+    ctx.lineWidth = 2
+    ctx.globalAlpha = 0.8
+    
+    // X-axis
+    ctx.beginPath()
+    ctx.moveTo(margins.left, xAxisY)
+    ctx.lineTo(width - margins.right, xAxisY)
+    ctx.stroke()
+    
+    // Y-axis
+    ctx.beginPath()
+    ctx.moveTo(yAxisX, margins.top)
+    ctx.lineTo(yAxisX, height - margins.bottom)
+    ctx.stroke()
+    
+    ctx.globalAlpha = 1.0
+    
+    // Add tick marks and labels
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    ctx.fillStyle = '#333333'
+    ctx.strokeStyle = '#333333'
+    ctx.font = '12px Arial'
+    
+    // X-axis ticks
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const screenX = margins.left + ((value - minX) / xRange) * (width - margins.left - margins.right)
+      
+      // Tick mark
+      ctx.beginPath()
+      ctx.moveTo(screenX, xAxisY)
+      ctx.lineTo(screenX, xAxisY + 5)
+      ctx.stroke()
+      
+      // Label
+      ctx.fillText(value.toFixed(1), screenX, xAxisY + 7)
+    }
+    
+    // Y-axis ticks
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const screenY = height - margins.bottom - ((value - minY) / yRange) * (height - margins.top - margins.bottom)
+      
+      // Tick mark
+      ctx.beginPath()
+      ctx.moveTo(yAxisX - 5, screenY)
+      ctx.lineTo(yAxisX, screenY)
+      ctx.stroke()
+      
+      // Label
+      ctx.fillText(value.toFixed(1), yAxisX - 7, screenY)
+    }
+    
+    // Add axis titles
+    ctx.fillStyle = '#333333'
+    ctx.font = '14px Arial'
+    
+    // X-axis title
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText('Dimension 1', width / 2, height - 5)
+    
+    // Y-axis title (rotated)
+    ctx.save()
+    ctx.translate(15, height / 2)
+    ctx.rotate(-Math.PI / 2)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText('Dimension 2', 0, 0)
+    ctx.restore()
+  }
+
+  // Canvas 2D version of renderGrid for ReGL mode
+  renderGridCanvas2D() {
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
+    
+    // Clear canvas first
+    this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height)
+    
+    const ctx = this.overlayCtx
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    const margins = this.getPlotMargins()
+    
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.lineWidth = 1
+    
+    // Vertical grid lines
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const t = (value - minX) / xRange
+      const x = margins.left + t * (width - margins.left - margins.right)
+      if (x >= margins.left && x <= width - margins.right) {
+        ctx.beginPath()
+        ctx.moveTo(x, margins.top)
+        ctx.lineTo(x, height - margins.bottom)
+        ctx.stroke()
+      }
+    }
+    
+    // Horizontal grid lines
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const t = (value - minY) / yRange
+      const y = margins.top + (height - margins.top - margins.bottom) - t * (height - margins.top - margins.bottom)
+      if (y >= margins.top && y <= height - margins.bottom) {
+        ctx.beginPath()
+        ctx.moveTo(margins.left, y)
+        ctx.lineTo(width - margins.right, y)
+        ctx.stroke()
+      }
+    }
+  }
+
+  // Canvas 2D version of renderCategoryLabels for ReGL mode
+  renderCategoryLabelsCanvas2D() {
+    console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
+    
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds || !this.currentMetadataVector || !this.currentCoordinates) {
+      console.log('🏷️ [Canvas2D] Missing required components')
+      return
+    }
+    
+    // Only render labels for discrete metadata
+    if (this.currentMetadataVector.data_type !== 'DISCRETE') {
+      console.log('🏷️ [Canvas2D] Not discrete metadata, skipping')
+      return
+    }
+    
+    // Check if the user wants to see category labels
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
+    
+    console.log(`🏷️ [Canvas2D] Category labels checkbox state: ${shouldShowLabels}`)
+    
+    if (!shouldShowLabels) {
+      console.log('🏷️ [Canvas2D] Category labels hidden by user preference')
+      // Clear stored labels when hidden
+      this.canvas2DLabels = []
+      return
+    }
+    
+    // Initialize labels array if not exists
+    if (!this.canvas2DLabels) {
+      this.canvas2DLabels = []
+    }
+    
+    const ctx = this.overlayCtx
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    
+    // Get the metadata values and categories
+    const values = this.currentMetadataVector.values
+    const categories = this.currentMetadataVector.categories
+    
+    // If categories is undefined, try to get unique values from the values array
+    let categoryList = categories
+    if (!categoryList || categoryList.length === 0) {
+      categoryList = [...new Set(values)]
+    }
+    
+    console.log(`🏷️ [Canvas2D] Found ${categoryList.length} categories`)
+    console.log(`🏷️ [Canvas2D] Current bounds:`, this.currentBounds)
+    console.log(`🏷️ [Canvas2D] Canvas dimensions: ${width}x${height}`)
+    
+    // Calculate centroids
+    const centroids = this.calculateCategoryCentroids(values, categoryList)
+    
+    console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
+    
+    // Get category colors
+    const categoryColors = this.getCategoryColors()
+    const uniqueCategories = [...new Set(values)]
+    const categoryToIndex = {}
+    uniqueCategories.forEach((cat, idx) => {
+      categoryToIndex[cat] = idx
+    })
+    
+    // Clear old labels array for this rendering
+    const newLabels = []
+    
+    // Render labels for each category
+    let labelsDrawn = 0
+    let labelsSkipped = 0
+    Object.entries(centroids).forEach(([category, centroid]) => {
+      if (centroid.count > 0) {
+        // Calculate default screen position from centroid
+        let screenX = this.normalizeX(centroid.x, this.currentBounds)
+        let screenY = this.normalizeY(centroid.y, this.currentBounds)
+        
+        // Check if this label was previously dragged (has offset)
+        const existingLabel = this.canvas2DLabels.find(l => l.category === category)
+        if (existingLabel && existingLabel.offsetX !== undefined && existingLabel.offsetY !== undefined) {
+          // Apply the drag offset to the centroid position
+          console.log(`🏷️ [Canvas2D] Found existing label for "${category}" with offset (${existingLabel.offsetX}, ${existingLabel.offsetY})`)
+          screenX += existingLabel.offsetX
+          screenY += existingLabel.offsetY
+        }
+        
+        console.log(`🏷️ [Canvas2D] Category "${category}": data coords (${centroid.x.toFixed(2)}, ${centroid.y.toFixed(2)}) -> screen coords (${screenX.toFixed(0)}, ${screenY.toFixed(0)})`)
+        
+        // Skip if outside visible area
+        const margins = this.getPlotMargins()
+        const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
+        const isOffScreen = screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin
+        if (isOffScreen) {
+          console.log(`🏷️ [Canvas2D] Category "${category}" is off-screen (width: ${width}, height: ${height}, margin: ${margin})`)
+          labelsSkipped++
+          return
+        }
+        
+        // Get category color
+        const categoryIndex = categoryToIndex[category] || 0
+        const colorValue = categoryColors[categoryIndex % categoryColors.length]
+        
+        // Convert color to RGB for canvas
+        let r, g, b
+        if (typeof colorValue === 'string') {
+          const hex = colorValue.replace('#', '')
+          r = parseInt(hex.substr(0, 2), 16)
+          g = parseInt(hex.substr(2, 2), 16)
+          b = parseInt(hex.substr(4, 2), 16)
+        } else {
+          r = (colorValue >> 16) & 0xFF
+          g = (colorValue >> 8) & 0xFF
+          b = colorValue & 0xFF
+        }
+        
+        // Draw label with background
+        ctx.save()
+        
+        // Measure text for background sizing
+        ctx.font = '12px Arial'
+        const text = category
+        const textMetrics = ctx.measureText(text)
+        const textWidth = textMetrics.width
+        const textHeight = 14
+        const padding = 4
+        
+        // Draw white background with border
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`
+        ctx.lineWidth = 2
+        
+        const bgX = screenX - textWidth / 2 - padding
+        const bgY = screenY - textHeight / 2 - padding
+        const bgWidth = textWidth + padding * 2
+        const bgHeight = textHeight + padding * 2
+        
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight)
+        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight)
+        
+        // Draw text
+        ctx.fillStyle = '#333333'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, screenX, screenY)
+        
+        ctx.restore()
+        
+        // Store label bounds for hit testing and dragging
+        newLabels.push({
+          category: category,
+          x: screenX,
+          y: screenY,
+          bounds: {
+            x: bgX,
+            y: bgY,
+            width: bgWidth,
+            height: bgHeight
+          },
+          centroidX: centroid.x,
+          centroidY: centroid.y,
+          offsetX: existingLabel ? existingLabel.offsetX || 0 : 0,
+          offsetY: existingLabel ? existingLabel.offsetY || 0 : 0,
+          color: { r, g, b }
+        })
+        
+        labelsDrawn++
+      }
+    })
+    
+    // Update stored labels
+    this.canvas2DLabels = newLabels
+    
+    // If we're currently dragging a label, update the reference to point to the new label object
+    if (this.draggingLabel) {
+      const newDraggingLabel = newLabels.find(l => l.category === this.draggingLabel.category)
+      if (newDraggingLabel) {
+        console.log(`🏷️ [Canvas2D] Updated dragging label reference for "${this.draggingLabel.category}"`)
+        this.draggingLabel = newDraggingLabel
+      }
+    }
+    
+    console.log(`🏷️ [Canvas2D] Drew ${labelsDrawn} category labels (${labelsSkipped} skipped as off-screen)`)
   }
 
   // Calculate centroids for each category
@@ -6954,6 +7929,50 @@ export default class extends Controller {
     categories.forEach(category => {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
+    
+    // ReGL PATH: Use currentCoordinates directly (no sprites in ReGL mode)
+    if (this.rendererType === 'regl' && this.currentCoordinates && values) {
+      console.log(`🏷️ Using ReGL path with currentCoordinates (${this.currentCoordinates.length} points)`)
+      
+      // Get visible cells for filtering
+      const visibleSet = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
+      let visiblePoints = 0
+      let filteredPoints = 0
+      
+      // Iterate through all cells using their original indices
+      for (let cellIndex = 0; cellIndex < this.currentCoordinates.length; cellIndex++) {
+        // Check if this cell is visible (not filtered out)
+        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        
+        if (isVisible) {
+          const category = values[cellIndex]
+          if (centroids[category]) {
+            const coord = this.currentCoordinates[cellIndex]
+            if (coord && coord.length >= 2) {
+              centroids[category].x += coord[0]
+              centroids[category].y += coord[1]
+              centroids[category].count += 1
+              visiblePoints++
+            }
+          }
+        } else {
+          filteredPoints++
+        }
+      }
+      
+      console.log(`🏷️ ReGL: ${visiblePoints} visible points, ${filteredPoints} filtered out`)
+      
+      // Calculate averages
+      Object.keys(centroids).forEach(category => {
+        if (centroids[category].count > 0) {
+          centroids[category].x /= centroids[category].count
+          centroids[category].y /= centroids[category].count
+          console.log(`🏷️ ReGL centroid for "${category}": count=${centroids[category].count}, pos=(${centroids[category].x.toFixed(2)}, ${centroids[category].y.toFixed(2)})`)
+        }
+      })
+      
+      return centroids
+    }
     
     // FAST PATH: Use pointSprites array if available (much faster for large datasets)
     if (this.pointSprites && this.pointSprites.length > 0) {
@@ -7065,8 +8084,6 @@ export default class extends Controller {
     const calcEndTime = performance.now()
     return centroids
   }
-
-
   // Create a category label with background
   createCategoryLabel(categoryName, count) {
     const container = new PIXI.Container()
@@ -7164,6 +8181,11 @@ export default class extends Controller {
 
   // Render continuous color legend for continuous metadata
   renderContinuousColorLegend() {
+    // Dispatch to Canvas 2D for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderContinuousColorLegendCanvas2D()
+    }
+    
     const startTime = performance.now()
     console.log('🎨 Rendering continuous color legend START')
     
@@ -7224,7 +8246,7 @@ export default class extends Controller {
     
     for (let i = 0; i < numSteps; i++) {
       const normalizedValue = i / (numSteps - 1)
-      const color = this.valueToColor(normalizedValue)
+      const color = this.getColorFromGradient(normalizedValue)
       
       const stepX = legendX + (i * legendWidth / numSteps)
       const stepWidth = legendWidth / numSteps
@@ -7269,6 +8291,756 @@ export default class extends Controller {
     const totalTime = performance.now() - startTime
     console.log(`🎨 Continuous color legend rendered successfully in ${totalTime.toFixed(2)}ms`)
     console.log('🎨 renderContinuousColorLegend COMPLETE')
+  }
+
+  // Initialize overlay canvas event listeners for gradient legend interaction
+  initializeGradientLegendListeners() {
+    if (!this.overlayCanvas) {
+      console.log('⚠️ Cannot initialize gradient legend listeners: overlayCanvas is null')
+      return
+    }
+    
+    console.log('🎨 Initializing gradient legend listeners')
+    
+    // Get the parent container to listen for events
+    const canvasContainer = this.overlayCanvas.parentElement
+    if (!canvasContainer) {
+      console.log('⚠️ Cannot find canvas container')
+      return
+    }
+    
+    // Remove existing listeners if any
+    if (this.gradientLegendClickListener) {
+      canvasContainer.removeEventListener('click', this.gradientLegendClickListener)
+    }
+    if (this.gradientLegendMouseMoveListener) {
+      canvasContainer.removeEventListener('mousemove', this.gradientLegendMouseMoveListener)
+    }
+    if (this.gradientLegendMouseLeaveListener) {
+      canvasContainer.removeEventListener('mouseleave', this.gradientLegendMouseLeaveListener)
+    }
+    
+    // Click listener - open modal when clicking on legend
+    this.gradientLegendClickListener = (event) => {
+      if (!this.gradientLegendBounds || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'NUMERIC') {
+        return
+      }
+      
+      const rect = this.overlayCanvas.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+      
+      const legend = this.gradientLegendBounds
+      if (x >= legend.x && x <= legend.x + legend.width && 
+          y >= legend.y && y <= legend.y + legend.height) {
+        console.log('🎨 Gradient legend clicked!')
+        this.openGradientEditorModal()
+        event.stopPropagation()
+      }
+    }
+    
+    // Mousemove listener - detect hover and change cursor/color
+    this.gradientLegendMouseMoveListener = (event) => {
+      if (!this.gradientLegendBounds || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'NUMERIC') {
+        return
+      }
+      
+      const rect = this.overlayCanvas.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+      
+      const legend = this.gradientLegendBounds
+      const isHovering = x >= legend.x && x <= legend.x + legend.width && 
+                        y >= legend.y && y <= legend.y + legend.height
+      
+      // Update hover state if changed
+      if (isHovering !== this.isHoveringGradientLegend) {
+        this.isHoveringGradientLegend = isHovering
+        this.overlayCanvas.style.cursor = isHovering ? 'pointer' : 'default'
+        this.renderContinuousColorLegend()
+      }
+    }
+    
+    // Mouseleave listener - reset hover state
+    this.gradientLegendMouseLeaveListener = () => {
+      if (this.isHoveringGradientLegend) {
+        this.isHoveringGradientLegend = false
+        this.overlayCanvas.style.cursor = 'default'
+        this.renderContinuousColorLegend()
+      }
+    }
+    
+    // Add listeners to the container, not the overlay canvas
+    canvasContainer.addEventListener('click', this.gradientLegendClickListener)
+    canvasContainer.addEventListener('mousemove', this.gradientLegendMouseMoveListener)
+    canvasContainer.addEventListener('mouseleave', this.gradientLegendMouseLeaveListener)
+    
+    // Keep pointer events disabled on overlay to allow pan/zoom on main canvas
+    this.overlayCanvas.style.pointerEvents = 'none'
+    
+    console.log('✅ Gradient legend listeners initialized successfully')
+  }
+
+  // Open gradient editor modal
+  openGradientEditorModal() {
+    const modal = document.getElementById('gradient-editor-modal')
+    if (!modal) {
+      console.error('❌ Gradient editor modal not found')
+      return
+    }
+
+    console.log('🎨 Opening gradient editor modal')
+    modal.style.display = 'flex'
+    
+    // Initialize gradient control points if not already set
+    if (!this.gradientControlPoints && !this.customGradientControlPoints) {
+      this.initializeDefaultGradient()
+    }
+    
+    // Calculate and store min/max values for the current metadata
+    if (this.currentMetadataVector && this.currentMetadataVector.values) {
+      const values = this.currentMetadataVector.values
+      this.gradientMinValue = this.safeMin(values)
+      this.gradientMaxValue = this.safeMax(values)
+      console.log('🎨 Gradient value range:', { min: this.gradientMinValue, max: this.gradientMaxValue })
+    }
+    
+    // Render the modal gradient preview and control points
+    this.renderModalGradientPreview()
+    this.renderModalControlPointMarkers()
+    this.renderControlPointsList()
+  }
+
+  // Close gradient editor modal
+  closeGradientEditorModal() {
+    const modal = document.getElementById('gradient-editor-modal')
+    if (modal) {
+      modal.style.display = 'none'
+    }
+    
+    // Close control point editor if open
+    this.closeControlPointEditor()
+  }
+
+  // Initialize default gradient based on value distribution
+  initializeDefaultGradient() {
+    if (!this.currentMetadataVector || this.currentMetadataVector.data_type !== 'NUMERIC') {
+      return
+    }
+
+    const values = this.currentMetadataVector.values
+    this.gradientControlPoints = this.determineGradientForValues(values)
+  }
+  
+  // Determine appropriate gradient based on value distribution
+  determineGradientForValues(values) {
+    // Calculate min and max values
+    let minVal = Infinity
+    let maxVal = -Infinity
+    
+    for (let i = 0; i < values.length; i++) {
+      const val = values[i]
+      if (val < minVal) minVal = val
+      if (val > maxVal) maxVal = val
+    }
+    
+    // Store min/max for value conversion
+    this.gradientMinValue = minVal
+    this.gradientMaxValue = maxVal
+    
+    // Helper to convert actual value to position
+    const valueToPosition = (value) => {
+      const range = maxVal - minVal
+      if (range === 0) return 0
+      return (value - minVal) / range
+    }
+    
+    // Determine gradient type based on value range
+    const spansZero = minVal < 0 && maxVal > 0
+    const allNegative = maxVal <= 0
+    const allPositive = minVal >= 0
+    
+    console.log('🎨 Determining gradient for values:', { minVal, maxVal, spansZero, allNegative, allPositive })
+    
+    if (spansZero) {
+      // Values span from negative to positive: use diverging gradient (dark blue -> light grey at 0 -> dark red)
+      const zeroPosition = valueToPosition(0)
+      console.log('🎨 Diverging gradient: zero positioned at', zeroPosition)
+      return [
+        { position: 0, color: 0x1e3a8a },           // Dark blue (most negative)
+        { position: zeroPosition, color: 0xe5e7eb }, // Light grey (at zero)
+        { position: 1, color: 0x991b1b }            // Dark red (most positive)
+      ]
+    } else if (allNegative) {
+      // All negative values: dark blue to light grey
+      console.log('🎨 All negative gradient: dark blue -> light grey')
+      return [
+        { position: 0, color: 0x1e3a8a },   // Dark blue (most negative)
+        { position: 1, color: 0xe5e7eb }    // Light grey (at zero/least negative)
+      ]
+    } else if (allPositive) {
+      // All positive values: light grey to dark red
+      console.log('🎨 All positive gradient: light grey -> dark red')
+      // If minimum is exactly 0, position light grey at 0, otherwise at minimum
+      const startPosition = minVal === 0 ? 0 : valueToPosition(Math.max(0, minVal))
+      return [
+        { position: 0, color: 0xe5e7eb },   // Light grey (at zero or minimum)
+        { position: 1, color: 0x991b1b }    // Dark red (most positive)
+      ]
+    } else {
+      // Fallback: simple gradient
+      return [
+        { position: 0, color: 0xdbeafe },   // Light blue
+        { position: 1, color: 0x1e40af }    // Dark blue
+      ]
+    }
+  }
+  
+  // Render gradient preview in modal
+  renderModalGradientPreview() {
+    const canvas = document.getElementById('gradient-editor-preview-canvas')
+    if (!canvas) return
+    
+    const ctx = canvas.getContext('2d')
+    const width = canvas.width
+    const height = canvas.height
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height)
+    
+    // Get active gradient (custom or auto)
+    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints
+    if (!controlPoints || controlPoints.length === 0) {
+      // Draw a default gradient if no control points
+      const gradient = ctx.createLinearGradient(0, 0, width, 0)
+      gradient.addColorStop(0, '#3b82f6')
+      gradient.addColorStop(1, '#ef4444')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, width, height)
+      return
+    }
+    
+    // Sort control points by position
+    const sorted = [...controlPoints].sort((a, b) => a.position - b.position)
+    
+    // Create linear gradient
+    const gradient = ctx.createLinearGradient(0, 0, width, 0)
+    
+    for (const point of sorted) {
+      const color = `#${point.color.toString(16).padStart(6, '0')}`
+      gradient.addColorStop(point.position, color)
+    }
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, width, height)
+  }
+  
+  // Render control point markers on the gradient bar in modal
+  renderModalControlPointMarkers() {
+    const container = document.getElementById('gradient-editor-control-points')
+    if (!container) return
+    
+    // Clear existing markers
+    container.innerHTML = ''
+    
+    // Get active gradient (custom or auto)
+    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints
+    if (!controlPoints || controlPoints.length === 0) return
+    
+    const canvas = document.getElementById('gradient-editor-preview-canvas')
+    if (!canvas) return
+    
+    const canvasWidth = canvas.offsetWidth
+    
+    // Create a marker for each control point
+    controlPoints.forEach((point, index) => {
+      const marker = document.createElement('div')
+      const markerSize = 16
+      const x = point.position * canvasWidth - (markerSize / 2)
+      
+      marker.style.cssText = `
+        position: absolute;
+        left: ${x}px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: ${markerSize}px;
+        height: ${markerSize}px;
+        border: 2px solid white;
+        border-radius: 50%;
+        background-color: #${point.color.toString(16).padStart(6, '0')};
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        cursor: pointer;
+        pointer-events: all;
+        transition: transform 0.2s;
+      `
+      
+      marker.addEventListener('mouseenter', () => {
+        marker.style.transform = 'translateY(-50%) scale(1.3)'
+      })
+      
+      marker.addEventListener('mouseleave', () => {
+        marker.style.transform = 'translateY(-50%) scale(1)'
+      })
+      
+      marker.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.selectControlPoint(index)
+      })
+      
+      container.appendChild(marker)
+    })
+  }
+  
+  // Render list of control points (now just updates markers, list UI removed for simplicity)
+  renderControlPointsList() {
+    // UI simplified - control points list removed
+    // Control points are now only visible on the gradient bar and in the editor
+    // This method is kept for backward compatibility but does nothing
+  }
+  
+  // Handle clicking on gradient bar to add new control point
+  gradientBarClicked(event) {
+    const canvas = event.target
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const position = Math.max(0, Math.min(1, x / rect.width))
+    
+    console.log('🎨 Adding control point at position:', position)
+    
+    // Get the color at this position by interpolating existing points
+    const color = this.getColorFromGradient(position)
+    
+    // Create custom gradient if it doesn't exist
+    if (!this.customGradientControlPoints) {
+      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
+    }
+    
+    // Add new control point
+    this.customGradientControlPoints.push({ position, color })
+    
+    // Sort and update display
+    this.sortControlPoints()
+    this.renderModalGradientPreview()
+    this.renderModalControlPointMarkers()
+    this.renderControlPointsList()
+    
+    // Apply to visualization
+    this.reapplyColorsWithNewGradient()
+  }
+  
+  // Sort control points by position
+  sortControlPoints() {
+    if (this.customGradientControlPoints) {
+      this.customGradientControlPoints.sort((a, b) => a.position - b.position)
+    } else if (this.gradientControlPoints) {
+      this.gradientControlPoints.sort((a, b) => a.position - b.position)
+    }
+    
+    this.renderModalGradientPreview()
+    this.renderModalControlPointMarkers()
+  }
+  
+  // Select a control point for editing
+  selectControlPoint(index) {
+    this.selectedControlPointIndex = index
+    
+    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints
+    if (!controlPoints || index < 0 || index >= controlPoints.length) return
+    
+    const point = controlPoints[index]
+    
+    // Show editor panel
+    const editor = document.getElementById('gradient-control-point-editor')
+    if (editor) {
+      editor.style.display = 'block'
+    }
+    
+    // Populate editor fields
+    const positionInput = document.getElementById('gradient-control-point-position')
+    const colorInput = document.getElementById('gradient-control-point-color')
+    
+    if (positionInput) {
+      // Convert position (0-1) to actual value
+      const actualValue = this.positionToActualValue(point.position)
+      positionInput.value = actualValue.toFixed(3)
+      
+      // Update input min/max attributes to match data range
+      if (this.gradientMinValue !== undefined && this.gradientMaxValue !== undefined) {
+        positionInput.min = this.gradientMinValue
+        positionInput.max = this.gradientMaxValue
+        positionInput.step = (this.gradientMaxValue - this.gradientMinValue) / 1000
+      }
+    }
+    
+    if (colorInput) {
+      colorInput.value = `#${point.color.toString(16).padStart(6, '0')}`
+    }
+    
+    // Update list highlighting
+    this.renderControlPointsList()
+    
+    console.log(`🎨 Selected control point ${index}:`, point)
+  }
+  
+  // Update position of selected control point
+  updateControlPointPosition(event) {
+    if (this.selectedControlPointIndex === undefined) return
+    
+    const actualValue = parseFloat(event.target.value)
+    if (isNaN(actualValue)) return
+    
+    // Validate against data range
+    if (this.gradientMinValue !== undefined && this.gradientMaxValue !== undefined) {
+      if (actualValue < this.gradientMinValue || actualValue > this.gradientMaxValue) return
+    }
+    
+    // Convert actual value to position (0-1)
+    const position = this.actualValueToPosition(actualValue)
+    
+    // Create custom gradient if modifying auto gradient
+    if (!this.customGradientControlPoints) {
+      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
+    }
+    
+    const controlPoints = this.customGradientControlPoints
+    if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
+      controlPoints[this.selectedControlPointIndex].position = position
+      
+      this.sortControlPoints()
+      this.reapplyColorsWithNewGradient()
+    }
+  }
+  
+  // Convert position (0-1) to actual data value
+  positionToActualValue(position) {
+    if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) {
+      return position
+    }
+    return this.gradientMinValue + (position * (this.gradientMaxValue - this.gradientMinValue))
+  }
+  
+  // Convert actual data value to position (0-1)
+  actualValueToPosition(actualValue) {
+    if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) {
+      return actualValue
+    }
+    const range = this.gradientMaxValue - this.gradientMinValue
+    if (range === 0) return 0
+    return (actualValue - this.gradientMinValue) / range
+  }
+  
+  // Get color from gradient control points by interpolating
+  getColorFromGradient(normalizedValue) {
+    // Handle invalid values
+    if (normalizedValue === undefined || normalizedValue === null || isNaN(normalizedValue)) {
+      return 0x3b82f6 // Default blue
+    }
+    
+    // Use gradient control points if available
+    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints
+    
+    // Fallback to old color scheme if no gradient defined
+    if (!controlPoints || controlPoints.length === 0) {
+      return this.valueToColor(normalizedValue)
+    }
+    
+    // Clamp value to 0-1 range
+    const clamped = Math.max(0, Math.min(1, normalizedValue))
+    
+    // Sort control points by position
+    const sorted = [...controlPoints].sort((a, b) => a.position - b.position)
+    
+    // Ensure we have valid control points
+    if (sorted.length === 0) {
+      return this.valueToColor(normalizedValue)
+    }
+    
+    // Single control point - return its color
+    if (sorted.length === 1) {
+      return sorted[0].color
+    }
+    
+    // Find the two control points to interpolate between
+    let beforePoint = sorted[0]
+    let afterPoint = sorted[sorted.length - 1]
+    
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (clamped >= sorted[i].position && clamped <= sorted[i + 1].position) {
+        beforePoint = sorted[i]
+        afterPoint = sorted[i + 1]
+        break
+      }
+    }
+    
+    // Handle edge cases
+    if (clamped <= sorted[0].position) {
+      return sorted[0].color
+    }
+    if (clamped >= sorted[sorted.length - 1].position) {
+      return sorted[sorted.length - 1].color
+    }
+    
+    // Interpolate between the two colors
+    const range = afterPoint.position - beforePoint.position
+    if (range === 0) return beforePoint.color
+    
+    const t = (clamped - beforePoint.position) / range
+    
+    // Extract RGB components
+    const r1 = (beforePoint.color >> 16) & 0xff
+    const g1 = (beforePoint.color >> 8) & 0xff
+    const b1 = beforePoint.color & 0xff
+    
+    const r2 = (afterPoint.color >> 16) & 0xff
+    const g2 = (afterPoint.color >> 8) & 0xff
+    const b2 = afterPoint.color & 0xff
+    
+    // Linear interpolation
+    const r = Math.round(r1 + (r2 - r1) * t)
+    const g = Math.round(g1 + (g2 - g1) * t)
+    const b = Math.round(b1 + (b2 - b1) * t)
+    
+    // Combine back into single color
+    return (r << 16) | (g << 8) | b
+  }
+  
+  // Update color of selected control point
+  updateControlPointColor(event) {
+    if (this.selectedControlPointIndex === undefined) return
+    
+    const hexColor = event.target.value
+    const color = parseInt(hexColor.substring(1), 16)
+    
+    // Create custom gradient if modifying auto gradient
+    if (!this.customGradientControlPoints) {
+      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
+    }
+    
+    const controlPoints = this.customGradientControlPoints
+    if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
+      controlPoints[this.selectedControlPointIndex].color = color
+      
+      this.renderModalGradientPreview()
+      this.renderModalControlPointMarkers()
+      this.renderControlPointsList()
+      this.reapplyColorsWithNewGradient()
+    }
+  }
+  
+  // Remove selected control point
+  removeControlPoint() {
+    if (this.selectedControlPointIndex === undefined) return
+    
+    // Create custom gradient if modifying auto gradient
+    if (!this.customGradientControlPoints) {
+      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
+    }
+    
+    const controlPoints = this.customGradientControlPoints
+    if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
+      // Don't allow removing if only 2 points left
+      if (controlPoints.length <= 2) {
+        alert('A gradient must have at least 2 control points.')
+        return
+      }
+      
+      controlPoints.splice(this.selectedControlPointIndex, 1)
+      this.selectedControlPointIndex = undefined
+      
+      this.closeControlPointEditor()
+      this.renderModalGradientPreview()
+      this.renderModalControlPointMarkers()
+      this.renderControlPointsList()
+      this.reapplyColorsWithNewGradient()
+    }
+  }
+  
+  // Close control point editor
+  closeControlPointEditor() {
+    const editor = document.getElementById('gradient-control-point-editor')
+    if (editor) {
+      editor.style.display = 'none'
+    }
+    this.selectedControlPointIndex = undefined
+    
+    // Update the modal display
+    this.renderModalGradientPreview()
+    this.renderModalControlPointMarkers()
+    this.renderControlPointsList()
+    
+    // Apply changes to the main visualization
+    this.reapplyColorsWithNewGradient()
+  }
+  
+  // Reset gradient to default
+  resetGradient() {
+    console.log('🎨 Resetting gradient to default')
+    this.customGradientControlPoints = null
+    this.selectedControlPointIndex = undefined
+    
+    // Reinitialize default gradient
+    this.initializeDefaultGradient()
+    
+    this.closeControlPointEditor()
+    this.renderModalGradientPreview()
+    this.renderModalControlPointMarkers()
+    this.renderControlPointsList()
+    this.reapplyColorsWithNewGradient()
+  }
+  
+  // Reapply colors with new gradient
+  reapplyColorsWithNewGradient() {
+    console.log('🎨 Reapplying colors with new gradient')
+    console.log('🎨 Custom gradient points:', this.customGradientControlPoints)
+    console.log('🎨 Auto gradient points:', this.gradientControlPoints)
+    
+    // Update the legend in the plot
+    if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      this.renderContinuousColorLegend()
+      
+      // Recolor all points
+      if (this.rendererType === 'regl') {
+        console.log('🎨 Recoloring points in ReGL mode')
+        this.renderPointsWithCurrentColoringReGL()
+      } else {
+        console.log('🎨 Recoloring points in PixiJS mode')
+        this.renderPointsWithCurrentColoring()
+      }
+    } else {
+      console.log('⚠️ Cannot reapply colors: no numeric metadata vector')
+    }
+  }
+
+  // Render continuous color legend using Canvas 2D (ReGL mode)
+  renderContinuousColorLegendCanvas2D() {
+    const startTime = performance.now()
+    console.log('🎨 [Canvas2D] Rendering continuous color legend START')
+    
+    if (!this.overlayCtx || !this.currentBounds || !this.currentMetadataVector || !this.currentCoordinates) {
+      console.log('🎨 [Canvas2D] Missing required components for continuous legend')
+      return
+    }
+
+    // Only render legend for continuous metadata
+    if (this.currentMetadataVector.data_type !== 'NUMERIC') {
+      console.log('🎨 [Canvas2D] Not numeric metadata, skipping legend')
+      return
+    }
+
+    // During panning, don't update legend
+    if (this.isPanning) {
+      console.log('🎨 [Canvas2D] Skipping legend updates during panning')
+      return
+    }
+
+    // Redraw the entire overlay (grid, axes, legend) to ensure the old legend is cleared
+    // This is necessary when the color range is adapted
+    console.log('🎨 [Canvas2D] Redrawing full overlay (grid + axes + legend)')
+    this.renderGrid() // Clears the canvas
+    this.renderAxes() // Draw axes
+
+    const ctx = this.overlayCtx
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+
+    // Get metadata values and effective color range
+    const values = this.currentMetadataVector.values
+    const effectiveRange = this.getEffectiveColorRange()
+    const minVal = effectiveRange.min
+    const maxVal = effectiveRange.max
+    console.log('🎨 [Canvas2D] Effective range:', { minVal, maxVal })
+
+    // Legend dimensions
+    const margins = this.getPlotMargins()
+    const legendWidth = 200
+    const legendHeight = 20
+    const padding = 10
+    const legendX = width - legendWidth - margins.right - 10 // Position on right side
+    const legendY = margins.top + 10 // Position at top
+    
+    // Calculate background dimensions (includes padding for title and labels)
+    const bgX = legendX - padding
+    const bgY = legendY - 25 // Account for title above
+    const bgWidth = legendWidth + (padding * 2)
+    const bgHeight = legendHeight + 40 // Account for title above and labels below
+    
+    // Store legend bounds for click and hover detection
+    this.gradientLegendBounds = {
+      x: bgX,
+      y: bgY,
+      width: bgWidth,
+      height: bgHeight
+    }
+    
+    // Draw semi-transparent background (changes color on hover)
+    ctx.save()
+    if (this.isHoveringGradientLegend) {
+      // Light blue when hovering
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.9)' // Light blue (#e0f2fe)
+      ctx.strokeStyle = 'rgba(125, 211, 252, 0.8)' // Light blue border
+    } else {
+      // Semi-transparent white normally
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)'
+    }
+    ctx.fillRect(bgX, bgY, bgWidth, bgHeight)
+    
+    // Add border to the background
+    ctx.lineWidth = 1
+    ctx.strokeRect(bgX, bgY, bgWidth, bgHeight)
+    ctx.restore()
+
+    // Draw metadata name label above the legend
+    ctx.save()
+    ctx.font = 'bold 12px Arial'
+    ctx.fillStyle = '#333333'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(this.currentMetadataVector.name, legendX, legendY - 5)
+    ctx.restore()
+
+    // Draw color gradient bar
+    const numSteps = 100
+    
+    for (let i = 0; i < numSteps; i++) {
+      const normalizedValue = i / (numSteps - 1)
+      const color = this.getColorFromGradient(normalizedValue)
+      
+      // Convert color integer to RGB
+      const r = (color >> 16) & 0xFF
+      const g = (color >> 8) & 0xFF
+      const b = color & 0xFF
+      
+      const stepX = legendX + (i * legendWidth / numSteps)
+      const stepWidth = Math.ceil(legendWidth / numSteps) + 1 // Add 1 to avoid gaps
+      
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`
+      ctx.fillRect(stepX, legendY, stepWidth, legendHeight)
+    }
+
+    // Draw border around gradient bar
+    ctx.strokeStyle = '#333333'
+    ctx.lineWidth = 1
+    ctx.strokeRect(legendX, legendY, legendWidth, legendHeight)
+
+    // Draw min/max value labels
+    ctx.save()
+    ctx.font = '10px Arial'
+    ctx.fillStyle = '#333333'
+    
+    // Min label (left-aligned)
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText(minVal.toFixed(2), legendX, legendY + legendHeight + 5)
+    
+    // Max label (right-aligned)
+    ctx.textAlign = 'right'
+    ctx.fillText(maxVal.toFixed(2), legendX + legendWidth, legendY + legendHeight + 5)
+    
+    ctx.restore()
+
+    const totalTime = performance.now() - startTime
+    console.log(`🎨 [Canvas2D] Continuous color legend rendered in ${totalTime.toFixed(2)}ms`)
   }
 
   // Create a label for the continuous legend
@@ -7569,8 +9341,37 @@ export default class extends Controller {
     
     console.log(`⏱️ [LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}]`)
     
-    // OPTIMIZED: Use pointSprites array directly (much faster!)
-    if (this.pointSprites && this.pointSprites.length > 0) {
+    // ReGL PATH: Check normalized coordinates against lasso polygon
+    if (this.rendererType === 'regl' && this.currentBounds) {
+      console.log('⏱️ [LASSO] Using ReGL path - checking normalized coordinates')
+      
+      let bboxRejected = 0
+      let polygonChecked = 0
+      
+      for (let i = 0; i < this.currentCoordinates.length; i++) {
+        const [dataX, dataY] = this.currentCoordinates[i]
+        
+        // Convert data coordinates to screen coordinates
+        const x = this.normalizeX(dataX, this.currentBounds)
+        const y = this.normalizeY(dataY, this.currentBounds)
+        
+        // Quick bounding box rejection
+        if (x < minX || x > maxX || y < minY || y > maxY) {
+          bboxRejected++
+          continue
+        }
+        
+        // Expensive polygon test only for points in bounding box
+        polygonChecked++
+        if (this.isPointInPolygon(x, y, this.lassoPoints)) {
+          selectedIndices.push(i)
+        }
+      }
+      
+      console.log(`⚡ [ReGL LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+      
+    } else if (this.pointSprites && this.pointSprites.length > 0) {
+      // OPTIMIZED: Use pointSprites array directly (much faster!)
       let bboxRejected = 0
       let polygonChecked = 0
       
@@ -7639,12 +9440,57 @@ export default class extends Controller {
     // Update colors of selected points without re-rendering (preserves pan/zoom state)
     this.updateSelectedPointColors()
   }
-
   // Update colors of selected points without re-rendering (preserves pan/zoom state)
   updateSelectedPointColors() {
-    console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${this.pointSprites?.length || 0} total`)
+    const numPoints = this.rendererType === 'regl' ? this.numPoints : (this.pointSprites?.length || 0)
+    console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${numPoints} total`)
     const updateStart = performance.now()
     
+    // ReGL PATH: Update color buffer
+    if (this.rendererType === 'regl') {
+      if (!this.reglRenderer || !this.numPoints) {
+        console.log('⚠️ No ReGL renderer or points available for color update')
+        return
+      }
+      
+      const hasSelections = this.selectedCells.size > 0
+      const colorMap = new Map()
+      
+      if (hasSelections) {
+        console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
+        // Set selected cells to red, unselected to faded original color
+        // Use displayOrder to correctly map draw positions to cell indices
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          if (this.selectedCells.has(cellIndex)) {
+            colorMap.set(drawPos, 0xff0000) // Red
+          } else {
+            // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
+            const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+            colorMap.set(drawPos, originalColor)
+          }
+        }
+      } else {
+        console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
+        // Restore original colors
+        // Use displayOrder to correctly map draw positions to cell indices
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+          colorMap.set(drawPos, originalColor)
+        }
+      }
+      
+      this.reglRenderer.updateColors(colorMap)
+      this.reglRenderer.render()
+      
+      this.previouslySelectedCells = new Set(this.selectedCells)
+      const updateTime = performance.now() - updateStart
+      console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
+      return
+    }
+    
+    // PixiJS PATH (original)
     if (!this.pointSprites || this.pointSprites.length === 0) {
       console.log('⚠️ No sprites available for color update')
       return
@@ -8061,6 +9907,17 @@ export default class extends Controller {
     console.log(`⏱️ [PERF] Updating point size to ${newSize}`)
     const updateStart = performance.now()
     
+    // ReGL PATH: Update point size uniform
+    if (this.rendererType === 'regl') {
+      if (this.reglRenderer) {
+        this.reglRenderer.setPointSize(newSize)
+        this.reglRenderer.render()
+        console.log(`⚡ [ReGL] Updated point size to ${newSize} in ${(performance.now() - updateStart).toFixed(2)}ms`)
+      }
+      return
+    }
+    
+    // PixiJS PATH (original)
     if (!this.pointSprites || this.pointSprites.length === 0) {
       console.log('No sprites found, will apply on next render')
       return
@@ -8159,29 +10016,55 @@ export default class extends Controller {
 
   toggleCategories() {
     const checkbox = document.getElementById('show-categories-checkbox')
-    if (!checkbox) return
+    if (!checkbox) {
+      console.log('🏷️ toggleCategories: checkbox not found!')
+      return
+    }
     
-    //console.log(`Toggling categories: ${checkbox.checked}`)
+    console.log(`🏷️ Toggling categories: ${checkbox.checked}`)
+    console.log(`🏷️ Current metadata:`, this.currentMetadataVector ? `${this.currentMetadataVector.name} (${this.currentMetadataVector.data_type})` : 'none')
     
     // Toggle category labels on the plot
-    if (this.categoryLabelsContainer) {
+    if (this.rendererType === 'regl') {
+      // ReGL mode: Labels are drawn on Canvas2D overlay
+      console.log('🏷️ [ReGL] Toggling category labels on Canvas2D overlay')
+      if (checkbox.checked) {
+        console.log('🏷️ [ReGL] Re-rendering category labels...')
+        // Redraw overlay with labels
+        this.renderGrid()
+        this.renderAxes()
+        this.renderCategoryLabels()
+      } else {
+        console.log('🏷️ [ReGL] Clearing category labels')
+        // Redraw overlay without labels (renderCategoryLabels will check checkbox and skip)
+        this.renderGrid()
+        this.renderAxes()
+        this.renderCategoryLabels()
+      }
+    } else if (this.categoryLabelsContainer) {
+      // PixiJS mode: Labels are in a PixiJS container
       this.categoryLabelsContainer.visible = checkbox.checked
-      //console.log(`Category labels visible: ${this.categoryLabelsContainer.visible}`)
+      console.log(`🏷️ Category labels container visible: ${this.categoryLabelsContainer.visible}`)
       
       // If turning on, make sure labels are rendered
       if (checkbox.checked) {
-        //console.log('Re-rendering category labels')
+        console.log('🏷️ Re-rendering category labels...')
         this.renderCategoryLabels()
+      } else {
+        console.log('🏷️ Hiding category labels')
       }
+    } else {
+      console.log('🏷️ No categoryLabelsContainer available')
     }
     
     // Find the categories container in the right panel
     const categoriesContainer = document.querySelector('.metadata-categories')
     if (categoriesContainer) {
       categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
+      console.log(`🏷️ Metadata categories panel: ${checkbox.checked ? 'shown' : 'hidden'}`)
     }
     
-    //console.log('Categories toggle complete!')
+    console.log('🏷️ Categories toggle complete!')
   }
 
   updateCategoriesCheckboxState() {
@@ -8203,36 +10086,209 @@ export default class extends Controller {
 
   changeCategoryOrder(event) {
     const newOrder = event.target.value
-    console.log(`📊 Changing category order from '${this.categoryOrder}' to '${newOrder}'`)
+    console.log(`📊 [CATEGORY ORDER] Changing from '${this.categoryOrder}' to '${newOrder}'`)
     
     if (newOrder === this.categoryOrder) {
-      console.log('📊 Order unchanged, skipping update')
+      console.log('📊 [CATEGORY ORDER] Order unchanged, skipping update')
       return
     }
     
     this.categoryOrder = newOrder
+    
+    // Reset the flag so reordering will happen on next render
+    this._lastCategoryOrderApplied = null
     
     // Update ALL unfolded categorical metadata panels in the left sidebar
     this.updateAllCategoryDisplayOrders()
     
     // If we have discrete metadata currently displayed, re-render the plot
     if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'DISCRETE') {
-      console.log('📊 Re-rendering plot with new category order...')
+      console.log(`📊 [CATEGORY ORDER] ✅ Discrete metadata active - applying new order`)
       
       // IMPORTANT: Don't recreate color map - keep existing color assignments!
       // The color map should remain stable regardless of sort order
-      // We only need to update the z-order
+      // We only need to update the z-order (PixiJS) or buffer order (ReGL)
       
-      // Re-render points with new z-order (colors stay the same)
+      if (this.rendererType === 'regl') {
+        // ReGL: Reorder points in buffer for painter's algorithm
+        // This function will also redraw the overlay (grid, axes, labels)
+        this.reorderPointsForCategoryDisplay()
+      } else {
+        // PixiJS: Update sprite z-index
       this.renderPointsWithCurrentColoring()
       
       // Re-render category labels
       this.renderCategoryLabels()
+      }
       
-      console.log('📊 Category order change complete')
+      console.log('📊 [CATEGORY ORDER] Complete!')
     } else {
-      console.log('📊 No discrete metadata active, order preference saved for next use')
+      console.log('📊 [CATEGORY ORDER] No discrete metadata active, order preference saved for next use')
     }
+  }
+  
+  // ReGL: Reorder display order based on category (painter's algorithm)
+  // Uses displayOrder array - does NOT modify original data
+  reorderPointsForCategoryDisplay() {
+    if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
+      console.log('⚠️ [ReGL] Cannot reorder - missing data')
+      return
+    }
+    
+    console.log('📊 [ReGL] Reordering display order for category...')
+    const startTime = performance.now()
+    
+    const values = this.currentMetadataVector.values
+    
+    // Calculate category frequencies from CURRENT display order
+    const categoryFrequencies = {}
+    for (let i = 0; i < this.displayOrder.length; i++) {
+      const cellIndex = this.displayOrder[i]
+      const category = values[cellIndex]
+      categoryFrequencies[category] = (categoryFrequencies[category] || 0) + 1
+    }
+    
+    // Sort categories by frequency
+    const sortedCategories = Object.keys(categoryFrequencies).sort((a, b) => {
+      const freqA = categoryFrequencies[a]
+      const freqB = categoryFrequencies[b]
+      
+      if (this.categoryOrder === 'smallest-first') {
+        return freqA - freqB // Ascending (smallest first = background)
+      } else {
+        return freqB - freqA // Descending (largest first = background)
+      }
+    })
+    
+    console.log(`📊 [ReGL] Category order (${this.categoryOrder}):`, 
+                sortedCategories.map(c => `${c}(${categoryFrequencies[c]})`).join(', '))
+    
+    // Create category -> draw order mapping
+    const categoryDrawOrder = {}
+    sortedCategories.forEach((category, order) => {
+      categoryDrawOrder[category] = order
+    })
+    
+    // Sort the displayOrder array by category
+    this.displayOrder.sort((cellA, cellB) => {
+      const catA = values[cellA]
+      const catB = values[cellB]
+      return categoryDrawOrder[catA] - categoryDrawOrder[catB]
+    })
+    
+    console.log(`📊 [ReGL] Reordered displayOrder array (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
+    
+    // Rebuild buffer using new display order
+    const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+    const colorMap = new Map()
+    
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const [dataX, dataY] = this.currentCoordinates[cellIndex]
+      
+      // Normalize to screen coordinates
+      screenCoordinates[drawPos * 2] = this.normalizeX(dataX, this.currentBounds)
+      screenCoordinates[drawPos * 2 + 1] = this.normalizeY(dataY, this.currentBounds)
+      
+      // Get color for this cell
+      const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
+      colorMap.set(drawPos, color)
+    }
+    
+    // Update ReGL buffers with reordered data
+    this.reglRenderer.updatePositions(screenCoordinates)
+    this.reglRenderer.updateColors(colorMap)
+    this.reglRenderer.render()
+    
+    // Redraw the Canvas 2D overlay (grid, axes, labels)
+    this.renderGrid()
+    this.renderAxes()
+    this.renderCategoryLabels()
+    
+    const elapsed = performance.now() - startTime
+    console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} points in ${elapsed.toFixed(2)}ms`)
+  }
+  // Reorder display order based on numeric values (painter's algorithm)
+  // Uses displayOrder array - does NOT modify original data
+  reorderPointsForNumericDisplay(values, minVal, maxVal) {
+    if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
+      console.log('⚠️ [ReGL] Cannot reorder - missing data')
+      return
+    }
+    
+    console.log(`📊 [ReGL] Reordering display order for numeric: ${this.numericalOrder}`)
+    const startTime = performance.now()
+    
+    // Compute z-indices for all cells based on their original cell indices
+    const zIndices = []
+    for (let i = 0; i < this.displayOrder.length; i++) {
+      const cellIndex = this.displayOrder[i]
+      const value = values[cellIndex]
+      // Compute z-index for this cell's value
+      const normalizedValue = (maxVal - minVal) > 0 ? (value - minVal) / (maxVal - minVal) : 0.5
+      
+      let zIndex = 0
+      const maxZIndex = 1000
+      switch (this.numericalOrder) {
+        case 'negative-to-positive':
+          zIndex = Math.round(normalizedValue * maxZIndex)
+          break
+        case 'positive-to-negative':
+          zIndex = Math.round((1 - normalizedValue) * maxZIndex)
+          break
+        case 'abs-min-to-max':
+          const absValue = Math.abs(value)
+          const absMax = Math.max(Math.abs(minVal), Math.abs(maxVal))
+          zIndex = absMax > 0 ? Math.round((absValue / absMax) * maxZIndex) : 0
+          break
+        case 'abs-max-to-min':
+          const absValue2 = Math.abs(value)
+          const absMax2 = Math.max(Math.abs(minVal), Math.abs(maxVal))
+          zIndex = absMax2 > 0 ? Math.round(((absMax2 - absValue2) / absMax2) * maxZIndex) : 0
+          break
+      }
+      zIndices.push({ cellIndex, zIndex })
+    }
+    
+    // Sort by z-index (lower z-index = drawn first = background)
+    zIndices.sort((a, b) => a.zIndex - b.zIndex)
+    
+    // Update displayOrder array
+    for (let i = 0; i < zIndices.length; i++) {
+      this.displayOrder[i] = zIndices[i].cellIndex
+    }
+    
+    console.log(`📊 [ReGL] Reordered displayOrder by numeric values (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
+    
+    // Rebuild buffer using new display order
+    const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+    const colorMap = new Map()
+    
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const [dataX, dataY] = this.currentCoordinates[cellIndex]
+      
+      // Normalize to screen coordinates
+      screenCoordinates[drawPos * 2] = this.normalizeX(dataX, this.currentBounds)
+      screenCoordinates[drawPos * 2 + 1] = this.normalizeY(dataY, this.currentBounds)
+      
+      // Get color for this cell
+      const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
+      colorMap.set(drawPos, color)
+    }
+    
+    // Update ReGL buffers with reordered data
+    this.reglRenderer.updatePositions(screenCoordinates)
+    this.reglRenderer.updateColors(colorMap)
+    this.reglRenderer.render()
+    
+    // Redraw the Canvas 2D overlay (grid, axes, legend)
+    this.renderGrid()
+    this.renderAxes()
+    this.renderContinuousColorLegend()
+    
+    const elapsed = performance.now() - startTime
+    console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} numeric points in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update category display order in ALL unfolded metadata panels
@@ -8299,12 +10355,21 @@ export default class extends Controller {
     
     this.numericalOrder = newOrder
     
+    // Reset the last order applied flag to force reordering
+    this._lastNumericOrderApplied = null
+    
     // If we have numeric metadata currently displayed, re-render the plot
     if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
       console.log('📊 Re-rendering plot with new numerical order...')
       
       // Re-render points with new z-order (colors stay the same)
+      if (this.rendererType === 'regl') {
+        // For ReGL, call the color rendering function which handles reordering
+        this.renderPointsWithCurrentColoringReGL()
+      } else {
+        // For PixiJS, use the general rendering function
       this.renderPointsWithCurrentColoring()
+      }
       
       console.log('📊 Numerical order change complete')
     } else {
@@ -8443,28 +10508,24 @@ export default class extends Controller {
 
   // Save plot as SVG method
   saveAsSVG() {
-    //console.log('Saving plot as SVG')
+    console.log('💾 Saving plot as SVG')
     
-    if (!this.pixiApp || !this.scatterContainer) {
+    // Check for renderer availability
+    const hasRenderer = this.rendererType === 'regl' ? !!this.reglRenderer : (!!this.pixiApp && !!this.scatterContainer)
+    
+    if (!hasRenderer) {
       alert('No plot available to save')
       return
     }
 
     try {
-      // Get the canvas element
-      const canvas = this.canvas || this.pixiApp.canvas
-      if (!canvas) {
-        alert('Canvas not found')
-        return
-      }
-
       // Create SVG content
-      const svgContent = this.generateSVGFromPlot(canvas)
+      const svgContent = this.generateSVGFromPlot()
       
       // Create and download the SVG file
       this.downloadSVG(svgContent, 'plot.svg')
       
-      //console.log('SVG saved successfully')
+      console.log('💾 SVG saved successfully')
     } catch (error) {
       console.error('Error saving SVG:', error)
       alert('Error saving SVG file')
@@ -8472,7 +10533,76 @@ export default class extends Controller {
   }
 
   // Generate SVG content from the current plot
-  generateSVGFromPlot(canvas) {
+  generateSVGFromPlot() {
+    console.log('💾 Generating SVG from plot...')
+    
+    // Dispatch to appropriate implementation
+    if (this.rendererType === 'regl') {
+      return this.generateSVGFromPlotReGL()
+    } else {
+      return this.generateSVGFromPlotPixi()
+    }
+  }
+  
+  // ReGL version of SVG generation
+  generateSVGFromPlotReGL() {
+    console.log('💾 [ReGL] Generating SVG from ReGL plot')
+    
+    const width = this.canvas.width
+    const height = this.canvas.height
+    
+    // Start SVG with proper dimensions
+    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
+    
+    // Add background
+    svg += `<rect width="100%" height="100%" fill="white"/>`
+    
+    // Add grid (always render if we have bounds)
+    if (this.currentBounds) {
+      svg += this.generateSVGGridReGL(width, height)
+    }
+    
+    // Add axes (always render if we have bounds)
+    if (this.currentBounds) {
+      svg += this.generateSVGAxesReGL(width, height)
+    }
+    
+    // Add points from currentCoordinates
+    if (this.currentCoordinates && this.originalPointColors) {
+      console.log(`💾 [ReGL] Exporting ${this.currentCoordinates.length} points to SVG`)
+      
+      const pointSize = this.currentPointSize || 4
+      
+      for (let i = 0; i < this.currentCoordinates.length; i++) {
+        const [dataX, dataY] = this.currentCoordinates[i]
+        const screenX = this.normalizeX(dataX, this.currentBounds)
+        const screenY = this.normalizeY(dataY, this.currentBounds)
+        
+        // Get color from originalPointColors
+        const colorInt = this.originalPointColors.get(i) || 0x3b82f6
+        const r = (colorInt >> 16) & 0xFF
+        const g = (colorInt >> 8) & 0xFF
+        const b = colorInt & 0xFF
+        const colorHex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+        
+        // Add circle for each point
+        svg += `<circle cx="${screenX.toFixed(2)}" cy="${screenY.toFixed(2)}" r="${pointSize}" fill="${colorHex}"/>`
+      }
+    }
+    
+    // Add category labels if checkbox is checked
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    if (categoriesCheckbox && categoriesCheckbox.checked && this.canvas2DLabels && this.canvas2DLabels.length > 0) {
+      svg += this.generateSVGCategoryLabelsReGL()
+    }
+    
+    svg += `</svg>`
+    console.log('💾 [ReGL] SVG generation complete')
+    return svg
+  }
+  
+  // PixiJS version of SVG generation (original)
+  generateSVGFromPlotPixi() {
     // Use the same dimensions as the actual plot
     const width = this.pixiApp.screen.width
     const height = this.pixiApp.screen.height
@@ -8572,6 +10702,122 @@ export default class extends Controller {
     }
     
     return { color, size }
+  }
+  
+  // ReGL version: Generate SVG grid from current bounds
+  generateSVGGridReGL(width, height) {
+    if (!this.currentBounds) return ''
+    
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const margins = this.getPlotMargins()
+    
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    let svg = ''
+    
+    // Vertical grid lines
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const t = (value - minX) / xRange
+      const x = margins.left + t * (width - margins.left - margins.right)
+      if (x >= margins.left && x <= width - margins.right) {
+        svg += `<line x1="${x}" y1="${margins.top}" x2="${x}" y2="${height - margins.bottom}" stroke="rgba(204,204,204,0.3)" stroke-width="1"/>`
+      }
+    }
+    
+    // Horizontal grid lines
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const t = (value - minY) / yRange
+      const y = margins.top + (height - margins.top - margins.bottom) - t * (height - margins.top - margins.bottom)
+      if (y >= margins.top && y <= height - margins.bottom) {
+        svg += `<line x1="${margins.left}" y1="${y}" x2="${width - margins.right}" y2="${y}" stroke="rgba(204,204,204,0.3)" stroke-width="1"/>`
+      }
+    }
+    
+    return svg
+  }
+  
+  // ReGL version: Generate SVG axes from current bounds
+  generateSVGAxesReGL(width, height) {
+    if (!this.currentBounds) return ''
+    
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const margins = this.getPlotMargins()
+    const xAxisY = height - margins.bottom
+    const yAxisX = margins.left
+    
+    let svg = ''
+    
+    // White rectangles to cover margin areas
+    svg += `<rect x="0" y="${xAxisY}" width="${width}" height="${height - xAxisY}" fill="white"/>`
+    svg += `<rect x="0" y="0" width="${yAxisX}" height="${height}" fill="white"/>`
+    
+    // Axes lines
+    svg += `<line x1="${margins.left}" y1="${xAxisY}" x2="${width - margins.right}" y2="${xAxisY}" stroke="#333333" stroke-width="2" opacity="0.8"/>`
+    svg += `<line x1="${yAxisX}" y1="${margins.top}" x2="${yAxisX}" y2="${height - margins.bottom}" stroke="#333333" stroke-width="2" opacity="0.8"/>`
+    
+    // Tick marks and labels
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    // X-axis ticks
+    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const screenX = margins.left + ((value - minX) / xRange) * (width - margins.left - margins.right)
+      
+      // Tick mark
+      svg += `<line x1="${screenX}" y1="${xAxisY}" x2="${screenX}" y2="${xAxisY + 5}" stroke="#333333" stroke-width="1"/>`
+      
+      // Label
+      svg += `<text x="${screenX}" y="${xAxisY + 19}" font-family="Arial" font-size="12" fill="#333333" text-anchor="middle">${value.toFixed(1)}</text>`
+    }
+    
+    // Y-axis ticks
+    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const screenY = height - margins.bottom - ((value - minY) / yRange) * (height - margins.top - margins.bottom)
+      
+      // Tick mark
+      svg += `<line x1="${yAxisX - 5}" y1="${screenY}" x2="${yAxisX}" y2="${screenY}" stroke="#333333" stroke-width="1"/>`
+      
+      // Label
+      svg += `<text x="${yAxisX - 9}" y="${screenY}" font-family="Arial" font-size="12" fill="#333333" text-anchor="end" dominant-baseline="middle">${value.toFixed(1)}</text>`
+    }
+    
+    // Axis titles
+    svg += `<text x="${width / 2}" y="${height - 5}" font-family="Arial" font-size="14" fill="#333333" text-anchor="middle">Dimension 1</text>`
+    svg += `<text x="15" y="${height / 2}" font-family="Arial" font-size="14" fill="#333333" text-anchor="middle" transform="rotate(-90, 15, ${height / 2})">Dimension 2</text>`
+    
+    return svg
+  }
+  
+  // ReGL version: Generate SVG category labels
+  generateSVGCategoryLabelsReGL() {
+    if (!this.canvas2DLabels || this.canvas2DLabels.length === 0) return ''
+    
+    let svg = ''
+    
+    this.canvas2DLabels.forEach(label => {
+      const { x, y, bounds, color, category } = label
+      
+      // Draw background rectangle
+      svg += `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="rgba(255,255,255,0.9)" stroke="rgb(${color.r},${color.g},${color.b})" stroke-width="2"/>`
+      
+      // Draw text
+      svg += `<text x="${x}" y="${y}" font-family="Arial" font-size="12" fill="#333333" text-anchor="middle" dominant-baseline="middle">${category}</text>`
+    })
+    
+    return svg
   }
 
   // Generate SVG grid
@@ -8737,7 +10983,6 @@ export default class extends Controller {
     }
     console.log('📦 Stored metadata state before selection:', this.lastActiveMetadata)
   }
-  
   // Restore metadata state after cancel/save selection
   restoreMetadataStateAfterSelection() {
     if (!this.lastActiveMetadata) {
@@ -9110,15 +11355,53 @@ export default class extends Controller {
 
   // Pick mode methods
   onPickMouseDown(event) {
+    // In ReGL mode, check for label clicks first
+    if (this.rendererType === 'regl' && this.canvas2DLabels && this.canvas2DLabels.length > 0) {
+      const canvas = this.canvas
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+      
+      console.log(`🏷️ [Drag] Mouse down at (${mouseX}, ${mouseY}), checking ${this.canvas2DLabels.length} labels`)
+      
+      // Check if clicking on a label
+      for (let i = this.canvas2DLabels.length - 1; i >= 0; i--) {
+        const label = this.canvas2DLabels[i]
+        const bounds = label.bounds
+        
+        console.log(`🏷️ [Drag] Label "${label.category}" bounds: x=${bounds.x}, y=${bounds.y}, w=${bounds.width}, h=${bounds.height}`)
+        
+        if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+            mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+          // Clicked on a label - start dragging
+          this.draggingLabel = label
+          this.labelDragStartX = mouseX
+          this.labelDragStartY = mouseY
+          this.labelStartOffsetX = label.offsetX
+          this.labelStartOffsetY = label.offsetY
+          this.clickingOnLabel = true
+          console.log(`🏷️ Started dragging label: ${label.category}`)
+          return
+        }
+      }
+      
+      console.log(`🏷️ [Drag] No label hit at (${mouseX}, ${mouseY})`)
+    }
+    
     // In pick mode, use fallback detection to find clicked points
     // But don't detect points if we're clicking on a label
     if (this.clickingOnLabel) {
       return
     }
     
-    // Safety check for PIXI app and scatterContainer
-    if (!this.pixiApp || !this.scatterContainer) {
+    // Safety check for renderer
+    if (this.rendererType === 'pixi' && (!this.pixiApp || !this.scatterContainer)) {
       console.log('PIXI app or scatterContainer not available for point detection')
+      return
+    }
+    
+    // ReGL mode doesn't support point clicking yet
+    if (this.rendererType === 'regl') {
       return
     }
     
@@ -9287,35 +11570,11 @@ export default class extends Controller {
     
     // Update cell filtering
     console.log(`🔄 About to call updateCellFiltering`)
-    console.log(`🔄 Labels before updateCellFiltering:`, this.categoryLabelsContainer.children.length)
     this.updateCellFiltering()
     console.log(`🔄 updateCellFiltering completed`)
-    console.log(`🔄 Labels after updateCellFiltering:`, this.categoryLabelsContainer.children.length)
     
-    // Re-render category labels to reflect selection changes
-    // Use requestAnimationFrame to ensure points are visible before calculating centroids
-    requestAnimationFrame(() => {
-      console.log(`🔄 Checking category labels container:`, {
-        exists: !!this.categoryLabelsContainer,
-        visible: this.categoryLabelsContainer?.visible,
-        children: this.categoryLabelsContainer?.children?.length
-      })
-      
-      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-        console.log(`🔄 Re-rendering labels after category selection change`)
-        console.log(`🔄 Current metadata vector:`, this.currentMetadataVector?.id, this.currentMetadataVector?.type)
-        console.log(`🔄 Current bounds:`, this.currentBounds)
-        console.log(`🔄 Current coordinates:`, this.currentCoordinates?.length)
-        try {
-          this.renderCategoryLabels()
-          console.log(`🔄 renderCategoryLabels completed successfully`)
-        } catch (error) {
-          console.error(`🔄 Error in renderCategoryLabels:`, error)
-        }
-      } else {
-        console.log(`🔄 Category labels container not visible, skipping label re-render`)
-      }
-    })
+    // Note: Category label re-rendering is handled by updateCellFiltering() in ReGL mode
+    // (it redraws the entire overlay including labels with new centroids)
     
     console.log(`🔄 toggleCategorySelection function completed`)
   }
@@ -9329,10 +11588,8 @@ export default class extends Controller {
       this.selectCategory(metadataId, category)
     })
     
-    // Re-render category labels to reflect selection changes
-    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-      this.renderCategoryLabels()
-    }
+    // Update cell filtering (which will re-render labels in ReGL mode)
+    this.updateCellFiltering()
   }
 
   deselectAllCategoriesForMetadata(metadataId) {
@@ -9344,10 +11601,8 @@ export default class extends Controller {
       this.deselectCategory(metadataId, category)
     })
     
-    // Re-render category labels to reflect selection changes
-    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-      this.renderCategoryLabels()
-    }
+    // Update cell filtering (which will re-render labels in ReGL mode)
+    this.updateCellFiltering()
   }
 
   selectCategory(metadataId, category) {
@@ -9448,6 +11703,12 @@ export default class extends Controller {
 
   // Optimized method to show/hide points without re-rendering
   updatePointVisibility(filteredIndices) {
+    // ReGL path: update point visibility by modifying alpha channel
+    if (this.rendererType === 'regl') {
+      return this.updatePointVisibilityReGL(filteredIndices)
+    }
+    
+    // PixiJS path
     if (!this.scatterContainer || !this.scatterContainer.children) {
       console.log('No scatter container or children - cannot update visibility')
       return
@@ -9500,6 +11761,66 @@ export default class extends Controller {
 
     const endTime = performance.now()
     //console.log(`Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
+  }
+  // Update point visibility in ReGL mode by hiding filtered-out points
+  updatePointVisibilityReGL(filteredIndices) {
+    if (!this.reglRenderer || !this.currentCoordinates) {
+      console.log('⚠️ [ReGL] Cannot update visibility - missing renderer or coordinates')
+      return
+    }
+    
+    const startTime = performance.now()
+    console.log('🎨 [ReGL] Updating point visibility based on filters')
+    console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
+    console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
+    console.log('🎨 [ReGL] originalPointColors size:', this.originalPointColors?.size)
+    
+    // Convert filteredIndices to Set for O(1) lookup
+    // filteredIndices contains ORIGINAL cell indices
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Create color map to hide/show points based on filtering
+    // We'll use the alpha channel approach: set alpha to 0 for hidden points
+    const colorMap = new Map()
+    let visibleCount = 0
+    let hiddenCount = 0
+    
+    // Sample a few points to debug
+    const sampleIndices = [0, 100, 1000, 5000]
+    
+    // Use displayOrder to map draw positions to cell indices
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const shouldBeVisible = !filteredSet || filteredSet.has(cellIndex)
+      
+      if (shouldBeVisible) {
+        // Restore original color (RGB format - alpha will be set to 1.0 by renderer)
+        const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        colorMap.set(drawPos, originalColor)
+        visibleCount++
+        
+        if (sampleIndices.includes(drawPos)) {
+          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${originalColor.toString(16)}`)
+        }
+      } else {
+        // Hide point by making it fully transparent
+        colorMap.set(drawPos, 0x00000000)
+        hiddenCount++
+        
+        if (sampleIndices.includes(drawPos)) {
+          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: HIDDEN, color 0x00000000`)
+        }
+      }
+    }
+    
+    console.log(`🎨 [ReGL] About to update ${colorMap.size} colors`)
+    
+    // Update colors (which includes alpha channel)
+    this.reglRenderer.updateColors(colorMap)
+    this.reglRenderer.render()
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎨 [ReGL] Visibility updated: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update the point count display with detailed filtering information
@@ -9609,6 +11930,19 @@ export default class extends Controller {
       } else {
         // Otherwise just update visibility
         this.updatePointVisibility(filteredIndices)
+      }
+      
+      // Re-render category labels after filtering (ReGL mode only)
+      // Labels need to move to new centroids of visible cells
+      if (this.rendererType === 'regl' && this.currentMetadataVector?.data_type === 'DISCRETE') {
+        const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+        if (categoriesCheckbox && categoriesCheckbox.checked) {
+          console.log('🏷️ Re-rendering category labels after filtering (centroids may have moved)')
+          // Clear and redraw overlay to ensure old labels are removed
+          this.renderGrid()
+          this.renderAxes()
+          this.renderCategoryLabels()
+        }
       }
     })
   }
@@ -10144,8 +12478,6 @@ export default class extends Controller {
     if (minInput) minInput.value = currentMin.toFixed(3)
     if (maxInput) maxInput.value = currentMax.toFixed(3)
   }
-
-
   // Show range slider modal for numeric metadata
   showRangeSlider(metadataId, metadataName) {
     console.log('🎚️ Showing range slider for metadata:', metadataId, metadataName)

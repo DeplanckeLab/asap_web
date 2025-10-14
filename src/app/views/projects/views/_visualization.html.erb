@@ -661,7 +661,6 @@
         </label>
         <input type="checkbox" 
                id="show-categories-checkbox" 
-               checked 
                style="width: 16px; height: 16px; cursor: pointer;"
                data-action="change->visualization#toggleCategories">
       </div>
@@ -691,7 +690,6 @@
           <option value="abs-max-to-min">Absolute max to min</option>
         </select>
       </div>
-      
       <!-- Auto Preload Metadata -->
       <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
         <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
@@ -799,6 +797,109 @@
   </div>
 </div>
 
-
+<!-- Gradient Editor Modal -->
+<div id="gradient-editor-modal" data-controller="visualization" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000; justify-content: center; align-items: center;">
+  <div style="background: white; border-radius: 12px; padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <i class="fas fa-palette" style="color: #6b7280;"></i>
+        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Customize Color Gradient</h3>
+      </div>
+      <button id="close-gradient-editor" 
+              data-action="click->visualization#closeGradientEditorModal"
+              style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px;" 
+              title="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    
+    <!-- Instructions -->
+    <div style="padding: 12px; background-color: #f0f9ff; border-left: 3px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+      <p style="margin: 0; font-size: 12px; color: #1e40af; line-height: 1.5;">
+        Click on the gradient bar to add control points. Click any point to edit its position and color, or remove it.
+      </p>
+    </div>
+    
+    <!-- Gradient Preview Bar -->
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+        Gradient Preview - Click to add control points
+      </label>
+      <div style="position: relative;">
+        <canvas id="gradient-editor-preview-canvas" 
+                width="450" 
+                height="40" 
+                style="width: 100%; height: 40px; border: 2px solid #d1d5db; border-radius: 6px; cursor: crosshair; display: block;"
+                data-action="click->visualization#gradientBarClicked"></canvas>
+        <!-- Control points will be positioned absolutely over the canvas -->
+        <div id="gradient-editor-control-points" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+      </div>
+      <p style="margin: 8px 0 0 0; font-size: 11px; color: #6b7280;">
+        Click anywhere on the gradient to add a control point. Click existing points to edit them.
+      </p>
+    </div>
+    
+    <!-- Selected Control Point Editor -->
+    <div id="gradient-control-point-editor" style="display: none; padding: 16px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
+      <div style="font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 12px;">
+        Edit Control Point
+      </div>
+      
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="flex: 1;">
+          <label style="display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px;">Data Value</label>
+          <input id="gradient-control-point-position" 
+                 type="number" 
+                 step="any"
+                 style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px;"
+                 data-action="input->visualization#updateControlPointPosition">
+        </div>
+        <div style="flex: 1;">
+          <label style="display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px;">Color</label>
+          <input id="gradient-control-point-color" 
+                 type="color"
+                 style="width: 100%; height: 32px; padding: 2px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;"
+                 data-action="input->visualization#updateControlPointColor">
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 8px;">
+        <button id="gradient-remove-control-point-btn"
+                data-action="click->visualization#removeControlPoint"
+                style="flex: 1; padding: 8px; font-size: 12px; color: #dc2626; background: white; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fef2f2';"
+                onmouseout="this.style.backgroundColor='white';">
+          <i class="fas fa-trash"></i> Remove Point
+        </button>
+        <button id="gradient-close-control-point-editor-btn"
+                data-action="click->visualization#closeControlPointEditor"
+                style="flex: 1; padding: 8px; font-size: 12px; color: #374151; background: white; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#f9fafb';"
+                onmouseout="this.style.backgroundColor='white';">
+          Done
+        </button>
+      </div>
+    </div>
+    
+    <!-- Actions -->
+    <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+      <button id="gradient-reset-btn"
+              data-action="click->visualization#resetGradient"
+              style="padding: 8px 16px; font-size: 13px; color: #6b7280; background: white; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; transition: all 0.2s;"
+              onmouseover="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#9ca3af';"
+              onmouseout="this.style.backgroundColor='white'; this.style.borderColor='#d1d5db';">
+        <i class="fas fa-undo"></i> Reset to Default
+      </button>
+      <button id="gradient-apply-btn"
+              data-action="click->visualization#closeGradientEditorModal"
+              style="padding: 8px 16px; font-size: 13px; color: white; background: #3b82f6; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-weight: 500;"
+              onmouseover="this.style.backgroundColor='#2563eb';"
+              onmouseout="this.style.backgroundColor='#3b82f6';">
+          Apply & Close
+        </button>
+    </div>
+  </div>
+</div>
 
 

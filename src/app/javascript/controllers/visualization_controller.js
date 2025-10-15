@@ -1608,9 +1608,15 @@ export default class extends Controller {
       if (data_type === 'DISCRETE') {
         // Cache the color map to avoid recalculating for every point
         if (!this._cachedColorMap) {
-          // Use stable sorting for consistent color assignment
-          const sortedCategories = this.getStableSortedCategories(values, [...compression_info.categories])
-          this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
+          // Use DOM order (same as legend) for consistent color assignment
+          const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataId)
+          if (domOrderCategories && domOrderCategories.length > 0) {
+            const categoryNames = domOrderCategories.map(cat => cat.name)
+            this._cachedColorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataId)
+          } else {
+            // Fallback to original categories if DOM not available
+            this._cachedColorMap = this.createDiscreteColorMap([...compression_info.categories], this.currentMetadataId)
+          }
         }
         baseColor = this._cachedColorMap[value] || 0x3b82f6
       } else if (data_type === 'NUMERIC') {
@@ -3998,9 +4004,15 @@ export default class extends Controller {
           
           // Pre-calculate discrete color map if needed
           if (!this._cachedColorMap) {
-            // Use stable sorting for consistent color assignment
-            const sortedCategories = this.getStableSortedCategories(values, [...compression_info.categories])
-            this._cachedColorMap = this.createDiscreteColorMap(sortedCategories, this.currentMetadataId)
+            // Use DOM order (same as legend) for consistent color assignment
+            const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataId)
+            if (domOrderCategories && domOrderCategories.length > 0) {
+              const categoryNames = domOrderCategories.map(cat => cat.name)
+              this._cachedColorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataId)
+            } else {
+              // Fallback to original categories if DOM not available
+              this._cachedColorMap = this.createDiscreteColorMap([...compression_info.categories], this.currentMetadataId)
+            }
           }
           const colorMap = this._cachedColorMap
           const hasSelection = this.selectedCells && this.selectedCells.size > 0
@@ -4515,13 +4527,25 @@ export default class extends Controller {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.getCategoryColors()
         
-        // Build category-to-index map
-        const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
-        const categoryToIndex = {}
-        uniqueCategories.forEach((cat, idx) => {
-          categoryToIndex[cat] = idx
-        })
+        // Build category-to-index map using DOM order (same as legend)
+        const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataId)
+        let categoryToIndex = {}
         
+        if (domOrderCategories && domOrderCategories.length > 0) {
+          // Use DOM order for consistent color assignment
+          const categoryNames = domOrderCategories.map(cat => cat.name)
+          categoryNames.forEach((cat, idx) => {
+            categoryToIndex[cat] = idx
+          })
+        } else {
+          // Fallback to Set order if DOM not available
+          const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
+          uniqueCategories.forEach((cat, idx) => {
+            categoryToIndex[cat] = idx
+          })
+        }
+        
+        const uniqueCategories = Object.keys(categoryToIndex)
         console.log(`🎨 [ReGL] ${uniqueCategories.length} categories, ${categoryColors.length} colors available`)
         
         // Assign colors using displayOrder, hiding filtered-out cells
@@ -4779,12 +4803,13 @@ export default class extends Controller {
         colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
       } else {
         // Use default color
-      colorMap[category] = colors[index % colors.length]
+        colorMap[category] = colors[index % colors.length]
       }
     })
     
     return colorMap
   }
+
 
   getCategoryColors() {
     // Cache the colors to prevent repeated conversion

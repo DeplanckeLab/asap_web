@@ -12872,12 +12872,15 @@ export default class extends Controller {
 
   // Checkbox functionality for cell selection
   async toggleMetadataSelection(event) {
+    console.log('🔍 [CHECKBOX] toggleMetadataSelection called!')
     event.preventDefault()
     event.stopPropagation()
     
     const metadataId = event.currentTarget.dataset.metadataId
     const checkbox = event.currentTarget
     const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
+    
+    console.log('🔍 [CHECKBOX] metadataId:', metadataId, 'isSelected:', isSelected)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.getMetadataVectorById(metadataId)
@@ -12902,6 +12905,7 @@ export default class extends Controller {
     
     // Check if this is categorical or continuous metadata
     const isContinuous = metadataVector?.data_type === 'NUMERIC'
+    console.log('🔍 [CHECKBOX] isContinuous:', isContinuous)
     
     // Toggle the checkbox state
     if (isSelected) {
@@ -12926,17 +12930,48 @@ export default class extends Controller {
       checkbox.querySelector('i').style.display = 'block'
       
       if (isContinuous) {
-        // For continuous metadata: enable range selection (set to full range)
-        if (metadataVector?.compression_info) {
-          this.selectedRanges[metadataId] = {
-            min: metadataVector.compression_info.min_val,
-            max: metadataVector.compression_info.max_val
-          }
-        }
+        console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
         checkbox.title = 'Disable range selection'
         
-        // Enable the range slider for this metadata
+        // Enable the range slider for this metadata first
         this.enableRangeSliderForMetadata(metadataId)
+        
+        // Read the current values directly from the range slider fields
+        const rangeSection = document.querySelector(`[data-metadata-item="${metadataId}"] .metadata-range-section`)
+        console.log('🔍 [CHECKBOX] Range section found:', !!rangeSection)
+        if (rangeSection) {
+          // Find the actual range slider controller element (child of range section)
+          const rangeSliderElement = rangeSection.querySelector('[data-controller="range-slider"]')
+          console.log('🔍 [CHECKBOX] Range slider element found:', !!rangeSliderElement)
+          
+          if (rangeSliderElement) {
+            const rangeSliderController = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
+            console.log('🔍 [CHECKBOX] Range slider controller found:', !!rangeSliderController)
+            
+            if (rangeSliderController) {
+              // Use the range slider's current values (which should still be set from before)
+              const currentMin = rangeSliderController.currentMinValue
+              const currentMax = rangeSliderController.currentMaxValue
+              console.log('🔍 [CHECKBOX] Range slider current values:', currentMin, currentMax)
+              
+              this.selectedRanges[metadataId] = {
+                min: currentMin,
+                max: currentMax
+              }
+              console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
+              
+              // Update the selected cells count
+              rangeSliderController.updateSelectedCellsCount()
+              console.log('🔍 [CHECKBOX] Updated selected cells count')
+            } else {
+              console.log('🔍 [CHECKBOX] No range slider controller found!')
+            }
+          } else {
+            console.log('🔍 [CHECKBOX] No range slider element found!')
+          }
+        } else {
+          console.log('🔍 [CHECKBOX] No range section found!')
+        }
       } else {
         // For categorical metadata: select all categories
         this.selectAllCategoriesForMetadata(metadataId)
@@ -12944,7 +12979,10 @@ export default class extends Controller {
     }
     
     // Update cell filtering
+    console.log('🔍 [CHECKBOX] About to call updateCellFiltering')
+    console.log('🔍 [CHECKBOX] Current selectedRanges:', this.selectedRanges)
     this.updateCellFiltering()
+    console.log('🔍 [CHECKBOX] updateCellFiltering called')
   }
 
   async toggleCategorySelection(event) {
@@ -13481,6 +13519,7 @@ export default class extends Controller {
   }
 
   updateCellFiltering(shouldUpdateColors = false) {
+    console.log('🔍 [FILTERING] updateCellFiltering called with selectedRanges:', this.selectedRanges)
     // Performance optimization: batch multiple updates
     this.scheduleUpdate('filtering', () => {
       this.performCellFilteringUpdate(shouldUpdateColors)
@@ -13624,6 +13663,11 @@ export default class extends Controller {
   getIncrementalFilteredIndices() {
     const hasDiscreteSelections = this.selectedCategories && Object.keys(this.selectedCategories).length > 0
     const hasContinuousSelections = this.selectedRanges && Object.keys(this.selectedRanges).length > 0
+    
+    console.log('🔍 [FILTERING] getIncrementalFilteredIndices called')
+    console.log('🔍 [FILTERING] hasDiscreteSelections:', hasDiscreteSelections)
+    console.log('🔍 [FILTERING] hasContinuousSelections:', hasContinuousSelections)
+    console.log('🔍 [FILTERING] selectedRanges:', this.selectedRanges)
     
     if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells

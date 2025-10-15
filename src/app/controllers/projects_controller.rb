@@ -71,7 +71,7 @@ class ProjectsController < ApplicationController
       @h_metadata[filepath] && 
       @h_metadata[filepath]['cell'] && 
       @h_metadata[filepath]['cell']['NUMERIC'] &&
-      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2 || m.nber_rows == 3) }
+      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) } # limit to 2D for now
     end
     
     # Get all embeddings for all loom files

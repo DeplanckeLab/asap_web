@@ -180,7 +180,7 @@
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
-            <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].each do |metadata| %>
+            <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 }.each do |metadata| %>
               <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 

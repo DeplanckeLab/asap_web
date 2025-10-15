@@ -220,7 +220,7 @@ export default class extends Controller {
       this.createDiagnosticButton()
     }, 3000) // Wait 3 seconds after connection
     
-    // No automatic loading - metadata will be loaded on-demand when needed
+    // Automatic preloading is now enabled - metadata will be preloaded in background when autoPreloadMetadata is true
   }
 
   disconnect() {
@@ -1132,10 +1132,10 @@ export default class extends Controller {
       // Only auto-preload if the option is enabled
       if (this.autoPreloadMetadata) {
         // Start preloading immediately (in background, ordered: embeddings → categorical → continuous)
-        console.log('🚀 Automatic metadata preload disabled - using on-demand loading instead')
-        // this.preloadAllMetadata().catch(error => {
-        //   console.log('Background metadata preload encountered an error:', error)
-        // })
+        console.log('🚀 Starting automatic metadata preload...')
+        this.preloadAllMetadata().catch(error => {
+          console.log('Background metadata preload encountered an error:', error)
+        })
       } else {
         console.log('🚀 Auto-preload disabled - metadata will load on hover/click only')
       }
@@ -2895,8 +2895,8 @@ export default class extends Controller {
     // Only preload if not already loaded and not currently loading
     if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
       console.log(`🚀 Preloading metadata vector ${metadataId} on hover`)
-      // Load into memory for fast access (without showing spinner)
-      this.loadSingleMetadataVector(metadataId).catch(error => {
+      // Load silently without showing spinners
+      this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
         console.log(`Preload failed for metadata ${metadataId}:`, error.message)
         // Don't show error to user for preloading failures
       })
@@ -3139,6 +3139,10 @@ export default class extends Controller {
   // Create and show diagnostic button
   createDiagnosticButton() {
     console.log('🔍 [DIAGNOSTIC] Creating diagnostic button...')
+    
+    // Hide the diagnostic button - return early without creating it
+    console.log('🔍 [DIAGNOSTIC] Diagnostic button is hidden')
+    return
     
     // Remove existing diagnostic button if it exists
     const existingButton = document.getElementById('metadata-diagnostic-btn')
@@ -10850,10 +10854,10 @@ export default class extends Controller {
         
         // If enabled, start preloading now
         if (this.autoPreloadMetadata) {
-          console.log('🚀 Automatic preload disabled - using on-demand loading instead')
-          // this.preloadAllMetadata().catch(error => {
-          //   console.log('Background metadata preload encountered an error:', error)
-          // })
+          console.log('🚀 Starting automatic preload after checkbox enable...')
+          this.preloadAllMetadata().catch(error => {
+            console.log('Background metadata preload encountered an error:', error)
+          })
         }
       })
     }
@@ -12198,9 +12202,9 @@ export default class extends Controller {
     // Set tooltip content with fixed/dynamic indicator
     let statusIndicator = ''
     if (this.rendererType === 'regl' && this.isTooltipFixed) {
-      statusIndicator = '<br><em style="color: #00ff00;">🔒 Fixed (clicked)</em>'
+      statusIndicator = '<br><em style="color: #00ff00;">🔒</em>'
     } else if (this.rendererType === 'regl') {
-      statusIndicator = '<br><em style="color: #ccc;">🖱️ Hovering</em>'
+      //statusIndicator = '<br><em style="color: #ccc;"></em>'
     }
     
     const tooltipHTML = `<strong>${cellName}</strong>${categoryInfo}${statusIndicator}`
@@ -12755,7 +12759,7 @@ export default class extends Controller {
     }
     
     // Add fixed indicator
-    categoryInfo += ' | 🔒 Fixed (clicked)'
+    categoryInfo += ' 🔒'
     
     // Create a mock point object for positioning
     const mockPoint = { x: screenX, y: screenY }
@@ -12828,7 +12832,7 @@ export default class extends Controller {
         }
         
         // Add hover indicator
-        categoryInfo += ' | 🖱️ Hovering'
+        categoryInfo += ''
         
         const mockPoint = { x: mouseX, y: mouseY }
         this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
@@ -13917,6 +13921,13 @@ export default class extends Controller {
     this.currentVisibleCells = null
     this.lastFilterState = null
     this.filterCache.clear()
+    
+    // Clear metadata coloring cache when embedding changes
+    // This ensures colors are recalculated with correct cell indices
+    this._cachedColorMap = null
+    this.lastColorUpdateHash = null
+    this.colorUpdateCache.clear()
+    
     //console.log('Cleared incremental filtering state after embedding change')
   }
 

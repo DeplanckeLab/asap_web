@@ -192,6 +192,16 @@
                       <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
                     </svg>
                   </div>
+                  <!-- Global Checkbox (hidden by default, shown when preloaded) -->
+                  <div class="metadata-checkbox" 
+                       data-metadata-id="<%= metadata.id %>"
+                       data-action="click->visualization#toggleMetadataSelection"
+                       title="Disable range selection"
+                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
+                       onmouseover="this.style.borderColor='#059669'"
+                       onmouseout="this.style.borderColor='#d1d5db'">
+                    <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
+                  </div>
                   <!-- Content -->
                   <div style="flex: 1; min-width: 0; margin-right: 8px;">
                     <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>

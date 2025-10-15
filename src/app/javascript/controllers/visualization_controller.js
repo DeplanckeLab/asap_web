@@ -28,6 +28,24 @@ export default class extends Controller {
     this.lastFilterState = null // Track last filter state for incremental updates
     this.filterCache = new Map() // Cache for intersection results
     
+    // Performance optimization: cache and batching
+    this.lastFilteredIndices = null // Cache last filtered indices result
+    this.lastFilterStateHash = null // Hash of filter state for change detection
+    this.pendingUpdates = new Set() // Track pending updates for batching
+    this.updateBatchTimer = null // Timer for batching updates
+    
+    // Color update optimization
+    this.lastColorUpdateHash = null // Hash of color state for change detection
+    this.colorUpdateCache = new Map() // Cache for color calculations
+    
+    // Performance monitoring
+    this.performanceMetrics = {
+      lastUpdateTime: 0,
+      updateCount: 0,
+      averageUpdateTime: 0,
+      maxUpdateTime: 0
+    }
+    
     // Performance optimization: throttling for range slider updates
     this.rangeSliderUpdateScheduled = false
     this.lastLegendUpdate = 0
@@ -70,6 +88,9 @@ export default class extends Controller {
     
     // Expose controller globally for range slider access
     window.visualizationController = this
+    
+    // Expose emergency diagnostic function
+    window.runEmergencyDiagnostic = () => this.runEmergencyDiagnostic()
     
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
@@ -119,6 +140,18 @@ export default class extends Controller {
     if (this.hasDefaultLoomFileValue && this.hasLoomFileSelectTarget) {
       this.loomFileSelectTarget.value = this.defaultLoomFileValue
       this.updateEmbeddings()
+      
+      // Auto-load the first available embedding on page load
+      setTimeout(() => {
+        if (this.hasMetadataSelectTarget) {
+          const firstOption = this.metadataSelectTarget.querySelector('option[value]:not([value=""])')
+          if (firstOption) {
+            console.log('🚀 Auto-loading first embedding on page load:', firstOption.textContent)
+            this.metadataSelectTarget.value = firstOption.value
+            this.updateMetadata()
+          }
+        }
+      }, 100) // Small delay to ensure DOM is ready
     }
     
     // Add click outside listener to close dropdowns
@@ -133,6 +166,10 @@ export default class extends Controller {
     // Initialize metadata vectors storage
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
+    
+    // Memory management for metadata vectors
+    this.metadataUsageTracker = new Map() // Track when metadata was last accessed
+    this.maxMetadataInMemory = 5 // Default buffer size, will be adjusted based on dataset size
     
     // Initialize interaction mode state
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
@@ -153,6 +190,8 @@ export default class extends Controller {
     // Initialize tooltip state
     this.tooltip = null
     this.tooltipContent = null
+    this.fixedTooltipCellId = null // Cell ID for fixed tooltip (clicked cell)
+    this.isTooltipFixed = false // Whether tooltip is fixed to a clicked cell
     
     // Zoom mode state
     this.isDrawingZoom = false
@@ -175,6 +214,11 @@ export default class extends Controller {
       // Initialize the selection count display
       this.updateSelectedCellsCount()
     }, 100)
+    
+    // Create diagnostic button after a delay (fallback in case preloading doesn't complete)
+    setTimeout(() => {
+      this.createDiagnosticButton()
+    }, 3000) // Wait 3 seconds after connection
     
     // No automatic loading - metadata will be loaded on-demand when needed
   }
@@ -356,6 +400,9 @@ export default class extends Controller {
             }
           } else {
             console.log(`💾 Metadata ${metadataId} not found in IndexedDB`)
+            
+            // Debug info removed - use diagnostic button for detailed analysis
+            
             resolve(null)
           }
         }
@@ -476,11 +523,12 @@ export default class extends Controller {
   }
 
   createTooltipDynamically() {
-    //console.log('Creating tooltip dynamically')
+    console.log('🎯 [Tooltip] Creating tooltip dynamically')
     
     // Remove existing tooltip if it exists
     const existingTooltip = document.getElementById('point-tooltip')
     if (existingTooltip) {
+      console.log('🎯 [Tooltip] Removing existing tooltip')
       existingTooltip.remove()
     }
     
@@ -513,11 +561,12 @@ export default class extends Controller {
     // Add to body
     document.body.appendChild(this.tooltip)
     
-    /*console.log('Tooltip created dynamically:', {
+    console.log('🎯 [Tooltip] Tooltip created dynamically:', {
       tooltip: this.tooltip,
       tooltipContent: this.tooltipContent,
-      parentNode: this.tooltip.parentNode
-    })*/
+      parentNode: this.tooltip.parentNode,
+      tooltipId: this.tooltip.id
+    })
   }
 
   setupInteractionSystem() {
@@ -720,6 +769,78 @@ export default class extends Controller {
     } catch (error) {
       console.error('Error loading metadata coordinates:', error)
       alert(`Failed to load metadata coordinates: ${error.message}`)
+    }
+  }
+
+  // Silent version of loadMetadataCoordinates - only caches without displaying
+  async loadMetadataCoordinatesSilently(metadataId, metadataName = 'unknown') {
+    try {
+      // Check cache first - if already cached, nothing to do
+      if (this.binaryDataCache.has(metadataId)) {
+        return { success: true, cached: true }
+      }
+      
+      // Get the current loom file selection
+      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
+      
+      // Build the URL for the metadata coordinates endpoint
+      const projectId = window.location.pathname.split('/')[2]
+      const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      // Get CSRF token
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = { 'Accept': 'application/octet-stream' }
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      // Check for JSON error
+      const contentType = response.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Unknown error')
+      }
+      
+      // Extract metadata from headers
+      const headerMetadataId = response.headers.get('X-Metadata-ID')
+      const responseName = response.headers.get('X-Metadata-Name')
+      const cellCount = parseInt(response.headers.get('X-Cell-Count'))
+      
+      // Get the binary data
+      const arrayBuffer = await response.arrayBuffer()
+      
+      // Prepare data object
+      const dataObject = {
+        id: headerMetadataId,
+        name: responseName,
+        cellCount: cellCount,
+        binaryData: arrayBuffer
+      }
+      
+      // Cache binary data (but DON'T call storeBinaryMetadataData - that would display it)
+      this.binaryDataCache.set(metadataId, dataObject)
+      
+      return { 
+        success: true, 
+        cached: false,
+        size: (arrayBuffer.byteLength / 1024).toFixed(1) + 'KB'
+      }
+      
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error.message 
+      }
     }
   }
 
@@ -1010,11 +1131,11 @@ export default class extends Controller {
       
       // Only auto-preload if the option is enabled
       if (this.autoPreloadMetadata) {
-        setTimeout(() => {
-          this.preloadAllMetadata().catch(error => {
-            console.log('Background metadata preload encountered an error:', error)
-          })
-        }, 1000) // Start after 1 second delay to let initial render complete
+        // Start preloading immediately (in background, ordered: embeddings → categorical → continuous)
+        console.log('🚀 Automatic metadata preload disabled - using on-demand loading instead')
+        // this.preloadAllMetadata().catch(error => {
+        //   console.log('Background metadata preload encountered an error:', error)
+        // })
       } else {
         console.log('🚀 Auto-preload disabled - metadata will load on hover/click only')
       }
@@ -1946,6 +2067,7 @@ export default class extends Controller {
   // Load a single metadata vector on demand
   async loadSingleMetadataVector(metadataId) {
     console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
+    console.log(`Call stack:`, new Error().stack)
     
     // Check if already loaded in memory
     if (this.loadedMetadataVectors[metadataId]) {
@@ -2256,9 +2378,9 @@ export default class extends Controller {
   }
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
-    //console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
+    console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
     
-    // Load the metadata vector on-demand
+    // Ensure metadata is loaded into memory for fast access
     let vectorData = await this.loadSingleMetadataVector(metadataId)
     
     if (!vectorData) {
@@ -2397,6 +2519,9 @@ export default class extends Controller {
     
     // Clear incremental state when new metadata is loaded
     this.clearIncrementalState()
+    
+    // Clear performance caches for new metadata
+    this.clearPerformanceCaches()
     
     // Don't clear checkbox selections - preserve them when switching metadata
     // This allows users to maintain their filter selections across different visualizations
@@ -2542,9 +2667,34 @@ export default class extends Controller {
       // Get the current loom file
       const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
       
+      // Special debugging for sex and age metadata
+      const metadataName = this.getMetadataNameById(metadataId)
+      if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+        console.log(`🔍 [SEX/AGE DEBUG] About to request ${metadataName} (${metadataId})`)
+        console.log(`🔍 [SEX/AGE DEBUG] Loom file selector value: "${this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : 'N/A'}"`)
+        console.log(`🔍 [SEX/AGE DEBUG] Default loom file value: "${this.defaultLoomFileValue}"`)
+        console.log(`🔍 [SEX/AGE DEBUG] Final loom file: "${loomFile}"`)
+      }
+      
+      // Check if loom file is available
+      if (!loomFile) {
+        const errorMsg = `No loom file available for metadata ${metadataId}`
+        if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+          console.log(`🔍 [SEX/AGE DEBUG] ${errorMsg}`)
+        }
+        throw new Error(errorMsg)
+      }
+      
       // Build the URL for the single metadata vector endpoint
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
       const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      // Additional debugging for sex and age metadata
+      if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+        console.log(`🔍 [SEX/AGE DEBUG] Requesting ${metadataName} (${metadataId}) from URL: ${url}`)
+        console.log(`🔍 [SEX/AGE DEBUG] Current loom file: "${loomFile}"`)
+        console.log(`🔍 [SEX/AGE DEBUG] Project ID: ${projectId}`)
+      }
       
       //console.log(`Fetching single metadata vector silently from URL: ${url}`)
       
@@ -2572,7 +2722,21 @@ export default class extends Controller {
       }
       
       const data = await response.json()
-      //console.log('Received single metadata vector data silently:', data)
+      // Reduced logging for cleaner output
+      
+      // Special debugging for sex and age metadata
+      if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+        console.log(`🔍 [SEX/AGE DEBUG] Server response for ${metadataName} (${metadataId}):`, {
+          hasMetadataVectors: !!data.metadata_vectors,
+          metadataVectorsKeys: data.metadata_vectors ? Object.keys(data.metadata_vectors) : [],
+          requestedId: metadataId,
+          foundInResponse: !!data.metadata_vectors?.[metadataId],
+          totalLoaded: data.total_loaded,
+          availableLoomFiles: data.loom_files,
+          requestedLoomFile: loomFile,
+          fullResponse: data
+        })
+      }
       
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
@@ -2617,26 +2781,52 @@ export default class extends Controller {
 
   // Show loading spinner for a specific metadata ID
   showLoadingSpinner(metadataId) {
+    // Show spinner in place of the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      // Store original content if not already stored
+      if (!metadataCheckbox.dataset.originalContent) {
+        metadataCheckbox.dataset.originalContent = metadataCheckbox.innerHTML
+      }
+      
+      // Show the checkbox container and replace content with spinner
+      metadataCheckbox.style.display = 'flex'
+      metadataCheckbox.innerHTML = `
+        <svg style="width: 12px; height: 12px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+            <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      `
+      
+      // Disable checkbox during loading
+      metadataCheckbox.style.pointerEvents = 'none'
+      metadataCheckbox.style.opacity = '0.7'
+    }
+    
+    // Also show spinner on water drop button for consistency
     const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
-    if (!button) {
-      //console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
-      return
+    if (button) {
+      // Store original content
+      if (!button.dataset.originalContent) {
+        button.dataset.originalContent = button.innerHTML
+      }
+      
+      // Replace with spinner
+      button.innerHTML = `
+        <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+            <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      `
+      
+      // Disable button during loading
+      button.disabled = true
+      button.style.cursor = 'wait'
     }
-    
-    // Store original content
-    if (!button.dataset.originalContent) {
-      button.dataset.originalContent = button.innerHTML
-    }
-    
-    // Replace with spinner
-    button.innerHTML = `
-      <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
-        <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
-          <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
-        </circle>
-      </svg>
-    `
     
     // Add CSS animation if not already added
     if (!document.getElementById('spinner-styles')) {
@@ -2651,29 +2841,41 @@ export default class extends Controller {
       document.head.appendChild(style)
     }
     
-    // Disable button during loading
-    button.disabled = true
-    button.style.cursor = 'wait'
-    
     //console.log(`Showing loading spinner for metadata ${metadataId}`)
   }
 
   // Hide loading spinner for a specific metadata ID
   hideLoadingSpinner(metadataId) {
+    // Restore the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      // Restore original content
+      if (metadataCheckbox.dataset.originalContent) {
+        metadataCheckbox.innerHTML = metadataCheckbox.dataset.originalContent
+      }
+      
+      // Re-enable checkbox
+      metadataCheckbox.style.pointerEvents = 'auto'
+      metadataCheckbox.style.opacity = '1'
+      
+      // Keep the checkbox visible since metadata is now loaded
+      metadataCheckbox.style.display = 'flex'
+    }
+    
+    // Restore the water drop button
     const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
-    if (!button) {
+    if (button) {
+      // Restore original content
+      if (button.dataset.originalContent) {
+        button.innerHTML = button.dataset.originalContent
+      }
+      
+      // Re-enable button
+      button.disabled = false
+      button.style.cursor = 'pointer'
+    } else {
       console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
-      return
     }
-    
-    // Restore original content
-    if (button.dataset.originalContent) {
-      button.innerHTML = button.dataset.originalContent
-    }
-    
-    // Re-enable button
-    button.disabled = false
-    button.style.cursor = 'pointer'
     
     //console.log(`Hiding loading spinner for metadata ${metadataId}`)
   }
@@ -2692,9 +2894,9 @@ export default class extends Controller {
     this.preloadTimeout = setTimeout(() => {
     // Only preload if not already loaded and not currently loading
     if (!this.loadedMetadataVectors[metadataId] && !this.loadingMetadataVectors.has(metadataId)) {
-      //console.log(`Preloading metadata vector ${metadataId} on hover`)
-      // Load in background without showing spinner
-      this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+      console.log(`🚀 Preloading metadata vector ${metadataId} on hover`)
+      // Load into memory for fast access (without showing spinner)
+      this.loadSingleMetadataVector(metadataId).catch(error => {
         console.log(`Preload failed for metadata ${metadataId}:`, error.message)
         // Don't show error to user for preloading failures
       })
@@ -2710,100 +2912,890 @@ export default class extends Controller {
     }
   }
   
-  // Preload all metadata vectors for instant switching
+  // Helper function to get metadata name by ID
+  getMetadataNameById(metadataId) {
+    const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-metadata-name]`)
+    return button ? button.dataset.metadataName : null
+  }
+
+  // Calculate optimal memory buffer size based on dataset characteristics
+  calculateOptimalBufferSize() {
+    // Get dataset size information
+    const totalCells = this.currentCoordinates?.length || 0
+    const totalMetadata = document.querySelectorAll('button[data-metadata-id]').length
+    
+    console.log(`🧠 [Memory] Calculating buffer size for dataset: ${totalCells} cells, ${totalMetadata} metadata`)
+    
+    // Base buffer size on dataset size and available metadata
+    let bufferSize = 5 // Default minimum
+    
+    if (totalCells > 100000) {
+      // Large datasets: smaller buffer to save memory
+      bufferSize = Math.min(3, totalMetadata)
+    } else if (totalCells > 50000) {
+      // Medium datasets: moderate buffer
+      bufferSize = Math.min(5, totalMetadata)
+    } else if (totalCells > 10000) {
+      // Small datasets: larger buffer for better performance
+      bufferSize = Math.min(8, totalMetadata)
+    } else {
+      // Very small datasets: can afford larger buffer
+      bufferSize = Math.min(10, totalMetadata)
+    }
+    
+    // Ensure we always keep at least 1 metadata in memory (current one)
+    bufferSize = Math.max(1, bufferSize)
+    
+    console.log(`🧠 [Memory] Optimal buffer size: ${bufferSize} metadata vectors`)
+    return bufferSize
+  }
+
+  // Update metadata usage tracker
+  updateMetadataUsage(metadataId) {
+    const now = Date.now()
+    this.metadataUsageTracker.set(metadataId, now)
+    console.log(`🧠 [Memory] Updated usage for metadata ${metadataId} at ${now}`)
+  }
+
+  // Get least recently used metadata IDs
+  getLeastRecentlyUsedMetadata(limit = 1) {
+    const entries = Array.from(this.metadataUsageTracker.entries())
+      .sort((a, b) => a[1] - b[1]) // Sort by timestamp (oldest first)
+      .slice(0, limit)
+    
+    return entries.map(([metadataId]) => metadataId)
+  }
+
+  // Run comprehensive metadata diagnostic
+  async runMetadataDiagnostic() {
+    console.log(`\n🔍 [DIAGNOSTIC] Starting comprehensive metadata analysis... (v2.0 - Fixed disk-first logic)`)
+    
+    // 1. Check UI metadata
+    const allMetadataButtons = document.querySelectorAll('button[data-metadata-id]')
+    const uiMetadataIds = Array.from(allMetadataButtons).map(btn => btn.dataset.metadataId).filter(id => id)
+    const uiMetadataInfo = Array.from(allMetadataButtons).map(btn => ({
+      id: btn.dataset.metadataId,
+      name: btn.dataset.metadataName,
+      type: btn.dataset.metadataType,
+      hasMetadataItem: !!btn.closest('[data-metadata-item]'),
+      hasWaterDropAction: btn.dataset.action?.includes('waterDropClicked')
+    }))
+    
+    console.log(`🔍 [DIAGNOSTIC] UI Metadata Analysis:`)
+    console.log(`  📊 Total metadata buttons found: ${allMetadataButtons.length}`)
+    console.log(`  📊 Valid metadata IDs: ${uiMetadataIds.length}`)
+    console.log(`  📊 First 10 UI metadata IDs:`, uiMetadataIds.slice(0, 10))
+    console.log(`  📊 Last 10 UI metadata IDs:`, uiMetadataIds.slice(-10))
+    
+    // 2. Check IndexedDB storage
+    let indexedDBMetadata = []
+    if (this.db) {
+      try {
+        const transaction = this.db.transaction(['metadataVectors'], 'readonly')
+        const objectStore = transaction.objectStore('metadataVectors')
+        const request = objectStore.getAll()
+        
+        indexedDBMetadata = await new Promise((resolve) => {
+          request.onsuccess = () => {
+            resolve(request.result || [])
+          }
+          request.onerror = () => {
+            console.error('Failed to read from IndexedDB')
+            resolve([])
+          }
+        })
+      } catch (error) {
+        console.error('Error accessing IndexedDB:', error)
+      }
+    }
+    
+    const storedIds = indexedDBMetadata.map(m => m.id)
+    console.log(`🔍 [DIAGNOSTIC] IndexedDB Analysis:`)
+    console.log(`  💾 Total metadata stored: ${indexedDBMetadata.length}`)
+    console.log(`  💾 First 10 stored metadata IDs:`, storedIds.slice(0, 10))
+    console.log(`  💾 Last 10 stored metadata IDs:`, storedIds.slice(-10))
+    
+    // 3. Check memory storage
+    const memoryIds = Object.keys(this.loadedMetadataVectors)
+    console.log(`🔍 [DIAGNOSTIC] Memory Analysis:`)
+    console.log(`  🧠 Metadata in memory: ${memoryIds.length}`)
+    console.log(`  🧠 Memory metadata IDs:`, memoryIds)
+    console.log(`  🧠 Buffer size: ${this.maxMetadataInMemory}`)
+    console.log(`  🧠 Buffer utilization: ${((memoryIds.length / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
+    
+    // 4. Find mismatches (with disk-first approach understanding)
+    // For disk-first approach: metadata can be in IndexedDB without being in memory
+    const availableMetadata = [...new Set([...storedIds, ...memoryIds])]
+    const missingMetadata = uiMetadataIds.filter(id => !availableMetadata.includes(id))
+    const storedOnly = storedIds.filter(id => !uiMetadataIds.includes(id))
+    const memoryOnly = memoryIds.filter(id => !storedIds.includes(id))
+    
+    console.log(`🔍 [DIAGNOSTIC] Mismatch Analysis:`)
+    console.log(`  🔍 Debug: UI metadata count: ${uiMetadataIds.length}`)
+    console.log(`  🔍 Debug: IndexedDB metadata count: ${storedIds.length}`)
+    console.log(`  🔍 Debug: Memory metadata count: ${memoryIds.length}`)
+    console.log(`  🔍 Debug: Available metadata count: ${availableMetadata.length}`)
+    
+    if (missingMetadata.length > 0) {
+      console.log(`  ⚠️ UI metadata not available anywhere:`, missingMetadata)
+    }
+    if (storedOnly.length > 0) {
+      console.log(`  ⚠️ IndexedDB-only metadata (not in UI):`, storedOnly)
+    }
+    if (memoryOnly.length > 0) {
+      console.log(`  ⚠️ Memory-only metadata (not in IndexedDB):`, memoryOnly)
+    }
+    
+    console.log(`🔍 [DIAGNOSTIC] Availability Summary:`)
+    console.log(`  ✅ Available metadata (disk + memory): ${availableMetadata.length}`)
+    console.log(`  ❌ Missing metadata: ${missingMetadata.length}`)
+    const coverage = uiMetadataIds.length > 0 ? ((availableMetadata.length / uiMetadataIds.length) * 100).toFixed(1) : '0.0'
+    console.log(`  📊 Coverage: ${coverage}%`)
+    console.log(`  📊 Note: Coverage > 100% means IndexedDB has more metadata than UI (possible with old data)`)
+    
+    // 5. Check specific problematic metadata
+    const problematicId = '469981' // Changed to the one mentioned by user
+    console.log(`🔍 [DIAGNOSTIC] Problematic Metadata Analysis (ID: ${problematicId}):`)
+    console.log(`  🔍 In UI:`, uiMetadataIds.includes(problematicId))
+    console.log(`  🔍 In IndexedDB:`, storedIds.includes(problematicId))
+    console.log(`  🔍 In Memory:`, memoryIds.includes(problematicId))
+    console.log(`  🔍 In Available:`, availableMetadata.includes(problematicId))
+    console.log(`  🔍 In Missing:`, missingMetadata.includes(problematicId))
+    console.log(`  🔍 In StoredOnly:`, storedOnly.includes(problematicId))
+    
+    if (uiMetadataIds.includes(problematicId)) {
+      const uiInfo = uiMetadataInfo.find(m => m.id === problematicId)
+      console.log(`  🔍 UI Info:`, uiInfo)
+    }
+    
+    if (storedIds.includes(problematicId)) {
+      const storedInfo = indexedDBMetadata.find(m => m.id === problematicId)
+      console.log(`  🔍 IndexedDB Info:`, {
+        id: storedInfo.id,
+        name: storedInfo.name,
+        data_type: storedInfo.data_type,
+        loomFile: storedInfo.loomFile,
+        hasValues: !!storedInfo.values,
+        hasCompressedData: !!storedInfo.compressed_data
+      })
+    }
+    
+    // 6. Recommendations
+    console.log(`🔍 [DIAGNOSTIC] Recommendations:`)
+    if (missingMetadata.length > 0) {
+      console.log(`  💡 Consider preloading missing UI metadata: ${missingMetadata.join(', ')}`)
+    }
+    if (storedOnly.length > 0) {
+      console.log(`  💡 Consider cleaning up orphaned IndexedDB metadata: ${storedOnly.join(', ')}`)
+    }
+    
+    // Additional recommendations based on disk-first approach
+    if (availableMetadata.length === uiMetadataIds.length) {
+      console.log(`  ✅ All UI metadata are available (disk-first approach working correctly)`)
+    }
+    if (memoryIds.length > 0) {
+      console.log(`  💡 Memory contains ${memoryIds.length} metadata (LRU cache active)`)
+    }
+    if (memoryOnly.length > 0) {
+      console.log(`  💡 Consider syncing memory-only metadata to IndexedDB`)
+    }
+    
+    console.log(`🔍 [DIAGNOSTIC] Analysis complete! (Updated: ${new Date().toISOString()})`)
+    
+    return {
+      uiMetadata: uiMetadataInfo,
+      indexedDBMetadata: indexedDBMetadata,
+      memoryMetadata: memoryIds,
+      mismatches: {
+        missingMetadata,
+        storedOnly,
+        memoryOnly
+      }
+    }
+  }
+
+  // Emergency diagnostic for infinite loop detection
+  runEmergencyDiagnostic() {
+    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Starting...`)
+    
+    console.log(`🔍 Loading call counts:`, this.loadingCallCount ? Object.fromEntries(this.loadingCallCount) : 'None')
+    console.log(`🔍 Currently loading:`, Array.from(this.loadingMetadataVectors))
+    console.log(`🔍 Loaded in memory:`, Object.keys(this.loadedMetadataVectors))
+    
+    // Check for problematic metadata
+    if (this.loadingCallCount) {
+      const problematicMetadata = Array.from(this.loadingCallCount.entries())
+        .filter(([id, count]) => count > 3)
+        .map(([id, count]) => `${id} (${count} calls)`)
+      
+      if (problematicMetadata.length > 0) {
+        console.error(`🚨 PROBLEMATIC METADATA:`, problematicMetadata)
+      }
+    }
+    
+    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Complete`)
+  }
+
+  // Create and show diagnostic button
+  createDiagnosticButton() {
+    console.log('🔍 [DIAGNOSTIC] Creating diagnostic button...')
+    
+    // Remove existing diagnostic button if it exists
+    const existingButton = document.getElementById('metadata-diagnostic-btn')
+    if (existingButton) {
+      console.log('🔍 [DIAGNOSTIC] Removing existing button')
+      existingButton.remove()
+    }
+
+    // Create diagnostic button
+    const diagnosticBtn = document.createElement('button')
+    diagnosticBtn.id = 'metadata-diagnostic-btn'
+    diagnosticBtn.className = 'btn btn-outline-info btn-sm'
+    diagnosticBtn.innerHTML = '🔍 Run Metadata Diagnostic'
+    diagnosticBtn.style.margin = '10px'
+    diagnosticBtn.style.position = 'fixed'
+    diagnosticBtn.style.top = '10px'
+    diagnosticBtn.style.right = '10px'
+    diagnosticBtn.style.zIndex = '9999'
+    diagnosticBtn.style.backgroundColor = '#17a2b8'
+    diagnosticBtn.style.color = 'white'
+    diagnosticBtn.style.border = '1px solid #17a2b8'
+    diagnosticBtn.style.borderRadius = '4px'
+    diagnosticBtn.style.padding = '8px 16px'
+    diagnosticBtn.style.fontSize = '14px'
+    diagnosticBtn.style.cursor = 'pointer'
+    diagnosticBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)'
+    
+    diagnosticBtn.addEventListener('click', async () => {
+      console.log('🔍 [DIAGNOSTIC] Button clicked, starting diagnostic...')
+      diagnosticBtn.disabled = true
+      diagnosticBtn.innerHTML = '🔍 Running Diagnostic...'
+      
+      try {
+        await this.runMetadataDiagnostic()
+        diagnosticBtn.innerHTML = '✅ Diagnostic Complete'
+        setTimeout(() => {
+          diagnosticBtn.innerHTML = '🔍 Run Metadata Diagnostic'
+          diagnosticBtn.disabled = false
+        }, 3000)
+      } catch (error) {
+        console.error('Diagnostic failed:', error)
+        diagnosticBtn.innerHTML = '❌ Diagnostic Failed'
+        setTimeout(() => {
+          diagnosticBtn.innerHTML = '🔍 Run Metadata Diagnostic'
+          diagnosticBtn.disabled = false
+        }, 3000)
+      }
+    })
+
+    // Add to page
+    document.body.appendChild(diagnosticBtn)
+    console.log('🔍 [DIAGNOSTIC] Diagnostic button created and added to page')
+    console.log('🔍 [DIAGNOSTIC] Button element:', diagnosticBtn)
+    console.log('🔍 [DIAGNOSTIC] Button position:', {
+      top: diagnosticBtn.style.top,
+      right: diagnosticBtn.style.right,
+      position: diagnosticBtn.style.position,
+      zIndex: diagnosticBtn.style.zIndex
+    })
+    
+    // Also make it available globally for manual testing
+    window.showDiagnosticButton = () => {
+      console.log('🔍 [DIAGNOSTIC] Manual button creation triggered')
+      this.createDiagnosticButton()
+    }
+    
+    console.log('🔍 [DIAGNOSTIC] You can also call window.showDiagnosticButton() to manually show the button')
+  }
+
+  // Clean up unused metadata from memory
+  cleanupUnusedMetadata() {
+    const currentCount = Object.keys(this.loadedMetadataVectors).length
+    
+    if (currentCount <= this.maxMetadataInMemory) {
+      console.log(`🧠 [Memory] No cleanup needed: ${currentCount}/${this.maxMetadataInMemory} metadata in memory`)
+      return
+    }
+    
+    const toRemove = currentCount - this.maxMetadataInMemory
+    console.log(`🧠 [Memory] Need to remove ${toRemove} metadata vectors from memory`)
+    
+    // Get the least recently used metadata
+    const lruMetadata = this.getLeastRecentlyUsedMetadata(toRemove)
+    
+    // Don't remove the current metadata
+    const currentMetadataId = this.currentMetadataVector?.id
+    const metadataToRemove = lruMetadata.filter(id => id !== currentMetadataId)
+    
+    let removedCount = 0
+    metadataToRemove.forEach(metadataId => {
+      if (this.loadedMetadataVectors[metadataId]) {
+        delete this.loadedMetadataVectors[metadataId]
+        this.metadataUsageTracker.delete(metadataId)
+        removedCount++
+        console.log(`🧠 [Memory] Removed metadata ${metadataId} from memory`)
+      }
+    })
+    
+    console.log(`🧠 [Memory] Cleanup complete: removed ${removedCount} metadata vectors`)
+    
+    // Force garbage collection if available
+    if (window.gc) {
+      window.gc()
+      console.log(`🧠 [Memory] Forced garbage collection`)
+    }
+  }
+
+  // Preload metadata vector directly to disk (IndexedDB) without keeping in memory
+  async preloadMetadataToDisk(metadataId) {
+    console.log(`💾 [DISK] Preloading metadata ${metadataId} directly to disk...`)
+    
+    // Check if already stored on disk
+    const existingData = await this.loadMetadataFromIndexedDB(metadataId)
+    if (existingData) {
+      console.log(`💾 [DISK] Metadata ${metadataId} already exists on disk`)
+      return { success: true, cached: true }
+    }
+    
+    // Check if currently loading
+    if (this.loadingMetadataVectors.has(metadataId)) {
+      console.log(`💾 [DISK] Metadata ${metadataId} is currently loading, waiting...`)
+      while (this.loadingMetadataVectors.has(metadataId)) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      return { success: true, cached: true }
+    }
+    
+    // Mark as loading
+    this.loadingMetadataVectors.add(metadataId)
+    
+    try {
+      // Get the current loom file
+      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      
+      if (!loomFile) {
+        throw new Error(`No loom file available for metadata ${metadataId}`)
+      }
+      
+      // Build the URL for the single metadata vector endpoint
+      const projectId = window.location.pathname.split('/')[2]
+      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile)}`
+      
+      // Get CSRF token safely
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+      
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken
+      }
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      const vectorData = data.metadata_vectors[metadataId]
+      
+      if (vectorData) {
+        // Parse compression_info if it's a JSON string
+        if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
+          try {
+            vectorData.compression_info = JSON.parse(vectorData.compression_info)
+          } catch (e) {
+            console.error('Failed to parse compression_info:', e)
+          }
+        }
+        
+        // Store directly to IndexedDB (disk) without keeping in memory
+        const storeSuccess = await this.storeMetadataInIndexedDB(metadataId, vectorData)
+        
+        if (storeSuccess) {
+          const info = vectorData.compression_info
+          console.log(`💾 [DISK] Successfully stored metadata ${vectorData.name} to disk (${info.type}): ${info.binary_size} bytes`)
+          
+          // Show checkboxes for this metadata now that it's available on disk
+          this.showCheckboxesForMetadata(metadataId)
+          
+          return { success: true, cached: false, size: info.binary_size }
+        } else {
+          throw new Error('Failed to store metadata to IndexedDB')
+        }
+      } else {
+        throw new Error(`Metadata vector ${metadataId} not found in response`)
+      }
+      
+    } catch (error) {
+      console.error(`💾 [DISK] Error preloading metadata ${metadataId} to disk:`, error)
+      return { success: false, error: error.message }
+    } finally {
+      // Remove from loading set
+      this.loadingMetadataVectors.delete(metadataId)
+    }
+  }
+
+  // Assess performance after preloading to identify optimization opportunities
+  async assessPerformanceAfterPreload() {
+    console.log(`\n🔍 [PERF] Assessing performance after preloading...`)
+    
+    // Memory usage analysis
+    const memoryInfo = this.logMemoryUsage('Performance Assessment')
+    
+    // Count loaded metadata vectors and estimate memory usage
+    const loadedMetadataCount = Object.keys(this.loadedMetadataVectors).length
+    const loadingCount = this.loadingMetadataVectors.size
+    
+    console.log(`📊 [PERF] Metadata vectors in memory: ${loadedMetadataCount}/${this.maxMetadataInMemory}`)
+    console.log(`📊 [PERF] Currently loading: ${loadingCount}`)
+    console.log(`💾 [PERF] Using disk-first preloading with LRU memory buffer`)
+    console.log(`🧠 [Memory] Buffer utilization: ${((loadedMetadataCount / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
+    
+    // Estimate memory usage per metadata vector (only what's actually in memory)
+    let totalEstimatedMemory = 0
+    let largestMetadata = null
+    let largestSize = 0
+    
+    Object.entries(this.loadedMetadataVectors).forEach(([id, data]) => {
+      if (data && data.compression_info) {
+        const size = data.compression_info.binary_size || 0
+        totalEstimatedMemory += size
+        
+        if (size > largestSize) {
+          largestSize = size
+          largestMetadata = { id, name: this.getMetadataNameById(id), size }
+        }
+      }
+    })
+    
+    console.log(`📊 [PERF] Estimated metadata memory usage: ${(totalEstimatedMemory / 1024 / 1024).toFixed(2)} MB (only active metadata)`)
+    if (largestMetadata) {
+      console.log(`📊 [PERF] Largest metadata in memory: ${largestMetadata.name} (${(largestMetadata.size / 1024 / 1024).toFixed(2)} MB)`)
+    }
+    
+    // Performance timing test
+    const startTime = performance.now()
+    
+    // Test DOM responsiveness
+    const testElement = document.createElement('div')
+    document.body.appendChild(testElement)
+    testElement.style.display = 'none'
+    document.body.removeChild(testElement)
+    
+    const domTime = performance.now() - startTime
+    
+    // Test JavaScript responsiveness
+    const jsStartTime = performance.now()
+    let testSum = 0
+    for (let i = 0; i < 10000; i++) {
+      testSum += Math.random()
+    }
+    const jsTime = performance.now() - jsStartTime
+    
+    console.log(`⏱️ [PERF] DOM responsiveness: ${domTime.toFixed(2)}ms`)
+    console.log(`⏱️ [PERF] JavaScript responsiveness: ${jsTime.toFixed(2)}ms`)
+    
+    // Performance recommendations
+    const recommendations = []
+    
+    if (loadedMetadataCount > this.maxMetadataInMemory) {
+      recommendations.push('Memory buffer exceeded (' + loadedMetadataCount + '/' + this.maxMetadataInMemory + ' metadata) - LRU cleanup should trigger')
+    }
+    
+    if (totalEstimatedMemory > 100) { // More than 100MB in memory
+      recommendations.push('High memory usage detected (' + (totalEstimatedMemory / 1024 / 1024).toFixed(2) + 'MB) - consider reducing buffer size')
+    }
+    
+    if (domTime > 10) {
+      recommendations.push('DOM operations are slow (' + domTime.toFixed(2) + 'ms) - browser may be under memory pressure')
+    }
+    
+    if (jsTime > 5) {
+      recommendations.push('JavaScript execution is slow (' + jsTime.toFixed(2) + 'ms) - consider reducing memory usage')
+    }
+    
+    if (loadedMetadataCount <= 3 && totalEstimatedMemory < 20) {
+      recommendations.push('✅ Memory usage is optimal - using disk-first approach effectively')
+    }
+    
+    if (recommendations.length > 0) {
+      console.log(`💡 [PERF] Performance recommendations:`)
+      recommendations.forEach((rec, index) => {
+        console.log(`  ${index + 1}. ${rec}`)
+      })
+    } else {
+      console.log(`✅ [PERF] Performance looks good!`)
+    }
+    
+    // Suggest memory optimization if needed (with LRU system, this should rarely be needed)
+    if (loadedMetadataCount > this.maxMetadataInMemory || totalEstimatedMemory > 50) {
+      console.log(`\n🔧 [PERF] Suggesting memory optimization...`)
+      this.optimizeMemoryUsage()
+    }
+    
+    return {
+      loadedMetadataCount,
+      totalEstimatedMemory,
+      domTime,
+      jsTime,
+      recommendations
+    }
+  }
+
+  // Optimize memory usage by implementing LRU-based memory management
+  optimizeMemoryUsage() {
+    console.log(`🔧 [PERF] Starting LRU-based memory optimization...`)
+    
+    const loadedCount = Object.keys(this.loadedMetadataVectors).length
+    if (loadedCount <= this.maxMetadataInMemory) {
+      console.log(`🔧 [PERF] Memory usage is optimal (${loadedCount}/${this.maxMetadataInMemory} metadata vectors) - LRU buffer working well`)
+      return
+    }
+    
+    // Use the LRU cleanup system
+    this.cleanupUnusedMetadata()
+    
+    console.log(`🔧 [PERF] LRU-based memory optimization complete`)
+    console.log(`  📊 Buffer size: ${this.maxMetadataInMemory} metadata vectors`)
+    console.log(`  💾 All metadata is available on disk via IndexedDB`)
+    console.log(`  🧠 LRU system automatically manages memory usage`)
+    
+    // Log memory usage after optimization
+    setTimeout(() => {
+      this.logMemoryUsage('After LRU memory optimization')
+    }, 1000)
+  }
+
+  // Preload all metadata (embeddings + metadata vectors) for instant switching
   async preloadAllMetadata() {
-    console.log('🚀 [PERF] Starting background preload of all metadata vectors...')
+    console.log('🚀 [PERF] Starting background preload of all metadata...')
+    
+    // Calculate and set optimal buffer size based on dataset characteristics
+    this.maxMetadataInMemory = this.calculateOptimalBufferSize()
+    console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
     
     // Separate metadata by type for ordered preloading
     const visualizationEmbeddings = []
     const categoricalMetadata = []
     const continuousMetadata = []
     
-    // 1. Get visualization embeddings from dropdown
+    // 1. Get visualization embeddings from dropdown (2D/3D coordinate data)
     const embeddingDropdown = document.getElementById('metadata-select-dropdown')
     if (embeddingDropdown) {
       const options = embeddingDropdown.querySelectorAll('option[value]:not([value=""])')
       options.forEach(option => {
-        const metadataId = option.value
-        if (metadataId) {
-          visualizationEmbeddings.push(metadataId)
+        const embeddingId = option.value
+        const embeddingName = option.textContent
+        if (embeddingId) {
+          visualizationEmbeddings.push({ id: embeddingId, name: embeddingName })
         }
       })
     }
     
-    // 2. Get categorical and continuous metadata from buttons
-    const metadataButtons = document.querySelectorAll('[data-metadata-id]')
-    metadataButtons.forEach(btn => {
-      const metadataId = btn.dataset.metadataId
-      const metadataType = btn.dataset.metadataType
-      
-      if (!metadataId) return
-      
-      if (metadataType === 'DISCRETE') {
-        categoricalMetadata.push(metadataId)
-      } else if (metadataType === 'NUMERIC') {
-        continuousMetadata.push(metadataId)
+    // Use Sets to avoid duplicates (multiple elements might have same metadata-id)
+    const categoricalSet = new Set()
+    const continuousSet = new Set()
+    const embeddingSet = new Set(visualizationEmbeddings.map(e => e.id))
+    
+    // 2. Get categorical and continuous metadata from the palette buttons
+    const metadataButtons = document.querySelectorAll('[data-metadata-item] button[data-action*="waterDropClicked"][data-metadata-id][data-metadata-type]')
+    console.log(`🔍 [Preload Debug] Found ${metadataButtons.length} metadata palette buttons in left panel`)
+    
+    // Debug: Let's also check for all buttons with metadata attributes
+    const allMetadataButtons = document.querySelectorAll('button[data-metadata-id]')
+    console.log(`🔍 [Preload Debug] Found ${allMetadataButtons.length} total buttons with data-metadata-id`)
+    
+    // Debug: Check for sex and age buttons specifically
+    allMetadataButtons.forEach(btn => {
+      const name = btn.dataset.metadataName
+      if (name && (name.toLowerCase().includes('sex') || name.toLowerCase().includes('age'))) {
+        console.log(`🔍 [SEX/AGE DEBUG] Found button for ${name}:`, {
+          hasMetadataItem: !!btn.closest('[data-metadata-item]'),
+          hasWaterDropAction: btn.dataset.action?.includes('waterDropClicked'),
+          hasMetadataId: !!btn.dataset.metadataId,
+          hasMetadataType: !!btn.dataset.metadataType,
+          metadataType: btn.dataset.metadataType,
+          element: btn
+        })
       }
     })
     
+    // Debug info removed - use diagnostic button for detailed analysis
+    
+    metadataButtons.forEach(btn => {
+      const metadataId = btn.dataset.metadataId
+      const metadataType = btn.dataset.metadataType
+      const metadataName = btn.dataset.metadataName || 'unknown'
+      
+      // Special logging for sex and age metadata
+      if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+        console.log(`🔍 [SEX/AGE DEBUG] Found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
+        console.log(`🔍 [SEX/AGE DEBUG] Button element:`, btn)
+        console.log(`🔍 [SEX/AGE DEBUG] Button dataset:`, btn.dataset)
+      }
+      
+      if (!metadataId) return
+      
+      // Process categorical and continuous metadata (excluding embeddings)
+      if (metadataType === 'DISCRETE') {
+        if (!categoricalSet.has(metadataId)) {
+          categoricalSet.add(metadataId)
+          console.log(`  ✅ Categorical: ${metadataName} (${metadataId})`)
+          
+          // Special logging for sex and age
+          if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+            console.log(`🔍 [SEX/AGE DEBUG] Added to categorical set: ${metadataName}`)
+          }
+        }
+      } else if (metadataType === 'NUMERIC') {
+        // Skip if it's an embedding (will be preloaded separately)
+        if (embeddingSet.has(metadataId)) {
+          console.log(`  📊 Embedding: ${metadataName} (${metadataId}) - will preload with embeddings`)
+          
+          // Special logging for sex and age
+          if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+            console.log(`🔍 [SEX/AGE DEBUG] Skipped as embedding: ${metadataName}`)
+          }
+        } else if (!continuousSet.has(metadataId)) {
+          continuousSet.add(metadataId)
+          console.log(`  ✅ Continuous: ${metadataName} (${metadataId})`)
+          
+          // Special logging for sex and age
+          if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+            console.log(`🔍 [SEX/AGE DEBUG] Added to continuous set: ${metadataName}`)
+          }
+        }
+      } else {
+        console.warn(`  ⚠️  Unknown metadata type "${metadataType}" for ${metadataName} (${metadataId})`)
+        
+        // Special logging for sex and age
+        if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+          console.log(`🔍 [SEX/AGE DEBUG] Unknown type for: ${metadataName} - Type: ${metadataType}`)
+        }
+      }
+    })
+    
+    // Convert Sets to Arrays
+    categoricalMetadata.push(...categoricalSet)
+    continuousMetadata.push(...continuousSet)
+    
+    // Fallback: If we didn't find any metadata buttons with the strict selector, try a more lenient approach
+    if (metadataButtons.length === 0) {
+      console.log(`🔍 [Preload Debug] No buttons found with strict selector, trying fallback...`)
+      
+      // Try to find buttons with just the basic attributes
+      const fallbackButtons = document.querySelectorAll('button[data-metadata-id][data-metadata-type]')
+      console.log(`🔍 [Preload Debug] Found ${fallbackButtons.length} buttons with fallback selector`)
+      
+      fallbackButtons.forEach(btn => {
+        const metadataId = btn.dataset.metadataId
+        const metadataType = btn.dataset.metadataType
+        const metadataName = btn.dataset.metadataName || 'unknown'
+        
+        // Special logging for sex and age metadata
+        if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
+          console.log(`🔍 [SEX/AGE DEBUG] Fallback found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
+        }
+        
+        if (!metadataId) return
+        
+        // Process categorical and continuous metadata (excluding embeddings)
+        if (metadataType === 'DISCRETE') {
+          if (!categoricalSet.has(metadataId)) {
+            categoricalSet.add(metadataId)
+            console.log(`  ✅ Categorical (fallback): ${metadataName} (${metadataId})`)
+          }
+        } else if (metadataType === 'NUMERIC') {
+          // Skip if it's an embedding (will be preloaded separately)
+          if (embeddingSet.has(metadataId)) {
+            console.log(`  📊 Embedding (fallback): ${metadataName} (${metadataId}) - will preload with embeddings`)
+          } else if (!continuousSet.has(metadataId)) {
+            continuousSet.add(metadataId)
+            console.log(`  ✅ Continuous (fallback): ${metadataName} (${metadataId})`)
+          }
+        }
+      })
+      
+      // Update the arrays with any new metadata found via fallback
+      categoricalMetadata.length = 0
+      continuousMetadata.length = 0
+      categoricalMetadata.push(...categoricalSet)
+      continuousMetadata.push(...continuousSet)
+    }
+    
     console.log(`🚀 [PERF] Found metadata to preload:`)
-    console.log(`  - ${visualizationEmbeddings.length} visualization embeddings`)
+    console.log(`  - ${visualizationEmbeddings.length} visualization embeddings:`, visualizationEmbeddings.slice(0, 3).map(e => e.name))
     console.log(`  - ${categoricalMetadata.length} categorical metadata`)
     console.log(`  - ${continuousMetadata.length} continuous metadata`)
     
-    // Preload in order: embeddings, then categorical, then continuous
-    const orderedMetadata = [
-      ...visualizationEmbeddings,
-      ...categoricalMetadata,
-      ...continuousMetadata
-    ]
+    // Special logging for sex and age in final lists
+    const allMetadataToPreload = [...categoricalMetadata, ...continuousMetadata]
+    const sexAgeMetadata = allMetadataToPreload.filter(id => {
+      const name = this.getMetadataNameById(id)
+      return name && (name.toLowerCase().includes('sex') || name.toLowerCase().includes('age'))
+    })
     
-    const batchSize = 3
-    let loadedCount = 0
+    if (sexAgeMetadata.length > 0) {
+      console.log(`🔍 [SEX/AGE DEBUG] Sex/Age metadata found in preload list:`, sexAgeMetadata.map(id => this.getMetadataNameById(id)))
+    } else {
+      console.log(`🔍 [SEX/AGE DEBUG] No sex/age metadata found in preload list!`)
+    }
+    
     let embeddingCount = 0
     let categoricalCount = 0
     let continuousCount = 0
     
-    for (let i = 0; i < orderedMetadata.length; i += batchSize) {
-      const batch = orderedMetadata.slice(i, i + batchSize)
+    // PHASE 1: Preload visualization embeddings (coordinate data)
+    // These are cached silently in binaryDataCache without displaying
+    console.log(`\n📊 [Phase 1] Preloading ${visualizationEmbeddings.length} embeddings...`)
+    for (const embedding of visualizationEmbeddings) {
+      try {
+        console.log(`  📥 Loading: ${embedding.name}`)
+        const result = await this.loadMetadataCoordinatesSilently(embedding.id, embedding.name)
+        
+        if (result.success) {
+          embeddingCount++
+          if (result.cached) {
+            console.log(`  ⏭️  Already cached: ${embedding.name}`)
+          } else {
+            console.log(`  ✅ Cached: ${embedding.name} (${result.size}) - ${embeddingCount}/${visualizationEmbeddings.length}`)
+          }
+        } else {
+          console.log(`  ❌ Failed: ${embedding.name} - ${result.error}`)
+        }
+      } catch (error) {
+        console.log(`  ❌ Failed: ${embedding.name} - ${error.message}`)
+      }
       
-      // Load batch in parallel
-      await Promise.all(batch.map(async (metadataId, batchIndex) => {
-        // Skip if already loaded in memory
-        if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
-          return Promise.resolve()
+      // Small delay between embeddings (they're large files)
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    
+    // PHASE 2: Preload metadata vectors (categorical + continuous)
+    // These use loadSingleMetadataVectorSilently and are stored in IndexedDB
+    const orderedMetadata = [
+      ...categoricalMetadata,
+      ...continuousMetadata
+    ]
+    
+    if (orderedMetadata.length > 0) {
+      console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors to disk...`)
+      console.log(`💾 [PERF] Using disk-first approach - all metadata will be stored on disk, not in memory`)
+      
+      // Reduce batch size to prevent server overload and add retry logic
+      const batchSize = 1 // Reduced from 3 to 1 to prevent server overload
+      const maxRetries = 2
+      
+      for (let i = 0; i < orderedMetadata.length; i += batchSize) {
+        const batch = orderedMetadata.slice(i, i + batchSize)
+        
+        // Load batch sequentially (not in parallel) to reduce server load
+        for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
+          const metadataId = batch[batchIndex]
+          // Skip if already loaded
+          if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
+            // Special logging for sex and age
+            const metadataName = this.getMetadataNameById(metadataId)
+            if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+              console.log(`🔍 [SEX/AGE DEBUG] Skipping ${metadataName} (${metadataId}) - already loaded/loading`)
+            }
+            continue
+          }
+          
+          // Special logging for sex and age before loading
+          const metadataName = this.getMetadataNameById(metadataId)
+          if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+            console.log(`🔍 [SEX/AGE DEBUG] Starting to preload ${metadataName} (${metadataId})`)
+          }
+          
+          // Retry logic for failed requests
+          let success = false
+          let lastError = null
+          
+          for (let retry = 0; retry <= maxRetries; retry++) {
+            try {
+              if (retry > 0) {
+                // Exponential backoff: wait longer between retries
+                const delay = Math.pow(2, retry) * 1000 // 2s, 4s, 8s...
+                console.log(`  🔄 Retry ${retry}/${maxRetries} for metadata ${metadataId} after ${delay}ms delay`)
+                await new Promise(resolve => setTimeout(resolve, delay))
+              }
+              
+              // Load from server directly to disk (IndexedDB) without keeping in memory
+              const result = await this.preloadMetadataToDisk(metadataId)
+              const globalIndex = i + batchIndex
+              
+              // Check if the loading actually succeeded
+              if (result.success) {
+                // Log progress for each type
+                if (globalIndex < categoricalMetadata.length) {
+                  categoricalCount++
+                  console.log(`  ✅ Categorical ${categoricalCount}/${categoricalMetadata.length}${result.cached ? ' (cached)' : ''}`)
+                } else {
+                  continuousCount++
+                  console.log(`  ✅ Continuous ${continuousCount}/${continuousMetadata.length}${result.cached ? ' (cached)' : ''}`)
+                }
+                
+                // Special logging for sex and age after successful loading
+                if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+                  console.log(`🔍 [SEX/AGE DEBUG] Successfully preloaded ${metadataName} (${metadataId}) to disk${retry > 0 ? ` on retry ${retry}` : ''}`)
+                }
+                success = true
+                break
+              } else {
+                // Loading failed
+                lastError = new Error(result.error || 'Unknown error')
+                console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${result.error}`)
+              }
+            } catch (error) {
+              lastError = error
+              console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${error.message}`)
+            }
+          }
+          
+          // If all retries failed, log the final error
+          if (!success) {
+            console.log(`  ❌ Final failure for metadata ${metadataId} after ${maxRetries + 1} attempts`)
+            
+            // Special logging for sex and age on final failure
+            if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
+              console.log(`🔍 [SEX/AGE DEBUG] Final failure for ${metadataName} (${metadataId}): ${lastError?.message || 'Unknown error'}`)
+            }
+          }
+          
+          // Add delay between requests to prevent server overload
+          if (i + batchSize < orderedMetadata.length) {
+            await new Promise(resolve => setTimeout(resolve, 500)) // 500ms delay between requests
+          }
         }
         
-        // Load from server (will auto-store to IndexedDB)
-        return this.loadSingleMetadataVectorSilently(metadataId).then(() => {
-          loadedCount++
-          const globalIndex = i + batchIndex
-          
-          // Log progress for each type
-          if (globalIndex < visualizationEmbeddings.length) {
-            embeddingCount++
-            console.log(`📊 [Preload] Loaded embedding ${embeddingCount}/${visualizationEmbeddings.length}`)
-          } else if (globalIndex < visualizationEmbeddings.length + categoricalMetadata.length) {
-            categoricalCount++
-            console.log(`🏷️ [Preload] Loaded categorical metadata ${categoricalCount}/${categoricalMetadata.length}`)
-          } else {
-            continuousCount++
-            console.log(`📈 [Preload] Loaded continuous metadata ${continuousCount}/${continuousMetadata.length}`)
-          }
-        }).catch(error => {
-          console.log(`Preload failed for metadata ${metadataId}:`, error.message)
-        })
-      }))
-      
-      // Small delay between batches
-      if (i + batchSize < orderedMetadata.length) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+        // Small delay between batches
+        if (i + batchSize < orderedMetadata.length) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
       }
     }
     
-    console.log(`🚀 [PERF] Completed preloading ${loadedCount} metadata vectors in order:`)
-    console.log(`  ✅ ${embeddingCount} Embeddings → ${categoricalCount} Categorical → ${continuousCount} Continuous`)
+    console.log(`\n🚀 [PERF] ✅ Preload complete!`)
+    console.log(`  📊 ${embeddingCount}/${visualizationEmbeddings.length} Embeddings`)
+    console.log(`  🏷️ ${categoricalCount}/${categoricalMetadata.length} Categorical`)
+    console.log(`  📈 ${continuousCount}/${continuousMetadata.length} Continuous`)
     this.logMemoryUsage('After preloading all metadata')
+    
+    // Performance assessment after preloading
+    await this.assessPerformanceAfterPreload()
+    
+    // Create diagnostic button for troubleshooting
+    this.createDiagnosticButton()
   }
 
   // Update visualization with metadata vector coloring
@@ -3486,6 +4478,16 @@ export default class extends Controller {
   }
   // ReGL version of renderPointsWithCurrentColoring
   renderPointsWithCurrentColoringReGL() {
+    // Performance optimization: check if color state has changed
+    const currentColorHash = this.getColorStateHash()
+    if (this.lastColorUpdateHash === currentColorHash && this.colorUpdateCache.has('lastColorMap')) {
+      console.log('🎨 [ReGL] Using cached color update (no color state change)')
+      const cachedColorMap = this.colorUpdateCache.get('lastColorMap')
+      this.reglRenderer.updateColors(cachedColorMap)
+      this.reglRenderer.render()
+      return
+    }
+    
     console.log('🎨 [ReGL] Updating point colors based on metadata')
     const startTime = performance.now()
     
@@ -3672,7 +4674,12 @@ export default class extends Controller {
       }
     }
     
+    // Cache the color map and state hash
+    this.colorUpdateCache.set('lastColorMap', colorMap)
+    this.lastColorUpdateHash = currentColorHash
+    
     const elapsed = performance.now() - startTime
+    this.recordPerformanceMetrics('ColorUpdate', elapsed)
     console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
   }
 
@@ -4270,8 +5277,21 @@ export default class extends Controller {
   }
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
-    if (!this.pixiApp || !this.scatterContainer || !this.currentCoordinates || !this.currentBounds) {
-      //console.log('Cannot clear coloring - missing PIXI app or coordinates')
+    console.log('🎨 clearMetadataColoring() called')
+    console.log('🎨 Checking prerequisites:', {
+      rendererType: this.rendererType,
+      reglRenderer: !!this.reglRenderer,
+      pixiApp: !!this.pixiApp,
+      scatterContainer: !!this.scatterContainer,
+      currentCoordinates: !!this.currentCoordinates,
+      currentBounds: !!this.currentBounds
+    })
+    
+    // Check for renderer availability (either ReGL or PixiJS)
+    const hasRenderer = this.rendererType === 'regl' ? !!this.reglRenderer : (!!this.pixiApp && !!this.scatterContainer)
+    
+    if (!hasRenderer || !this.currentCoordinates || !this.currentBounds) {
+      console.log('🎨 Cannot clear coloring - missing renderer or coordinates')
       return
     }
     
@@ -4287,26 +5307,33 @@ export default class extends Controller {
     // Clear the cached color map since we're clearing metadata
     this.clearColorMapCache()
     
-    // OPTIMIZED: Just update sprite colors directly instead of recreating!
-    if (this.pointSprites && this.pointSprites.length > 0) {
-      console.log('🎨 Using fast color update path (no recreation)')
-      const defaultColor = 0x3b82f6 // Default blue
-      
-      for (let i = 0; i < this.pointSprites.length; i++) {
-        const sprite = this.pointSprites[i]
-        if (sprite && !sprite.destroyed) {
-          sprite.tint = defaultColor
-          sprite.zIndex = 0
-          this.originalPointColors.set(i, defaultColor)
-        }
-      }
-      
-      // Mark sprites as default coloring
-      this.spritesRenderType = 'default'
+    // Render points with default blue coloring based on renderer type
+    if (this.rendererType === 'regl') {
+      console.log('🎨 Using ReGL renderer to clear coloring')
+      // For ReGL, we need to render with default blue colors
+      this.renderPointsWithCurrentColoringReGL()
     } else {
-      // Fallback: full re-render if sprites don't exist
-      console.log('🎨 Sprites not available, using full re-render')
-    this.forceReRenderPoints()
+      // OPTIMIZED: Just update sprite colors directly instead of recreating!
+      if (this.pointSprites && this.pointSprites.length > 0) {
+        console.log('🎨 Using fast color update path (no recreation)')
+        const defaultColor = 0x3b82f6 // Default blue
+        
+        for (let i = 0; i < this.pointSprites.length; i++) {
+          const sprite = this.pointSprites[i]
+          if (sprite && !sprite.destroyed) {
+            sprite.tint = defaultColor
+            sprite.zIndex = 0
+            this.originalPointColors.set(i, defaultColor)
+          }
+        }
+        
+        // Mark sprites as default coloring
+        this.spritesRenderType = 'default'
+      } else {
+        // Fallback: full re-render if sprites don't exist
+        console.log('🎨 Sprites not available, using full re-render')
+        this.forceReRenderPoints()
+      }
     }
     
     // Clear any existing legend (both discrete and continuous)
@@ -4501,9 +5528,9 @@ export default class extends Controller {
           const metadataId = metadataItem.dataset.metadataItem
           //console.log(`Loading metadata vector for ${metadataId} on category expansion`)
           
-          // Load silently in background (no spinner for category expansion)
-          this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-            //console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+          // Load into memory for fast access (no spinner for category expansion)
+          this.loadSingleMetadataVector(metadataId).catch(error => {
+            console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
           })
         }
       }
@@ -4689,12 +5716,17 @@ export default class extends Controller {
     console.log('✅ Valid metadataId found:', metadataId)
     console.log('Metadata name:', metadataName)
     console.log('Is currently active:', isCurrentlyActive)
+    console.log('Button dataset.active:', button.dataset.active)
+    console.log('Current metadata ID:', this.currentMetadataId)
     
     if (isCurrentlyActive) {
       // Button is already active - deselect it
       console.log('🎨 Button is already active - deselecting...')
+      console.log('🎨 Step 1: Resetting water drop buttons...')
       this.resetAllWaterDropButtons()
+      console.log('🎨 Step 2: Removing category colors...')
       this.removeAllCategoryColors()
+      console.log('🎨 Step 3: Clearing metadata coloring...')
       this.clearMetadataColoring()
       console.log('🎨 === DESELECTION COMPLETE ===')
       return
@@ -4818,7 +5850,7 @@ export default class extends Controller {
       })
     } else {
       // For discrete metadata, just load and visualize directly
-    this.loadAndVisualizeMetadataVector(metadataId)
+      this.loadAndVisualizeMetadataVector(metadataId)
         .catch(error => {
           console.error('❌ Error loading metadata:', error)
         })
@@ -5582,7 +6614,7 @@ export default class extends Controller {
   }
 
   onInteractionMouseDown(event) {
-    //console.log('Mouse down event:', this.interactionMode)
+    console.log('🎯 [Interaction] onInteractionMouseDown called, mode:', this.interactionMode, 'rendererType:', this.rendererType)
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
@@ -5615,6 +6647,12 @@ export default class extends Controller {
       this.renderAxes()
       this.renderCategoryLabels()
       
+      return
+    }
+    
+    // Handle point hovering in pick mode (RegL)
+    if (this.interactionMode === 'pick' && this.rendererType === 'regl' && !this.isTooltipFixed) {
+      this.detectRegLPointHover(event)
       return
     }
     
@@ -9122,8 +10160,8 @@ export default class extends Controller {
       const metadataId = checkbox.dataset.metadataId
       const category = checkbox.dataset.category
       
-      // Get the metadata vector for this metadata ID
-      const metadataVector = this.getMetadataVectorById(metadataId)
+      // Get the metadata vector for this metadata ID (only if already loaded in memory)
+      const metadataVector = this.loadedMetadataVectors[metadataId]
       if (!metadataVector || !metadataVector.values) return
       
       // Find the count span - it's the second span in the parent container
@@ -9812,10 +10850,10 @@ export default class extends Controller {
         
         // If enabled, start preloading now
         if (this.autoPreloadMetadata) {
-          console.log('🚀 Starting background preload...')
-          this.preloadAllMetadata().catch(error => {
-            console.log('Background metadata preload encountered an error:', error)
-          })
+          console.log('🚀 Automatic preload disabled - using on-demand loading instead')
+          // this.preloadAllMetadata().catch(error => {
+          //   console.log('Background metadata preload encountered an error:', error)
+          // })
         }
       })
     }
@@ -11136,21 +12174,8 @@ export default class extends Controller {
 
   // Tooltip methods
   showTooltip(cellId, point) {
-    
-    // Force create tooltip if not available
-    if (!this.tooltip || !this.tooltipContent) {
-      console.log('Tooltip elements not found, creating now:', { 
-        tooltip: !!this.tooltip, 
-        tooltipContent: !!this.tooltipContent 
-      })
-      this.createTooltipDynamically()
-    }
-    
-    // Double-check after creation
-    if (!this.tooltip || !this.tooltipContent) {
-      console.log('Failed to create tooltip elements')
-      return
-    }
+    // This method is kept for compatibility with PixiJS mode
+    // For RegL mode, we use showSimpleTooltip instead
     
     // Get cell information
     const cellName = `Cell ${cellId + 1}` // Generate cell name from ID
@@ -11170,8 +12195,15 @@ export default class extends Controller {
       }
     }
     
-    // Set tooltip content
-    const tooltipHTML = `<strong>${cellName}</strong>${categoryInfo}`
+    // Set tooltip content with fixed/dynamic indicator
+    let statusIndicator = ''
+    if (this.rendererType === 'regl' && this.isTooltipFixed) {
+      statusIndicator = '<br><em style="color: #00ff00;">🔒 Fixed (clicked)</em>'
+    } else if (this.rendererType === 'regl') {
+      statusIndicator = '<br><em style="color: #ccc;">🖱️ Hovering</em>'
+    }
+    
+    const tooltipHTML = `<strong>${cellName}</strong>${categoryInfo}${statusIndicator}`
     this.tooltipContent.innerHTML = tooltipHTML
     // Tooltip content set
     
@@ -11212,6 +12244,16 @@ export default class extends Controller {
       tooltipTop = rect.top + 10 // Keep it within bounds
     }
     
+    // Additional safety check - ensure tooltip is within viewport
+    if (tooltipLeft < rect.left) {
+      tooltipLeft = rect.left + 10
+    }
+    if (tooltipLeft > rect.right - tooltipWidth) {
+      tooltipLeft = rect.right - tooltipWidth - 10
+    }
+    
+    console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
+    
     this.tooltip.style.left = `${tooltipLeft}px`
     this.tooltip.style.top = `${tooltipTop}px`
     this.tooltip.style.display = 'block'
@@ -11225,7 +12267,13 @@ export default class extends Controller {
     
     // Debug: Check if tooltip is actually visible
     const computedStyle = window.getComputedStyle(this.tooltip)
-    // Tooltip style computed
+    console.log('🎯 [Tooltip] Computed style:', {
+      display: computedStyle.display,
+      visibility: computedStyle.visibility,
+      opacity: computedStyle.opacity,
+      position: computedStyle.position,
+      zIndex: computedStyle.zIndex
+    })
     
     // Force tooltip to be visible with maximum z-index
     this.tooltip.style.zIndex = '999999'
@@ -11233,21 +12281,85 @@ export default class extends Controller {
     this.tooltip.style.visibility = 'visible'
     this.tooltip.style.opacity = '1'
     
-    // Test: Position tooltip in a fixed, visible location
-    this.tooltip.style.left = '50px'
-    this.tooltip.style.top = '50px'
-    this.tooltip.style.backgroundColor = 'red'
-    this.tooltip.style.border = '3px solid yellow'
-    this.tooltip.style.width = '300px'
-    this.tooltip.style.height = '100px'
+    // For RegL mode, use proper positioning instead of fixed debug position
+    if (this.rendererType === 'regl') {
+      console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+      
+      // Use the calculated position for RegL
+      this.tooltip.style.left = `${tooltipLeft}px`
+      this.tooltip.style.top = `${tooltipTop}px`
+      
+      // Different styling for fixed vs dynamic tooltips
+      if (this.isTooltipFixed) {
+        console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+        this.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
+        this.tooltip.style.border = '2px solid #00ff00'
+        this.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
+      } else {
+        console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+        this.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
+        this.tooltip.style.border = '1px solid #ccc'
+        this.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
+      }
+      
+      this.tooltip.style.width = 'auto'
+      this.tooltip.style.height = 'auto'
+      
+      console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+        left: this.tooltip.style.left,
+        top: this.tooltip.style.top,
+        display: this.tooltip.style.display,
+        backgroundColor: this.tooltip.style.backgroundColor
+      })
+      
+      // TEMPORARY: Force tooltip to a visible position for debugging
+      this.tooltip.style.left = '100px'
+      this.tooltip.style.top = '100px'
+      this.tooltip.style.backgroundColor = 'red'
+      this.tooltip.style.border = '3px solid yellow'
+      this.tooltip.style.width = '300px'
+      this.tooltip.style.height = '100px'
+      console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+    } else {
+      // Keep debug positioning for PixiJS mode
+      this.tooltip.style.left = '50px'
+      this.tooltip.style.top = '50px'
+      this.tooltip.style.backgroundColor = 'red'
+      this.tooltip.style.border = '3px solid yellow'
+      this.tooltip.style.width = '300px'
+      this.tooltip.style.height = '100px'
+    }
     
-    // Tooltip forced to fixed position
+    // Tooltip positioned
   }
 
   hideTooltip() {
     if (this.tooltip) {
       this.tooltip.style.display = 'none'
     }
+    // Only reset fixed state if we're not in a fixed tooltip mode
+    if (!this.isTooltipFixed) {
+      this.fixedTooltipCellId = null
+    }
+  }
+
+  // Unfix tooltip (called when clicking on empty space)
+  unfixTooltip() {
+    this.isTooltipFixed = false
+    this.fixedTooltipCellId = null
+    this.hideSimpleTooltip()
+    console.log('🎯 [RegL] Unfixed tooltip')
+  }
+
+  // Hide simple tooltip
+  hideSimpleTooltip() {
+    const existing = document.getElementById('simple-tooltip')
+    if (existing) {
+      existing.remove()
+    }
+    // Reset tooltip state when hiding
+    this.isTooltipFixed = false
+    this.fixedTooltipCellId = null
   }
 
   showSimpleTooltip(cellName, categoryInfo, point) {
@@ -11312,7 +12424,10 @@ export default class extends Controller {
     `
     closeButton.onclick = () => {
       tooltip.remove()
-      console.log('🗑️ Tooltip closed by user')
+      // Reset tooltip state to re-enable hover detection
+      this.isTooltipFixed = false
+      this.fixedTooltipCellId = null
+      console.log('🗑️ Tooltip closed by user - hover detection re-enabled')
     }
     
     // Create content
@@ -11355,6 +12470,8 @@ export default class extends Controller {
 
   // Pick mode methods
   onPickMouseDown(event) {
+    console.log('🎯 [Pick] onPickMouseDown called, rendererType:', this.rendererType)
+    
     // In ReGL mode, check for label clicks first
     if (this.rendererType === 'regl' && this.canvas2DLabels && this.canvas2DLabels.length > 0) {
       const canvas = this.canvas
@@ -11400,8 +12517,14 @@ export default class extends Controller {
       return
     }
     
-    // ReGL mode doesn't support point clicking yet
+    // ReGL mode: implement point detection
     if (this.rendererType === 'regl') {
+      // Check if RegL renderer and coordinates are available
+      if (!this.reglRenderer || !this.currentCoordinates) {
+        console.log('🎯 [RegL] RegL renderer or coordinates not available, skipping point detection')
+        return
+      }
+      this.detectRegLPointClick(event)
       return
     }
     
@@ -11509,8 +12632,217 @@ export default class extends Controller {
     }
   }
 
+  // RegL-specific point detection method
+  detectRegLPointClick(event) {
+    console.log('🎯 [RegL] detectRegLPointClick called')
+    
+    if (this.interactionMode !== 'pick') {
+      console.log('🎯 [RegL] Not in pick mode, current mode:', this.interactionMode)
+      return
+    }
+
+    const canvas = this.canvas
+    if (!canvas || !this.reglRenderer || !this.currentCoordinates) {
+      console.log('🎯 [RegL] Missing requirements:', {
+        canvas: !!canvas,
+        reglRenderer: !!this.reglRenderer,
+        currentCoordinates: !!this.currentCoordinates,
+        coordinatesLength: this.currentCoordinates?.length
+      })
+      return
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const clickX = event.clientX - rect.left
+    const clickY = event.clientY - rect.top
+
+    console.log('🎯 [RegL] Click coordinates:', { clickX, clickY, canvasWidth: canvas.width, canvasHeight: canvas.height })
+
+    // Use current bounds (which include pan/zoom state) instead of calculating from coordinates
+    const bounds = this.currentBounds || this.calculateBounds(this.currentCoordinates)
+    const margins = this.getPlotMargins()
+    
+    console.log('🎯 [RegL] Current bounds and margins:', { bounds, margins })
+    
+    // Convert screen coordinates back to data coordinates using current bounds
+    const dataX = bounds.minX + ((clickX - margins.left) / (canvas.width - margins.left - margins.right)) * (bounds.maxX - bounds.minX)
+    const dataY = bounds.minY + ((canvas.height - margins.top - margins.bottom - (clickY - margins.top)) / (canvas.height - margins.top - margins.bottom)) * (bounds.maxY - bounds.minY)
+    
+    console.log('🎯 [RegL] Data coordinates (with pan/zoom):', { dataX, dataY })
+
+    // Calculate tolerance in screen pixels, accounting for point size
+    const pointSize = this.currentPointSize || 4
+    const screenTolerance = Math.max(pointSize * 2, 10) // At least 2x point size, minimum 10px
+    
+    // Convert screen tolerance to data coordinates
+    const screenWidth = canvas.width - margins.left - margins.right
+    const screenHeight = canvas.height - margins.top - margins.bottom
+    const dataToleranceX = (screenTolerance / screenWidth) * (bounds.maxX - bounds.minX)
+    const dataToleranceY = (screenTolerance / screenHeight) * (bounds.maxY - bounds.minY)
+    const maxDistance = Math.max(dataToleranceX, dataToleranceY) // Use the larger tolerance
+    
+    console.log('🎯 [RegL] Screen-based tolerance:', { 
+      pointSize: pointSize,
+      screenTolerance: screenTolerance,
+      dataToleranceX: dataToleranceX.toFixed(6),
+      dataToleranceY: dataToleranceY.toFixed(6),
+      maxDistance: maxDistance.toFixed(6),
+      screenWidth: screenWidth,
+      screenHeight: screenHeight
+    })
+
+    // Find closest point
+    let closestPointIndex = -1
+    let closestDistance = Infinity
+
+    console.log('🎯 [RegL] Searching through', this.currentCoordinates.length, 'points with maxDistance:', maxDistance)
+
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const [x, y] = this.currentCoordinates[cellIndex]
+      const distance = Math.sqrt(Math.pow(x - dataX, 2) + Math.pow(y - dataY, 2))
+      
+      if (drawPos < 5) { // Debug first 5 points
+        console.log(`🎯 [RegL] DrawPos ${drawPos} -> Cell ${cellIndex}: (${x}, ${y}), distance: ${distance.toFixed(6)}`)
+      }
+      
+      // Track the closest point
+      if (distance < closestDistance) {
+        closestDistance = distance
+        closestPointIndex = cellIndex // Use the original cell index, not draw position
+        console.log(`🎯 [RegL] New closest point: DrawPos ${drawPos} -> Cell ${cellIndex}, distance: ${distance.toFixed(6)}`)
+      }
+    }
+
+    console.log('🎯 [RegL] Final result:', { closestPointIndex, closestDistance: closestDistance.toFixed(6), maxDistance: maxDistance.toFixed(6) })
+
+    if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
+      // Point found within tolerance - fix tooltip to this cell
+      console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
+      this.fixTooltipToCell(closestPointIndex, clickX, clickY)
+    } else {
+      // No point found within tolerance - hide any existing tooltip
+      console.log('🎯 [RegL] No point found within tolerance - hiding tooltip')
+      if (this.isTooltipFixed) {
+        this.unfixTooltip()
+      } else {
+        this.hideSimpleTooltip()
+      }
+    }
+  }
+
+  // Fix tooltip to a specific cell (clicked cell)
+  fixTooltipToCell(cellId, screenX, screenY) {
+    console.log('🎯 [RegL] fixTooltipToCell called with:', { cellId, screenX, screenY })
+    
+    this.fixedTooltipCellId = cellId
+    this.isTooltipFixed = true
+    
+    // Use the existing showSimpleTooltip method instead of the complex tooltip system
+    const cellName = `Cell ${cellId + 1}`
+    let categoryInfo = ''
+    
+    // Get category information if available
+    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
+      const { data_type, values } = this.currentMetadataVector
+      const value = values[cellId]
+      
+      if (data_type === 'DISCRETE') {
+        categoryInfo = `Category: ${value}`
+      } else if (data_type === 'NUMERIC') {
+        categoryInfo = `Value: ${value.toFixed(3)}`
+      }
+    }
+    
+    // Add fixed indicator
+    categoryInfo += ' | 🔒 Fixed (clicked)'
+    
+    // Create a mock point object for positioning
+    const mockPoint = { x: screenX, y: screenY }
+    this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
+    
+    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
+  }
+
+  // Detect point hovering for RegL (dynamic tooltip)
+  detectRegLPointHover(event) {
+    if (this.interactionMode !== 'pick') return
+
+    const canvas = this.canvas
+    if (!canvas || !this.reglRenderer || !this.currentCoordinates) return
+
+    const rect = canvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+
+    // Use current bounds (which include pan/zoom state) instead of calculating from coordinates
+    const bounds = this.currentBounds || this.calculateBounds(this.currentCoordinates)
+    const margins = this.getPlotMargins()
+    
+    // Convert screen coordinates back to data coordinates using current bounds
+    const dataX = bounds.minX + ((mouseX - margins.left) / (canvas.width - margins.left - margins.right)) * (bounds.maxX - bounds.minX)
+    const dataY = bounds.minY + ((canvas.height - margins.top - margins.bottom - (mouseY - margins.top)) / (canvas.height - margins.top - margins.bottom)) * (bounds.maxY - bounds.minY)
+
+    // Calculate tolerance in screen pixels, accounting for point size (same as click detection)
+    const pointSize = this.currentPointSize || 4
+    const screenTolerance = Math.max(pointSize * 2, 10) // At least 2x point size, minimum 10px
+    
+    // Convert screen tolerance to data coordinates
+    const screenWidth = canvas.width - margins.left - margins.right
+    const screenHeight = canvas.height - margins.top - margins.bottom
+    const dataToleranceX = (screenTolerance / screenWidth) * (bounds.maxX - bounds.minX)
+    const dataToleranceY = (screenTolerance / screenHeight) * (bounds.maxY - bounds.minY)
+    const maxDistance = Math.max(dataToleranceX, dataToleranceY) // Use the larger tolerance
+
+    // Find closest point
+    let closestPointIndex = -1
+    let closestDistance = Infinity
+
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const [x, y] = this.currentCoordinates[cellIndex]
+      const distance = Math.sqrt(Math.pow(x - dataX, 2) + Math.pow(y - dataY, 2))
+      
+      if (distance < maxDistance && distance < closestDistance) {
+        closestDistance = distance
+        closestPointIndex = cellIndex // Use the original cell index, not draw position
+      }
+    }
+
+    if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
+      // Point found within tolerance - show dynamic tooltip only if not fixed
+      if (!this.isTooltipFixed) {
+        const cellName = `Cell ${closestPointIndex + 1}`
+        let categoryInfo = ''
+        
+        // Get category information if available
+        if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[closestPointIndex] !== undefined) {
+          const { data_type, values } = this.currentMetadataVector
+          const value = values[closestPointIndex]
+          
+          if (data_type === 'DISCRETE') {
+            categoryInfo = `Category: ${value}`
+          } else if (data_type === 'NUMERIC') {
+            categoryInfo = `Value: ${value.toFixed(3)}`
+          }
+        }
+        
+        // Add hover indicator
+        categoryInfo += ' | 🖱️ Hovering'
+        
+        const mockPoint = { x: mouseX, y: mouseY }
+        this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
+      }
+    } else {
+      // No point found within tolerance - hide tooltip only if not fixed
+      if (!this.isTooltipFixed) {
+        this.hideSimpleTooltip()
+      }
+    }
+  }
+
   // Checkbox functionality for cell selection
-  toggleMetadataSelection(event) {
+  async toggleMetadataSelection(event) {
     event.preventDefault()
     event.stopPropagation()
     
@@ -11518,24 +12850,75 @@ export default class extends Controller {
     const checkbox = event.currentTarget
     const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
     
+    // Ensure metadata is loaded (from memory or disk)
+    let metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector) {
+      console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
+      try {
+        metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
+        if (!metadataVector) {
+          console.error(`💾 [DISK] Failed to load metadata ${metadataId} from disk - trying server fallback...`)
+          // Try direct server loading as last resort
+          metadataVector = await this.loadSingleMetadataVector(metadataId)
+          if (!metadataVector) {
+            console.error(`💾 [DISK] Failed to load metadata ${metadataId} from server`)
+            return
+          }
+        }
+      } catch (error) {
+        console.error(`💾 [DISK] Error loading metadata ${metadataId}:`, error)
+        return
+      }
+    }
+    
+    // Check if this is categorical or continuous metadata
+    const isContinuous = metadataVector?.data_type === 'NUMERIC'
+    
     // Toggle the checkbox state
     if (isSelected) {
-      // Deselect all categories for this metadata
+      // Deselect
       checkbox.style.backgroundColor = '#f3f4f6'
       checkbox.querySelector('i').style.display = 'none'
-      this.deselectAllCategoriesForMetadata(metadataId)
+      
+      if (isContinuous) {
+        // For continuous metadata: disable range selection (clear the range)
+        delete this.selectedRanges[metadataId]
+        checkbox.title = 'Enable range selection'
+        
+        // Disable the range slider for this metadata
+        this.disableRangeSliderForMetadata(metadataId)
+      } else {
+        // For categorical metadata: deselect all categories
+        this.deselectAllCategoriesForMetadata(metadataId)
+      }
     } else {
-      // Select all categories for this metadata
+      // Select
       checkbox.style.backgroundColor = '#10b981'
       checkbox.querySelector('i').style.display = 'block'
-      this.selectAllCategoriesForMetadata(metadataId)
+      
+      if (isContinuous) {
+        // For continuous metadata: enable range selection (set to full range)
+        if (metadataVector?.compression_info) {
+          this.selectedRanges[metadataId] = {
+            min: metadataVector.compression_info.min_val,
+            max: metadataVector.compression_info.max_val
+          }
+        }
+        checkbox.title = 'Disable range selection'
+        
+        // Enable the range slider for this metadata
+        this.enableRangeSliderForMetadata(metadataId)
+      } else {
+        // For categorical metadata: select all categories
+        this.selectAllCategoriesForMetadata(metadataId)
+      }
     }
     
     // Update cell filtering
     this.updateCellFiltering()
   }
 
-  toggleCategorySelection(event) {
+  async toggleCategorySelection(event) {
     event.preventDefault()
     event.stopPropagation()
     
@@ -11546,20 +12929,40 @@ export default class extends Controller {
     
     console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
+    // Ensure metadata is loaded (from memory or disk)
+    let metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector) {
+      try {
+        metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
+        if (!metadataVector) {
+          // Try direct server loading as last resort
+          metadataVector = await this.loadSingleMetadataVector(metadataId)
+          if (!metadataVector) {
+            console.error(`Failed to load metadata ${metadataId}`)
+            return
+          }
+        }
+      } catch (error) {
+        console.error(`Error loading metadata ${metadataId}:`, error)
+        return
+      }
+    }
+    
     // Initialize checkboxes for this metadata if not already done (only for discrete)
-    const metadataVector = this.getMetadataVectorById(metadataId)
     if (metadataVector?.data_type === 'DISCRETE' && !this.selectedCategories[metadataId]) {
-      this.initializeCheckboxesForMetadata(metadataId)
+      await this.initializeCheckboxesForMetadata(metadataId)
     }
     
     // Toggle the checkbox state
     if (isSelected) {
       // Deselect this category
+      console.log(`🔄 About to deselect category: ${category}`)
       checkbox.style.backgroundColor = '#f3f4f6'
       checkbox.querySelector('i').style.display = 'none'
       this.deselectCategory(metadataId, category)
     } else {
       // Select this category
+      console.log(`🔄 About to select category: ${category}`)
       checkbox.style.backgroundColor = '#10b981'
       checkbox.querySelector('i').style.display = 'block'
       this.selectCategory(metadataId, category)
@@ -11617,8 +13020,20 @@ export default class extends Controller {
   }
 
   deselectCategory(metadataId, category) {
+    console.log(`🔄 Deselecting category: "${category}" for metadata: ${metadataId}`)
+    console.log(`🔄 Category type:`, typeof category, `Length:`, category.length)
+    console.log(`🔄 Before deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
+    console.log(`🔄 Set size before:`, this.selectedCategories[metadataId]?.size)
+    
     if (this.selectedCategories && this.selectedCategories[metadataId]) {
+      const hadCategory = this.selectedCategories[metadataId].has(category)
+      console.log(`🔄 Did the Set contain "${category}"?`, hadCategory)
+      
       this.selectedCategories[metadataId].delete(category)
+      console.log(`🔄 After deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
+      console.log(`🔄 Set size after:`, this.selectedCategories[metadataId]?.size)
+    } else {
+      console.log(`🔄 No selectedCategories found for metadata: ${metadataId}`)
     }
   }
 
@@ -11657,11 +13072,21 @@ export default class extends Controller {
     this.initializeCheckboxesForMetadata(metadataId)
   }
 
-  initializeCheckboxesForMetadata(metadataId) {
+  async initializeCheckboxesForMetadata(metadataId) {
     //console.log(`Initializing checkboxes for metadata: ${metadataId}`)
     
+    // Ensure metadata is loaded (from memory or disk)
+    let metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector) {
+      console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
+      metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
+      if (!metadataVector) {
+        console.error(`💾 [DISK] Failed to load metadata ${metadataId} from disk`)
+        return
+      }
+    }
+    
     // Only initialize for discrete metadata
-    const metadataVector = this.getMetadataVectorById(metadataId)
     if (!metadataVector || metadataVector.data_type !== 'DISCRETE') {
       console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
       return
@@ -11690,6 +13115,13 @@ export default class extends Controller {
     const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
     if (metadataCheckbox) {
       metadataCheckbox.style.display = 'flex'
+      
+      // Set initial tooltip based on metadata type
+      const metadataVector = this.getMetadataVectorById(metadataId)
+      if (metadataVector?.data_type === 'NUMERIC') {
+        // For continuous metadata, checkbox is checked by default
+        metadataCheckbox.title = 'Disable range selection'
+      }
     }
     
     // Show all category checkboxes for this metadata
@@ -11699,6 +13131,58 @@ export default class extends Controller {
     })
     
     //console.log(`Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+  }
+
+  // Enable range slider for continuous metadata
+  enableRangeSliderForMetadata(metadataId) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+    
+    const rangeSection = metadataItem.querySelector('.metadata-range-section')
+    if (!rangeSection) return
+    
+    // Find all interactive elements in the range slider
+    const minInput = rangeSection.querySelector('.range-min-input')
+    const maxInput = rangeSection.querySelector('.range-max-input')
+    const minHandle = rangeSection.querySelector('.range-slider-min-handle')
+    const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
+    const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+    
+    // Enable all controls
+    if (minInput) minInput.disabled = false
+    if (maxInput) maxInput.disabled = false
+    if (minHandle) minHandle.style.pointerEvents = 'auto'
+    if (maxHandle) maxHandle.style.pointerEvents = 'auto'
+    if (adaptButton) adaptButton.disabled = false
+    
+    // Remove visual disabled state
+    if (rangeSection) rangeSection.style.opacity = '1'
+  }
+
+  // Disable range slider for continuous metadata
+  disableRangeSliderForMetadata(metadataId) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+    
+    const rangeSection = metadataItem.querySelector('.metadata-range-section')
+    if (!rangeSection) return
+    
+    // Find all interactive elements in the range slider
+    const minInput = rangeSection.querySelector('.range-min-input')
+    const maxInput = rangeSection.querySelector('.range-max-input')
+    const minHandle = rangeSection.querySelector('.range-slider-min-handle')
+    const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
+    const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+    
+    // Disable all controls
+    if (minInput) minInput.disabled = true
+    if (maxInput) maxInput.disabled = true
+    if (minHandle) minHandle.style.pointerEvents = 'none'
+    if (maxHandle) maxHandle.style.pointerEvents = 'none'
+    if (adaptButton) adaptButton.disabled = true
+    
+    // Add visual disabled state
+    if (rangeSection) rangeSection.style.opacity = '0.5'
   }
 
   // Optimized method to show/hide points without re-rendering
@@ -11896,7 +13380,86 @@ export default class extends Controller {
     return summary.length > 0 ? summary.join(' • ') : null
   }
 
+  // Create a hash of the current filter state for change detection
+  getFilterStateHash() {
+    const discreteCount = Object.keys(this.selectedCategories || {}).length
+    const continuousCount = Object.keys(this.selectedRanges || {}).length
+    
+    // Convert Sets to Arrays for proper JSON serialization
+    const selectedCategoriesForHash = {}
+    if (this.selectedCategories) {
+      Object.keys(this.selectedCategories).forEach(metadataId => {
+        const set = this.selectedCategories[metadataId]
+        selectedCategoriesForHash[metadataId] = set ? Array.from(set).sort() : []
+      })
+    }
+    
+    return JSON.stringify({
+      selectedCategories: selectedCategoriesForHash,
+      selectedRanges: this.selectedRanges,
+      currentMetadataId: this.currentMetadataId,
+      discreteCount,
+      continuousCount
+    })
+  }
+
+  // Create a hash of the current color state for change detection
+  getColorStateHash() {
+    return JSON.stringify({
+      currentMetadataId: this.currentMetadataId,
+      currentMetadataType: this.currentMetadataVector?.data_type,
+      categoryOrder: this.categoryOrder,
+      customColorRange: this.customColorRange,
+      currentColorScheme: this.currentColorScheme,
+      filteredIndices: this.currentVisibleCells
+    })
+  }
+
+  // Performance monitoring helper
+  recordPerformanceMetrics(operationName, duration) {
+    this.performanceMetrics.updateCount++
+    this.performanceMetrics.lastUpdateTime = duration
+    this.performanceMetrics.maxUpdateTime = Math.max(this.performanceMetrics.maxUpdateTime, duration)
+    
+    // Calculate rolling average
+    const alpha = 0.1 // Smoothing factor
+    this.performanceMetrics.averageUpdateTime = 
+      (this.performanceMetrics.averageUpdateTime * (1 - alpha)) + (duration * alpha)
+    
+    // Log performance warnings
+    if (duration > 50) { // More than 50ms
+      console.warn(`⚠️ [PERF] ${operationName} took ${duration.toFixed(2)}ms (slow)`)
+    } else if (duration > 16) { // More than 16ms (60fps threshold)
+      console.log(`📊 [PERF] ${operationName} took ${duration.toFixed(2)}ms`)
+    }
+  }
+
+  // Clear performance caches to prevent memory leaks
+  clearPerformanceCaches() {
+    this.lastFilteredIndices = null
+    this.lastFilterStateHash = null
+    this.lastColorUpdateHash = null
+    this.colorUpdateCache.clear()
+    this.filterCache.clear()
+    this.pendingUpdates.clear()
+    
+    if (this.updateBatchTimer) {
+      clearTimeout(this.updateBatchTimer)
+      this.updateBatchTimer = null
+    }
+    
+    console.log('🧹 Performance caches cleared')
+  }
+
   updateCellFiltering(shouldUpdateColors = false) {
+    // Performance optimization: batch multiple updates
+    this.scheduleUpdate('filtering', () => {
+      this.performCellFilteringUpdate(shouldUpdateColors)
+    })
+  }
+
+  // Actual filtering update logic (separated for batching)
+  performCellFilteringUpdate(shouldUpdateColors = false) {
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     //console.log('Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
@@ -11945,6 +13508,44 @@ export default class extends Controller {
         }
       }
     })
+  }
+
+  // Schedule updates for batching to reduce redundant operations
+  scheduleUpdate(updateType, updateFunction) {
+    // Add to pending updates
+    this.pendingUpdates.add(updateType)
+    
+    // Clear existing timer
+    if (this.updateBatchTimer) {
+      clearTimeout(this.updateBatchTimer)
+    }
+    
+    // Schedule batch execution
+    this.updateBatchTimer = setTimeout(() => {
+      this.executeBatchedUpdates()
+    }, 16) // ~60fps
+  }
+
+  // Execute all pending updates in a single batch
+  executeBatchedUpdates() {
+    if (this.pendingUpdates.size === 0) return
+    
+    const startTime = performance.now()
+    console.log('🔄 Executing batched updates:', Array.from(this.pendingUpdates))
+    
+    // Clear pending updates
+    this.pendingUpdates.clear()
+    
+    // Clear timer
+    this.updateBatchTimer = null
+    
+    // Execute the actual updates
+    // Note: This is a simplified version - in practice, you'd want to merge
+    // multiple update types intelligently
+    this.performCellFilteringUpdate(false)
+    
+    const duration = performance.now() - startTime
+    this.recordPerformanceMetrics('BatchedUpdates', duration)
   }
 
   // Update current selection to only include cells that are currently visible (not filtered out)
@@ -12005,7 +13606,7 @@ export default class extends Controller {
       ? Object.keys(this.selectedCategories).filter(metadataId => {
       const selections = this.selectedCategories[metadataId]
       const hasSelections = selections && selections.size > 0
-      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      const hasLoadedVector = this.loadedMetadataVectors[metadataId] !== undefined
       return hasSelections && hasLoadedVector
     })
       : []
@@ -12015,7 +13616,7 @@ export default class extends Controller {
       ? Object.keys(this.selectedRanges).filter(metadataId => {
           const range = this.selectedRanges[metadataId]
           const hasRange = range && (range.min !== undefined && range.max !== undefined)
-          const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+          const hasLoadedVector = this.loadedMetadataVectors[metadataId] !== undefined
           return hasRange && hasLoadedVector
         })
       : []
@@ -12076,6 +13677,20 @@ export default class extends Controller {
 
   // Get the intersection of selected cells across all metadata (full calculation)
   getFilteredCellIndices() {
+    // Performance optimization: check if filter state has changed
+    const currentFilterHash = this.getFilterStateHash()
+    console.log('🔍 Filter state check:', {
+      currentHash: currentFilterHash,
+      lastHash: this.lastFilterStateHash,
+      hasCachedIndices: this.lastFilteredIndices !== undefined,
+      selectedCategories: this.selectedCategories
+    })
+    
+    if (this.lastFilterStateHash === currentFilterHash && this.lastFilteredIndices !== undefined) {
+      console.log('🔍 Using cached filtered indices (no filter state change)')
+      return this.lastFilteredIndices
+    }
+    
     const startTime = performance.now()
     const hasDiscreteSelections = this.selectedCategories && Object.keys(this.selectedCategories).length > 0
     const hasContinuousSelections = this.selectedRanges && Object.keys(this.selectedRanges).length > 0
@@ -12090,6 +13705,9 @@ export default class extends Controller {
     if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells
       console.log('🔍 No selections found, returning null (no filtering)')
+      // Update performance cache
+      this.lastFilteredIndices = null
+      this.lastFilterStateHash = currentFilterHash
       return null
     }
 
@@ -12107,12 +13725,12 @@ export default class extends Controller {
     const discreteMetadataWithConstraints = Object.keys(this.selectedCategories).filter(metadataId => {
       const selections = this.selectedCategories[metadataId]
       const hasSelections = selections && selections.size > 0
-      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      const hasLoadedVector = this.loadedMetadataVectors[metadataId] !== undefined
       
       if (!hasSelections || !hasLoadedVector) return false
       
       // Check if all categories are selected (no constraint)
-      const metadataVector = this.getMetadataVectorById(metadataId)
+      const metadataVector = this.loadedMetadataVectors[metadataId]
       if (metadataVector && metadataVector.values) {
         const availableCategories = [...new Set(metadataVector.values)]
         const allSelected = availableCategories.every(category => selections.has(category))
@@ -12125,12 +13743,12 @@ export default class extends Controller {
     const continuousMetadataWithConstraints = Object.keys(this.selectedRanges).filter(metadataId => {
       const range = this.selectedRanges[metadataId]
       const hasRange = range && (range.min !== undefined && range.max !== undefined)
-      const hasLoadedVector = this.getMetadataVectorById(metadataId) !== null
+      const hasLoadedVector = this.loadedMetadataVectors[metadataId] !== undefined
       
       if (!hasRange || !hasLoadedVector) return false
       
       // Check if range covers the full range (no constraint)
-      const metadataVector = this.getMetadataVectorById(metadataId)
+      const metadataVector = this.loadedMetadataVectors[metadataId]
       if (metadataVector && metadataVector.values) {
         const values = metadataVector.values
         const minVal = this.safeMin(values)
@@ -12152,6 +13770,9 @@ export default class extends Controller {
     if (allMetadataWithConstraints.length === 0) {
       // No metadata has actual constraints, return all cells
       console.log('🔍 No metadata with constraints found, returning null (no filtering)')
+      // Update performance cache
+      this.lastFilteredIndices = null
+      this.lastFilterStateHash = currentFilterHash
       return null
     }
 
@@ -12181,6 +13802,10 @@ export default class extends Controller {
     // Cache the result
     this.filterCache.set(cacheKey, filteredIndices)
     
+    // Update performance cache
+    this.lastFilteredIndices = filteredIndices
+    this.lastFilterStateHash = currentFilterHash
+    
     const totalTime = performance.now() - startTime
     console.log(`🚀 [PERF] getFilteredCellIndices completed in ${totalTime.toFixed(2)}ms`)
     
@@ -12205,12 +13830,19 @@ export default class extends Controller {
 
   // Get cell indices that belong to the specified categories for a given metadata
   getCellsForMetadataCategories(metadataId, selectedCategories) {
+    console.log(`🔍 getCellsForMetadataCategories called for metadata ${metadataId}`)
+    console.log(`🔍 Selected categories:`, selectedCategories)
+    console.log(`🔍 Selected categories type:`, typeof selectedCategories)
+    console.log(`🔍 Selected categories size:`, selectedCategories?.size)
+    
     // Find the metadata vector for this metadata ID
     const metadataVector = this.getMetadataVectorById(metadataId)
     if (!metadataVector || !metadataVector.values) {
       console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
       return []
     }
+    
+    console.log(`🔍 Metadata vector found, values length:`, metadataVector.values.length)
 
     const startTime = performance.now()
     const cellIndices = []
@@ -12310,12 +13942,17 @@ export default class extends Controller {
   getMetadataVectorById(metadataId) {
     // Check if it's the current metadata vector (fully loaded and decompressed)
     if (this.currentMetadataId === metadataId && this.currentMetadataVector) {
+      // Update usage tracker for current metadata
+      this.updateMetadataUsage(metadataId)
       return this.currentMetadataVector
     }
     
-    // Check stored metadata vectors
+    // Check stored metadata vectors in memory
     if (this.loadedMetadataVectors && this.loadedMetadataVectors[metadataId]) {
       const vectorData = this.loadedMetadataVectors[metadataId]
+      
+      // Update usage tracker
+      this.updateMetadataUsage(metadataId)
       
       // If it's already decompressed (has values), return it
       if (vectorData.values) {
@@ -12355,8 +13992,118 @@ export default class extends Controller {
       }
     }
     
-    console.warn(`Metadata vector not found for ID: ${metadataId}`)
-    return null
+    // If not found in memory, try to load from disk and cache in memory
+    // Load from disk and cache in memory for future use
+    this.loadMetadataVectorFromDisk(metadataId).then(vectorData => {
+      if (vectorData) {
+        // Metadata loaded and cached silently
+      }
+    }).catch(error => {
+      console.error(`💾 [DISK] Failed to load metadata ${metadataId} from disk:`, error)
+    })
+    
+    return null // Return null for now, will be available after async load completes
+  }
+
+  // Load metadata vector from disk (IndexedDB) when needed
+  async loadMetadataVectorFromDisk(metadataId) {
+    // Safety check to prevent infinite loops
+    if (!this.loadingCallCount) {
+      this.loadingCallCount = new Map()
+    }
+    
+    const currentCount = this.loadingCallCount.get(metadataId) || 0
+    if (currentCount > 5) {
+      console.error(`🚨 INFINITE LOOP DETECTED for metadata ${metadataId}! Stopping to prevent browser crash.`)
+      console.error(`Call stack:`, new Error().stack)
+      return null
+    }
+    
+    this.loadingCallCount.set(metadataId, currentCount + 1)
+    console.log(`💾 [DISK] loadMetadataVectorFromDisk called for ${metadataId} (call #${currentCount + 1})`)
+    
+    // Check if already loading to prevent duplicate requests
+    if (this.loadingMetadataVectors.has(metadataId)) {
+      console.log(`💾 [DISK] Metadata ${metadataId} already loading, waiting...`)
+      while (this.loadingMetadataVectors.has(metadataId)) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      return this.loadedMetadataVectors[metadataId]
+    }
+    
+    try {
+      // Load from IndexedDB
+      const vectorData = await this.loadMetadataFromIndexedDB(metadataId)
+      
+      if (!vectorData) {
+        console.warn(`💾 [DISK] Metadata vector not found on disk for ID: ${metadataId}`)
+        console.log(`💾 [DISK] Attempting to load metadata ${metadataId} from server as fallback...`)
+        
+        // Fallback: Try to load from server directly
+        try {
+          const fallbackData = await this.loadSingleMetadataVectorSilently(metadataId)
+          if (fallbackData) {
+            console.log(`💾 [DISK] Loaded metadata ${metadataId} from server`)
+            return fallbackData
+          }
+        } catch (error) {
+          console.error(`💾 [DISK] Fallback loading failed for metadata ${metadataId}:`, error)
+        }
+        
+        return null
+      }
+      
+      console.log(`💾 [DISK] Loaded metadata ${metadataId} from disk`)
+      
+      // Decompress the data if needed
+      if (!vectorData.values) {
+        let values
+        if (vectorData.data_type === 'DISCRETE') {
+          values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else if (vectorData.data_type === 'NUMERIC') {
+          values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else {
+          console.warn(`Unknown data type for metadata ${metadataId}: ${vectorData.data_type}`)
+          return null
+        }
+        
+        // Create a fully loaded metadata vector object
+        const decompressedVector = {
+          id: metadataId,
+          name: vectorData.name,
+          data_type: vectorData.data_type,
+          values: values,
+          compression_info: vectorData.compression_info
+        }
+        
+        // Store in memory for future use (but will be cleaned up by memory optimization)
+        this.loadedMetadataVectors[metadataId] = decompressedVector
+        
+        // Update usage tracker
+        this.updateMetadataUsage(metadataId)
+        
+        // Trigger cleanup if we have too many metadata in memory
+        this.cleanupUnusedMetadata()
+        
+        console.log(`💾 [DISK] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
+        return decompressedVector
+      }
+      
+      // If already decompressed, store in memory and return
+      this.loadedMetadataVectors[metadataId] = vectorData
+      
+      // Update usage tracker
+      this.updateMetadataUsage(metadataId)
+      
+      // Trigger cleanup if we have too many metadata in memory
+      this.cleanupUnusedMetadata()
+      
+      return vectorData
+      
+    } catch (error) {
+      console.error(`💾 [DISK] Error loading metadata vector ${metadataId} from disk:`, error)
+      return null
+    }
   }
 
   // ===== RANGE SLIDER FUNCTIONALITY =====

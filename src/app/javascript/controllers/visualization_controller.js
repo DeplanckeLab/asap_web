@@ -5555,10 +5555,14 @@ export default class extends Controller {
         const metadataItem = headerElement.closest('[data-metadata-item]')
         if (metadataItem) {
           const metadataId = metadataItem.dataset.metadataItem
-          //console.log(`Loading metadata vector for ${metadataId} on category expansion`)
-          
           // Load into memory for fast access (no spinner for category expansion)
-          this.loadSingleMetadataVector(metadataId).catch(error => {
+          this.loadSingleMetadataVector(metadataId).then(() => {
+            // Initialize checkboxes for this metadata to enable filtering
+            this.initializeCheckboxesForMetadata(metadataId).then(() => {
+              // Now update the filtering to apply the category selections
+              this.updateCellFiltering()
+            })
+          }).catch(error => {
             console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
           })
         }

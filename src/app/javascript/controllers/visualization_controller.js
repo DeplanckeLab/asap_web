@@ -12797,9 +12797,34 @@ export default class extends Controller {
     console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
   }
 
+  // Check if color picker popup or gradient editor is currently open
+  isColorPickerOpen() {
+    const colorPicker = document.getElementById('color-picker-form')
+    const gradientEditor = document.getElementById('gradient-editor-modal')
+    const controlPointEditor = document.getElementById('gradient-control-point-editor')
+    
+    // Check if color picker exists and is visible
+    const colorPickerOpen = colorPicker !== null
+    
+    // Check if gradient editor exists and is visible (display not 'none')
+    const gradientEditorOpen = gradientEditor !== null && 
+                               gradientEditor.style.display !== 'none' && 
+                               gradientEditor.style.display !== ''
+    
+    // Check if control point editor exists and is visible (display not 'none')
+    const controlPointEditorOpen = controlPointEditor !== null && 
+                                   controlPointEditor.style.display !== 'none' && 
+                                   controlPointEditor.style.display !== ''
+    
+    return colorPickerOpen || gradientEditorOpen || controlPointEditorOpen
+  }
+
   // Detect point hovering for RegL (dynamic tooltip)
   detectRegLPointHover(event) {
     if (this.interactionMode !== 'pick') return
+    
+    // Prevent hovering when color picker popup is open
+    if (this.isColorPickerOpen()) return
 
     const canvas = this.canvas
     if (!canvas || !this.reglRenderer || !this.currentCoordinates) return

@@ -38,6 +38,11 @@ export default class extends Controller {
     this.lastColorUpdateHash = null // Hash of color state for change detection
     this.colorUpdateCache = new Map() // Cache for color calculations
     
+    // Color cache for visibility updates (performance optimization)
+    this.cachedColorsByCellIndex = new Map() // Cache colors by cell index for fast lookup
+    this.lastColoringMetadataId = null // Track which metadata was used for last color calculation
+    this.lastColorRange = null // Track color range for continuous metadata
+    
     // Performance monitoring
     this.performanceMetrics = {
       lastUpdateTime: 0,
@@ -1590,6 +1595,8 @@ export default class extends Controller {
   }
 
   // Helper method to get color and alpha separately for PIXI.js
+  // FIXED: Now correctly identifies which metadata is used for coloring vs filtering
+  // This prevents new dots from appearing with wrong colors when filtering constraints are relaxed
   getColorAndAlpha(pointIndex) {
     const hasSelection = this.selectedCells && this.selectedCells.size > 0
     const isSelected = this.selectedCells && this.selectedCells.has(pointIndex)
@@ -1601,22 +1608,29 @@ export default class extends Controller {
 
     // Check for metadata coloring
     let baseColor = 0x3b82f6 // Default blue color
-    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[pointIndex] !== undefined) {
-      const { data_type, values, compression_info } = this.currentMetadataVector
+    
+    // Find the metadata vector that is actually being used for coloring
+    // This should be the one that has a visible legend/color scheme active
+    // This fixes the issue where new dots appear with wrong colors when filtering constraints are relaxed
+    const coloringMetadataVector = this.getColoringMetadataVector()
+    
+    if (coloringMetadataVector && coloringMetadataVector.values && coloringMetadataVector.values[pointIndex] !== undefined) {
+      const { data_type, values, compression_info } = coloringMetadataVector
       const value = values[pointIndex]
       
       if (data_type === 'DISCRETE') {
         // Cache the color map to avoid recalculating for every point
-        if (!this._cachedColorMap) {
+        if (!this._cachedColorMap || this._cachedColorMapMetadataId !== coloringMetadataVector.id) {
           // Use DOM order (same as legend) for consistent color assignment
-          const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataId)
+          const domOrderCategories = this.getCategoriesForMetadata(coloringMetadataVector.id)
           if (domOrderCategories && domOrderCategories.length > 0) {
             const categoryNames = domOrderCategories.map(cat => cat.name)
-            this._cachedColorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataId)
+            this._cachedColorMap = this.createDiscreteColorMap(categoryNames, coloringMetadataVector.id)
           } else {
             // Fallback to original categories if DOM not available
-            this._cachedColorMap = this.createDiscreteColorMap([...compression_info.categories], this.currentMetadataId)
+            this._cachedColorMap = this.createDiscreteColorMap([...compression_info.categories], coloringMetadataVector.id)
           }
+          this._cachedColorMapMetadataId = coloringMetadataVector.id
         }
         baseColor = this._cachedColorMap[value] || 0x3b82f6
       } else if (data_type === 'NUMERIC') {
@@ -1643,6 +1657,172 @@ export default class extends Controller {
     }
 
     return { color: baseColor, alpha: 1.0 }
+  }
+
+  // Get the metadata vector that is currently being used for coloring
+  // This should be the one that has a visible legend/color scheme active
+  getColoringMetadataVector() {
+    // First, check if there's a metadata vector that has a visible legend
+    // Look for active legend elements in the DOM
+    const activeLegend = document.querySelector('.metadata-legend:not([style*="display: none"])')
+    if (activeLegend) {
+      const metadataId = activeLegend.dataset.metadataId
+      if (metadataId && this.loadedMetadataVectors[metadataId]) {
+        return this.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Fallback: check for active color legend (for continuous metadata)
+    const activeColorLegend = document.querySelector('.color-legend:not([style*="display: none"])')
+    if (activeColorLegend) {
+      const metadataId = activeColorLegend.dataset.metadataId
+      if (metadataId && this.loadedMetadataVectors[metadataId]) {
+        return this.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Fallback: check for active gradient legend (for continuous metadata)
+    const activeGradientLegend = document.querySelector('.gradient-legend:not([style*="display: none"])')
+    if (activeGradientLegend) {
+      const metadataId = activeGradientLegend.dataset.metadataId
+      if (metadataId && this.loadedMetadataVectors[metadataId]) {
+        return this.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Final fallback: use currentMetadataVector if it exists and has values
+    if (this.currentMetadataVector && this.currentMetadataVector.values) {
+      return this.currentMetadataVector
+    }
+    
+    return null
+  }
+
+  // Clear color cache when coloring metadata changes
+  clearColorMapCache() {
+    this._cachedColorMap = null
+    this._cachedColorMapMetadataId = null
+    // Also clear the new color cache for visibility updates
+    this.cachedColorsByCellIndex = new Map()
+    this.lastColoringMetadataId = null
+    this.lastColorRange = null
+  }
+
+  // Check if colors need to be recalculated
+  shouldRecalculateColors(coloringMetadataVector) {
+    // If no coloring metadata, no recalculation needed
+    if (!coloringMetadataVector) {
+      return false
+    }
+    
+    // If we don't have cached colors, we need to calculate them
+    if (!this.cachedColorsByCellIndex || this.cachedColorsByCellIndex.size === 0) {
+      return true
+    }
+    
+    // If the coloring metadata ID has changed, we need to recalculate
+    if (this.lastColoringMetadataId !== coloringMetadataVector.id) {
+      return true
+    }
+    
+    // If the color range has changed (for continuous metadata), we need to recalculate
+    if (coloringMetadataVector.data_type === 'NUMERIC') {
+      const currentRange = this.getEffectiveColorRange()
+      if (this.lastColorRange && currentRange) {
+        if (this.lastColorRange.min !== currentRange.min || this.lastColorRange.max !== currentRange.max) {
+          return true
+        }
+      } else if (this.lastColorRange !== currentRange) {
+        return true
+      }
+    }
+    
+    return false
+  }
+
+  // Calculate and cache colors for all points based on coloring metadata
+  calculateAndCacheColors(coloringMetadataVector) {
+    if (!coloringMetadataVector || !coloringMetadataVector.values) {
+      // No coloring metadata, use default colors
+      this.cachedColorsByCellIndex = new Map()
+      for (let i = 0; i < this.currentCoordinates.length; i++) {
+        this.cachedColorsByCellIndex.set(i, 0x3b82f6) // Default blue
+      }
+      this.lastColoringMetadataId = null
+      this.lastColorRange = null
+      return
+    }
+    
+    console.log(`🎨 [CACHE] Calculating colors for ${coloringMetadataVector.values.length} points`)
+    const startTime = performance.now()
+    
+    this.cachedColorsByCellIndex = new Map()
+    const { data_type, values, compression_info } = coloringMetadataVector
+    
+    if (data_type === 'DISCRETE') {
+      // Discrete metadata coloring
+      const categoryColors = this.getCategoryColors()
+      const domOrderCategories = this.getCategoriesForMetadata(coloringMetadataVector.id)
+      let categoryToIndex = {}
+      
+      if (domOrderCategories && domOrderCategories.length > 0) {
+        const categoryNames = domOrderCategories.map(cat => cat.name)
+        categoryNames.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+      } else {
+        const uniqueCategories = [...new Set(values)]
+        uniqueCategories.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+      }
+      
+      // Cache colors for all points
+      for (let i = 0; i < values.length; i++) {
+        const category = values[i]
+        const categoryIndex = categoryToIndex[category] || 0
+        const colorValue = categoryColors[categoryIndex % categoryColors.length]
+        const color = typeof colorValue === 'string' 
+          ? parseInt(colorValue.replace('#', ''), 16)
+          : colorValue
+        this.cachedColorsByCellIndex.set(i, color)
+      }
+      
+    } else if (data_type === 'NUMERIC') {
+      // Continuous metadata coloring
+      const effectiveRange = this.getEffectiveColorRange()
+      let minVal, maxVal
+      
+      if (effectiveRange) {
+        minVal = effectiveRange.min
+        maxVal = effectiveRange.max
+      } else if (compression_info) {
+        minVal = compression_info.min_val
+        maxVal = compression_info.max_val
+      } else {
+        minVal = Math.min(...values)
+        maxVal = Math.max(...values)
+      }
+      
+      const range = maxVal - minVal
+      
+      // Cache colors for all points
+      for (let i = 0; i < values.length; i++) {
+        const value = values[i]
+        const normalizedValue = range > 0 ? (value - minVal) / range : 0.5
+        const color = this.getColorFromGradient(normalizedValue)
+        this.cachedColorsByCellIndex.set(i, color)
+      }
+      
+      // Cache the color range for future comparisons
+      this.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
+    }
+    
+    // Cache the metadata ID for future comparisons
+    this.lastColoringMetadataId = coloringMetadataVector.id
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎨 [CACHE] Cached colors for ${this.cachedColorsByCellIndex.size} points in ${elapsed.toFixed(2)}ms`)
   }
 
   // Centralized function to get the color for a point at a given index
@@ -2392,7 +2572,14 @@ export default class extends Controller {
     if (!vectorData) {
       console.error('Failed to load metadata vector for:', metadataId)
       console.error('loadedMetadataVectors:', Object.keys(this.loadedMetadataVectors))
+      console.error('loadingMetadataVectors:', Array.from(this.loadingMetadataVectors))
       console.error('IndexedDB available:', !!this.db)
+      
+      // Try to diagnose the issue
+      if (this.loadingMetadataVectors.has(metadataId)) {
+        console.error('DIAGNOSIS: Metadata is still marked as loading - this indicates a race condition!')
+      }
+      
       return
     }
     
@@ -4493,6 +4680,7 @@ export default class extends Controller {
     console.log(`🚀 [PERF] renderPointsWithCurrentColoring completed in ${totalTime.toFixed(2)}ms`)
   }
   // ReGL version of renderPointsWithCurrentColoring
+  // FIXED: Now correctly identifies which metadata is used for coloring vs filtering
   renderPointsWithCurrentColoringReGL() {
     // Performance optimization: check if color state has changed
     const currentColorHash = this.getColorStateHash()
@@ -4520,15 +4708,17 @@ export default class extends Controller {
     console.log(`🎨 [ReGL] Filtered indices:`, filteredIndices ? `${filteredIndices.length} visible cells` : 'all visible')
     
     // Check if we have metadata coloring active
-    if (this.currentMetadataVector) {
-      console.log(`🎨 [ReGL] Applying ${this.currentMetadataVector.data_type} metadata colors`)
+    // FIXED: Use getColoringMetadataVector() to get the correct metadata for coloring
+    const coloringMetadataVector = this.getColoringMetadataVector()
+    if (coloringMetadataVector) {
+      console.log(`🎨 [ReGL] Applying ${coloringMetadataVector.data_type} metadata colors`)
       
-      if (this.currentMetadataVector.data_type === 'DISCRETE') {
+      if (coloringMetadataVector.data_type === 'DISCRETE') {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.getCategoryColors()
         
         // Build category-to-index map using DOM order (same as legend)
-        const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataId)
+        const domOrderCategories = this.getCategoriesForMetadata(coloringMetadataVector.id)
         let categoryToIndex = {}
         
         if (domOrderCategories && domOrderCategories.length > 0) {
@@ -4539,7 +4729,7 @@ export default class extends Controller {
           })
         } else {
           // Fallback to Set order if DOM not available
-          const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
+          const uniqueCategories = [...new Set(coloringMetadataVector.values)]
           uniqueCategories.forEach((cat, idx) => {
             categoryToIndex[cat] = idx
           })
@@ -4554,7 +4744,7 @@ export default class extends Controller {
           const isVisible = !visibleSet || visibleSet.has(cellIndex)
           
           if (isVisible) {
-            const category = this.currentMetadataVector.values[cellIndex]
+            const category = coloringMetadataVector.values[cellIndex]
             const categoryIndex = categoryToIndex[category] || 0
             const colorValue = categoryColors[categoryIndex % categoryColors.length]
             
@@ -4569,6 +4759,9 @@ export default class extends Controller {
             colorMap.set(drawPos, 0x00000000)
           }
         }
+        
+        // Cache colors for fast visibility updates
+        this.calculateAndCacheColors(coloringMetadataVector)
         
         // Update colors in ReGL
         this.reglRenderer.updateColors(colorMap)
@@ -4591,10 +4784,10 @@ export default class extends Controller {
           return // Early exit - reordering already rendered everything
         }
         
-      } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+      } else if (coloringMetadataVector.data_type === 'NUMERIC') {
         // Continuous/numeric metadata coloring
-        const values = this.currentMetadataVector.values
-        const compressionInfo = this.currentMetadataVector.compression_info
+        const values = coloringMetadataVector.values
+        const compressionInfo = coloringMetadataVector.compression_info
         
         console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
         
@@ -4640,6 +4833,9 @@ export default class extends Controller {
             colorMap.set(drawPos, 0x00000000)
           }
         }
+        
+        // Cache colors for fast visibility updates
+        this.calculateAndCacheColors(coloringMetadataVector)
         
         console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
         
@@ -8856,13 +9052,19 @@ export default class extends Controller {
     
     console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
     
-    // Get category colors
-    const categoryColors = this.getCategoryColors()
-    const uniqueCategories = [...new Set(values)]
-    const categoryToIndex = {}
-    uniqueCategories.forEach((cat, idx) => {
-      categoryToIndex[cat] = idx
-    })
+    // Get category colors using the same logic as plot dots for consistency
+    // Use DOM order (same as legend) for consistent color assignment
+    const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataVector.id)
+    let colorMap = {}
+    
+    if (domOrderCategories && domOrderCategories.length > 0) {
+      const categoryNames = domOrderCategories.map(cat => cat.name)
+      colorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataVector.id)
+    } else {
+      // Fallback to original categories if DOM not available
+      const uniqueCategories = [...new Set(values)]
+      colorMap = this.createDiscreteColorMap(uniqueCategories, this.currentMetadataVector.id)
+    }
     
     // Clear old labels array for this rendering
     const newLabels = []
@@ -8897,9 +9099,8 @@ export default class extends Controller {
           return
         }
         
-        // Get category color
-        const categoryIndex = categoryToIndex[category] || 0
-        const colorValue = categoryColors[categoryIndex % categoryColors.length]
+        // Get category color from the same color map used by plot dots
+        const colorValue = colorMap[category] || 0x3b82f6 // Default blue if not found
         
         // Convert color to RGB for canvas
         let r, g, b
@@ -9190,12 +9391,22 @@ export default class extends Controller {
     }
     
     
-    // Get the category color for the border
-    const rawCategories = this.currentMetadataVector.categories || [...new Set(this.currentMetadataVector.values)]
-    const sortedCategories = this.getSortedCategories(this.currentMetadataVector.values, [...rawCategories])
-    const categoryIndex = sortedCategories.indexOf(categoryName)
-    const categoryColor = this.getCategoryColor(categoryName, categoryIndex, this.currentMetadataId)
-    const borderColor = this.convertHexToPixiColor(categoryColor)
+    // Get the category color for the border using the same logic as plot dots for consistency
+    // Use DOM order (same as legend) for consistent color assignment
+    const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataVector.id)
+    let colorMap = {}
+    
+    if (domOrderCategories && domOrderCategories.length > 0) {
+      const categoryNames = domOrderCategories.map(cat => cat.name)
+      colorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataVector.id)
+    } else {
+      // Fallback to original categories if DOM not available
+      const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
+      colorMap = this.createDiscreteColorMap(uniqueCategories, this.currentMetadataVector.id)
+    }
+    
+    // Get color from the same color map used by plot dots
+    const borderColor = colorMap[categoryName] || 0x3b82f6 // Default blue if not found
 
     // Create background rectangle
     const padding = 3
@@ -13343,6 +13554,7 @@ export default class extends Controller {
     //console.log(`Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
   }
   // Update point visibility in ReGL mode by hiding filtered-out points
+  // OPTIMIZED: Uses cached colors and only recalculates when coloring metadata changes
   updatePointVisibilityReGL(filteredIndices) {
     if (!this.reglRenderer || !this.currentCoordinates) {
       console.log('⚠️ [ReGL] Cannot update visibility - missing renderer or coordinates')
@@ -13353,11 +13565,21 @@ export default class extends Controller {
     console.log('🎨 [ReGL] Updating point visibility based on filters')
     console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
     console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
-    console.log('🎨 [ReGL] originalPointColors size:', this.originalPointColors?.size)
     
     // Convert filteredIndices to Set for O(1) lookup
     // filteredIndices contains ORIGINAL cell indices
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Get the metadata vector that is actually being used for coloring
+    const coloringMetadataVector = this.getColoringMetadataVector()
+    
+    // Check if we need to recalculate colors (only when coloring metadata changes)
+    const needsColorRecalculation = this.shouldRecalculateColors(coloringMetadataVector)
+    
+    if (needsColorRecalculation) {
+      console.log('🎨 [ReGL] Recalculating colors due to coloring metadata change')
+      this.calculateAndCacheColors(coloringMetadataVector)
+    }
     
     // Create color map to hide/show points based on filtering
     // We'll use the alpha channel approach: set alpha to 0 for hidden points
@@ -13374,13 +13596,13 @@ export default class extends Controller {
       const shouldBeVisible = !filteredSet || filteredSet.has(cellIndex)
       
       if (shouldBeVisible) {
-        // Restore original color (RGB format - alpha will be set to 1.0 by renderer)
-        const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
-        colorMap.set(drawPos, originalColor)
+        // Use cached color (much faster than recalculating)
+        const cachedColor = this.cachedColorsByCellIndex.get(cellIndex) || 0x3b82f6
+        colorMap.set(drawPos, cachedColor)
         visibleCount++
         
         if (sampleIndices.includes(drawPos)) {
-          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${originalColor.toString(16)}`)
+          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${cachedColor.toString(16)}`)
         }
       } else {
         // Hide point by making it fully transparent
@@ -14137,8 +14359,16 @@ export default class extends Controller {
       while (this.loadingMetadataVectors.has(metadataId)) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
-      return this.loadedMetadataVectors[metadataId]
+      const result = this.loadedMetadataVectors[metadataId]
+      if (!result) {
+        console.error(`💾 [DISK] RACE CONDITION: Metadata ${metadataId} finished loading but not found in loadedMetadataVectors!`)
+        console.error(`💾 [DISK] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors))
+      }
+      return result
     }
+    
+    // Mark as loading to prevent race conditions
+    this.loadingMetadataVectors.add(metadataId)
     
     try {
       // Load from IndexedDB
@@ -14212,6 +14442,9 @@ export default class extends Controller {
     } catch (error) {
       console.error(`💾 [DISK] Error loading metadata vector ${metadataId} from disk:`, error)
       return null
+    } finally {
+      // Always remove from loading set, even if there was an error
+      this.loadingMetadataVectors.delete(metadataId)
     }
   }
 

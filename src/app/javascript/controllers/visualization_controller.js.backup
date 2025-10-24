@@ -1,0 +1,1288 @@
+import { Controller } from "@hotwired/stimulus"
+import { ReglRenderer } from "visualization/regl_renderer"
+
+console.log('Visualization controller file loaded - REGL ONLY VERSION')
+
+export default class extends Controller {
+  static targets = ["loomFileSelect", "embeddingSelect", "metadataSelect"]
+  static values = { 
+    embeddingsByLoom: Object,
+    defaultLoomFile: String
+  }
+
+  connect() {
+    console.log('🚀 Visualization controller connected')
+    
+    // RENDERER CHOICE: RegL only
+    this.rendererType = 'regl'
+    this.reglRenderer = null
+    
+    // Initialize IndexedDB for storing metadata on disk instead of memory
+    this.initializeIndexedDB()
+    
+    // Initialize memory management
+    this.binaryDataCache = new Map()
+    this.loadedMetadataVectors = {}
+    this.metadataUsageTracker = new Map()
+    
+    // Initialize interaction state
+    this.selectedCells = new Set()
+    this.interactionMode = 'pan'
+    
+    // Initialize metadata state
+    this.currentMetadataVector = null
+    this.selectedCategories = {}
+    this.selectedRanges = {}
+    
+    // Initialize rendering state
+    this.currentBounds = null
+    this.currentCoordinates = null
+    this.currentPointSize = 2
+    
+    // Initialize canvas
+    this.canvas = null
+    this.overlayCanvas = null
+    this.overlayCtx = null
+    
+    // Clear category colors cache
+    this.clearCategoryColorsCache()
+    
+    // Auto-load the first available embedding on page load
+    // Use a longer timeout to ensure DOM is fully loaded
+    setTimeout(() => {
+      console.log('🔍 Attempting to auto-load first embedding...')
+      this.attemptAutoLoad()
+    }, 500) // Increased timeout to 500ms
+    
+    // Initialize draggable divider
+    setTimeout(() => {
+      this.initializeDraggableDivider()
+    }, 500)
+    
+    // Create diagnostic button
+    setTimeout(() => {
+      this.createDiagnosticButton()
+    }, 3000)
+    
+    // Fallback: Try to auto-load after a longer delay if it didn't work initially
+    setTimeout(() => {
+      if (!this.metadataData) {
+        console.log('🔄 Fallback: Attempting to auto-load embedding after delay...')
+        this.attemptAutoLoad()
+      }
+    }, 2000)
+  }
+
+  disconnect() {
+    // Remove click outside listener when controller disconnects
+    if (this.boundCloseDropdowns) {
+      document.removeEventListener('click', this.boundCloseDropdowns)
+    }
+    
+    // Remove interaction event listeners
+    this.removeInteractionEventListeners()
+    
+    // Clean up any existing ReGL renderer
+    if (this.reglRenderer) {
+      this.reglRenderer.destroy()
+      this.reglRenderer = null
+    }
+  }
+
+  // Initialize IndexedDB for storing metadata on disk
+  initializeIndexedDB() {
+    const dbName = 'VisualizationMetadataCache'
+    const dbVersion = 1
+    
+    const request = indexedDB.open(dbName, dbVersion)
+    
+    request.onerror = () => {
+      console.error('💾 IndexedDB initialization failed')
+    }
+    
+    request.onsuccess = () => {
+      this.db = request.result
+      console.log('💾 IndexedDB initialized successfully - metadata will be stored on disk')
+    }
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result
+      if (!db.objectStoreNames.contains('metadata')) {
+        db.createObjectStore('metadata', { keyPath: 'id' })
+      }
+    }
+  }
+
+  // Clear category colors cache
+  clearCategoryColorsCache() {
+    this.cachedColorsByCellIndex = new Map()
+    this.cachedColorMap = null
+    this.lastColoringMetadataId = null
+    this.lastColorRange = null
+  }
+
+  // Initialize draggable divider
+  initializeDraggableDivider() {
+    console.log('Initializing draggable divider')
+  }
+
+  // Setup interaction system
+  setupInteractionSystem() {
+    console.log('Setting up interaction system')
+  }
+
+  // Initialize tooltip
+  initializeTooltip() {
+    console.log('Initializing tooltip')
+  }
+
+  // Update selected cells count
+  updateSelectedCellsCount() {
+    console.log('Updating selected cells count')
+  }
+
+  // Create diagnostic button
+  createDiagnosticButton() {
+    console.log('Creating diagnostic button')
+  }
+
+  // Remove interaction event listeners
+  removeInteractionEventListeners() {
+    console.log('Removing interaction event listeners')
+  }
+
+  // Create tooltip dynamically
+  createTooltipDynamically() {
+    console.log('Creating tooltip dynamically')
+  }
+
+  // Update button states
+  updateButtonStates(mode) {
+    console.log('Updating button states:', mode)
+  }
+
+  // Update control instructions
+  updateControlInstructions() {
+    console.log('Updating control instructions')
+  }
+
+  // Setup canvas listeners
+  setupCanvasListeners() {
+    console.log('Setting up canvas listeners')
+  }
+
+  // Update embeddings
+  updateEmbeddings() {
+    console.log('🔄 Updating embeddings...')
+    
+    // Try to find the loom file select element
+    const loomFileSelect = document.querySelector('[data-visualization-target="loomFileSelect"]')
+    const embeddingSelect = document.querySelector('[data-visualization-target="embeddingSelect"]')
+    
+    if (!loomFileSelect || !embeddingSelect || !this.embeddingsByLoomValue) {
+      console.log('❌ Required targets or values not available')
+      return
+    }
+    
+    const selectedLoomFile = loomFileSelect.value
+    const embeddings = this.embeddingsByLoomValue[selectedLoomFile] || []
+    
+    console.log('Selected loom file:', selectedLoomFile)
+    console.log('Embeddings found:', embeddings.length)
+    
+    // Clear current options
+    embeddingSelect.innerHTML = '<option selected>Select embedding...</option>'
+    
+    // Add new options
+    embeddings.forEach(embedding => {
+      const option = document.createElement('option')
+      option.value = embedding.id
+      option.textContent = embedding.display_name
+      embeddingSelect.appendChild(option)
+    })
+    
+    console.log('✅ Embeddings dropdown updated with', embeddings.length, 'options')
+  }
+
+  // Update metadata
+  updateMetadata() {
+    const perfStart = performance.now()
+    console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
+    
+    // Try to get the selected metadata ID from the dropdown
+    const metadataSelect = document.getElementById('metadata-select-dropdown')
+    if (!metadataSelect) {
+      console.log('❌ Metadata select element not available')
+      return
+    }
+    
+    const selectedMetadataId = metadataSelect.value
+    console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
+    
+    if (selectedMetadataId) {
+      console.log('🔄 Starting to load metadata coordinates...')
+      // Show loading spinner
+      this.showMetadataDropdownSpinner()
+      
+      // Load metadata and hide spinner when done
+      this.loadMetadataCoordinates(selectedMetadataId)
+        .then(() => {
+          console.log('✅ Successfully loaded metadata coordinates')
+        })
+        .catch(error => {
+          console.error('❌ Error loading metadata coordinates:', error)
+        })
+        .finally(() => {
+          this.hideMetadataDropdownSpinner()
+          const perfEnd = performance.now()
+          console.log(`⏱️ [PERF] ====== TOTAL EMBEDDING SWITCH TIME: ${(perfEnd - perfStart).toFixed(2)}ms ======`)
+        })
+    } else {
+      console.log('❌ No embedding ID selected')
+      // Clear any existing metadata data
+      this.clearMetadataData()
+    }
+  }
+
+  // Load metadata coordinates
+  async loadMetadataCoordinates(metadataId) {
+    const fetchStart = performance.now()
+    console.log(`🔄 Loading metadata coordinates for ID: ${metadataId}`)
+    
+    try {
+      // Check cache first!
+      if (this.binaryDataCache.has(metadataId)) {
+        console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
+        const cachedData = this.binaryDataCache.get(metadataId)
+        const cacheTime = performance.now() - fetchStart
+        console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
+        
+        // Use cached binary data
+        this.storeBinaryMetadataData(cachedData)
+        return
+      }
+      
+      console.log(`⏱️ [PERF] Step 1: BINARY CACHE MISS - Starting network fetch for ${metadataId}`)
+      
+      // Get the current loom file selection
+      const loomFileSelect = document.querySelector('[data-visualization-target="loomFileSelect"]')
+      let loomFile = loomFileSelect ? loomFileSelect.value : null
+      
+      console.log('🔍 Loom file select element:', loomFileSelect)
+      console.log('🔍 Loom file value:', loomFile)
+      
+      // If loom file is empty, try to get the first option or default value
+      if (!loomFile && loomFileSelect) {
+        const firstOption = loomFileSelect.querySelector('option:not([value=""])')
+        if (firstOption) {
+          loomFile = firstOption.value
+          console.log('🔧 Using first available loom file option:', loomFile)
+        }
+      }
+      
+      // If still no loom file, try to get it from the controller's default value
+      if (!loomFile && this.hasDefaultLoomFileValue) {
+        loomFile = this.defaultLoomFileValue
+        console.log('🔧 Using default loom file value:', loomFile)
+      }
+      
+      // Build the URL for the metadata coordinates endpoint
+      const projectId = window.location.pathname.split('/')[2]
+      const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      
+      console.log(`🔗 Fetching from URL: ${url}`)
+      
+      // Get CSRF token
+      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+      const csrfToken = csrfMetaTag?.getAttribute('content')
+      
+      const headers = { 'Accept': 'application/octet-stream' }
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+      const response = await fetch(url, { headers })
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`Metadata not found (ID: ${metadataId}). The metadata may not exist or may not belong to this project.`)
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+      }
+      
+      const arrayBuffer = await response.arrayBuffer()
+      const fetchTime = performance.now() - fetchStart
+      console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
+      
+      // Create data object with proper structure
+      const dataObject = {
+        id: metadataId,
+        name: `Embedding_${metadataId}`,
+        cellCount: arrayBuffer.byteLength / 4, // 4 bytes per coordinate pair
+        binaryData: arrayBuffer
+      }
+      
+      // Store in cache for future use
+      this.binaryDataCache.set(metadataId, dataObject)
+      
+      // Store the binary coordinate data
+      this.storeBinaryMetadataData(dataObject)
+      
+    } catch (error) {
+      console.error('❌ Error loading metadata coordinates:', error)
+      console.log('💡 Tip: Check if the metadata ID exists and belongs to the current project')
+      alert(`Failed to load metadata coordinates: ${error.message}`)
+    }
+  }
+
+  // Store binary metadata data
+  storeBinaryMetadataData(data) {
+    console.log('📦 Storing binary metadata data...')
+    // Store the binary coordinate data for later use
+    // The coordinates are stored as 16-bit signed integers in binary format
+    // Each coordinate pair takes 4 bytes (2 bytes for x, 2 bytes for y)
+    
+    this.metadataData = {
+      id: data.id,
+      name: data.name,
+      cellCount: data.cellCount,
+      binaryData: data.binaryData, // ArrayBuffer with binary data
+      loadedAt: Date.now()
+    }
+    
+    const binarySize = data.binaryData.byteLength
+    const expectedSize = data.cellCount * 4 // 4 bytes per coordinate pair (2 coordinates * 2 bytes each)
+    const compressionRatio = (data.cellCount * 2 * 8) / (binarySize * 8) // bits comparison
+    
+    console.log(`📦 Stored binary metadata data for ${data.name}:`, {
+      cellCount: data.cellCount,
+      binarySize: binarySize,
+      expectedSize: expectedSize,
+      compressionRatio: compressionRatio.toFixed(2) + 'x'
+    })
+    
+    console.log('📦 Metadata data stored, updating visualization...')
+    // Update visualization with the new coordinate data
+    this.updateVisualizationWithMetadata()
+  }
+
+  // Clear metadata data
+  clearMetadataData() {
+    this.metadataData = null
+    
+    // Clear ReGL visualization
+    if (this.reglRenderer) {
+      this.reglRenderer.destroy()
+      this.reglRenderer = null
+    }
+    
+    // Show placeholder and hide plot info
+    const placeholder = document.getElementById('plot-placeholder')
+    const plotInfo = document.getElementById('plot-info')
+    if (placeholder) placeholder.style.display = 'block'
+    if (plotInfo) plotInfo.style.display = 'none'
+    
+    // Clear point count
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      pointCountElement.textContent = '0'
+    }
+  }
+
+  // Update visualization with metadata
+  updateVisualizationWithMetadata() {
+    const vizStart = performance.now()
+    console.log('🎨 Updating visualization with metadata...')
+    
+    if (!this.metadataData) {
+      console.log('❌ No metadata data available')
+      return
+    }
+    
+    console.log('✅ Metadata data available, decompressing coordinates...')
+    // Decompress coordinates
+    const decompressStart = performance.now()
+    let decompressedCoords
+    try {
+      decompressedCoords = this.decompressBinaryCoordinates(this.metadataData.binaryData)
+      const decompressTime = performance.now() - decompressStart
+      console.log(`⏱️ [PERF] Step 2a: Total decompress + cache: ${decompressTime.toFixed(2)}ms`)
+      console.log(`✅ Decompressed ${decompressedCoords.length} coordinates`)
+    } catch (error) {
+      console.error('❌ Error decompressing coordinates:', error)
+      return
+    }
+    
+    console.log('🎯 Initializing ReGL scatter plot...')
+    // Initialize ReGL scatter plot
+    const reglStart = performance.now()
+    this.initializeReGLScatterPlot(decompressedCoords)
+    const reglTime = performance.now() - reglStart
+    
+    const vizTime = performance.now() - vizStart
+    console.log(`⏱️ [PERF] Step 2: updateVisualizationWithMetadata completed in ${vizTime.toFixed(2)}ms`)
+  }
+
+  // Initialize ReGL scatter plot
+  async initializeReGLScatterPlot(coordinates) {
+    console.log('🎯 Initializing ReGL scatter plot with', coordinates.length, 'coordinates')
+    try {
+      // Find the plot container
+      const plotContainer = document.querySelector('.plot-container')
+      if (!plotContainer) {
+        console.error('❌ Plot container not found')
+        return
+      }
+      console.log('✅ Plot container found')
+      
+      // Check if we already have a ReGL renderer for this loom file
+      const loomFileSelectElement = document.querySelector('[data-visualization-target="loomFileSelect"]')
+      const currentLoomFileValue = loomFileSelectElement ? loomFileSelectElement.value : null
+      if (this.reglRenderer && this.currentLoomFile === currentLoomFileValue) {
+        console.log('⏱️ [PERF] Step 3: Updating existing plot (FAST PATH)')
+        const updateStart = performance.now()
+        // Clear selection since coordinates might have changed
+        this.selectedCells.clear()
+        this.updateSelectedCellsCount()
+        // Use updateScatterPlot to animate coordinate changes
+        await this.updateScatterPlot(coordinates)
+        const updateTime = performance.now() - updateStart
+        console.log(`⏱️ [PERF] Step 3: Plot update completed in ${updateTime.toFixed(2)}ms`)
+        return
+      }
+      
+      console.log(`⏱️ [PERF] Step 3: Creating new ReGL renderer (SLOW PATH - first render)`)
+      
+      // Clear existing renderers
+      if (this.reglRenderer) {
+        this.reglRenderer.destroy()
+        this.reglRenderer = null
+      }
+      
+      // Clear plot container
+      plotContainer.innerHTML = ''
+      
+      // Create ReGL canvas (if not already created)
+      if (!this.canvas) {
+        const canvas = document.createElement('canvas')
+        canvas.width = plotContainer.clientWidth
+        canvas.height = plotContainer.clientHeight
+        canvas.style.width = '100%'
+        canvas.style.height = '100%'
+        canvas.style.display = 'block'
+        canvas.style.border = '1px solid #ccc' // Add border to make it visible for debugging
+        plotContainer.appendChild(canvas)
+        
+        console.log('🎯 Canvas created:', { 
+          width: canvas.width, 
+          height: canvas.height, 
+          clientWidth: plotContainer.clientWidth, 
+          clientHeight: plotContainer.clientHeight,
+          style: canvas.style.cssText,
+          offsetWidth: canvas.offsetWidth,
+          offsetHeight: canvas.offsetHeight
+        })
+        
+        // Store canvas reference
+        this.canvas = canvas
+        
+        // Initialize ReGL renderer
+        console.log('🎯 Initializing ReglRenderer...')
+        this.reglRenderer = new ReglRenderer(canvas)
+        console.log('🎯 ReglRenderer initialized:', this.reglRenderer)
+        
+        // Create overlay canvas for grid, axes, and labels (Canvas 2D)
+        const overlayCanvas = document.createElement('canvas')
+        overlayCanvas.width = plotContainer.clientWidth
+        overlayCanvas.height = plotContainer.clientHeight
+        overlayCanvas.style.width = '100%'
+        overlayCanvas.style.height = '100%'
+        overlayCanvas.style.position = 'absolute'
+        overlayCanvas.style.top = '0'
+        overlayCanvas.style.left = '0'
+        overlayCanvas.style.zIndex = '2' // Top layer
+        overlayCanvas.style.pointerEvents = 'none' // Let events pass through
+        plotContainer.appendChild(overlayCanvas)
+        
+        this.overlayCanvas = overlayCanvas
+        this.overlayCtx = overlayCanvas.getContext('2d')
+        
+        console.log('🎯 Overlay canvas created:', { 
+          width: overlayCanvas.width, 
+          height: overlayCanvas.height 
+        })
+      }
+      
+      console.log('✅ ReGL scatter plot initialized')
+      
+      // Hide placeholder and show plot info
+      const placeholder = document.getElementById('plot-placeholder')
+      const plotInfo = document.getElementById('plot-info')
+      if (placeholder) placeholder.style.display = 'none'
+      if (plotInfo) plotInfo.style.display = 'block'
+      
+      // Store current loom file
+      const loomFileSelectForStorage = document.querySelector('[data-visualization-target="loomFileSelect"]')
+      this.currentLoomFile = loomFileSelectForStorage ? loomFileSelectForStorage.value : null
+      
+      // Render the scatter plot
+      await this.renderScatterPlot(coordinates)
+      
+      // Add interaction handlers
+      this.addInteractionHandlers()
+      
+      console.log('✅ ReGL scatter plot initialized successfully')
+      
+    } catch (error) {
+      console.error('Failed to initialize ReGL scatter plot:', error)
+    }
+  }
+
+  // Render scatter plot
+  async renderScatterPlot(coordinates) {
+    // Use ReGL renderer only
+    return this.renderScatterPlotReGL(coordinates)
+  }
+
+  // ReGL version of renderScatterPlot
+  async renderScatterPlotReGL(coordinates) {
+    if (!this.reglRenderer) return
+    
+    const startTime = performance.now()
+    console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
+    console.log('🎯 First 5 coordinates:', coordinates.slice(0, 5))
+    console.log('🎯 Last 5 coordinates:', coordinates.slice(-5))
+    
+    // Calculate bounds for normalization
+    const originalBounds = this.calculateBounds(coordinates)
+    const bounds = this.getAdjustedBounds(originalBounds)
+    console.log('🎯 Calculated bounds:', bounds)
+    this.currentBounds = bounds
+    this.currentCoordinates = coordinates
+    
+    // Reset ordering flags so they'll be reapplied for this new embedding
+    this._lastCategoryOrderApplied = null
+    this._lastNumericOrderApplied = null
+    
+    // Initialize display order array (identity mapping initially)
+    // displayOrder[drawPosition] = originalCellIndex
+    this.displayOrder = new Array(coordinates.length)
+    for (let i = 0; i < coordinates.length; i++) {
+      this.displayOrder[i] = i
+    }
+    console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
+    
+    // Normalize coordinates to screen space (0 to canvas size)
+    const canvas = this.canvas
+    const screenCoordinates = new Float32Array(coordinates.length * 2)
+    
+    console.log('🎯 Canvas dimensions:', { width: canvas.width, height: canvas.height })
+    console.log('🎯 Bounds:', bounds)
+    console.log('🎯 Plot margins:', this.getPlotMargins())
+    
+    for (let i = 0; i < coordinates.length; i++) {
+      const [x, y] = coordinates[i]
+      // Normalize to the plot area (with margins)
+      const plotX = this.normalizeX(x, bounds)
+      const plotY = this.normalizeY(y, bounds)
+      
+      // Convert to canvas coordinates (0 to canvas.width/height)
+      screenCoordinates[i * 2] = plotX
+      screenCoordinates[i * 2 + 1] = plotY
+    }
+    
+    // Check coordinate range
+    let minScreenX = Infinity, maxScreenX = -Infinity
+    let minScreenY = Infinity, maxScreenY = -Infinity
+    for (let i = 0; i < screenCoordinates.length; i += 2) {
+      minScreenX = Math.min(minScreenX, screenCoordinates[i])
+      maxScreenX = Math.max(maxScreenX, screenCoordinates[i])
+      minScreenY = Math.min(minScreenY, screenCoordinates[i + 1])
+      maxScreenY = Math.max(maxScreenY, screenCoordinates[i + 1])
+    }
+    console.log('🎯 Screen coordinate range:', { minScreenX, maxScreenX, minScreenY, maxScreenY })
+    
+    // Set positions in ReGL renderer
+    console.log('🎯 Setting positions in ReGL renderer...')
+    console.log('🎯 Screen coordinates type:', typeof screenCoordinates)
+    console.log('🎯 Screen coordinates length:', screenCoordinates.length)
+    console.log('🎯 First 5 screen coordinates:', screenCoordinates.slice(0, 10))
+    
+    try {
+      this.reglRenderer.setPositions(screenCoordinates)
+      console.log('✅ Successfully set positions in ReGL renderer')
+    } catch (error) {
+      console.error('❌ Error setting positions in ReGL renderer:', error)
+      return
+    }
+    
+    // Set initial point size
+    this.reglRenderer.setPointSize(this.currentPointSize || 4)
+    
+    // Set camera to default settings since coordinates are already normalized to screen space
+    console.log('🎯 Setting camera to default settings')
+    this.reglRenderer.setCamera(0, 0, 1)
+    
+    // Render first frame
+    console.log('🎯 Calling ReGL render...')
+    try {
+      this.reglRenderer.render()
+      console.log('✅ ReGL render completed')
+    } catch (error) {
+      console.error('❌ Error in ReGL render:', error)
+      return
+    }
+    
+    // Render grid and axes using Canvas 2D overlay
+    this.renderGrid()
+    this.renderAxes()
+    this.renderCategoryLabels() // ✅ Category labels work in ReGL mode!
+    
+    // Update point count display
+    const pointCountElement = document.getElementById('point-count')
+    if (pointCountElement) {
+      pointCountElement.textContent = coordinates.length.toLocaleString()
+    }
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
+  }
+
+  // Update scatter plot
+  async updateScatterPlot(coordinates) {
+    return this.renderScatterPlot(coordinates)
+  }
+
+  // Calculate bounds for coordinates
+  calculateBounds(coordinates) {
+    if (coordinates.length === 0) return { minX: 0, maxX: 1, minY: 0, maxY: 1 }
+    
+    let minX = coordinates[0][0]
+    let maxX = coordinates[0][0]
+    let minY = coordinates[0][1]
+    let maxY = coordinates[0][1]
+    
+    for (const [x, y] of coordinates) {
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    
+    // Add padding
+    const paddingX = (maxX - minX) * 0.05
+    const paddingY = (maxY - minY) * 0.05
+    
+    return {
+      minX: minX - paddingX,
+      maxX: maxX + paddingX,
+      minY: minY - paddingY,
+      maxY: maxY + paddingY
+    }
+  }
+
+  // Get plot margins
+  getPlotMargins() {
+    return {
+      left: 60,   // Space for Y-axis labels
+      right: 20,  // Space for right edge
+      top: 20,    // Space for top edge
+      bottom: 60  // Space for X-axis labels
+    }
+  }
+
+  // Get bounds adjusted for axes margins
+  getAdjustedBounds(originalBounds) {
+    if (!this.canvas) {
+      return originalBounds
+    }
+    
+    const { minX, maxX, minY, maxY } = originalBounds
+    const width = this.canvas.width
+    const height = this.canvas.height
+    const margins = this.getPlotMargins()
+    
+    // Calculate the data range that fits in the available space
+    const availableWidth = width - margins.left - margins.right
+    const availableHeight = height - margins.top - margins.bottom
+    
+    // Calculate the aspect ratio of the available space
+    const availableAspectRatio = availableWidth / availableHeight
+    const dataAspectRatio = (maxX - minX) / (maxY - minY)
+    
+    let adjustedMinX = minX
+    let adjustedMaxX = maxX
+    let adjustedMinY = minY
+    let adjustedMaxY = maxY
+    
+    if (dataAspectRatio > availableAspectRatio) {
+      // Data is wider than available space, adjust Y bounds
+      const dataWidth = maxX - minX
+      const targetHeight = dataWidth / availableAspectRatio
+      const heightDifference = targetHeight - (maxY - minY)
+      adjustedMinY = minY - heightDifference / 2
+      adjustedMaxY = maxY + heightDifference / 2
+    } else {
+      // Data is taller than available space, adjust X bounds
+      const dataHeight = maxY - minY
+      const targetWidth = dataHeight * availableAspectRatio
+      const widthDifference = targetWidth - (maxX - minX)
+      adjustedMinX = minX - widthDifference / 2
+      adjustedMaxX = maxX + widthDifference / 2
+    }
+    
+    return {
+      minX: adjustedMinX,
+      maxX: adjustedMaxX,
+      minY: adjustedMinY,
+      maxY: adjustedMaxY
+    }
+  }
+
+  // Add interaction handlers
+  addInteractionHandlers() {
+    // ReGL mode - interaction handled differently
+    
+    // Set initial cursor based on interaction mode
+    const canvas = this.canvas
+    if (canvas) {
+      if (this.interactionMode === 'pan') {
+        canvas.style.cursor = 'grab'
+      } else if (this.interactionMode === 'lasso') {
+        canvas.style.cursor = 'crosshair'
+      } else {
+        canvas.style.cursor = 'default'
+      }
+    }
+    
+    // Add our new interaction event listeners (works for both ReGL and PixiJS)
+    this.addInteractionEventListeners()
+  }
+
+  // Add interaction event listeners
+  addInteractionEventListeners() {
+    console.log('Adding interaction event listeners')
+  }
+
+  // Decompress binary coordinates
+  decompressBinaryCoordinates(arrayBuffer) {
+    // OPTIMIZED: Use Int16Array for much faster decompression
+    const int16Array = new Int16Array(arrayBuffer)
+    const coordinates = []
+    
+    // Each coordinate is 2 int16 values (x, y)
+    for (let i = 0; i < int16Array.length; i += 2) {
+      coordinates.push([int16Array[i], int16Array[i + 1]])
+    }
+    
+    return coordinates
+  }
+
+  // Show metadata dropdown spinner
+  showMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = true
+      dropdown.style.opacity = '0.6'
+    }
+    
+    if (spinner) {
+      spinner.style.display = 'block'
+    }
+  }
+
+  // Hide metadata dropdown spinner
+  hideMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = false
+      dropdown.style.opacity = '1'
+    }
+    
+    if (spinner) {
+      spinner.style.display = 'none'
+    }
+  }
+
+  // Update visualization with metadata vector coloring
+  updateVisualizationWithMetadataVector() {
+    // Check for renderer availability (ReGL only)
+    if (this.reglRenderer) {
+      this.renderPointsWithCurrentColoring()
+    }
+  }
+
+  // Render points with current coloring (RegL implementation)
+  renderPointsWithCurrentColoring() {
+    if (!this.reglRenderer || !this.currentCoordinates) return
+    
+    console.log('Rendering points with current coloring (RegL)')
+    
+    // Set positions if not already set
+    this.reglRenderer.setPositions(this.currentCoordinates)
+    
+    // Set camera based on current bounds
+    if (this.currentBounds) {
+      const centerX = (this.currentBounds.minX + this.currentBounds.maxX) / 2
+      const centerY = (this.currentBounds.minY + this.currentBounds.maxY) / 2
+      const scaleX = 2 / (this.currentBounds.maxX - this.currentBounds.minX)
+      const scaleY = 2 / (this.currentBounds.maxY - this.currentBounds.minY)
+      const scale = Math.min(scaleX, scaleY)
+      
+      this.reglRenderer.setCamera(-centerX, -centerY, scale)
+    }
+    
+    this.reglRenderer.setPointSize(this.currentPointSize)
+    
+    // Render the points
+    this.reglRenderer.render()
+  }
+
+  // Close all dropdowns
+  closeAllDropdowns() {
+    // Implementation for closing all dropdowns
+    console.log('Closing all dropdowns')
+  }
+
+  // Run emergency diagnostic
+  runEmergencyDiagnostic() {
+    // Implementation for emergency diagnostic
+    console.log('Running emergency diagnostic')
+  }
+
+  // Attempt to auto-load embedding as fallback
+  attemptAutoLoad() {
+    console.log('🔄 Attempting auto-load fallback...')
+    
+    // Try to find the metadata select element by ID
+    const metadataSelect = document.getElementById('metadata-select-dropdown')
+    if (metadataSelect) {
+      console.log('✅ Found metadata select by ID in fallback')
+      const options = metadataSelect.querySelectorAll('option[value]:not([value=""])')
+      console.log('Found options in fallback:', options.length)
+      
+      if (options.length > 0) {
+        const firstOption = options[0]
+        console.log('🚀 Auto-loading first embedding in fallback:', firstOption.textContent, 'value:', firstOption.value)
+        metadataSelect.value = firstOption.value
+        
+        // Manually call updateMetadata since we're bypassing the target system
+        this.updateMetadataFallback(firstOption.value)
+      } else {
+        console.log('❌ No embedding options found in fallback')
+      }
+    } else {
+      console.log('❌ Could not find metadata select element in fallback')
+    }
+  }
+
+  // Fallback updateMetadata method that doesn't rely on targets
+  updateMetadataFallback(metadataId) {
+    console.log('🔄 Using fallback updateMetadata with ID:', metadataId)
+    
+    if (!metadataId) {
+      console.log('❌ No metadata ID provided to fallback')
+      return
+    }
+    
+    console.log('🔄 Starting to load metadata coordinates in fallback...')
+    
+    // Load metadata and hide spinner when done
+    this.loadMetadataCoordinates(metadataId)
+      .then(() => {
+        console.log('✅ Successfully loaded metadata coordinates in fallback')
+      })
+      .catch(error => {
+        console.error('❌ Error loading metadata coordinates in fallback:', error)
+      })
+  }
+
+  // ===== CANVAS 2D OVERLAY METHODS FOR REGL MODE =====
+  
+  /**
+   * Render axes using Canvas 2D overlay
+   */
+  renderAxes() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderAxesCanvas2D()
+    }
+  }
+  
+  /**
+   * Render grid using Canvas 2D overlay
+   */
+  renderGrid() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderGridCanvas2D()
+    }
+  }
+  
+  /**
+   * Render category labels using Canvas 2D overlay
+   */
+  renderCategoryLabels() {
+    // Dispatch to Canvas 2D version for ReGL mode
+    if (this.rendererType === 'regl') {
+      return this.renderCategoryLabelsCanvas2D()
+    }
+  }
+  
+  /**
+   * Canvas 2D implementation of axes rendering
+   */
+  renderAxesCanvas2D() {
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
+    
+    const ctx = this.overlayCtx
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    const margins = this.getPlotMargins()
+    
+    const xAxisY = height - margins.bottom
+    const yAxisX = margins.left
+    
+    // Draw white rectangles to cover margin areas (below x-axis and left of y-axis)
+    ctx.fillStyle = '#ffffff'
+    
+    // Rectangle below x-axis (covers bottom margin)
+    ctx.fillRect(0, xAxisY, width, height - xAxisY)
+    
+    // Rectangle left of y-axis (covers left margin)
+    ctx.fillRect(0, 0, yAxisX, height)
+    
+    // Draw axes
+    ctx.strokeStyle = '#333333'
+    ctx.lineWidth = 2
+    ctx.globalAlpha = 0.8
+    
+    // X-axis (horizontal line at bottom)
+    ctx.beginPath()
+    ctx.moveTo(margins.left, xAxisY)
+    ctx.lineTo(width - margins.right, xAxisY)
+    ctx.stroke()
+    
+    // Y-axis (vertical line at left)
+    ctx.beginPath()
+    ctx.moveTo(yAxisX, margins.top)
+    ctx.lineTo(yAxisX, height - margins.bottom)
+    ctx.stroke()
+    
+    // Draw tick marks and labels
+    this.drawAxisTicks(ctx, minX, maxX, minY, maxY, width, height, margins)
+    
+    ctx.globalAlpha = 1.0
+  }
+  
+  /**
+   * Canvas 2D implementation of grid rendering
+   */
+  renderGridCanvas2D() {
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
+    
+    // Clear canvas first
+    this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height)
+    
+    const ctx = this.overlayCtx
+    const { minX, maxX, minY, maxY } = this.currentBounds
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    const margins = this.getPlotMargins()
+    
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.lineWidth = 1
+    
+    // Vertical grid lines
+    for (let x = Math.ceil(minX / xTickSpacing) * xTickSpacing; x <= maxX; x += xTickSpacing) {
+      const screenX = this.normalizeX(x, this.currentBounds)
+      ctx.beginPath()
+      ctx.moveTo(screenX, margins.top)
+      ctx.lineTo(screenX, height - margins.bottom)
+      ctx.stroke()
+    }
+    
+    // Horizontal grid lines
+    for (let y = Math.ceil(minY / yTickSpacing) * yTickSpacing; y <= maxY; y += yTickSpacing) {
+      const screenY = this.normalizeY(y, this.currentBounds)
+      ctx.beginPath()
+      ctx.moveTo(margins.left, screenY)
+      ctx.lineTo(width - margins.right, screenY)
+      ctx.stroke()
+    }
+  }
+  
+  /**
+   * Canvas 2D implementation of category labels
+   */
+  renderCategoryLabelsCanvas2D() {
+    console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
+    
+    if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds || !this.currentMetadataVector || !this.currentCoordinates) {
+      console.log('🏷️ [Canvas2D] Missing required components')
+      return
+    }
+    
+    // Only render labels for discrete metadata
+    if (this.currentMetadataVector.data_type !== 'DISCRETE') {
+      console.log('🏷️ [Canvas2D] Not discrete metadata, skipping')
+      return
+    }
+    
+    // Check if the user wants to see category labels
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
+    
+    console.log(`🏷️ [Canvas2D] Category labels checkbox state: ${shouldShowLabels}`)
+    
+    if (!shouldShowLabels) {
+      console.log('🏷️ [Canvas2D] Category labels disabled by user')
+      return
+    }
+    
+    const ctx = this.overlayCtx
+    const width = this.overlayCanvas.width
+    const height = this.overlayCanvas.height
+    
+    // Get the metadata values and categories
+    const values = this.currentMetadataVector.values
+    const categories = this.currentMetadataVector.categories
+    
+    if (!categories || categories.length === 0) {
+      console.log('🏷️ [Canvas2D] No categories found')
+      return
+    }
+    
+    // Calculate category centers
+    const categoryCenters = {}
+    const categoryCounts = {}
+    
+    for (let i = 0; i < values.length; i++) {
+      const category = values[i]
+      if (!categoryCenters[category]) {
+        categoryCenters[category] = { x: 0, y: 0, count: 0 }
+        categoryCounts[category] = 0
+      }
+      
+      const [x, y] = this.currentCoordinates[i]
+      const screenX = this.normalizeX(x, this.currentBounds)
+      const screenY = this.normalizeY(y, this.currentBounds)
+      
+      categoryCenters[category].x += screenX
+      categoryCenters[category].y += screenY
+      categoryCenters[category].count++
+      categoryCounts[category]++
+    }
+    
+    // Calculate average positions
+    for (const category in categoryCenters) {
+      const center = categoryCenters[category]
+      center.x /= center.count
+      center.y /= center.count
+    }
+    
+    // Draw category labels
+    ctx.font = '12px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    
+    for (const category in categoryCenters) {
+      const center = categoryCenters[category]
+      const count = categoryCounts[category]
+      
+      // Draw background circle
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+      ctx.beginPath()
+      ctx.arc(center.x, center.y, 15, 0, 2 * Math.PI)
+      ctx.fill()
+      
+      // Draw border
+      ctx.strokeStyle = '#333333'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      
+      // Draw text
+      ctx.fillStyle = '#333333'
+      ctx.fillText(`${category} (${count})`, center.x, center.y)
+    }
+    
+    console.log('🏷️ [Canvas2D] Category labels rendered successfully')
+  }
+  
+  /**
+   * Calculate tick spacing for axes
+   */
+  calculateTickSpacing(range) {
+    const targetTicks = 8
+    const rawSpacing = range / targetTicks
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawSpacing)))
+    const normalizedSpacing = rawSpacing / magnitude
+    
+    let tickSpacing
+    if (normalizedSpacing <= 1) {
+      tickSpacing = magnitude
+    } else if (normalizedSpacing <= 2) {
+      tickSpacing = 2 * magnitude
+    } else if (normalizedSpacing <= 5) {
+      tickSpacing = 5 * magnitude
+    } else {
+      tickSpacing = 10 * magnitude
+    }
+    
+    return tickSpacing
+  }
+  
+  /**
+   * Get plot margins for axes and labels
+   */
+  getPlotMargins() {
+    return {
+      left: 60,    // Space for Y-axis labels
+      right: 20,   // Right margin
+      top: 20,      // Minimal top margin
+      bottom: 60   // Space for X-axis labels
+    }
+  }
+
+  /**
+   * Calculate bounds from coordinates
+   */
+  calculateBounds(coordinates) {
+    if (coordinates.length === 0) return { minX: 0, maxX: 1, minY: 0, maxY: 1 }
+    
+    let minX = Infinity, maxX = -Infinity
+    let minY = Infinity, maxY = -Infinity
+    
+    for (const [x, y] of coordinates) {
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    
+    // Add minimal padding on both top and bottom
+    const paddingX = (maxX - minX) * 0.05
+    const paddingYBottom = (maxY - minY) * 0.01  // Minimal padding on bottom
+    const paddingYTop = (maxY - minY) * 0.05     // More padding on top
+    
+    return {
+      minX: minX - paddingX,
+      maxX: maxX + paddingX,
+      minY: minY - paddingYBottom,
+      maxY: maxY + paddingYTop
+    }
+  }
+
+  /**
+   * Get bounds adjusted for axes margins
+   */
+  getAdjustedBounds(originalBounds) {
+    if (!originalBounds) {
+      return originalBounds
+    }
+
+    const { minX, maxX, minY, maxY } = originalBounds
+    const width = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const height = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
+    const margins = this.getPlotMargins()
+
+    // Calculate the data range that fits in the available space
+    const availableWidth = width - margins.left - margins.right
+    const availableHeight = height - margins.top - margins.bottom
+
+    // Calculate the data range per pixel
+    const dataWidth = maxX - minX
+    const dataHeight = maxY - minY
+    const dataPerPixelX = dataWidth / availableWidth
+    const dataPerPixelY = dataHeight / availableHeight
+
+    // Calculate the data range that fits in the available space
+    const adjustedDataWidth = dataPerPixelX * availableWidth
+    const adjustedDataHeight = dataPerPixelY * availableHeight
+
+    return {
+      minX: minX,
+      maxX: minX + adjustedDataWidth,
+      minY: minY,
+      maxY: minY + adjustedDataHeight
+    }
+  }
+
+  /**
+   * Normalize X coordinate from data space to screen space
+   */
+  normalizeX(x, bounds) {
+    const margins = this.getPlotMargins()
+    const screenWidth = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const availableWidth = screenWidth - margins.left - margins.right
+    return margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
+  }
+
+  /**
+   * Normalize Y coordinate from data space to screen space
+   */
+  normalizeY(y, bounds) {
+    // Invert Y-axis: higher Y values appear at the top, lower Y values at the bottom
+    const margins = this.getPlotMargins()
+    const screenHeight = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
+    const availableHeight = screenHeight - margins.top - margins.bottom
+    return margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
+  }
+
+  /**
+   * Draw axis ticks and labels
+   */
+  drawAxisTicks(ctx, minX, maxX, minY, maxY, width, height, margins) {
+    const xRange = maxX - minX
+    const yRange = maxY - minY
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    ctx.font = '10px Arial'
+    ctx.fillStyle = '#333333'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    
+    // X-axis ticks
+    for (let x = Math.ceil(minX / xTickSpacing) * xTickSpacing; x <= maxX; x += xTickSpacing) {
+      const screenX = this.normalizeX(x, this.currentBounds)
+      if (screenX >= margins.left && screenX <= width - margins.right) {
+        // Draw tick mark
+        ctx.beginPath()
+        ctx.moveTo(screenX, height - margins.bottom)
+        ctx.lineTo(screenX, height - margins.bottom + 5)
+        ctx.stroke()
+        
+        // Draw label
+        ctx.fillText(x.toFixed(2), screenX, height - margins.bottom + 8)
+      }
+    }
+    
+    // Y-axis ticks
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    
+    for (let y = Math.ceil(minY / yTickSpacing) * yTickSpacing; y <= maxY; y += yTickSpacing) {
+      const screenY = this.normalizeY(y, this.currentBounds)
+      if (screenY >= margins.top && screenY <= height - margins.bottom) {
+        // Draw tick mark
+        ctx.beginPath()
+        ctx.moveTo(margins.left, screenY)
+        ctx.lineTo(margins.left - 5, screenY)
+        ctx.stroke()
+        
+        // Draw label
+        ctx.fillText(y.toFixed(2), margins.left - 8, screenY)
+      }
+    }
+  }
+}

@@ -130,12 +130,14 @@ export class ReglRenderer {
    */
   setPositions(coordinates) {
     const startTime = performance.now()
+    console.log('🚀 [ReGL] setPositions called with:', typeof coordinates, coordinates.length)
     
     // coordinates is a flat Float32Array: [x1, y1, x2, y2, x3, y3, ...]
     // So number of points = length / 2
     if (coordinates instanceof Float32Array) {
       this.numPoints = coordinates.length / 2
       this.positions = coordinates
+      console.log('🚀 [ReGL] Using Float32Array, numPoints:', this.numPoints)
     } else {
       // Fallback: convert array of pairs to Float32Array
       this.numPoints = coordinates.length
@@ -144,16 +146,20 @@ export class ReglRenderer {
         this.positions[i * 2] = coordinates[i][0]
         this.positions[i * 2 + 1] = coordinates[i][1]
       }
+      console.log('🚀 [ReGL] Converted to Float32Array, numPoints:', this.numPoints)
     }
     
+    console.log('🚀 [ReGL] Creating position buffer...')
     // Create or update buffer
     if (this.positionBuffer) {
       this.positionBuffer.destroy()
     }
     this.positionBuffer = this.regl.buffer(this.positions)
+    console.log('🚀 [ReGL] Position buffer created')
     
     // Initialize colors if needed
     if (!this.colors || this.colors.length !== this.numPoints * 4) {
+      console.log('🚀 [ReGL] Initializing default colors...')
       this.initializeDefaultColors()
     }
     
@@ -317,15 +323,27 @@ export class ReglRenderer {
    * Render the current frame
    */
   render() {
+    console.log('🚀 [ReGL] render() called')
+    console.log('🚀 [ReGL] positionBuffer:', !!this.positionBuffer)
+    console.log('🚀 [ReGL] colorBuffer:', !!this.colorBuffer)
+    console.log('🚀 [ReGL] numPoints:', this.numPoints)
+    
     if (!this.positionBuffer || !this.colorBuffer) {
+      console.log('🚀 [ReGL] Missing buffers, skipping render')
       return
     }
     
+    console.log('🚀 [ReGL] Clearing canvas...')
     // Clear canvas to white background
     this.regl.clear({
       color: [1, 1, 1, 1], // White background
       depth: 1
     })
+    
+    console.log('🚀 [ReGL] Drawing points...')
+    console.log('🚀 [ReGL] Camera settings:', { scale: this.camera.scale, offsetX: this.camera.offsetX, offsetY: this.camera.offsetY })
+    console.log('🚀 [ReGL] Point size:', this.pointSize)
+    console.log('🚀 [ReGL] Canvas size:', { width: this.canvas.width, height: this.canvas.height })
     
     // Draw points
     this.drawPoints({
@@ -336,6 +354,8 @@ export class ReglRenderer {
       scale: [this.camera.scale, this.camera.scale],
       offset: [this.camera.offsetX, this.camera.offsetY]
     })
+    
+    console.log('🚀 [ReGL] Render completed')
   }
   
   /**

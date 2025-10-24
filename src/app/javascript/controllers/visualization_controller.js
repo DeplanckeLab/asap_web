@@ -215,7 +215,6 @@ export default class extends Controller {
     
     // Initialize interaction system after DOM is ready
     setTimeout(() => {
-      this.setupInteractionSystem()
       this.initializeTooltip()
       // Initialize the selection count display
       this.updateSelectedCellsCount()
@@ -579,27 +578,16 @@ export default class extends Controller {
   }
 
   setupCanvasListeners() {
-    //console.log('Setting up canvas listeners')
+    console.log('Setting up canvas listeners')
     
-    // This will be called when the PIXI app is created
-    // For now, we'll set up a polling mechanism to check for the canvas
-    const checkForCanvas = () => {
-      const canvas = document.querySelector('.plot-container canvas')
-      //console.log('Checking for canvas:', !!canvas, 'Setup done:', !!this.canvasListenersSetup)
-      
-      if (canvas && !this.canvasListenersSetup) {
-        //console.log('Canvas found, setting up interaction listeners')
-        this.canvas = canvas
-        this.addInteractionEventListeners()
-        this.canvasListenersSetup = true
-      } else if (!canvas) {
-        console.log('Canvas not found yet, checking again in 500ms')
-        // Keep checking every 500ms until canvas is available
-        setTimeout(checkForCanvas, 500)
-      }
+    // Canvas should exist now since this is called after canvas creation
+    if (this.canvas && !this.canvasListenersSetup) {
+      console.log('Canvas found, setting up interaction listeners')
+      this.addInteractionEventListeners()
+      this.canvasListenersSetup = true
+    } else {
+      console.log('Canvas not available for interaction setup')
     }
-    
-    checkForCanvas()
   }
 
   updateEmbeddings() {
@@ -920,26 +908,17 @@ export default class extends Controller {
       console.log(`⏱️ [PERF] Step 2a: Total decompress + cache: ${decompressTime.toFixed(2)}ms`)
     }
     
-    // Initialize PIXI.js scatter plot
-    const pixiStart = performance.now()
+    // Initialize scatter plot
+    const plotStart = performance.now()
     this.initializeScatterPlot(decompressedCoords)
-    const pixiTime = performance.now() - pixiStart
-    
+    const plotTime = performance.now() - plotStart
+    console.log(`⏱️ [PERF] Plot initialization completed in ${plotTime.toFixed(2)}ms`)
     const vizTime = performance.now() - vizStart
     console.log(`⏱️ [PERF] Step 2: updateVisualizationWithMetadata completed in ${vizTime.toFixed(2)}ms`)
   }
 
   async initializeScatterPlot(coordinates) {
     try {
-      
-      
-      //console.log('DEBUG: Checking conditions for updateScatterPlot')
-      //console.log('DEBUG: this.pixiApp exists:', !!this.pixiApp)
-      //console.log('DEBUG: this.currentLoomFile:', this.currentLoomFile)
-      //console.log('DEBUG: this.loomFileSelectTarget.value:', this.loomFileSelectTarget.value)
-      //console.log('DEBUG: Files match:', this.currentLoomFile === this.loomFileSelectTarget.value)
-      
-  
       
       console.log(`⏱️ [PERF] Step 3: Creating new ${this.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
       
@@ -978,11 +957,22 @@ export default class extends Controller {
         canvas.style.zIndex = '1' // Bottom layer
         plotContainer.appendChild(canvas)
         
+        console.log('🔍 DEBUG: Canvas dimensions:', {
+          width: canvas.width,
+          height: canvas.height,
+          clientWidth: plotContainer.clientWidth,
+          clientHeight: plotContainer.clientHeight,
+          containerVisible: plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0
+        })
+        
         // Initialize ReGL renderer
         this.reglRenderer = new ReglRenderer(canvas)
         this.canvas = canvas
         
         console.log('ReGL canvas added to container:', canvas)
+        
+        // Setup interaction system now that canvas exists
+        this.setupInteractionSystem()
         
         // Create HTML Canvas 2D overlay for axes/grid/labels
         // (Simple and efficient - no need for PixiJS!)
@@ -1036,11 +1026,6 @@ export default class extends Controller {
       
       // Add interaction handlers
       this.addInteractionHandlers()
-      
-      // Setup global drag handlers for label dragging
-      this.setupGlobalDragHandlers()
-      
-      //console.log('PIXI.js scatter plot initialized successfully')
       
       // Only auto-preload if the option is enabled
       if (this.autoPreloadMetadata) {
@@ -1098,6 +1083,14 @@ export default class extends Controller {
       screenCoordinates[i * 2 + 1] = this.normalizeY(y, originalBounds)
     }
     
+    console.log('🔍 DEBUG: Coordinate normalization:', {
+      numPoints: coordinates.length,
+      bounds: originalBounds,
+      canvasSize: { width: this.canvas.width, height: this.canvas.height },
+      firstFewCoords: coordinates.slice(0, 3),
+      firstFewScreenCoords: Array.from(screenCoordinates.slice(0, 6))
+    })
+    
     // Set positions in ReGL renderer
     this.reglRenderer.setPositions(screenCoordinates)
     
@@ -1105,7 +1098,9 @@ export default class extends Controller {
     this.reglRenderer.setPointSize(this.currentPointSize || 4)
     
     // Render first frame
+    console.log('🔍 DEBUG: About to render first frame')
     this.reglRenderer.render()
+    console.log('🔍 DEBUG: First frame rendered')
     
     // Render grid and axes using PixiJS overlay
     this.renderGrid()
@@ -1409,53 +1404,10 @@ export default class extends Controller {
     }
   }
 
-  // Get bounds adjusted for axes margins
-  getAdjustedBounds(originalBounds) {
-    //console.log('getAdjustedBounds called with:', originalBounds)
-    //console.log('axesContainer exists:', !!this.axesContainer)
-    //console.log('axesContainer visible:', this.axesContainer ? this.axesContainer.visible : 'N/A')
-    
-    if (!originalBounds || !this.axesContainer || !this.axesContainer.visible) {
-      //console.log('Returning original bounds (no adjustment needed)')
-      return originalBounds
-    }
-
-    const { minX, maxX, minY, maxY } = originalBounds
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-    const margins = this.getPlotMargins()
-
-    // Calculate the data range that fits in the available space
-    const availableWidth = width - margins.left - margins.right
-    const availableHeight = height - margins.top - margins.bottom
-
-    // Calculate the data range per pixel
-    const dataWidth = maxX - minX
-    const dataHeight = maxY - minY
-    const dataPerPixelX = dataWidth / availableWidth
-    const dataPerPixelY = dataHeight / availableHeight
-
-    // Adjust bounds to account for margins
-    // Note: Y-axis is inverted, so maxY appears at top, minY at bottom
-    const adjustedMinX = minX - (margins.left * dataPerPixelX)
-    const adjustedMaxX = maxX + (margins.right * dataPerPixelX)
-    const adjustedMinY = minY - (margins.bottom * dataPerPixelY)  // Bottom of plot (X-axis labels)
-    const adjustedMaxY = maxY + (margins.top * dataPerPixelY)     // Top of plot (minimal space)
-
-    const adjustedBounds = {
-      minX: adjustedMinX,
-      maxX: adjustedMaxX,
-      minY: adjustedMinY,
-      maxY: adjustedMaxY
-    }
-    
-    //console.log('Returning adjusted bounds:', adjustedBounds)
-    return adjustedBounds
-  }
 
   normalizeX(x, bounds) {
     const margins = this.getPlotMargins()
-    const screenWidth = this.rendererType === 'regl' ? this.canvas.width : this.pixiApp.screen.width
+    const screenWidth = this.canvas.width
     const availableWidth = screenWidth - margins.left - margins.right
     return margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
   }
@@ -1463,19 +1415,15 @@ export default class extends Controller {
   normalizeY(y, bounds) {
     // Invert Y-axis: higher Y values appear at the top, lower Y values at the bottom
     const margins = this.getPlotMargins()
-    const screenHeight = this.rendererType === 'regl' ? this.canvas.height : this.pixiApp.screen.height
+    const screenHeight = this.canvas.height
     const availableHeight = screenHeight - margins.top - margins.bottom
     return margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
   }
 
   addInteractionHandlers() {
-    // Make the stage interactive (PixiJS mode only)
-    if (this.rendererType === 'pixi' && this.pixiApp) {
-    this.pixiApp.stage.interactive = true
-    }
     
     // Set initial cursor based on interaction mode
-    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
+    const canvas = this.canvas
     if (canvas) {
       if (this.interactionMode === 'pan') {
         canvas.style.cursor = 'grab'
@@ -3279,7 +3227,7 @@ export default class extends Controller {
   // Update visualization with metadata vector coloring
   updateVisualizationWithMetadataVector() {
     // Check for renderer availability (either ReGL or PixiJS)
-    const hasRenderer = this.rendererType === 'regl' ? !!this.reglRenderer : (!!this.pixiApp && !!this.scatterContainer)
+    const hasRenderer = !!this.reglRenderer
     
     if (!this.currentMetadataVector || !hasRenderer) {
       console.log('Cannot update visualization - missing data or renderer')
@@ -3312,24 +3260,8 @@ export default class extends Controller {
     // Render with current coloring (will reuse sprites if type matches)
     this.renderPointsWithCurrentColoring()
     
-    // Render category labels if this is discrete metadata, or color legend if continuous
-    // Note: In renderPointsWithCurrentColoring() already renders labels
-    if (this.rendererType === 'pixi') {
-    if (this.currentMetadataVector.data_type === 'DISCRETE') {
-      // renderCategoryLabels will handle visibility based on checkbox state
-      this.renderCategoryLabels()
-    } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
-      // Hide category labels for numeric metadata
-      if (this.categoryLabelsContainer) {
-        this.categoryLabelsContainer.visible = false
-        this.categoryLabelsContainer.removeChildren()
-      }
-      this.renderContinuousColorLegend()
-      }
-    }
-    
-    //console.log(`Successfully colored ${this.currentCoordinates.length} points with ${this.currentMetadataVector.name}`)
   }
+
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
 
@@ -5275,9 +5207,6 @@ export default class extends Controller {
       }
     }
     
-    // Update label interaction behavior
-    this.updateLabelInteractionMode()
-    
     // Update control instructions
     this.updateControlInstructions()
     
@@ -5285,8 +5214,6 @@ export default class extends Controller {
     this.removeInteractionEventListeners()
     this.addInteractionEventListeners()
     
-    // Add global drag event handlers for labels
-    this.setupGlobalDragHandlers()
   }
 
   // Update button visual states
@@ -5319,7 +5246,7 @@ export default class extends Controller {
   }
 
   addInteractionEventListeners() {
-    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
+    const canvas = this.canvas
     if (!canvas) {
       console.log('⚠️ No canvas available for interaction listeners')
       return
@@ -5395,7 +5322,7 @@ export default class extends Controller {
   }
 
   removeInteractionEventListeners() {
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
+    const canvas = this.canvas
     if (!canvas) return
     
     if (this.boundMouseDown) {
@@ -5525,7 +5452,7 @@ export default class extends Controller {
     }
     
     // Get mouse position relative to canvas
-    const canvas = this.rendererType === 'regl' ? this.canvas : (this.pixiApp && this.pixiApp.view)
+    const canvas = this.canvas
     const rect = canvas.getBoundingClientRect()
     const mouseX = event.clientX - rect.left
     const mouseY = event.clientY - rect.top
@@ -5800,12 +5727,6 @@ export default class extends Controller {
     // Store original bounds for consistent pan scaling
     this.panOriginalBounds = this.calculateBounds(this.currentCoordinates)
     
-    /*console.log('Pan Start Debug:', {
-      panStartBounds: this.panStartBounds,
-      panOriginalBounds: this.panOriginalBounds,
-      currentBounds: this.currentBounds,
-      screenSize: { width: this.pixiApp.screen.width, height: this.pixiApp.screen.height }
-    })*/
     
     // For large datasets, use panning shape for smooth performance
     const usePanningShape = this.currentCoordinates.length > 100000
@@ -6020,9 +5941,6 @@ export default class extends Controller {
 
     console.log('🔄 Resetting zoom and pan to original view')
     
-    // Clear any stored original positions
-    this.clearStoredOriginalPositions()
-    
     // Reset to original bounds
     const originalBounds = this.calculateBounds(this.currentCoordinates)
     const newBounds = originalBounds
@@ -6210,172 +6128,6 @@ export default class extends Controller {
     this.scatterContainer = originalContainer
   }
 
-  // Render plot axes with labels
-  renderAxes() {
-    // Dispatch to Canvas 2D version for ReGL mode
-    if (this.rendererType === 'regl') {
-      return this.renderAxesCanvas2D()
-    }
-    
-    if (!this.axesContainer || !this.currentBounds || !this.pixiApp) {
-      return
-    }
-
-    // Clear existing axes
-    this.axesContainer.removeChildren()
-
-    // Use current view bounds (which change with pan/zoom)
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-    const margins = this.getPlotMargins()
-
-    // Create axes graphics
-    const axesGraphics = new PIXI.Graphics()
-    axesGraphics.lineStyle(2, 0x333333, 0.8) // Dark gray lines
-
-    // X-axis (horizontal line at bottom)
-    const xAxisY = height - margins.bottom
-    axesGraphics.moveTo(margins.left, xAxisY)
-    axesGraphics.lineTo(width - margins.right, xAxisY)
-
-    // Y-axis (vertical line at left)
-    const yAxisX = margins.left
-    axesGraphics.moveTo(yAxisX, margins.top)
-    axesGraphics.lineTo(yAxisX, height - margins.bottom)
-
-    // Add white rectangles to cover margin areas (below x-axis and left of y-axis)
-    const marginGraphics = new PIXI.Graphics()
-    marginGraphics.beginFill(0xffffff, 1.0) // White background
-    
-    // Rectangle below x-axis (covers bottom margin)
-    marginGraphics.drawRect(0, xAxisY, width, height - xAxisY)
-    
-    // Rectangle left of y-axis (covers left margin)
-    marginGraphics.drawRect(0, 0, yAxisX, height)
-    
-    marginGraphics.endFill()
-    
-    // Add margin rectangles first (behind axes)
-    this.axesContainer.addChild(marginGraphics)
-    
-    // Add axes on top
-    this.axesContainer.addChild(axesGraphics)
-
-    // Add axis labels
-    this.addAxisLabels(minX, maxX, minY, maxY, width, height)
-  }
-
-  // Add axis labels
-  addAxisLabels(minX, maxX, minY, maxY, width, height) {
-    const margins = this.getPlotMargins()
-    
-    // X-axis label (Dimension 1)
-    const xLabel = new PIXI.Text('Dimension 1', {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: 14,
-      fill: 0x333333,
-      align: 'center'
-    })
-    xLabel.x = width / 2
-    xLabel.y = height - margins.bottom / 2
-    xLabel.anchor.set(0.5, 0.5)
-    this.axesContainer.addChild(xLabel)
-
-    // Y-axis label (Dimension 2) - rotated 90 degrees
-    const yLabel = new PIXI.Text('Dimension 2', {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: 14,
-      fill: 0x333333,
-      align: 'center'
-    })
-    yLabel.x = margins.left / 2
-    yLabel.y = height / 2
-    yLabel.anchor.set(0.5, 0.5)
-    yLabel.rotation = -Math.PI / 2 // Rotate 90 degrees counter-clockwise
-    this.axesContainer.addChild(yLabel)
-
-    // Add tick marks and values
-    this.addTickMarks(minX, maxX, minY, maxY, width, height)
-  }
-
-  // Add tick marks and values
-  addTickMarks(minX, maxX, minY, maxY, width, height) {
-    const tickLength = 5
-    const margins = this.getPlotMargins()
-    const xAxisY = height - margins.bottom
-    const yAxisX = margins.left
-
-    // Calculate smart tick spacing based on zoom level
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-
-    // X-axis ticks (bottom)
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
-      const t = (value - minX) / (maxX - minX)
-      const availableWidth = width - margins.left - margins.right
-      const x = margins.left + t * availableWidth
-
-      // Skip if outside visible area
-      if (x < margins.left || x > width - margins.right) continue
-
-      // Tick mark
-      const tickGraphics = new PIXI.Graphics()
-      tickGraphics.lineStyle(1, 0x666666, 0.6)
-      tickGraphics.moveTo(x, xAxisY - tickLength)
-      tickGraphics.lineTo(x, xAxisY + tickLength)
-      this.axesContainer.addChild(tickGraphics)
-
-      // Tick value
-      const tickText = new PIXI.Text(this.formatTickValue(value), {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: 10,
-        fill: 0x666666,
-        align: 'center'
-      })
-      tickText.x = x
-      tickText.y = xAxisY + 15
-      tickText.anchor.set(0.5, 0.5)
-      this.axesContainer.addChild(tickText)
-    }
-
-    // Y-axis ticks (left) - inverted to match inverted Y-axis
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const t = (value - minY) / (maxY - minY)
-      // Invert Y-axis tick positioning to match inverted Y-axis
-      const availableHeight = height - margins.top - margins.bottom
-      const y = margins.top + availableHeight - t * availableHeight
-
-      // Skip if outside visible area
-      if (y < margins.top || y > height - margins.bottom) continue
-
-      // Tick mark
-      const tickGraphics = new PIXI.Graphics()
-      tickGraphics.lineStyle(1, 0x666666, 0.6)
-      tickGraphics.moveTo(yAxisX - tickLength, y)
-      tickGraphics.lineTo(yAxisX + tickLength, y)
-      this.axesContainer.addChild(tickGraphics)
-
-      // Tick value
-      const tickText = new PIXI.Text(this.formatTickValue(value), {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: 10,
-        fill: 0x666666,
-        align: 'center'
-      })
-      tickText.x = yAxisX - 15
-      tickText.y = y
-      tickText.anchor.set(0.5, 0.5)
-      this.axesContainer.addChild(tickText)
-    }
-  }
-
   // Calculate smart tick spacing based on range
   calculateTickSpacing(range) {
     // Target about 5-8 ticks per axis
@@ -6419,272 +6171,8 @@ export default class extends Controller {
     }
   }
 
-  // Render grid lines aligned with tick marks
-  renderGrid() {
-    // Dispatch to Canvas 2D version for ReGL mode
-    if (this.rendererType === 'regl') {
-      return this.renderGridCanvas2D()
-    }
-    
-    if (!this.gridContainer || !this.currentBounds || !this.pixiApp) {
-      return
-    }
-
-    // Clear existing grid
-    this.gridContainer.removeChildren()
-
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-    const margins = this.getPlotMargins()
-
-    // Calculate smart tick spacing (same as axes)
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-
-    // Create grid graphics
-    const gridGraphics = new PIXI.Graphics()
-    gridGraphics.lineStyle(1, 0xcccccc, 0.3) // Light grey, semi-transparent
-
-    // Vertical grid lines (aligned with X-axis ticks)
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
-      const t = (value - minX) / (maxX - minX)
-      const availableWidth = width - margins.left - margins.right
-      const x = margins.left + t * availableWidth
-
-      // Skip if outside visible area
-      if (x < margins.left || x > width - margins.right) continue
-
-      // Draw vertical line from top to bottom
-      gridGraphics.moveTo(x, margins.top)
-      gridGraphics.lineTo(x, height - margins.bottom)
-    }
-
-    // Horizontal grid lines (aligned with Y-axis ticks) - inverted to match inverted Y-axis
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const t = (value - minY) / (maxY - minY)
-      const availableHeight = height - margins.top - margins.bottom
-      const y = margins.top + availableHeight - t * availableHeight
-
-      // Skip if outside visible area
-      if (y < margins.top || y > height - margins.bottom) continue
-
-      // Draw horizontal line from left to right
-      gridGraphics.moveTo(margins.left, y)
-      gridGraphics.lineTo(width - margins.right, y)
-    }
-
-    this.gridContainer.addChild(gridGraphics)
-  }
-  // Render category labels at centroids of colored groups
-  renderCategoryLabels() {
-    // Dispatch to Canvas 2D version for ReGL mode
-    if (this.rendererType === 'regl') {
-      return this.renderCategoryLabelsCanvas2D()
-    }
-    
-    const renderStartTime = performance.now()
-    
-    // Debug: Track where this function is called from
-    const stack = new Error().stack
-    const caller = stack.split('\n')[2] || 'unknown'
-    console.log(`🏷️ renderCategoryLabels called from:`, caller.trim())
-    console.log(`🏷️ isPanning: ${this.isPanning}`)
-    console.log(`🏷️ rendererType: ${this.rendererType}`)
-    
-    // Detailed component check
-    console.log(`🏷️ Component check:`, {
-      hasCategoryLabelsContainer: !!this.categoryLabelsContainer,
-      hasCurrentBounds: !!this.currentBounds,
-      hasPixiApp: !!this.pixiApp,
-      hasCurrentMetadataVector: !!this.currentMetadataVector,
-      hasCurrentCoordinates: !!this.currentCoordinates,
-      metadataType: this.currentMetadataVector?.data_type
-    })
-    
-    if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
-      console.log('🏷️ Missing required components, returning early')
-      return
-    }
-
-    // Only render labels for discrete metadata
-    if (this.currentMetadataVector.data_type !== 'DISCRETE') {
-      return
-    }
-
-    // During panning, don't update labels at all - let them stay in their original positions
-    if (this.isPanning) {
-      console.log(`🏷️ Skipping label updates during panning`)
-      return
-    }
-    
-    // Check if the user wants to see category labels
-    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
-    const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
-    
-    console.log(`🏷️ Category labels checkbox state: ${shouldShowLabels}`)
-    
-    // If checkbox is unchecked, hide the container and return early
-    if (!shouldShowLabels) {
-      this.categoryLabelsContainer.visible = false
-    this.categoryLabelsContainer.removeChildren()
-      console.log('🏷️ Category labels hidden by user preference')
-      return
-    }
-
-    // Clear existing labels and make container visible
-    this.categoryLabelsContainer.removeChildren()
-    this.categoryLabelsContainer.visible = true
-
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-
-    // Get the metadata values and categories
-    const values = this.currentMetadataVector.values
-    const categories = this.currentMetadataVector.categories
-    
-    // If categories is undefined, try to get unique values from the values array
-    let categoryList = categories
-    if (!categoryList || categoryList.length === 0) {
-      categoryList = [...new Set(values)]
-    }
-
-    // Calculate centroids from currently visible points in the current view
-    // This ensures labels follow the points correctly when panning/zooming
-    const centroidStartTime = performance.now()
-    console.log(`🏷️ Calculating centroids - isPanning: ${this.isPanning}, bounds:`, this.currentBounds)
-    
-    let centroids
-    if (this.isPanning && this.storedCentroids) {
-      // During panning, use stored centroids to avoid coordinate mismatch
-      console.log(`🏷️ Using stored centroids during panning:`, this.storedCentroids)
-      centroids = this.storedCentroids
-    } else {
-      // Normal calculation when not panning
-      centroids = this.calculateCategoryCentroids(values, categoryList)
-      // Store centroids for use during panning
-      this.storedCentroids = centroids
-      console.log(`🏷️ Stored centroids for future panning:`, this.storedCentroids)
-    }
-    
-    // Note: We don't pre-calculate centroids for unselected categories
-    // because centroids should only be calculated from visible points
-    // When a category is re-selected, the points become visible and we can calculate centroids then
-    
-    const centroidEndTime = performance.now()
-
-    // Render labels for each category
-    const labelCreationStartTime = performance.now()
-    let labelsAdded = 0
-    // First, process categories with visible points
-    console.log(`🏷️ Total centroids to process: ${Object.keys(centroids).length}`)
-    Object.entries(centroids).forEach(([category, centroid]) => {
-      
-      if (centroid.count > 0) { // Only show labels for categories with points
-        // Check if this category is selected by looking at the checkbox state
-        const categoryCheckbox = document.querySelector(`.category-checkbox[data-metadata-id="${this.currentMetadataVector.id}"][data-category="${category}"]`)
-        
-        // If checkbox doesn't exist yet (e.g., when first loading metadata), assume all categories are selected
-        if (!categoryCheckbox) {
-          // Category is selected by default
-        } else {
-          const bgColor = categoryCheckbox.style.backgroundColor
-        // Check if NOT unselected (unselected is #f3f4f6 or rgb(243, 244, 246))
-          const isCategorySelected = bgColor !== '#f3f4f6' && bgColor !== 'rgb(243, 244, 246)'
-        
-        if (!isCategorySelected) {
-          return // Skip rendering label for unselected categories
-          }
-        }
-
-        
-        const screenX = this.normalizeX(centroid.x, this.currentBounds)
-        const screenY = this.normalizeY(centroid.y, this.currentBounds)
-
-        // Skip if outside visible area (with some margin)
-        const margins = this.getPlotMargins()
-        const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
-        const isOffScreen = screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin
-        if (isOffScreen) {
-          return
-        }
-
-        // Create label with background
-        let label
-        try {
-          label = this.createCategoryLabel(category, centroid.count)
-        } catch (error) {
-          console.error(`🏷️ ERROR creating label for ${category}:`, error)
-          return
-        }
-        
-        // Position the label at the centroid
-        label.x = screenX
-        label.y = screenY
-        
-        // Store original position for panning
-        label.originalX = screenX
-        label.originalY = screenY
-        
-        // Center the label by setting anchor on the text object inside the container
-        if (label.children[1] && label.children[1].anchor) {
-          label.children[1].anchor.set(0.5, 0.5)
-        }
-
-        this.categoryLabelsContainer.addChild(label)
-        labelsAdded++
-        
-      }
-    })
-    
-    // Note: visibility is already set at the top of this function based on checkbox state
-    
-    console.log(`🏷️ Labels render complete:`, {
-      labelsAdded,
-      containerVisible: this.categoryLabelsContainer.visible,
-      containerChildren: this.categoryLabelsContainer.children.length,
-      containerAlpha: this.categoryLabelsContainer.alpha,
-      containerX: this.categoryLabelsContainer.x,
-      containerY: this.categoryLabelsContainer.y,
-      containerOnStage: this.categoryLabelsContainer.parent === this.pixiApp.stage,
-      stageChildren: this.pixiApp.stage.children.length
-    })
-    
-    // Debug: Log first few label positions
-    if (labelsAdded > 0) {
-      console.log(`🏷️ First 3 label positions:`)
-      for (let i = 0; i < Math.min(3, this.categoryLabelsContainer.children.length); i++) {
-        const label = this.categoryLabelsContainer.children[i]
-        console.log(`  Label ${i}: x=${label.x}, y=${label.y}, visible=${label.visible}, alpha=${label.alpha}`)
-      }
-    }
-
-    // Update label interaction behavior for newly created labels
-    this.updateLabelInteractionMode()
-
-    const labelCreationEndTime = performance.now()
-    
-    // In ReGL mode, manually trigger PixiJS render to update overlay
-    if (this.rendererType === 'regl' && this.pixiApp) {
-      console.log('🏷️ Triggering PixiJS overlay render...')
-      this.pixiApp.renderer.render(this.pixiApp.stage)
-      console.log('🏷️ PixiJS overlay rendered')
-    }
-    
-    const renderEndTime = performance.now()
-    
-    
-  }
-
   // Canvas 2D version of renderAxes for ReGL mode
-  renderAxesCanvas2D() {
+  renderAxes() {
     if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
     
     const ctx = this.overlayCtx
@@ -6790,7 +6278,7 @@ export default class extends Controller {
   }
 
   // Canvas 2D version of renderGrid for ReGL mode
-  renderGridCanvas2D() {
+  renderGrid() {
     if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds) return
     
     // Clear canvas first
@@ -6840,7 +6328,7 @@ export default class extends Controller {
   }
 
   // Canvas 2D version of renderCategoryLabels for ReGL mode
-  renderCategoryLabelsCanvas2D() {
+  renderCategoryLabels() {
     console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
     
     if (!this.overlayCtx || !this.overlayCanvas || !this.currentBounds || !this.currentMetadataVector || !this.currentCoordinates) {
@@ -7088,335 +6576,15 @@ export default class extends Controller {
       
       return centroids
     }
-    
-    // FAST PATH: Use pointSprites array if available (much faster for large datasets)
-    if (this.pointSprites && this.pointSprites.length > 0) {
-      console.log(`🏷️ Using fast path with pointSprites array (${this.pointSprites.length} sprites)`)
-      
-      for (let i = 0; i < this.pointSprites.length; i++) {
-        const sprite = this.pointSprites[i]
-        if (sprite && sprite.visible && sprite.cellId !== undefined) {
-          const category = values[sprite.cellId]
-          if (centroids[category]) {
-            const coord = this.currentCoordinates[sprite.cellId]
-            if (coord && coord.length >= 2) {
-              centroids[category].x += coord[0]
-              centroids[category].y += coord[1]
-              centroids[category].count += 1
-            }
-          }
-        }
-      }
-      
-      // Calculate averages
-      Object.keys(centroids).forEach(category => {
-        if (centroids[category].count > 0) {
-          centroids[category].x /= centroids[category].count
-          centroids[category].y /= centroids[category].count
-          console.log(`🏷️ Fast path centroid for ${category}: count=${centroids[category].count}, pos=(${centroids[category].x.toFixed(2)}, ${centroids[category].y.toFixed(2)})`)
-        }
-      })
-      
-      return centroids
-    }
 
-    // Calculate centroids from actual visible points in the scatter container
-    if (this.scatterContainer && this.scatterContainer.children) {
-        let validPoints = 0
-
-        // Always look for points in the nested container structure
-        const pointsToCheck = []
-        
-        this.scatterContainer.children.forEach((child, index) => {
-          if (child.isPoint) {
-            // Individual point (shouldn't happen with new structure)
-            pointsToCheck.push(child)
-          } else if (child.children) {
-            // Nested container - check its children (this is our standard structure)
-            child.children.forEach((point) => {
-              if (point.isPoint) {
-                pointsToCheck.push(point)
-              }
-            })
-          }
-        })
-        
-
-        // Calculate centroids from visible points using currentCoordinates for accuracy
-        const categoryCounts = {}
-        let debugCount = 0
-        pointsToCheck.forEach((point, index) => {
-          if (point.visible && point.cellId !== undefined) {
-            validPoints++
-          const category = values[point.cellId]
-          if (centroids[category]) {
-            // Debug first few points to see their positions
-            if (index < 3) {
-              // Get world position instead of local position
-              const worldPos = point.getGlobalPosition()
-              console.log(`🏷️ Point ${index} (${category}):`, {
-                localPosition: { x: point.x, y: point.y },
-                worldPosition: { x: worldPos.x, y: worldPos.y },
-                currentBounds: this.currentBounds,
-                isPanning: this.isPanning,
-                screenWidth: this.pixiApp.screen.width,
-                screenHeight: this.pixiApp.screen.height
-              })
-            }
-              // Use original data coordinates for accurate centroid calculation
-              const coord = this.currentCoordinates[point.cellId]
-              if (coord && coord.length >= 2) {
-                centroids[category].x += coord[0]
-                centroids[category].y += coord[1]
-                centroids[category].count += 1
-              } else {
-                // Fallback to screen coordinate conversion (should not happen)
-                console.warn(`No coordinate found for point ${point.cellId}`)
-              }
-              
-              // Track category counts for debugging
-              categoryCounts[category] = (categoryCounts[category] || 0) + 1
-          }
-        }
-      })
-        
-    }
-
-    // Calculate average coordinates (centroids)
-    Object.keys(centroids).forEach(category => {
-      if (centroids[category].count > 0) {
-        centroids[category].x /= centroids[category].count
-        centroids[category].y /= centroids[category].count
-        console.log(`🏷️ Final centroid for ${category}:`, {
-          count: centroids[category].count,
-          x: centroids[category].x.toFixed(2),
-          y: centroids[category].y.toFixed(2),
-          isPanning: this.isPanning
-        })
-      }
-    })
-
-    const calcEndTime = performance.now()
-    return centroids
-  }
-  // Create a category label with background
-  createCategoryLabel(categoryName, count) {
-    const container = new PIXI.Container()
-
-    // Create text - try to fix the PIXI.js constructor issue
-    let text
-    try {
-      // Try creating with explicit PIXI namespace
-      text = new window.PIXI.Text(categoryName, {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: 12,
-        fill: 0x333333,
-        align: 'center',
-        fontWeight: 'bold'
-      })
-    } catch (error) {
-      console.error('🏷️ Error creating PIXI.Text with window.PIXI:', error)
-      try {
-        // Fallback to direct PIXI reference
-        text = new PIXI.Text(categoryName, {
-          fontFamily: 'Arial, sans-serif',
-          fontSize: 12,
-          fill: 0x333333,
-          align: 'center',
-          fontWeight: 'bold'
-        })
-      } catch (error2) {
-        console.error('🏷️ Error creating PIXI.Text with PIXI:', error2)
-        // Last resort: create a simple container
-        text = new PIXI.Container()
-        text.text = categoryName
-      }
-    }
-    
-    
-    // Get the category color for the border using the same logic as plot dots for consistency
-    // Use DOM order (same as legend) for consistent color assignment
-    const domOrderCategories = this.getCategoriesForMetadata(this.currentMetadataVector.id)
-    let colorMap = {}
-    
-    if (domOrderCategories && domOrderCategories.length > 0) {
-      const categoryNames = domOrderCategories.map(cat => cat.name)
-      colorMap = this.createDiscreteColorMap(categoryNames, this.currentMetadataVector.id)
-    } else {
-      // Fallback to original categories if DOM not available
-      const uniqueCategories = [...new Set(this.currentMetadataVector.values)]
-      colorMap = this.createDiscreteColorMap(uniqueCategories, this.currentMetadataVector.id)
-    }
-    
-    // Get color from the same color map used by plot dots
-    const borderColor = colorMap[categoryName] || 0x3b82f6 // Default blue if not found
-
-    // Create background rectangle
-    const padding = 3
-    let background
-    try {
-      background = new window.PIXI.Graphics()
-      background.beginFill(0xffffff, 0.8)
-      background.lineStyle(2, borderColor, 0.8)
-      background.drawRoundedRect(
-        -text.width / 2 - padding,
-        -text.height / 2 - padding,
-        text.width + padding * 2,
-        text.height + padding * 2,
-        3
-      )
-      background.endFill()
-    } catch (error) {
-      console.error('🏷️ Error creating PIXI.Graphics with window.PIXI:', error)
-      try {
-        background = new PIXI.Graphics()
-        background.beginFill(0xffffff, 0.8)
-        background.lineStyle(2, borderColor, 0.8)
-        background.drawRoundedRect(
-          -text.width / 2 - padding,
-          -text.height / 2 - padding,
-          text.width + padding * 2,
-          text.height + padding * 2,
-          3
-        )
-        background.endFill()
-      } catch (error2) {
-        console.error('🏷️ Error creating PIXI.Graphics with PIXI:', error2)
-        background = new PIXI.Container()
-      }
-    }
-    
-
-    // Add background and text to container
-    container.addChild(background)
-    container.addChild(text)
-    
-
-    // Store the category name and border color for reference
-    container.categoryName = categoryName
-    container.borderColor = borderColor
-
-    // Make the label interactive for dragging in pick mode
-    container.interactive = true
-    container.buttonMode = false
-    container.cursor = 'default'
-
-    return container
   }
 
   // Render continuous color legend for continuous metadata
   renderContinuousColorLegend() {
     // Dispatch to Canvas 2D for ReGL mode
-    if (this.rendererType === 'regl') {
       return this.renderContinuousColorLegendCanvas2D()
     }
     
-    const startTime = performance.now()
-    console.log('🎨 Rendering continuous color legend START')
-    
-    // Throttle legend updates to avoid redundant work
-    const now = Date.now()
-    if (this.lastLegendUpdate && now - this.lastLegendUpdate < 100) { // 100ms throttle
-      console.log('🎨 Throttling legend update (too soon)')
-      return
-    }
-    this.lastLegendUpdate = now
-    
-    if (!this.categoryLabelsContainer || !this.currentBounds || !this.pixiApp || !this.currentMetadataVector || !this.currentCoordinates) {
-      console.log('🎨 Missing required components for continuous legend, returning early')
-      return
-    }
-
-    // Only render legend for continuous metadata
-    if (this.currentMetadataVector.data_type !== 'NUMERIC') {
-      console.log('🎨 Not numeric metadata, skipping legend')
-      return
-    }
-
-    // During panning, don't update legend
-    if (this.isPanning) {
-      console.log('🎨 Skipping legend updates during panning')
-      return
-    }
-
-    console.log('🎨 Clearing existing legend...')
-    // Clear existing legend
-    this.categoryLabelsContainer.removeChildren()
-
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-
-    console.log('🎨 Getting metadata values and effective range...')
-    // Get metadata values and effective color range
-    const values = this.currentMetadataVector.values
-    const effectiveRange = this.getEffectiveColorRange()
-    const minVal = effectiveRange.min
-    const maxVal = effectiveRange.max
-    console.log('🎨 Effective range:', { minVal, maxVal })
-
-    // Create legend container
-    const legendContainer = new PIXI.Container()
-    
-    // Legend dimensions
-    const margins = this.getPlotMargins()
-    const legendWidth = 200
-    const legendHeight = 20
-    const legendX = width - legendWidth - margins.right // Position on right side
-    const legendY = margins.top // Position at top
-
-    // Create color gradient bar
-    const gradientBar = new PIXI.Graphics()
-    const numSteps = 100
-    
-    for (let i = 0; i < numSteps; i++) {
-      const normalizedValue = i / (numSteps - 1)
-      const color = this.getColorFromGradient(normalizedValue)
-      
-      const stepX = legendX + (i * legendWidth / numSteps)
-      const stepWidth = legendWidth / numSteps
-      
-      gradientBar.beginFill(color)
-      gradientBar.drawRect(stepX, legendY, stepWidth, legendHeight)
-      gradientBar.endFill()
-    }
-
-    // Create border around gradient bar
-    const border = new PIXI.Graphics()
-    border.lineStyle(1, 0x333333, 1)
-    border.drawRect(legendX, legendY, legendWidth, legendHeight)
-    
-    // Create min/max value labels
-    const minLabel = this.createLegendLabel(minVal.toFixed(2), legendX, legendY + legendHeight + 5)
-    const maxLabel = this.createLegendLabel(maxVal.toFixed(2), legendX + legendWidth, legendY + legendHeight + 5)
-    
-    // Center the max label
-    if (maxLabel.children[1] && maxLabel.children[1].anchor) {
-      maxLabel.children[1].anchor.set(1, 0) // Right-align
-    }
-
-    // Create metadata name label
-    const nameLabel = this.createLegendLabel(this.currentMetadataVector.name, legendX, legendY - margins.top)
-    if (nameLabel.children[1] && nameLabel.children[1].anchor) {
-      nameLabel.children[1].anchor.set(0, 0.5) // Left-align
-    }
-
-    // Add all elements to legend container
-    legendContainer.addChild(gradientBar)
-    legendContainer.addChild(border)
-    legendContainer.addChild(minLabel)
-    legendContainer.addChild(maxLabel)
-    legendContainer.addChild(nameLabel)
-
-    console.log('🎨 Adding legend to container...')
-    // Add legend to the category labels container
-    this.categoryLabelsContainer.addChild(legendContainer)
-    this.categoryLabelsContainer.visible = true
-
-    const totalTime = performance.now() - startTime
-    console.log(`🎨 Continuous color legend rendered successfully in ${totalTime.toFixed(2)}ms`)
-    console.log('🎨 renderContinuousColorLegend COMPLETE')
-  }
 
   // Initialize overlay canvas event listeners for gradient legend interaction
   initializeGradientLegendListeners() {
@@ -8311,32 +7479,6 @@ export default class extends Controller {
     return visibleCount
   }
 
-  // Update label interaction behavior based on current interaction mode
-  updateLabelInteractionMode() {
-    if (!this.categoryLabelsContainer || !this.pixiApp) return
-
-    this.categoryLabelsContainer.children.forEach(label => {
-      if (label.categoryName) { // Check if it's a category label
-        if (this.interactionMode === 'pick') {
-          label.cursor = 'move'
-          // Add drag event handlers for pick mode
-          label.on('pointerdown', (event) => {
-            event.stopPropagation()
-            this.clickingOnLabel = true
-            this.draggingLabel = label
-            label.alpha = 0.7
-          })
-        } else {
-          label.cursor = 'default'
-          // Reset any hover effects if not in pick mode
-          label.scale.set(1.0)
-          label.alpha = 1.0
-          // Remove drag event handlers
-          label.off('pointerdown')
-        }
-      }
-    })
-  }
 
   // Update control instructions based on current interaction mode
   updateControlInstructions() {
@@ -8361,55 +7503,6 @@ export default class extends Controller {
     controlElement.textContent = instructions
   }
 
-  // Setup global drag handlers for label dragging
-  setupGlobalDragHandlers() {
-    if (!this.pixiApp || !this.pixiApp.stage) return
-
-    // Remove existing global drag handlers if they exist
-    if (this.globalDragHandlers) {
-      this.pixiApp.stage.off('pointermove', this.globalDragHandlers.move)
-      this.pixiApp.stage.off('pointerup', this.globalDragHandlers.up)
-      this.pixiApp.stage.off('pointerupoutside', this.globalDragHandlers.upOutside)
-    }
-
-    // Create new global drag handlers
-    this.globalDragHandlers = {
-      move: (event) => {
-        // Skip if drawing lasso (shouldn't be called anyway due to .off())
-        if (this.isDrawingLasso) {
-          console.warn('⚠️ PIXI stage handler called during lasso! This should not happen.')
-          return
-        }
-        
-        if (this.draggingLabel && this.interactionMode === 'pick') {
-          const newPosition = event.data.getLocalPosition(this.draggingLabel.parent)
-          this.draggingLabel.x = newPosition.x
-          this.draggingLabel.y = newPosition.y
-        }
-      },
-      up: (event) => {
-        if (this.draggingLabel) {
-          event.stopPropagation()
-          this.draggingLabel.alpha = 1.0
-          this.draggingLabel = null
-        }
-        this.clickingOnLabel = false
-      },
-      upOutside: (event) => {
-        if (this.draggingLabel) {
-          event.stopPropagation()
-          this.draggingLabel.alpha = 1.0
-          this.draggingLabel = null
-        }
-        this.clickingOnLabel = false
-      }
-    }
-
-    // Add global event listeners
-    this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
-    this.pixiApp.stage.on('pointerup', this.globalDragHandlers.up)
-    this.pixiApp.stage.on('pointerupoutside', this.globalDragHandlers.upOutside)
-  }
 
   // Convert hex color to PIXI color number
   convertHexToPixiColor(hexColor) {
@@ -8700,15 +7793,6 @@ export default class extends Controller {
     
     this.lassoPoints = []
     this.isDrawingLasso = false
-    
-    // Re-enable PIXI event system (but sprite interactivity stays OFF - still in lasso mode)
-    if (this.pixiApp?.renderer?.events) {
-      this.pixiApp.renderer.events.setTargetElement(this.pixiApp.view)
-    }
-    if (this.globalDragHandlers && this.pixiApp?.stage) {
-      this.pixiApp.stage.on('pointermove', this.globalDragHandlers.move)
-    }
-    // Note: sprite interactivity is NOT re-enabled here - it stays disabled until user switches modes
     
     // Clean up Firefox polling if active
     if (this.firefoxPollInterval) {
@@ -9594,7 +8678,7 @@ export default class extends Controller {
     console.log('💾 Saving plot as SVG')
     
     // Check for renderer availability
-    const hasRenderer = this.rendererType === 'regl' ? !!this.reglRenderer : (!!this.pixiApp && !!this.scatterContainer)
+    const hasRenderer = !!this.reglRenderer
     
     if (!hasRenderer) {
       alert('No plot available to save')
@@ -9681,74 +8765,6 @@ export default class extends Controller {
     
     svg += `</svg>`
     console.log('💾 [ReGL] SVG generation complete')
-    return svg
-  }
-  
-  // PixiJS version of SVG generation (original)
-  generateSVGFromPlotPixi() {
-    // Use the same dimensions as the actual plot
-    const width = this.pixiApp.screen.width
-    const height = this.pixiApp.screen.height
-    
-    // Start SVG with proper dimensions
-    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
-    
-    // Add background
-    svg += `<rect width="100%" height="100%" fill="white"/>`
-    
-    // Add grid if visible
-    if (this.gridContainer && this.gridContainer.visible) {
-      svg += this.generateSVGGrid(width, height)
-    }
-    
-    // Add axes if visible
-    if (this.axesContainer && this.axesContainer.visible) {
-      svg += this.generateSVGAxes(width, height)
-    }
-    
-    // Add points from scatterContainer
-    if (this.scatterContainer && this.scatterContainer.children) {
-      this.scatterContainer.children.forEach((child) => {
-        if (child.isPoint && child.cellId !== undefined) {
-          const x = child.x
-          const y = child.y
-          
-          // Get the current color and size
-          const { color, size } = this.getPointColorAndSize(child)
-          
-          // Add circle for each point
-          svg += `<circle cx="${x}" cy="${y}" r="${size}" fill="${color}"/>`
-        }
-      })
-    }
-    
-    // Add points from animatedContainer if it exists
-    if (this.animatedContainer && this.animatedContainer.children) {
-      this.animatedContainer.children.forEach((child) => {
-        if (child.isPoint && child.cellId !== undefined) {
-          const x = child.x
-          const y = child.y
-          
-          // Get the current color and size
-          const { color, size } = this.getPointColorAndSize(child)
-          
-          // Add circle for each point
-          svg += `<circle cx="${x}" cy="${y}" r="${size}" fill="${color}"/>`
-        }
-      })
-    }
-    
-    // Add category labels if visible
-    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-      svg += this.generateSVGCategoryLabels()
-    }
-    
-    // Add lasso graphics if it exists
-    if (this.lassoGraphics && this.lassoPoints && this.lassoPoints.length > 0) {
-      svg += `<polyline points="${this.lassoPoints.map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.8"/>`
-    }
-    
-    svg += `</svg>`
     return svg
   }
 
@@ -9898,134 +8914,6 @@ export default class extends Controller {
       
       // Draw text
       svg += `<text x="${x}" y="${y}" font-family="Arial" font-size="12" fill="#333333" text-anchor="middle" dominant-baseline="middle">${category}</text>`
-    })
-    
-    return svg
-  }
-
-  // Generate SVG grid
-  generateSVGGrid(width, height) {
-    if (!this.currentBounds) return ''
-    
-    let svg = ''
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const margins = this.getPlotMargins()
-    
-    // Use the same coordinate system as the actual plot
-    const plotWidth = this.pixiApp.screen.width
-    const plotHeight = this.pixiApp.screen.height
-    
-    // Calculate tick spacing for each axis
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-    
-    // Vertical grid lines
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const availableWidth = plotWidth - margins.left - margins.right
-      const screenX = margins.left + ((x - minX) / (maxX - minX)) * availableWidth
-      svg += `<line x1="${screenX}" y1="${margins.top}" x2="${screenX}" y2="${plotHeight - margins.bottom}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
-    }
-    
-    // Horizontal grid lines - inverted to match inverted Y-axis
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const availableHeight = plotHeight - margins.top - margins.bottom
-      const screenY = margins.top + availableHeight - ((y - minY) / (maxY - minY)) * availableHeight
-      svg += `<line x1="${margins.left}" y1="${screenY}" x2="${plotWidth - margins.right}" y2="${screenY}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
-    }
-    
-    return svg
-  }
-
-  // Generate SVG axes
-  generateSVGAxes(width, height) {
-    if (!this.currentBounds) return ''
-    
-    let svg = ''
-    const { minX, maxX, minY, maxY } = this.currentBounds
-    const margins = this.getPlotMargins()
-    
-    // Use the same coordinate system as the actual plot
-    const plotWidth = this.pixiApp.screen.width
-    const plotHeight = this.pixiApp.screen.height
-    
-    // X-axis (bottom)
-    const xAxisY = plotHeight - margins.bottom
-    svg += `<line x1="${margins.left}" y1="${xAxisY}" x2="${plotWidth - margins.right}" y2="${xAxisY}" stroke="#374151" stroke-width="2"/>`
-    
-    // Y-axis (left)
-    const yAxisX = margins.left
-    svg += `<line x1="${yAxisX}" y1="${margins.top}" x2="${yAxisX}" y2="${plotHeight - margins.bottom}" stroke="#374151" stroke-width="2"/>`
-    
-    // Axis labels
-    svg += `<text x="${plotWidth/2}" y="${plotHeight - margins.bottom/2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151">Dimension 1</text>`
-    svg += `<text x="${margins.left/2}" y="${plotHeight/2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151" transform="rotate(-90, ${margins.left/2}, ${plotHeight/2})">Dimension 2</text>`
-    
-    // Tick marks and values
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-    
-    // X-axis ticks
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const availableWidth = plotWidth - margins.left - margins.right
-      const screenX = margins.left + ((x - minX) / (maxX - minX)) * availableWidth
-      svg += `<line x1="${screenX}" y1="${xAxisY - 5}" x2="${screenX}" y2="${xAxisY + 5}" stroke="#374151" stroke-width="1"/>`
-      svg += `<text x="${screenX}" y="${xAxisY + 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(x)}</text>`
-    }
-    
-    // Y-axis ticks - inverted to match inverted Y-axis
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const availableHeight = plotHeight - margins.top - margins.bottom
-      const screenY = margins.top + availableHeight - ((y - minY) / (maxY - minY)) * availableHeight
-      svg += `<line x1="${yAxisX - 5}" y1="${screenY}" x2="${yAxisX + 5}" y2="${screenY}" stroke="#374151" stroke-width="1"/>`
-      svg += `<text x="${yAxisX - 10}" y="${screenY + 3}" text-anchor="end" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(y)}</text>`
-    }
-    
-    return svg
-  }
-
-  // Generate SVG category labels
-  generateSVGCategoryLabels() {
-    if (!this.categoryLabelsContainer || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'DISCRETE') {
-      return ''
-    }
-    
-    let svg = ''
-    
-    this.categoryLabelsContainer.children.forEach(label => {
-      if (label.categoryName) {
-        const x = label.x
-        const y = label.y
-        const text = label.categoryName
-        
-        // Get the text element to get dimensions
-        const textElement = label.children[1] // Text is the second child
-        if (textElement) {
-          const textWidth = textElement.width || text.length * 7 // Approximate width
-          const textHeight = textElement.height || 12
-          const padding = 3
-          
-          // Get border color from stored property
-          const borderColor = label.borderColor ? this.hexToRgb(label.borderColor) : '#cccccc'
-          
-          // Background rectangle
-          svg += `<rect x="${x - textWidth/2 - padding}" y="${y - textHeight/2 - padding}" width="${textWidth + padding*2}" height="${textHeight + padding*2}" fill="white" fill-opacity="0.8" stroke="${borderColor}" stroke-width="2" rx="3"/>`
-          
-          // Text
-          svg += `<text x="${x}" y="${y + 3}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#333333">${text}</text>`
-        }
-      }
     })
     
     return svg
@@ -10556,25 +9444,13 @@ export default class extends Controller {
       return
     }
     
-    // Safety check for renderer
-    if (this.rendererType === 'pixi' && (!this.pixiApp || !this.scatterContainer)) {
-      console.log('PIXI app or scatterContainer not available for point detection')
+    // Check if RegL renderer and coordinates are available
+    if (!this.reglRenderer || !this.currentCoordinates) {
+      console.log('🎯 [RegL] RegL renderer or coordinates not available, skipping point detection')
       return
     }
-    
-    // ReGL mode: implement point detection
-    if (this.rendererType === 'regl') {
-      // Check if RegL renderer and coordinates are available
-      if (!this.reglRenderer || !this.currentCoordinates) {
-        console.log('🎯 [RegL] RegL renderer or coordinates not available, skipping point detection')
-        return
-      }
-      this.detectRegLPointClick(event)
-      return
-    }
-    
-    // Pick mode: Canvas clicked
-    this.detectPointClick(event)
+    this.detectRegLPointClick(event)
+
   }
 
   onPointClick(cellId, point, event) {
@@ -10587,93 +9463,6 @@ export default class extends Controller {
       
       this.showTooltip(cellId, point)
       event.stopPropagation() // Prevent canvas click event
-    }
-  }
-
-  // Fallback method to detect point clicks when PIXI events don't work
-  detectPointClick(event) {
-    if (this.interactionMode !== 'pick') return
-
-    const canvas = this.canvas || (this.pixiApp && this.pixiApp.canvas)
-    if (!canvas) return
-
-    // Safety check for scatterContainer
-    if (!this.scatterContainer || !this.scatterContainer.children) {
-      console.log('ScatterContainer not available for point detection')
-      return
-    }
-
-    const rect = canvas.getBoundingClientRect()
-    const clickX = event.clientX - rect.left
-    const clickY = event.clientY - rect.top
-
-    //console.log('Detecting point click at:', { clickX, clickY })
-    //console.log('ScatterContainer children count:', this.scatterContainer.children.length)
-
-    // Check all points in scatterContainer
-    let closestPoint = null
-    let closestDistance = Infinity
-    const maxDistance = 5 // Maximum distance to consider a click
-
-    this.scatterContainer.children.forEach((child, index) => {
-      if (index < 3) { // Debug first 3 children
-        console.log(`Child ${index}:`, { 
-          isPoint: child.isPoint, 
-          cellId: child.cellId, 
-          x: child.x, 
-          y: child.y 
-        })
-      }
-      if (child.isPoint && child.cellId !== undefined) {
-        const distance = Math.sqrt(
-          Math.pow(child.x - clickX, 2) + Math.pow(child.y - clickY, 2)
-        )
-        
-        if (distance < maxDistance && distance < closestDistance) {
-          closestDistance = distance
-          closestPoint = child
-        }
-      }
-    })
-
-    // Also check animatedContainer if it exists
-    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      this.animatedContainer.children.forEach((child) => {
-        if (child.isPoint && child.cellId !== undefined) {
-          const distance = Math.sqrt(
-            Math.pow(child.x - clickX, 2) + Math.pow(child.y - clickY, 2)
-          )
-          
-          if (distance < maxDistance && distance < closestDistance) {
-            closestDistance = distance
-            closestPoint = child
-          }
-        }
-      })
-    }
-
-    if (closestPoint) {
-      // Closest point found
-      
-      // Simple test - show alert with category info
-      const cellName = `Cell ${closestPoint.cellId + 1}`
-      let categoryInfo = ''
-      if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[closestPoint.cellId] !== undefined) {
-        const { data_type, values } = this.currentMetadataVector
-        const value = values[closestPoint.cellId]
-        
-        if (data_type === 'DISCRETE') {
-          categoryInfo = `\nCategory: ${value}`
-        } else if (data_type === 'NUMERIC') {
-          categoryInfo = `\nValue: ${value.toFixed(3)}`
-        }
-      }
-      
-      // Show tooltip
-      this.showSimpleTooltip(cellName, categoryInfo, closestPoint)
-    } else {
-      console.log('No point found near click position')
-      this.hideTooltip()
     }
   }
 

@@ -253,8 +253,8 @@ export class DataManager {
 
   // Load a single metadata vector on demand
   async loadSingleMetadataVector(metadataId) {
-    console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
-    console.log(`Call stack:`, new Error().stack)
+    // console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`)
+    // console.log(`Call stack:`, new Error().stack)
     
     // Check if already loaded in memory
     if (this.controller.loadedMetadataVectors[metadataId]) {
@@ -271,7 +271,8 @@ export class DataManager {
     if (!this.controller.loadingMetadataVectors.has(metadataId)) {
       const diskData = await this.controller.memoryManager.loadMetadataFromIndexedDB(metadataId)
       if (diskData) {
-        console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`)
+        // Silently load from disk (reduced logging)
+        // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`)
         
         // Remove IndexedDB metadata fields before returning
         const cleanData = { ...diskData }
@@ -353,7 +354,8 @@ export class DataManager {
           console.error(`Failed to store metadata ${metadataId} in IndexedDB:`, error)
         })
         
-        console.log(`💾 ✅ Loaded and cached metadata vector ${metadataId} (memory + disk)`)
+        // Silently cached (reduced logging)
+        // console.log(`💾 ✅ Loaded and cached metadata vector ${metadataId} (memory + disk)`)
         return vectorData
       } else {
         throw new Error(`No metadata vector found for ID: ${metadataId}`)
@@ -752,7 +754,7 @@ export class DataManager {
 
   // Update cell filtering with performance optimization
   updateCellFiltering(shouldUpdateColors = false) {
-    console.log('🔍 [FILTERING] updateCellFiltering called with selectedRanges:', this.controller.selectedRanges)
+    // console.log('🔍 [FILTERING] updateCellFiltering called with selectedRanges:', this.controller.selectedRanges)
     // Performance optimization: batch multiple updates
     this.controller.scheduleUpdate('filtering', () => {
       this.performCellFilteringUpdate(shouldUpdateColors)
@@ -816,10 +818,10 @@ export class DataManager {
     const hasDiscreteSelections = this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0
     const hasContinuousSelections = this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0
     
-    console.log('🔍 [FILTERING] getIncrementalFilteredIndices called')
-    console.log('🔍 [FILTERING] hasDiscreteSelections:', hasDiscreteSelections)
-    console.log('🔍 [FILTERING] hasContinuousSelections:', hasContinuousSelections)
-    console.log('🔍 [FILTERING] selectedRanges:', this.controller.selectedRanges)
+    // console.log('🔍 [FILTERING] getIncrementalFilteredIndices called')
+    // console.log('🔍 [FILTERING] hasDiscreteSelections:', hasDiscreteSelections)
+    // console.log('🔍 [FILTERING] hasContinuousSelections:', hasContinuousSelections)
+    // console.log('🔍 [FILTERING] selectedRanges:', this.controller.selectedRanges)
     
     if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells
@@ -921,7 +923,7 @@ export class DataManager {
     
     if (!filteredIndices) {
       // No filtering applied - all cells are visible, keep current selection
-      console.log(`Selection unchanged: ${originalSelectionSize} cells (no filtering)`)
+      // console.log(`Selection unchanged: ${originalSelectionSize} cells (no filtering)`)
       return
     }
 
@@ -978,7 +980,7 @@ export class DataManager {
     
     if (!hasDiscreteSelections && !hasContinuousSelections) {
       // No filtering applied, return all cells
-      console.log('🔍 No selections found, returning null (no filtering)')
+      // console.log('🔍 No selections found, returning null (no filtering)')
       // Update performance cache
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = currentFilterHash
@@ -1048,7 +1050,7 @@ export class DataManager {
 
     if (allMetadataWithConstraints.length === 0) {
       // No metadata has actual constraints, return all cells
-      console.log('🔍 No metadata with constraints found, returning null (no filtering)')
+      // console.log('🔍 No metadata with constraints found, returning null (no filtering)')
       // Update performance cache
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = currentFilterHash
@@ -1251,7 +1253,7 @@ export class DataManager {
       
       // If it's compressed, decompress it on demand (matching original controller logic)
       if (vectorData.compressed_data && vectorData.compression_info) {
-        console.log(`💾 [MEMORY] Decompressing metadata ${metadataId} from memory...`)
+        // console.log(`💾 [MEMORY] Decompressing metadata ${metadataId} from memory...`)
         try {
           let values
           if (vectorData.data_type === 'DISCRETE') {
@@ -1275,7 +1277,7 @@ export class DataManager {
           // Store the decompressed version
           this.controller.loadedMetadataVectors[metadataId] = decompressedVector
           
-          console.log(`💾 [MEMORY] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
+          // console.log(`💾 [MEMORY] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
           return decompressedVector
           
         } catch (error) {

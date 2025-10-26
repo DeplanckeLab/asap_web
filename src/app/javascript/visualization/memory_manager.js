@@ -386,15 +386,15 @@ export class MemoryManager {
           if (request.result) {
             const currentLoom = this.controller.currentLoomFile || this.controller.loomFileSelectTarget?.value || this.controller.defaultLoomFileValue
             
-            console.log(`💾 IndexedDB lookup for ${metadataId}:`, {
-              found: true,
-              storedLoomFile: request.result.loomFile,
-              currentLoomFile: currentLoom,
-              match: request.result.loomFile === currentLoom
-            })
+            // console.log(`💾 IndexedDB lookup for ${metadataId}:`, {
+            //   found: true,
+            //   storedLoomFile: request.result.loomFile,
+            //   currentLoomFile: currentLoom,
+            //   match: request.result.loomFile === currentLoom
+            // })
             
             if (request.result.loomFile === currentLoom) {
-              console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
+              // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
               resolve(request.result)
             } else {
               console.log(`💾 ⚠️ Loom file mismatch, ignoring cached data for ${metadataId}`)

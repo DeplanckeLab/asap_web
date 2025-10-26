@@ -306,14 +306,14 @@ export class UIManager {
 
   // Show checkboxes for metadata
   showCheckboxesForMetadata(metadataId) {
-    console.log(`🔍 [DEBUG] Showing checkboxes for metadata: ${metadataId}`)
+    // console.log(`🔍 [DEBUG] Showing checkboxes for metadata: ${metadataId}`)
     
     // Show the global metadata checkbox
     const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
-    console.log(`🔍 [DEBUG] Found metadata checkbox:`, !!metadataCheckbox)
+    // console.log(`🔍 [DEBUG] Found metadata checkbox:`, !!metadataCheckbox)
     if (metadataCheckbox) {
       metadataCheckbox.style.display = 'flex'
-      console.log(`🔍 [DEBUG] Set metadata checkbox display to flex`)
+      // console.log(`🔍 [DEBUG] Set metadata checkbox display to flex`)
       
       // Set initial tooltip based on metadata type
       const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
@@ -327,12 +327,12 @@ export class UIManager {
     
     // Show all category checkboxes for this metadata
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    console.log(`🔍 [DEBUG] Found ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+    // console.log(`🔍 [DEBUG] Found ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.display = 'flex'
     })
     
-    console.log(`🔍 [DEBUG] Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+    // console.log(`🔍 [DEBUG] Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
   }
 
   // Initialize all checkboxes for the current metadata

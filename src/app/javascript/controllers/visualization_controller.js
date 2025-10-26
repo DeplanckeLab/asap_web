@@ -12,10 +12,28 @@ import { PerformanceManager } from "visualization/performance_manager"
 console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
 export default class extends Controller {
-  static targets = ["loomFileSelect", "embeddingSelect", "metadataSelect"]
+  // Only metadataSelect is required, others are optional
+  static targets = ["metadataSelect"]
   static values = { 
     embeddingsByLoom: Object,
     defaultLoomFile: String
+  }
+  
+  // Optional targets - manually check with querySelector
+  get loomFileSelectTarget() {
+    return this.element.querySelector('[data-visualization-target="loomFileSelect"]')
+  }
+  
+  get hasLoomFileSelectTarget() {
+    return !!this.loomFileSelectTarget
+  }
+  
+  get embeddingSelectTarget() {
+    return this.element.querySelector('[data-visualization-target="embeddingSelect"]')
+  }
+  
+  get hasEmbeddingSelectTarget() {
+    return !!this.embeddingSelectTarget
   }
 
   connect() {
@@ -1693,15 +1711,23 @@ export default class extends Controller {
             
             // Check if this metadata is in the database
             if (metadataInDatabase.has(metadataId.toString())) {
-              console.log(`  💾→🧠 Loading from disk to memory: ${metadataName || metadataId}`)
+              // Silently load from disk to memory (only log every 10th)
               try {
                 const metadata = await this.dataManager.loadSingleMetadataVector(metadataId)
                 if (metadata) {
                   const globalIndex = i + batchIndex
                   if (globalIndex < categoricalMetadata.length) {
                     categoricalCount++
+                    // Log progress every 10 items
+                    if (categoricalCount % 10 === 0 || categoricalCount === categoricalMetadata.length) {
+                      console.log(`  💾→🧠 Loaded ${categoricalCount}/${categoricalMetadata.length} categorical metadata to memory`)
+                    }
                   } else {
                     continuousCount++
+                    // Log progress every 5 items
+                    if (continuousCount % 5 === 0 || continuousCount === continuousMetadata.length) {
+                      console.log(`  💾→🧠 Loaded ${continuousCount}/${continuousMetadata.length} continuous metadata to memory`)
+                    }
                   }
                   
                   // Show checkboxes for loaded metadata
@@ -1711,7 +1737,6 @@ export default class extends Controller {
                 console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
               }
             } else {
-              console.log(`  ⏭️  Not in database: ${metadataName || metadataId} - skipping`)
               skippedCount++
             }
             continue
@@ -1886,7 +1911,7 @@ export default class extends Controller {
       return
     }
     
-    console.log('🎨 [ReGL] Updating point colors based on metadata')
+    // console.log('🎨 [ReGL] Updating point colors based on metadata')
     const startTime = performance.now()
     
     if (!this.reglRenderer || !this.currentCoordinates) {
@@ -1905,7 +1930,7 @@ export default class extends Controller {
     // FIXED: Use getColoringMetadataVector() to get the correct metadata for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
     if (coloringMetadataVector) {
-      console.log(`🎨 [ReGL] Applying ${coloringMetadataVector.data_type} metadata colors`)
+      // console.log(`🎨 [ReGL] Applying ${coloringMetadataVector.data_type} metadata colors`)
       
       if (coloringMetadataVector.data_type === 'DISCRETE') {
         // Discrete metadata coloring with category ordering
@@ -7329,7 +7354,7 @@ export default class extends Controller {
         visibleCount++
         
         if (sampleIndices.includes(drawPos)) {
-          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${cachedColor.toString(16)}`)
+          // console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${cachedColor.toString(16)}`)
         }
       } else {
         // Hide point by making it fully transparent
@@ -7337,7 +7362,7 @@ export default class extends Controller {
         hiddenCount++
         
         if (sampleIndices.includes(drawPos)) {
-          console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: HIDDEN, color 0x00000000`)
+          // console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: HIDDEN, color 0x00000000`)
         }
       }
     }

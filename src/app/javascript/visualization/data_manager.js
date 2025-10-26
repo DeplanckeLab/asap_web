@@ -266,11 +266,9 @@ export class DataManager {
       return cachedData
     }
     
-    // Try to load from IndexedDB (disk storage) - ONLY on cold start (nothing in memory yet)
-    // This avoids race conditions during active preloading
-    const isSessionColdStart = Object.keys(this.controller.loadedMetadataVectors).length === 0
-    
-    if (isSessionColdStart && !this.controller.loadingMetadataVectors.has(metadataId)) {
+    // Try to load from IndexedDB (disk storage) first
+    // Always check disk before network to avoid unnecessary downloads
+    if (!this.controller.loadingMetadataVectors.has(metadataId)) {
       const diskData = await this.controller.memoryManager.loadMetadataFromIndexedDB(metadataId)
       if (diskData) {
         console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`)
@@ -351,10 +349,11 @@ export class DataManager {
         this.controller.loadedMetadataVectors[metadataId] = vectorData
         
         // SECOND: Store in IndexedDB for future sessions (async, don't wait)
-        // Note: storeBinaryMetadataData is for binary coordinate data, not metadata vectors
-        // Metadata vectors are already stored in memory cache above
+        this.controller.memoryManager.storeMetadataInIndexedDB(metadataId, vectorData).catch(error => {
+          console.error(`Failed to store metadata ${metadataId} in IndexedDB:`, error)
+        })
         
-        console.log(`💾 ✅ Loaded and cached metadata vector ${metadataId}`)
+        console.log(`💾 ✅ Loaded and cached metadata vector ${metadataId} (memory + disk)`)
         return vectorData
       } else {
         throw new Error(`No metadata vector found for ID: ${metadataId}`)
@@ -514,24 +513,29 @@ export class DataManager {
 
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId) {
-    console.log(`Loading and visualizing metadata vector for ID: ${metadataId}`)
+    console.log(`🔍 [DEBUG] Loading and visualizing metadata vector for ID: ${metadataId}`)
+    console.log(`🔍 [DEBUG] Current state before load:`)
+    console.log(`🔍 [DEBUG] - loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors || {}))
+    console.log(`🔍 [DEBUG] - loadingMetadataVectors size:`, this.controller.loadingMetadataVectors?.size || 0)
     
     // Ensure metadata is loaded into memory for fast access
     let vectorData = await this.loadSingleMetadataVector(metadataId)
     
     if (!vectorData) {
-      console.error('Failed to load metadata vector for:', metadataId)
-      console.error('loadedMetadataVectors:', Object.keys(this.controller.loadedMetadataVectors))
-      console.error('loadingMetadataVectors:', Array.from(this.controller.loadingMetadataVectors))
-      console.error('IndexedDB available:', !!this.controller.db)
+      console.error('❌ Failed to load metadata vector for:', metadataId)
+      console.error('❌ loadedMetadataVectors keys:', Object.keys(this.controller.loadedMetadataVectors))
+      console.error('❌ loadingMetadataVectors:', Array.from(this.controller.loadingMetadataVectors))
+      console.error('❌ IndexedDB available:', !!this.controller.db)
       
       // Try to diagnose the issue
       if (this.controller.loadingMetadataVectors.has(metadataId)) {
-        console.error('DIAGNOSIS: Metadata is still marked as loading - this indicates a race condition!')
+        console.error('❌ DIAGNOSIS: Metadata is still marked as loading - this indicates a race condition!')
       }
       
       return
     }
+    
+    console.log(`✅ [DEBUG] Successfully received vectorData, proceeding with decompression...`)
     
     console.log('✅ Successfully loaded metadata vector:', {
       id: vectorData.id || metadataId,
@@ -650,12 +654,33 @@ export class DataManager {
       compression_info: vectorData.compression_info
     }
     
+    try {
+      console.log(`✅ [DEBUG] Set currentMetadataVector at:`, new Error().stack)
+    } catch (e) {
+      console.log(`✅ [DEBUG] Set currentMetadataVector (stack not available):`, e)
+    }
+    console.log(`✅ [DEBUG] Set currentMetadataVector:`, {
+      id: this.controller.currentMetadataVector.id,
+      name: this.controller.currentMetadataVector.name,
+      dataType: this.controller.currentMetadataVector.data_type,
+      valuesLength: this.controller.currentMetadataVector.values?.length
+    })
+    
     // Also store in loadedMetadataVectors for filtering
     this.controller.loadedMetadataVectors[metadataId] = this.controller.currentMetadataVector
     
+    console.log(`✅ [DEBUG] [Instance ${this.controller.instanceId}] Stored in loadedMetadataVectors. New keys:`, Object.keys(this.controller.loadedMetadataVectors))
+    console.log(`✅ [DEBUG] Immediately after storing - loadedMetadataVectors[${metadataId}] exists:`, !!this.controller.loadedMetadataVectors[metadataId])
+    
+    // Update usage tracker for LRU
+    this.controller.memoryManager.updateMetadataUsage(metadataId)
+    
+    // Cleanup old metadata if we exceed the buffer size
+    this.controller.memoryManager.cleanupUnusedMetadata()
+    
     // Note: We keep metadata in memory during the session for fast switching
     // IndexedDB is used for persistence across page reloads
-    // Memory will be managed by browser's garbage collector
+    // LRU cleanup ensures we don't exceed maxMetadataInMemory
     
     // Show checkboxes for this metadata now that it's loaded
     console.log(`🔍 [DEBUG] Calling showCheckboxesForMetadata for metadata ${metadataId}`)
@@ -719,6 +744,10 @@ export class DataManager {
         this.controller.overlayCanvas.style.pointerEvents = 'none'
       }
     }
+    
+    // Final check - is the data still in memory at the end of this function?
+    console.log(`✅ [DEBUG] [Instance ${this.controller.instanceId}] END of loadAndVisualizeMetadataVector - loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors))
+    console.log(`✅ [DEBUG] END - loadedMetadataVectors[${metadataId}] still exists:`, !!this.controller.loadedMetadataVectors[metadataId])
   }
 
   // Update cell filtering with performance optimization
@@ -1350,8 +1379,25 @@ export class DataManager {
       memoryEfficiency: ((1 - binarySize / (data.cellCount * 2 * 8)) * 100).toFixed(1) + '%'
     })*/
     
+    // Recalculate optimal buffer size now that we have cell count
+    // This updates from the default (5) to the actual optimal size
+    if (this.controller.maxMetadataInMemory <= 5) {
+      const newBufferSize = this.controller.memoryManager.calculateOptimalBufferSize()
+      if (newBufferSize > this.controller.maxMetadataInMemory) {
+        console.log(`🧠 [MEMORY] Recalculating buffer size with cell count ${data.cellCount.toLocaleString()}`)
+        console.log(`🧠 [MEMORY] Updated buffer size: ${this.controller.maxMetadataInMemory} → ${newBufferSize} metadata vectors`)
+        this.controller.maxMetadataInMemory = newBufferSize
+      }
+    }
+    
     // Update visualization with the new coordinate data
     this.updateVisualizationWithMetadata()
+    
+    // If there's a currently active metadata vector (coloring), reapply it to the new embedding
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataId) {
+      console.log(`🎨 Reapplying metadata coloring after embedding switch: ${this.controller.currentMetadataVector.name}`)
+      this.controller.updateVisualizationWithMetadataVector()
+    }
   }
 
   // Clear metadata data

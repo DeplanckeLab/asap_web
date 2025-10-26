@@ -622,6 +622,9 @@ export class RendererManager {
         this.controller.reglRenderer = null
       }
       
+      // Reset canvas listeners flag so they get reattached to the new canvas
+      this.controller.canvasListenersSetup = false
+      
       // Find the plot container
       const plotContainer = document.querySelector('.plot-container')
       if (!plotContainer) {

@@ -19,7 +19,25 @@ export default class extends Controller {
   }
 
   connect() {
-    console.log('🚀 Visualization controller connected')
+    // Generate unique ID for this controller instance
+    this.instanceId = Math.random().toString(36).substring(7)
+    console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
+    
+    // DEBUG: Add direct event listener to measure Stimulus overhead
+    setTimeout(() => {
+      const metadataHeaders = document.querySelectorAll('[data-action*="toggleMetadata"]')
+      console.log(`🔍 [DEBUG] Found ${metadataHeaders.length} metadata headers with toggleMetadata action`)
+      
+      metadataHeaders.forEach((header, index) => {
+        if (index === 0) { // Only instrument the first one for testing
+          header.addEventListener('click', (e) => {
+            const directCallTime = performance.now()
+            console.log(`⚡ [DIRECT] Direct listener called at: ${directCallTime.toFixed(2)}ms (event timestamp: ${e.timeStamp.toFixed(2)}ms)`)
+            console.log(`⚡ [DIRECT] Direct listener delay: ${(directCallTime - e.timeStamp).toFixed(2)}ms`)
+          }, { capture: true }) // Use capture to run BEFORE Stimulus
+        }
+      })
+    }, 1000)
     
     // Initialize modules
     this.dataManager = new DataManager(this)
@@ -243,6 +261,8 @@ export default class extends Controller {
     }, 500)
     
     // Initialize metadata vectors storage
+    console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
+    console.trace('Call stack:')
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
@@ -334,15 +354,16 @@ export default class extends Controller {
     }
   }
   
-  
-
-
+  // Delegates to ui_manager to avoid duplication
+  updateMetadata() {
+    this.uiManager.updateMetadata()
+  }
 
   async loadMetadataCoordinates(metadataId) {
     const fetchStart = performance.now()
     
     try {
-      // Check cache first!
+      // Check in-memory cache first!
       if (this.binaryDataCache.has(metadataId)) {
         console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
         const cachedData = this.binaryDataCache.get(metadataId)
@@ -354,7 +375,22 @@ export default class extends Controller {
         return
       }
       
-      console.log(`⏱️ [PERF] Step 1: BINARY CACHE MISS - Starting network fetch for ${metadataId}`)
+      // Check IndexedDB (disk storage) for embeddings - this is the key fix!
+      console.log(`⏱️ [PERF] Step 1a: Checking IndexedDB for coordinates ${metadataId}...`)
+      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
+      if (diskData) {
+        const diskTime = performance.now() - fetchStart
+        console.log(`⏱️ [PERF] Step 1a: IndexedDB HIT for ${metadataId} - ${diskTime.toFixed(2)}ms (saved network fetch!)`)
+        
+        // Store in memory cache for next time
+        this.binaryDataCache.set(metadataId, diskData)
+        
+        // Use cached binary data
+        this.dataManager.storeBinaryMetadataData(diskData)
+        return
+      }
+      
+      console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
       
       // Get the current loom file selection
       const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
@@ -431,9 +467,15 @@ export default class extends Controller {
         binaryData: arrayBuffer
       }
       
-      // Cache binary data for instant retrieval next time
+      // Cache binary data in memory for instant retrieval next time
       this.binaryDataCache.set(metadataId, dataObject)
-      console.log(`⏱️ [PERF] Cached binary data for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
+      console.log(`⏱️ [PERF] Cached binary data in memory for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
+      
+      // Also store in IndexedDB (disk) for persistent cache across page reloads!
+      this.memoryManager.storeCoordinatesInIndexedDB(metadataId, dataObject).catch(error => {
+        console.warn('Failed to store coordinates in IndexedDB:', error)
+      })
+      console.log(`⏱️ [PERF] Stored coordinates in IndexedDB for ${metadataName} (will survive page reload)`)
       
       // Store the binary coordinate data
       this.dataManager.storeBinaryMetadataData(dataObject)
@@ -447,8 +489,17 @@ export default class extends Controller {
   // Silent version of loadMetadataCoordinates - only caches without displaying
   async loadMetadataCoordinatesSilently(metadataId, metadataName = 'unknown') {
     try {
-      // Check cache first - if already cached, nothing to do
+      // Check memory cache first - if already cached, nothing to do
       if (this.binaryDataCache.has(metadataId)) {
+        return { success: true, cached: true }
+      }
+      
+      // Check IndexedDB (disk storage) for embeddings
+      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
+      if (diskData) {
+        console.log(`  ✅ Loaded from IndexedDB: ${metadataName}`)
+        // Store in memory cache for next time
+        this.binaryDataCache.set(metadataId, diskData)
         return { success: true, cached: true }
       }
       
@@ -499,8 +550,13 @@ export default class extends Controller {
         binaryData: arrayBuffer
       }
       
-      // Cache binary data (but DON'T call storeBinaryMetadataData - that would display it)
+      // Cache binary data in memory (but DON'T call storeBinaryMetadataData - that would display it)
       this.binaryDataCache.set(metadataId, dataObject)
+      
+      // Also store in IndexedDB (disk) for persistent cache
+      this.memoryManager.storeCoordinatesInIndexedDB(metadataId, dataObject).catch(error => {
+        console.warn('Failed to store coordinates in IndexedDB:', error)
+      })
       
       return { 
         success: true, 
@@ -1308,9 +1364,15 @@ export default class extends Controller {
       availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : []
     })
     
+    // Try to get cell count from database for accurate buffer size calculation
+    const cellCountFromDB = await this.memoryManager.getCellCountFromDatabase()
+    
     // Calculate and set optimal buffer size based on dataset characteristics
-    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize()
+    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCountFromDB)
     console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
+    if (cellCountFromDB > 0) {
+      console.log(`🧠 [Memory] Used cell count from database: ${cellCountFromDB.toLocaleString()}`)
+    }
     
     // Separate metadata by type for ordered preloading
     const visualizationEmbeddings = []
@@ -1473,10 +1535,21 @@ export default class extends Controller {
       continuousMetadata.push(...continuousSet)
     }
     
+    const totalMetadataCount = categoricalMetadata.length + continuousMetadata.length
+    
     console.log(`🚀 [PERF] Found metadata to preload:`)
     console.log(`  - ${visualizationEmbeddings.length} visualization embeddings:`, visualizationEmbeddings.slice(0, 3).map(e => e.name))
     console.log(`  - ${categoricalMetadata.length} categorical metadata`)
     console.log(`  - ${continuousMetadata.length} continuous metadata`)
+    console.log(`  - Total metadata: ${totalMetadataCount}, Buffer size: ${this.maxMetadataInMemory}`)
+    
+    // If total metadata count is less than buffer size, preload ALL metadata
+    const shouldPreloadAllMetadata = totalMetadataCount <= this.maxMetadataInMemory
+    if (shouldPreloadAllMetadata) {
+      console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) ≤ buffer size (${this.maxMetadataInMemory}) → Preloading ALL metadata!`)
+    } else {
+      console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) > buffer size (${this.maxMetadataInMemory}) → Selective preloading (LRU will manage)`)
+    }
     
     // Special logging for sex and age in final lists
     const allMetadataToPreload = [...categoricalMetadata, ...continuousMetadata]
@@ -1551,9 +1624,48 @@ export default class extends Controller {
       ...continuousMetadata
     ]
     
+    // If we should preload all to memory, first get list of what's already in database
+    let metadataInDatabase = new Set()
+    if (shouldPreloadAllMetadata && this.db) {
+      console.log(`\n🔍 [MEMORY] Checking which metadata are already in database...`)
+      try {
+        const transaction = this.db.transaction(['metadata'], 'readonly')
+        const objectStore = transaction.objectStore('metadata')
+        const getAllRequest = objectStore.getAll()
+        
+        await new Promise((resolve) => {
+          getAllRequest.onsuccess = () => {
+            const allItems = getAllRequest.result
+            const currentLoom = this.currentLoomFile || this.defaultLoomFileValue || 'parsing/output.loom'
+            
+            // Filter by matching loom file
+            allItems.forEach(item => {
+              if (item.loomFile === currentLoom && item.id) {
+                metadataInDatabase.add(item.id.toString())
+              }
+            })
+            
+            console.log(`🔍 [MEMORY] Found ${metadataInDatabase.size} metadata in database for loom: ${currentLoom}`)
+            resolve()
+          }
+          getAllRequest.onerror = () => {
+            console.error('Error getting metadata list from database')
+            resolve()
+          }
+        })
+      } catch (error) {
+        console.error('Error checking database:', error)
+      }
+    }
+    
     if (orderedMetadata.length > 0) {
-      console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors to disk...`)
-      console.log(`💾 [PERF] Using disk-first approach - all metadata will be stored on disk, not in memory`)
+      console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors...`)
+      if (shouldPreloadAllMetadata) {
+        console.log(`💾 [PERF] Preloading to MEMORY + DISK (all ${totalMetadataCount} metadata fit in buffer)`)
+        console.log(`💾 [PERF] ${metadataInDatabase.size}/${totalMetadataCount} already in database, will load to memory`)
+      } else {
+        console.log(`💾 [PERF] Preloading to DISK only (${totalMetadataCount} metadata > ${this.maxMetadataInMemory} buffer limit)`)
+      }
       
       // Reduce batch size to prevent server overload and add retry logic
       const batchSize = 1 // Reduced from 3 to 1 to prevent server overload
@@ -1575,7 +1687,37 @@ export default class extends Controller {
             continue
           }
 
-          // Check if already stored in IndexedDB
+          // If we should preload all to memory, only load if it's in database
+          if (shouldPreloadAllMetadata) {
+            const metadataName = this.dataManager.getMetadataNameById(metadataId)
+            
+            // Check if this metadata is in the database
+            if (metadataInDatabase.has(metadataId.toString())) {
+              console.log(`  💾→🧠 Loading from disk to memory: ${metadataName || metadataId}`)
+              try {
+                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId)
+                if (metadata) {
+                  const globalIndex = i + batchIndex
+                  if (globalIndex < categoricalMetadata.length) {
+                    categoricalCount++
+                  } else {
+                    continuousCount++
+                  }
+                  
+                  // Show checkboxes for loaded metadata
+                  this.uiManager.showCheckboxesForMetadata(metadataId)
+                }
+              } catch (error) {
+                console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
+              }
+            } else {
+              console.log(`  ⏭️  Not in database: ${metadataName || metadataId} - skipping`)
+              skippedCount++
+            }
+            continue
+          }
+          
+          // For disk-only preload, check if already in database first
           console.log(`🔍 [DEBUG] About to check if metadata ${metadataId} is in database...`)
           const isInDatabase = await this.checkMetadataInDatabase(metadataId)
           console.log(`🔍 [DEBUG] checkMetadataInDatabase result for ${metadataId}:`, isInDatabase)
@@ -1610,8 +1752,22 @@ export default class extends Controller {
                 await new Promise(resolve => setTimeout(resolve, delay))
               }
               
-              // Load from server directly to disk (IndexedDB) without keeping in memory
-              const result = await this.preloadMetadataToDisk(metadataId)
+              // Load from server to disk (IndexedDB)
+              // If we have enough buffer space, also load into memory for instant access
+              let result
+              if (shouldPreloadAllMetadata) {
+                // Load into memory AND disk
+                result = await this.dataManager.loadSingleMetadataVector(metadataId)
+                if (result) {
+                  result = { success: true, metadataId, name: result.name }
+                } else {
+                  result = { success: false, metadataId }
+                }
+              } else {
+                // Load to disk only
+                result = await this.preloadMetadataToDisk(metadataId)
+              }
+              
               const globalIndex = i + batchIndex
               
               // Check if the loading actually succeeded
@@ -2449,6 +2605,8 @@ export default class extends Controller {
     }
     
     console.log('🎨 Clearing metadata coloring, returning to default blue')
+    console.log('🎨 [DEBUG] clearMetadataColoring() called - clearing currentMetadataVector')
+    console.trace('Call stack:')
     
     // Clear current metadata vector
     this.currentMetadataVector = null
@@ -2610,6 +2768,51 @@ export default class extends Controller {
 
   // Toggle metadata categories (moved from inline JS)
   async toggleMetadata(event) {
+    // Log the event timestamp to see if there's a delay before this function is called
+    const eventTime = event.timeStamp
+    const callTime = performance.now()
+    const delay = callTime - eventTime
+    
+    console.log(`⏱️ [TOGGLE] Event fired at: ${eventTime.toFixed(2)}ms`)
+    console.log(`⏱️ [TOGGLE] Function called at: ${callTime.toFixed(2)}ms`)
+    console.log(`⏱️ [TOGGLE] ⚠️ DELAY between event and function call: ${delay.toFixed(2)}ms`)
+    
+    if (delay > 100) {
+      console.error(`❌ [TOGGLE] CRITICAL: ${delay.toFixed(2)}ms delay! Something is severely blocking the main thread!`)
+      console.error(`❌ [TOGGLE] Possible causes:`)
+      console.error(`   1. Heavy synchronous computation running`)
+      console.error(`   2. Large data structure being processed`)
+      console.error(`   3. Stimulus framework overhead`)
+      console.error(`   4. Browser extension interference`)
+      console.error(`   5. Garbage collection pause`)
+      
+      // Log current state to help diagnose
+      console.error(`❌ [TOGGLE] Current state:`, {
+        loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length,
+        binaryCacheSize: this.binaryDataCache?.size || 0,
+        interactionMode: this.interactionMode,
+        isDrawingLasso: this.isDrawingLasso,
+        isPanning: this.isPanning
+      })
+      
+      // Check memory usage if available
+      if (performance.memory) {
+        const memMB = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)
+        const limitMB = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(1)
+        console.error(`❌ [TOGGLE] Memory: ${memMB}MB / ${limitMB}MB (${((performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit) * 100).toFixed(1)}% used)`)
+        
+        if (performance.memory.usedJSHeapSize > performance.memory.jsHeapSizeLimit * 0.9) {
+          console.error(`❌ [TOGGLE] WARNING: Memory usage is very high! This could cause GC pauses.`)
+        }
+      }
+      
+      // Recommendation
+      console.error(`❌ [TOGGLE] RECOMMENDATION: Open Chrome DevTools > Performance tab, record, then click to fold/unfold to see what's blocking the thread.`)
+    }
+    
+    const perfStart = performance.now()
+    console.log('⏱️ [TOGGLE] Starting metadata fold/unfold...')
+    
     const headerElement = event.currentTarget
     const chevron = headerElement.querySelector('svg')
     const nextSibling = headerElement.nextElementSibling
@@ -2628,12 +2831,18 @@ export default class extends Controller {
     // Toggle the chevron rotation
     const isExpanding = chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)'
     
+    console.log(`⏱️ [TOGGLE] Type: ${isContinuousMetadata ? 'Continuous' : 'Categorical'}, Action: ${isExpanding ? 'Expanding' : 'Collapsing'}`)
+    
     if (isExpanding) {
+      const chevronTime = performance.now()
       chevron.style.transform = 'rotate(90deg)'
+      console.log(`⏱️ [TOGGLE] Chevron rotation: ${(performance.now() - chevronTime).toFixed(2)}ms`)
       
       if (isContinuousMetadata) {
         // Handle continuous metadata - show range section
+        const displayTime = performance.now()
         rangeSection.style.display = 'block'
+        console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Get metadata info and initialize the range slider
         const metadataItem = headerElement.closest('[data-metadata-item]')
@@ -2644,29 +2853,71 @@ export default class extends Controller {
           console.log('🎚️ Expanding continuous metadata:', metadataId, metadataName)
           
           // Initialize the inline range slider
+          const sliderTime = performance.now()
           this.toggleInlineRangeSlider(metadataId, metadataName)
+          console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
         }
       } else {
         // Handle categorical metadata - show categories
+        const displayTime = performance.now()
         categoriesDiv.style.display = 'block'
+        console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Load metadata vector when expanding categories (for future coloring)
         const metadataItem = headerElement.closest('[data-metadata-item]')
         if (metadataItem) {
           const metadataId = metadataItem.dataset.metadataItem
-          // Load into memory for fast access (no spinner for category expansion)
-          this.dataManager.loadSingleMetadataVector(metadataId).then(() => {
-            // Initialize checkboxes for this metadata to enable filtering
+          
+          // Check if already in memory (should be instant!)
+          const memCheckTime = performance.now()
+          const isInMemory = !!this.loadedMetadataVectors[metadataId]
+          console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
+          
+          if (isInMemory) {
+            // Already in memory - just initialize checkboxes (no loading needed)
+            const checkboxTime = performance.now()
             this.initializeCheckboxesForMetadata(metadataId).then(() => {
-              // Now update the filtering to apply the category selections
-              this.dataManager.updateCellFiltering()
+              console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
+              
+              // Only update filtering if there are active selections
+              if (this.selectedCategories[metadataId] && Object.keys(this.selectedCategories[metadataId]).length > 0) {
+                const filterTime = performance.now()
+                this.dataManager.updateCellFiltering()
+                console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
+              } else {
+                console.log(`⏱️ [TOGGLE] Skipped filtering (no active selections)`)
+              }
+              
+              console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
-          }).catch(error => {
-            console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
-          })
+          } else {
+            // Not in memory - load it first (rare case)
+            const loadTime = performance.now()
+            console.log(`⏱️ [TOGGLE] Loading from disk/network...`)
+            this.dataManager.loadSingleMetadataVector(metadataId).then(() => {
+              console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
+              
+              const checkboxTime = performance.now()
+              this.initializeCheckboxesForMetadata(metadataId).then(() => {
+                console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
+                
+                if (this.selectedCategories[metadataId] && Object.keys(this.selectedCategories[metadataId]).length > 0) {
+                  const filterTime = performance.now()
+                  this.dataManager.updateCellFiltering()
+                  console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
+                }
+                
+                console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
+              })
+            }).catch(error => {
+              console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+              console.log(`⏱️ [TOGGLE] ❌ Failed after: ${(performance.now() - perfStart).toFixed(2)}ms`)
+            })
+          }
         }
       }
     } else {
+      const collapseTime = performance.now()
       chevron.style.transform = 'rotate(0deg)'
       
       if (isContinuousMetadata) {
@@ -2674,10 +2925,18 @@ export default class extends Controller {
       } else {
         categoriesDiv.style.display = 'none'
       }
+      
+      console.log(`⏱️ [TOGGLE] ✅ Collapse time: ${(performance.now() - collapseTime).toFixed(2)}ms`)
+      console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
     }
     
     // Don't automatically select or color - just expand/collapse the panel
     // The water drop button is used for coloring
+    
+    // Check if browser repaint is the bottleneck
+    requestAnimationFrame(() => {
+      console.log(`⏱️ [TOGGLE] ✅ After browser repaint: ${(performance.now() - perfStart).toFixed(2)}ms`)
+    })
   }
 
   // Initialize draggable divider (moved from inline JS)
@@ -2764,11 +3023,6 @@ export default class extends Controller {
 
   // Handle water drop button clicks
   waterDropClicked(event) {
-    /*console.log('=== WATER DROP CLICKED ===')
-    console.log('Event:', event)
-    console.log('Event target:', event.target)
-    console.log('Event currentTarget:', event.currentTarget)
-    */
     event.preventDefault()
     event.stopPropagation()
     
@@ -2964,7 +3218,7 @@ export default class extends Controller {
             }
             
             // Now load and visualize
-            console.log('🎚️ Calling loadAndVisualizeMetadataVector...')
+            console.log('🎚️ Calling loadAndVisualizeMetadataVector for metadataId:', metadataId)
             return this.dataManager.loadAndVisualizeMetadataVector(metadataId)
           } else {
             console.error('❌ No values available after decompression')
@@ -2982,6 +3236,7 @@ export default class extends Controller {
       })
     } else {
       // For discrete metadata, just load and visualize directly
+      console.log('📋 Calling loadAndVisualizeMetadataVector for discrete metadataId:', metadataId)
       this.dataManager.loadAndVisualizeMetadataVector(metadataId)
         .catch(error => {
           console.error('❌ Error loading metadata:', error)
@@ -3666,20 +3921,11 @@ export default class extends Controller {
     canvas.addEventListener('wheel', this.boundWheel, { passive: false })
     canvas.addEventListener('dblclick', this.boundDoubleClick)
     
-    // Add pointermove to DOCUMENT with capture=true to intercept BEFORE PIXI
-    document.addEventListener('pointermove', this.boundMouseMove, { capture: true })
-    this.documentMoveListenerAdded = true
+    // Add pointermove to CANVAS only (not document) to avoid blocking main thread when hovering over UI
+    canvas.addEventListener('pointermove', this.boundMouseMove)
+    this.canvasMoveListenerAdded = true
     
-    // Test if events are reaching handlers
-    let testCount = 0
-    document.addEventListener('pointermove', (e) => {
-      testCount++
-      if (testCount % 50 === 0) {
-        console.log(`✅ TEST: Document received ${testCount} pointermove events`)
-      }
-    }, { capture: true })
-    
-    console.log('✅ Event listeners registered - pointermove on DOCUMENT with capture=true')
+    console.log('✅ Event listeners registered - pointermove on CANVAS only (not document)')
     
     // Store reference to plot container for cleanup (but don't add wheel listener)
     if (plotContainer) {
@@ -3723,10 +3969,10 @@ export default class extends Controller {
       canvas.removeEventListener('pointerdown', this.boundMouseDown)
     }
     if (this.boundMouseMove) {
-      // Remove from document if we added it there
-      if (this.documentMoveListenerAdded) {
-        document.removeEventListener('pointermove', this.boundMouseMove, { capture: true })
-        this.documentMoveListenerAdded = false
+      // Remove from canvas if we added it there
+      if (this.canvasMoveListenerAdded && canvas) {
+        canvas.removeEventListener('pointermove', this.boundMouseMove)
+        this.canvasMoveListenerAdded = false
       }
     }
     if (this.boundMouseUp) {
@@ -3752,6 +3998,14 @@ export default class extends Controller {
   }
 
   onInteractionMouseMove(event) {
+    // Track how often this is called (for debugging performance issues)
+    if (!this.mouseMoveCount) this.mouseMoveCount = 0
+    this.mouseMoveCount++
+    
+    if (this.mouseMoveCount % 100 === 0) {
+      console.log(`⚠️ [PERF] onInteractionMouseMove called ${this.mouseMoveCount} times - this might be blocking the main thread!`)
+    }
+    
     // Handle label dragging in pick mode (ReGL)
     if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
       const canvas = this.canvas
@@ -3777,9 +4031,14 @@ export default class extends Controller {
       return
     }
     
-    // Handle point hovering in pick mode (RegL)
+    // Handle point hovering in pick mode (ReGL) - THROTTLED to prevent blocking main thread
     if (this.interactionMode === 'pick' && this.rendererType === 'regl' && !this.isTooltipFixed) {
-      this.detectRegLPointHover(event)
+      // Throttle hover detection to max 60fps (every 16ms)
+      const now = performance.now()
+      if (!this.lastHoverCheckTime || (now - this.lastHoverCheckTime) >= 16) {
+        this.lastHoverCheckTime = now
+        this.detectRegLPointHover(event)
+      }
       return
     }
     

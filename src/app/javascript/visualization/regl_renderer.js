@@ -320,6 +320,17 @@ export class ReglRenderer {
   }
   
   /**
+   * Update point size and re-render
+   */
+  updatePointSize(size) {
+    this.setPointSize(size)
+    if (this.positionBuffer && this.colorBuffer && this.numPoints > 0) {
+      this.render()
+    }
+    return this
+  }
+  
+  /**
    * Render the current frame
    */
   render() {

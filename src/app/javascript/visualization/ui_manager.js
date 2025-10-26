@@ -242,7 +242,7 @@ export class UIManager {
 
   // Point size management
   updatePointSize(newSize) {
-    return this.controller.updatePointSize(newSize)
+    return this.controller.rendererManager.updateAllPointSizes(newSize)
   }
 
   // Selection display
@@ -483,16 +483,39 @@ export class UIManager {
 
   // Update sidebar category counts with visual indicators for ALL categorical metadata
   updateSidebarCategoryCounts() {
-    // Update counts for ALL categorical metadata, not just the currently colored one
-    // This is important when continuous metadata is used for coloring
+    // PERFORMANCE: This function can be very slow with many metadata loaded
+    // Only update counts for VISIBLE (expanded) metadata to avoid blocking the UI
     
-    // Find all category checkboxes
+    const perfStart = performance.now()
+    
+    // DEBUG: Log who's calling this function
+    console.log(`⏱️ [PERF] updateSidebarCategoryCounts called from:`)
+    console.trace()
+    
+    // Find all category checkboxes that are currently visible (display !== 'none')
     const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
+    const visibleCheckboxes = Array.from(allCategoryCheckboxes).filter(cb => {
+      // Check if the checkbox's parent container is visible
+      const container = cb.closest('[data-metadata-item]')
+      if (!container) return false
+      
+      // Find the categories div (sibling of the header)
+      const header = container.querySelector('[data-action*="toggleMetadata"]')
+      if (!header) return false
+      
+      const categoriesDiv = header.nextElementSibling
+      if (!categoriesDiv) return false
+      
+      // Only process if categories are expanded (visible)
+      return categoriesDiv.style.display !== 'none'
+    })
+    
+    console.log(`⏱️ [PERF] updateSidebarCategoryCounts: Processing ${visibleCheckboxes.length}/${allCategoryCheckboxes.length} visible checkboxes`)
     
     // Convert currentVisibleCells to Set once for O(1) lookups
     const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
     
-    allCategoryCheckboxes.forEach(checkbox => {
+    visibleCheckboxes.forEach(checkbox => {
       const metadataId = checkbox.dataset.metadataId
       const category = checkbox.dataset.category
       
@@ -540,6 +563,13 @@ export class UIManager {
         }
       }
     })
+    
+    const perfTime = performance.now() - perfStart
+    console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)
+    
+    if (perfTime > 100) {
+      console.warn(`⚠️ [PERF] updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
+    }
   }
 
   // Update selected cells count display
@@ -628,7 +658,7 @@ export class UIManager {
         //console.log(`Direct listener updating currentPointSize: ${this.controller.currentPointSize} -> ${newSize}`)
         this.controller.currentPointSize = newSize
         
-        this.controller.updateAllPointSizes(newSize)
+        this.controller.rendererManager.updateAllPointSizes(newSize)
       })
     }
     

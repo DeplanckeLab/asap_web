@@ -140,6 +140,105 @@ import VisualizationController from './visualization_controller.js'
 
 The API remains the same, but the internal implementation is now modular and maintainable.
 
+## Memory and Data Storage Architecture
+
+### Overview
+
+The visualization system uses a multi-tier caching system to optimize performance:
+
+1. **Memory Cache** - Fast access to recently used data
+2. **IndexedDB (Disk Storage)** - Persistent storage across page reloads
+3. **Network** - Fallback when data isn't cached
+
+### Data Types
+
+#### 1. Embedding Coordinates (2D/3D visualization data)
+- **Storage in Memory**: `binaryDataCache` (Map) - Cached embeddings for quick switching
+- **Storage on Disk**: IndexedDB `coordinates` store - Persistent across page reloads
+- **Current Active**: `metadataData` - The currently loaded and displayed embedding
+- **Location**: `visualization_controller.js`
+
+**How it works:**
+```javascript
+// Load embedding with caching:
+1. Check binaryDataCache (memory) → instant
+2. Check IndexedDB (disk) → fast
+3. Fetch from network → slow (first time only)
+
+// After loading:
+// - Stored in binaryDataCache for instant switching
+// - Stored in IndexedDB for persistence
+// - Set as metadataData for display
+```
+
+#### 2. Metadata Vectors (Categorical/Continuous)
+- **Storage in Memory**: `loadedMetadataVectors` (Object) - Currently active metadata
+- **Storage on Disk**: IndexedDB `metadata` store - Persistent across page reloads
+- **Memory Limit**: LRU (Least Recently Used) buffer - max 5 metadata in memory
+- **Location**: `memory_manager.js`
+
+**How it works:**
+```javascript
+// Load metadata vector:
+1. Check loadedMetadataVectors (memory) → instant
+2. Check IndexedDB (disk) → fast  
+3. Fetch from network → slow (first time only)
+
+// Memory management:
+// - LRU system automatically evicts least used metadata
+// - All metadata available on disk via IndexedDB
+// - Only actively used metadata kept in memory
+```
+
+### Memory Structure
+
+```javascript
+controller = {
+  // EMBEDDING DATA (2D/3D coordinates)
+  binaryDataCache: Map()              // Cached embeddings (for switching)
+  metadataData: {}                    // Currently displayed embedding
+  
+  // METADATA VECTORS (categorical/continuous)
+  loadedMetadataVectors: {}           // Active metadata (LRU limited)
+  loadingMetadataVectors: Set()       // Currently loading
+  
+  // INDEXEDDB (disk storage)
+  db: IndexedDB                       // Persistent storage
+  // Stores: 'metadata' + 'coordinates' object stores
+}
+```
+
+### Disk-First Approach
+
+The system uses a **disk-first** preloading strategy:
+
+1. **Preload Phase**: All metadata preloaded directly to IndexedDB (not memory)
+2. **Access Phase**: Data loaded from disk to memory only when needed
+3. **LRU Buffer**: Memory acts as LRU cache (most recently used data)
+4. **Benefit**: Can store 100s of metadata on disk, only ~5 in memory
+
+### Memory Diagnostic
+
+Open the diagnostic window to inspect memory usage:
+- Click the 🧠 (brain) icon in the top toolbar
+- Shows:
+  - Items in memory vs on disk
+  - Currently loaded embedding
+  - Available embeddings
+  - Memory usage statistics
+
+### Performance Notes
+
+**Embedding Loading Speed:**
+- From memory (`binaryDataCache`): ~5ms
+- From IndexedDB (disk): ~50ms
+- From network (first time): ~1-5 seconds
+
+**Metadata Loading Speed:**
+- From memory (`loadedMetadataVectors`): ~10ms
+- From IndexedDB (disk): ~100ms
+- From network (first time): ~2-10 seconds
+
 ## File Sizes
 
 - **Original (backup)**: `visualization_controller_old.js` - 6,131 lines

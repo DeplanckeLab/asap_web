@@ -75,10 +75,10 @@ class ProjectsController < ApplicationController
     end
     
     # Get all embeddings for all loom files
-    #@all_embeddings_by_loom = {}
-    #@available_loom_files.each do |filepath|
-    #  @all_embeddings_by_loom[filepath] = Annot.available_embeddings_for_loom(@project.id, filepath)
-    #end
+    @all_embeddings_by_loom = {}
+    @available_loom_files.each do |filepath|
+      @all_embeddings_by_loom[filepath] = Annot.available_embeddings_for_loom(@project.id, filepath)
+    end
     
     # Get default loom file - use the first loom file with visualizations
     Rails.logger.debug "🔍 [DEBUG] Available loom files: #{@available_loom_files.inspect}"

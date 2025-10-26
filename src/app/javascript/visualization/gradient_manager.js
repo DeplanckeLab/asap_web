@@ -30,6 +30,13 @@ export class GradientManager {
     
     // Close control point editor if open
     this.controller.closeControlPointEditor()
+    
+    // Ensure bar plots are updated with the final gradient
+    // This handles the case where the modal is closed without making changes
+    // but the bar plots still need to reflect the current gradient
+    if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
+      this.controller.dataManager.updateAllCategoryDistributions()
+    }
   }
 
   // Handle clicking on gradient bar to add new control point

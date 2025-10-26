@@ -218,14 +218,7 @@ export class UIManager {
     return this.controller.updateControlInstructions()
   }
 
-  // Settings and toggles
-  toggleAxes() {
-    return this.controller.toggleAxes()
-  }
-
-  toggleGrid() {
-    return this.controller.toggleGrid()
-  }
+  // Settings and toggles (actual implementations are further down in the file)
 
   toggleCategoryLabels() {
     return this.controller.toggleCategoryLabels()
@@ -308,18 +301,104 @@ export class UIManager {
   showCheckboxesForMetadata(metadataId) {
     // console.log(`🔍 [DEBUG] Showing checkboxes for metadata: ${metadataId}`)
     
-    // Show the global metadata checkbox
-    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
-    // console.log(`🔍 [DEBUG] Found metadata checkbox:`, !!metadataCheckbox)
-    if (metadataCheckbox) {
-      metadataCheckbox.style.display = 'flex'
-      // console.log(`🔍 [DEBUG] Set metadata checkbox display to flex`)
+    const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
+    const isCategorical = metadataVector?.data_type === 'DISCRETE'
+    const isContinuous = metadataVector?.data_type === 'NUMERIC'
+    
+    if (isCategorical) {
+      // For categorical metadata, show the new UI elements
       
-      // Set initial tooltip based on metadata type
-      const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
-      if (metadataVector?.data_type === 'NUMERIC') {
-        // For continuous metadata, checkbox is checked by default
-        metadataCheckbox.title = 'Disable range selection'
+      // Update status icon to show it's in memory
+      this.updateMetadataStatusIcon(metadataId, 'in-memory')
+      
+      // Show select all/none checkbox
+      const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
+      if (selectAllCheckbox) {
+        selectAllCheckbox.style.display = 'flex'
+        // Initialize as checked with white background
+        selectAllCheckbox.style.backgroundColor = 'white'
+        selectAllCheckbox.style.borderColor = '#d1d5db'
+        const icon = selectAllCheckbox.querySelector('i')
+        if (icon) {
+          icon.style.display = 'block'
+          icon.style.color = '#10b981' // green checkmark
+        }
+        
+        // Check if there's only one category - if so, disable the checkbox
+        if (metadataVector && metadataVector.values) {
+          const uniqueCategories = new Set(metadataVector.values)
+          if (uniqueCategories.size === 1) {
+            selectAllCheckbox.style.opacity = '0.5'
+            selectAllCheckbox.style.cursor = 'not-allowed'
+            selectAllCheckbox.style.pointerEvents = 'none'
+            selectAllCheckbox.title = 'Cannot deselect - only one category available'
+          }
+        }
+      }
+      
+      // Show ON/OFF switch only if there are selected categories
+      const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+      if (filterSwitch) {
+        const hasSelection = this.controller.selectedCategories && 
+                            this.controller.selectedCategories[metadataId] &&
+                            this.controller.selectedCategories[metadataId].size > 0
+        
+        if (hasSelection) {
+          filterSwitch.style.display = 'flex'
+          // Initialize as ON (enabled)
+          filterSwitch.dataset.filterEnabled = 'true'
+          filterSwitch.style.backgroundColor = '#10b981'
+          const switchToggle = filterSwitch.querySelector('div')
+          if (switchToggle) {
+            switchToggle.style.transform = 'translateX(14px)'
+          }
+        } else {
+          // Hide switch if no selection
+          filterSwitch.style.display = 'none'
+        }
+      }
+      
+      // Note: Don't initialize selectedCategories here!
+      // The HTML only shows a subset of categories, not all of them.
+      // selectedCategories will be initialized when the user unfolds the metadata
+      // (in initializeCheckboxesForMetadata), which loads the full metadata vector.
+    } else if (isContinuous) {
+      // For continuous metadata, show the new UI elements (status icon, filter state icon, and filter switch)
+      
+      // Update status icon to show it's in memory
+      this.updateMetadataStatusIcon(metadataId, 'in-memory')
+      
+      // Show filter state icon
+      const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${metadataId}"]`)
+      if (filterStateIcon) {
+        filterStateIcon.style.display = 'flex'
+        // Initialize as white (no filter) - will be updated by range slider controller
+        filterStateIcon.style.backgroundColor = 'white'
+        filterStateIcon.style.borderColor = '#d1d5db'
+        const icon = filterStateIcon.querySelector('i')
+        if (icon) {
+          icon.style.color = '#9ca3af'
+        }
+      }
+      
+      // Show ON/OFF filter switch only if there's a selected range
+      const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+      if (filterSwitch) {
+        const hasSelection = this.controller.selectedRanges && this.controller.selectedRanges[metadataId]
+        
+        if (hasSelection) {
+          filterSwitch.style.display = 'flex'
+          // Default to ON when first showing the switch
+          filterSwitch.dataset.filterEnabled = 'true'
+          filterSwitch.style.backgroundColor = '#10b981' // green
+          const switchToggle = filterSwitch.querySelector('div')
+          if (switchToggle) {
+            switchToggle.style.transform = 'translateX(14px)'
+          }
+        } else {
+          // Hide switch if no selection
+          filterSwitch.style.display = 'none'
+        }
       }
     } else {
       console.log(`🔍 [DEBUG] No metadata checkbox found for metadata ${metadataId}`)
@@ -328,11 +407,138 @@ export class UIManager {
     // Show all category checkboxes for this metadata
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
     // console.log(`🔍 [DEBUG] Found ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+    
+    // Check if there's only one category - if so, disable all category checkboxes
+    // (reuse metadataVector from line 311)
+    const hasOnlyOneCategory = metadataVector && metadataVector.values && 
+                               new Set(metadataVector.values).size === 1
+    
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.display = 'flex'
+      
+      if (hasOnlyOneCategory) {
+        // Disable checkbox for single-category metadata
+        checkbox.style.opacity = '0.5'
+        checkbox.style.cursor = 'not-allowed'
+        checkbox.style.pointerEvents = 'none'
+        checkbox.title = 'Cannot deselect - only one category available'
+      }
     })
     
     // console.log(`🔍 [DEBUG] Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+  }
+
+  // Show or hide the filter switch based on whether there's a selection
+  updateFilterSwitchVisibility(metadataId) {
+    const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+    if (!filterSwitch) return
+    
+    // Check if this is categorical or continuous metadata
+    const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
+    const isCategorical = metadataVector?.data_type === 'DISCRETE'
+    const isContinuous = metadataVector?.data_type === 'NUMERIC'
+    
+    let hasActiveFilter = false
+    
+    if (isCategorical) {
+      // For categorical: check if there are selected categories AND not all are selected
+      if (this.controller.selectedCategories && 
+          this.controller.selectedCategories[metadataId] &&
+          this.controller.selectedCategories[metadataId].size > 0) {
+        
+        // Get total number of categories from metadata vector
+        let totalCount = 0
+        
+        if (metadataVector) {
+          if (metadataVector.values) {
+            // Normal case: count unique values
+            const allCategories = new Set(metadataVector.values)
+            totalCount = allCategories.size
+          } else if (metadataVector.compression_info?.single_category) {
+            // Single category compression: only 1 category
+            totalCount = 1
+          } else if (metadataVector.compression_info?.categories) {
+            // Compressed data: use categories array
+            totalCount = metadataVector.compression_info.categories.length
+          }
+          
+          const selectedCount = this.controller.selectedCategories[metadataId].size
+          
+          // Only show switch if not all categories are selected (i.e., there's actual filtering)
+          hasActiveFilter = selectedCount < totalCount
+        }
+      }
+    } else if (isContinuous) {
+      // For continuous: check if there's a selected range
+      hasActiveFilter = this.controller.selectedRanges && this.controller.selectedRanges[metadataId]
+    }
+    
+    if (hasActiveFilter) {
+      // Show the switch
+      filterSwitch.style.display = 'flex'
+      // Ensure it's ON by default when first showing
+      if (filterSwitch.dataset.filterEnabled !== 'false') {
+        filterSwitch.dataset.filterEnabled = 'true'
+        filterSwitch.style.backgroundColor = '#10b981'
+        const switchToggle = filterSwitch.querySelector('div')
+        if (switchToggle) {
+          switchToggle.style.transform = 'translateX(14px)'
+        }
+      }
+    } else {
+      // Hide the switch
+      filterSwitch.style.display = 'none'
+    }
+  }
+
+  // Update metadata status icon based on loading state
+  // States: 'not-loaded', 'downloading', 'in-db', 'in-memory'
+  updateMetadataStatusIcon(metadataId, state) {
+    const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
+    if (!statusIcon) return
+    
+    const icon = statusIcon.querySelector('i')
+    if (!icon) return
+    
+    // Show the icon
+    statusIcon.style.display = 'flex'
+    
+    switch (state) {
+      case 'not-loaded':
+        // Gray circle with animated spinner
+        statusIcon.style.backgroundColor = '#9ca3af'
+        icon.className = 'fas fa-spinner fa-spin'
+        icon.style.color = 'white'
+        statusIcon.title = 'Waiting...'
+        break
+        
+      case 'downloading':
+        // Blue circle with spinner
+        statusIcon.style.backgroundColor = '#3b82f6'
+        icon.className = 'fas fa-spinner fa-spin'
+        icon.style.color = 'white'
+        statusIcon.title = 'Downloading from server...'
+        break
+        
+      case 'in-db':
+        // Orange circle with check
+        statusIcon.style.backgroundColor = '#f59e0b'
+        icon.className = 'fas fa-check'
+        icon.style.color = 'white'
+        statusIcon.title = 'Metadata in database (on disk)'
+        break
+        
+      case 'in-memory':
+        // Green circle with check
+        statusIcon.style.backgroundColor = '#10b981'
+        icon.className = 'fas fa-check'
+        icon.style.color = 'white'
+        statusIcon.title = 'Metadata in memory (fast access)'
+        break
+        
+      default:
+        console.warn(`Unknown status icon state: ${state}`)
+    }
   }
 
   // Initialize all checkboxes for the current metadata
@@ -355,13 +561,13 @@ export class UIManager {
     // Check if current metadata is discrete
     const isDiscreteMetadata = this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE'
     
+    // Always keep checkbox enabled so users can set preference before selecting categorical metadata
+    checkbox.disabled = false
+    
     if (isDiscreteMetadata) {
-      checkbox.disabled = false
       checkbox.title = 'Toggle category legend visibility'
     } else {
-      checkbox.disabled = true
-      checkbox.checked = false
-      checkbox.title = 'Categories only available for discrete metadata'
+      checkbox.title = 'Category labels will appear when categorical metadata is selected'
     }
   }
 
@@ -415,6 +621,26 @@ export class UIManager {
     
     // Add visual disabled state
     if (rangeSection) rangeSection.style.opacity = '0.5'
+  }
+
+  // Enable category checkboxes for a metadata
+  enableCategoryCheckboxesForMetadata(metadataId) {
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.pointerEvents = 'auto'
+      checkbox.style.opacity = '1'
+      checkbox.style.cursor = 'pointer'
+    })
+  }
+
+  // Disable category checkboxes for a metadata
+  disableCategoryCheckboxesForMetadata(metadataId) {
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.pointerEvents = 'none'
+      checkbox.style.opacity = '0.5'
+      checkbox.style.cursor = 'not-allowed'
+    })
   }
 
   // Update point count display
@@ -971,71 +1197,39 @@ export class UIManager {
 
   // Toggle methods for plot elements
   toggleAxes() {
-    //console.log('toggleAxes method called!')
     const checkbox = document.getElementById('show-axes-checkbox')
     if (!checkbox) {
-      console.log('Checkbox not found!')
-      return
-    }
-    if (!this.controller.axesContainer) {
-      console.log('Axes container not found!')
+      console.log('Axes checkbox not found!')
       return
     }
     
-    //console.log(`Toggling axes: ${checkbox.checked}`)
-    //console.log(`Current axes visible: ${this.controller.axesContainer.visible}`)
-    
-    // Recalculate bounds with/without axes margins BEFORE toggling visibility
-    if (this.controller.currentCoordinates) {
-      const originalBounds = this.controller.dataManager.calculateBounds(this.controller.currentCoordinates)
-      //console.log('Original bounds:', originalBounds)
-      
-      // Temporarily set axes visibility to match checkbox state for bounds calculation
-      const previousVisibility = this.controller.axesContainer.visible
-      this.controller.axesContainer.visible = checkbox.checked
-      
-      const newBounds = originalBounds
-      //console.log('Adjusted bounds:', newBounds)
-      this.controller.currentBounds = newBounds
-      
-      // Restore the previous visibility state
-      this.controller.axesContainer.visible = previousVisibility
-      
-      // Re-render axes and grid with new bounds
-      this.controller.rendererManager.renderAxes()
+    if (this.controller.rendererType === 'regl') {
+      // ReGL mode: redraw overlay (renderGrid clears and redraws everything)
+      console.log(`🔄 [ReGL] Toggling axes: ${checkbox.checked}`)
       this.controller.rendererManager.renderGrid()
-      
-      // Re-render category labels after axes toggle (bounds may have changed)
-      if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.visible) {
-        this.controller.rendererManager.renderCategoryLabels()
-      }
-      
-      // Now set the final axes visibility
+    } else if (this.controller.axesContainer) {
+      // PixiJS mode: axes are in a PixiJS container
       this.controller.axesContainer.visible = checkbox.checked
-      //console.log(`Final axes visible: ${this.controller.axesContainer.visible}`)
-      
-      // Re-render axes
       this.controller.rendererManager.renderAxes()
-      //console.log('Axes toggle complete!')
-    } else {
-      console.log('No current coordinates found!')
     }
   }
 
   toggleGrid() {
     const checkbox = document.getElementById('show-grid-checkbox')
-    if (!checkbox || !this.controller.gridContainer) return
+    if (!checkbox) {
+      console.log('Grid checkbox not found!')
+      return
+    }
     
-    //console.log(`Toggling grid: ${checkbox.checked}`)
-    //console.log(`Current grid visible: ${this.controller.gridContainer.visible}`)
-    
-    // Toggle grid visibility
-    this.controller.gridContainer.visible = checkbox.checked
-    //console.log(`New grid visible: ${this.controller.gridContainer.visible}`)
-    
-    // Re-render grid to ensure it's up to date
-    this.controller.rendererManager.renderGrid()
-    //console.log('Grid toggle complete!')
+    if (this.controller.rendererType === 'regl') {
+      // ReGL mode: grid is drawn on Canvas2D overlay
+      console.log(`🔄 [ReGL] Toggling grid: ${checkbox.checked}`)
+      this.controller.rendererManager.renderGrid()
+    } else if (this.controller.gridContainer) {
+      // PixiJS mode: grid is in a PixiJS container
+      this.controller.gridContainer.visible = checkbox.checked
+      this.controller.rendererManager.renderGrid()
+    }
   }
 
   toggleCategories() {

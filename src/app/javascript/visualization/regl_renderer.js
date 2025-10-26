@@ -379,6 +379,22 @@ export class ReglRenderer {
   }
   
   /**
+   * Handle canvas resize (wrapper for resize method)
+   */
+  handleResize() {
+    // Get the actual rendered size of the canvas
+    const rect = this.canvas.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      this.resize(rect.width, rect.height)
+      // Re-render with new canvas size
+      if (this.positionBuffer && this.colorBuffer && this.numPoints > 0) {
+        this.render()
+      }
+    }
+    return this
+  }
+  
+  /**
    * Clean up resources
    */
   destroy() {

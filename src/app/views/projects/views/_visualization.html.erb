@@ -43,7 +43,7 @@
      style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
-  <div style="width: 380px; height: 100vh; background-color: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column;">
+  <div id="left-panel" style="width: 380px; height: 100vh; background-color: white; display: flex; flex-direction: column;">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
@@ -59,27 +59,62 @@
                      onmouseout="this.style.backgroundColor=''"
                      data-action="click->visualization#toggleMetadata">
                   <!-- Chevron -->
-                  <div style="margin-right: 12px; color: #9ca3af; transition: transform 0.2s;">
-                    <svg style="width: 12px; height: 12px;" fill="currentColor" viewBox="0 0 20 20">
-                      <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                    </svg>
+                  <div style="margin-right: 12px; color: #9ca3af;">
+                    <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;"></i>
                   </div>
-                <!-- Global Checkbox (hidden by default) -->
-                <div class="metadata-checkbox" 
-                     data-metadata-id="<%= metadata.id %>"
-                     data-action="click->visualization#toggleMetadataSelection"
-                     style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
-                     onmouseover="this.style.borderColor='#059669'"
-                     onmouseout="this.style.borderColor='#d1d5db'">
-                  <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
-                </div>
-                <!-- Content -->
-                <div style="flex: 1; min-width: 0; margin-right: 8px;">
-                  <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
-                  <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
-                </div>
+                  
+                  <!-- Status Icon (shows data loading status) -->
+                  <div class="metadata-status-icon" 
+                       data-metadata-id="<%= metadata.id %>"
+                       title="Waiting..."
+                       style="margin-right: 8px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background-color: #9ca3af; transition: all 0.2s;">
+                    <i class="fas fa-spinner fa-spin" style="color: white; font-size: 10px;"></i>
+                  </div>
+                  
+                  <!-- Select All/None Checkbox -->
+                  <div class="metadata-select-all-checkbox" 
+                       data-metadata-id="<%= metadata.id %>"
+                       data-action="click->visualization#toggleSelectAllCategories"
+                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
+                       onmouseover="this.style.borderColor='#059669'"
+                       onmouseout="this.style.borderColor='#d1d5db'"
+                       title="Select/Deselect all categories"
+                       onclick="event.stopPropagation()">
+                    <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
+                  </div>
+                  
+                  <!-- Content -->
+                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                    <div style="font-size: 12px; color: #6b7280;"><%= metadata.nber_cats || 0 %> categories</div>
+                  </div>
+                  
+                  <!-- ON/OFF Switch -->
+                  <div class="metadata-filter-switch" 
+                       data-metadata-id="<%= metadata.id %>"
+                       data-action="click->visualization#toggleMetadataFilter"
+                       data-filter-enabled="true"
+                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; width: 32px; height: 18px; border-radius: 9px; background-color: #10b981; transition: all 0.3s; position: relative;"
+                       title="Enable/Disable filtering"
+                       onclick="event.stopPropagation()">
+                    <div style="position: absolute; left: 2px; width: 14px; height: 14px; border-radius: 50%; background-color: white; transition: all 0.3s; transform: translateX(14px);"></div>
+                  </div>
+                  
                   <!-- Hidden Radio -->
                   <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
+                  
+                  <!-- Global Download Button -->
+                  <button class="global-download-btn"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-action="click->visualization#downloadGlobalDistribution"
+                          style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
+                          onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                          onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                          title="Download all categories distribution"
+                          onclick="event.stopPropagation()">
+                    <i class="fas fa-file-download" style="font-size: 14px;"></i>
+                  </button>
+                  
                   <!-- Water Drop Button -->
                   <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
                           onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
@@ -109,21 +144,28 @@
                             # Index is now based on sorted order (largest to smallest)
                             category_color = category_colors[index % category_colors.length]
                           %>
-                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                              <!-- Category Checkbox -->
-                              <div class="category-checkbox" 
-                                   data-metadata-id="<%= metadata.id %>"
-                                   data-category="<%= category %>"
-                                   data-action="click->visualization#toggleCategorySelection"
-                                   style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: #10b981; transition: all 0.2s;"
-                                   onmouseover="this.style.borderColor='#059669'"
-                                   onmouseout="this.style.borderColor='#d1d5db'">
-                                <i class="fas fa-check" style="color: white; font-size: 10px; display: block;"></i>
+                          <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                              <div style="display: flex; align-items: center; gap: 6px;">
+                                <!-- Category Checkbox -->
+                                <div class="category-checkbox" 
+                                     data-metadata-id="<%= metadata.id %>"
+                                     data-category="<%= category %>"
+                                     data-action="click->visualization#toggleCategorySelection"
+                                     style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
+                                     onmouseover="this.style.borderColor='#059669'"
+                                     onmouseout="this.style.borderColor='#d1d5db'">
+                                  <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
+                                </div>
+                                <span style="color: #374151;"><%= category %></span>
                               </div>
-                              <span style="color: #374151;"><%= category %></span>
+                              <span style="color: #6b7280; font-weight: 500;"><%= count %></span>
                             </div>
-                            <span style="color: #6b7280; font-weight: 500;"><%= count %></span>
+                            <!-- Category Distribution Canvas and Download Button -->
+                            <canvas class="category-distribution-canvas" 
+                                    data-metadata-id="<%= metadata.id %>"
+                                    data-category="<%= category %>"
+                                    style="width: 100%; height: 8px; border-radius: 2px;"></canvas>
                           </div>
                         <% end %>
                       <% elsif categories.is_a?(Array) %>
@@ -133,21 +175,28 @@
                             category_index = categories.index(category)
                             category_color = category_colors[category_index % category_colors.length]
                           %>
-                          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                              <!-- Category Checkbox -->
-                              <div class="category-checkbox" 
-                                   data-metadata-id="<%= metadata.id %>"
-                                   data-category="<%= category %>"
-                                   data-action="click->visualization#toggleCategorySelection"
-                                   style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: #10b981; transition: all 0.2s;"
-                                   onmouseover="this.style.borderColor='#059669'"
-                                   onmouseout="this.style.borderColor='#d1d5db'">
-                                <i class="fas fa-check" style="color: white; font-size: 10px; display: block;"></i>
+                          <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                              <div style="display: flex; align-items: center; gap: 6px;">
+                                <!-- Category Checkbox -->
+                                <div class="category-checkbox" 
+                                     data-metadata-id="<%= metadata.id %>"
+                                     data-category="<%= category %>"
+                                     data-action="click->visualization#toggleCategorySelection"
+                                     style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
+                                     onmouseover="this.style.borderColor='#059669'"
+                                     onmouseout="this.style.borderColor='#d1d5db'">
+                                  <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
+                                </div>
+                                <span style="color: #374151;"><%= category %></span>
                               </div>
-                              <span style="color: #374151;"><%= category %></span>
+                              <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
                             </div>
-                            <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
+                            <!-- Category Distribution Canvas and Download Button -->
+                            <canvas class="category-distribution-canvas" 
+                                    data-metadata-id="<%= metadata.id %>"
+                                    data-category="<%= category %>"
+                                    style="width: 100%; height: 8px; border-radius: 2px;"></canvas>
                           </div>
                         <% end %>
                       <% end %>
@@ -187,28 +236,53 @@
                      onmouseout="this.style.backgroundColor=''"
                      data-action="click->visualization#toggleMetadata">
                   <!-- Chevron -->
-                  <div style="margin-right: 12px; color: #9ca3af; transition: transform 0.2s;">
-                    <svg style="width: 12px; height: 12px;" fill="currentColor" viewBox="0 0 20 20">
-                      <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                    </svg>
+                  <div style="margin-right: 12px; color: #9ca3af;">
+                    <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;"></i>
                   </div>
-                  <!-- Global Checkbox (hidden by default, shown when preloaded) -->
-                  <div class="metadata-checkbox" 
+                  <!-- Status Icon (shows data loading status) -->
+                  <div class="metadata-status-icon" 
                        data-metadata-id="<%= metadata.id %>"
-                       data-action="click->visualization#toggleMetadataSelection"
-                       title="Disable range selection"
-                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
-                       onmouseover="this.style.borderColor='#059669'"
-                       onmouseout="this.style.borderColor='#d1d5db'">
-                    <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
+                       title="Waiting..."
+                       style="margin-right: 8px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background-color: #9ca3af; transition: all 0.2s;">
+                    <i class="fas fa-spinner fa-spin" style="color: white; font-size: 10px;"></i>
+                  </div>
+                  <!-- Filter State Icon (shows if a subrange is selected) -->
+                  <div class="metadata-filter-state-icon" 
+                       data-metadata-id="<%= metadata.id %>"
+                       title="No filter applied"
+                       style="margin-right: 8px; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; background-color: white; border: 2px solid #d1d5db; border-radius: 4px; transition: all 0.2s;">
+                    <i class="fas fa-sliders" style="font-size: 12px; color: #9ca3af;"></i>
                   </div>
                   <!-- Content -->
                   <div style="flex: 1; min-width: 0; margin-right: 8px;">
                     <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
                     <!--<div style="font-size: 12px; color: #6b7280;">Continuous data</div>-->
                   </div>
+                  <!-- ON/OFF Filter Switch (hidden by default, shown when metadata is unfolded) -->
+                  <div class="metadata-filter-switch" 
+                       data-metadata-id="<%= metadata.id %>"
+                       data-filter-enabled="true"
+                       data-action="click->visualization#toggleContinuousMetadataFilter"
+                       title="Enable/Disable filtering"
+                       style="margin-right: 8px; display: none; align-items: center; width: 32px; height: 18px; background-color: #10b981; border-radius: 9px; cursor: pointer; position: relative; transition: background-color 0.2s;"
+                       onclick="event.stopPropagation()">
+                    <div style="position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background-color: white; border-radius: 50%; transition: transform 0.2s; transform: translateX(14px);"></div>
+                  </div>
                   <!-- Hidden Radio -->
                   <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
+                  
+                  <!-- Global Download Button -->
+                  <button class="global-download-btn"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-action="click->visualization#downloadGlobalDistribution"
+                          style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
+                          onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                          onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                          title="Download all categories distribution"
+                          onclick="event.stopPropagation()">
+                    <i class="fas fa-file-download" style="font-size: 14px;"></i>
+                  </button>
+                  
                   <!-- Water Drop Button -->
                   <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
                           onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
@@ -292,8 +366,13 @@
     </div>
   </div>
 
+  <!-- Left Resizer -->
+  <div id="left-resizer" style="width: 4px; height: 100vh; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
+       onmouseover="this.style.backgroundColor='#3b82f6'"
+       onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
+
   <!-- Main Content: UMAP Plot -->
-  <div style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
+  <div id="main-panel" style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
     <!-- Menu Bar -->
     <div style="display: flex; align-items: center; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
@@ -454,8 +533,13 @@
     </div>
   </div>
 
+  <!-- Right Resizer -->
+  <div id="right-resizer" style="width: 4px; height: 100vh; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
+       onmouseover="this.style.backgroundColor='#3b82f6'"
+       onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
+
   <!-- Right Panel: Split into Gene Expression and Selections -->
-  <div style="width: 320px; height: 100vh; display: flex; flex-direction: column;">
+  <div id="right-panel" style="width: 320px; height: 100vh; display: flex; flex-direction: column;">
     
     <!-- Top Section: Gene Expression Panel -->
     <div style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;">
@@ -686,7 +770,7 @@
           Show Categories
         </label>
         <input type="checkbox" 
-               id="show-categories-checkbox" 
+               id="show-categories-checkbox"
                style="width: 16px; height: 16px; cursor: pointer;"
                data-action="change->visualization#toggleCategories">
       </div>

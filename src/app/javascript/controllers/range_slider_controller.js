@@ -243,14 +243,60 @@ export default class extends Controller {
   }
   
   // Update checkbox color: green if full range, orange if subrange
+  // Also updates the filter state icon
   updateCheckboxColor() {
-    const checkbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${this.metadataIdValue}"]`)
-    if (!checkbox) return
-    
     // Check if current range is the full range (with small tolerance for floating point)
     const tolerance = (this.maxValue - this.minValue) * 0.001 // 0.1% tolerance
     const isFullRange = Math.abs(this.currentMinValue - this.minValue) < tolerance && 
                         Math.abs(this.currentMaxValue - this.maxValue) < tolerance
+    
+    // Update the filter state icon (new UI)
+    const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${this.metadataIdValue}"]`)
+    if (filterStateIcon) {
+      const icon = filterStateIcon.querySelector('i')
+      if (isFullRange) {
+        // Full range - white background, gray icon
+        filterStateIcon.style.backgroundColor = 'white'
+        filterStateIcon.style.borderColor = '#d1d5db'
+        if (icon) {
+          icon.style.color = '#9ca3af'
+        }
+        filterStateIcon.title = 'No filter applied (full range)'
+      } else {
+        // Subrange - orange background, white icon
+        filterStateIcon.style.backgroundColor = '#f59e0b'
+        filterStateIcon.style.borderColor = '#f59e0b'
+        if (icon) {
+          icon.style.color = 'white'
+        }
+        filterStateIcon.title = `Subrange selected: ${this.currentMinValue.toFixed(3)} - ${this.currentMaxValue.toFixed(3)}`
+      }
+    }
+    
+    // Legacy: Update the old checkbox if it exists (for backward compatibility)
+    const checkbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${this.metadataIdValue}"]`)
+    if (!checkbox) return
+    
+    // Get the visualization controller to check if this metadata was explicitly unchecked
+    const visualizationController = this.application.getControllerForElementAndIdentifier(
+      document.querySelector('[data-controller="visualization"]'),
+      'visualization'
+    )
+    
+    // If the metadata was explicitly unchecked by the user, don't change the color
+    if (visualizationController?.uncheckedMetadata?.has(this.metadataIdValue)) {
+      console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is in uncheckedMetadata set - keeping it unchecked`)
+      return
+    }
+    
+    // Check if the checkbox is currently unchecked (gray)
+    const currentBgColor = checkbox.style.backgroundColor
+    const isCurrentlyUnchecked = currentBgColor === 'rgb(243, 244, 246)' || currentBgColor === '#f3f4f6'
+    
+    if (isCurrentlyUnchecked) {
+      console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is currently unchecked - not changing color`)
+      return
+    }
     
     if (isFullRange) {
       // Full range - green checkbox
@@ -430,6 +476,11 @@ export default class extends Controller {
     const cacheClearTime = performance.now() - cacheClearStart
     console.log(`🚀 [PERF] filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
+    // Update filter switch visibility based on whether there's a selection
+    if (this.visualizationController.uiManager) {
+      this.visualizationController.uiManager.updateFilterSwitchVisibility(this.metadataIdValue)
+    }
+    
     // Trigger unified filtering (which will update ALL counts and render)
     const filterStart = performance.now()
     if (this.dataManager.updateCellFiltering) {
@@ -545,7 +596,9 @@ export default class extends Controller {
     const minPercent = (this.currentMinValue - this.minValue) / range
     const maxPercent = (this.currentMaxValue - this.minValue) / range
     
-    ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'
+    // Check if filter is disabled (gray) or enabled (blue)
+    const isFilterDisabled = this.visualizationController?.disabledFilters?.has(this.metadataIdValue)
+    ctx.fillStyle = isFilterDisabled ? 'rgba(209, 213, 219, 0.5)' : 'rgba(0, 123, 255, 0.3)' // gray or blue
     const overlayX = leftMargin + minPercent * plotWidth
     const overlayWidth = (maxPercent - minPercent) * plotWidth
     ctx.fillRect(overlayX, topMargin, overlayWidth, plotHeight)
@@ -820,6 +873,15 @@ export default class extends Controller {
     
     // Redraw the histogram to reflect the new range
     this.drawDensityPlot()
+    
+    // Update all bar plots to reflect the new gradient
+    if (this.visualizationController.dataManager && this.visualizationController.dataManager.updateAllCategoryDistributions) {
+      console.log('🎨 Updating all category distributions...')
+      this.visualizationController.dataManager.updateAllCategoryDistributions()
+      console.log('🎨 Category distributions updated')
+    } else {
+      console.warn('🎨 updateAllCategoryDistributions not found!')
+    }
     
     console.log('🎨 Button click handling completed!')
   }

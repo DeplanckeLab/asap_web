@@ -23,6 +23,10 @@ export class RendererManager {
   renderAxes() {
     if (!this.controller.overlayCtx || !this.controller.overlayCanvas || !this.controller.currentBounds) return
     
+    // Check if axes should be visible
+    const axesCheckbox = document.getElementById('show-axes-checkbox')
+    if (!axesCheckbox || !axesCheckbox.checked) return
+    
     const ctx = this.controller.overlayCtx
     const { minX, maxX, minY, maxY } = this.controller.currentBounds
     const width = this.controller.overlayCanvas.width
@@ -135,6 +139,10 @@ export class RendererManager {
     // Clear canvas first
     this.controller.overlayCtx.clearRect(0, 0, this.controller.overlayCanvas.width, this.controller.overlayCanvas.height)
     
+    // Check if grid should be visible
+    const gridCheckbox = document.getElementById('show-grid-checkbox')
+    const shouldDrawGrid = gridCheckbox && gridCheckbox.checked
+    
     const ctx = this.controller.overlayCtx
     const { minX, maxX, minY, maxY } = this.controller.currentBounds
     const width = this.controller.overlayCanvas.width
@@ -146,36 +154,43 @@ export class RendererManager {
     const xTickSpacing = this.calculateTickSpacing(xRange)
     const yTickSpacing = this.calculateTickSpacing(yRange)
     
-    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
-    ctx.lineWidth = 1
-    
-    // Vertical grid lines
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
-      const t = (value - minX) / xRange
-      const x = margins.left + t * (width - margins.left - margins.right)
-      if (x >= margins.left && x <= width - margins.right) {
-        ctx.beginPath()
-        ctx.moveTo(x, margins.top)
-        ctx.lineTo(x, height - margins.bottom)
-        ctx.stroke()
+    // Only draw grid if checkbox is checked
+    if (shouldDrawGrid) {
+      ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+      ctx.lineWidth = 1
+      
+      // Vertical grid lines
+      const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
+      const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
+      for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+        const t = (value - minX) / xRange
+        const x = margins.left + t * (width - margins.left - margins.right)
+        if (x >= margins.left && x <= width - margins.right) {
+          ctx.beginPath()
+          ctx.moveTo(x, margins.top)
+          ctx.lineTo(x, height - margins.bottom)
+          ctx.stroke()
+        }
+      }
+      
+      // Horizontal grid lines
+      const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
+      const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
+      for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+        const t = (value - minY) / yRange
+        const y = margins.top + (height - margins.top - margins.bottom) - t * (height - margins.top - margins.bottom)
+        if (y >= margins.top && y <= height - margins.bottom) {
+          ctx.beginPath()
+          ctx.moveTo(margins.left, y)
+          ctx.lineTo(width - margins.right, y)
+          ctx.stroke()
+        }
       }
     }
     
-    // Horizontal grid lines
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const t = (value - minY) / yRange
-      const y = margins.top + (height - margins.top - margins.bottom) - t * (height - margins.top - margins.bottom)
-      if (y >= margins.top && y <= height - margins.bottom) {
-        ctx.beginPath()
-        ctx.moveTo(margins.left, y)
-        ctx.lineTo(width - margins.right, y)
-        ctx.stroke()
-    }
-  }
+    // Always redraw axes and category labels after clearing
+    this.renderAxes()
+    this.renderCategoryLabels()
   }
   // Render continuous color legend using Canvas 2D (ReGL mode)
   renderContinuousColorLegendCanvas2D() {
@@ -326,7 +341,7 @@ export class RendererManager {
     
     // Only render labels for discrete metadata
     if (this.controller.currentMetadataVector.data_type !== 'DISCRETE') {
-      console.log('🏷️ [Canvas2D] Not discrete metadata, skipping')
+      console.log('🏷️ [Canvas2D] Not discrete metadata, skipping (checkbox can still be toggled for when categorical metadata is selected)')
       return
     }
     

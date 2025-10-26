@@ -263,6 +263,8 @@ export class DataManager {
       console.log('Cached data:', cachedData)
       console.log('Cached compressed_data:', cachedData.compressed_data)
       console.log('Cached compression_info:', cachedData.compression_info)
+      // Update status icon to show it's in memory
+      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
       return cachedData
     }
     
@@ -280,6 +282,8 @@ export class DataManager {
         delete cleanData.timestamp
         
         this.controller.loadedMetadataVectors[metadataId] = cleanData
+        // Update status icon to show it's in memory (loaded from disk)
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         return cleanData
       }
     }
@@ -294,9 +298,9 @@ export class DataManager {
       return this.controller.loadedMetadataVectors[metadataId]
     }
     
-    // Mark as loading and show spinner
+    // Mark as loading and update status icon to show downloading
     this.controller.loadingMetadataVectors.add(metadataId)
-    this.controller.uiManager.showLoadingSpinner(metadataId)
+    this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
     
     try {
       // Get the current loom file
@@ -349,6 +353,9 @@ export class DataManager {
         // FIRST: Store in memory cache immediately
         this.controller.loadedMetadataVectors[metadataId] = vectorData
         
+        // Update status icon to show it's in memory
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        
         // SECOND: Store in IndexedDB for future sessions (async, don't wait)
         this.controller.memoryManager.storeMetadataInIndexedDB(metadataId, vectorData).catch(error => {
           console.error(`Failed to store metadata ${metadataId} in IndexedDB:`, error)
@@ -362,11 +369,12 @@ export class DataManager {
       }
     } catch (error) {
       console.error(`Failed to load metadata vector ${metadataId}:`, error)
+      // Update status icon to show error (gray with question mark)
+      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
       throw error
     } finally {
       // Always clean up loading state
       this.controller.loadingMetadataVectors.delete(metadataId)
-      this.controller.uiManager.hideLoadingSpinner(metadataId)
     }
   }
 
@@ -729,6 +737,14 @@ export class DataManager {
       // Just show the checkboxes without selecting them
       // this.controller.uiManager.initializeAllCheckboxes()
       console.log('📋 Discrete metadata loaded - checkboxes available for user selection')
+      
+      // Update category distribution bars for all visible metadata sections
+      this.updateAllCategoryDistributions()
+    } else if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
+      console.log('📊 Continuous metadata loaded - updating distribution bars')
+      
+      // Update distribution bars for continuous coloring
+      this.updateAllCategoryDistributions()
     }
     
     // Update cell filtering after loading metadata vector
@@ -788,6 +804,9 @@ export class DataManager {
     // Update button state after filtering
     this.controller.uiManager.updateAddAllVisibleButtonState()
     
+    // Update category distribution bar plots to reflect filtered cells
+    this.updateAllCategoryDistributions()
+    
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(() => {
       // If we need to update colors (e.g., color range adapted), render colors first
@@ -832,15 +851,15 @@ export class DataManager {
     const discreteMetadataWithSelections = hasDiscreteSelections 
       ? Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
-      const hasSelections = selections && selections.size > 0
       const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
       
-      // Clean up empty selections to avoid future issues
-      if (!hasSelections && this.controller.selectedCategories[metadataId]) {
-        delete this.controller.selectedCategories[metadataId]
+      // Important: Empty Set (size === 0) is a valid constraint meaning "show nothing"
+      // Don't filter it out or delete it
+      if (!selections) {
+        return false
       }
       
-      return hasSelections && hasLoadedVector
+      return hasLoadedVector
     })
       : []
     
@@ -998,28 +1017,41 @@ export class DataManager {
     // We'll check for constraints in the filtering logic below
 
     // Get all metadata that have actual constraints (not all categories/values selected)
+    console.log(`🔍 [FILTER] selectedCategories keys:`, Object.keys(this.controller.selectedCategories))
+    Object.keys(this.controller.selectedCategories).forEach(id => {
+      console.log(`🔍 [FILTER] selectedCategories[${id}] size:`, this.controller.selectedCategories[id]?.size)
+    })
+    
     const discreteMetadataWithConstraints = Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
-      const hasSelections = selections && selections.size > 0
       const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
       
-      // Clean up empty selections to avoid future issues
-      if (!hasSelections && this.controller.selectedCategories[metadataId]) {
-        delete this.controller.selectedCategories[metadataId]
+      console.log(`🔍 [FILTER] Checking metadata ${metadataId}: selections.size=${selections?.size}, hasLoadedVector=${hasLoadedVector}`)
+      
+      if (!selections || !hasLoadedVector) {
+        console.log(`🔍 [FILTER] Metadata ${metadataId} skipped (no selections or no vector)`)
+        return false
       }
       
-      if (!hasSelections || !hasLoadedVector) return false
+      // Special case: Empty Set means "show nothing" - this IS a constraint
+      if (selections.size === 0) {
+        console.log(`🔍 [FILTER] Metadata ${metadataId} has empty selection - will show no cells`)
+        return true // Include as a constraint (will result in 0 cells)
+      }
       
       // Check if all categories are selected (no constraint)
       const metadataVector = this.controller.loadedMetadataVectors[metadataId]
       if (metadataVector && metadataVector.values) {
         const availableCategories = [...new Set(metadataVector.values)]
         const allSelected = availableCategories.every(category => selections.has(category))
+        console.log(`🔍 [FILTER] Metadata ${metadataId}: ${selections.size}/${availableCategories.length} categories selected, allSelected=${allSelected}`)
         return !allSelected // Only include if not all categories are selected
       }
       
       return true
     })
+    
+    console.log(`🔍 [FILTER] discreteMetadataWithConstraints:`, discreteMetadataWithConstraints)
 
     const continuousMetadataWithConstraints = Object.keys(this.controller.selectedRanges).filter(metadataId => {
       const range = this.controller.selectedRanges[metadataId]
@@ -1252,7 +1284,8 @@ export class DataManager {
       }
       
       // If it's compressed, decompress it on demand (matching original controller logic)
-      if (vectorData.compressed_data && vectorData.compression_info) {
+      // Handle both regular compression and single_category optimization
+      if (vectorData.compression_info && (vectorData.compressed_data || vectorData.compression_info.single_category)) {
         // console.log(`💾 [MEMORY] Decompressing metadata ${metadataId} from memory...`)
         try {
           let values
@@ -1393,12 +1426,19 @@ export class DataManager {
     }
     
     // Update visualization with the new coordinate data
+    console.log(`📊 [EMBEDDING] Updating visualization with new coordinates...`)
     this.updateVisualizationWithMetadata()
+    console.log(`📊 [EMBEDDING] Visualization updated, checking for active coloring...`)
     
     // If there's a currently active metadata vector (coloring), reapply it to the new embedding
     if (this.controller.currentMetadataVector && this.controller.currentMetadataId) {
-      console.log(`🎨 Reapplying metadata coloring after embedding switch: ${this.controller.currentMetadataVector.name}`)
+      console.log(`🎨 [EMBEDDING] Reapplying metadata coloring after embedding switch: ${this.controller.currentMetadataVector.name}`)
+      console.log(`🎨 [EMBEDDING] Current metadata type: ${this.controller.currentMetadataVector.data_type}`)
+      console.log(`🎨 [EMBEDDING] Display order length: ${this.controller.displayOrder?.length}`)
       this.controller.updateVisualizationWithMetadataVector()
+      console.log(`🎨 [EMBEDDING] Coloring reapplied successfully`)
+    } else {
+      console.log(`📊 [EMBEDDING] No active coloring to reapply (currentMetadataVector: ${!!this.controller.currentMetadataVector}, currentMetadataId: ${this.controller.currentMetadataId})`)
     }
   }
 
@@ -1430,5 +1470,27 @@ export class DataManager {
         </div>
       `
     }
+  }
+  
+  // Update category distribution bars for all visible (expanded) metadata sections
+  updateAllCategoryDistributions() {
+    console.log('🎨 [BAR PLOTS] updateAllCategoryDistributions called')
+    
+    // Find all expanded metadata sections
+    const expandedSections = document.querySelectorAll('[data-metadata-item]')
+    console.log('🎨 [BAR PLOTS] Found sections:', expandedSections.length)
+    
+    expandedSections.forEach(section => {
+      const metadataId = parseInt(section.dataset.metadataItem)
+      // Check if this section is expanded (has visible canvases)
+      const canvases = section.querySelectorAll('.category-distribution-canvas')
+      console.log(`🎨 [BAR PLOTS] Metadata ${metadataId}: ${canvases.length} canvases found`)
+      
+      if (canvases.length > 0 && canvases[0].offsetParent !== null) {
+        // Section is expanded, update its distributions
+        console.log(`🎨 [BAR PLOTS] Redrawing distributions for metadata ${metadataId}`)
+        this.controller.drawCategoryDistributions(metadataId)
+      }
+    })
   }
 }

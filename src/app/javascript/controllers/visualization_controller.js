@@ -8,6 +8,7 @@ import { RendererManager } from "visualization/renderer_manager"
 import { GradientManager } from "visualization/gradient_manager"
 import { MemoryManager } from "visualization/memory_manager"
 import { PerformanceManager } from "visualization/performance_manager"
+import { DownloadManager } from "visualization/download_manager"
 
 console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
@@ -66,6 +67,7 @@ export default class extends Controller {
     this.gradientManager = new GradientManager(this)
     this.memoryManager = new MemoryManager(this)
     this.performanceManager = new PerformanceManager(this)
+    this.downloadManager = new DownloadManager(this)
     
     // RENDERER CHOICE: 'regl' only
     this.rendererType = 'regl' // 🎯 Using ReGL for better performance
@@ -327,6 +329,7 @@ export default class extends Controller {
     // Initialize interaction system after DOM is ready
     setTimeout(() => {
       this.uiManager.initializeTooltip()
+      this.initializeResizers()
       // Initialize the selection count display
       this.uiManager.updateSelectedCellsCount()
     }, 100)
@@ -616,6 +619,10 @@ export default class extends Controller {
     for (let i = 0; i < coordinates.length; i++) {
       this.displayOrder[i] = i
     }
+    
+    // Flag that display order was reset - color cache needs to rebuild colorMap from originalPointColors
+    this._displayOrderWasReset = true
+    
     console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
     
     // Normalize coordinates to screen space (0 to canvas size)
@@ -1906,6 +1913,26 @@ export default class extends Controller {
     if (this.lastColorUpdateHash === currentColorHash && this.colorUpdateCache.has('lastColorMap')) {
       console.log('🎨 [ReGL] Using cached color update (no color state change)')
       const cachedColorMap = this.colorUpdateCache.get('lastColorMap')
+      
+      // IMPORTANT: If display order was reset (e.g., after embedding switch),
+      // we need to rebuild the colorMap from originalPointColors using the new display order
+      if (this._displayOrderWasReset) {
+        console.log('🎨 [ReGL] Display order was reset, rebuilding colorMap from originalPointColors')
+        const colorMap = new Map()
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
+          colorMap.set(drawPos, color)
+        }
+        this.reglRenderer.updateColors(colorMap)
+        this.reglRenderer.render()
+        
+        // Clear the flag and update cache with new colorMap
+        this._displayOrderWasReset = false
+        this.colorUpdateCache.set('lastColorMap', colorMap)
+        return
+      }
+      
       this.reglRenderer.updateColors(cachedColorMap)
       this.reglRenderer.render()
       return
@@ -1992,6 +2019,7 @@ export default class extends Controller {
         
         if (needsReordering) {
           console.log('📊 [ReGL] Applying category display order (first time or order changed)...')
+          console.log(`📊 [ReGL] originalPointColors size: ${this.originalPointColors.size}, displayOrder length: ${this.displayOrder.length}`)
           this._lastCategoryOrderApplied = this.categoryOrder
           
           // Reorder points in buffer (this will re-render and redraw overlay)
@@ -2474,6 +2502,12 @@ export default class extends Controller {
       this.customColorRange = null
       console.log('🎨 Color range reset to full data range')
     }
+    
+    // Update category distribution bar plots to reflect the new color range
+    // This ensures bar plots show the correct gradient when color range changes
+    if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      this.dataManager.updateAllCategoryDistributions()
+    }
   }
 
   // Redraw the entire visualization (used by inline range slider)
@@ -2839,7 +2873,7 @@ export default class extends Controller {
     console.log('⏱️ [TOGGLE] Starting metadata fold/unfold...')
     
     const headerElement = event.currentTarget
-    const chevron = headerElement.querySelector('svg')
+    const chevron = headerElement.querySelector('.fa-chevron-right')
     const nextSibling = headerElement.nextElementSibling
     const radioInput = headerElement.querySelector('input[type="radio"]')
     
@@ -2864,9 +2898,20 @@ export default class extends Controller {
       console.log(`⏱️ [TOGGLE] Chevron rotation: ${(performance.now() - chevronTime).toFixed(2)}ms`)
       
       if (isContinuousMetadata) {
-        // Handle continuous metadata - show range section
+        // Handle continuous metadata - show range section with smooth transition
         const displayTime = performance.now()
         rangeSection.style.display = 'block'
+        rangeSection.style.maxHeight = '0px'
+        rangeSection.style.opacity = '0'
+        rangeSection.style.overflow = 'hidden'
+        rangeSection.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+        
+        // Trigger reflow to ensure transition works
+        rangeSection.offsetHeight
+        
+        // Expand with animation
+        rangeSection.style.maxHeight = '500px'
+        rangeSection.style.opacity = '1'
         console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Get metadata info and initialize the range slider
@@ -2883,9 +2928,20 @@ export default class extends Controller {
           console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
         }
       } else {
-        // Handle categorical metadata - show categories
+        // Handle categorical metadata - show categories with smooth transition
         const displayTime = performance.now()
         categoriesDiv.style.display = 'block'
+        categoriesDiv.style.maxHeight = '0px'
+        categoriesDiv.style.opacity = '0'
+        categoriesDiv.style.overflow = 'hidden'
+        categoriesDiv.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+        
+        // Trigger reflow to ensure transition works
+        categoriesDiv.offsetHeight
+        
+        // Expand with animation
+        categoriesDiv.style.maxHeight = '2000px' // Larger for categories list
+        categoriesDiv.style.opacity = '1'
         console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Load metadata vector when expanding categories (for future coloring)
@@ -2893,9 +2949,10 @@ export default class extends Controller {
         if (metadataItem) {
           const metadataId = metadataItem.dataset.metadataItem
           
-          // Check if already in memory (should be instant!)
+          // Check if metadata is actually accessible (not just in loadedMetadataVectors)
           const memCheckTime = performance.now()
-          const isInMemory = !!this.loadedMetadataVectors[metadataId]
+          const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+          const isInMemory = !!metadataVector
           console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
           
           if (isInMemory) {
@@ -2904,8 +2961,11 @@ export default class extends Controller {
             this.initializeCheckboxesForMetadata(metadataId).then(() => {
               console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
               
+              // Draw category distribution bar plots
+              this.drawCategoryDistributions(metadataId)
+              
               // Only update filtering if there are active selections
-              if (this.selectedCategories[metadataId] && Object.keys(this.selectedCategories[metadataId]).length > 0) {
+              if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
                 const filterTime = performance.now()
                 this.dataManager.updateCellFiltering()
                 console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
@@ -2916,9 +2976,9 @@ export default class extends Controller {
               console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
           } else {
-            // Not in memory - load it first (rare case)
+            // Not in memory - load it first
             const loadTime = performance.now()
-            console.log(`⏱️ [TOGGLE] Loading from disk/network...`)
+            console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
             this.dataManager.loadSingleMetadataVector(metadataId).then(() => {
               console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
               
@@ -2926,7 +2986,10 @@ export default class extends Controller {
               this.initializeCheckboxesForMetadata(metadataId).then(() => {
                 console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
                 
-                if (this.selectedCategories[metadataId] && Object.keys(this.selectedCategories[metadataId]).length > 0) {
+                // Draw category distribution bar plots
+                this.drawCategoryDistributions(metadataId)
+                
+                if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
                   const filterTime = performance.now()
                   this.dataManager.updateCellFiltering()
                   console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
@@ -2946,9 +3009,23 @@ export default class extends Controller {
       chevron.style.transform = 'rotate(0deg)'
       
       if (isContinuousMetadata) {
-        rangeSection.style.display = 'none'
+        // Collapse with animation
+        rangeSection.style.maxHeight = '0px'
+        rangeSection.style.opacity = '0'
+        
+        // Hide after transition completes
+        setTimeout(() => {
+          rangeSection.style.display = 'none'
+        }, 300) // Match transition duration
       } else {
-        categoriesDiv.style.display = 'none'
+        // Collapse with animation
+        categoriesDiv.style.maxHeight = '0px'
+        categoriesDiv.style.opacity = '0'
+        
+        // Hide after transition completes
+        setTimeout(() => {
+          categoriesDiv.style.display = 'none'
+        }, 300) // Match transition duration
       }
       
       console.log(`⏱️ [TOGGLE] ✅ Collapse time: ${(performance.now() - collapseTime).toFixed(2)}ms`)
@@ -5123,6 +5200,9 @@ export default class extends Controller {
       
       // Recolor all points
       this.renderPointsWithCurrentColoring()
+      
+      // Redraw category distribution bar plots to reflect new gradient
+      this.dataManager.updateAllCategoryDistributions()
      
     } else {
       console.log('⚠️ Cannot reapply colors: no numeric metadata vector')
@@ -6995,6 +7075,10 @@ export default class extends Controller {
       checkbox.querySelector('i').style.display = 'none'
       
       if (isContinuous) {
+        // Track that this metadata was explicitly unchecked
+        if (!this.uncheckedMetadata) this.uncheckedMetadata = new Set()
+        this.uncheckedMetadata.add(metadataId)
+        
         // Store the current range before clearing it (for restoration when re-checking)
         if (!this.savedRanges) this.savedRanges = {}
         
@@ -7002,15 +7086,30 @@ export default class extends Controller {
         if (rangeSliderElement) {
           const rangeSliderController = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
           if (rangeSliderController) {
-            // Save the current slider values
-            this.savedRanges[metadataId] = {
-              min: rangeSliderController.currentMinValue,
-              max: rangeSliderController.currentMaxValue,
-              fullMin: rangeSliderController.minValue,
-              fullMax: rangeSliderController.maxValue
+            // Check if the slider has been initialized with real data
+            // If minValue and maxValue are still the default (0 and 1), it means the slider wasn't initialized
+            const hasRealData = !(rangeSliderController.minValue === 0 && rangeSliderController.maxValue === 1)
+            
+            if (hasRealData) {
+              // Save the current slider values
+              this.savedRanges[metadataId] = {
+                min: rangeSliderController.currentMinValue,
+                max: rangeSliderController.currentMaxValue,
+                fullMin: rangeSliderController.minValue,
+                fullMax: rangeSliderController.maxValue
+              }
+              console.log('🔍 [CHECKBOX] Saved range for restoration:', this.savedRanges[metadataId])
+            } else {
+              // Slider exists but wasn't initialized with real data yet
+              this.savedRanges[metadataId] = null // null means "use full range when restoring"
+              console.log('🔍 [CHECKBOX] Slider not initialized with real data - will use full range on restore')
             }
-            console.log('🔍 [CHECKBOX] Saved range for restoration:', this.savedRanges[metadataId])
           }
+        } else {
+          // Slider doesn't exist yet (metadata was never unfolded)
+          // Mark that we need to use full range when checking later
+          this.savedRanges[metadataId] = null // null means "use full range when restoring"
+          console.log('🔍 [CHECKBOX] No slider found - will use full range on restore')
         }
         
         // For continuous metadata: disable range selection (clear the range)
@@ -7020,8 +7119,21 @@ export default class extends Controller {
         // Disable the range slider for this metadata
         this.uiManager.disableRangeSliderForMetadata(metadataId)
       } else {
-        // For categorical metadata: deselect all categories
-        this.deselectAllCategoriesForMetadata(metadataId)
+        // For categorical metadata: save current selections and clear them to disable filtering
+        if (!this.savedCategorySelections) this.savedCategorySelections = {}
+        
+        // Save the current category selections for restoration
+        if (this.selectedCategories && this.selectedCategories[metadataId]) {
+          this.savedCategorySelections[metadataId] = new Set(this.selectedCategories[metadataId])
+          console.log('🔍 [CHECKBOX] Saved category selections:', Array.from(this.savedCategorySelections[metadataId]))
+          
+          // Clear the selections to disable filtering
+          this.selectedCategories[metadataId].clear()
+          console.log('🔍 [CHECKBOX] Cleared selectedCategories to disable filtering')
+        }
+        
+        // Disable the category checkboxes visually
+        this.uiManager.disableCategoryCheckboxesForMetadata(metadataId)
       }
     } else {
       // Select - restore previous range if it was a subrange, otherwise use full range
@@ -7029,6 +7141,15 @@ export default class extends Controller {
       
       if (isContinuous) {
         console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
+        
+        // Remove from unchecked tracking set FIRST
+        if (this.uncheckedMetadata) {
+          this.uncheckedMetadata.delete(metadataId)
+        }
+        
+        // Set checkbox to green initially (will be changed to orange if subrange)
+        checkbox.style.backgroundColor = '#10b981'
+        checkbox.title = 'Disable range selection'
         
         // Enable the range slider for this metadata first
         this.uiManager.enableRangeSliderForMetadata(metadataId)
@@ -7049,18 +7170,38 @@ export default class extends Controller {
               // Check if we have a saved range (from previous uncheck)
               let currentMin, currentMax
               
-              if (this.savedRanges && this.savedRanges[metadataId]) {
-                // Restore the saved range
-                currentMin = this.savedRanges[metadataId].min
-                currentMax = this.savedRanges[metadataId].max
-                console.log('🔍 [CHECKBOX] Restoring saved range:', currentMin, currentMax)
-                
-                // Update the slider to show the restored range
-                rangeSliderController.currentMinValue = currentMin
-                rangeSliderController.currentMaxValue = currentMax
-                rangeSliderController.updateSliderUI()
+              if (this.savedRanges && metadataId in this.savedRanges) {
+                if (this.savedRanges[metadataId] === null) {
+                  // null means use full range (metadata was unchecked before being unfolded)
+                  // Make sure the slider has valid min/max values
+                  if (rangeSliderController.minValue !== undefined && rangeSliderController.maxValue !== undefined) {
+                    currentMin = rangeSliderController.minValue
+                    currentMax = rangeSliderController.maxValue
+                    console.log('🔍 [CHECKBOX] Using full range (was unchecked before unfold):', currentMin, currentMax)
+                    
+                    // Update the slider to show the full range
+                    rangeSliderController.currentMinValue = currentMin
+                    rangeSliderController.currentMaxValue = currentMax
+                    rangeSliderController.updateSliderUI()
+                  } else {
+                    // Slider not fully initialized yet, use current values as fallback
+                    currentMin = rangeSliderController.currentMinValue
+                    currentMax = rangeSliderController.currentMaxValue
+                    console.log('🔍 [CHECKBOX] Slider not fully initialized, using current values:', currentMin, currentMax)
+                  }
+                } else {
+                  // Restore the saved range
+                  currentMin = this.savedRanges[metadataId].min
+                  currentMax = this.savedRanges[metadataId].max
+                  console.log('🔍 [CHECKBOX] Restoring saved range:', currentMin, currentMax)
+                  
+                  // Update the slider to show the restored range
+                  rangeSliderController.currentMinValue = currentMin
+                  rangeSliderController.currentMaxValue = currentMax
+                  rangeSliderController.updateSliderUI()
+                }
               } else {
-                // No saved range, use current slider values
+                // No saved range, use current slider values (full range by default)
                 currentMin = rangeSliderController.currentMinValue
                 currentMax = rangeSliderController.currentMaxValue
                 console.log('🔍 [CHECKBOX] Using current slider values:', currentMin, currentMax)
@@ -7073,7 +7214,7 @@ export default class extends Controller {
               console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
               
               // Update checkbox color based on whether it's a subrange
-              // This will be done by updateCheckboxColor() in the range slider
+              // This will change it to orange if it's a subrange, or keep it green if full range
               rangeSliderController.updateCheckboxColor()
               
               // Update the selected cells count
@@ -7081,23 +7222,58 @@ export default class extends Controller {
               console.log('🔍 [CHECKBOX] Updated selected cells count')
             } else {
               console.log('🔍 [CHECKBOX] No range slider controller found!')
-              checkbox.style.backgroundColor = '#10b981' // Default to green
-              checkbox.title = 'Disable range selection'
+              // Already set to green above
             }
           } else {
             console.log('🔍 [CHECKBOX] No range slider element found!')
-            checkbox.style.backgroundColor = '#10b981' // Default to green
-            checkbox.title = 'Disable range selection'
+            // Already set to green above
           }
         } else {
           console.log('🔍 [CHECKBOX] No range section found!')
-          checkbox.style.backgroundColor = '#10b981' // Default to green
-          checkbox.title = 'Disable range selection'
+          // Already set to green above
         }
       } else {
-        // For categorical metadata: select all categories
-        checkbox.style.backgroundColor = '#10b981' // Green for categorical
-        this.selectAllCategoriesForMetadata(metadataId)
+        // For categorical metadata: restore selections and re-enable checkboxes
+        
+        // Restore the saved category selections
+        if (this.savedCategorySelections && this.savedCategorySelections[metadataId]) {
+          if (!this.selectedCategories) this.selectedCategories = {}
+          if (!this.selectedCategories[metadataId]) {
+            this.selectedCategories[metadataId] = new Set()
+          }
+          
+          // Restore each saved category
+          this.savedCategorySelections[metadataId].forEach(category => {
+            this.selectedCategories[metadataId].add(category)
+          })
+          console.log('🔍 [CHECKBOX] Restored category selections:', Array.from(this.selectedCategories[metadataId]))
+        }
+        
+        // Re-enable the category checkboxes
+        this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
+        
+        // Determine checkbox color based on whether all categories are selected
+        if (this.selectedCategories && this.selectedCategories[metadataId]) {
+          const allCategoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+          const totalCategories = allCategoryCheckboxes.length
+          const selectedCount = this.selectedCategories[metadataId].size
+          
+          if (selectedCount === totalCategories) {
+            // All categories selected - green
+            checkbox.style.backgroundColor = '#10b981'
+            console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - green`)
+          } else if (selectedCount > 0) {
+            // Some categories selected - orange
+            checkbox.style.backgroundColor = '#f59e0b'
+            console.log(`🔍 [CHECKBOX] ${selectedCount}/${totalCategories} categories selected - orange`)
+          } else {
+            // No categories selected - should not happen, but default to green
+            checkbox.style.backgroundColor = '#10b981'
+          }
+        } else {
+          // No categories selected or not initialized - default to green
+          checkbox.style.backgroundColor = '#10b981'
+        }
       }
     }
     
@@ -7108,6 +7284,312 @@ export default class extends Controller {
     console.log('🔍 [CHECKBOX] updateCellFiltering called')
   }
 
+  async toggleSelectAllCategories(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const metadataId = event.currentTarget.dataset.metadataId
+    const checkbox = event.currentTarget
+    
+    // Check if filtering is enabled
+    const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+    const isFilterEnabled = filterSwitch && filterSwitch.dataset.filterEnabled === 'true'
+    
+    if (!isFilterEnabled) {
+      console.log(`🔄 Select all/none blocked - filtering is disabled`)
+      return
+    }
+    
+    // Determine current state based on checkmark visibility
+    const icon = checkbox.querySelector('i')
+    const hasCheckmark = icon && icon.style.display !== 'none'
+    
+    console.log(`🔄 Toggle select all categories for metadata ${metadataId}, current state: ${hasCheckmark ? 'checked' : 'unchecked'}`)
+    
+    if (hasCheckmark) {
+      // Deselect all categories
+      this.deselectAllCategoriesForMetadata(metadataId)
+      checkbox.style.backgroundColor = 'white'
+      checkbox.style.borderColor = '#d1d5db'
+      if (icon) {
+        icon.style.display = 'none'
+      }
+    } else {
+      // Select all categories
+      this.selectAllCategoriesForMetadata(metadataId)
+      checkbox.style.backgroundColor = 'white'
+      checkbox.style.borderColor = '#d1d5db'
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = '#10b981' // green checkmark
+      }
+    }
+  }
+
+  async toggleMetadataFilter(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const metadataId = event.currentTarget.dataset.metadataId
+    const filterSwitch = event.currentTarget
+    const isEnabled = filterSwitch.dataset.filterEnabled === 'true'
+    
+    console.log(`🔄 Toggle metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
+    
+    const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
+    const switchToggle = filterSwitch.querySelector('div')
+    
+    if (isEnabled) {
+      // Turn OFF - disable filtering (show all cells)
+      filterSwitch.dataset.filterEnabled = 'false'
+      filterSwitch.style.backgroundColor = '#d1d5db' // gray
+      switchToggle.style.transform = 'translateX(0px)' // move to left
+      
+      // Save current selections and remove the metadata from selectedCategories
+      // (removing it entirely means "no constraint" = show all cells)
+      if (!this.savedCategorySelections) this.savedCategorySelections = {}
+      if (this.selectedCategories && this.selectedCategories[metadataId]) {
+        this.savedCategorySelections[metadataId] = new Set(this.selectedCategories[metadataId])
+        delete this.selectedCategories[metadataId]
+      }
+      
+      // Disable the select all checkbox
+      if (selectAllCheckbox) {
+        selectAllCheckbox.style.opacity = '0.5'
+        selectAllCheckbox.style.cursor = 'not-allowed'
+      }
+      
+      // Disable category checkboxes
+      this.uiManager.disableCategoryCheckboxesForMetadata(metadataId)
+    } else {
+      // Turn ON - enable filtering
+      filterSwitch.dataset.filterEnabled = 'true'
+      filterSwitch.style.backgroundColor = '#10b981' // green
+      switchToggle.style.transform = 'translateX(14px)' // move to right
+      
+      // Restore saved selections
+      if (this.savedCategorySelections && this.savedCategorySelections[metadataId]) {
+        if (!this.selectedCategories) this.selectedCategories = {}
+        if (!this.selectedCategories[metadataId]) {
+          this.selectedCategories[metadataId] = new Set()
+        }
+        this.savedCategorySelections[metadataId].forEach(category => {
+          this.selectedCategories[metadataId].add(category)
+        })
+      }
+      
+      // Enable the select all checkbox
+      if (selectAllCheckbox) {
+        selectAllCheckbox.style.opacity = '1'
+        selectAllCheckbox.style.cursor = 'pointer'
+        // Update its color based on selections
+        this.updateSelectAllCheckboxState(metadataId)
+      }
+      
+      // Enable category checkboxes
+      this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
+    }
+    
+    // Update filtering
+    this.dataManager.updateCellFiltering()
+  }
+
+  async toggleContinuousMetadataFilter(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const metadataId = event.currentTarget.dataset.metadataId
+    const filterSwitch = event.currentTarget
+    const isEnabled = filterSwitch.dataset.filterEnabled === 'true'
+    
+    console.log(`🔄 Toggle continuous metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
+    
+    const switchToggle = filterSwitch.querySelector('div')
+    
+    if (isEnabled) {
+      // Turn OFF - disable filtering (show all cells)
+      filterSwitch.dataset.filterEnabled = 'false'
+      filterSwitch.style.backgroundColor = '#d1d5db' // gray
+      switchToggle.style.transform = 'translateX(0px)' // move to left
+      
+      // Disable the range slider controls (but not the histogram)
+      const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+      if (metadataItem) {
+        const rangeSliderDiv = metadataItem.querySelector('[data-controller="range-slider"]')
+        if (rangeSliderDiv) {
+          // Disable input fields
+          const inputs = rangeSliderDiv.querySelectorAll('input[type="number"]')
+          inputs.forEach(input => {
+            input.disabled = true
+            input.style.opacity = '0.5'
+            input.style.cursor = 'not-allowed'
+          })
+          
+          // Disable slider handles and change to gray
+          const handles = rangeSliderDiv.querySelectorAll('.range-slider-min-handle, .range-slider-max-handle')
+          handles.forEach(handle => {
+            handle.style.opacity = '0.5'
+            handle.style.pointerEvents = 'none'
+            handle.style.cursor = 'not-allowed'
+            handle.style.backgroundColor = '#d1d5db' // gray
+          })
+          
+      // Change active track to light gray
+      const activeTrack = rangeSliderDiv.querySelector('[data-range-slider-target="activeTrack"]')
+      if (activeTrack) {
+        activeTrack.style.backgroundColor = '#d1d5db' // light gray
+      }
+      
+      // Store filter disabled state for histogram rendering
+      if (!this.disabledFilters) this.disabledFilters = new Set()
+      this.disabledFilters.add(metadataId)
+      
+      // Redraw histogram with gray overlay
+      const rangeSliderController = this.application.getControllerForElementAndIdentifier(
+        rangeSliderDiv,
+        'range-slider'
+      )
+      if (rangeSliderController && rangeSliderController.drawDensityPlot) {
+        rangeSliderController.drawDensityPlot()
+      }
+      
+      // Disable palette button
+          const paletteButton = rangeSliderDiv.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+          if (paletteButton) {
+            paletteButton.disabled = true
+            paletteButton.style.opacity = '0.5'
+            paletteButton.style.cursor = 'not-allowed'
+          }
+        }
+      }
+      
+      // Save current range and remove it from selectedRanges
+      // (removing it entirely means "no constraint" = show all cells)
+      if (!this.savedRanges) this.savedRanges = {}
+      if (this.selectedRanges && this.selectedRanges[metadataId]) {
+        this.savedRanges[metadataId] = { ...this.selectedRanges[metadataId] }
+        delete this.selectedRanges[metadataId]
+      }
+    } else {
+      // Turn ON - enable filtering
+      filterSwitch.dataset.filterEnabled = 'true'
+      filterSwitch.style.backgroundColor = '#10b981' // green
+      switchToggle.style.transform = 'translateX(14px)' // move to right
+      
+      // Enable the range slider controls (but not the histogram)
+      const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+      if (metadataItem) {
+        const rangeSliderDiv = metadataItem.querySelector('[data-controller="range-slider"]')
+        if (rangeSliderDiv) {
+          // Enable input fields
+          const inputs = rangeSliderDiv.querySelectorAll('input[type="number"]')
+          inputs.forEach(input => {
+            input.disabled = false
+            input.style.opacity = '1'
+            input.style.cursor = 'default'
+          })
+          
+          // Enable slider handles and restore blue color
+          const handles = rangeSliderDiv.querySelectorAll('.range-slider-min-handle, .range-slider-max-handle')
+          handles.forEach(handle => {
+            handle.style.opacity = '1'
+            handle.style.pointerEvents = 'auto'
+            handle.style.cursor = 'grab'
+            handle.style.backgroundColor = '#3b82f6' // blue
+          })
+          
+          // Restore active track to blue
+          const activeTrack = rangeSliderDiv.querySelector('[data-range-slider-target="activeTrack"]')
+          if (activeTrack) {
+            activeTrack.style.backgroundColor = '#3b82f6' // blue
+          }
+          
+          // Remove filter disabled state for histogram rendering
+          if (this.disabledFilters) {
+            this.disabledFilters.delete(metadataId)
+          }
+          
+          // Redraw histogram with blue overlay
+          const rangeSliderController = this.application.getControllerForElementAndIdentifier(
+            rangeSliderDiv,
+            'range-slider'
+          )
+          if (rangeSliderController && rangeSliderController.drawDensityPlot) {
+            rangeSliderController.drawDensityPlot()
+          }
+          
+          // Enable palette button
+          const paletteButton = rangeSliderDiv.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+          if (paletteButton) {
+            paletteButton.disabled = false
+            paletteButton.style.opacity = '1'
+            paletteButton.style.cursor = 'pointer'
+          }
+        }
+      }
+      
+      // Restore saved range
+      if (this.savedRanges && this.savedRanges[metadataId]) {
+        if (!this.selectedRanges) this.selectedRanges = {}
+        this.selectedRanges[metadataId] = { ...this.savedRanges[metadataId] }
+      } else {
+        // No saved range - initialize with full range from slider
+        const rangeSection = document.querySelector(`.metadata-range-section[data-metadata-id="${metadataId}"]`)
+        if (rangeSection) {
+          const rangeSliderController = this.application.getControllerForElementAndIdentifier(
+            rangeSection.querySelector('[data-controller="range-slider"]'),
+            'range-slider'
+          )
+          if (rangeSliderController) {
+            const min = rangeSliderController.minValue
+            const max = rangeSliderController.maxValue
+            if (!this.selectedRanges) this.selectedRanges = {}
+            this.selectedRanges[metadataId] = { min, max }
+          }
+        }
+      }
+    }
+    
+    // Update filtering
+    this.dataManager.updateCellFiltering()
+  }
+
+  updateSelectAllCheckboxState(metadataId) {
+    const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
+    if (!selectAllCheckbox) return
+    
+    const allCategoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    const totalCategories = allCategoryCheckboxes.length
+    const selectedCount = this.selectedCategories && this.selectedCategories[metadataId] ? this.selectedCategories[metadataId].size : 0
+    
+    const icon = selectAllCheckbox.querySelector('i')
+    
+    if (selectedCount === 0) {
+      // None selected - white background, no checkmark
+      selectAllCheckbox.style.backgroundColor = 'white'
+      selectAllCheckbox.style.borderColor = '#d1d5db'
+      if (icon) {
+        icon.style.display = 'none'
+      }
+    } else if (selectedCount === totalCategories) {
+      // All selected - white background, green checkmark
+      selectAllCheckbox.style.backgroundColor = 'white'
+      selectAllCheckbox.style.borderColor = '#d1d5db'
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = '#10b981' // green
+      }
+    } else {
+      // Some selected - orange background, white checkmark
+      selectAllCheckbox.style.backgroundColor = '#f59e0b' // orange
+      selectAllCheckbox.style.borderColor = '#f59e0b'
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = 'white'
+      }
+    }
+  }
+
   async toggleCategorySelection(event) {
     event.preventDefault()
     event.stopPropagation()
@@ -7115,7 +7597,19 @@ export default class extends Controller {
     const metadataId = event.currentTarget.dataset.metadataId
     const category = event.currentTarget.dataset.category
     const checkbox = event.currentTarget
-    const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
+    
+    // Check if filtering is enabled
+    const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+    const isFilterEnabled = filterSwitch && filterSwitch.dataset.filterEnabled === 'true'
+    
+    if (!isFilterEnabled) {
+      console.log(`🔄 Category selection blocked - filtering is disabled`)
+      return
+    }
+    
+    // Check if selected by looking at the checkmark visibility and color
+    const icon = checkbox.querySelector('i')
+    const isSelected = icon && icon.style.display !== 'none' && icon.style.color === 'rgb(16, 185, 129)' // #10b981
     
     console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
@@ -7147,19 +7641,25 @@ export default class extends Controller {
     if (isSelected) {
       // Deselect this category
       console.log(`🔄 About to deselect category: ${category}`)
-      checkbox.style.backgroundColor = '#f3f4f6'
-      checkbox.querySelector('i').style.display = 'none'
+      checkbox.style.backgroundColor = 'white'
+      const icon = checkbox.querySelector('i')
+      icon.style.display = 'none'
       this.deselectCategory(metadataId, category)
     } else {
       // Select this category
       console.log(`🔄 About to select category: ${category}`)
-      checkbox.style.backgroundColor = '#10b981'
-      checkbox.querySelector('i').style.display = 'block'
+      checkbox.style.backgroundColor = 'white'
+      const icon = checkbox.querySelector('i')
+      icon.style.display = 'block'
+      icon.style.color = '#10b981' // green checkmark
       this.selectCategory(metadataId, category)
     }
     
-    // Update the metadata checkbox state
-    this.updateMetadataCheckboxState(metadataId)
+    // Update the select all checkbox state
+    this.updateSelectAllCheckboxState(metadataId)
+    
+    // Update filter switch visibility (show/hide based on selection)
+    this.uiManager.updateFilterSwitchVisibility(metadataId)
     
     // Update cell filtering
     console.log(`🔄 About to call updateCellFiltering`)
@@ -7172,27 +7672,111 @@ export default class extends Controller {
     console.log(`🔄 toggleCategorySelection function completed`)
   }
 
-  selectAllCategoriesForMetadata(metadataId) {
+  async selectAllCategoriesForMetadata(metadataId) {
+    console.log(`🔍 [SELECT ALL] Selecting all categories for metadata ${metadataId}`)
+    
+    // Debug: Check what's in memory
+    console.log(`🔍 [SELECT ALL] currentMetadataId:`, this.currentMetadataId)
+    console.log(`🔍 [SELECT ALL] currentMetadataVector exists:`, !!this.currentMetadataVector)
+    console.log(`🔍 [SELECT ALL] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
+    console.log(`🔍 [SELECT ALL] loadedMetadataVectors[${metadataId}] exists:`, !!this.loadedMetadataVectors?.[metadataId])
+    
+    // Get the metadata vector to access ALL categories
+    let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+    console.log(`🔍 [SELECT ALL] getMetadataVectorById returned:`, !!metadataVector)
+    console.log(`🔍 [SELECT ALL] metadataVector.values exists:`, !!metadataVector?.values)
+    
+    // If metadata exists but values are not decompressed, decompress it manually
+    if (metadataVector && !metadataVector.values && metadataVector.compression_info) {
+      console.log(`🔍 [SELECT ALL] Metadata exists but not decompressed, decompressing...`)
+      const compressionInfo = metadataVector.compression_info
+      
+      // Handle single_category compression (all cells have the same value)
+      if (compressionInfo.single_category) {
+        const category = compressionInfo.categories[compressionInfo.category_index]
+        const length = compressionInfo.length
+        metadataVector.values = new Array(length).fill(category)
+        console.log(`🔍 [SELECT ALL] Decompressed single_category: ${category} (${length} cells)`)
+      } else {
+        console.error(`🔍 [SELECT ALL] Unknown compression format:`, compressionInfo)
+        return
+      }
+    }
+    
+    // If not in memory at all, load it first
+    if (!metadataVector) {
+      console.log(`🔍 [SELECT ALL] Metadata not in memory, loading...`)
+      try {
+        metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
+        if (!metadataVector) {
+          // Try loading from server as fallback
+          await this.dataManager.loadSingleMetadataVector(metadataId)
+          metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+        }
+      } catch (error) {
+        console.error(`🔍 [SELECT ALL] Failed to load metadata ${metadataId}:`, error)
+        return
+      }
+    }
+    
+    if (!metadataVector || !metadataVector.values) {
+      console.error(`🔍 [SELECT ALL] No metadata vector values found for ${metadataId}`)
+      console.error(`🔍 [SELECT ALL] metadataVector:`, metadataVector)
+      return
+    }
+    
+    // Initialize selectedCategories if needed
+    if (!this.selectedCategories) {
+      this.selectedCategories = {}
+    }
+    if (!this.selectedCategories[metadataId]) {
+      this.selectedCategories[metadataId] = new Set()
+    }
+    
+    // Add ALL unique categories from the metadata vector
+    const allCategories = [...new Set(metadataVector.values)]
+    allCategories.forEach(category => {
+      this.selectedCategories[metadataId].add(category)
+    })
+    
+    console.log(`🔍 [SELECT ALL] Selected ${this.selectedCategories[metadataId].size} categories`)
+    
+    // Update the visual state of category checkboxes in the HTML
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
     categoryCheckboxes.forEach(checkbox => {
-      checkbox.style.backgroundColor = '#10b981'
-      checkbox.querySelector('i').style.display = 'block'
-      const category = checkbox.dataset.category
-      this.selectCategory(metadataId, category)
+      checkbox.style.backgroundColor = 'white'
+      const icon = checkbox.querySelector('i')
+      icon.style.display = 'block'
+      icon.style.color = '#10b981' // green checkmark
     })
+    
+    // Update filter switch visibility (hide when all selected)
+    this.uiManager.updateFilterSwitchVisibility(metadataId)
     
     // Update cell filtering (which will re-render labels in ReGL mode)
     this.dataManager.updateCellFiltering()
   }
 
   deselectAllCategoriesForMetadata(metadataId) {
+    console.log(`🔍 [DESELECT ALL] Deselecting all categories for metadata ${metadataId}`)
+    
+    // Clear ALL categories from the Set (not just the ones in HTML)
+    if (this.selectedCategories && this.selectedCategories[metadataId]) {
+      this.selectedCategories[metadataId].clear()
+      console.log(`🔍 [DESELECT ALL] Cleared all categories from selectedCategories`)
+    }
+    
+    // Update the visual state of category checkboxes in the HTML
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
     categoryCheckboxes.forEach(checkbox => {
-      checkbox.style.backgroundColor = '#f3f4f6'
+      checkbox.style.backgroundColor = 'white'
       checkbox.querySelector('i').style.display = 'none'
-      const category = checkbox.dataset.category
-      this.deselectCategory(metadataId, category)
     })
+    
+    console.log(`🔍 [DESELECT ALL] Updated ${categoryCheckboxes.length} visible checkboxes`)
+    
+    // Update filter switch visibility (show when not all selected)
+    this.uiManager.updateFilterSwitchVisibility(metadataId)
     
     // Update cell filtering (which will re-render labels in ReGL mode)
     this.dataManager.updateCellFiltering()
@@ -7253,7 +7837,7 @@ export default class extends Controller {
 
 
   async initializeCheckboxesForMetadata(metadataId) {
-    //console.log(`Initializing checkboxes for metadata: ${metadataId}`)
+    console.log(`🔍 [INIT] Initializing checkboxes for metadata: ${metadataId}`)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
@@ -7272,20 +7856,32 @@ export default class extends Controller {
       return
     }
     
+    // Only initialize if not already initialized
+    if (this.selectedCategories[metadataId]) {
+      console.log(`🔍 [INIT] Checkboxes already initialized for metadata ${metadataId}, skipping`)
+      return
+    }
+    
     // Initialize the selected categories for this metadata
+    // Get ALL unique categories from the actual metadata vector, not just from HTML
     this.selectedCategories[metadataId] = new Set()
     
-    // Get all categories for this metadata
-    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    categoryCheckboxes.forEach(categoryCheckbox => {
-      const category = categoryCheckbox.dataset.category
-      this.selectedCategories[metadataId].add(category)
-    })
-    
-    //console.log(`Initialized checkboxes for metadata ${metadataId}:`, Array.from(this.selectedCategories[metadataId]))
+    if (metadataVector.values && Array.isArray(metadataVector.values)) {
+      // Get all unique categories from the metadata values
+      const allCategories = [...new Set(metadataVector.values)]
+      allCategories.forEach(category => {
+        this.selectedCategories[metadataId].add(category)
+      })
+      console.log(`🔍 [INIT] Initialized ${this.selectedCategories[metadataId].size} categories from metadata vector for ${metadataId}`)
+    } else {
+      console.error(`🔍 [INIT] No values found in metadata vector for ${metadataId}`)
+    }
     
     // Update point count display after initializing checkboxes
     this.dataManager.updateCellFiltering()
+    
+    // Show the filter switch now that we have a selection
+    this.uiManager.updateFilterSwitchVisibility(metadataId)
   }
 
 
@@ -7508,8 +8104,8 @@ export default class extends Controller {
 
   // Get cell indices for a given metadata (handles both discrete and continuous)
   getCellsForMetadata(metadataId) {
-    // Check if this is discrete metadata with actual selections
-    if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
+    // Check if this is discrete metadata (including empty Set which means "show nothing")
+    if (this.selectedCategories[metadataId] !== undefined) {
       return this.getCellsForMetadataCategories(metadataId, this.selectedCategories[metadataId])
     }
     
@@ -7632,12 +8228,22 @@ export default class extends Controller {
     this.selectedRanges = {}
     
     // Reset all checkbox visual states
-    const allCheckboxes = document.querySelectorAll('.metadata-checkbox, .category-checkbox')
-    allCheckboxes.forEach(checkbox => {
+    const metadataCheckboxes = document.querySelectorAll('.metadata-checkbox')
+    metadataCheckboxes.forEach(checkbox => {
       checkbox.style.backgroundColor = '#10b981' // Green (selected)
       const icon = checkbox.querySelector('i')
       if (icon) {
         icon.style.display = 'block'
+      }
+    })
+    
+    const categoryCheckboxes = document.querySelectorAll('.category-checkbox')
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.backgroundColor = 'white' // White background
+      const icon = checkbox.querySelector('i')
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = '#10b981' // Green checkmark
       }
     })
     
@@ -8644,6 +9250,838 @@ export default class extends Controller {
     
     // Ensure final update is performed when dragging stops
     this.updatePlot()
+  }
+
+  // Draw category distribution bar plots (cumulative stacked bars showing coloring metadata distribution)
+  drawCategoryDistributions(metadataId) {
+    // Get the metadata vector that's being displayed (the one with categories)
+    const displayedMetadataVector = this.dataManager.getMetadataVectorById(metadataId)
+    if (!displayedMetadataVector || !displayedMetadataVector.values || displayedMetadataVector.data_type !== 'DISCRETE') {
+      return
+    }
+    
+    // Get the metadata vector used for coloring (currentMetadataVector)
+    const coloringMetadataVector = this.currentMetadataVector
+    if (!coloringMetadataVector || !coloringMetadataVector.values) {
+      // No coloring active, don't draw distributions
+      return
+    }
+    
+    // Check if coloring is continuous or categorical
+    if (coloringMetadataVector.data_type === 'NUMERIC') {
+      // Draw continuous distribution (gradient bar)
+      this.drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector)
+      return
+    } else if (coloringMetadataVector.data_type !== 'DISCRETE') {
+      // Unknown type, don't draw
+      return
+    }
+    
+    // Get filtered cell indices (if any filters are active)
+    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Count occurrences of each coloring category (filtered only)
+    const coloringCategoryCounts = {}
+    const totalCells = coloringMetadataVector.values.length
+    
+    for (let i = 0; i < coloringMetadataVector.values.length; i++) {
+      if (!filteredSet || filteredSet.has(i)) {
+        const category = coloringMetadataVector.values[i]
+        coloringCategoryCounts[category] = (coloringCategoryCounts[category] || 0) + 1
+      }
+    }
+    
+    // Sort coloring categories by count (largest first) to match plot ordering
+    const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
+      return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
+    })
+    
+    // Get category colors from color manager
+    const categoryColors = this.colorManager.getCategoryColors(sortedColoringCategories.length)
+    
+    // Get all canvases for this metadata
+    const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
+    
+    canvases.forEach(canvas => {
+      const displayedCategory = canvas.dataset.category
+      
+      // Find all cells that belong to this displayed category (filtered only)
+      const cellsInDisplayedCategory = []
+      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+          cellsInDisplayedCategory.push(i)
+        }
+      }
+      
+      // Count how many cells in this displayed category belong to each coloring category
+      const distributionCounts = {}
+      cellsInDisplayedCategory.forEach(cellIndex => {
+        const coloringCategory = coloringMetadataVector.values[cellIndex]
+        distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
+      })
+      
+      // Store segment information for tooltip
+      const segments = []
+      let currentX = 0
+      
+      sortedColoringCategories.forEach((coloringCategory, index) => {
+        const count = distributionCounts[coloringCategory] || 0
+        if (count > 0) {
+          const percentage = (count / cellsInDisplayedCategory.length) * 100
+          const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width
+          
+          segments.push({
+            category: coloringCategory,
+            count: count,
+            percentage: percentage,
+            startX: currentX,
+            endX: currentX + segmentWidth,
+            color: categoryColors[index % categoryColors.length]
+          })
+          
+          currentX += segmentWidth
+        }
+      })
+      
+      // Store segments data on canvas for tooltip
+      canvas.dataset.segments = JSON.stringify(segments)
+      
+      // Set canvas size
+      const rect = canvas.getBoundingClientRect()
+      canvas.width = rect.width * window.devicePixelRatio
+      canvas.height = rect.height * window.devicePixelRatio
+      
+      const ctx = canvas.getContext('2d')
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+      
+      // Draw background (light gray)
+      ctx.fillStyle = '#f3f4f6'
+      ctx.fillRect(0, 0, rect.width, rect.height)
+      
+      // Draw cumulative stacked bar
+      segments.forEach(segment => {
+        const colorValue = segment.color
+        const color = typeof colorValue === 'string' ? colorValue : `#${colorValue.toString(16).padStart(6, '0')}`
+        
+        ctx.fillStyle = color
+        const segmentWidth = segment.endX - segment.startX
+        ctx.fillRect(segment.startX, 0, segmentWidth, rect.height)
+      })
+      
+      // Add mousemove event listener for tooltip
+      if (!canvas.dataset.tooltipInitialized) {
+        canvas.dataset.tooltipInitialized = 'true'
+        canvas.style.cursor = 'pointer'
+        
+        // Create custom tooltip element if it doesn't exist
+        let tooltip = document.getElementById('category-bar-tooltip')
+        if (!tooltip) {
+          tooltip = document.createElement('div')
+          tooltip.id = 'category-bar-tooltip'
+          tooltip.style.cssText = `
+            position: fixed;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+          `
+          document.body.appendChild(tooltip)
+        }
+        
+        canvas.addEventListener('mousemove', (e) => {
+          const rect = canvas.getBoundingClientRect()
+          const x = e.clientX - rect.left
+          const segments = JSON.parse(canvas.dataset.segments || '[]')
+          
+          // Find which segment the mouse is over
+          const hoveredSegment = segments.find(seg => x >= seg.startX && x < seg.endX)
+          
+          if (hoveredSegment) {
+            const tooltipText = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
+            tooltip.textContent = tooltipText
+            tooltip.style.display = 'block'
+            tooltip.style.left = `${e.clientX + 10}px`
+            tooltip.style.top = `${e.clientY + 10}px`
+          } else {
+            tooltip.style.display = 'none'
+          }
+        })
+        
+        canvas.addEventListener('mouseleave', () => {
+          tooltip.style.display = 'none'
+        })
+      }
+    })
+  }
+
+  // Draw continuous distribution (histogram-like bar showing value distribution)
+  drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector) {
+    console.log('🎨 [BAR PLOTS] drawContinuousDistributions called for metadata:', metadataId)
+    console.log('🎨 [BAR PLOTS] Current gradient points:', this.customGradientControlPoints || this.gradientControlPoints)
+    
+    // Get filtered cell indices (if any filters are active)
+    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Get all canvases for this metadata
+    const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
+    
+    // Use the same color range logic as the scatter plot
+    // This ensures the gradient mapping is identical
+    const effectiveRange = this.getEffectiveColorRange()
+    let globalMin, globalMax
+    
+    if (effectiveRange && coloringMetadataVector.id === this.currentMetadataVector?.id) {
+      // Use the effective color range (respects "Adapt color range" setting)
+      globalMin = effectiveRange.min
+      globalMax = effectiveRange.max
+    } else if (coloringMetadataVector.compression_info) {
+      // Use compression info range
+      globalMin = coloringMetadataVector.compression_info.min_val
+      globalMax = coloringMetadataVector.compression_info.max_val
+    } else {
+      // Fallback: calculate from filtered values
+      const filteredColoringValues = coloringMetadataVector.values.filter((v, idx) => {
+        return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
+      })
+      globalMin = Math.min(...filteredColoringValues)
+      globalMax = Math.max(...filteredColoringValues)
+    }
+    
+    canvases.forEach(canvas => {
+      const displayedCategory = canvas.dataset.category
+      
+      // Find all cells that belong to this displayed category (filtered only)
+      const cellsInDisplayedCategory = []
+      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+          cellsInDisplayedCategory.push(i)
+        }
+      }
+      
+      // Get continuous values for these cells
+      const values = cellsInDisplayedCategory.map(cellIndex => coloringMetadataVector.values[cellIndex])
+      
+      // Calculate statistics
+      const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v))
+      if (validValues.length === 0) {
+        // No valid values, draw empty bar
+        const rect = canvas.getBoundingClientRect()
+        canvas.width = rect.width * window.devicePixelRatio
+        canvas.height = rect.height * window.devicePixelRatio
+        const ctx = canvas.getContext('2d')
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+        ctx.fillStyle = '#f3f4f6'
+        ctx.fillRect(0, 0, rect.width, rect.height)
+        canvas.dataset.bins = JSON.stringify([])
+        canvas.dataset.stats = JSON.stringify({ min: 0, max: 0, mean: 0, median: 0, count: 0 })
+        return
+      }
+      
+      const min = Math.min(...validValues)
+      const max = Math.max(...validValues)
+      const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
+      const sortedValues = [...validValues].sort((a, b) => a - b)
+      const median = sortedValues[Math.floor(sortedValues.length / 2)]
+      
+      // Store stats for download
+      canvas.dataset.stats = JSON.stringify({ min, max, mean, median, count: validValues.length })
+      
+      // Create bins for histogram (use 20 bins across the global range)
+      const numBins = 20
+      const binWidth = (globalMax - globalMin) / numBins
+      const bins = Array(numBins).fill(0)
+      
+      validValues.forEach(value => {
+        const binIndex = Math.min(Math.floor((value - globalMin) / binWidth), numBins - 1)
+        bins[binIndex]++
+      })
+      
+      // Store bin information for tooltip
+      const binData = bins.map((count, index) => ({
+        start: globalMin + index * binWidth,
+        end: globalMin + (index + 1) * binWidth,
+        count: count,
+        percentage: (count / validValues.length) * 100
+      }))
+      canvas.dataset.bins = JSON.stringify(binData)
+      
+      // Set canvas size
+      const rect = canvas.getBoundingClientRect()
+      canvas.width = rect.width * window.devicePixelRatio
+      canvas.height = rect.height * window.devicePixelRatio
+      
+      const ctx = canvas.getContext('2d')
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+      
+      // Draw background (light gray)
+      ctx.fillStyle = '#f3f4f6'
+      ctx.fillRect(0, 0, rect.width, rect.height)
+      
+      // Get the actual gradient being used in the plot
+      const controlPoints = this.customGradientControlPoints || this.gradientControlPoints || [
+        { position: 0, color: 0x0000ff },
+        { position: 0.5, color: 0x00ff00 },
+        { position: 1, color: 0xff0000 }
+      ]
+      
+      // Convert control points to hex strings if they're numbers
+      const normalizedControlPoints = controlPoints.map(cp => ({
+        position: cp.position,
+        color: typeof cp.color === 'number' ? `#${cp.color.toString(16).padStart(6, '0')}` : cp.color
+      }))
+      
+      // Helper function to get color at a specific position in the gradient
+      const getColorAtPosition = (position) => {
+        // Find the two control points that surround this position
+        let lowerPoint = normalizedControlPoints[0]
+        let upperPoint = normalizedControlPoints[normalizedControlPoints.length - 1]
+        
+        for (let i = 0; i < normalizedControlPoints.length - 1; i++) {
+          if (position >= normalizedControlPoints[i].position && position <= normalizedControlPoints[i + 1].position) {
+            lowerPoint = normalizedControlPoints[i]
+            upperPoint = normalizedControlPoints[i + 1]
+            break
+          }
+        }
+        
+        // Interpolate between the two colors
+        const t = (position - lowerPoint.position) / (upperPoint.position - lowerPoint.position)
+        const lower = this.hexToRgb(lowerPoint.color)
+        const upper = this.hexToRgb(upperPoint.color)
+        
+        const r = Math.round(lower.r + (upper.r - lower.r) * t)
+        const g = Math.round(lower.g + (upper.g - lower.g) * t)
+        const b = Math.round(lower.b + (upper.b - lower.b) * t)
+        
+        return `rgb(${r}, ${g}, ${b})`
+      }
+      
+      // Draw histogram bars with proportional widths
+      let currentX = 0
+      bins.forEach((count, index) => {
+        if (count > 0) {
+          // Calculate width proportional to the number of cells in this bin
+          const proportion = count / validValues.length
+          const segmentWidth = proportion * rect.width
+          
+          // Get color for this bin based on its actual value position in the selected range
+          // The gradient maps globalMin to 0 and globalMax to 1
+          const binCenterValue = globalMin + (index + 0.5) * binWidth
+          const binPosition = (binCenterValue - globalMin) / (globalMax - globalMin)
+          const color = getColorAtPosition(binPosition)
+          
+          ctx.fillStyle = color
+          ctx.fillRect(currentX, 0, segmentWidth, rect.height)
+          
+          currentX += segmentWidth
+        }
+      })
+      
+      // Add mousemove event listener for tooltip (only once)
+      if (!canvas.dataset.tooltipInitialized) {
+        canvas.dataset.tooltipInitialized = 'true'
+        canvas.style.cursor = 'pointer'
+        
+        // Create custom tooltip element if it doesn't exist
+        let tooltip = document.getElementById('category-bar-tooltip')
+        if (!tooltip) {
+          tooltip = document.createElement('div')
+          tooltip.id = 'category-bar-tooltip'
+          tooltip.style.cssText = `
+            position: fixed;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+          `
+          document.body.appendChild(tooltip)
+        }
+        
+        const tooltipHandler = (e) => {
+          const rect = canvas.getBoundingClientRect()
+          const x = e.clientX - rect.left
+          const bins = JSON.parse(canvas.dataset.bins || '[]')
+          const stats = JSON.parse(canvas.dataset.stats || '{}')
+          
+          // Calculate cumulative widths to find which bin was hovered
+          let cumulativeWidth = 0
+          let hoveredBin = null
+          
+          for (const bin of bins) {
+            if (bin.count > 0) {
+              const segmentWidth = (bin.count / stats.count) * rect.width
+              if (x >= cumulativeWidth && x < cumulativeWidth + segmentWidth) {
+                hoveredBin = bin
+                break
+              }
+              cumulativeWidth += segmentWidth
+            }
+          }
+          
+          if (hoveredBin) {
+            const tooltipText = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
+            tooltip.textContent = tooltipText
+            tooltip.style.display = 'block'
+            tooltip.style.left = `${e.clientX + 10}px`
+            tooltip.style.top = `${e.clientY + 10}px`
+          } else {
+            // Show overall stats
+            const tooltipText = `Min: ${stats.min?.toFixed(2)}, Max: ${stats.max?.toFixed(2)}, Mean: ${stats.mean?.toFixed(2)}, Median: ${stats.median?.toFixed(2)} (${stats.count} cells)`
+            tooltip.textContent = tooltipText
+            tooltip.style.display = 'block'
+            tooltip.style.left = `${e.clientX + 10}px`
+            tooltip.style.top = `${e.clientY + 10}px`
+          }
+        }
+        
+        canvas.addEventListener('mousemove', tooltipHandler)
+        canvas.addEventListener('mouseleave', () => {
+          tooltip.style.display = 'none'
+        })
+      }
+    })
+  }
+  
+  // Helper function to convert hex color to RGB
+  hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 }
+  }
+  // Delegate download to DownloadManager
+  async downloadGlobalDistribution(event) {
+    return this.downloadManager.downloadGlobalDistribution(event)
+  }
+
+  // Old implementation moved to DownloadManager
+  // The following methods are kept for reference but delegated:
+  /*
+  async downloadGlobalDistribution(event) {
+    event.stopPropagation()
+    
+    const button = event.currentTarget
+    const metadataId = parseInt(button.dataset.metadataId)
+    
+    // Get the displayed metadata vector
+    const displayedMetadataVector = this.dataManager.getMetadataVectorById(metadataId)
+    if (!displayedMetadataVector || !displayedMetadataVector.values || displayedMetadataVector.data_type !== 'DISCRETE') {
+      console.warn('Cannot download: metadata must be categorical')
+      return
+    }
+    
+    // Get filtered cell indices (if any filters are active)
+    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    const hasFilters = filteredSet !== null
+    
+    // Get all unique categories and count them (total and filtered)
+    const uniqueCategories = [...new Set(displayedMetadataVector.values)]
+    const totalCategoryCounts = {}
+    const filteredCategoryCounts = {}
+    
+    displayedMetadataVector.values.forEach((cat, idx) => {
+      totalCategoryCounts[cat] = (totalCategoryCounts[cat] || 0) + 1
+      if (!hasFilters || filteredSet.has(idx)) {
+        filteredCategoryCounts[cat] = (filteredCategoryCounts[cat] || 0) + 1
+      }
+    })
+    
+    // Sort categories by filtered count (or total if no filters)
+    const sortedCategories = uniqueCategories.sort((a, b) => {
+      const countA = hasFilters ? (filteredCategoryCounts[a] || 0) : (totalCategoryCounts[a] || 0)
+      const countB = hasFilters ? (filteredCategoryCounts[b] || 0) : (totalCategoryCounts[b] || 0)
+      return countB - countA
+    })
+    
+    // Load SheetJS library
+    if (!window.XLSX) {
+      try {
+        await this.loadSheetJS()
+      } catch (error) {
+        console.warn('Could not load Excel library')
+        return
+      }
+    }
+    
+    const wb = window.XLSX.utils.book_new()
+    const totalCells = displayedMetadataVector.values.length
+    const filteredTotalCells = hasFilters ? filteredSet.size : totalCells
+    
+    // Sheet 0: Active Filters (if filters exist)
+    if (hasFilters) {
+      this.addFiltersSheet(wb)
+    }
+    
+    // Sheet 1 (or 2 if filters exist): Category Summary (with total and filtered counts)
+    const summaryData = hasFilters 
+      ? [['Category', 'Total Cells', 'Total %', 'Filtered Cells', 'Filtered %']]
+      : [['Category', 'Cell Count', 'Percentage']]
+    
+    sortedCategories.forEach(category => {
+      const totalCount = totalCategoryCounts[category] || 0
+      const totalPercentage = parseFloat(((totalCount / totalCells) * 100).toFixed(2))
+      
+      if (hasFilters) {
+        const filteredCount = filteredCategoryCounts[category] || 0
+        const filteredPercentage = filteredTotalCells > 0 
+          ? parseFloat(((filteredCount / filteredTotalCells) * 100).toFixed(2)) 
+          : 0
+        summaryData.push([category, totalCount, totalPercentage, filteredCount, filteredPercentage])
+      } else {
+        summaryData.push([category, totalCount, totalPercentage])
+      }
+    })
+    const ws1 = window.XLSX.utils.aoa_to_sheet(summaryData)
+    window.XLSX.utils.book_append_sheet(wb, ws1, 'Categories')
+    
+    // Check if there's active coloring
+    const coloringMetadataVector = this.currentMetadataVector
+    if (coloringMetadataVector && coloringMetadataVector.values) {
+      if (coloringMetadataVector.data_type === 'DISCRETE') {
+        // Sheet 2: Categorical Distribution
+        await this.addCategoricalDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet)
+      } else if (coloringMetadataVector.data_type === 'NUMERIC') {
+        // Sheet 2: Continuous Distribution (bins)
+        await this.addContinuousDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet)
+        // Sheet 3: Summary statistics for each category
+        await this.addContinuousSummarySheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet)
+      }
+    }
+    
+    // Create filename
+    const projectKey = this.getProjectKey()
+    const displayedMetadataName = this.sanitizeFilename(displayedMetadataVector.name || 'metadata')
+    const coloringSuffix = coloringMetadataVector 
+      ? `_colored-by_${this.sanitizeFilename(coloringMetadataVector.name)}` 
+      : ''
+    const filename = `${projectKey}_${displayedMetadataName}_all-categories${coloringSuffix}.xlsx`
+    
+    // Write and download
+    window.XLSX.writeFile(wb, filename)
+    
+    console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
+  }
+  
+  // Add filters sheet to workbook
+  addFiltersSheet(wb) {
+    const filtersData = [['Filter Type', 'Metadata', 'Filter Details']]
+    
+    // Add categorical filters
+    if (this.selectedCategories && Object.keys(this.selectedCategories).length > 0) {
+      for (const [metadataId, selectedCats] of Object.entries(this.selectedCategories)) {
+        if (selectedCats && selectedCats.size > 0) {
+          const metadataVector = this.dataManager.getMetadataVectorById(parseInt(metadataId))
+          if (metadataVector) {
+            const metadataName = metadataVector.name || `Metadata ${metadataId}`
+            const allCategories = [...new Set(metadataVector.values)]
+            
+            // Only add if not all categories are selected (i.e., it's actually filtering)
+            if (selectedCats.size < allCategories.length) {
+              const selectedList = [...selectedCats].join(', ')
+              const filterDetail = `Selected ${selectedCats.size} of ${allCategories.length} categories: ${selectedList}`
+              filtersData.push(['Categorical', metadataName, filterDetail])
+            }
+          }
+        }
+      }
+    }
+    
+    // Add continuous (range) filters
+    if (this.selectedRanges && Object.keys(this.selectedRanges).length > 0) {
+      for (const [metadataId, range] of Object.entries(this.selectedRanges)) {
+        if (range && range.min !== undefined && range.max !== undefined) {
+          // Check if this filter is disabled
+          if (this.disabledFilters && this.disabledFilters.has(parseInt(metadataId))) {
+            continue // Skip disabled filters
+          }
+          
+          const metadataVector = this.dataManager.getMetadataVectorById(parseInt(metadataId))
+          if (metadataVector) {
+            const metadataName = metadataVector.name || `Metadata ${metadataId}`
+            const values = metadataVector.values.filter(v => v !== null && v !== undefined && !isNaN(v))
+            const globalMin = Math.min(...values)
+            const globalMax = Math.max(...values)
+            
+            // Check if it's a subrange (not the full range)
+            const isFullRange = (Math.abs(range.min - globalMin) < 0.0001 && Math.abs(range.max - globalMax) < 0.0001)
+            if (!isFullRange) {
+              const filterDetail = `Range: ${range.min.toFixed(4)} to ${range.max.toFixed(4)} (full range: ${globalMin.toFixed(4)} to ${globalMax.toFixed(4)})`
+              filtersData.push(['Continuous', metadataName, filterDetail])
+            }
+          }
+        }
+      }
+    }
+    
+    // Only add the sheet if there are actual filters (more than just the header row)
+    if (filtersData.length > 1) {
+      const ws = window.XLSX.utils.aoa_to_sheet(filtersData)
+      window.XLSX.utils.book_append_sheet(wb, ws, 'Active Filters')
+    }
+  }
+  
+  // Add categorical distribution sheet to workbook
+  async addCategoricalDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet) {
+    // Get coloring categories (from filtered cells only)
+    const coloringCategoryCounts = {}
+    coloringMetadataVector.values.forEach((cat, idx) => {
+      if (!filteredSet || filteredSet.has(idx)) {
+        coloringCategoryCounts[cat] = (coloringCategoryCounts[cat] || 0) + 1
+      }
+    })
+    const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
+      return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
+    })
+    
+    // Create distribution data
+    const distributionData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (count)`), ...sortedColoringCategories.map(cat => `${cat} (%)`)]]
+    
+    sortedCategories.forEach(displayedCategory => {
+      const row = [displayedCategory]
+      
+      // Find cells in this category (filtered only)
+      const cellsInCategory = []
+      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+          cellsInCategory.push(i)
+        }
+      }
+      
+      // Count distribution
+      const distribution = {}
+      cellsInCategory.forEach(cellIndex => {
+        const coloringCat = coloringMetadataVector.values[cellIndex]
+        distribution[coloringCat] = (distribution[coloringCat] || 0) + 1
+      })
+      
+      // Add counts
+      sortedColoringCategories.forEach(coloringCat => {
+        row.push(distribution[coloringCat] || 0)
+      })
+      
+      // Add percentages
+      sortedColoringCategories.forEach(coloringCat => {
+        const count = distribution[coloringCat] || 0
+        const percentage = cellsInCategory.length > 0 ? parseFloat(((count / cellsInCategory.length) * 100).toFixed(2)) : 0
+        row.push(percentage)
+      })
+      
+      distributionData.push(row)
+    })
+    
+    const ws = window.XLSX.utils.aoa_to_sheet(distributionData)
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Distribution')
+  }
+  
+  // Add continuous distribution sheet to workbook
+  async addContinuousDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet) {
+    // Get global min/max (from filtered cells only)
+    const filteredValues = coloringMetadataVector.values.filter((v, idx) => {
+      return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
+    })
+    const globalMin = Math.min(...filteredValues)
+    const globalMax = Math.max(...filteredValues)
+    const numBins = 20
+    const binWidth = (globalMax - globalMin) / numBins
+    
+    // Create bin ranges header
+    const binRanges = []
+    for (let i = 0; i < numBins; i++) {
+      const start = globalMin + i * binWidth
+      const end = globalMin + (i + 1) * binWidth
+      binRanges.push(`${start.toFixed(2)}-${end.toFixed(2)}`)
+    }
+    
+    const distributionData = [['Category', ...binRanges.map(r => `${r} (count)`), ...binRanges.map(r => `${r} (%)`)]]
+    
+    sortedCategories.forEach(displayedCategory => {
+      const row = [displayedCategory]
+      
+      // Find cells in this category (filtered only)
+      const cellsInCategory = []
+      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+          cellsInCategory.push(i)
+        }
+      }
+      
+      // Get values and create bins
+      const values = cellsInCategory.map(idx => coloringMetadataVector.values[idx])
+      const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v))
+      const bins = Array(numBins).fill(0)
+      
+      validValues.forEach(value => {
+        const binIndex = Math.min(Math.floor((value - globalMin) / binWidth), numBins - 1)
+        bins[binIndex]++
+      })
+      
+      // Add counts
+      bins.forEach(count => row.push(count))
+      
+      // Add percentages
+      bins.forEach(count => {
+        const percentage = validValues.length > 0 ? parseFloat(((count / validValues.length) * 100).toFixed(2)) : 0
+        row.push(percentage)
+      })
+      
+      distributionData.push(row)
+    })
+    
+    const ws = window.XLSX.utils.aoa_to_sheet(distributionData)
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Distribution')
+  }
+  
+  // Add continuous summary statistics sheet to workbook
+  async addContinuousSummarySheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet) {
+    const summaryData = [['Category', 'Cell Count', 'Min', 'Max', 'Mean', 'Median', 'Q1', 'Q3', 'Std Dev']]
+    
+    sortedCategories.forEach(displayedCategory => {
+      // Find cells in this category (filtered only)
+      const cellsInCategory = []
+      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+          cellsInCategory.push(i)
+        }
+      }
+      
+      // Get values
+      const values = cellsInCategory.map(idx => coloringMetadataVector.values[idx])
+      const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v))
+      
+      if (validValues.length === 0) {
+        summaryData.push([displayedCategory, 0, 0, 0, 0, 0, 0, 0, 0])
+        return
+      }
+      
+      // Calculate statistics
+      const min = Math.min(...validValues)
+      const max = Math.max(...validValues)
+      const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
+      const sortedValues = [...validValues].sort((a, b) => a - b)
+      const median = sortedValues[Math.floor(sortedValues.length / 2)]
+      const q1 = sortedValues[Math.floor(sortedValues.length * 0.25)]
+      const q3 = sortedValues[Math.floor(sortedValues.length * 0.75)]
+      const stdDev = Math.sqrt(validValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / validValues.length)
+      
+      summaryData.push([
+        displayedCategory,
+        validValues.length,
+        parseFloat(min.toFixed(4)),
+        parseFloat(max.toFixed(4)),
+        parseFloat(mean.toFixed(4)),
+        parseFloat(median.toFixed(4)),
+        parseFloat(q1.toFixed(4)),
+        parseFloat(q3.toFixed(4)),
+        parseFloat(stdDev.toFixed(4))
+      ])
+    })
+    
+    const ws = window.XLSX.utils.aoa_to_sheet(summaryData)
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Summary Stats')
+  }
+  
+  */
+  // All download-related methods have been moved to DownloadManager
+
+  // Initialize resizable column dividers
+  initializeResizers() {
+    const leftPanel = document.getElementById('left-panel')
+    const rightPanel = document.getElementById('right-panel')
+    const mainPanel = document.getElementById('main-panel')
+    const leftResizer = document.getElementById('left-resizer')
+    const rightResizer = document.getElementById('right-resizer')
+    
+    if (!leftPanel || !rightPanel || !mainPanel || !leftResizer || !rightResizer) {
+      console.warn('Resizer elements not found')
+      return
+    }
+    
+    let isResizingLeft = false
+    let isResizingRight = false
+    let startX = 0
+    let startLeftWidth = 0
+    let startRightWidth = 0
+    
+    // Left resizer
+    leftResizer.addEventListener('mousedown', (e) => {
+      isResizingLeft = true
+      startX = e.clientX
+      startLeftWidth = leftPanel.offsetWidth
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      e.preventDefault()
+    })
+    
+    // Right resizer
+    rightResizer.addEventListener('mousedown', (e) => {
+      isResizingRight = true
+      startX = e.clientX
+      startRightWidth = rightPanel.offsetWidth
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      e.preventDefault()
+    })
+    
+    // Mouse move handler
+    document.addEventListener('mousemove', (e) => {
+      if (isResizingLeft) {
+        const deltaX = e.clientX - startX
+        const newWidth = Math.max(200, Math.min(800, startLeftWidth + deltaX))
+        leftPanel.style.width = `${newWidth}px`
+        
+        // Trigger canvas resize if needed
+        if (this.reglRenderer) {
+          requestAnimationFrame(() => {
+            this.reglRenderer.handleResize()
+          })
+        }
+      } else if (isResizingRight) {
+        const deltaX = e.clientX - startX
+        const newWidth = Math.max(200, Math.min(800, startRightWidth - deltaX))
+        rightPanel.style.width = `${newWidth}px`
+        
+        // Trigger canvas resize if needed
+        if (this.reglRenderer) {
+          requestAnimationFrame(() => {
+            this.reglRenderer.handleResize()
+          })
+        }
+      }
+    })
+    
+    // Mouse up handler
+    document.addEventListener('mouseup', () => {
+      if (isResizingLeft || isResizingRight) {
+        isResizingLeft = false
+        isResizingRight = false
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        
+        // Final resize update
+        if (this.reglRenderer) {
+          setTimeout(() => {
+            this.reglRenderer.handleResize()
+          }, 100)
+        }
+      }
+    })
   }
 
 }

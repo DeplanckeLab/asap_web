@@ -37,9 +37,13 @@ export default class extends Controller {
     // Color range adaptation button state
     this.adaptColorRangeEnabled = false
     
-    // Get the main visualization controller
+    // Get the main visualization controller and its modules
     this.visualizationController = window.visualizationController
+    this.dataManager = this.visualizationController?.dataManager
+    this.rendererManager = this.visualizationController?.rendererManager
     console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
+    console.log('🎚️ Range slider controller connected, dataManager:', !!this.dataManager)
+    console.log('🎚️ Range slider controller connected, rendererManager:', !!this.rendererManager)
     
     // Initialize button appearance
     this.updateButtonAppearance()
@@ -343,7 +347,7 @@ export default class extends Controller {
   
   // Perform the actual plot update (separated for throttling)
   performPlotUpdate() {
-    if (!this.visualizationController) return
+    if (!this.visualizationController || !this.dataManager) return
     
     const startTime = performance.now()
     console.log('🚀 [PERF] performPlotUpdate started for metadata:', this.metadataIdValue)
@@ -404,10 +408,10 @@ export default class extends Controller {
     
     // Trigger unified filtering (which will update ALL counts and render)
     const filterStart = performance.now()
-    if (this.visualizationController.updateCellFiltering) {
+    if (this.dataManager.updateCellFiltering) {
       // Pass shouldUpdateColors=true if we're adapting the color range
       const shouldUpdateColors = this.adaptColorRangeEnabled
-      this.visualizationController.updateCellFiltering(shouldUpdateColors)
+      this.dataManager.updateCellFiltering(shouldUpdateColors)
     }
     const filterTime = performance.now() - filterStart
     console.log(`🚀 [PERF] updateCellFiltering took ${filterTime.toFixed(2)}ms`)
@@ -416,8 +420,8 @@ export default class extends Controller {
     // (otherwise the legend doesn't change, so no need to redraw)
     if (this.adaptColorRangeEnabled) {
       const legendStart = performance.now()
-      if (this.visualizationController.renderContinuousColorLegend) {
-        this.visualizationController.renderContinuousColorLegend()
+      if (this.rendererManager.renderContinuousColorLegendCanvas2D) {
+        this.rendererManager.renderContinuousColorLegendCanvas2D()
       }
       const legendTime = performance.now() - legendStart
       console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
@@ -781,10 +785,10 @@ export default class extends Controller {
       console.error('🎨 renderPointsWithCurrentColoring method not found!')
     }
     
-    console.log('🎨 About to trigger legend re-render, method exists?', !!this.visualizationController.renderContinuousColorLegend)
-    if (this.visualizationController.renderContinuousColorLegend) {
+    console.log('🎨 About to trigger legend re-render, method exists?', !!this.rendererManager.renderContinuousColorLegendCanvas2D)
+    if (this.rendererManager.renderContinuousColorLegendCanvas2D) {
       console.log('🎨 Triggering legend re-render...')
-      this.visualizationController.renderContinuousColorLegend()
+      this.rendererManager.renderContinuousColorLegendCanvas2D()
       console.log('🎨 Legend re-render completed')
     } else {
       console.error('🎨 renderContinuousColorLegend method not found!')

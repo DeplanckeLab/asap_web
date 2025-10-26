@@ -81,7 +81,10 @@ class ProjectsController < ApplicationController
     #end
     
     # Get default loom file - use the first loom file with visualizations
+    Rails.logger.debug "🔍 [DEBUG] Available loom files: #{@available_loom_files.inspect}"
+    Rails.logger.debug "🔍 [DEBUG] All loom files: #{all_loom_files.inspect}"
     @default_loom_file = @available_loom_files.first || all_loom_files.first || 'parsing/output.loom'
+    Rails.logger.debug "🔍 [DEBUG] Default loom file set to: #{@default_loom_file}"
     
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 

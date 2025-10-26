@@ -1,363 +1,418 @@
-// Color Management Module for Visualization
-// Handles all color-related operations including customization and caching
+/**
+ * Color Manager Module
+ * Handles color management and customization
+ */
 
 export class ColorManager {
   constructor(controller) {
     this.controller = controller
-    this._cachedCategoryColors = null
-    this._cachedColorMap = null
-    this._cachedCentroids = null
-    this._cachedCentroidsKey = null
   }
 
-  // Get category colors with caching
-  getCategoryColors() {
-    if (this._cachedCategoryColors) {
-      return this._cachedCategoryColors
-    }
-
-    if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      this._cachedCategoryColors = window.CATEGORY_COLORS.map(color => {
-        // Convert hex to PIXI color number
-        return parseInt(color.replace('#', ''), 16)
-      })
-      return this._cachedCategoryColors
-    }
-
-    // Fallback colors if global colors are not available
-    const fallbackColors = [
-      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b,
-      0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4,
-      0x45b7d1, 0x96ceb4, 0xfeca57, 0xff9ff3, 0xff6b6b
-    ]
-    
-    this._cachedCategoryColors = fallbackColors
-    return this._cachedCategoryColors
-  }
-
-  // Get color and alpha for a point with caching
+  // Color calculation and caching
   getColorAndAlpha(pointIndex) {
-    if (this._cachedColorMap && this._cachedColorMap.has(pointIndex)) {
-      return this._cachedColorMap.get(pointIndex)
+    const hasSelection = this.controller.selectedCells && this.controller.selectedCells.size > 0
+    const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(pointIndex)
+    
+    // Check for selection coloring first (highest priority)
+    if (isSelected) {
+      return { color: 0xff0000, alpha: 1.0 } // Red for selected points
     }
 
-    // If no metadata coloring is active, return default blue
-    if (!this.controller.currentMetadataVector || !this.controller.currentMetadataVector.values) {
-      return { color: 0x3b82f6, alpha: 1.0 }
-    }
-
-    const { data_type, values, compression_info } = this.controller.currentMetadataVector
-    let color, alpha
-
-    if (data_type === 'DISCRETE') {
-      const category = values[pointIndex]
-      const categories = this.controller.currentMetadataVector.categories
-      const categoryIndex = categories.indexOf(category)
+    // Check for metadata coloring
+    let baseColor = 0x3b82f6 // Default blue color
+    
+    // Find the metadata vector that is actually being used for coloring
+    // This should be the one that has a visible legend/color scheme active
+    // This fixes the issue where new dots appear with wrong colors when filtering constraints are relaxed
+    const coloringMetadataVector = this.getColoringMetadataVector()
+    
+    if (coloringMetadataVector && coloringMetadataVector.values && coloringMetadataVector.values[pointIndex] !== undefined) {
+      const { data_type, values, compression_info } = coloringMetadataVector
+      const value = values[pointIndex]
       
-      color = this.getCategoryColor(category, categoryIndex, this.controller.currentMetadataVector.name)
-      alpha = 1.0
-    } else if (data_type === 'CONTINUOUS') {
-      const normalizedValue = this.normalizeContinuousValue(values[pointIndex], compression_info)
-      color = this.valueToColor(normalizedValue)
-      alpha = 1.0
-    } else {
-      color = 0x3b82f6
-      alpha = 1.0
+      if (data_type === 'DISCRETE') {
+        // Cache the color map to avoid recalculating for every point
+        if (!this.controller._cachedColorMap || this.controller._cachedColorMapMetadataId !== coloringMetadataVector.id) {
+          // Use DOM order (same as legend) for consistent color assignment
+          const domOrderCategories = this.controller.getCategoriesForMetadata(coloringMetadataVector.id)
+          if (domOrderCategories && domOrderCategories.length > 0) {
+            const categoryNames = domOrderCategories.map(cat => cat.name)
+            this.controller._cachedColorMap = this.controller.createDiscreteColorMap(categoryNames, coloringMetadataVector.id)
+          } else {
+            // Fallback to alphabetical order if DOM order not available
+            const uniqueValues = [...new Set(values.filter(v => v !== null && v !== undefined))]
+            this.controller._cachedColorMap = this.controller.createDiscreteColorMap(uniqueValues, coloringMetadataVector.id)
+          }
+          this.controller._cachedColorMapMetadataId = coloringMetadataVector.id
+        }
+        
+        const colorInfo = this.controller._cachedColorMap.get(value)
+        if (colorInfo) {
+          baseColor = colorInfo.color
+        }
+      } else if (data_type === 'NUMERIC') {
+        // For numeric data, use the continuous color mapping
+        const normalizedValue = this.controller.normalizeNumericValue(value, compression_info)
+        const colorInfo = this.controller.valueToColor(normalizedValue)
+        if (colorInfo) {
+          baseColor = colorInfo.color
+        }
+      }
     }
-
-    // Cache the result
-    if (!this._cachedColorMap) {
-      this._cachedColorMap = new Map()
+    
+    // Apply visibility filtering (alpha channel)
+    let alpha = 1.0
+    if (this.controller.currentVisibleCells && this.controller.currentVisibleCells.length > 0) {
+      alpha = this.controller.currentVisibleCells.includes(pointIndex) ? 1.0 : 0.1
     }
-    this._cachedColorMap.set(pointIndex, { color, alpha })
-
-    return { color, alpha }
+    
+    return { color: baseColor, alpha: alpha }
   }
 
-  // Get point color (simplified version)
-  getPointColor(pointIndex) {
-    const { color } = this.getColorAndAlpha(pointIndex)
-    return color
+  getColoringMetadataVector() {
+    return this.controller.getColoringMetadataVector()
   }
 
-  // Clear category colors cache
-  clearCategoryColorsCache() {
-    this._cachedCategoryColors = null
-  }
-
-  // Clear color map cache
   clearColorMapCache() {
-    this._cachedColorMap = null
-    this._cachedCentroids = null
-    this._cachedCentroidsKey = null
+    return this.controller.clearColorMapCache()
   }
 
-  // Normalize continuous value to 0-1 range
-  normalizeContinuousValue(value, compressionInfo) {
-    if (!compressionInfo || compressionInfo.min === undefined || compressionInfo.max === undefined) {
-      return 0.5 // Default to middle if no compression info
+  shouldRecalculateColors(coloringMetadataVector) {
+    return this.controller.shouldRecalculateColors(coloringMetadataVector)
+  }
+
+  calculateAndCacheColors(coloringMetadataVector) {
+    return this.controller.calculateAndCacheColors(coloringMetadataVector)
+  }
+
+  getPointColor(pointIndex) {
+    return this.controller.getPointColor(pointIndex)
+  }
+
+  // Color updates and rendering
+  updateVisualizationWithMetadataVector() {
+    return this.controller.updateVisualizationWithMetadataVector()
+  }
+
+  renderPointsWithCurrentColoring() {
+    return this.controller.renderPointsWithCurrentColoring()
+  }
+
+  // Color storage management
+  clearStoredColors(metadataId) {
+    return this.controller.clearStoredColors(metadataId)
+  }
+
+  resetColorsForMetadata(metadataId) {
+    return this.controller.resetColorsForMetadata(metadataId)
+  }
+
+  // Calculate and cache colors for all points based on coloring metadata
+  calculateAndCacheColors(coloringMetadataVector) {
+    if (!coloringMetadataVector || !coloringMetadataVector.values) {
+      // No coloring metadata, use default colors
+      this.controller.cachedColorsByCellIndex = new Map()
+      for (let i = 0; i < this.controller.currentCoordinates.length; i++) {
+        this.controller.cachedColorsByCellIndex.set(i, 0x3b82f6) // Default blue
+      }
+      this.controller.lastColoringMetadataId = null
+      this.controller.lastColorRange = null
+      return
     }
     
-    const { min, max } = compressionInfo
-    if (max === min) return 0.5 // Avoid division by zero
+    console.log(`🎨 [CACHE] Calculating colors for ${coloringMetadataVector.values.length} points`)
+    const startTime = performance.now()
     
-    return Math.max(0, Math.min(1, (value - min) / (max - min)))
-  }
-
-  // Convert normalized value to color
-  valueToColor(normalizedValue) {
-    // Use a color scale from blue (low) to red (high)
-    const colors = this.getCategoryColors()
+    this.controller.cachedColorsByCellIndex = new Map()
+    const { data_type, values, compression_info } = coloringMetadataVector
     
-    // Map normalized value to color index
-    const colorIndex = Math.floor(normalizedValue * (colors.length - 1))
-    return colors[colorIndex]
-  }
-
-  // Get category color with customization support
-  getCategoryColor(categoryName, index, metadataId) {
-    // Check for custom color in localStorage
-    const customColorKey = `custom_color_${metadataId}_${categoryName}`
-    const customColor = localStorage.getItem(customColorKey)
-    
-    if (customColor && customColor !== 'undefined') {
-      return parseInt(customColor.replace('#', ''), 16)
+    if (data_type === 'DISCRETE') {
+      // Discrete metadata coloring
+      const categoryColors = this.getCategoryColors()
+      const domOrderCategories = this.controller.getCategoriesForMetadata(coloringMetadataVector.id)
+      let categoryToIndex = {}
+      
+      if (domOrderCategories && domOrderCategories.length > 0) {
+        const categoryNames = domOrderCategories.map(cat => cat.name)
+        categoryNames.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+      } else {
+        const uniqueCategories = [...new Set(values)]
+        uniqueCategories.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+      }
+      
+      // Cache colors for all points
+      for (let i = 0; i < values.length; i++) {
+        const category = values[i]
+        const categoryIndex = categoryToIndex[category] || 0
+        const colorValue = categoryColors[categoryIndex % categoryColors.length]
+        const color = typeof colorValue === 'string' 
+          ? parseInt(colorValue.replace('#', ''), 16)
+          : colorValue
+        this.controller.cachedColorsByCellIndex.set(i, color)
+      }
+      
+    } else if (data_type === 'NUMERIC') {
+      // Continuous metadata coloring
+      const effectiveRange = this.controller.getEffectiveColorRange()
+      let minVal, maxVal
+      
+      if (effectiveRange) {
+        minVal = effectiveRange.min
+        maxVal = effectiveRange.max
+      } else if (compression_info) {
+        minVal = compression_info.min_val
+        maxVal = compression_info.max_val
+      } else {
+        minVal = Math.min(...values)
+        maxVal = Math.max(...values)
+      }
+      
+      const range = maxVal - minVal
+      
+      // Cache colors for all points
+      for (let i = 0; i < values.length; i++) {
+        const value = values[i]
+        const normalizedValue = range > 0 ? (value - minVal) / range : 0.5
+        const color = this.controller.getColorFromGradient(normalizedValue)
+        this.controller.cachedColorsByCellIndex.set(i, color)
+      }
+      
+      // Cache the color range for future comparisons
+      this.controller.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
     }
     
-    // Use default color from palette
-    const colors = this.getCategoryColors()
-    return colors[index % colors.length]
+    // Cache the metadata ID for future comparisons
+    this.controller.lastColoringMetadataId = coloringMetadataVector.id
+    
+    const elapsed = performance.now() - startTime
+    console.log(`🎨 [CACHE] Cached colors for ${this.controller.cachedColorsByCellIndex.size} points in ${elapsed.toFixed(2)}ms`)
   }
 
-  // Get default category color (ignoring localStorage)
-  getDefaultCategoryColor(categoryName, index) {
-    // Use the same color palette as the plot
+  // Centralized function to get the color for a point at a given index
+  getPointColor(pointIndex) {
+    return this.getColorAndAlpha(pointIndex).color
+  }
+
+  // Get the metadata vector that is currently being used for coloring
+  getColoringMetadataVector() {
+    // First, check if there's a metadata vector that has a visible legend
+    // Look for active legend elements in the DOM
+    const activeLegend = document.querySelector('.metadata-legend:not([style*="display: none"])')
+    if (activeLegend) {
+      const metadataId = activeLegend.dataset.metadataId
+      if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        return this.controller.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Fallback: check for active color legend (for continuous metadata)
+    const activeColorLegend = document.querySelector('.color-legend:not([style*="display: none"])')
+    if (activeColorLegend) {
+      const metadataId = activeColorLegend.dataset.metadataId
+      if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        return this.controller.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Fallback: check for active gradient legend (for continuous metadata)
+    const activeGradientLegend = document.querySelector('.gradient-legend:not([style*="display: none"])')
+    if (activeGradientLegend) {
+      const metadataId = activeGradientLegend.dataset.metadataId
+      if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        return this.controller.loadedMetadataVectors[metadataId]
+      }
+    }
+    
+    // Final fallback: use currentMetadataVector if it exists and has values
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
+      return this.controller.currentMetadataVector
+    }
+    
+    return null
+  }
+
+  // Clear color cache when coloring metadata changes
+  clearColorMapCache() {
+    this.controller._cachedColorMap = null
+    this.controller._cachedColorMapMetadataId = null
+    // Also clear the new color cache for visibility updates
+    this.controller.cachedColorsByCellIndex = new Map()
+    this.controller.lastColoringMetadataId = null
+    this.controller.lastColorRange = null
+  }
+
+  // Check if colors need to be recalculated
+  shouldRecalculateColors(coloringMetadataVector) {
+    // If no coloring metadata, no recalculation needed
+    if (!coloringMetadataVector) {
+      return false
+    }
+    
+    // If we don't have cached colors, we need to calculate them
+    if (!this.controller.cachedColorsByCellIndex || this.controller.cachedColorsByCellIndex.size === 0) {
+      return true
+    }
+    
+    // If the coloring metadata ID has changed, we need to recalculate
+    if (this.controller.lastColoringMetadataId !== coloringMetadataVector.id) {
+      return true
+    }
+    
+    // If the color range has changed (for continuous metadata), we need to recalculate
+    if (coloringMetadataVector.data_type === 'NUMERIC') {
+      const currentRange = this.controller.getEffectiveColorRange()
+      if (this.controller.lastColorRange && currentRange) {
+        if (this.controller.lastColorRange.min !== currentRange.min || this.controller.lastColorRange.max !== currentRange.max) {
+          return true
+        }
+      } else if (this.controller.lastColorRange !== currentRange) {
+        return true
+      }
+    }
+    
+    return false
+  }
+
+  // Create discrete color map for categories
+  createDiscreteColorMap(categories, metadataId) {
+    // Use the centralized color palette from the server
+    const colors = this.getCategoryColors()
+    
+    const colorMap = {}
+    categories.forEach((category, index) => {
+      // Check if we have a stored color for this category in this metadata
+      const storageKey = `category_color_${metadataId}_${category}`
+      const storedColor = localStorage.getItem(storageKey)
+      
+      if (storedColor) {
+        // Convert hex string to number for PIXI.js
+        colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
+      } else {
+        // Use default color
+        colorMap[category] = colors[index % colors.length]
+      }
+    })
+    
+    return colorMap
+  }
+
+  // Initialize default gradient based on value distribution
+  initializeDefaultGradient() {
+    if (!this.controller.currentMetadataVector || this.controller.currentMetadataVector.data_type !== 'NUMERIC') {
+      return
+    }
+
+    const values = this.controller.currentMetadataVector.values
+    this.controller.gradientControlPoints = this.determineGradientForValues(values)
+  }
+  
+  // Determine appropriate gradient based on value distribution
+  determineGradientForValues(values) {
+    // Calculate min and max values
+    let minVal = Infinity
+    let maxVal = -Infinity
+    
+    for (let i = 0; i < values.length; i++) {
+      const val = values[i]
+      if (val < minVal) minVal = val
+      if (val > maxVal) maxVal = val
+    }
+    
+    // Store min/max for value conversion
+    this.controller.gradientMinValue = minVal
+    this.controller.gradientMaxValue = maxVal
+    
+    // Helper to convert actual value to position
+    const valueToPosition = (value) => {
+      const range = maxVal - minVal
+      if (range === 0) return 0
+      return (value - minVal) / range
+    }
+    
+    // Determine gradient type based on value range
+    const spansZero = minVal < 0 && maxVal > 0
+    const allNegative = maxVal <= 0
+    const allPositive = minVal >= 0
+    
+    console.log('🎨 Determining gradient for values:', { minVal, maxVal, spansZero, allNegative, allPositive })
+    
+    if (spansZero) {
+      // Values span from negative to positive: use diverging gradient (dark blue -> light grey at 0 -> dark red)
+      const zeroPosition = valueToPosition(0)
+      console.log('🎨 Diverging gradient: zero positioned at', zeroPosition)
+      return [
+        { position: 0, color: 0x1e3a8a },           // Dark blue (most negative)
+        { position: zeroPosition, color: 0xe5e7eb }, // Light grey (at zero)
+        { position: 1, color: 0x991b1b }            // Dark red (most positive)
+      ]
+    } else if (allNegative) {
+      // All negative values: dark blue to light grey
+      console.log('🎨 All negative gradient: dark blue -> light grey')
+      return [
+        { position: 0, color: 0x1e3a8a },   // Dark blue (most negative)
+        { position: 1, color: 0xe5e7eb }    // Light grey (at zero/least negative)
+      ]
+    } else if (allPositive) {
+      // All positive values: light grey to dark red
+      console.log('🎨 All positive gradient: light grey -> dark red')
+      // If minimum is exactly 0, position light grey at 0, otherwise at minimum
+      const startPosition = minVal === 0 ? 0 : valueToPosition(Math.max(0, minVal))
+      return [
+        { position: 0, color: 0xe5e7eb },   // Light grey (at zero or minimum)
+        { position: 1, color: 0x991b1b }    // Dark red (most positive)
+      ]
+    } else {
+      // Fallback: simple gradient
+      return [
+        { position: 0, color: 0xdbeafe },   // Light blue
+        { position: 1, color: 0x1e40af }    // Dark blue
+      ]
+    }
+  }
+
+  // Get category colors from global palette
+  getCategoryColors() {
+    // Cache the colors to prevent repeated conversion
+    if (this.controller._cachedCategoryColors) {
+      return this.controller._cachedCategoryColors
+    }
+    
+    //console.log('🎨 getCategoryColors called - converting colors for first time')
+    //console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
+    
+    // Use colors from the global color palette loaded in layout
     if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
-      return parseInt(color.replace('#', ''), 16)
+      //console.log('Converting colors to JavaScript hex numbers')
+      // Convert CSS hex colors (#1f77b4) to JavaScript hex numbers (0x1f77b4)
+      const jsColors = window.CATEGORY_COLORS.map(cssColor => {
+        // Remove # and convert to hex number
+        return parseInt(cssColor.replace('#', ''), 16)
+      })
+      //console.log('Converted colors:', jsColors)
+      
+      // Cache the converted colors
+      this.controller._cachedCategoryColors = jsColors
+      return jsColors
     }
     
-    // Fallback to default colors if global colors are not available
-    const defaultColors = [
-      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b,
-      0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4,
-      0x45b7d1, 0x96ceb4, 0xfeca57, 0xff9ff3, 0xff6b6b
+    // Temporary fallback to prevent infinite loop - will be removed once colors are properly loaded
+    console.warn('Using temporary fallback colors to prevent infinite loop')
+    const fallbackColors = [
+      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b, 
+      0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4
     ]
     
-    return defaultColors[index % defaultColors.length]
+    // Cache the fallback colors too
+    this.controller._cachedCategoryColors = fallbackColors
+    return fallbackColors
   }
 
-  // Check if metadata has customized colors
-  hasCustomizedColors(metadataId) {
-    const keys = Object.keys(localStorage)
-    return keys.some(key => key.startsWith(`custom_color_${metadataId}_`))
-  }
-
-  // Clear stored colors for a metadata
-  clearStoredColors(metadataId) {
-    const keys = Object.keys(localStorage)
-    keys.forEach(key => {
-      if (key.startsWith(`custom_color_${metadataId}_`)) {
-        localStorage.removeItem(key)
-      }
-    })
-  }
-
-  // Show color picker for category customization
-  showColorPicker(colorDisk, categoryName, metadataId) {
-    // Check if there's already a picker open for this category/metadata
-    const existingPicker = document.querySelector('.color-picker')
-    if (existingPicker) {
-      const existingCategory = existingPicker.dataset.category
-      const existingMetadata = existingPicker.dataset.metadata
-      
-      if (existingCategory === categoryName && existingMetadata === metadataId) {
-        // Same picker, remove it (toggle behavior)
-        existingPicker.remove()
-        return
-      } else {
-        // Different picker, remove the old one
-        existingPicker.remove()
-      }
-    }
-
-    // Get current color
-    const currentColor = colorDisk.style.backgroundColor || '#1f77b4'
-    
-    // Create color picker
-    const picker = document.createElement('div')
-    picker.className = 'color-picker'
-    picker.style.cssText = `
-      position: absolute;
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      padding: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      z-index: 1000;
-    `
-    picker.dataset.category = categoryName
-    picker.dataset.metadata = metadataId
-
-    // Create color input
-    const colorInput = document.createElement('input')
-    colorInput.type = 'color'
-    colorInput.value = currentColor
-    colorInput.style.cssText = 'width: 40px; height: 30px; border: none; cursor: pointer;'
-
-    // Create save button
-    const saveButton = document.createElement('button')
-    saveButton.textContent = 'Save'
-    saveButton.style.cssText = `
-      margin-left: 10px;
-      padding: 5px 10px;
-      background: #007bff;
-      color: white;
-      border: none;
-      border-radius: 3px;
-      cursor: pointer;
-    `
-
-    // Create cancel button
-    const cancelButton = document.createElement('button')
-    cancelButton.textContent = 'Cancel'
-    cancelButton.style.cssText = `
-      margin-left: 5px;
-      padding: 5px 10px;
-      background: #6c757d;
-      color: white;
-      border: none;
-      border-radius: 3px;
-      cursor: pointer;
-    `
-
-    // Position picker
-    const rect = colorDisk.getBoundingClientRect()
-    picker.style.left = rect.left + 'px'
-    picker.style.top = (rect.bottom + 5) + 'px'
-
-    // Add elements to picker
-    picker.appendChild(colorInput)
-    picker.appendChild(saveButton)
-    picker.appendChild(cancelButton)
-
-    // Add to document
-    document.body.appendChild(picker)
-
-    // Event handlers
-    cancelButton.addEventListener('click', () => {
-      picker.remove()
-    })
-
-    saveButton.addEventListener('click', () => {
-      const newColor = colorInput.value
-      
-      // Store custom color
-      const customColorKey = `custom_color_${metadataId}_${categoryName}`
-      localStorage.setItem(customColorKey, newColor)
-      
-      // Clear color cache to force re-rendering
-      this.clearColorMapCache()
-      
-      // Re-render plot if this is the active metadata
-      if (this.controller.currentMetadataId === metadataId) {
-        this.controller.renderPointsWithCurrentColoring()
-        this.controller.updateLegendColors(metadataId)
-        
-        // Re-render category labels if they are visible
-        if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.visible) {
-          this.controller.renderCategoryLabels()
-        }
-      }
-      
-      // Add reset button if it doesn't exist (first customization)
-      const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
-      if (metadataContainer) {
-        this.controller.addResetColorsButton(metadataContainer, metadataId)
-      }
-      
-      // Close the picker
-      picker.remove()
-    })
-
-    // Close on outside click
-    setTimeout(() => {
-      document.addEventListener('click', function closePicker(e) {
-        if (!picker.contains(e.target)) {
-          picker.remove()
-          document.removeEventListener('click', closePicker)
-        }
-      })
-    }, 100)
-  }
-
-  // Reset colors for a metadata
-  resetColorsForMetadata(metadataId) {
-    // Clear stored colors
-    this.clearStoredColors(metadataId)
-    
-    // Clear color cache
-    this.clearColorMapCache()
-    
-    // Re-render plot if this is the active metadata
-    if (this.controller.currentMetadataId === metadataId) {
-      this.controller.renderPointsWithCurrentColoring()
-      this.controller.updateLegendColors(metadataId)
-      
-      // Re-render category labels if they are visible
-      if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.visible) {
-        this.controller.renderCategoryLabels()
-      }
-    }
-    
-    // Remove reset button
-    this.controller.removeResetColorsButton(metadataId)
-  }
-
-  // Update legend colors
-  updateLegendColors(metadataId) {
-    const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
-    if (!metadataContainer) return
-
-    const colorDisks = metadataContainer.querySelectorAll('.category-color-disk')
-    colorDisks.forEach((disk, index) => {
-      const categoryName = disk.dataset.category
-      const defaultColor = this.getDefaultCategoryColor(categoryName, index)
-      const hexColor = '#' + defaultColor.toString(16).padStart(6, '0')
-      disk.style.backgroundColor = hexColor
-    })
-  }
-
-  // Convert hex to RGB
-  hexToRgb(hex) {
-    if (!hex || hex === 'undefined') return { r: 204, g: 204, b: 204 }
-    
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : { r: 204, g: 204, b: 204 }
-  }
-
-  // Get point color and size for SVG export
-  getPointColorAndSize(point) {
-    let color = '#3b82f6' // Default blue
-    let size = this.controller.currentPointSize || 1
-
-    if (point.cellId !== undefined) {
-      const { color: pointColor } = this.getColorAndAlpha(point.cellId)
-      color = '#' + pointColor.toString(16).padStart(6, '0')
-    }
-
-    return { color, size }
-  }
-
-  // Store original point color for reset functionality
-  storeOriginalPointColor(cellId, color) {
-    if (!this.controller.originalPointColors) {
-      this.controller.originalPointColors = new Map()
-    }
-    this.controller.originalPointColors.set(cellId, color)
+  // Clear the cached colors (call this when colors are reloaded)
+  clearCategoryColorsCache() {
+    this.controller._cachedCategoryColors = null
   }
 }

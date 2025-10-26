@@ -1,115 +1,606 @@
-// UI Manager Module for Visualization
-// Handles UI elements, tooltips, settings windows, and other interface components
+/**
+ * UI Manager Module
+ * Handles UI elements, tooltips, and settings
+ */
 
 export class UIManager {
   constructor(controller) {
     this.controller = controller
-    this.tooltip = null
-    this.settingsWindow = null
-    this.isDraggingSettings = false
-    this.dragOffset = { x: 0, y: 0 }
   }
 
-  // Initialize tooltip
+  // Tooltip management
   initializeTooltip() {
-    // Create tooltip element
-    this.tooltip = document.createElement('div')
-    this.tooltip.id = 'visualization-tooltip'
-    this.tooltip.style.cssText = `
-      position: absolute;
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      pointer-events: none;
-      z-index: 1000;
-      display: none;
-      max-width: 300px;
-      word-wrap: break-word;
-    `
-    document.body.appendChild(this.tooltip)
-  }
-
-  // Create tooltip dynamically
-  createTooltipDynamically() {
-    if (this.tooltip) {
-      this.tooltip.remove()
-    }
-    this.initializeTooltip()
-  }
-
-  // Show tooltip
-  showTooltip(cellId, point) {
-    if (!this.tooltip) {
-      this.createTooltipDynamically()
-    }
-
-    // Get cell information
-    const cellName = `Cell ${cellId + 1}`
-    let categoryInfo = ''
-
-    // Add metadata information if available
-    if (this.controller.currentMetadataVector) {
-      const { data_type, values, categories } = this.controller.currentMetadataVector
+    //console.log('🔧 Initializing tooltip system')
+    this.controller.tooltip = document.getElementById('point-tooltip')
+    this.controller.tooltipContent = document.getElementById('tooltip-content')
+    
+    if (!this.controller.tooltip || !this.controller.tooltipContent) {
+      console.warn('Tooltip elements not found, creating dynamically:', {
+        tooltip: !!this.controller.tooltip,
+        tooltipContent: !!this.controller.tooltipContent,
+        tooltipElement: this.controller.tooltip,
+        contentElement: this.controller.tooltipContent
+      })
       
-      if (data_type === 'DISCRETE' && values && values[cellId] !== undefined) {
-        const category = values[cellId]
-        categoryInfo = `Category: ${category}`
-      } else if (data_type === 'CONTINUOUS' && values && values[cellId] !== undefined) {
-        const value = values[cellId]
-        categoryInfo = `Value: ${value.toFixed(3)}`
+      // Create tooltip dynamically
+      this.createTooltipDynamically()
+      return
+    }
+  }
+
+  createTooltipDynamically() {
+    console.log('🎯 [Tooltip] Creating tooltip dynamically')
+    
+    // Remove existing tooltip if it exists
+    const existingTooltip = document.getElementById('point-tooltip')
+    if (existingTooltip) {
+      console.log('🎯 [Tooltip] Removing existing tooltip')
+      existingTooltip.remove()
+    }
+    
+    // Create tooltip element
+    this.controller.tooltip = document.createElement('div')
+    this.controller.tooltip.id = 'point-tooltip'
+    
+    // Set styles individually for better compatibility
+    this.controller.tooltip.style.position = 'fixed'
+    this.controller.tooltip.style.backgroundColor = 'red'
+    this.controller.tooltip.style.color = 'white'
+    this.controller.tooltip.style.padding = '12px 16px'
+    this.controller.tooltip.style.borderRadius = '6px'
+    this.controller.tooltip.style.fontSize = '16px'
+    this.controller.tooltip.style.pointerEvents = 'none'
+    this.controller.tooltip.style.zIndex = '999999'
+    this.controller.tooltip.style.display = 'none'
+    this.controller.tooltip.style.maxWidth = '200px'
+    this.controller.tooltip.style.wordWrap = 'break-word'
+    this.controller.tooltip.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)'
+    this.controller.tooltip.style.border = '3px solid yellow'
+    this.controller.tooltip.style.left = '50px'
+    this.controller.tooltip.style.top = '50px'
+    
+    // Create content element
+    this.controller.tooltipContent = document.createElement('div')
+    this.controller.tooltipContent.id = 'tooltip-content'
+    this.controller.tooltip.appendChild(this.controller.tooltipContent)
+    
+    // Add to body
+    document.body.appendChild(this.controller.tooltip)
+    
+    console.log('🎯 [Tooltip] Tooltip created dynamically:', {
+      tooltip: this.controller.tooltip,
+      tooltipContent: this.controller.tooltipContent,
+      parentNode: this.controller.tooltip.parentNode,
+      tooltipId: this.controller.tooltip.id
+    })
+  }
+
+  showTooltip(x, y, content) {
+    return this.controller.showTooltip(x, y, content)
+  }
+
+  hideTooltip() {
+    return this.controller.hideTooltip()
+  }
+
+  updateTooltipContent(content) {
+    return this.controller.updateTooltipContent(content)
+  }
+
+  // Loading spinners and indicators
+  showLoadingSpinner(metadataId) {
+    // Show spinner in place of the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      // Store original content if not already stored
+      if (!metadataCheckbox.dataset.originalContent) {
+        metadataCheckbox.dataset.originalContent = metadataCheckbox.innerHTML
+      }
+      
+      // Show the checkbox container and replace content with spinner
+      metadataCheckbox.style.display = 'flex'
+      metadataCheckbox.innerHTML = `
+        <svg style="width: 12px; height: 12px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+            <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      `
+      
+      // Disable checkbox during loading
+      metadataCheckbox.style.pointerEvents = 'none'
+      metadataCheckbox.style.opacity = '0.7'
+    }
+    
+    // Also show spinner on water drop button for consistency
+    const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
+    if (button) {
+      // Store original content
+      if (!button.dataset.originalContent) {
+        button.dataset.originalContent = button.innerHTML
+      }
+      
+      // Replace with spinner
+      button.innerHTML = `
+        <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+            <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      `
+      
+      // Disable button during loading
+      button.disabled = true
+      button.style.cursor = 'not-allowed'
+    }
+    
+    // Add CSS for spinner animation if not already added
+    if (!document.getElementById('spinner-animation-css')) {
+      const style = document.createElement('style')
+      style.id = 'spinner-animation-css'
+      style.textContent = `
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `
+      document.head.appendChild(style)
+    }
+  }
+
+  hideLoadingSpinner(metadataId) {
+    // Restore the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      // Restore original content
+      if (metadataCheckbox.dataset.originalContent) {
+        metadataCheckbox.innerHTML = metadataCheckbox.dataset.originalContent
+      }
+      
+      // Re-enable checkbox
+      metadataCheckbox.style.pointerEvents = 'auto'
+      metadataCheckbox.style.opacity = '1'
+      
+      // Keep the checkbox visible since metadata is now loaded
+      metadataCheckbox.style.display = 'flex'
+    }
+    
+    // Restore the water drop button
+    const button = document.querySelector(`[data-metadata-id="${metadataId}"][data-action*="waterDropClicked"]`)
+    if (button) {
+      // Restore original content
+      if (button.dataset.originalContent) {
+        button.innerHTML = button.dataset.originalContent
+      }
+      
+      // Re-enable button
+      button.disabled = false
+      button.style.cursor = 'pointer'
+    } else {
+      console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
+    }
+  }
+
+  showMetadataDropdownSpinner() {
+    return this.controller.showMetadataDropdownSpinner()
+  }
+
+  hideMetadataDropdownSpinner() {
+    return this.controller.hideMetadataDropdownSpinner()
+  }
+
+  // Metadata preloading
+  preloadMetadataVector(event) {
+    return this.controller.dataManager.preloadMetadataVector(event)
+  }
+
+  cancelPreload(event) {
+    return this.controller.dataManager.cancelPreload(event)
+  }
+
+  // Diagnostic and debugging
+  runEmergencyDiagnostic() {
+    return this.controller.runEmergencyDiagnostic()
+  }
+
+  createDiagnosticButton() {
+    return this.controller.createDiagnosticButton()
+  }
+
+  // UI state management
+  updateButtonStates(activeMode) {
+    return this.controller.updateButtonStates(activeMode)
+  }
+
+  updateControlInstructions() {
+    return this.controller.updateControlInstructions()
+  }
+
+  // Settings and toggles
+  toggleAxes() {
+    return this.controller.toggleAxes()
+  }
+
+  toggleGrid() {
+    return this.controller.toggleGrid()
+  }
+
+  toggleCategoryLabels() {
+    return this.controller.toggleCategoryLabels()
+  }
+
+  // Label management
+  renderCategoryLabels() {
+    return this.controller.renderCategoryLabels()
+  }
+
+  renderContinuousColorLegend() {
+    return this.controller.renderContinuousColorLegend()
+  }
+
+  // Point size management
+  updatePointSize(newSize) {
+    return this.controller.updatePointSize(newSize)
+  }
+
+  // Selection display
+  updateSelectedCellsCount() {
+    return this.controller.updateSelectedCellsCount()
+  }
+
+  // Show spinner next to metadata dropdown
+  showMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = true
+      dropdown.style.opacity = '0.6'
+    }
+    if (spinner) {
+      spinner.style.display = 'block'
+    }
+  }
+
+  // Hide spinner and re-enable metadata dropdown
+  hideMetadataDropdownSpinner() {
+    const dropdown = document.getElementById('metadata-select-dropdown')
+    const spinner = document.getElementById('metadata-loading-spinner')
+    
+    if (dropdown) {
+      dropdown.disabled = false
+      dropdown.style.opacity = '1'
+    }
+    if (spinner) {
+      spinner.style.display = 'none'
+    }
+  }
+
+  // Show loading spinner for a specific metadata ID
+  showLoadingSpinner(metadataId) {
+    // Show spinner in place of the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      const spinner = metadataCheckbox.querySelector('.loading-spinner')
+      if (spinner) {
+        spinner.style.display = 'inline-block'
+      }
+      metadataCheckbox.disabled = true
+    }
+  }
+
+  // Hide loading spinner for a specific metadata ID
+  hideLoadingSpinner(metadataId) {
+    // Restore the metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (metadataCheckbox) {
+      const spinner = metadataCheckbox.querySelector('.loading-spinner')
+      if (spinner) {
+        spinner.style.display = 'none'
+      }
+      metadataCheckbox.disabled = false
+    }
+  }
+
+  // Show checkboxes for metadata
+  showCheckboxesForMetadata(metadataId) {
+    console.log(`🔍 [DEBUG] Showing checkboxes for metadata: ${metadataId}`)
+    
+    // Show the global metadata checkbox
+    const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    console.log(`🔍 [DEBUG] Found metadata checkbox:`, !!metadataCheckbox)
+    if (metadataCheckbox) {
+      metadataCheckbox.style.display = 'flex'
+      console.log(`🔍 [DEBUG] Set metadata checkbox display to flex`)
+      
+      // Set initial tooltip based on metadata type
+      const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
+      if (metadataVector?.data_type === 'NUMERIC') {
+        // For continuous metadata, checkbox is checked by default
+        metadataCheckbox.title = 'Disable range selection'
+      }
+    } else {
+      console.log(`🔍 [DEBUG] No metadata checkbox found for metadata ${metadataId}`)
+    }
+    
+    // Show all category checkboxes for this metadata
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    console.log(`🔍 [DEBUG] Found ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+    categoryCheckboxes.forEach(checkbox => {
+      checkbox.style.display = 'flex'
+    })
+    
+    console.log(`🔍 [DEBUG] Showed ${categoryCheckboxes.length} category checkboxes for metadata ${metadataId}`)
+  }
+
+  // Initialize all checkboxes for the current metadata
+  initializeAllCheckboxes() {
+    // Initialize checkboxes only for the currently loaded metadata
+    const metadataId = this.controller.currentMetadataId
+    if (!metadataId) {
+      console.log('⚠️ No current metadata ID - skipping checkbox initialization')
+      return
+    }
+
+    this.controller.initializeCheckboxesForMetadata(metadataId)
+  }
+
+  // Update categories checkbox state based on current metadata
+  updateCategoriesCheckboxState() {
+    const checkbox = document.getElementById('show-categories-checkbox')
+    if (!checkbox) return
+    
+    // Check if current metadata is discrete
+    const isDiscreteMetadata = this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE'
+    
+    if (isDiscreteMetadata) {
+      checkbox.disabled = false
+      checkbox.title = 'Toggle category legend visibility'
+    } else {
+      checkbox.disabled = true
+      checkbox.checked = false
+      checkbox.title = 'Categories only available for discrete metadata'
+    }
+  }
+
+  // Enable range slider for continuous metadata
+  enableRangeSliderForMetadata(metadataId) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+    
+    const rangeSection = metadataItem.querySelector('.metadata-range-section')
+    if (!rangeSection) return
+    
+    // Find all interactive elements in the range slider
+    const minInput = rangeSection.querySelector('.range-min-input')
+    const maxInput = rangeSection.querySelector('.range-max-input')
+    const minHandle = rangeSection.querySelector('.range-slider-min-handle')
+    const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
+    const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+    
+    // Enable all controls
+    if (minInput) minInput.disabled = false
+    if (maxInput) maxInput.disabled = false
+    if (minHandle) minHandle.style.pointerEvents = 'auto'
+    if (maxHandle) maxHandle.style.pointerEvents = 'auto'
+    if (adaptButton) adaptButton.disabled = false
+    
+    // Remove visual disabled state
+    if (rangeSection) rangeSection.style.opacity = '1'
+  }
+
+  // Disable range slider for continuous metadata
+  disableRangeSliderForMetadata(metadataId) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+    
+    const rangeSection = metadataItem.querySelector('.metadata-range-section')
+    if (!rangeSection) return
+    
+    // Find all interactive elements in the range slider
+    const minInput = rangeSection.querySelector('.range-min-input')
+    const maxInput = rangeSection.querySelector('.range-max-input')
+    const minHandle = rangeSection.querySelector('.range-slider-min-handle')
+    const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
+    const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
+    
+    // Disable all controls
+    if (minInput) minInput.disabled = true
+    if (maxInput) maxInput.disabled = true
+    if (minHandle) minHandle.style.pointerEvents = 'none'
+    if (maxHandle) maxHandle.style.pointerEvents = 'none'
+    if (adaptButton) adaptButton.disabled = true
+    
+    // Add visual disabled state
+    if (rangeSection) rangeSection.style.opacity = '0.5'
+  }
+
+  // Update point count display
+  updatePointCountDisplay(filteredIndices) {
+    const pointCountElement = document.getElementById('point-count')
+    if (!pointCountElement) return
+
+    const totalPoints = this.controller.currentCoordinates?.length || 0
+    
+    // Handle undefined or null filteredIndices
+    if (!filteredIndices || filteredIndices === undefined) {
+      // No filtering applied - show total points
+      pointCountElement.textContent = `${totalPoints.toLocaleString()} points`
+      pointCountElement.title = 'All points visible (no filtering applied)'
+      pointCountElement.style.color = '' // Reset to default
+      pointCountElement.style.fontWeight = ''
+    } else {
+      // Filtering applied - show filtered count and percentage
+      const filteredCount = filteredIndices.length || 0
+      const percentage = totalPoints > 0 ? ((filteredCount / totalPoints) * 100).toFixed(1) : 0
+      const filteringSummary = this.controller.dataManager.getFilteringSummary()
+      
+      pointCountElement.textContent = `${filteredCount.toLocaleString()} points`
+      
+      // Create detailed tooltip
+      let tooltip = `${filteredCount.toLocaleString()} of ${totalPoints.toLocaleString()} points visible (${percentage}%)`
+      if (filteringSummary) {
+        tooltip += `\n\nActive filters: ${filteringSummary}`
+      }
+      pointCountElement.title = tooltip
+      
+      // Add visual indicator if filtering is applied
+      if (filteredCount < totalPoints) {
+        pointCountElement.style.color = '#f59e0b' // Orange to indicate filtering
+        pointCountElement.style.fontWeight = '600'
+      } else {
+        pointCountElement.style.color = '' // Reset to default
+        pointCountElement.style.fontWeight = ''
       }
     }
 
-    // Show tooltip
-    this.showSimpleTooltip(cellName, categoryInfo, point)
+    // Ensure the plot info panel is visible
+    this.showPlotInfoPanel()
   }
 
-  // Show simple tooltip
-  showSimpleTooltip(cellName, categoryInfo, point) {
-    if (!this.tooltip) return
-
-    // Build tooltip content
-    let content = `<strong>${cellName}</strong>`
-    if (categoryInfo) {
-      content += `<br>${categoryInfo}`
-    }
-
-    // Add selection status
-    if (this.controller.selectedCells && this.controller.selectedCells.has(point.cellId)) {
-      content += '<br><em>Selected</em>'
-    }
-
-    this.tooltip.innerHTML = content
-
-    // Position tooltip
-    const canvas = this.controller.canvas || (this.controller.pixiApp && this.controller.pixiApp.canvas)
-    if (!canvas) return
-
-    const rect = canvas.getBoundingClientRect()
-    const tooltipX = rect.left + point.x
-    const tooltipY = rect.top + point.y - 10
-
-    this.tooltip.style.left = tooltipX + 'px'
-    this.tooltip.style.top = tooltipY + 'px'
-    this.tooltip.style.display = 'block'
-  }
-
-  // Hide tooltip
-  hideTooltip() {
-    if (this.tooltip) {
-      this.tooltip.style.display = 'none'
+  // Show the plot info panel
+  showPlotInfoPanel() {
+    const plotInfo = document.getElementById('plot-info')
+    if (plotInfo) {
+      plotInfo.style.display = 'block'
     }
   }
 
-  // Toggle settings window
+  // Update all range slider counts
+  updateAllRangeSliderCounts() {
+    // Find all range slider controllers and trigger their count updates
+    const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
+    rangeSliderElements.forEach(element => {
+      // Get the Stimulus controller instance
+      const controller = this.controller.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+      if (controller && typeof controller.updateSelectedCellsCount === 'function') {
+        controller.updateSelectedCellsCount()
+      }
+    })
+  }
+
+  // Update sidebar category counts with visual indicators for ALL categorical metadata
+  updateSidebarCategoryCounts() {
+    // Update counts for ALL categorical metadata, not just the currently colored one
+    // This is important when continuous metadata is used for coloring
+    
+    // Find all category checkboxes
+    const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
+    
+    // Convert currentVisibleCells to Set once for O(1) lookups
+    const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
+    
+    allCategoryCheckboxes.forEach(checkbox => {
+      const metadataId = checkbox.dataset.metadataId
+      const category = checkbox.dataset.category
+      
+      // Get the metadata vector for this metadata ID (only if already loaded in memory)
+      const metadataVector = this.controller.loadedMetadataVectors[metadataId]
+      if (!metadataVector || !metadataVector.values) return
+      
+      // Find the count span - it's the second span in the parent container
+      const parentContainer = checkbox.parentElement.parentElement
+      const spans = parentContainer.querySelectorAll('span')
+      const countSpan = spans[spans.length - 1] // Last span is the count
+      
+      if (countSpan) {
+        // Count total and visible cells for this category
+        let totalCount = 0
+        let visibleCount = 0
+        
+        for (let i = 0; i < metadataVector.values.length; i++) {
+          if (metadataVector.values[i] === category) {
+            totalCount++
+            // O(1) lookup with Set instead of array iteration
+            if (!visibleSet || visibleSet.has(i)) {
+              visibleCount++
+            }
+          }
+        }
+        
+        // Update the count display
+        countSpan.textContent = visibleCount.toLocaleString()
+        
+        // Add visual indicators
+        if (totalCount > visibleCount) {
+          // Some cells are filtered out - show in red
+          countSpan.style.color = '#dc2626'
+          countSpan.style.fontWeight = '600'
+          
+          // Add hover tooltip
+          const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
+          countSpan.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% visible after filtering)`
+        } else {
+          // No filtering - normal appearance
+          countSpan.style.color = '#6b7280'
+          countSpan.style.fontWeight = '500'
+          countSpan.title = `${totalCount.toLocaleString()} cells (100% visible)`
+        }
+      }
+    })
+  }
+
+  // Update selected cells count display
+  updateSelectedCellsCount() {
+    const countElement = document.getElementById('selected-cells-count')
+    //console.log(`updateSelectedCellsCount called - countElement found:`, !!countElement)
+    
+    if (countElement) {
+      const totalSelectedCount = this.controller.selectedCells ? this.controller.selectedCells.size : 0
+      countElement.textContent = totalSelectedCount.toLocaleString()
+      
+      // Update tooltip with detailed information
+      if (totalSelectedCount > 0) {
+        const visibleCount = this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : 0
+        const totalCount = this.controller.currentCoordinates ? this.controller.currentCoordinates.length : 0
+        const percentage = totalCount > 0 ? ((totalSelectedCount / totalCount) * 100).toFixed(1) : 0
+        
+        countElement.title = `${totalSelectedCount.toLocaleString()} cells selected (${percentage}% of ${totalCount.toLocaleString()} total)`
+        countElement.style.color = '#1f2937'
+        countElement.style.fontWeight = '600'
+      } else {
+        countElement.title = 'No cells selected'
+        countElement.style.color = '#6b7280'
+        countElement.style.fontWeight = '500'
+      }
+    }
+  }
+
+  // Update the state of the "Add all visible cells" button
+  updateAddAllVisibleButtonState() {
+    const button = document.getElementById('add-all-visible-btn')
+    if (!button) return
+    
+    const visibleCount = this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : 0
+    const selectedCount = this.controller.selectedCells ? this.controller.selectedCells.size : 0
+    
+    if (visibleCount === 0) {
+      // No visible cells
+      button.disabled = true
+      button.textContent = 'No visible cells'
+      button.title = 'No cells are currently visible'
+    } else if (selectedCount >= visibleCount) {
+      // All visible cells are already selected
+      button.disabled = true
+      button.textContent = 'All visible selected'
+      button.title = 'All visible cells are already selected'
+    } else {
+      // Some visible cells are not selected
+      button.disabled = false
+      const remainingCount = visibleCount - selectedCount
+      button.textContent = `Add ${remainingCount.toLocaleString()} visible`
+      button.title = `Add ${remainingCount.toLocaleString()} remaining visible cells to selection`
+    }
+  }
+
+  // Settings Window Methods
   toggleSettingsWindow() {
     const settingsWindow = document.getElementById('settings-window')
     if (!settingsWindow) return
-
-    if (settingsWindow.style.display === 'none' || !settingsWindow.style.display) {
+    
+    if (settingsWindow.style.display === 'none' || settingsWindow.style.display === '') {
       settingsWindow.style.display = 'block'
       this.initializeSettingsWindow()
     } else {
@@ -117,70 +608,162 @@ export class UIManager {
     }
   }
 
-  // Initialize settings window
   initializeSettingsWindow() {
-    const settingsWindow = document.getElementById('settings-window')
-    if (!settingsWindow) return
-
-    // Initialize slider
+    // Initialize point size slider value display
     const slider = document.getElementById('point-size-slider')
     const valueDisplay = document.getElementById('point-size-value')
     if (slider && valueDisplay) {
+      // Set slider to current point size
       slider.value = this.controller.currentPointSize
       valueDisplay.textContent = this.controller.currentPointSize.toFixed(1)
+      //console.log(`Settings window initialized with point size: ${this.controller.currentPointSize}`)
+      
+      // Add direct event listener to ensure it works
+      slider.addEventListener('input', (e) => {
+        const newSize = parseFloat(e.target.value)
+        valueDisplay.textContent = newSize.toFixed(1)
+        //console.log(`Slider value changed to: ${newSize}`)
+        
+        // CRITICAL: Update this.currentPointSize so it persists across re-renders
+        //console.log(`Direct listener updating currentPointSize: ${this.controller.currentPointSize} -> ${newSize}`)
+        this.controller.currentPointSize = newSize
+        
+        this.controller.updateAllPointSizes(newSize)
+      })
     }
-
-    // Initialize checkboxes
+    
+    // Add direct event listeners for checkboxes to ensure they work
     const axesCheckbox = document.getElementById('show-axes-checkbox')
-    const gridCheckbox = document.getElementById('show-grid-checkbox')
-    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
-
     if (axesCheckbox) {
-      axesCheckbox.checked = this.controller.axesContainer ? this.controller.axesContainer.visible : true
+      //console.log('Adding event listener to axes checkbox')
+      // Remove any existing listeners first
+      axesCheckbox.removeEventListener('change', this.controller.boundAxesToggle)
+      // Create bound method for proper cleanup
+      this.controller.boundAxesToggle = (e) => {
+        //console.log('Direct axes checkbox event listener triggered!')
+        this.controller.toggleAxes()
+      }
+      axesCheckbox.addEventListener('change', this.controller.boundAxesToggle)
+    } else {
+      console.log('Axes checkbox not found during initialization!')
     }
+    
+    const gridCheckbox = document.getElementById('show-grid-checkbox')
     if (gridCheckbox) {
-      gridCheckbox.checked = this.controller.gridContainer ? this.controller.gridContainer.visible : true
+      gridCheckbox.addEventListener('change', (e) => {
+        //console.log('Direct grid checkbox event listener triggered!')
+        this.controller.toggleGrid()
+      })
     }
+    
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
     if (categoriesCheckbox) {
-      categoriesCheckbox.checked = this.controller.categoryLabelsContainer ? this.controller.categoryLabelsContainer.visible : true
+      categoriesCheckbox.addEventListener('change', (e) => {
+        //console.log('Direct categories checkbox event listener triggered!')
+        this.controller.toggleCategories()
+      })
     }
-
+    
+    // Add event listener for category order dropdown and set current value
+    const categoryOrderSelect = document.getElementById('category-order-select')
+    if (categoryOrderSelect) {
+      // Set the selected option based on current preference
+      categoryOrderSelect.value = this.controller.categoryOrder
+      
+      // Add event listener
+      categoryOrderSelect.addEventListener('change', (e) => {
+        console.log('📊 Category order changed:', e.target.value)
+        this.changeCategoryOrder(e)
+      })
+    }
+    
+    // Add event listener for numerical order dropdown and set current value
+    const numericalOrderSelect = document.getElementById('numerical-order-select')
+    if (numericalOrderSelect) {
+      // Set the selected option based on current preference
+      numericalOrderSelect.value = this.controller.numericalOrder
+      
+      // Add event listener
+      numericalOrderSelect.addEventListener('change', (e) => {
+        console.log('📊 Numerical order changed:', e.target.value)
+        this.changeNumericalOrder(e)
+      })
+    }
+    
+    // Add event listener for auto-preload checkbox
+    const autoPreloadCheckbox = document.getElementById('auto-preload-checkbox')
+    if (autoPreloadCheckbox) {
+      // Set checkbox based on current preference
+      autoPreloadCheckbox.checked = this.controller.autoPreloadMetadata
+      
+      // Add event listener
+      autoPreloadCheckbox.addEventListener('change', (e) => {
+        this.controller.autoPreloadMetadata = e.target.checked
+        console.log('📊 Auto-preload metadata:', this.controller.autoPreloadMetadata)
+        
+        // If enabled, start preloading now
+        if (this.controller.autoPreloadMetadata) {
+          console.log('🚀 Starting automatic preload after checkbox enable...')
+          this.controller.preloadAllMetadata().catch(error => {
+            console.log('Background metadata preload encountered an error:', error)
+          })
+        }
+      })
+    }
+    
+    // Update categories checkbox state based on current metadata
+    this.updateCategoriesCheckboxState()
+    
     // Make window draggable
     this.makeSettingsWindowDraggable()
   }
 
-  // Make settings window draggable
   makeSettingsWindowDraggable() {
     const settingsWindow = document.getElementById('settings-window')
     const header = document.getElementById('settings-header')
     if (!settingsWindow || !header) return
-
-    header.addEventListener('mousedown', (e) => {
-      this.isDraggingSettings = true
+    
+    let isDragging = false
+    let startX, startY, startLeft, startTop
+    
+    const startDrag = (e) => {
+      isDragging = true
+      startX = e.clientX
+      startY = e.clientY
+      
+      // Get the actual current position of the window using computed position
       const rect = settingsWindow.getBoundingClientRect()
-      this.dragOffset.x = e.clientX - rect.left
-      this.dragOffset.y = e.clientY - rect.top
-      header.style.cursor = 'grabbing'
-    })
-
-    document.addEventListener('mousemove', (e) => {
-      if (this.isDraggingSettings) {
-        const x = e.clientX - this.dragOffset.x
-        const y = e.clientY - this.dragOffset.y
-        settingsWindow.style.left = x + 'px'
-        settingsWindow.style.top = y + 'px'
-        settingsWindow.style.right = 'auto'
-      }
-    })
-
-    document.addEventListener('mouseup', () => {
-      if (this.isDraggingSettings) {
-        this.isDraggingSettings = false
-        header.style.cursor = 'move'
-      }
-    })
-
-    // Close button
+      startLeft = rect.left
+      startTop = rect.top
+      
+      // Set explicit positioning to prevent jump
+      settingsWindow.style.left = startLeft + 'px'
+      settingsWindow.style.top = startTop + 'px'
+      
+      settingsWindow.style.cursor = 'grabbing'
+      e.preventDefault()
+    }
+    
+    const doDrag = (e) => {
+      if (!isDragging) return
+      
+      const deltaX = e.clientX - startX
+      const deltaY = e.clientY - startY
+      
+      settingsWindow.style.left = (startLeft + deltaX) + 'px'
+      settingsWindow.style.top = (startTop + deltaY) + 'px'
+    }
+    
+    const stopDrag = () => {
+      isDragging = false
+      settingsWindow.style.cursor = 'move'
+    }
+    
+    header.addEventListener('mousedown', startDrag)
+    document.addEventListener('mousemove', doDrag)
+    document.addEventListener('mouseup', stopDrag)
+    
+    // Close button functionality
     const closeBtn = document.getElementById('close-settings-btn')
     if (closeBtn) {
       closeBtn.addEventListener('click', () => {
@@ -189,344 +772,439 @@ export class UIManager {
     }
   }
 
-  // Update point size
-  updatePointSize() {
-    const slider = document.getElementById('point-size-slider')
-    const valueDisplay = document.getElementById('point-size-value')
+  // Tooltip methods
+  showTooltip(cellId, point) {
+    // This method is kept for compatibility with PixiJS mode
+    // For RegL mode, we use showSimpleTooltip instead
     
-    if (!slider || !valueDisplay) return
-
-    const newSize = parseFloat(slider.value)
-    this.controller.currentPointSize = newSize
-    valueDisplay.textContent = newSize.toFixed(1)
-
-    // Update all point sizes
-    this.controller.updateAllPointSizes(newSize)
+    // Get cell information
+    const cellName = `Cell ${cellId + 1}` // Generate cell name from ID
+    
+    // Get category information if available
+    let categoryInfo = ''
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values && this.controller.currentMetadataVector.values[cellId] !== undefined) {
+      const { data_type, values } = this.controller.currentMetadataVector
+      const value = values[cellId]
+      
+      if (data_type === 'DISCRETE') {
+        // For discrete metadata, show the category name
+        categoryInfo = `<br><strong>Category:</strong> ${value}`
+      } else if (data_type === 'NUMERIC') {
+        // For continuous metadata, show the numeric value
+        categoryInfo = `<br><strong>Value:</strong> ${value.toFixed(3)}`
+      }
+    }
+    
+    // Set tooltip content with fixed/dynamic indicator
+    let statusIndicator = ''
+    if (this.controller.rendererType === 'regl' && this.controller.isTooltipFixed) {
+      statusIndicator = '<br><em style="color: #00ff00;">🔒</em>'
+    } else if (this.controller.rendererType === 'regl') {
+      //statusIndicator = '<br><em style="color: #ccc;"></em>'
+    }
+    
+    const tooltipHTML = `<strong>${cellName}</strong>${categoryInfo}${statusIndicator}`
+    this.controller.tooltipContent.innerHTML = tooltipHTML
+    // Tooltip content set
+    
+    // Position tooltip near the mouse cursor
+    const plotContainer = document.querySelector('.plot-container')
+    if (!plotContainer) {
+      console.log('Plot container not found')
+      return
+    }
+    
+    const rect = plotContainer.getBoundingClientRect()
+    // Plot container positioned
+    
+    // Get point position in screen coordinates
+    const pointX = point.x + rect.left
+    const pointY = point.y + rect.top
+    
+    // Position tooltip to the right of the point, with some offset
+    let tooltipLeft = pointX + 15
+    let tooltipTop = pointY - 10
+    
+    // Ensure tooltip stays within the plot container bounds
+    const tooltipWidth = 200 // max-width from CSS
+    const tooltipHeight = 50 // estimated height
+    
+    // Check if tooltip would go off the right edge
+    if (tooltipLeft + tooltipWidth > rect.right) {
+      tooltipLeft = pointX - tooltipWidth - 15 // Position to the left instead
+    }
+    
+    // Check if tooltip would go off the bottom edge
+    if (tooltipTop + tooltipHeight > rect.bottom) {
+      tooltipTop = pointY - tooltipHeight - 10 // Position above instead
+    }
+    
+    // Check if tooltip would go off the top edge
+    if (tooltipTop < rect.top) {
+      tooltipTop = rect.top + 10 // Keep it within bounds
+    }
+    
+    // Additional safety check - ensure tooltip is within viewport
+    if (tooltipLeft < rect.left) {
+      tooltipLeft = rect.left + 10
+    }
+    if (tooltipLeft > rect.right - tooltipWidth) {
+      tooltipLeft = rect.right - tooltipWidth - 10
+    }
+    
+    console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
+    
+    this.controller.tooltip.style.left = `${tooltipLeft}px`
+    this.controller.tooltip.style.top = `${tooltipTop}px`
+    this.controller.tooltip.style.display = 'block'
+    
+    // Temporarily make tooltip more visible for debugging
+    this.controller.tooltip.style.backgroundColor = 'red'
+    this.controller.tooltip.style.fontSize = '16px'
+    this.controller.tooltip.style.padding = '12px 16px'
+    
+    // Tooltip positioned
+    
+    // Debug: Check if tooltip is actually visible
+    const computedStyle = window.getComputedStyle(this.controller.tooltip)
+    console.log('🎯 [Tooltip] Computed style:', {
+      display: computedStyle.display,
+      visibility: computedStyle.visibility,
+      opacity: computedStyle.opacity,
+      position: computedStyle.position,
+      zIndex: computedStyle.zIndex
+    })
+    
+    // Force tooltip to be visible with maximum z-index
+    this.controller.tooltip.style.zIndex = '999999'
+    this.controller.tooltip.style.position = 'fixed'
+    this.controller.tooltip.style.visibility = 'visible'
+    this.controller.tooltip.style.opacity = '1'
+    
+    // For RegL mode, use proper positioning instead of fixed debug position
+    if (this.controller.rendererType === 'regl') {
+      console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+      
+      // Use the calculated position for RegL
+      this.controller.tooltip.style.left = `${tooltipLeft}px`
+      this.controller.tooltip.style.top = `${tooltipTop}px`
+      
+      // Different styling for fixed vs dynamic tooltips
+      if (this.controller.isTooltipFixed) {
+        console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+        this.controller.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
+        this.controller.tooltip.style.border = '2px solid #00ff00'
+        this.controller.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
+      } else {
+        console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+        this.controller.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
+        this.controller.tooltip.style.border = '1px solid #ccc'
+        this.controller.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
+      }
+      
+      this.controller.tooltip.style.width = 'auto'
+      this.controller.tooltip.style.height = 'auto'
+      
+      console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+        left: this.controller.tooltip.style.left,
+        top: this.controller.tooltip.style.top,
+        display: this.controller.tooltip.style.display,
+        backgroundColor: this.controller.tooltip.style.backgroundColor
+      })
+      
+      // TEMPORARY: Force tooltip to a visible position for debugging
+      this.controller.tooltip.style.left = '100px'
+      this.controller.tooltip.style.top = '100px'
+      this.controller.tooltip.style.backgroundColor = 'red'
+      this.controller.tooltip.style.border = '3px solid yellow'
+      this.controller.tooltip.style.width = '300px'
+      this.controller.tooltip.style.height = '100px'
+      console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+    } else {
+      // Keep debug positioning for PixiJS mode
+      this.controller.tooltip.style.left = '50px'
+      this.controller.tooltip.style.top = '50px'
+      this.controller.tooltip.style.backgroundColor = 'red'
+      this.controller.tooltip.style.border = '3px solid yellow'
+      this.controller.tooltip.style.width = '300px'
+      this.controller.tooltip.style.height = '100px'
+    }
+    
+    // Tooltip positioned
   }
 
-  // Toggle axes
-  toggleAxes() {
-    const checkbox = document.getElementById('show-axes-checkbox')
-    if (!checkbox || !this.controller.axesContainer) return
-
-    const previousVisibility = this.controller.axesContainer.visible
-    this.controller.axesContainer.visible = checkbox.checked
-
-    if (checkbox.checked !== previousVisibility) {
-      // Recalculate bounds when toggling axes
-      const originalBounds = this.controller.calculateBounds(this.controller.currentCoordinates)
-      const newBounds = this.controller.getAdjustedBounds(originalBounds)
-      this.controller.currentBounds = newBounds
-
-      // Restore the previous visibility state
-      this.controller.axesContainer.visible = previousVisibility
-
-      // Re-render points with new bounds
-      this.controller.scatterContainer.removeChildren()
-      this.controller.renderPointsWithCurrentColoring()
-
-      // Now set the final axes visibility
-      this.controller.axesContainer.visible = checkbox.checked
-
-      // Re-render axes
-      this.controller.renderAxes()
+  hideTooltip() {
+    if (this.controller.tooltip) {
+      this.controller.tooltip.style.display = 'none'
     }
   }
 
-  // Toggle grid
+  // Toggle methods for plot elements
+  toggleAxes() {
+    //console.log('toggleAxes method called!')
+    const checkbox = document.getElementById('show-axes-checkbox')
+    if (!checkbox) {
+      console.log('Checkbox not found!')
+      return
+    }
+    if (!this.controller.axesContainer) {
+      console.log('Axes container not found!')
+      return
+    }
+    
+    //console.log(`Toggling axes: ${checkbox.checked}`)
+    //console.log(`Current axes visible: ${this.controller.axesContainer.visible}`)
+    
+    // Recalculate bounds with/without axes margins BEFORE toggling visibility
+    if (this.controller.currentCoordinates) {
+      const originalBounds = this.controller.dataManager.calculateBounds(this.controller.currentCoordinates)
+      //console.log('Original bounds:', originalBounds)
+      
+      // Temporarily set axes visibility to match checkbox state for bounds calculation
+      const previousVisibility = this.controller.axesContainer.visible
+      this.controller.axesContainer.visible = checkbox.checked
+      
+      const newBounds = originalBounds
+      //console.log('Adjusted bounds:', newBounds)
+      this.controller.currentBounds = newBounds
+      
+      // Restore the previous visibility state
+      this.controller.axesContainer.visible = previousVisibility
+      
+      // Re-render axes and grid with new bounds
+      this.controller.rendererManager.renderAxes()
+      this.controller.rendererManager.renderGrid()
+      
+      // Re-render category labels after axes toggle (bounds may have changed)
+      if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.visible) {
+        this.controller.rendererManager.renderCategoryLabels()
+      }
+      
+      // Now set the final axes visibility
+      this.controller.axesContainer.visible = checkbox.checked
+      //console.log(`Final axes visible: ${this.controller.axesContainer.visible}`)
+      
+      // Re-render axes
+      this.controller.rendererManager.renderAxes()
+      //console.log('Axes toggle complete!')
+    } else {
+      console.log('No current coordinates found!')
+    }
+  }
+
   toggleGrid() {
     const checkbox = document.getElementById('show-grid-checkbox')
     if (!checkbox || !this.controller.gridContainer) return
-
+    
+    //console.log(`Toggling grid: ${checkbox.checked}`)
+    //console.log(`Current grid visible: ${this.controller.gridContainer.visible}`)
+    
+    // Toggle grid visibility
     this.controller.gridContainer.visible = checkbox.checked
-    this.controller.renderGrid()
+    //console.log(`New grid visible: ${this.controller.gridContainer.visible}`)
+    
+    // Re-render grid to ensure it's up to date
+    this.controller.rendererManager.renderGrid()
+    //console.log('Grid toggle complete!')
   }
 
-  // Toggle categories
   toggleCategories() {
     const checkbox = document.getElementById('show-categories-checkbox')
-    if (!checkbox || !this.controller.categoryLabelsContainer) return
-
-    this.controller.categoryLabelsContainer.visible = checkbox.checked
-    this.controller.renderCategoryLabels()
-  }
-
-  // Update categories checkbox state
-  updateCategoriesCheckboxState() {
-    const checkbox = document.getElementById('show-categories-checkbox')
-    if (!checkbox) return
-
-    // Check if current metadata is discrete
-    const isDiscreteMetadata = this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE'
-
-    if (isDiscreteMetadata) {
-      checkbox.disabled = false
-      checkbox.checked = this.controller.categoryLabelsContainer ? this.controller.categoryLabelsContainer.visible : true
+    if (!checkbox) {
+      console.log('🏷️ toggleCategories: checkbox not found!')
+      return
+    }
+    
+    console.log(`🏷️ Toggling categories: ${checkbox.checked}`)
+    console.log(`🏷️ Current metadata:`, this.controller.currentMetadataVector ? `${this.controller.currentMetadataVector.name} (${this.controller.currentMetadataVector.data_type})` : 'none')
+    
+    // Toggle category labels on the plot
+    if (this.controller.rendererType === 'regl') {
+      // ReGL mode: Labels are drawn on Canvas2D overlay
+      console.log('🏷️ [ReGL] Toggling category labels on Canvas2D overlay')
+      if (checkbox.checked) {
+        console.log('🏷️ [ReGL] Re-rendering category labels...')
+        // Redraw overlay with labels
+        this.controller.rendererManager.renderGrid()
+        this.controller.rendererManager.renderAxes()
+        this.controller.rendererManager.renderCategoryLabels()
+      } else {
+        console.log('🏷️ [ReGL] Clearing category labels')
+        // Redraw overlay without labels (renderCategoryLabels will check checkbox and skip)
+        this.controller.rendererManager.renderGrid()
+        this.controller.rendererManager.renderAxes()
+        this.controller.rendererManager.renderCategoryLabels()
+      }
+    } else if (this.controller.categoryLabelsContainer) {
+      // PixiJS mode: Labels are in a PixiJS container
+      this.controller.categoryLabelsContainer.visible = checkbox.checked
+      console.log(`🏷️ Category labels container visible: ${this.controller.categoryLabelsContainer.visible}`)
+      
+      // If turning on, make sure labels are rendered
+      if (checkbox.checked) {
+        console.log('🏷️ Re-rendering category labels...')
+        this.controller.rendererManager.renderCategoryLabels()
+      } else {
+        console.log('🏷️ Hiding category labels')
+      }
     } else {
-      checkbox.disabled = true
-      checkbox.checked = false
+      console.log('🏷️ No categoryLabelsContainer available')
     }
+    
+    // Find the categories container in the right panel
+    const categoriesContainer = document.querySelector('.metadata-categories')
+    if (categoriesContainer) {
+      categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
+      console.log(`🏷️ Metadata categories panel: ${checkbox.checked ? 'shown' : 'hidden'}`)
+    }
+    
+    console.log('🏷️ Categories toggle complete!')
   }
 
-  // Save selection
-  saveSelection() {
-    if (!this.controller.selectedCells || this.controller.selectedCells.size === 0) {
-      alert('No cells selected')
+  changeCategoryOrder(event) {
+    const newOrder = event.target.value
+    console.log(`📊 [CATEGORY ORDER] Changing from '${this.controller.categoryOrder}' to '${newOrder}'`)
+    
+    if (newOrder === this.controller.categoryOrder) {
+      console.log('📊 [CATEGORY ORDER] Order unchanged, skipping update')
       return
     }
-
-    const selectedArray = Array.from(this.controller.selectedCells)
-    const selectionData = {
-      selected_cells: selectedArray,
-      total_cells: this.controller.currentCoordinates ? this.controller.currentCoordinates.length : 0
-    }
-
-    // Here you would typically send the selection to the server
-    console.log('Saving selection:', selectionData)
-    alert(`Selection saved: ${selectedArray.length} cells selected`)
-  }
-
-  // Save as SVG
-  saveAsSVG() {
-    if (!this.controller.pixiApp) {
-      alert('No plot to save')
-      return
-    }
-
-    const canvas = this.controller.canvas || this.controller.pixiApp.canvas
-    if (!canvas) {
-      alert('No canvas found')
-      return
-    }
-
-    const svgContent = this.generateSVGFromPlot(canvas)
-    this.downloadSVG(svgContent, 'visualization.svg')
-  }
-
-  // Generate SVG from plot
-  generateSVGFromPlot(canvas) {
-    const width = this.controller.pixiApp.screen.width
-    const height = this.controller.pixiApp.screen.height
-
-    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
-
-    // Add grid if visible
-    if (this.controller.gridContainer && this.controller.gridContainer.visible) {
-      svg += this.generateSVGGrid(width, height)
-    }
-
-    // Add axes if visible
-    if (this.controller.axesContainer && this.controller.axesContainer.visible) {
-      svg += this.generateSVGAxes(width, height)
-    }
-
-    // Add points
-    svg += this.generateSVGPoints(width, height)
-
-    // Add category labels if visible
-    if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.visible) {
-      svg += this.generateSVGCategoryLabels()
-    }
-
-    svg += '</svg>'
-    return svg
-  }
-
-  // Generate SVG for points
-  generateSVGPoints(width, height) {
-    let svg = ''
     
-    if (this.controller.scatterContainer && this.controller.scatterContainer.children) {
-      this.controller.scatterContainer.children.forEach(point => {
-        if (point.isPoint && point.visible) {
-          const { color, size } = this.controller.getPointColorAndSize(point)
-          svg += `<circle cx="${point.x}" cy="${point.y}" r="${size}" fill="${color}" opacity="0.8"/>`
-        }
-      })
-    }
+    this.controller.categoryOrder = newOrder
     
-    return svg
-  }
-
-  // Generate SVG for grid
-  generateSVGGrid(width, height) {
-    if (!this.controller.currentBounds) return ''
-
-    let svg = ''
-    const { minX, maxX, minY, maxY } = this.controller.currentBounds
-
-    // Use the same coordinate system as the actual plot
-    const plotWidth = this.controller.pixiApp.screen.width
-    const plotHeight = this.controller.pixiApp.screen.height
-
-    // Use the same margins as axes
-    const leftMargin = 80
-    const bottomMargin = 40
-
-    // Calculate tick spacing for each axis
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-
-    // Vertical grid lines
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
-      svg += `<line x1="${screenX}" y1="0" x2="${screenX}" y2="${plotHeight - bottomMargin}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
-    }
-
-    // Horizontal grid lines
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
-      svg += `<line x1="${leftMargin}" y1="${screenY}" x2="${plotWidth}" y2="${screenY}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`
-    }
-
-    return svg
-  }
-
-  // Generate SVG for axes
-  generateSVGAxes(width, height) {
-    if (!this.controller.currentBounds) return ''
-
-    let svg = ''
-    const { minX, maxX, minY, maxY } = this.controller.currentBounds
-
-    // Use the same coordinate system as the actual plot
-    const plotWidth = this.controller.pixiApp.screen.width
-    const plotHeight = this.controller.pixiApp.screen.height
-
-    // Add more left margin for Y-axis labels
-    const leftMargin = 80
-    const bottomMargin = 40
-
-    // X-axis (bottom)
-    const xAxisY = plotHeight - bottomMargin
-    svg += `<line x1="${leftMargin}" y1="${xAxisY}" x2="${plotWidth}" y2="${xAxisY}" stroke="#374151" stroke-width="2"/>`
-
-    // Y-axis (left)
-    const yAxisX = leftMargin
-    svg += `<line x1="${yAxisX}" y1="0" x2="${yAxisX}" y2="${plotHeight - bottomMargin}" stroke="#374151" stroke-width="2"/>`
-
-    // Axis labels
-    svg += `<text x="${(plotWidth/2) + leftMargin}" y="${plotHeight - 5}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151">Dimension 1</text>`
-    svg += `<text x="${leftMargin - 15}" y="${plotHeight/2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#374151" transform="rotate(-90, ${leftMargin - 15}, ${plotHeight/2})">Dimension 2</text>`
-
-    // Tick marks and values
-    const xRange = maxX - minX
-    const yRange = maxY - minY
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
-
-    // X-axis ticks
-    const xStart = Math.ceil(minX / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(maxX / xTickSpacing) * xTickSpacing
-    for (let x = xStart; x <= xEnd; x += xTickSpacing) {
-      const screenX = leftMargin + ((x - minX) / (maxX - minX)) * (plotWidth - leftMargin)
-      svg += `<line x1="${screenX}" y1="${xAxisY - 5}" x2="${screenX}" y2="${xAxisY + 5}" stroke="#374151" stroke-width="1"/>`
-      svg += `<text x="${screenX}" y="${xAxisY + 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(x)}</text>`
-    }
-
-    // Y-axis ticks
-    const yStart = Math.ceil(minY / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(maxY / yTickSpacing) * yTickSpacing
-    for (let y = yStart; y <= yEnd; y += yTickSpacing) {
-      const screenY = ((y - minY) / (maxY - minY)) * (plotHeight - bottomMargin)
-      svg += `<line x1="${yAxisX - 5}" y1="${screenY}" x2="${yAxisX + 5}" y2="${screenY}" stroke="#374151" stroke-width="1"/>`
-      svg += `<text x="${yAxisX - 10}" y="${screenY + 3}" text-anchor="end" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">${this.formatTickValue(y)}</text>`
-    }
-
-    return svg
-  }
-
-  // Generate SVG for category labels
-  generateSVGCategoryLabels() {
-    let svg = ''
+    // Reset the flag so reordering will happen on next render
+    this.controller._lastCategoryOrderApplied = null
     
-    if (this.controller.categoryLabelsContainer && this.controller.categoryLabelsContainer.children) {
-      this.controller.categoryLabelsContainer.children.forEach(label => {
-        if (label.visible) {
-          const text = label.children[1] // Text is the second child
-          if (text && text.text) {
-            const bgWidth = text.width + 8
-            const bgHeight = text.height + 8
-            const borderColor = label.borderColor || '#cccccc'
-            
-            svg += `<rect x="${label.x - bgWidth/2}" y="${label.y - bgHeight/2}" width="${bgWidth}" height="${bgHeight}" fill="white" fill-opacity="0.9" stroke="${borderColor}" stroke-width="1" rx="4"/>`
-            svg += `<text x="${label.x}" y="${label.y + 4}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#374151">${text.text}</text>`
-          }
-        }
-      })
-    }
+    // Update ALL unfolded categorical metadata panels in the left sidebar
+    this.controller.updateAllCategoryDisplayOrders()
     
-    return svg
-  }
-
-  // Calculate tick spacing for nice round numbers
-  calculateTickSpacing(range) {
-    const roughTickCount = 5
-    const roughSpacing = range / roughTickCount
-    
-    // Find the order of magnitude
-    const magnitude = Math.pow(10, Math.floor(Math.log10(roughSpacing)))
-    
-    // Normalize to 1-10 range
-    const normalized = roughSpacing / magnitude
-    
-    // Choose nice spacing
-    let niceSpacing
-    if (normalized <= 1) {
-      niceSpacing = 1
-    } else if (normalized <= 2) {
-      niceSpacing = 2
-    } else if (normalized <= 5) {
-      niceSpacing = 5
+    // If we have discrete metadata currently displayed, re-render the plot
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE') {
+      console.log(`📊 [CATEGORY ORDER] ✅ Discrete metadata active - applying new order`)
+      
+      // IMPORTANT: Don't recreate color map - keep existing color assignments!
+      // The color map should remain stable regardless of sort order
+      // We only need to update the z-order (PixiJS) or buffer order (ReGL)
+      
+      if (this.controller.rendererType === 'regl') {
+        // ReGL: Reorder points in buffer for painter's algorithm
+        // This function will also redraw the overlay (grid, axes, labels)
+        this.controller.reorderPointsForCategoryDisplay()
+      } else {
+        // PixiJS: Update sprite z-index
+        this.controller.renderPointsWithCurrentColoring()
+      
+        // Re-render category labels
+        this.controller.rendererManager.renderCategoryLabels()
+      }
+      
+      console.log('📊 [CATEGORY ORDER] Complete!')
     } else {
-      niceSpacing = 10
+      console.log('📊 [CATEGORY ORDER] No discrete metadata active, order preference saved for next use')
     }
-    
-    return niceSpacing * magnitude
   }
 
-  // Format tick values to remove unnecessary decimals
-  formatTickValue(value) {
-    // If it's an integer, don't show decimals
-    if (Number.isInteger(value)) {
-      return value.toString()
+  changeNumericalOrder(event) {
+    const newOrder = event.target.value
+    console.log(`📊 Changing numerical order from '${this.controller.numericalOrder}' to '${newOrder}'`)
+    
+    if (newOrder === this.controller.numericalOrder) {
+      console.log('📊 Numerical order unchanged, skipping update')
+      return
     }
     
-    // Otherwise, show up to 2 decimal places, removing trailing zeros
-    return parseFloat(value.toFixed(2)).toString()
+    this.controller.numericalOrder = newOrder
+    
+    // Reset the flag so reordering will happen on next render
+    this.controller._lastNumericalOrderApplied = null
+    
+    // If we have continuous metadata currently displayed, re-render the plot
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'NUMERIC') {
+      console.log(`📊 ✅ Continuous metadata active - applying new order`)
+      
+      // Re-render the plot with new order
+      this.controller.renderPointsWithCurrentColoring()
+      
+      console.log('📊 Numerical order change complete!')
+    } else {
+      console.log('📊 No continuous metadata active, order preference saved for next use')
+    }
   }
 
-  // Download SVG
-  downloadSVG(svgContent, filename) {
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
+  // Update point size from UI slider
+  updatePointSize() {
+    //console.log('Stimulus updatePointSize method called!')
+    const slider = document.getElementById('point-size-slider')
+    const valueDisplay = document.getElementById('point-size-value')
+    if (!slider || !valueDisplay) {
+      console.log('Slider or valueDisplay not found')
+      return
+    }
     
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const newSize = parseFloat(slider.value)
+    valueDisplay.textContent = newSize.toFixed(1)
     
-    URL.revokeObjectURL(url)
+    // Store the new point size for future renders
+    //console.log(`Stimulus updatePointSize: ${this.controller.currentPointSize} -> ${newSize}`)
+    this.controller.currentPointSize = newSize
+    
+    //console.log(`Stimulus updating point size to: ${newSize}`)
+    
+    // Update all existing points
+    this.controller.rendererManager.updateAllPointSizes(newSize)
   }
 
-  // Cleanup method
-  destroy() {
-    if (this.tooltip) {
-      this.tooltip.remove()
-      this.tooltip = null
+  // Update embeddings dropdown based on selected loom file
+  updateEmbeddings() {
+    // Check if loom file select target exists (it's now manually found, not a Stimulus target)
+    if (!this.controller.loomFileSelectTarget || !this.controller.hasEmbeddingSelectTarget || !this.controller.hasEmbeddingsByLoomValue) {
+      console.log('Required targets or values not available')
+      return
     }
     
-    if (this.settingsWindow) {
-      this.settingsWindow.remove()
-      this.settingsWindow = null
+    const selectedLoomFile = this.controller.loomFileSelectTarget.value
+    const embeddings = this.controller.embeddingsByLoomValue[selectedLoomFile] || []
+    
+    // Clear current options
+    this.controller.embeddingSelectTarget.innerHTML = '<option selected>Select embedding...</option>'
+    
+    // Add new options
+    embeddings.forEach(embedding => {
+      const option = document.createElement('option')
+      option.value = embedding.id
+      option.textContent = embedding.display_name
+      this.controller.embeddingSelectTarget.appendChild(option)
+    })
+  }
+
+  // Update metadata dropdown
+  updateMetadata() {
+    const perfStart = performance.now()
+    console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
+    
+    if (!this.controller.hasMetadataSelectTarget) {
+      console.log('Metadata select target not available')
+      return
+    }
+    
+    const selectedMetadataId = this.controller.metadataSelectTarget.value
+    console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
+    
+    if (selectedMetadataId) {
+      // Show loading spinner
+      this.showMetadataDropdownSpinner()
+      
+      // Load metadata and hide spinner when done
+      this.controller.loadMetadataCoordinates(selectedMetadataId)
+        .catch(error => {
+          console.error('❌ Error loading metadata coordinates:', error)
+        })
+        .finally(() => {
+          this.hideMetadataDropdownSpinner()
+          const perfEnd = performance.now()
+          console.log(`⏱️ [PERF] ====== EMBEDDING SWITCH COMPLETED in ${(perfEnd - perfStart).toFixed(2)}ms ======`)
+        })
     }
   }
+
 }

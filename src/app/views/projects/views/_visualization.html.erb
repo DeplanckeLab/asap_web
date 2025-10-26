@@ -38,8 +38,8 @@
 </script>
 
 <div data-controller="visualization" 
-     data-visualization-embeddings-by-loom-value="<%= @all_embeddings_by_loom.to_json %>"
-     data-visualization-default-loom-file-value="<%= @default_loom_file %>"
+     data-visualization-embeddings-by-loom-value="<%= (@all_embeddings_by_loom || {}).to_json %>"
+     data-visualization-default-loom-file-value="<%= @default_loom_file.present? ? @default_loom_file : 'parsing/output.loom' %>"
      style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
@@ -302,9 +302,15 @@
           <select data-visualization-target="loomFileSelect" 
                   data-action="change->visualization#updateEmbeddings"
                   style="font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 8px;">
-            <% @available_loom_files.each do |filepath| %>
-              <option value="<%= filepath %>">
-                <%= filepath.split('/').first.capitalize %>
+            <% if @available_loom_files && @available_loom_files.any? %>
+              <% @available_loom_files.each do |filepath| %>
+                <option value="<%= filepath %>">
+                  <%= filepath.split('/').first.capitalize %>
+                </option>
+              <% end %>
+            <% else %>
+              <option value="<%= @default_loom_file || 'parsing/output.loom' %>">
+                <%= (@default_loom_file || 'parsing/output.loom').split('/').first.capitalize %>
               </option>
             <% end %>
           </select>
@@ -382,6 +388,17 @@
                 onmouseover="this.style.backgroundColor='#e5e7eb'" 
                 onmouseout="this.style.backgroundColor='#f3f4f6'">
           <i class="fas fa-save" style="font-size: 14px;"></i>
+        </button>
+        
+        <!-- Memory Diagnostic Button -->
+        <button type="button" 
+                style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
+                data-controller="visualization"
+                data-action="click->visualization#openMemoryDiagnostic"
+                title="Memory & Database Diagnostic"
+                onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                onmouseout="this.style.backgroundColor='#f3f4f6'">
+          <i class="fas fa-brain" style="font-size: 14px;"></i>
         </button>
         
         <!-- Settings Button (Icon Only) -->

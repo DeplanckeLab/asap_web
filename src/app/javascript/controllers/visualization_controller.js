@@ -6984,12 +6984,35 @@ export default class extends Controller {
     console.log('🔍 [CHECKBOX] isContinuous:', isContinuous)
     
     // Toggle the checkbox state
-    if (isSelected) {
-      // Deselect
+    // Note: Also check for orange (#f59e0b) which indicates a subrange selection
+    const isSelectedGreen = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981 green
+    const isSelectedOrange = checkbox.style.backgroundColor === 'rgb(245, 158, 11)' // #f59e0b orange
+    const isAnySelected = isSelectedGreen || isSelectedOrange
+    
+    if (isAnySelected) {
+      // Deselect - store the current range for later restoration
       checkbox.style.backgroundColor = '#f3f4f6'
       checkbox.querySelector('i').style.display = 'none'
       
       if (isContinuous) {
+        // Store the current range before clearing it (for restoration when re-checking)
+        if (!this.savedRanges) this.savedRanges = {}
+        
+        const rangeSliderElement = document.querySelector(`[data-metadata-item="${metadataId}"] [data-controller="range-slider"]`)
+        if (rangeSliderElement) {
+          const rangeSliderController = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
+          if (rangeSliderController) {
+            // Save the current slider values
+            this.savedRanges[metadataId] = {
+              min: rangeSliderController.currentMinValue,
+              max: rangeSliderController.currentMaxValue,
+              fullMin: rangeSliderController.minValue,
+              fullMax: rangeSliderController.maxValue
+            }
+            console.log('🔍 [CHECKBOX] Saved range for restoration:', this.savedRanges[metadataId])
+          }
+        }
+        
         // For continuous metadata: disable range selection (clear the range)
         delete this.selectedRanges[metadataId]
         checkbox.title = 'Enable range selection'
@@ -7001,13 +7024,11 @@ export default class extends Controller {
         this.deselectAllCategoriesForMetadata(metadataId)
       }
     } else {
-      // Select
-      checkbox.style.backgroundColor = '#10b981'
+      // Select - restore previous range if it was a subrange, otherwise use full range
       checkbox.querySelector('i').style.display = 'block'
       
       if (isContinuous) {
         console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
-        checkbox.title = 'Disable range selection'
         
         // Enable the range slider for this metadata first
         this.uiManager.enableRangeSliderForMetadata(metadataId)
@@ -7025,10 +7046,25 @@ export default class extends Controller {
             console.log('🔍 [CHECKBOX] Range slider controller found:', !!rangeSliderController)
             
             if (rangeSliderController) {
-              // Use the range slider's current values (which should still be set from before)
-              const currentMin = rangeSliderController.currentMinValue
-              const currentMax = rangeSliderController.currentMaxValue
-              console.log('🔍 [CHECKBOX] Range slider current values:', currentMin, currentMax)
+              // Check if we have a saved range (from previous uncheck)
+              let currentMin, currentMax
+              
+              if (this.savedRanges && this.savedRanges[metadataId]) {
+                // Restore the saved range
+                currentMin = this.savedRanges[metadataId].min
+                currentMax = this.savedRanges[metadataId].max
+                console.log('🔍 [CHECKBOX] Restoring saved range:', currentMin, currentMax)
+                
+                // Update the slider to show the restored range
+                rangeSliderController.currentMinValue = currentMin
+                rangeSliderController.currentMaxValue = currentMax
+                rangeSliderController.updateSliderUI()
+              } else {
+                // No saved range, use current slider values
+                currentMin = rangeSliderController.currentMinValue
+                currentMax = rangeSliderController.currentMaxValue
+                console.log('🔍 [CHECKBOX] Using current slider values:', currentMin, currentMax)
+              }
               
               this.selectedRanges[metadataId] = {
                 min: currentMin,
@@ -7036,20 +7072,31 @@ export default class extends Controller {
               }
               console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
               
+              // Update checkbox color based on whether it's a subrange
+              // This will be done by updateCheckboxColor() in the range slider
+              rangeSliderController.updateCheckboxColor()
+              
               // Update the selected cells count
               rangeSliderController.updateSelectedCellsCount()
               console.log('🔍 [CHECKBOX] Updated selected cells count')
             } else {
               console.log('🔍 [CHECKBOX] No range slider controller found!')
+              checkbox.style.backgroundColor = '#10b981' // Default to green
+              checkbox.title = 'Disable range selection'
             }
           } else {
             console.log('🔍 [CHECKBOX] No range slider element found!')
+            checkbox.style.backgroundColor = '#10b981' // Default to green
+            checkbox.title = 'Disable range selection'
           }
         } else {
           console.log('🔍 [CHECKBOX] No range section found!')
+          checkbox.style.backgroundColor = '#10b981' // Default to green
+          checkbox.title = 'Disable range selection'
         }
       } else {
         // For categorical metadata: select all categories
+        checkbox.style.backgroundColor = '#10b981' // Green for categorical
         this.selectAllCategoriesForMetadata(metadataId)
       }
     }

@@ -237,6 +237,30 @@ export default class extends Controller {
     if (this.hasMaxInputTarget) {
       this.maxInputTarget.value = this.currentMaxValue.toFixed(3)
     }
+    
+    // Update checkbox color based on whether it's a subrange
+    this.updateCheckboxColor()
+  }
+  
+  // Update checkbox color: green if full range, orange if subrange
+  updateCheckboxColor() {
+    const checkbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${this.metadataIdValue}"]`)
+    if (!checkbox) return
+    
+    // Check if current range is the full range (with small tolerance for floating point)
+    const tolerance = (this.maxValue - this.minValue) * 0.001 // 0.1% tolerance
+    const isFullRange = Math.abs(this.currentMinValue - this.minValue) < tolerance && 
+                        Math.abs(this.currentMaxValue - this.maxValue) < tolerance
+    
+    if (isFullRange) {
+      // Full range - green checkbox
+      checkbox.style.backgroundColor = '#10b981' // green
+      checkbox.title = 'Full range selected (click to disable filtering)'
+    } else {
+      // Subrange - orange checkbox
+      checkbox.style.backgroundColor = '#f59e0b' // orange
+      checkbox.title = `Subrange selected: ${this.currentMinValue.toFixed(3)} - ${this.currentMaxValue.toFixed(3)} (click to disable filtering)`
+    }
   }
 
   // Update the selected cells count display

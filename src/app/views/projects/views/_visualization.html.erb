@@ -235,7 +235,7 @@
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
             <% continuous_count = @h_metadata[@default_loom_file]&.dig('cell', 'NUMERIC')&.select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 }&.count || 0 %>
-            <span style="background-color: #10b981; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
+            <span style="background-color: #3b82f6; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
               <%= continuous_count %>
             </span>
           </div>

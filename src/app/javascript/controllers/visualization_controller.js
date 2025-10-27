@@ -4228,8 +4228,20 @@ export default class extends Controller {
     const canvas = this.canvas
     if (!canvas) {
       console.log('⚠️ No canvas available for interaction listeners')
+      console.log('🔍 [DEBUG] Canvas state:', {
+        canvas: !!this.canvas,
+        reglRenderer: !!this.reglRenderer,
+        interactionMode: this.interactionMode
+      })
       return
     }
+    
+    console.log('✅ [DEBUG] Adding interaction event listeners to canvas:', {
+      canvas: !!canvas,
+      width: canvas.width,
+      height: canvas.height,
+      interactionMode: this.interactionMode
+    })
     
     //console.log('Adding interaction event listeners to canvas')
     
@@ -4318,6 +4330,12 @@ export default class extends Controller {
 
   onInteractionMouseDown(event) {
     console.log('🎯 [Interaction] onInteractionMouseDown called, mode:', this.interactionMode, 'rendererType:', this.rendererType)
+    console.log('🔍 [DEBUG] Interaction mouse down:', {
+      eventType: event.type,
+      interactionMode: this.interactionMode,
+      canvas: !!this.canvas,
+      target: event.target?.tagName
+    })
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
@@ -4512,6 +4530,12 @@ export default class extends Controller {
   onLassoMouseDown(event) {
     console.log('========================================')
     console.log('⏱️ [LASSO] Starting lasso selection')
+    console.log('🔍 [DEBUG] Lasso mouse down called:', {
+      eventType: event.type,
+      interactionMode: this.interactionMode,
+      isDrawingLasso: this.isDrawingLasso,
+      canvas: !!this.canvas
+    })
     
     // Detect browser and store it
     //this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
@@ -5519,6 +5543,7 @@ export default class extends Controller {
     if (!this.lassoCanvasCtx || this.lassoPoints.length < 2) return
     
     // Draw on HTML canvas overlay
+    const ctx = this.lassoCanvasCtx
     
     // Clear canvas
     ctx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)

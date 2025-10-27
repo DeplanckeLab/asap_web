@@ -384,7 +384,7 @@ export class MemoryManager {
       return new Promise((resolve, reject) => {
         request.onsuccess = () => {
           if (request.result) {
-            const currentLoom = this.controller.currentLoomFile || this.controller.loomFileSelectTarget?.value || this.controller.defaultLoomFileValue
+            const currentLoom = this.controller.getCurrentLoomFile()
             
             // console.log(`💾 IndexedDB lookup for ${metadataId}:`, {
             //   found: true,
@@ -393,7 +393,9 @@ export class MemoryManager {
             //   match: request.result.loomFile === currentLoom
             // })
             
-            if (request.result.loomFile === currentLoom) {
+            // Handle both null values (empty strings) as equivalent
+            const storedLoomNormalized = request.result.loomFile === '' ? null : request.result.loomFile
+            if (storedLoomNormalized === currentLoom) {
               // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
               resolve(request.result)
             } else {
@@ -427,9 +429,21 @@ export class MemoryManager {
       const transaction = this.controller.db.transaction(['coordinates'], 'readwrite')
       const objectStore = transaction.objectStore('coordinates')
       
-      // Convert ArrayBuffer to base64 for storage
-      const binaryString = String.fromCharCode.apply(null, new Uint8Array(coordinateData.binaryData))
+      // Convert ArrayBuffer to base64 for storage (handles large buffers)
+      const uint8Array = new Uint8Array(coordinateData.binaryData)
+      let binaryString = ''
+      
+      console.log(`💾 Converting ${(coordinateData.binaryData.byteLength / 1024).toFixed(1)}KB ArrayBuffer to base64...`)
+      
+      // Process in chunks to avoid "too many arguments" error
+      const chunkSize = 8192 // Process 8KB at a time
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, i + chunkSize)
+        binaryString += String.fromCharCode.apply(null, chunk)
+      }
+      
       const base64Data = btoa(binaryString)
+      console.log(`💾 Successfully converted to base64 (${(base64Data.length / 1024).toFixed(1)}KB)`)
       
       // Add loom file info for cache invalidation
       const dataToStore = {
@@ -474,7 +488,7 @@ export class MemoryManager {
       return new Promise((resolve, reject) => {
         request.onsuccess = () => {
           if (request.result) {
-            const currentLoom = this.controller.currentLoomFile || this.controller.loomFileSelectTarget?.value || this.controller.defaultLoomFileValue
+            const currentLoom = this.controller.getCurrentLoomFile()
             
             console.log(`💾 IndexedDB lookup for coordinates ${metadataId}:`, {
               found: true,
@@ -483,15 +497,21 @@ export class MemoryManager {
               match: request.result.loomFile === currentLoom
             })
             
-            if (request.result.loomFile === currentLoom) {
+            // Handle both null values (empty strings) as equivalent
+            const storedLoomNormalized = request.result.loomFile === '' ? null : request.result.loomFile
+            if (storedLoomNormalized === currentLoom) {
               console.log(`💾 ✅ Loaded coordinates ${metadataId} from IndexedDB (disk storage)`)
               
-              // Convert base64 back to ArrayBuffer
+              // Convert base64 back to ArrayBuffer (optimized for large data)
+              console.log(`💾 Converting ${(request.result.binaryData.length / 1024).toFixed(1)}KB base64 to ArrayBuffer...`)
               const binaryString = atob(request.result.binaryData)
               const bytes = new Uint8Array(binaryString.length)
+              
+              // Use more efficient method for large datasets
               for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i)
               }
+              console.log(`💾 Successfully converted to ArrayBuffer (${(bytes.buffer.byteLength / 1024).toFixed(1)}KB)`)
               
               // Return in same format as network fetch
               resolve({

@@ -271,7 +271,12 @@ export class DataManager {
     // Try to load from IndexedDB (disk storage) first
     // Always check disk before network to avoid unnecessary downloads
     if (!this.controller.loadingMetadataVectors.has(metadataId)) {
+      console.log(`🔍 [DEBUG] About to call loadMetadataFromIndexedDB for ${metadataId}`)
+      const indexDBStart = performance.now()
       const diskData = await this.controller.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      const indexDBEnd = performance.now()
+      const indexDBDuration = (indexDBEnd - indexDBStart).toFixed(2)
+      console.log(`🔍 [DEBUG] loadMetadataFromIndexedDB completed for ${metadataId} in ${indexDBDuration}ms`)
       if (diskData) {
         // Silently load from disk (reduced logging)
         // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`)
@@ -1351,7 +1356,7 @@ export class DataManager {
         // Don't show error to user for preloading failures
       })
       }
-    }, 300) // 300ms delay - only preload if user hovers for a bit
+    }, 1000) // 1000ms delay - only preload if user hovers for 1 second
   }
   
   // Cancel preload if user quickly moves away

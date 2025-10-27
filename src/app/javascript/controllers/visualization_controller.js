@@ -154,6 +154,19 @@ export default class extends Controller {
     // Expose emergency diagnostic function
     window.runEmergencyDiagnostic = () => this.performanceManager.runEmergencyDiagnostic()
     
+    // Expose metadata status checking functions for debugging
+    window.checkMetadataStatus = () => this.checkAllMetadataStatusBeforePreload()
+    window.checkSpecificMetadataStatus = (metadataId) => this.checkSpecificMetadataStatus(metadataId)
+    
+    // Expose cell count debugging function
+    window.getCellCount = () => {
+      const cellCount = this.getCellCountFromServerData()
+      console.log(`🔍 [DEBUG] Current cell count: ${cellCount.toLocaleString()}`)
+      console.log(`🔍 [DEBUG] Current buffer size: ${this.maxMetadataInMemory}`)
+      console.log(`🔍 [DEBUG] EmbeddingsByLoomValue:`, this.embeddingsByLoomValue)
+      return cellCount
+    }
+    
     // Don't initialize checkboxes yet - wait for metadata vectors to be loaded
     
     // Simple test - remove this after debugging
@@ -246,6 +259,13 @@ export default class extends Controller {
     if (this.loomFileSelectTarget) {
       this.loomFileSelectTarget.value = loomFileToUse
       console.log('🔍 [DEBUG] Set loom file target value:', this.loomFileSelectTarget.value)
+      
+      // Debug: Check what options are available
+      console.log('🔍 [DEBUG] Loom file select options:', Array.from(this.loomFileSelectTarget.options).map(opt => ({
+        value: opt.value,
+        text: opt.text,
+        selected: opt.selected
+      })))
       
       // Add change listener to update currentLoomFile when user changes selection
       this.loomFileSelectTarget.addEventListener('change', (event) => {
@@ -350,12 +370,18 @@ export default class extends Controller {
         embeddingsByLoomValue: !!this.embeddingsByLoomValue
       })
       
-      // Add a small delay to ensure loom file is set
-      setTimeout(() => {
-        this.preloadAllMetadata().catch(error => {
+      // Add a small delay to ensure loom file is set, then check all metadata status before preloading
+      setTimeout(async () => {
+        try {
+          // Check status of all metadata before preloading
+          await this.checkAllMetadataStatusBeforePreload()
+          
+          // Then start preloading (wait for it to complete)
+          await this.preloadAllMetadata()
+        } catch (error) {
           console.log('Background metadata preload encountered an error:', error)
-        })
-      }, 100)
+        }
+      }, 200) // Slightly longer delay to ensure UI is fully ready
     }
   }
 
@@ -414,7 +440,7 @@ export default class extends Controller {
       console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
       
       // Get the current loom file selection
-      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
+      const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata coordinates endpoint
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
@@ -525,7 +551,7 @@ export default class extends Controller {
       }
       
       // Get the current loom file selection
-      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : null
+      const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata coordinates endpoint
       const projectId = window.location.pathname.split('/')[2]
@@ -709,7 +735,7 @@ export default class extends Controller {
     
     try {
       // Get the current loom file
-      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata vectors endpoint (single request for all)
       const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
@@ -786,7 +812,7 @@ export default class extends Controller {
     
     try {
       // Get the current loom file
-      const loomFile = this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      const loomFile = this.getCurrentLoomFileForRequest()
       
       // Special debugging for sex and age metadata
       const metadataName = this.dataManager.getMetadataNameById(metadataId)
@@ -874,6 +900,10 @@ export default class extends Controller {
         // FIRST: Store in memory cache immediately to avoid race conditions
         this.loadedMetadataVectors[metadataId] = vectorData
         this.metadataVectorsLoomFile = data.loom_file
+        
+        // Update status icon to show it's in memory (green check)
+        console.log(`🔍 [MEMORY] Metadata ${metadataId} loaded to memory in loadSingleMetadataVector - setting to green`)
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         
         const info = vectorData.compression_info
         //console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
@@ -1085,7 +1115,7 @@ export default class extends Controller {
       console.log(`🔍 [DEBUG] Starting preloadMetadataToDisk for metadata ${metadataId}`)
       
       // Use the original logic from the working version
-      const loomFile = this.loomFileSelectTarget ? this.loomFileSelectTarget.value : this.defaultLoomFileValue
+      const loomFile = this.getCurrentLoomFileForRequest()
       
       console.log(`🔍 [DEBUG] Using original loom file logic: loomFile="${loomFile}"`)
       
@@ -1154,10 +1184,16 @@ export default class extends Controller {
           const info = vectorData.compression_info
           console.log(`💾 [DISK] Successfully stored metadata ${vectorData.name} to disk (${info.type}): ${info.binary_size} bytes`)
           
+          // Update status icon to show it's in database (orange check)
+          const orangeTime = performance.now()
+          console.log(`🔍 [DISK] Setting ${metadataId} to in-db (orange) after disk storage at ${orangeTime.toFixed(2)}ms`)
+          console.log(`🔍 [DEBUG] Disk storage completed for metadata ${metadataId} (${vectorData.name})`)
+          this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+          
           // Show checkboxes for this metadata now that it's available on disk
           this.uiManager.showCheckboxesForMetadata(metadataId)
           
-          return { success: true, cached: false, size: info.binary_size }
+          return { success: true, cached: false, size: info.binary_size, orangeTime: orangeTime }
         } else {
           throw new Error('Failed to store metadata to IndexedDB')
         }
@@ -1305,73 +1341,186 @@ export default class extends Controller {
     }, 1000)
   }
 
-  // Check if metadata is already stored in IndexedDB
+  // Get current loom file with consistent handling of empty strings
+  getCurrentLoomFile() {
+    const loomFile = this.currentLoomFile || this.loomFileSelectTarget?.value || this.defaultLoomFileValue
+    
+    // Debug logging to help identify the issue
+    if (loomFile === '') {
+      console.warn('⚠️ [DEBUG] Loom file is empty string!', {
+        currentLoomFile: this.currentLoomFile,
+        loomFileSelectValue: this.loomFileSelectTarget?.value,
+        defaultLoomFileValue: this.defaultLoomFileValue,
+        hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
+        loomFileSelectOptions: this.loomFileSelectTarget ? Array.from(this.loomFileSelectTarget.options).map(opt => ({ value: opt.value, text: opt.text, selected: opt.selected })) : 'N/A'
+      })
+    }
+    
+    // Normalize empty string to null for consistent comparison
+    return loomFile === '' ? null : loomFile
+  }
+
+  // Get current loom file for requests (no fallback - let errors be visible)
+  getCurrentLoomFileForRequest() {
+    const loomFile = this.getCurrentLoomFile()
+    if (!loomFile) {
+      console.error('❌ [ERROR] No loom file available for request!', {
+        currentLoomFile: this.currentLoomFile,
+        loomFileSelectValue: this.loomFileSelectTarget?.value,
+        defaultLoomFileValue: this.defaultLoomFileValue,
+        hasLoomFileSelectTarget: this.hasLoomFileSelectTarget
+      })
+      throw new Error('No loom file available for request - check loom file selection')
+    }
+    return loomFile
+  }
+
+  // Get cell count from server-side data (embeddingsByLoomValue)
+  getCellCountFromServerData() {
+    // Try to get cell count from embeddingsByLoomValue first
+    if (this.embeddingsByLoomValue) {
+      const currentLoom = this.getCurrentLoomFile() || this.defaultLoomFileValue
+      const loomData = this.embeddingsByLoomValue[currentLoom]
+      
+      if (loomData && Array.isArray(loomData) && loomData.length > 0) {
+        // Get the first embedding to check its cell count
+        const firstEmbedding = loomData[0]
+        if (firstEmbedding && firstEmbedding.cellCount) {
+          console.log(`🧠 [Memory] Found cell count from embeddingsByLoomValue: ${firstEmbedding.cellCount.toLocaleString()}`)
+          return firstEmbedding.cellCount
+        }
+      }
+    }
+    
+    // Fallback: try to get from any loaded metadata
+    if (this.currentCoordinates && this.currentCoordinates.length > 0) {
+      console.log(`🧠 [Memory] Using cell count from current coordinates: ${this.currentCoordinates.length.toLocaleString()}`)
+      return this.currentCoordinates.length
+    }
+    
+    // Fallback: try to get from metadataData
+    if (this.metadataData && this.metadataData.cellCount) {
+      console.log(`🧠 [Memory] Using cell count from metadataData: ${this.metadataData.cellCount.toLocaleString()}`)
+      return this.metadataData.cellCount
+    }
+    
+    console.log(`🧠 [Memory] No cell count available from server data`)
+    return 0
+  }
+
+  // Check if metadata is already stored in IndexedDB (optimized for speed)
   async checkMetadataInDatabase(metadataId) {
-    console.log(`🔍 [DEBUG] Checking if metadata ${metadataId} is in database...`)
-    console.log(`🔍 [DEBUG] metadataId type: ${typeof metadataId}, value: ${metadataId}`)
     if (!this.db) {
-      console.log(`🔍 [DEBUG] No database available for metadata ${metadataId}`)
       return false
     }
 
     try {
       const transaction = this.db.transaction(['metadata'], 'readonly')
       const objectStore = transaction.objectStore('metadata')
-      console.log(`🔍 [DEBUG] Querying IndexedDB for metadataId: ${metadataId} (type: ${typeof metadataId})`)
-      
-      // First, let's see what's actually in the database
-      const getAllRequest = objectStore.getAll()
-      getAllRequest.onsuccess = () => {
-        const allItems = getAllRequest.result
-        console.log(`🔍 [DEBUG] All items in IndexedDB:`, allItems.map(item => ({ id: item.id, name: item.name, key: item.key })))
-        
-        // Look for our specific metadata ID
-        const foundItem = allItems.find(item => item.id === metadataId || item.id === parseInt(metadataId) || item.id === metadataId.toString())
-        console.log(`🔍 [DEBUG] Found item for ${metadataId}:`, foundItem)
-      }
-      
-      // Convert metadataId to number since that's how it's stored in IndexedDB
       const numericMetadataId = parseInt(metadataId)
-      console.log(`🔍 [DEBUG] Converting metadataId from "${metadataId}" to ${numericMetadataId}`)
       const getRequest = objectStore.get(numericMetadataId)
       
       return new Promise((resolve) => {
-        console.log(`🔍 [DEBUG] Created Promise for metadata ${metadataId} check`)
-        
         getRequest.onsuccess = () => {
-          console.log(`🔍 [DEBUG] getRequest.onsuccess called for metadata ${metadataId}`)
           if (getRequest.result) {
-            console.log(`🔍 [DEBUG] Found result for metadata ${metadataId}:`, getRequest.result)
             // Check if the loom file matches (for cache invalidation)
-            const currentLoom = this.currentLoomFile || this.defaultLoomFileValue || 'parsing/output.loom'
+            const currentLoom = this.getCurrentLoomFile()
             const storedLoom = getRequest.result.loomFile
             
-            console.log(`🔍 [DEBUG] Loom file comparison for metadata ${metadataId}:`, {
-              currentLoom,
-              storedLoom,
-              match: storedLoom === currentLoom
-            })
-            
-            if (storedLoom === currentLoom) {
-              console.log(`💾 Found metadata ${metadataId} in IndexedDB with matching loom file`)
+            // Handle both null values (empty strings) as equivalent
+            const storedLoomNormalized = storedLoom === '' ? null : storedLoom
+            if (storedLoomNormalized === currentLoom) {
               resolve(true)
             } else {
-              console.log(`💾 Found metadata ${metadataId} in IndexedDB but loom file mismatch (stored: ${storedLoom}, current: ${currentLoom})`)
               resolve(false) // Wrong loom file, treat as not cached
             }
           } else {
-            console.log(`🔍 [DEBUG] No result found for metadata ${metadataId}`)
             resolve(false) // Not found in database
           }
         }
         getRequest.onerror = () => {
-          console.error('Error checking metadata in database:', getRequest.error)
           resolve(false) // Assume not in database if error occurs
         }
       })
     } catch (error) {
-      console.error('Error checking metadata in database:', error)
       return false
+    }
+  }
+
+  // Check status of all metadata before preloading starts
+  async checkAllMetadataStatusBeforePreload() {
+    console.log('🔍 [STATUS] Checking status of all metadata before preloading...')
+    
+    try {
+      // Get all metadata buttons from the UI
+      let metadataButtons = document.querySelectorAll('button[data-metadata-id]')
+      
+      // If no buttons found, wait a bit and try again (UI might not be ready yet)
+      if (metadataButtons.length === 0) {
+        console.log('🔍 [STATUS] No metadata buttons found yet, waiting 500ms and retrying...')
+        await new Promise(resolve => setTimeout(resolve, 500))
+        metadataButtons = document.querySelectorAll('button[data-metadata-id]')
+        
+        if (metadataButtons.length === 0) {
+          console.log('🔍 [STATUS] Still no metadata buttons found, skipping status check')
+          return
+        }
+      }
+
+      console.log(`🔍 [STATUS] Checking status for ${metadataButtons.length} metadata items before preloading...`)
+      
+      // Process all metadata status checks in parallel since DB checks are now instant
+      const startTime = performance.now()
+      const allPromises = Array.from(metadataButtons).map(button => this.checkSingleMetadataStatus(button))
+      await Promise.all(allPromises)
+      const endTime = performance.now()
+      
+      console.log(`🔍 [STATUS] Completed status check for all ${metadataButtons.length} metadata items in ${(endTime - startTime).toFixed(2)}ms`)
+      
+      console.log('🔍 [STATUS] Completed status check for all metadata before preloading')
+    } catch (error) {
+      console.error('Error in metadata status checking before preload:', error)
+    }
+  }
+
+  // Check status of a single metadata item and update its icon
+  async checkSingleMetadataStatus(button) {
+    const metadataId = button.dataset.metadataId
+    if (!metadataId) return
+
+    try {
+      // Check if metadata is in memory first (fastest check)
+      const isInMemory = this.dataManager.getMetadataVectorById(metadataId)
+      if (isInMemory) {
+        console.log(`🔍 [STATUS] Metadata ${metadataId} found in memory - setting to green`)
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        return
+      }
+
+      // Check if metadata is in database (IndexedDB) - now optimized for speed
+      const dbCheckStart = performance.now()
+      const isInDatabase = await this.checkMetadataInDatabase(metadataId)
+      const dbCheckTime = performance.now() - dbCheckStart
+      
+      if (isInDatabase) {
+        console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+        return
+      }
+
+      // Metadata is not loaded anywhere
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
+    } catch (error) {
+      console.error(`Error checking status for metadata ${metadataId}:`, error)
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
+    }
+  }
+
+  // Check status for a specific metadata item and update its icon immediately
+  async checkSpecificMetadataStatus(metadataId) {
+    const button = document.querySelector(`button[data-metadata-id="${metadataId}"]`)
+    if (button) {
+      await this.checkSingleMetadataStatus(button)
     }
   }
 
@@ -1389,14 +1538,14 @@ export default class extends Controller {
       availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : []
     })
     
-    // Try to get cell count from database for accurate buffer size calculation
-    const cellCountFromDB = await this.memoryManager.getCellCountFromDatabase()
+    // Get cell count from server-side data for accurate buffer size calculation
+    const cellCount = this.getCellCountFromServerData()
     
     // Calculate and set optimal buffer size based on dataset characteristics
-    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCountFromDB)
+    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCount)
     console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
-    if (cellCountFromDB > 0) {
-      console.log(`🧠 [Memory] Used cell count from database: ${cellCountFromDB.toLocaleString()}`)
+    if (cellCount > 0) {
+      console.log(`🧠 [Memory] Used cell count from server data: ${cellCount.toLocaleString()}`)
     }
     
     // Separate metadata by type for ordered preloading
@@ -1661,11 +1810,12 @@ export default class extends Controller {
         await new Promise((resolve) => {
           getAllRequest.onsuccess = () => {
             const allItems = getAllRequest.result
-            const currentLoom = this.currentLoomFile || this.defaultLoomFileValue || 'parsing/output.loom'
+            const currentLoom = this.getCurrentLoomFile()
             
             // Filter by matching loom file
             allItems.forEach(item => {
-              if (item.loomFile === currentLoom && item.id) {
+              const itemLoomNormalized = item.loomFile === '' ? null : item.loomFile
+              if (itemLoomNormalized === currentLoom && item.id) {
                 metadataInDatabase.add(item.id.toString())
               }
             })
@@ -1702,6 +1852,8 @@ export default class extends Controller {
         // Load batch sequentially (not in parallel) to reduce server load
         for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
           const metadataId = batch[batchIndex]
+          const metadataStartTime = performance.now()
+          console.log(`🔍 [TIMING] Starting processing metadata ${metadataId} at ${metadataStartTime.toFixed(2)}ms`)
           // Skip if already loaded in memory or currently loading
           if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
             // Special logging for sex and age
@@ -1718,9 +1870,19 @@ export default class extends Controller {
             
             // Check if this metadata is in the database
             if (metadataInDatabase.has(metadataId.toString())) {
+              // Update status icon to show it's downloading
+              this.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
+              
               // Silently load from disk to memory (only log every 10th)
+              const memoryLoadStart = performance.now()
+              console.log(`🔍 [MEMORY] Starting memory load for existing metadata ${metadataId} at ${memoryLoadStart.toFixed(2)}ms`)
+              console.log(`🔍 [DEBUG] About to call loadSingleMetadataVector for existing metadata ${metadataId}`)
               try {
                 const metadata = await this.dataManager.loadSingleMetadataVector(metadataId)
+                const memoryLoadEnd = performance.now()
+                const memoryLoadDuration = (memoryLoadEnd - memoryLoadStart).toFixed(2)
+                console.log(`🔍 [MEMORY] Completed memory load for existing metadata ${metadataId} in ${memoryLoadDuration}ms`)
+                console.log(`🔍 [DEBUG] loadSingleMetadataVector returned for existing metadata ${metadataId}:`, metadata ? 'success' : 'failed')
                 if (metadata) {
                   const globalIndex = i + batchIndex
                   if (globalIndex < categoricalMetadata.length) {
@@ -1737,9 +1899,17 @@ export default class extends Controller {
                     }
                   }
                   
+                  // Update status icon to show it's in memory (green check) - this is new data loaded during preloading
+                  console.log(`🔍 [PRELOAD] Setting ${metadataId} to in-memory (green) during preloading`)
+                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                  
                   // Show checkboxes for loaded metadata
                   this.uiManager.showCheckboxesForMetadata(metadataId)
                 }
+                
+                const metadataEndTime = performance.now()
+                const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
+                console.log(`🔍 [TIMING] Completed processing existing metadata ${metadataId} in ${metadataDuration}ms`)
               } catch (error) {
                 console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
               }
@@ -1757,9 +1927,15 @@ export default class extends Controller {
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
             console.log(`  ⏭️  Already in database: ${metadataName || metadataId} - skipping preload`)
             
+            // Status icon already updated during initial status check - no need to update again
+            
             // Still show checkboxes for metadata that's already in database
             console.log(`🔍 [DEBUG] Showing checkboxes for already-cached metadata ${metadataId}`)
             this.uiManager.showCheckboxesForMetadata(metadataId)
+            
+            const metadataEndTime = performance.now()
+            const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
+            console.log(`🔍 [TIMING] Completed processing skipped metadata ${metadataId} in ${metadataDuration}ms`)
             
             skippedCount++
             continue
@@ -1796,6 +1972,9 @@ export default class extends Controller {
                   result = { success: false, metadataId }
                 }
               } else {
+                // Update status icon to show it's downloading
+                this.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
+                
                 // Load to disk only
                 result = await this.preloadMetadataToDisk(metadataId)
               }
@@ -1817,7 +1996,41 @@ export default class extends Controller {
                 if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
                   console.log(`🔍 [SEX/AGE DEBUG] Successfully preloaded ${metadataName} (${metadataId}) to disk${retry > 0 ? ` on retry ${retry}` : ''}`)
                 }
+                
+                // Try to load the newly stored metadata to memory if there's space
+                console.log(`🔍 [MEMORY] Attempting to load metadata ${metadataId} to memory after disk storage`)
+                const newMetadataLoadStart = performance.now()
+                console.log(`🔍 [MEMORY] Starting memory load for new metadata ${metadataId} at ${newMetadataLoadStart.toFixed(2)}ms`)
+                try {
+                  const memoryMetadata = await this.dataManager.loadSingleMetadataVector(metadataId)
+                  const newMetadataLoadEnd = performance.now()
+                  const newMetadataLoadDuration = (newMetadataLoadEnd - newMetadataLoadStart).toFixed(2)
+                  console.log(`🔍 [MEMORY] Completed memory load for new metadata ${metadataId} in ${newMetadataLoadDuration}ms`)
+                  console.log(`🔍 [MEMORY] loadSingleMetadataVector result for ${metadataId}:`, memoryMetadata ? 'success' : 'failed')
+                  if (memoryMetadata) {
+                    const greenTime = performance.now()
+                    const orangeDuration = result.orangeTime ? (greenTime - result.orangeTime).toFixed(2) : 'unknown'
+                    console.log(`🔍 [MEMORY] Loaded newly stored metadata ${metadataId} to memory`)
+                    // Update status icon to show it's in memory (green check)
+                    console.log(`🔍 [MEMORY] Setting ${metadataId} to in-memory (green) after memory loading at ${greenTime.toFixed(2)}ms`)
+                    console.log(`🔍 [DEBUG] Memory loading completed for metadata ${metadataId}`)
+                    console.log(`⏱️ [TIMER] Orange status duration for ${metadataId}: ${orangeDuration}ms`)
+                    this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                    
+                    // Show checkboxes for newly loaded metadata
+                    this.uiManager.showCheckboxesForMetadata(metadataId)
+                  } else {
+                    console.log(`🔍 [MEMORY] loadSingleMetadataVector returned null/undefined for ${metadataId}`)
+                  }
+                } catch (error) {
+                  console.log(`🔍 [MEMORY] Could not load metadata ${metadataId} to memory (buffer full or error):`, error.message)
+                  console.log(`🔍 [MEMORY] Error details:`, error)
+                }
+                
                 success = true
+                const metadataEndTime = performance.now()
+                const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
+                console.log(`🔍 [TIMING] Completed processing metadata ${metadataId} in ${metadataDuration}ms`)
                 break
               } else {
                 // Loading failed
@@ -2926,6 +3139,21 @@ export default class extends Controller {
           const sliderTime = performance.now()
           this.toggleInlineRangeSlider(metadataId, metadataName)
           console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
+          
+          // Preload metadata for continuous metadata (for future coloring)
+          const memCheckTime = performance.now()
+          const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+          const isInMemory = !!metadataVector
+          console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
+          
+          if (!isInMemory) {
+            // Not in memory - load it silently
+            const loadTime = performance.now()
+            console.log(`⏱️ [TOGGLE] Preloading continuous metadata from disk/network...`)
+            this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+              console.log(`Failed to preload continuous metadata vector ${metadataId}:`, error.message)
+            })
+          }
         }
       } else {
         // Handle categorical metadata - show categories with smooth transition
@@ -2976,10 +3204,10 @@ export default class extends Controller {
               console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
           } else {
-            // Not in memory - load it first
+            // Not in memory - load it first (immediate loading for click)
             const loadTime = performance.now()
             console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
-            this.dataManager.loadSingleMetadataVector(metadataId).then(() => {
+            this.loadSingleMetadataVectorSilently(metadataId).then(() => {
               console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
               
               const checkboxTime = performance.now()
@@ -8399,6 +8627,8 @@ export default class extends Controller {
         // Store in memory for future use (but will be cleaned up by memory optimization)
         this.loadedMetadataVectors[metadataId] = decompressedVector
         
+        // Status icon already updated during initial status check - no need to update again
+        
         // Update usage tracker
         this.memoryManager.updateMetadataUsage(metadataId)
         
@@ -8411,6 +8641,8 @@ export default class extends Controller {
       
       // If already decompressed, store in memory and return
       this.loadedMetadataVectors[metadataId] = vectorData
+      
+      // Status icon already updated during initial status check - no need to update again
       
       // Update usage tracker
       this.memoryManager.updateMetadataUsage(metadataId)

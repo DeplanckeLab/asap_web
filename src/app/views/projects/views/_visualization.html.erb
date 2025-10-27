@@ -48,7 +48,13 @@
       <!-- Categorical Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-          <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
+            <% categorical_count = @h_metadata[@default_loom_file]&.dig('cell', 'DISCRETE')&.count || 0 %>
+            <span style="background-color: #3b82f6; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
+              <%= categorical_count %>
+            </span>
+          </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
@@ -57,7 +63,8 @@
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
-                     data-action="click->visualization#toggleMetadata">
+                     data-action="click->visualization#toggleMetadata mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                     data-metadata-id="<%= metadata.id %>">
                   <!-- Chevron -->
                   <div style="margin-right: 12px; color: #9ca3af;">
                     <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;"></i>
@@ -225,7 +232,13 @@
       <!-- Continuous Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-          <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
+            <% continuous_count = @h_metadata[@default_loom_file]&.dig('cell', 'NUMERIC')&.select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 }&.count || 0 %>
+            <span style="background-color: #10b981; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
+              <%= continuous_count %>
+            </span>
+          </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
@@ -234,7 +247,8 @@
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
-                     data-action="click->visualization#toggleMetadata">
+                     data-action="click->visualization#toggleMetadata mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                     data-metadata-id="<%= metadata.id %>">
                   <!-- Chevron -->
                   <div style="margin-right: 12px; color: #9ca3af;">
                     <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;"></i>

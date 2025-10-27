@@ -299,17 +299,19 @@ export class UIManager {
 
   // Show checkboxes for metadata
   showCheckboxesForMetadata(metadataId) {
-    // console.log(`🔍 [DEBUG] Showing checkboxes for metadata: ${metadataId}`)
+    console.log(`🔍 [UI] showCheckboxesForMetadata called for ${metadataId}`)
     
     const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
+    console.log(`🔍 [UI] getMetadataVectorById result for ${metadataId}:`, metadataVector ? 'found' : 'not found')
+    
     const isCategorical = metadataVector?.data_type === 'DISCRETE'
     const isContinuous = metadataVector?.data_type === 'NUMERIC'
     
     if (isCategorical) {
       // For categorical metadata, show the new UI elements
+      console.log(`🔍 [UI] Processing categorical metadata ${metadataId}`)
       
-      // Update status icon to show it's in memory
-      this.updateMetadataStatusIcon(metadataId, 'in-memory')
+      // Status icon updates should be handled by data loading logic, not UI display logic
       
       // Show select all/none checkbox
       const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
@@ -364,9 +366,9 @@ export class UIManager {
       // (in initializeCheckboxesForMetadata), which loads the full metadata vector.
     } else if (isContinuous) {
       // For continuous metadata, show the new UI elements (status icon, filter state icon, and filter switch)
+      console.log(`🔍 [UI] Processing continuous metadata ${metadataId}`)
       
-      // Update status icon to show it's in memory
-      this.updateMetadataStatusIcon(metadataId, 'in-memory')
+      // Status icon updates should be handled by data loading logic, not UI display logic
       
       // Show filter state icon
       const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${metadataId}"]`)

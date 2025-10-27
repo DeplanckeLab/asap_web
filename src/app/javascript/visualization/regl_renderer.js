@@ -52,19 +52,18 @@ export class ReglRenderer {
         attribute vec4 color;
         
         uniform float pointSize;
-        uniform vec2 scale;
-        uniform vec2 offset;
         uniform vec2 canvasSize;
         
         varying vec4 vColor;
         
         void main() {
-          // Apply camera transform
-          vec2 transformed = (position + offset) * scale;
+          // Position is in SCREEN COORDINATES (pixel space from 0 to canvasSize)
+          // Convert to normalized device coordinates (0 to 1)
+          vec2 normalizedPos = position / canvasSize;
           
           // Convert to clip space (-1 to 1)
-          vec2 clipSpace = (transformed / canvasSize) * 2.0 - 1.0;
-          clipSpace.y *= -1.0; // Flip Y axis
+          vec2 clipSpace = normalizedPos * 2.0 - 1.0;
+          clipSpace.y *= -1.0; // Flip Y axis (screen Y increases downward, OpenGL increases upward)
           
           gl_Position = vec4(clipSpace, 0.0, 1.0);
           gl_PointSize = pointSize;
@@ -100,8 +99,6 @@ export class ReglRenderer {
       
       uniforms: {
         pointSize: this.regl.prop('pointSize'),
-        scale: this.regl.prop('scale'),
-        offset: this.regl.prop('offset'),
         canvasSize: ({ viewportWidth, viewportHeight }) => [viewportWidth, viewportHeight]
       },
       
@@ -345,25 +342,26 @@ export class ReglRenderer {
     }
     
     console.log('🚀 [ReGL] Clearing canvas...')
-    // Clear canvas to white background
+    // Clear canvas to black background for debugging
     this.regl.clear({
       color: [1, 1, 1, 1], // White background
       depth: 1
     })
     
     console.log('🚀 [ReGL] Drawing points...')
-    console.log('🚀 [ReGL] Camera settings:', { scale: this.camera.scale, offsetX: this.camera.offsetX, offsetY: this.camera.offsetY })
     console.log('🚀 [ReGL] Point size:', this.pointSize)
     console.log('🚀 [ReGL] Canvas size:', { width: this.canvas.width, height: this.canvas.height })
     
-    // Draw points
+    // Debug: Check ReGL viewport
+    const viewport = this.regl._gl.getParameter(this.regl._gl.VIEWPORT)
+    console.log('🚀 [ReGL] Viewport:', viewport)
+    
+    // Draw points (positions are already in screen/pixel coordinates)
     this.drawPoints({
       positions: this.positionBuffer,
       colors: this.colorBuffer,
       count: this.numPoints,
-      pointSize: this.pointSize,
-      scale: [this.camera.scale, this.camera.scale],
-      offset: [this.camera.offsetX, this.camera.offsetY]
+      pointSize: this.pointSize
     })
     
     console.log('🚀 [ReGL] Render completed')
@@ -375,6 +373,13 @@ export class ReglRenderer {
   resize(width, height) {
     this.canvas.width = width
     this.canvas.height = height
+    
+    // Update ReGL viewport to match new canvas size
+    if (this.regl && this.regl._gl) {
+      this.regl._gl.viewport(0, 0, width, height)
+      console.log('🔄 [ReGL] Viewport updated to:', width, 'x', height)
+    }
+    
     return this
   }
   
@@ -384,8 +389,19 @@ export class ReglRenderer {
   handleResize() {
     // Get the actual rendered size of the canvas
     const rect = this.canvas.getBoundingClientRect()
+    console.log('🔄 [ReGL] handleResize called:', {
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      canvasWidth: this.canvas.width,
+      canvasHeight: this.canvas.height
+    })
+    
     if (rect.width > 0 && rect.height > 0) {
       this.resize(rect.width, rect.height)
+      console.log('🔄 [ReGL] After resize:', {
+        canvasWidth: this.canvas.width,
+        canvasHeight: this.canvas.height
+      })
       // Re-render with new canvas size
       if (this.positionBuffer && this.colorBuffer && this.numPoints > 0) {
         this.render()

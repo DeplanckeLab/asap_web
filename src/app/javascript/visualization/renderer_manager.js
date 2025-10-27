@@ -89,7 +89,7 @@ export class RendererManager {
       ctx.stroke()
       
       // Label
-      ctx.fillText(value.toFixed(1), screenX, xAxisY + 7)
+      ctx.fillText(value.toFixed(1), screenX, xAxisY + 10)
     }
     
     // Y-axis ticks
@@ -117,7 +117,7 @@ export class RendererManager {
     // X-axis title
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
-    ctx.fillText('Dimension 1', width / 2, height - 5)
+    ctx.fillText('Dimension 1', width / 2, height - 15)
     
     // Y-axis title (rotated)
     ctx.save()
@@ -579,8 +579,46 @@ export class RendererManager {
       left: 60,    // Space for Y-axis labels
       right: 20,   // Right margin
       top: 20,      // Minimal top margin
-      bottom: 60   // Space for X-axis labels
+      bottom: 60   // Space for X-axis labels and title (increased to 50)
     }
+  }
+
+  // Get bounds adjusted for axes margins
+  getAdjustedBounds(originalBounds) {
+    if (!originalBounds || !this.controller.canvas) {
+      return originalBounds
+    }
+
+    const { minX, maxX, minY, maxY } = originalBounds
+    const width = this.controller.canvas.width
+    const height = this.controller.canvas.height
+    const margins = this.getPlotMargins()
+
+    // Calculate the data range that fits in the available space
+    const availableWidth = width - margins.left - margins.right
+    const availableHeight = height - margins.top - margins.bottom
+
+    // Calculate the data range per pixel
+    const dataWidth = maxX - minX
+    const dataHeight = maxY - minY
+    const dataPerPixelX = dataWidth / availableWidth
+    const dataPerPixelY = dataHeight / availableHeight
+
+    // Adjust bounds to account for margins
+    // Note: Y-axis is inverted, so maxY appears at top, minY at bottom
+    const adjustedMinX = minX - (margins.left * dataPerPixelX)
+    const adjustedMaxX = maxX + (margins.right * dataPerPixelX)
+    const adjustedMinY = minY - (margins.bottom * dataPerPixelY)  // Bottom of plot (X-axis labels)
+    const adjustedMaxY = maxY + (margins.top * dataPerPixelY)     // Top of plot (minimal space)
+
+    const adjustedBounds = {
+      minX: adjustedMinX,
+      maxX: adjustedMaxX,
+      minY: adjustedMinY,
+      maxY: adjustedMaxY
+    }
+    
+    return adjustedBounds
   }
 
   calculateTickSpacing(range) {

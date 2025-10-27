@@ -19,8 +19,8 @@ export class InteractionHandler {
     const lassoBtn = document.getElementById('lasso-mode-btn')
     if (panBtn && pickBtn && lassoBtn) {
       //console.log('Found interaction mode buttons')
-      // Set initial state (pick mode is default)
-      this.controller.updateButtonStates('pick')
+      // Set initial state (pan mode is default)
+      this.controller.updateButtonStates('pan')
       this.controller.updateControlInstructions()
     } else {
       console.log('Interaction mode buttons not found')
@@ -141,7 +141,15 @@ export class InteractionHandler {
     const margins = this.rendererManager.getPlotMargins()
     const screenWidth = this.controller.canvas.width
     const availableWidth = screenWidth - margins.left - margins.right
-    return margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
+    const normalized = margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
+    
+    // Debug logging for first normalization call
+    if (!this._normalizeLogged) {
+      console.log(`🔍 [NORMALIZE] normalizeX: x=${x.toFixed(3)}, bounds=(${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}), screenWidth=${screenWidth}, availableWidth=${availableWidth}, margins.left=${margins.left}, result=${normalized.toFixed(1)}`)
+      this._normalizeLogged = true
+    }
+    
+    return normalized
   }
 
   normalizeY(y, bounds) {
@@ -149,7 +157,15 @@ export class InteractionHandler {
     const margins = this.rendererManager.getPlotMargins()
     const screenHeight = this.controller.canvas.height
     const availableHeight = screenHeight - margins.top - margins.bottom
-    return margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
+    const normalized = margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
+    
+    // Debug logging for first normalization call
+    if (!this._normalizeYLogged) {
+      console.log(`🔍 [NORMALIZE] normalizeY: y=${y.toFixed(3)}, bounds=(${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}), screenHeight=${screenHeight}, availableHeight=${availableHeight}, margins.top=${margins.top}, result=${normalized.toFixed(1)}`)
+      this._normalizeYLogged = true
+    }
+    
+    return normalized
   }
 
   extractCurrentScreenPositions(currentBounds, coordinateCount) {

@@ -74,6 +74,9 @@ export default class extends Controller {
     this.reglRenderer = null // Will hold ReGL renderer instance
     this.pixiApp = null // Not used, kept for compatibility
     
+    // Initialize canvas and renderer
+    this.initializeCanvas()
+    
     // Initialize IndexedDB for storing metadata on disk instead of memory
     this.memoryManager.initializeIndexedDB()
     
@@ -133,6 +136,11 @@ export default class extends Controller {
     
     // Initialize inline range slider data storage
     this.inlineRangeSliderData = {} // Store range slider data for each metadata
+    
+    // Initialize resize handling
+    this.resizeHandler = this.handleWindowResize.bind(this)
+    this.resizeTimeout = null
+    this.isResizing = false
     
     // Performance optimization: store existing points for visibility updates and fast color switching
     this.pointSprites = null // Array of sprite objects for fast updates (replaces existingPoints)
@@ -300,6 +308,9 @@ export default class extends Controller {
       this.initializeDraggableDivider()
     }, 500)
     
+    // Add window resize listener
+    window.addEventListener('resize', this.resizeHandler)
+    
     // Initialize metadata vectors storage
     console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
     console.trace('Call stack:')
@@ -311,13 +322,13 @@ export default class extends Controller {
     this.maxMetadataInMemory = 5 // Default buffer size, will be adjusted based on dataset size
     
     // Initialize interaction mode state
-    this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
+    this.interactionMode = 'pan' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
     this.clickingOnLabel = false // Track if we're clicking on a label
     //console.log(`Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
-    this.currentPointSize = 1.0 // Store current point size for consistent rendering
+    this.currentPointSize = 8.0 // Store current point size for consistent rendering (increased for debugging)
     this.lassoGraphics = null
     this.lassoPoints = []
     this.isDrawingLasso = false
@@ -389,6 +400,11 @@ export default class extends Controller {
     // Remove click outside listener when controller disconnects
     if (this.boundCloseDropdowns) {
       document.removeEventListener('click', this.boundCloseDropdowns)
+    }
+    
+    // Remove window resize listener
+    if (this.resizeHandler) {
+      window.removeEventListener('resize', this.resizeHandler)
     }
     
     // Remove interaction event listeners
@@ -4155,6 +4171,145 @@ export default class extends Controller {
     }
   }
 
+  // Initialize canvas and ReGL renderer
+  initializeCanvas() {
+    const plotContainer = document.querySelector('.plot-container')
+    if (!plotContainer) {
+      console.log('🔄 [CANVAS] Plot container not found, skipping canvas initialization')
+      return
+    }
+    
+    console.log('🔄 [CANVAS] Initializing canvas and ReGL renderer...')
+    
+    // Create ReGL canvas for points (layer 1)
+    const canvas = document.createElement('canvas')
+    canvas.width = plotContainer.clientWidth
+    canvas.height = plotContainer.clientHeight
+    canvas.style.width = '100%'
+    canvas.style.height = '100%'
+    canvas.style.position = 'absolute'
+    canvas.style.top = '0'
+    canvas.style.left = '0'
+    canvas.style.zIndex = '1' // Bottom layer
+    plotContainer.appendChild(canvas)
+    
+    // Store canvas reference
+    this.canvas = canvas
+    
+    // Initialize ReGL renderer
+    console.log('🔄 [CANVAS] Initializing ReGL renderer...')
+    this.reglRenderer = new ReglRenderer(canvas)
+    
+    // Create HTML Canvas 2D overlay for axes/grid/labels
+    const overlayCanvas = document.createElement('canvas')
+    overlayCanvas.width = plotContainer.clientWidth
+    overlayCanvas.height = plotContainer.clientHeight
+    overlayCanvas.style.width = '100%'
+    overlayCanvas.style.height = '100%'
+    overlayCanvas.style.position = 'absolute'
+    overlayCanvas.style.top = '0'
+    overlayCanvas.style.left = '0'
+    overlayCanvas.style.zIndex = '2' // Top layer
+    overlayCanvas.style.pointerEvents = 'none' // Let events pass through
+    plotContainer.appendChild(overlayCanvas)
+    
+    this.overlayCanvas = overlayCanvas
+    this.overlayCtx = overlayCanvas.getContext('2d')
+    
+    console.log('🔄 [CANVAS] Canvas initialization completed:', {
+      canvas: { width: canvas.width, height: canvas.height },
+      overlayCanvas: { width: overlayCanvas.width, height: overlayCanvas.height }
+    })
+  } // End of initializeCanvas
+
+  // Handle window resize with debouncing
+  handleWindowResize() {
+    // Debounce resize events to avoid excessive redraws during drag
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout)
+    }
+    
+    // Use a longer debounce to prevent flickering during drag
+    this.resizeTimeout = setTimeout(() => {
+      console.log('🔄 [RESIZE] Window resized, redrawing plot...')
+      
+      // Check if canvas and renderer are ready
+      if (!this.canvas || !this.reglRenderer) {
+        console.log('🔄 [RESIZE] Canvas or renderer not ready, skipping resize')
+        return
+      }
+      
+      // Prevent resize during active mouse interactions (panning, lasso, etc.)
+      if (this.isPanning || this.isDrawingLasso || this.isZooming) {
+        console.log('🔄 [RESIZE] Mouse interaction in progress, skipping resize')
+        return
+      }
+      
+      // Simply call redrawPlot - it will handle everything
+      this.redrawPlot()
+    }, 300) // 300ms debounce to prevent flickering during drag
+  }
+  
+  // Redraw the plot after resize
+  redrawPlot() {
+    console.log('🔄 [RESIZE] Starting simple redrawPlot...')
+    
+    // Check if we have the necessary components
+    if (!this.reglRenderer || !this.currentCoordinates) {
+      console.log('🔄 [RESIZE] Cannot redraw - missing renderer or coordinates')
+      return
+    }
+    
+    // Get current canvas dimensions
+    const canvas = this.canvas
+    if (!canvas) {
+      console.log('🔄 [RESIZE] No canvas found')
+      return
+    }
+    
+    const rect = canvas.getBoundingClientRect()
+    const newWidth = Math.round(rect.width)
+    const newHeight = Math.round(rect.height)
+    
+    console.log('🔄 [RESIZE] Resizing canvas from', this.canvas.width, 'x', this.canvas.height, 'to', newWidth, 'x', newHeight)
+    
+    // Check if canvas dimensions are valid
+    if (newWidth <= 0 || newHeight <= 0) {
+      console.log('🔄 [RESIZE] Invalid canvas dimensions, skipping resize')
+      return
+    }
+    
+    // Update canvas dimensions
+    this.canvas.width = newWidth
+    this.canvas.height = newHeight
+    
+    // Update overlay canvas to match
+    if (this.overlayCanvas) {
+      this.overlayCanvas.width = newWidth
+      this.overlayCanvas.height = newHeight
+      this.overlayCtx.clearRect(0, 0, newWidth, newHeight)
+    }
+    
+    // Update only the viewport, NOT the canvas size
+    console.log('🔄 [RESIZE] Updating viewport only (not canvas size)')
+    if (this.reglRenderer.regl && this.reglRenderer.regl._gl) {
+      this.reglRenderer.regl._gl.viewport(0, 0, newWidth, newHeight)
+      console.log('🔄 [RESIZE] Viewport updated to:', newWidth, 'x', newHeight)
+    }
+    
+    // Render the points after resize
+    console.log('🔄 [RESIZE] Rendering points after resize...')
+    this.reglRenderer.render()
+    
+    // Redraw axes and grid with new bounds (keep the working code)
+    console.log('🔄 [RESIZE] Redrawing axes and grid...')
+    this.rendererManager.renderAxes()
+    this.rendererManager.renderGrid()
+    this.rendererManager.renderCategoryLabels()
+    
+    console.log('🔄 [RESIZE] Simple redraw completed')
+  }
+
   // Set interaction mode (internal method)
   setInteractionMode(mode) {
     this.interactionMode = mode
@@ -6964,8 +7119,10 @@ export default class extends Controller {
         font-size: 12px !important;
         color: #e5e7eb !important;
         margin-top: 2px !important;
+        white-space: pre-line !important;
+        line-height: 1.3 !important;
       `
-      categoryDiv.textContent = categoryInfo.replace('\n', '')
+      categoryDiv.textContent = categoryInfo
       content.appendChild(cellNameDiv)
       content.appendChild(categoryDiv)
     } else {
@@ -7151,9 +7308,50 @@ export default class extends Controller {
     this.fixedTooltipCellId = cellId
     this.isTooltipFixed = true
     
-    // Use the existing showSimpleTooltip method instead of the complex tooltip system
+    // Get detailed point information
     const cellName = `Cell ${cellId + 1}`
-    let categoryInfo = ''
+    let detailedInfo = []
+    
+    // Get data coordinates
+    if (this.currentCoordinates && this.currentCoordinates.length > cellId * 2) {
+      const dataX = this.currentCoordinates[cellId * 2]
+      const dataY = this.currentCoordinates[cellId * 2 + 1]
+      detailedInfo.push(`Position: (${dataX.toFixed(3)}, ${dataY.toFixed(3)})`)
+    }
+    
+    // Get screen coordinates
+    detailedInfo.push(`Screen: (${Math.round(screenX)}, ${Math.round(screenY)})`)
+    
+    // Get point size
+    const pointSize = this.currentPointSize || 4
+    detailedInfo.push(`Size: ${pointSize}px`)
+    
+    // Debug: Temporarily increase point size for visibility
+    if (this.reglRenderer && pointSize < 4) {
+      this.reglRenderer.setPointSize(8)
+      detailedInfo.push(`Size increased to 8px for debugging`)
+    }
+    
+    // Debug: Check if point is within visible bounds
+    if (this.currentBounds) {
+      const bounds = this.currentBounds
+      detailedInfo.push(`Bounds: X[${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}] Y[${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}]`)
+    }
+    
+    // Debug: Check camera settings
+    if (this.reglRenderer && this.reglRenderer.camera) {
+      const camera = this.reglRenderer.camera
+      detailedInfo.push(`Camera: scale=${camera.scale.toFixed(2)}, offset=(${camera.offsetX.toFixed(2)}, ${camera.offsetY.toFixed(2)})`)
+    }
+    
+    // Get color information
+    if (this.reglRenderer && this.reglRenderer.colors && this.reglRenderer.colors.length > cellId * 4) {
+      const r = Math.round(this.reglRenderer.colors[cellId * 4] * 255)
+      const g = Math.round(this.reglRenderer.colors[cellId * 4 + 1] * 255)
+      const b = Math.round(this.reglRenderer.colors[cellId * 4 + 2] * 255)
+      const a = this.reglRenderer.colors[cellId * 4 + 3]
+      detailedInfo.push(`Color: RGB(${r}, ${g}, ${b}) Alpha: ${a.toFixed(2)}`)
+    }
     
     // Get category information if available
     if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
@@ -7161,20 +7359,23 @@ export default class extends Controller {
       const value = values[cellId]
       
       if (data_type === 'DISCRETE') {
-        categoryInfo = `Category: ${value}`
+        detailedInfo.push(`Category: ${value}`)
       } else if (data_type === 'NUMERIC') {
-        categoryInfo = `Value: ${value.toFixed(3)}`
+        detailedInfo.push(`Value: ${value.toFixed(3)}`)
       }
     }
     
     // Add fixed indicator
-    categoryInfo += ' 🔒'
+    detailedInfo.push('🔒 Fixed')
+    
+    // Join all information
+    const categoryInfo = detailedInfo.join('\n')
     
     // Create a mock point object for positioning
     const mockPoint = { x: screenX, y: screenY }
     this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
     
-    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
+    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1} with detailed info`)
   }
 
   // Check if color picker popup or gradient editor is currently open
@@ -10303,10 +10504,10 @@ export default class extends Controller {
         const newWidth = Math.max(200, Math.min(800, startLeftWidth + deltaX))
         leftPanel.style.width = `${newWidth}px`
         
-        // Trigger canvas resize if needed
+        // Trigger plot redraw
         if (this.reglRenderer) {
           requestAnimationFrame(() => {
-            this.reglRenderer.handleResize()
+            this.redrawPlot()
           })
         }
       } else if (isResizingRight) {
@@ -10314,10 +10515,10 @@ export default class extends Controller {
         const newWidth = Math.max(200, Math.min(800, startRightWidth - deltaX))
         rightPanel.style.width = `${newWidth}px`
         
-        // Trigger canvas resize if needed
+        // Trigger plot redraw
         if (this.reglRenderer) {
           requestAnimationFrame(() => {
-            this.reglRenderer.handleResize()
+            this.redrawPlot()
           })
         }
       }
@@ -10334,7 +10535,7 @@ export default class extends Controller {
         // Final resize update
         if (this.reglRenderer) {
           setTimeout(() => {
-            this.reglRenderer.handleResize()
+            this.redrawPlot()
           }, 100)
         }
       }

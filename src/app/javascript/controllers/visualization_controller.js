@@ -4223,7 +4223,7 @@ export default class extends Controller {
   } // End of initializeCanvas
 
   // Handle window resize with debouncing
-  handleWindowResize() {
+  async handleWindowResize() {
     // Debounce resize events to avoid excessive redraws during drag
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout)
@@ -4251,7 +4251,7 @@ export default class extends Controller {
   }
   
   // Redraw the plot after resize
-  redrawPlot() {
+  async redrawPlot() {
     console.log('🔄 [RESIZE] Starting simple redrawPlot...')
     
     // Check if we have the necessary components
@@ -4309,18 +4309,9 @@ export default class extends Controller {
     // Clear cached canvas rect to force fresh calculation after resize
     this.cachedCanvasRect = null
     
-    // Don't adjust anything during resize - just update viewport
-    console.log('🔄 [RESIZE] Keeping same visual representation, only updating viewport')
-    
-    // Render the points after resize
-    console.log('🔄 [RESIZE] Rendering points after resize...')
-    this.reglRenderer.render()
-    
-    // Redraw axes and grid with new bounds (keep the working code)
-    console.log('🔄 [RESIZE] Redrawing axes and grid...')
-    this.rendererManager.renderAxes()
-    this.rendererManager.renderGrid()
-    this.rendererManager.renderCategoryLabels()
+    // Call the same method as when switching visualization metadata
+    console.log('🔄 [RESIZE] Calling updateMetadata like metadata switch...')
+    this.updateMetadata()
     
     console.log('🔄 [RESIZE] Simple redraw completed')
   }

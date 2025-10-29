@@ -4279,10 +4279,6 @@ export default class extends Controller {
       return
     }
     
-    // Update canvas dimensions
-    this.canvas.width = newWidth
-    this.canvas.height = newHeight
-    
     // Update overlay canvas to match
     if (this.overlayCanvas) {
       this.overlayCanvas.width = newWidth
@@ -4290,12 +4286,31 @@ export default class extends Controller {
       this.overlayCtx.clearRect(0, 0, newWidth, newHeight)
     }
     
-    // Update only the viewport, NOT the canvas size
-    console.log('🔄 [RESIZE] Updating viewport only (not canvas size)')
-    if (this.reglRenderer.regl && this.reglRenderer.regl._gl) {
+    // Store old dimensions before updating
+    const oldWidth = this.canvas.width
+    const oldHeight = this.canvas.height
+    
+    // Set canvas dimensions explicitly to avoid fractional values from getBoundingClientRect
+    this.canvas.width = newWidth
+    this.canvas.height = newHeight
+    
+    // Update ReGL viewport to match the exact canvas dimensions
+    if (this.reglRenderer && this.reglRenderer.regl && this.reglRenderer.regl._gl) {
       this.reglRenderer.regl._gl.viewport(0, 0, newWidth, newHeight)
-      console.log('🔄 [RESIZE] Viewport updated to:', newWidth, 'x', newHeight)
+      console.log('🔄 [RESIZE] Canvas and viewport set to:', newWidth, 'x', newHeight)
     }
+    
+    // Reset coordinate normalization debug flags to see fresh debug info
+    if (this.interactionHandler) {
+      this.interactionHandler._normalizeLogged = false
+      this.interactionHandler._normalizeYLogged = false
+    }
+    
+    // Clear cached canvas rect to force fresh calculation after resize
+    this.cachedCanvasRect = null
+    
+    // Don't adjust anything during resize - just update viewport
+    console.log('🔄 [RESIZE] Keeping same visual representation, only updating viewport')
     
     // Render the points after resize
     console.log('🔄 [RESIZE] Rendering points after resize...')
@@ -4890,22 +4905,8 @@ export default class extends Controller {
     this.panOriginalBounds = this.dataManager.calculateBounds(this.currentCoordinates)
     
     
-    // For large datasets, use panning shape for smooth performance
-    const usePanningShape = this.currentCoordinates.length > 100000
-    
-    if (usePanningShape) {
-      // Hide real points during panning for large datasets
-      if (this.scatterContainer) {
-        this.scatterContainer.visible = false
-      }
-      if (this.categoryLabelsContainer) {
-        this.categoryLabelsContainer.visible = false
-      }
-      
-      // Create and show the panning shape
-      this.panningShape = this.createPanningShape()
-    
-    }
+    // Note: Panning shape optimization is not needed in ReGL mode
+    // ReGL handles large datasets efficiently without needing a simplified shape
     
     // Change cursor to grabbing
     const panCanvas = this.canvas
@@ -4938,7 +4939,16 @@ export default class extends Controller {
     const screenWidth = this.canvas.width
     const screenHeight = this.canvas.height
     
-    // Use current bounds for pan calculation to match current view
+    // Debug: Log panning calculation parameters
+    // console.log('🔍 [PAN DEBUG] Panning calculation:', {
+    //   deltaX, deltaY,
+    //   screenWidth, screenHeight,
+    //   panStartBounds: this.panStartBounds,
+    //   canvasRect: this.cachedCanvasRect,
+    //   currentBounds: this.currentBounds
+    // })
+    
+    // Use canvas buffer size for pan calculation to match coordinate normalization
     const dataDeltaX = (deltaX / screenWidth) * (this.panStartBounds.maxX - this.panStartBounds.minX)
     const dataDeltaY = (deltaY / screenHeight) * (this.panStartBounds.maxY - this.panStartBounds.minY)
     
@@ -4992,19 +5002,7 @@ export default class extends Controller {
     // Move the points to match the new bounds during panning
     this.updatePointPositions()
 
-    // Don't update category labels during panning in PixiJS mode - they move automatically as PIXI objects
-    
-    // Move the panning shape as well
-    if (this.panningShape) {
-      this.panningShape.x = deltaX
-      this.panningShape.y = deltaY
-    }
-    
-    /*console.log('Pan Move Debug:', {
-      deltaX: deltaX,
-      deltaY: deltaY,
-      shapePosition: this.panningShape ? { x: this.panningShape.x, y: this.panningShape.y } : 'No shape'
-    })*/
+    // Note: Panning shape not needed in ReGL mode
   }
 
   onPanMouseUp(event) {
@@ -5162,6 +5160,12 @@ export default class extends Controller {
         console.log('Cannot update positions - missing data (ReGL)')
         return
       }
+      
+      // console.log('🔍 [UPDATE POSITIONS] Re-normalizing coordinates with:', {
+      //   canvasSize: { width: this.canvas.width, height: this.canvas.height },
+      //   bounds: this.currentBounds,
+      //   numPoints: this.currentCoordinates.length
+      // })
       
       // Re-normalize all coordinates to screen space with current bounds
       // Use displayOrder to maintain proper draw order

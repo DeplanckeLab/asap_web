@@ -143,11 +143,13 @@ export class InteractionHandler {
     const availableWidth = screenWidth - margins.left - margins.right
     const normalized = margins.left + ((x - bounds.minX) / (bounds.maxX - bounds.minX)) * availableWidth
     
-    // Debug logging for first normalization call
-    if (!this._normalizeLogged) {
-      console.log(`🔍 [NORMALIZE] normalizeX: x=${x.toFixed(3)}, bounds=(${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}), screenWidth=${screenWidth}, availableWidth=${availableWidth}, margins.left=${margins.left}, result=${normalized.toFixed(1)}`)
-      this._normalizeLogged = true
-    }
+    // Debug logging for every normalization call during panning
+    // if (this.controller.isPanning) {
+    //   console.log(`🔍 [NORMALIZE] normalizeX: x=${x.toFixed(3)}, bounds=(${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}), screenWidth=${screenWidth}, availableWidth=${availableWidth}, margins.left=${margins.left}, result=${normalized.toFixed(1)}`)
+    // } else if (!this._normalizeLogged) {
+    //   console.log(`🔍 [NORMALIZE] normalizeX: x=${x.toFixed(3)}, bounds=(${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}), screenWidth=${screenWidth}, availableWidth=${availableWidth}, margins.left=${margins.left}, result=${normalized.toFixed(1)}`)
+    //   this._normalizeLogged = true
+    // }
     
     return normalized
   }
@@ -159,11 +161,13 @@ export class InteractionHandler {
     const availableHeight = screenHeight - margins.top - margins.bottom
     const normalized = margins.top + availableHeight - ((y - bounds.minY) / (bounds.maxY - bounds.minY)) * availableHeight
     
-    // Debug logging for first normalization call
-    if (!this._normalizeYLogged) {
-      console.log(`🔍 [NORMALIZE] normalizeY: y=${y.toFixed(3)}, bounds=(${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}), screenHeight=${screenHeight}, availableHeight=${availableHeight}, margins.top=${margins.top}, result=${normalized.toFixed(1)}`)
-      this._normalizeYLogged = true
-    }
+    // Debug logging for every normalization call during panning
+    // if (this.controller.isPanning) {
+    //   console.log(`🔍 [NORMALIZE] normalizeY: y=${y.toFixed(3)}, bounds=(${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}), screenHeight=${screenHeight}, availableHeight=${availableHeight}, margins.top=${margins.top}, result=${normalized.toFixed(1)}`)
+    // } else if (!this._normalizeYLogged) {
+    //   console.log(`🔍 [NORMALIZE] normalizeY: y=${y.toFixed(3)}, bounds=(${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}), screenHeight=${screenHeight}, availableHeight=${availableHeight}, margins.top=${margins.top}, result=${normalized.toFixed(1)}`)
+    //   this._normalizeYLogged = true
+    // }
     
     return normalized
   }

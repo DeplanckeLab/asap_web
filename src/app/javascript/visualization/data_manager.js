@@ -639,7 +639,7 @@ export class DataManager {
         console.log(`Using uncompressed data: ${values.length} values for ${vectorData.name}`)
       } else if (hasCompressedData) {
         // Data is compressed, decompress it
-        if (vectorData.data_type === 'DISCRETE') {
+        if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
           values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else if (vectorData.data_type === 'NUMERIC') {
           values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
@@ -738,7 +738,7 @@ export class DataManager {
     
     // Initialize checkboxes for the new metadata (only for discrete)
     // NOTE: Don't auto-select categories when loading metadata - let user choose
-    if (this.controller.currentMetadataVector?.data_type === 'DISCRETE') {
+    if (this.controller.currentMetadataVector?.data_type === 'DISCRETE' || this.controller.currentMetadataVector?.data_type === 'STRING') {
       // Just show the checkboxes without selecting them
       // this.controller.uiManager.initializeAllCheckboxes()
       console.log('📋 Discrete metadata loaded - checkboxes available for user selection')
@@ -824,7 +824,7 @@ export class DataManager {
       
       // Re-render category labels after filtering (ReGL mode only)
       // Labels need to move to new centroids of visible cells
-      if (this.controller.rendererType === 'regl' && this.controller.currentMetadataVector?.data_type === 'DISCRETE') {
+      if (this.controller.rendererType === 'regl' && (this.controller.currentMetadataVector?.data_type === 'DISCRETE' || this.controller.currentMetadataVector?.data_type === 'STRING')) {
         const categoriesCheckbox = document.getElementById('show-categories-checkbox')
         if (categoriesCheckbox && categoriesCheckbox.checked) {
           console.log('🏷️ Re-rendering category labels after filtering (centroids may have moved)')
@@ -1288,13 +1288,28 @@ export class DataManager {
         return vectorData
       }
       
+      // Check if compression_info is invalid (error string instead of object)
+      const isInvalidCompression = vectorData.compression_info && 
+        typeof vectorData.compression_info === 'string' &&
+        (vectorData.compression_info.includes('No categories available') || 
+         vectorData.compression_info.includes('Failed to parse'))
+      
+      // If invalid compression, remove from cache and return null to force reload
+      if (isInvalidCompression) {
+        console.warn(`⚠️ [DataManager] Metadata ${metadataId} has invalid compression_info: ${vectorData.compression_info}`)
+        console.warn(`⚠️ [DataManager] Removing from cache - will reload from server`)
+        delete this.controller.loadedMetadataVectors[metadataId]
+        return null
+      }
+      
       // If it's compressed, decompress it on demand (matching original controller logic)
       // Handle both regular compression and single_category optimization
-      if (vectorData.compression_info && (vectorData.compressed_data || vectorData.compression_info.single_category)) {
+      if (vectorData.compression_info && typeof vectorData.compression_info === 'object' && 
+          (vectorData.compressed_data || vectorData.compression_info.single_category)) {
         // console.log(`💾 [MEMORY] Decompressing metadata ${metadataId} from memory...`)
         try {
           let values
-          if (vectorData.data_type === 'DISCRETE') {
+          if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
             values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
           } else if (vectorData.data_type === 'NUMERIC') {
             values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)

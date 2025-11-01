@@ -50,7 +50,7 @@
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
-            <% categorical_count = @h_metadata[@default_loom_file]&.dig('cell', 'DISCRETE')&.count || 0 %>
+            <% categorical_count = (@h_metadata[@default_loom_file]&.dig('cell', 'DISCRETE')&.count || 0) %>
             <span style="background-color: #3b82f6; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
               <%= categorical_count %>
             </span>
@@ -58,7 +58,8 @@
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
-            <% @h_metadata[@default_loom_file]['cell']['DISCRETE'].each do |metadata| %>
+            <%# Visible DISCRETE metadata %>
+            <% (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []).each do |metadata| %>
               <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
@@ -129,7 +130,7 @@
                           data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
                           data-metadata-name="<%= metadata.display_name %>"
                           data-metadata-id="<%= metadata.id %>"
-                          data-metadata-type="DISCRETE"
+                          data-metadata-type="<%= metadata.data_type.name %>"
                           data-active="false"
                           onclick="event.stopPropagation()">
                     <i class="fas fa-palette" style="font-size: 16px;"></i>
@@ -218,6 +219,50 @@
             <% end %>
           <% else %>
             <p style="color: #6b7280; font-size: 14px;">No categorical metadata available</p>
+          <% end %>
+          
+          <%# Hidden STRING metadata for preloading but not displayed %>
+          <% if @h_metadata[@default_loom_file] && @h_metadata[@default_loom_file]['cell'] && @h_metadata[@default_loom_file]['cell']['STRING'] %>
+            <% (@h_metadata[@default_loom_file]['cell']['STRING'] || []).each do |metadata| %>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; display: none;" data-metadata-item="<%= metadata.id %>" data-metadata-type="STRING">
+                <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f9fafb'" 
+                     onmouseout="this.style.backgroundColor=''"
+                     data-action="click->visualization#toggleMetadata mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                     data-metadata-id="<%= metadata.id %>">
+                  <!-- Chevron -->
+                  <div style="margin-right: 12px; color: #9ca3af;">
+                    <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;"></i>
+                  </div>
+                  
+                  <!-- Status Icon -->
+                  <div class="metadata-status-icon" 
+                       data-metadata-id="<%= metadata.id %>"
+                       title="Waiting..."
+                       style="margin-right: 8px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background-color: #9ca3af; transition: all 0.2s;">
+                    <i class="fas fa-spinner fa-spin" style="color: white; font-size: 10px;"></i>
+                  </div>
+                  
+                  <!-- Content -->
+                  <div style="flex: 1; min-width: 0; margin-right: 8px;">
+                    <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<%= metadata.display_name %>"><%= metadata.display_name %></div>
+                  </div>
+                  
+                  <!-- Water Drop Button -->
+                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-id="<%= metadata.id %>"
+                          data-metadata-type="<%= metadata.data_type.name %>"
+                          data-active="false"
+                          onclick="event.stopPropagation()">
+                    <i class="fas fa-palette" style="font-size: 16px;"></i>
+                  </button>
+                </div>
+              </div>
+            <% end %>
           <% end %>
         </div>
       </div>

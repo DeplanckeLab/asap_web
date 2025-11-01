@@ -530,6 +530,8 @@ class ProjectsController < ApplicationController
         compress_discrete_metadata_vector(raw_vector, metadata)
       when 'NUMERIC'
         compress_continuous_metadata_vector(raw_vector, metadata)
+      when 'STRING'
+        compress_discrete_metadata_vector(raw_vector, metadata)
       else
         Rails.logger.warn "Unknown data type for compression: #{data_type}"
         { data: nil, info: "Unknown data type: #{data_type}" }
@@ -555,6 +557,15 @@ class ProjectsController < ApplicationController
           Rails.logger.error "Failed to parse categories for #{metadata.display_name}: #{e.message}"
           return { data: nil, info: "Failed to parse categories" }
         end
+      end
+      
+      # If no categories from JSON, extract them from raw data (for STRING metadata without categories_json)
+      if categories.empty?
+        Rails.logger.info "No categories_json found for #{metadata.display_name}, extracting from raw data"
+        # Extract unique values from raw_vector
+        unique_values = raw_vector.map { |v| v.is_a?(Array) ? v[0] : v }.uniq.compact.sort
+        categories = unique_values
+        Rails.logger.info "Extracted #{categories.length} unique categories from raw data for #{metadata.display_name}"
       end
       
       if categories.empty?

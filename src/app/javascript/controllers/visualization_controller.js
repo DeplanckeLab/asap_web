@@ -342,6 +342,7 @@ export default class extends Controller {
     this.tooltipContent = null
     this.fixedTooltipCellId = null // Cell ID for fixed tooltip (clicked cell)
     this.isTooltipFixed = false // Whether tooltip is fixed to a clicked cell
+    this.lastTooltipPosition = null // Last position of the fixed tooltip
     
     // Zoom mode state
     this.isDrawingZoom = false
@@ -1639,7 +1640,7 @@ export default class extends Controller {
       if (!metadataId) return
       
       // Process categorical and continuous metadata (excluding embeddings)
-      if (metadataType === 'DISCRETE') {
+      if (metadataType === 'DISCRETE' || metadataType === 'STRING') {
         if (!categoricalSet.has(metadataId)) {
           categoricalSet.add(metadataId)
           console.log(`  ✅ Categorical: ${metadataName} (${metadataId})`)
@@ -1702,7 +1703,7 @@ export default class extends Controller {
         if (!metadataId) return
         
         // Process categorical and continuous metadata (excluding embeddings)
-        if (metadataType === 'DISCRETE') {
+        if (metadataType === 'DISCRETE' || metadataType === 'STRING') {
           if (!categoricalSet.has(metadataId)) {
             categoricalSet.add(metadataId)
             console.log(`  ✅ Categorical (fallback): ${metadataName} (${metadataId})`)
@@ -2188,7 +2189,7 @@ export default class extends Controller {
     if (coloringMetadataVector) {
       // console.log(`🎨 [ReGL] Applying ${coloringMetadataVector.data_type} metadata colors`)
       
-      if (coloringMetadataVector.data_type === 'DISCRETE') {
+      if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.colorManager.getCategoryColors()
         
@@ -2367,7 +2368,7 @@ export default class extends Controller {
     this.rendererManager.renderGrid()
     this.rendererManager.renderAxes()
     if (this.currentMetadataVector) {
-      if (this.currentMetadataVector.data_type === 'DISCRETE') {
+      if (this.currentMetadataVector.data_type === 'DISCRETE' || this.currentMetadataVector.data_type === 'STRING') {
         this.rendererManager.renderCategoryLabels()
       } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
         this.renderContinuousColorLegend()
@@ -2381,6 +2382,9 @@ export default class extends Controller {
     const elapsed = performance.now() - startTime
     this.recordPerformanceMetrics('ColorUpdate', elapsed)
     console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
+    
+    // Refresh fixed tooltip if one is displayed
+    this.refreshFixedTooltipIfNeeded()
   }
 
 
@@ -4675,7 +4679,7 @@ export default class extends Controller {
           this.rendererManager.renderAxes()
           
           // Re-render the appropriate legend/labels based on metadata type
-          if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+          if (this.currentMetadataVector?.data_type === 'DISCRETE' || this.currentMetadataVector?.data_type === 'STRING') {
             this.rendererManager.renderCategoryLabels()
           } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
             this.renderContinuousColorLegend()
@@ -4979,7 +4983,7 @@ export default class extends Controller {
     this.rendererManager.renderAxes()
     
     // In ReGL mode, we need to redraw labels/legend too since renderGrid() clears the canvas
-      if (this.currentMetadataVector?.data_type === 'DISCRETE') {
+      if (this.currentMetadataVector?.data_type === 'DISCRETE' || this.currentMetadataVector?.data_type === 'STRING') {
         const categoriesCheckbox = document.getElementById('show-categories-checkbox')
         if (categoriesCheckbox && categoriesCheckbox.checked) {
           this.rendererManager.renderCategoryLabels()
@@ -6762,7 +6766,7 @@ export default class extends Controller {
         this.setWaterDropButtonActive(activeButton)
         
         // Re-add category colors if it's discrete metadata
-        if (metadataVector.data_type === 'DISCRETE') {
+        if (metadataVector.data_type === 'DISCRETE' || metadataVector.data_type === 'STRING') {
           const metadataContainer = activeButton.closest('[data-metadata-item]')
           if (metadataContainer) {
             this.addCategoryColors(metadataContainer, metadataId)
@@ -6840,7 +6844,7 @@ export default class extends Controller {
     // For RegL mode, we use showSimpleTooltip instead
     
     // Get cell information
-    const cellName = `Cell ${cellId + 1}` // Generate cell name from ID
+    const cellName = cellId.toString() // Generate cell name from ID
     
     // Get category information if available
     let categoryInfo = ''
@@ -6848,7 +6852,7 @@ export default class extends Controller {
       const { data_type, values } = this.currentMetadataVector
       const value = values[cellId]
       
-      if (data_type === 'DISCRETE') {
+      if (data_type === 'DISCRETE' || data_type === 'STRING') {
         // For discrete metadata, show the category name
         categoryInfo = `<br><strong>Category:</strong> ${value}`
       } else if (data_type === 'NUMERIC') {
@@ -7024,9 +7028,7 @@ export default class extends Controller {
     this.fixedTooltipCellId = null
   }
 
-  showSimpleTooltip(cellName, categoryInfo, point) {
-    // Simple tooltip shown
-    
+  showSimpleTooltip(cellName, categoryInfo, point, cellId = null, isFixed = false) {
     // Remove any existing simple tooltip
     const existing = document.getElementById('simple-tooltip')
     if (existing) {
@@ -7037,10 +7039,17 @@ export default class extends Controller {
     const plotContainer = document.querySelector('.plot-container')
     const rect = plotContainer ? plotContainer.getBoundingClientRect() : { left: 0, top: 0, width: 600, height: 400 }
     
-    // Position tooltip above the plot, centered horizontally
-    const margins = this.rendererManager.getPlotMargins()
-    const tooltipLeft = rect.left + (rect.width / 2) - 100 // Center horizontally, offset for tooltip width
-    const tooltipTop = rect.top - margins.top - 20 // Above the plot with margin
+    // Position tooltip - use last position if available (for both fixed and hover), otherwise calculate default position
+    let tooltipLeft, tooltipTop
+    if (this.lastTooltipPosition) {
+      tooltipLeft = this.lastTooltipPosition.left
+      tooltipTop = this.lastTooltipPosition.top
+    } else {
+      // Default position: above the plot, centered horizontally
+      const margins = this.rendererManager.getPlotMargins()
+      tooltipLeft = rect.left + (rect.width / 2) - 100
+      tooltipTop = rect.top - margins.top - 20
+    }
     
     // Create tooltip container
     const tooltip = document.createElement('div')
@@ -7051,7 +7060,7 @@ export default class extends Controller {
       left: ${tooltipLeft}px !important;
       background: rgba(0, 0, 0, 0.9) !important;
       color: white !important;
-      padding: 12px 16px !important;
+      padding: 8px 8px 12px 8px !important;
       font-size: 14px !important;
       font-weight: normal !important;
       border: 1px solid rgba(255, 255, 255, 0.2) !important;
@@ -7065,6 +7074,14 @@ export default class extends Controller {
       min-width: 200px !important;
       max-width: 300px !important;
     `
+    
+    // Make tooltip draggable if fixed (will be moved to drag handle)
+    let dragHandle = null
+    let isDragging = false
+    let currentX
+    let currentY
+    let initialX
+    let initialY
     
     // Create close button
     const closeButton = document.createElement('button')
@@ -7083,53 +7100,324 @@ export default class extends Controller {
       width: 20px !important;
       height: 20px !important;
       line-height: 1 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
     `
     closeButton.onclick = () => {
       tooltip.remove()
-      // Reset tooltip state to re-enable hover detection
       this.isTooltipFixed = false
       this.fixedTooltipCellId = null
-      console.log('🗑️ Tooltip closed by user - hover detection re-enabled')
+      console.log('Tooltip closed by user - hover detection re-enabled')
+    }
+    
+    // Create header with title, drag handle, and lock icon
+    const header = document.createElement('div')
+    header.style.cssText = `
+      display: flex !important;
+      align-items: center !important;
+      padding: 4px 30px 8px 8px !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+      margin-bottom: 8px !important;
+      cursor: ${isFixed ? 'move' : 'default'} !important;
+    `
+    
+    // Create drag handle if tooltip is fixed (visual indicator only)
+    if (isFixed) {
+      dragHandle = document.createElement('i')
+      dragHandle.className = 'fas fa-grip-vertical drag-handle'
+      dragHandle.style.cssText = `
+        cursor: move !important;
+        font-size: 14px !important;
+        color: #9ca3af !important;
+        margin-right: 8px !important;
+        user-select: none !important;
+        line-height: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+      `
+      
+      header.appendChild(dragHandle)
+    }
+    
+    const title = document.createElement('div')
+    title.textContent = 'Cell Inspector'
+    title.style.cssText = `
+      font-weight: 600 !important;
+      font-size: 13px !important;
+      color: white !important;
+      flex: 1 !important;
+      display: flex !important;
+      align-items: center !important;
+      user-select: none !important;
+    `
+    header.appendChild(title)
+    
+    // Create lock icon if tooltip is fixed (positioned absolutely to align with close button)
+    if (isFixed) {
+      const lockIcon = document.createElement('span')
+      lockIcon.className = 'lock-icon'
+      lockIcon.innerHTML = '🔒'
+      lockIcon.style.cssText = `
+        position: absolute !important;
+        top: 4px !important;
+        right: 32px !important;
+        font-size: 14px !important;
+        color: white !important;
+        display: flex !important;
+        align-items: center !important;
+      `
+      tooltip.appendChild(lockIcon)
+    }
+    
+    tooltip.appendChild(header)
+    
+    // Set up drag handlers for fixed tooltip (entire header is draggable)
+    if (isFixed) {
+      header.onmousedown = (e) => {
+        // Don't start drag if clicking on close button or lock icon
+        if (e.target === closeButton || e.target.closest('.lock-icon')) {
+          return
+        }
+        
+        e.preventDefault()
+        e.stopPropagation()
+        isDragging = true
+        const rect = tooltip.getBoundingClientRect()
+        initialX = e.clientX - rect.left
+        initialY = e.clientY - rect.top
+      }
+      
+      document.onmouseup = () => {
+        isDragging = false
+      }
+      
+      document.onmousemove = (e) => {
+        if (!isDragging) return
+        
+        e.preventDefault()
+        currentX = e.clientX - initialX
+        currentY = e.clientY - initialY
+        
+        tooltip.style.left = currentX + 'px'
+        tooltip.style.top = currentY + 'px'
+        
+        // Store the position for next time
+        this.lastTooltipPosition = { left: currentX, top: currentY }
+      }
     }
     
     // Create content
     const content = document.createElement('div')
     content.style.cssText = `
       padding-right: 25px !important;
-      line-height: 1.4 !important;
     `
     
-    // Add cell name
-    const cellNameDiv = document.createElement('div')
-    cellNameDiv.style.cssText = `
-      font-weight: 600 !important;
-      margin-bottom: 4px !important;
-    `
-    cellNameDiv.textContent = cellName
-    
-    // Add category info if available
-    if (categoryInfo) {
-      const categoryDiv = document.createElement('div')
-      categoryDiv.style.cssText = `
+    // Create table for information
+    const table = document.createElement('table')
+    table.style.cssText = `
+      width: 100% !important;
+      border-collapse: collapse !important;
         font-size: 12px !important;
-        color: #e5e7eb !important;
-        margin-top: 2px !important;
-        white-space: pre-line !important;
-        line-height: 1.3 !important;
-      `
-      categoryDiv.textContent = categoryInfo
-      content.appendChild(cellNameDiv)
-      content.appendChild(categoryDiv)
-    } else {
-      content.appendChild(cellNameDiv)
+      margin-top: 4px !important;
+    `
+    
+    // Add cell ID row
+    const nameRow = document.createElement('tr')
+    const nameLabelCell = document.createElement('td')
+    nameLabelCell.textContent = 'Cell index'
+    nameLabelCell.style.cssText = 'font-weight: 600 !important; padding: 2px 8px 2px 0 !important; color: white !important;'
+    const nameValueCell = document.createElement('td')
+    nameValueCell.textContent = cellName
+    nameValueCell.style.cssText = 'padding: 2px 0 !important; color: #e5e7eb !important;'
+    nameRow.appendChild(nameLabelCell)
+    nameRow.appendChild(nameValueCell)
+    table.appendChild(nameRow)
+    
+    // Always add CellID row to tooltip (with loading state if not available)
+    if (cellId !== null) {
+      const cellIdRow = document.createElement('tr')
+      const cellIdLabelCell = document.createElement('td')
+      cellIdLabelCell.textContent = 'CellID'
+      cellIdLabelCell.style.cssText = 'font-weight: 600 !important; padding: 2px 8px 2px 0 !important; color: white !important;'
+      const cellIdValueCell = document.createElement('td')
+      
+      let cellIdValue = null
+      let cellIdMetadataId = null
+      let isLoading = false
+      
+      // First, search in loaded metadata vectors
+      if (this.loadedMetadataVectors) {
+        for (const [metadataId, vectorData] of Object.entries(this.loadedMetadataVectors)) {
+          // Search for CellID metadata (case-insensitive, handles "CellID", "Cell ID", etc.)
+          const metadataName = vectorData.name ? vectorData.name.toLowerCase().replace(/\s+/g, '') : ''
+          if (metadataName === 'cellid' || metadataName.includes('cellid')) {
+            // Check if metadata has invalid compression info
+            const hasInvalidCompression = vectorData.compression_info && 
+              typeof vectorData.compression_info === 'string' &&
+              (vectorData.compression_info.includes('No categories available') || 
+               vectorData.compression_info.includes('Failed to parse'))
+            
+            // If invalid, remove it to force reload (will happen on next check)
+            if (hasInvalidCompression) {
+              console.log(`🔧 [Tooltip] CellID metadata has invalid compression, will reload on next access`)
+              delete this.loadedMetadataVectors[metadataId]
+              continue
+            }
+            
+            const cellIdVector = this.dataManager.getMetadataVectorById(metadataId)
+            if (cellIdVector && cellIdVector.values && cellIdVector.values[cellId] !== undefined) {
+              cellIdValue = cellIdVector.values[cellId]
+              cellIdMetadataId = metadataId
+              break
+            }
+          }
+        }
+      }
+      
+      // If not found in loaded vectors, try to find CellID metadata button in UI and load it
+      if (!cellIdValue) {
+        const cellIdButtons = document.querySelectorAll('button[data-metadata-name]')
+        for (const button of cellIdButtons) {
+          const metadataName = (button.dataset.metadataName || '').toLowerCase().replace(/\s+/g, '')
+          if (metadataName === 'cellid' || metadataName.includes('cellid')) {
+            const metadataId = button.dataset.metadataId
+            if (metadataId) {
+              // Check if metadata exists but has invalid compression info
+              const existingVector = this.loadedMetadataVectors?.[metadataId]
+              const hasInvalidCompression = existingVector && 
+                typeof existingVector.compression_info === 'string' &&
+                (existingVector.compression_info.includes('No categories available') || 
+                 existingVector.compression_info.includes('Failed to parse'))
+              
+              // If invalid, remove it to force reload
+              if (hasInvalidCompression) {
+                console.log(`🔧 [Tooltip] CellID metadata has invalid compression, forcing reload`)
+                delete this.loadedMetadataVectors[metadataId]
+                // Also try to remove from IndexedDB cache if memoryManager exists
+                if (this.memoryManager) {
+                  // Try to clear from IndexedDB if the method exists
+                  if (typeof this.memoryManager.clearMetadataFromIndexedDB === 'function') {
+                    this.memoryManager.clearMetadataFromIndexedDB(metadataId).catch(() => {})
+                  } else if (this.memoryManager.store && this.memoryManager.store.delete) {
+                    // Fallback: try direct IndexedDB deletion
+                    this.memoryManager.store.delete(metadataId).catch(() => {})
+                  }
+                }
+              }
+              
+              // Try to get the metadata vector (this will load it if needed)
+              const cellIdVector = this.dataManager.getMetadataVectorById(metadataId)
+              
+              // If still no values and we have metadata ID, try loading from server
+              if ((!cellIdVector || !cellIdVector.values) && metadataId) {
+                console.log(`🔧 [Tooltip] CellID not in memory, attempting to load from server`)
+                isLoading = true
+                // Load asynchronously and update tooltip when ready
+                this.loadSingleMetadataVectorSilently(metadataId).then(() => {
+                  // Reload the tooltip with updated data
+                  this.hideSimpleTooltip()
+                  this.showSimpleTooltip(cellName, categoryInfo, point, cellId, isFixed)
+                  console.log(`🔧 [Tooltip] CellID metadata loaded successfully, tooltip refreshed`)
+                }).catch(err => {
+                  console.error(`🔧 [Tooltip] Failed to load CellID metadata:`, err)
+                })
+              } else if (cellIdVector && cellIdVector.values && cellIdVector.values[cellId] !== undefined) {
+                cellIdValue = cellIdVector.values[cellId]
+                cellIdMetadataId = metadataId
+                break
+              }
+            }
+          }
+        }
+      }
+      
+      // Set cell content based on availability
+      if (cellIdValue !== null) {
+        cellIdValueCell.textContent = cellIdValue
+        cellIdValueCell.style.cssText = 'padding: 2px 0 !important; color: #e5e7eb !important;'
+      } else {
+        // Show loading spinner
+        cellIdValueCell.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 4px;"></i><span style="font-style: italic;">Loading...</span>'
+        cellIdValueCell.style.cssText = 'padding: 2px 0 !important; color: #9ca3af !important;'
+      }
+      
+      cellIdRow.appendChild(cellIdLabelCell)
+      cellIdRow.appendChild(cellIdValueCell)
+      table.appendChild(cellIdRow)
     }
     
-    // Assemble tooltip
+    // Add category/value row - use current metadata if cellId provided, otherwise use passed categoryInfo
+    let finalCategoryInfo = categoryInfo
+    if (cellId !== null && this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
+      const { data_type, values } = this.currentMetadataVector
+      const value = values[cellId]
+      
+      if (data_type === 'DISCRETE' || data_type === 'STRING') {
+        finalCategoryInfo = value
+      } else if (data_type === 'NUMERIC') {
+        finalCategoryInfo = value.toFixed(3)
+      }
+    }
+    
+    if (finalCategoryInfo !== null && finalCategoryInfo !== undefined && finalCategoryInfo !== '') {
+      const categoryRow = document.createElement('tr')
+      const categoryLabelCell = document.createElement('td')
+      const { data_type } = this.currentMetadataVector || {}
+      categoryLabelCell.textContent = data_type === 'NUMERIC' ? 'Value' : 'Category'
+      categoryLabelCell.style.cssText = 'font-weight: 600 !important; padding: 2px 8px 2px 0 !important; color: white !important;'
+      const categoryValueCell = document.createElement('td')
+      categoryValueCell.textContent = finalCategoryInfo
+      categoryValueCell.style.cssText = 'padding: 2px 0 !important; color: #e5e7eb !important;'
+      categoryRow.appendChild(categoryLabelCell)
+      categoryRow.appendChild(categoryValueCell)
+      table.appendChild(categoryRow)
+    }
+    
+    content.appendChild(table)
     tooltip.appendChild(content)
     tooltip.appendChild(closeButton)
     document.body.appendChild(tooltip)
     
-    // Improved tooltip created and positioned
+    // Store initial position for tooltips (if not already stored)
+    if (!this.lastTooltipPosition) {
+      this.lastTooltipPosition = { left: tooltipLeft, top: tooltipTop }
+    }
+  }
+
+  // Refresh fixed tooltip if needed (called after coloring changes)
+  refreshFixedTooltipIfNeeded() {
+    if (!this.isTooltipFixed || this.fixedTooltipCellId === null) {
+      return
+    }
+    
+    // Check if tooltip exists in DOM
+    const existing = document.getElementById('simple-tooltip')
+    if (!existing) {
+      return
+    }
+    
+    // Recreate the tooltip with updated information
+    // Get current category info
+    let categoryInfo = null
+    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[this.fixedTooltipCellId] !== undefined) {
+      const { data_type, values } = this.currentMetadataVector
+      const value = values[this.fixedTooltipCellId]
+      
+      if (data_type === 'DISCRETE' || data_type === 'STRING') {
+        categoryInfo = value
+      } else if (data_type === 'NUMERIC') {
+        categoryInfo = value.toFixed(3)
+      }
+    }
+    
+    // Use existing position from DOM
+    const rect = existing.getBoundingClientRect()
+    const point = { x: rect.left, y: rect.top }
+    
+    // Recreate tooltip with updated data
+    const cellName = this.fixedTooltipCellId.toString()
+    this.showSimpleTooltip(cellName, categoryInfo, point, this.fixedTooltipCellId, true)
   }
 
   // Pick mode methods
@@ -7303,74 +7591,16 @@ export default class extends Controller {
     this.fixedTooltipCellId = cellId
     this.isTooltipFixed = true
     
-    // Get detailed point information
-    const cellName = `Cell ${cellId + 1}`
-    let detailedInfo = []
-    
-    // Get data coordinates
-    if (this.currentCoordinates && this.currentCoordinates.length > cellId * 2) {
-      const dataX = this.currentCoordinates[cellId * 2]
-      const dataY = this.currentCoordinates[cellId * 2 + 1]
-      detailedInfo.push(`Position: (${dataX.toFixed(3)}, ${dataY.toFixed(3)})`)
-    }
-    
-    // Get screen coordinates
-    detailedInfo.push(`Screen: (${Math.round(screenX)}, ${Math.round(screenY)})`)
-    
-    // Get point size
-    const pointSize = this.currentPointSize || 4
-    detailedInfo.push(`Size: ${pointSize}px`)
-    
-    // Debug: Temporarily increase point size for visibility
-    if (this.reglRenderer && pointSize < 4) {
-      this.reglRenderer.setPointSize(8)
-      detailedInfo.push(`Size increased to 8px for debugging`)
-    }
-    
-    // Debug: Check if point is within visible bounds
-    if (this.currentBounds) {
-      const bounds = this.currentBounds
-      detailedInfo.push(`Bounds: X[${bounds.minX.toFixed(2)}, ${bounds.maxX.toFixed(2)}] Y[${bounds.minY.toFixed(2)}, ${bounds.maxY.toFixed(2)}]`)
-    }
-    
-    // Debug: Check camera settings
-    if (this.reglRenderer && this.reglRenderer.camera) {
-      const camera = this.reglRenderer.camera
-      detailedInfo.push(`Camera: scale=${camera.scale.toFixed(2)}, offset=(${camera.offsetX.toFixed(2)}, ${camera.offsetY.toFixed(2)})`)
-    }
-    
-    // Get color information
-    if (this.reglRenderer && this.reglRenderer.colors && this.reglRenderer.colors.length > cellId * 4) {
-      const r = Math.round(this.reglRenderer.colors[cellId * 4] * 255)
-      const g = Math.round(this.reglRenderer.colors[cellId * 4 + 1] * 255)
-      const b = Math.round(this.reglRenderer.colors[cellId * 4 + 2] * 255)
-      const a = this.reglRenderer.colors[cellId * 4 + 3]
-      detailedInfo.push(`Color: RGB(${r}, ${g}, ${b}) Alpha: ${a.toFixed(2)}`)
-    }
-    
-    // Get category information if available
-    if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
-      const { data_type, values } = this.currentMetadataVector
-      const value = values[cellId]
-      
-      if (data_type === 'DISCRETE') {
-        detailedInfo.push(`Category: ${value}`)
-      } else if (data_type === 'NUMERIC') {
-        detailedInfo.push(`Value: ${value.toFixed(3)}`)
-      }
-    }
-    
-    // Add fixed indicator
-    detailedInfo.push('🔒 Fixed')
-    
-    // Join all information
-    const categoryInfo = detailedInfo.join('\n')
+    // Get cell information
+    const cellName = cellId.toString()
     
     // Create a mock point object for positioning
     const mockPoint = { x: screenX, y: screenY }
-    this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
     
-    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1} with detailed info`)
+    // Tooltip will read current metadata directly, and isFixed=true will show lock icon
+    this.showSimpleTooltip(cellName, null, mockPoint, cellId, true)
+    
+    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
   }
 
   // Check if color picker popup or gradient editor is currently open
@@ -7446,26 +7676,11 @@ export default class extends Controller {
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
       // Point found within tolerance - show dynamic tooltip only if not fixed
       if (!this.isTooltipFixed) {
-        const cellName = `Cell ${closestPointIndex + 1}`
-        let categoryInfo = ''
-        
-        // Get category information if available
-        if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[closestPointIndex] !== undefined) {
-          const { data_type, values } = this.currentMetadataVector
-          const value = values[closestPointIndex]
-          
-          if (data_type === 'DISCRETE') {
-            categoryInfo = `Category: ${value}`
-          } else if (data_type === 'NUMERIC') {
-            categoryInfo = `Value: ${value.toFixed(3)}`
-          }
-        }
-        
-        // Add hover indicator
-        categoryInfo += ''
+        const cellName = closestPointIndex.toString()
         
         const mockPoint = { x: mouseX, y: mouseY }
-        this.showSimpleTooltip(cellName, categoryInfo, mockPoint)
+        // Tooltip will read current metadata directly, isFixed=false so no lock icon
+        this.showSimpleTooltip(cellName, null, mockPoint, closestPointIndex, false)
       }
     } else {
       // No point found within tolerance - hide tooltip only if not fixed
@@ -8082,7 +8297,7 @@ export default class extends Controller {
     }
     
     // Initialize checkboxes for this metadata if not already done (only for discrete)
-    if (metadataVector?.data_type === 'DISCRETE' && !this.selectedCategories[metadataId]) {
+    if ((metadataVector?.data_type === 'DISCRETE' || metadataVector?.data_type === 'STRING') && !this.selectedCategories[metadataId]) {
       await this.initializeCheckboxesForMetadata(metadataId)
     }
     
@@ -8300,7 +8515,7 @@ export default class extends Controller {
     }
     
     // Only initialize for discrete metadata
-    if (!metadataVector || metadataVector.data_type !== 'DISCRETE') {
+    if (!metadataVector || (metadataVector.data_type !== 'DISCRETE' && metadataVector.data_type !== 'STRING')) {
       console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
       return
     }
@@ -8723,7 +8938,7 @@ export default class extends Controller {
       // If it's compressed, decompress it on demand
       try {
         let values
-        if (vectorData.data_type === 'DISCRETE') {
+        if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
           values = this.dataManager.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else if (vectorData.data_type === 'NUMERIC') {
           values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
@@ -8827,7 +9042,7 @@ export default class extends Controller {
       // Decompress the data if needed
       if (!vectorData.values) {
         let values
-        if (vectorData.data_type === 'DISCRETE') {
+        if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
           values = this.dataManager.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else if (vectorData.data_type === 'NUMERIC') {
           values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
@@ -8893,7 +9108,7 @@ export default class extends Controller {
     
     try {
       let values
-      if (vectorData.data_type === 'DISCRETE') {
+      if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
         values = this.dataManager.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
       } else if (vectorData.data_type === 'NUMERIC') {
         values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
@@ -10207,7 +10422,7 @@ export default class extends Controller {
     // Check if there's active coloring
     const coloringMetadataVector = this.currentMetadataVector
     if (coloringMetadataVector && coloringMetadataVector.values) {
-      if (coloringMetadataVector.data_type === 'DISCRETE') {
+      if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Sheet 2: Categorical Distribution
         await this.addCategoricalDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet)
       } else if (coloringMetadataVector.data_type === 'NUMERIC') {

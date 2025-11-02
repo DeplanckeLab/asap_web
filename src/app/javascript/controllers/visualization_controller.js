@@ -5348,44 +5348,8 @@ export default class extends Controller {
   
   // Select a control point for editing
   selectControlPoint(index) {
-    this.selectedControlPointIndex = index
-    
-    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints
-    if (!controlPoints || index < 0 || index >= controlPoints.length) return
-    
-    const point = controlPoints[index]
-    
-    // Show editor panel
-    const editor = document.getElementById('gradient-control-point-editor')
-    if (editor) {
-      editor.style.display = 'block'
-    }
-    
-    // Populate editor fields
-    const positionInput = document.getElementById('gradient-control-point-position')
-    const colorInput = document.getElementById('gradient-control-point-color')
-    
-    if (positionInput) {
-      // Convert position (0-1) to actual value
-      const actualValue = this.positionToActualValue(point.position)
-      positionInput.value = actualValue.toFixed(3)
-      
-      // Update input min/max attributes to match data range
-      if (this.gradientMinValue !== undefined && this.gradientMaxValue !== undefined) {
-        positionInput.min = this.gradientMinValue
-        positionInput.max = this.gradientMaxValue
-        positionInput.step = (this.gradientMaxValue - this.gradientMinValue) / 1000
-      }
-    }
-    
-    if (colorInput) {
-      colorInput.value = `#${point.color.toString(16).padStart(6, '0')}`
-    }
-    
-    // Update list highlighting
-    this.rendererManager.renderControlPointsList()
-    
-    console.log(`🎨 Selected control point ${index}:`, point)
+    // Delegate to gradientManager
+    this.gradientManager.selectControlPoint(index)
   }
   
   // Update position of selected control point
@@ -5412,8 +5376,18 @@ export default class extends Controller {
     if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
       controlPoints[this.selectedControlPointIndex].position = position
       
-      this.sortControlPoints()
-      this.reapplyColorsWithNewGradient()
+      // Sort and update display
+      controlPoints.sort((a, b) => a.position - b.position)
+      
+      // Update selected index after sorting
+      const sortedIndex = controlPoints.findIndex(p => 
+        Math.abs(p.position - position) < 0.0001
+      )
+      if (sortedIndex >= 0) {
+        this.selectedControlPointIndex = sortedIndex
+      }
+      
+      this.gradientManager.updateGradientDisplay()
     }
   }
   
@@ -5512,53 +5486,219 @@ export default class extends Controller {
   
   // Update color of selected control point
   updateControlPointColor(event) {
-    if (this.selectedControlPointIndex === undefined) return
+    console.log('🎨 updateControlPointColor CALLED')
+    console.log('🎨 updateControlPointColor: this controller instance', this)
+    console.log('🎨 updateControlPointColor: selectedControlPointIndex', this.selectedControlPointIndex)
+    console.log('🎨 updateControlPointColor: customGradientControlPoints', this.customGradientControlPoints)
+    console.log('🎨 updateControlPointColor: gradientControlPoints', this.gradientControlPoints)
+    console.log('🎨 updateControlPointColor: has gradientManager', !!this.gradientManager)
+    
+    // Try to find the main controller instance that has the gradient state
+    let mainController = this
+    const mainVisualizationDiv = document.querySelector('[data-controller="visualization"][data-visualization-embeddings-by-loom-value]')
+    if (mainVisualizationDiv && mainVisualizationDiv !== this.element) {
+      try {
+        const mainControllerInstance = this.application.getControllerForElementAndIdentifier(mainVisualizationDiv, 'visualization')
+        if (mainControllerInstance && mainControllerInstance !== this) {
+          console.log('🎨 updateControlPointColor: Found main controller instance, using it')
+          mainController = mainControllerInstance
+        }
+      } catch (e) {
+        console.warn('🎨 ⚠️ updateControlPointColor: Could not get main controller', e)
+      }
+    }
+    
+    // Use main controller's state
+    if (mainController !== this) {
+      console.log('🎨 updateControlPointColor: Switching to main controller instance')
+      console.log('🎨 updateControlPointColor: mainController.selectedControlPointIndex', mainController.selectedControlPointIndex)
+      console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints', mainController.customGradientControlPoints)
+      console.log('🎨 updateControlPointColor: mainController.gradientControlPoints', mainController.gradientControlPoints)
+    }
     
     const hexColor = event.target.value
     const color = parseInt(hexColor.substring(1), 16)
+    console.log('🎨 updateControlPointColor: new color', hexColor, '(', color, ')')
     
-    // Create custom gradient if modifying auto gradient
-    if (!this.customGradientControlPoints) {
-      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
-    }
+    // Initialize targetIndex from selectedControlPointIndex
+    let targetIndex = mainController.selectedControlPointIndex
     
-    const controlPoints = this.customGradientControlPoints
-    if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
-      controlPoints[this.selectedControlPointIndex].color = color
+    // Use main controller's gradient arrays
+    if (!mainController.customGradientControlPoints && !mainController.gradientControlPoints) {
+      console.warn('🎨 ⚠️ updateControlPointColor: Both gradient arrays undefined in main controller! Trying to recover...')
       
-      this.rendererManager.renderModalGradientPreview()
-      this.rendererManager.renderModalControlPointMarkers()
-      this.rendererManager.renderControlPointsList()
-      this.reapplyColorsWithNewGradient()
+      // Try to access through gradientManager which might have the state
+      if (mainController.gradientManager) {
+        console.log('🎨 updateControlPointColor: gradientManager exists, checking its controller state')
+        // The gradientManager's controller should be the same instance
+        if (mainController.gradientManager.controller) {
+          if (mainController.gradientManager.controller.customGradientControlPoints) {
+            mainController.customGradientControlPoints = JSON.parse(JSON.stringify(mainController.gradientManager.controller.customGradientControlPoints))
+            console.log('🎨 updateControlPointColor: Recovered customGradientControlPoints from gradientManager', mainController.customGradientControlPoints)
+          }
+          if (mainController.gradientManager.controller.gradientControlPoints && !mainController.gradientControlPoints) {
+            mainController.gradientControlPoints = JSON.parse(JSON.stringify(mainController.gradientManager.controller.gradientControlPoints))
+            console.log('🎨 updateControlPointColor: Recovered gradientControlPoints from gradientManager', mainController.gradientControlPoints)
+          }
+        }
+      }
+      
+      // If still undefined, try to reinitialize
+      if (!this.customGradientControlPoints && !this.gradientControlPoints) {
+        console.warn('🎨 ⚠️ updateControlPointColor: Still undefined, trying to reinitialize...')
+        if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+          this.colorManager.initializeDefaultGradient()
+          console.log('🎨 updateControlPointColor: After reinit, gradientControlPoints', this.gradientControlPoints)
+        } else {
+          console.error('🎨 ❌ updateControlPointColor: Cannot initialize - currentMetadataVector:', this.currentMetadataVector)
+          // Try one more thing - get the controller from the modal element
+          const modal = document.getElementById('gradient-editor-modal')
+          if (modal) {
+            try {
+              const modalController = this.application.getControllerForElementAndIdentifier(modal, 'visualization')
+              if (modalController && modalController !== this) {
+                console.log('🎨 updateControlPointColor: Found different controller instance, using its state')
+                if (modalController.customGradientControlPoints) {
+                  this.customGradientControlPoints = JSON.parse(JSON.stringify(modalController.customGradientControlPoints))
+                  console.log('🎨 updateControlPointColor: Copied customGradientControlPoints from modal controller')
+                }
+                if (modalController.gradientControlPoints && !this.gradientControlPoints) {
+                  this.gradientControlPoints = JSON.parse(JSON.stringify(modalController.gradientControlPoints))
+                  console.log('🎨 updateControlPointColor: Copied gradientControlPoints from modal controller')
+                }
+                if (modalController.selectedControlPointIndex !== undefined) {
+                  const recoveredIndex = modalController.selectedControlPointIndex
+                  if (targetIndex === undefined) {
+                    targetIndex = recoveredIndex
+                  }
+                  this.selectedControlPointIndex = recoveredIndex
+                  console.log('🎨 updateControlPointColor: Copied selectedControlPointIndex from modal controller', recoveredIndex)
+                }
+                // Also copy currentMetadataVector if we don't have it
+                if (!this.currentMetadataVector && modalController.currentMetadataVector) {
+                  this.currentMetadataVector = modalController.currentMetadataVector
+                  console.log('🎨 updateControlPointColor: Copied currentMetadataVector from modal controller')
+                }
+              }
+            } catch (e) {
+              console.warn('🎨 ⚠️ updateControlPointColor: Error getting modal controller', e)
+            }
+          }
+          if (!this.customGradientControlPoints && !this.gradientControlPoints) {
+            console.error('🎨 ❌ updateControlPointColor: Cannot proceed - no gradient data available')
+            return
+          }
+        }
+      }
     }
+    
+    // Ensure we have a custom gradient array - create a deep copy if needed
+    if (!this.customGradientControlPoints) {
+      console.log('🎨 updateControlPointColor: creating custom gradient from', this.gradientControlPoints)
+      if (this.gradientControlPoints && this.gradientControlPoints.length > 0) {
+        // Create deep copy of control points
+        this.customGradientControlPoints = this.gradientControlPoints.map(p => ({
+          position: p.position,
+          color: p.color
+        }))
+        console.log('🎨 updateControlPointColor: Created custom gradient', this.customGradientControlPoints)
+      } else {
+        console.error('🎨 ❌ updateControlPointColor: no gradientControlPoints to copy after reinit!')
+        return
+      }
+    }
+    
+    // If selectedControlPointIndex is undefined, try to recover it from data attributes
+    // This can happen if the selection was lost but the editor is still open
+    if (targetIndex === undefined) {
+      console.warn('🎨 ⚠️ updateControlPointColor: selectedControlPointIndex is undefined, trying to recover from data attributes')
+      
+      // Try to get from color input data attribute first
+      const colorInput = event.target
+      if (colorInput && colorInput.dataset.controlPointIndex !== undefined) {
+        targetIndex = parseInt(colorInput.dataset.controlPointIndex, 10)
+        console.log('🎨 updateControlPointColor: Recovered index from color input data attribute', targetIndex)
+        mainController.selectedControlPointIndex = targetIndex
+      } else {
+        // Try to get from editor data attribute
+        const editor = document.getElementById('gradient-control-point-editor')
+        if (editor && editor.dataset.selectedControlPointIndex !== undefined) {
+          targetIndex = parseInt(editor.dataset.selectedControlPointIndex, 10)
+          console.log('🎨 updateControlPointColor: Recovered index from editor data attribute', targetIndex)
+          mainController.selectedControlPointIndex = targetIndex
+        } else {
+          // Fallback: try to find by reading the position input value
+          const positionInput = document.getElementById('gradient-control-point-position')
+          if (positionInput && positionInput.value) {
+            const actualValue = parseFloat(positionInput.value)
+            if (!isNaN(actualValue)) {
+              const position = mainController.actualValueToPosition(actualValue)
+              console.log('🎨 updateControlPointColor: Found position from input', position)
+              
+              // Find control point closest to this position
+              const sorted = [...mainController.customGradientControlPoints].sort((a, b) => a.position - b.position)
+              for (let i = 0; i < sorted.length; i++) {
+                if (Math.abs(sorted[i].position - position) < 0.01) {
+                  // Find the original index
+                  targetIndex = mainController.customGradientControlPoints.findIndex(p => 
+                    p.position === sorted[i].position && p.color === sorted[i].color
+                  )
+                  console.log('🎨 updateControlPointColor: Found matching control point at index', targetIndex)
+                  mainController.selectedControlPointIndex = targetIndex
+                  break
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    if (targetIndex === undefined || targetIndex < 0) {
+      console.error('🎨 ❌ updateControlPointColor: Cannot determine which control point to update')
+      return
+    }
+    
+    console.log('🎨 updateControlPointColor: updating index', targetIndex, 'to color', hexColor, '(', color, ')')
+    
+    const controlPoints = mainController.customGradientControlPoints
+    console.log('🎨 updateControlPointColor: controlPoints before update', JSON.parse(JSON.stringify(controlPoints)))
+    console.log('🎨 updateControlPointColor: targetIndex', targetIndex, 'length', controlPoints ? controlPoints.length : 0)
+    
+    if (!controlPoints || controlPoints.length === 0) {
+      console.warn('🎨 ⚠️ updateControlPointColor: controlPoints is empty or null')
+      return
+    }
+    
+    if (targetIndex < 0 || targetIndex >= controlPoints.length) {
+      console.warn('🎨 ⚠️ updateControlPointColor: invalid index', {
+        targetIndex: targetIndex,
+        controlPointsLength: controlPoints.length
+      })
+      return
+    }
+    
+    // Update the color on main controller
+    controlPoints[targetIndex].color = color
+    console.log('🎨 updateControlPointColor: controlPoints after update', JSON.parse(JSON.stringify(controlPoints)))
+    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints reference check', mainController.customGradientControlPoints === controlPoints)
+    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after update', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
+    
+    // Verify the update persisted before rendering
+    if (mainController.customGradientControlPoints[targetIndex].color !== color) {
+      console.error('🎨 ❌ updateControlPointColor: Color update failed!')
+      return
+    }
+    
+    // Update display using main controller
+    mainController.gradientManager.updateGradientDisplay()
+    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after updateGradientDisplay', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
   }
   
   // Remove selected control point
   removeControlPoint() {
-    if (this.selectedControlPointIndex === undefined) return
-    
-    // Create custom gradient if modifying auto gradient
-    if (!this.customGradientControlPoints) {
-      this.customGradientControlPoints = this.gradientControlPoints ? [...this.gradientControlPoints] : []
-    }
-    
-    const controlPoints = this.customGradientControlPoints
-    if (controlPoints && this.selectedControlPointIndex < controlPoints.length) {
-      // Don't allow removing if only 2 points left
-      if (controlPoints.length <= 2) {
-        alert('A gradient must have at least 2 control points.')
-        return
-      }
-      
-      controlPoints.splice(this.selectedControlPointIndex, 1)
-      this.selectedControlPointIndex = undefined
-      
-      this.closeControlPointEditor()
-      this.rendererManager.renderModalGradientPreview()
-      this.rendererManager.renderModalControlPointMarkers()
-      this.rendererManager.renderControlPointsList()
-      this.reapplyColorsWithNewGradient()
-    }
+    // Delegate to gradientManager
+    this.gradientManager.removeControlPoint()
   }
   
   // Close control point editor
@@ -5600,18 +5740,40 @@ export default class extends Controller {
     console.log('🎨 Custom gradient points:', this.customGradientControlPoints)
     console.log('🎨 Auto gradient points:', this.gradientControlPoints)
     
+    // Preserve custom gradient points - they should not be reset by this function
+    const preservedCustomPoints = this.customGradientControlPoints ? 
+      JSON.parse(JSON.stringify(this.customGradientControlPoints)) : null
+    
+    // CRITICAL: Invalidate color cache to force recalculation with new gradient
+    // The cache is based on a hash that might not include gradient changes
+    console.log('🎨 Invalidating color cache to force recalculation with new gradient')
+    this.lastColorUpdateHash = null
+    this.colorUpdateCache.clear()
+    
     // Update the legend in the plot
     if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+      console.log('🎨 Updating legend, scatter plot, and bar plots with new gradient')
+      
+      // Update the continuous color legend
       this.renderContinuousColorLegend()
       
-      // Recolor all points
+      // Recolor all scatter plot points based on the new gradient
+      // renderPointsWithCurrentColoring() handles both ReGL and PixiJS renderers internally
+      console.log('🎨 Recoloring scatter plot points (renderer type:', this.rendererType, ')')
       this.renderPointsWithCurrentColoring()
       
       // Redraw category distribution bar plots to reflect new gradient
+      console.log('🎨 Updating all category distribution bar plots')
       this.dataManager.updateAllCategoryDistributions()
      
     } else {
       console.log('⚠️ Cannot reapply colors: no numeric metadata vector')
+    }
+    
+    // Restore custom gradient points if they got lost
+    if (!this.customGradientControlPoints && preservedCustomPoints) {
+      console.warn('🎨 ⚠️ reapplyColorsWithNewGradient: Custom gradient points were lost! Restoring...')
+      this.customGradientControlPoints = preservedCustomPoints
     }
   }
 

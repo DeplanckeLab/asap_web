@@ -12,17 +12,223 @@ export class GradientManager {
       return
     }
 
+    console.log('🎨 Opening gradient editor modal')
+    console.log('🎨 Current metadata vector:', this.controller.currentMetadataVector)
+    console.log('🎨 Existing gradientControlPoints:', this.controller.gradientControlPoints)
+    console.log('🎨 Existing customGradientControlPoints:', this.controller.customGradientControlPoints)
+
+    // Close any open control point editor to start fresh
+    this.controller.closeControlPointEditor()
+    this.controller.selectedControlPointIndex = undefined
+
+    // Initialize gradient control points if not already set
+    if (!this.controller.gradientControlPoints && !this.controller.customGradientControlPoints) {
+      console.log('🎨 No gradient points found - initializing default gradient')
+      this.controller.colorManager.initializeDefaultGradient()
+      console.log('🎨 After initialization, gradientControlPoints:', this.controller.gradientControlPoints)
+    } else {
+      console.log('🎨 Using existing gradient control points')
+    }
+    
+    // Calculate and store min/max values for the current metadata
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
+      const values = this.controller.currentMetadataVector.values
+      this.controller.gradientMinValue = this.controller.dataManager.safeMin(values)
+      this.controller.gradientMaxValue = this.controller.dataManager.safeMax(values)
+      console.log('🎨 Gradient value range:', { 
+        min: this.controller.gradientMinValue, 
+        max: this.controller.gradientMaxValue,
+        valuesLength: values.length
+      })
+    } else {
+      console.warn('🎨 ⚠️ No metadata vector or values found:', {
+        hasMetadataVector: !!this.controller.currentMetadataVector,
+        hasValues: !!(this.controller.currentMetadataVector && this.controller.currentMetadataVector.values),
+        dataType: this.controller.currentMetadataVector?.data_type
+      })
+    }
+
+    // Get the control points that will be used
+    const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    console.log('🎨 Control points to render:', controlPoints)
+    console.log('🎨 Number of control points:', controlPoints ? controlPoints.length : 0)
+
     // Show modal
     modal.style.display = 'flex'
     
-    // Initialize gradient editor
+    // Initialize gradient editor with current gradient
     this.controller.rendererManager.renderModalGradientPreview()
     this.controller.rendererManager.renderModalControlPointMarkers()
     this.controller.rendererManager.renderControlPointsList()
+    
+    // Attach event listeners to buttons since the modal is outside the controller scope
+    this.attachModalButtonListeners()
+    
+    // Attach click listener to gradient canvas
+    this.attachGradientCanvasListener()
+    
+    console.log('🎨 Modal opened and rendered')
+  }
+  
+  // Attach click listener to gradient canvas
+  attachGradientCanvasListener() {
+    const canvas = document.getElementById('gradient-editor-preview-canvas')
+    if (canvas) {
+      // Remove any existing listener to avoid duplicates
+      const newCanvas = canvas.cloneNode(true)
+      canvas.parentNode.replaceChild(newCanvas, canvas)
+      
+      // Re-render the gradient on the new canvas
+      this.controller.rendererManager.renderModalGradientPreview()
+      
+      // Attach click listener
+      newCanvas.addEventListener('click', (event) => {
+        console.log('🎨 Gradient canvas clicked')
+        this.gradientBarClicked(event)
+      })
+    }
+  }
+  
+  // Attach event listeners to modal buttons
+  attachModalButtonListeners() {
+    // Close button (X in header)
+    const closeBtn = document.getElementById('close-gradient-editor')
+    if (closeBtn) {
+      // Remove any existing listener to avoid duplicates
+      const newCloseBtn = closeBtn.cloneNode(true)
+      closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn)
+      newCloseBtn.addEventListener('click', () => {
+        console.log('🎨 Close button clicked')
+        this.closeGradientEditorModal()
+      })
+    }
+    
+    // Apply & Close button
+    const applyBtn = document.getElementById('gradient-apply-btn')
+    if (applyBtn) {
+      // Remove any existing listener to avoid duplicates
+      const newApplyBtn = applyBtn.cloneNode(true)
+      applyBtn.parentNode.replaceChild(newApplyBtn, applyBtn)
+      newApplyBtn.addEventListener('click', () => {
+        console.log('🎨 Apply & Close button clicked')
+        this.closeGradientEditorModal()
+      })
+    }
+    
+    // Reset button
+    const resetBtn = document.getElementById('gradient-reset-btn')
+    if (resetBtn) {
+      // Remove any existing listener to avoid duplicates
+      const newResetBtn = resetBtn.cloneNode(true)
+      resetBtn.parentNode.replaceChild(newResetBtn, resetBtn)
+      newResetBtn.addEventListener('click', () => {
+        console.log('🎨 Reset button clicked')
+        this.controller.resetGradient()
+      })
+    }
+    
+    // Done button in control point editor
+    const doneBtn = document.getElementById('gradient-close-control-point-editor-btn')
+    if (doneBtn) {
+      // Remove any existing listener to avoid duplicates
+      const newDoneBtn = doneBtn.cloneNode(true)
+      doneBtn.parentNode.replaceChild(newDoneBtn, doneBtn)
+      newDoneBtn.addEventListener('click', () => {
+        console.log('🎨 Done button (control point editor) clicked')
+        // Apply any pending changes before closing the editor
+        this.applyPendingControlPointChanges()
+        this.controller.closeControlPointEditor()
+      })
+    }
+    
+    // Remove Point button
+    const removeBtn = document.getElementById('gradient-remove-control-point-btn')
+    if (removeBtn) {
+      // Remove any existing listener to avoid duplicates
+      const newRemoveBtn = removeBtn.cloneNode(true)
+      removeBtn.parentNode.replaceChild(newRemoveBtn, removeBtn)
+      newRemoveBtn.addEventListener('click', () => {
+        console.log('🎨 Remove Point button clicked')
+        this.removeControlPoint()
+      })
+    }
+  }
+  
+  // Apply any pending changes from the control point editor inputs
+  applyPendingControlPointChanges() {
+    const colorInput = document.getElementById('gradient-control-point-color')
+    const positionInput = document.getElementById('gradient-control-point-position')
+    const selectedIndex = this.controller.selectedControlPointIndex
+    
+    if (selectedIndex === undefined) {
+      return
+    }
+    
+    // Ensure we have a custom gradient
+    if (!this.controller.customGradientControlPoints) {
+      if (this.controller.gradientControlPoints) {
+        this.controller.customGradientControlPoints = this.controller.gradientControlPoints.map(p => ({
+          position: p.position,
+          color: p.color
+        }))
+      } else {
+        return
+      }
+    }
+    
+    // Apply color change if any
+    if (colorInput && colorInput.value) {
+      const hexColor = colorInput.value
+      const color = parseInt(hexColor.substring(1), 16)
+      if (this.controller.customGradientControlPoints[selectedIndex]) {
+        this.controller.customGradientControlPoints[selectedIndex].color = color
+        console.log('🎨 applyPendingControlPointChanges: Updated color to', hexColor)
+      }
+    }
+    
+    // Apply position change if any
+    if (positionInput && positionInput.value) {
+      const actualValue = parseFloat(positionInput.value)
+      if (!isNaN(actualValue)) {
+        const position = this.controller.actualValueToPosition(actualValue)
+        if (this.controller.customGradientControlPoints[selectedIndex]) {
+          this.controller.customGradientControlPoints[selectedIndex].position = position
+          console.log('🎨 applyPendingControlPointChanges: Updated position to', position)
+          
+          // Sort control points
+          this.controller.customGradientControlPoints.sort((a, b) => a.position - b.position)
+          
+          // Find new index after sorting
+          const currentColor = this.controller.customGradientControlPoints.find(p => 
+            Math.abs(p.position - position) < 0.001
+          )?.color
+          if (currentColor !== undefined) {
+            const newIndex = this.controller.customGradientControlPoints.findIndex(p => 
+              Math.abs(p.position - position) < 0.001 && p.color === currentColor
+            )
+            if (newIndex >= 0) {
+              this.controller.selectedControlPointIndex = newIndex
+            }
+          }
+        }
+      }
+    }
+    
+    // Update display
+    this.updateGradientDisplay()
   }
 
   // Close gradient editor modal
   closeGradientEditorModal() {
+    console.log('🎨 closeGradientEditorModal called')
+    
+    // Before closing, ensure any pending color/position changes are applied
+    const editor = document.getElementById('gradient-control-point-editor')
+    if (editor && editor.style.display !== 'none') {
+      console.log('🎨 closeGradientEditorModal: Applying pending changes before closing')
+      this.applyPendingControlPointChanges()
+    }
+    
     const modal = document.getElementById('gradient-editor-modal')
     if (modal) {
       modal.style.display = 'none'
@@ -31,106 +237,258 @@ export class GradientManager {
     // Close control point editor if open
     this.controller.closeControlPointEditor()
     
-    // Ensure bar plots are updated with the final gradient
-    // This handles the case where the modal is closed without making changes
-    // but the bar plots still need to reflect the current gradient
+    // Ensure scatter plot and bar plots are updated with the final gradient
+    // This handles the case where the modal is closed, ensuring all visualizations
+    // reflect the current gradient state
     if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
-      this.controller.dataManager.updateAllCategoryDistributions()
+      console.log('🎨 closeGradientEditorModal: Updating all visualizations with new gradient')
+      // This will update: legend, scatter plot points, and bar plots
+      this.controller.reapplyColorsWithNewGradient()
     }
+    
+    console.log('🎨 closeGradientEditorModal: Modal closed and changes applied')
   }
 
   // Handle clicking on gradient bar to add new control point
   gradientBarClicked(event) {
+    // Stop event propagation to avoid conflicts with marker clicks
+    event.stopPropagation()
+    
     const canvas = event.target
     const rect = canvas.getBoundingClientRect()
     const x = event.clientX - rect.left
-    const position = x / rect.width
+    const normalizedPosition = Math.max(0, Math.min(1, x / rect.width))
     
-    // Get color at this position
-    const color = this.getColorFromGradient(position)
+    // Get control points (will create custom if needed)
+    let controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
     
-    // Add new control point
-    this.addControlPoint(position, color)
+    // Check if click is near an existing control point (within threshold)
+    if (controlPoints && controlPoints.length > 0) {
+      const threshold = 0.02 // 2% threshold
+      
+      for (let i = 0; i < controlPoints.length; i++) {
+        const point = controlPoints[i]
+        if (Math.abs(point.position - normalizedPosition) < threshold) {
+          // Clicked near existing point - select it instead
+          // Make sure we're using custom gradient
+          if (!this.controller.customGradientControlPoints) {
+            this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+              ? [...this.controller.gradientControlPoints] 
+              : []
+            controlPoints = this.controller.customGradientControlPoints
+            // Re-find the index after copying
+            i = controlPoints.findIndex(p => 
+              Math.abs(p.position - point.position) < 0.0001 && p.color === point.color
+            )
+            if (i < 0) break
+          }
+          this.selectControlPoint(i)
+          return
+        }
+      }
+    }
     
-    // Update preview
-    this.controller.rendererManager.renderModalGradientPreview()
-    this.controller.rendererManager.renderModalControlPointMarkers()
-    this.controller.rendererManager.renderControlPointsList()
-    
-    // Update colors
-    this.controller.reapplyColorsWithNewGradient()
+    // Not near an existing point - add a new one
+    const color = this.getColorFromGradient(normalizedPosition)
+    this.addControlPoint(normalizedPosition, color)
   }
 
   // Select a control point for editing
   selectControlPoint(index) {
-    this.controller.selectedControlPointIndex = index
-    
-    const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
-    if (controlPoints && controlPoints[index]) {
-      const point = controlPoints[index]
-      
-      // Update color picker
-      const colorPicker = document.getElementById('control-point-color')
-      if (colorPicker) {
-        colorPicker.value = `#${point.color.toString(16).padStart(6, '0')}`
-      }
-      
-      // Update position slider
-      const positionSlider = document.getElementById('control-point-position')
-      if (positionSlider) {
-        positionSlider.value = point.position
-      }
-      
-      // Show control point editor
-      this.controller.showControlPointEditor()
+    // Create custom gradient if modifying auto gradient
+    if (!this.controller.customGradientControlPoints) {
+      this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+        ? [...this.controller.gradientControlPoints] 
+        : []
     }
     
-    this.controller.rendererManager.renderControlPointsList()
+    const controlPoints = this.controller.customGradientControlPoints
+    if (!controlPoints || index < 0 || index >= controlPoints.length) {
+      return
+    }
+    
+    this.controller.selectedControlPointIndex = index
+    const point = controlPoints[index]
+    
+    // Show editor panel
+    const editor = document.getElementById('gradient-control-point-editor')
+    if (editor) {
+      editor.style.display = 'block'
+      // Store the index in data attribute for recovery
+      editor.dataset.selectedControlPointIndex = index
+    }
+    
+    // Populate editor fields
+    const positionInput = document.getElementById('gradient-control-point-position')
+    const colorInput = document.getElementById('gradient-control-point-color')
+    
+    if (positionInput) {
+      // Convert position (0-1) to actual value
+      const actualValue = this.controller.positionToActualValue(point.position)
+      positionInput.value = actualValue.toFixed(3)
+      // Store the index in data attribute
+      positionInput.dataset.controlPointIndex = index
+      
+      // Update input min/max attributes to match data range
+      if (this.controller.gradientMinValue !== undefined && this.controller.gradientMaxValue !== undefined) {
+        positionInput.min = this.controller.gradientMinValue
+        positionInput.max = this.controller.gradientMaxValue
+        const range = this.controller.gradientMaxValue - this.controller.gradientMinValue
+        positionInput.step = range > 0 ? range / 1000 : 0.001
+      }
+    }
+    
+    if (colorInput) {
+      colorInput.value = `#${point.color.toString(16).padStart(6, '0')}`
+      // Store the index in data attribute
+      colorInput.dataset.controlPointIndex = index
+    }
+    
+    // Update markers to show selected state
+    this.renderModalControlPointMarkers()
   }
 
-  // Add a new control point
+  // Add a new control point at the specified position with the specified color
   addControlPoint(position, color) {
     // Create custom gradient if modifying auto gradient
     if (!this.controller.customGradientControlPoints) {
-      this.controller.customGradientControlPoints = [...(this.controller.gradientControlPoints || [])]
+      this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+        ? [...this.controller.gradientControlPoints] 
+        : []
     }
     
+    // Clamp position to valid range
+    const clampedPosition = Math.max(0, Math.min(1, position))
+    
     // Add new control point
-    this.controller.customGradientControlPoints.push({
-      position: Math.max(0, Math.min(1, position)),
+    const newPoint = {
+      position: clampedPosition,
       color: color
-    })
+    }
+    
+    this.controller.customGradientControlPoints.push(newPoint)
     
     // Sort by position
     this.controller.customGradientControlPoints.sort((a, b) => a.position - b.position)
     
+    // Find the index of the newly added point after sorting
+    const newIndex = this.controller.customGradientControlPoints.findIndex(p => 
+      p.position === clampedPosition && p.color === color
+    )
+    
+    // Select the newly added point
+    if (newIndex >= 0) {
+      this.selectControlPoint(newIndex)
+    }
+    
     // Update preview
-    this.controller.rendererManager.renderModalGradientPreview()
-    this.controller.rendererManager.renderModalControlPointMarkers()
-    this.controller.rendererManager.renderControlPointsList()
-    this.controller.reapplyColorsWithNewGradient()
+    this.updateGradientDisplay()
   }
 
-  // Remove selected control point
-  removeControlPoint() {
-    if (this.controller.selectedControlPointIndex === undefined) return
+  // Remove a control point
+  removeControlPoint(index) {
+    // Use provided index or selected index
+    const targetIndex = index !== undefined ? index : this.controller.selectedControlPointIndex
+    if (targetIndex === undefined || targetIndex < 0) {
+      return false
+    }
     
     // Create custom gradient if modifying auto gradient
     if (!this.controller.customGradientControlPoints) {
-      this.controller.customGradientControlPoints = [...(this.controller.gradientControlPoints || [])]
+      this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+        ? [...this.controller.gradientControlPoints] 
+        : []
+    }
+    
+    const controlPoints = this.controller.customGradientControlPoints
+    
+    // Validate index
+    if (targetIndex >= controlPoints.length) {
+      return false
+    }
+    
+    // Don't allow removing if only 2 points left (minimum required)
+    if (controlPoints.length <= 2) {
+      alert('A gradient must have at least 2 control points.')
+      return false
     }
     
     // Remove control point
-    this.controller.customGradientControlPoints.splice(this.controller.selectedControlPointIndex, 1)
+    controlPoints.splice(targetIndex, 1)
     
-    // Clear selection
-    this.controller.selectedControlPointIndex = undefined
+    // Adjust selected index
+    if (this.controller.selectedControlPointIndex === targetIndex) {
+      // Removed the selected point - clear selection
+      this.controller.selectedControlPointIndex = undefined
+      this.controller.closeControlPointEditor()
+    } else if (this.controller.selectedControlPointIndex > targetIndex) {
+      // Adjust selected index if a point before it was removed
+      this.controller.selectedControlPointIndex--
+    }
     
     // Update preview
+    this.updateGradientDisplay()
+    
+    return true
+  }
+  
+  // Update gradient display and reapply colors
+  updateGradientDisplay() {
+    console.log('🎨 updateGradientDisplay called')
+    console.log('🎨 updateGradientDisplay: customGradientControlPoints', this.controller.customGradientControlPoints)
+    console.log('🎨 updateGradientDisplay: gradientControlPoints', this.controller.gradientControlPoints)
+    
+    // CRITICAL: If both are undefined, reinitialize from current metadata
+    if (!this.controller.customGradientControlPoints && !this.controller.gradientControlPoints) {
+      console.warn('🎨 ⚠️ Both gradient arrays are undefined! Reinitializing...')
+      if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
+        this.controller.colorManager.initializeDefaultGradient()
+        console.log('🎨 updateGradientDisplay: After reinit, gradientControlPoints', this.controller.gradientControlPoints)
+      }
+    }
+    
+    // Preserve control points before rendering - prefer custom, fallback to default
+    let preservedCustomPoints = this.controller.customGradientControlPoints ? 
+      JSON.parse(JSON.stringify(this.controller.customGradientControlPoints)) : null
+    let preservedDefaultPoints = this.controller.gradientControlPoints ? 
+      JSON.parse(JSON.stringify(this.controller.gradientControlPoints)) : null
+    
+    // If we have default points but no custom, preserve default as custom
+    if (!preservedCustomPoints && preservedDefaultPoints) {
+      console.log('🎨 updateGradientDisplay: No custom points, preserving default as custom')
+      preservedCustomPoints = preservedDefaultPoints
+    }
+    
     this.controller.rendererManager.renderModalGradientPreview()
     this.controller.rendererManager.renderModalControlPointMarkers()
-    this.controller.rendererManager.renderControlPointsList()
+    
+    // Restore control points if they got lost - prefer custom, fallback to default
+    if (!this.controller.customGradientControlPoints) {
+      if (preservedCustomPoints) {
+        console.warn('🎨 ⚠️ Control points were lost during rendering! Restoring custom...')
+        this.controller.customGradientControlPoints = preservedCustomPoints
+      } else if (preservedDefaultPoints) {
+        console.warn('🎨 ⚠️ Control points were lost during rendering! Restoring default...')
+        this.controller.gradientControlPoints = preservedDefaultPoints
+      }
+    }
+    
+    console.log('🎨 updateGradientDisplay: after rendering, customGradientControlPoints', this.controller.customGradientControlPoints)
+    
     this.controller.reapplyColorsWithNewGradient()
+    
+    // Restore again after reapplyColors in case it reset them
+    if (!this.controller.customGradientControlPoints) {
+      if (preservedCustomPoints) {
+        console.warn('🎨 ⚠️ Control points were lost during reapplyColors! Restoring custom...')
+        this.controller.customGradientControlPoints = preservedCustomPoints
+      } else if (preservedDefaultPoints) {
+        console.warn('🎨 ⚠️ Control points were lost during reapplyColors! Restoring default...')
+        this.controller.gradientControlPoints = preservedDefaultPoints
+      }
+    }
+    
+    console.log('🎨 updateGradientDisplay: after reapplyColors, customGradientControlPoints', this.controller.customGradientControlPoints)
   }
 
   // Get color from gradient at normalized position (0-1)
@@ -275,7 +633,10 @@ export class GradientManager {
   // Render gradient preview in modal
   renderModalGradientPreview() {
     const canvas = document.getElementById('gradient-editor-preview-canvas')
-    if (!canvas) return
+    if (!canvas) {
+      console.warn('🎨 ⚠️ Preview canvas not found')
+      return
+    }
     
     const ctx = canvas.getContext('2d')
     const width = canvas.width
@@ -284,9 +645,21 @@ export class GradientManager {
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
     
-    // Get active gradient (custom or auto)
-    const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    // Get active gradient (custom or auto) - defensive check
+    let controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    console.log('🎨 renderModalGradientPreview - customGradientControlPoints:', this.controller.customGradientControlPoints)
+    console.log('🎨 renderModalGradientPreview - gradientControlPoints:', this.controller.gradientControlPoints)
+    console.log('🎨 renderModalGradientPreview - controlPoints:', controlPoints)
+    console.log('🎨 renderModalGradientPreview - controlPoints length:', controlPoints ? controlPoints.length : 0)
+    
+    // Safety check: if controlPoints is undefined but we had custom points, try to recover
+    if (!controlPoints && this.controller.customGradientControlPoints) {
+      console.warn('🎨 ⚠️ renderModalGradientPreview: controlPoints is undefined but customGradientControlPoints exists!')
+      controlPoints = this.controller.customGradientControlPoints
+    }
+    
     if (!controlPoints || controlPoints.length === 0) {
+      console.warn('🎨 ⚠️ No control points - using fallback gradient')
       // Draw a default gradient if no control points
       const gradient = ctx.createLinearGradient(0, 0, width, 0)
       gradient.addColorStop(0, '#3b82f6')
@@ -314,24 +687,45 @@ export class GradientManager {
   // Render control point markers on the gradient bar in modal
   renderModalControlPointMarkers() {
     const container = document.getElementById('gradient-editor-control-points')
-    if (!container) return
+    if (!container) {
+      console.warn('🎨 ⚠️ Control points container not found')
+      return
+    }
     
     // Clear existing markers
     container.innerHTML = ''
     
-    // Get active gradient (custom or auto)
-    const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
-    if (!controlPoints || controlPoints.length === 0) return
+    // Get active gradient (custom or auto) - defensive check
+    let controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    console.log('🎨 renderModalControlPointMarkers - customGradientControlPoints:', this.controller.customGradientControlPoints)
+    console.log('🎨 renderModalControlPointMarkers - gradientControlPoints:', this.controller.gradientControlPoints)
+    console.log('🎨 renderModalControlPointMarkers - controlPoints:', controlPoints)
+    console.log('🎨 renderModalControlPointMarkers - controlPoints length:', controlPoints ? controlPoints.length : 0)
+    
+    // Safety check: if controlPoints is undefined but we had custom points, try to recover
+    if (!controlPoints && this.controller.customGradientControlPoints) {
+      console.warn('🎨 ⚠️ renderModalControlPointMarkers: controlPoints is undefined but customGradientControlPoints exists!')
+      controlPoints = this.controller.customGradientControlPoints
+    }
+    
+    if (!controlPoints || controlPoints.length === 0) {
+      console.warn('🎨 ⚠️ No control points to render')
+      return
+    }
     
     const canvas = document.getElementById('gradient-editor-preview-canvas')
     if (!canvas) return
     
     const canvasWidth = canvas.offsetWidth
+    const selectedIndex = this.controller.selectedControlPointIndex
     
     // Create a marker for each control point
     controlPoints.forEach((point, index) => {
       const marker = document.createElement('div')
-      const markerSize = 16
+      const isSelected = selectedIndex === index
+      const markerSize = isSelected ? 20 : 16
+      const borderWidth = isSelected ? 3 : 2
+      const borderColor = isSelected ? '#3b82f6' : 'white'
       const x = point.position * canvasWidth - (markerSize / 2)
       
       marker.style.cssText = `
@@ -341,27 +735,72 @@ export class GradientManager {
         transform: translateY(-50%);
         width: ${markerSize}px;
         height: ${markerSize}px;
-        border: 2px solid white;
+        border: ${borderWidth}px solid ${borderColor};
         border-radius: 50%;
         background-color: #${point.color.toString(16).padStart(6, '0')};
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        box-shadow: 0 2px 6px rgba(0,0,0,${isSelected ? '0.5' : '0.3'});
         cursor: pointer;
         pointer-events: all;
-        transition: transform 0.2s;
+        transition: all 0.2s;
+        z-index: ${isSelected ? 10 : 1};
       `
       
       marker.addEventListener('mouseenter', () => {
-        marker.style.transform = 'translateY(-50%) scale(1.3)'
+        if (!isSelected) {
+          marker.style.transform = 'translateY(-50%) scale(1.3)'
+        }
       })
       
       marker.addEventListener('mouseleave', () => {
-        marker.style.transform = 'translateY(-50%) scale(1)'
+        if (!isSelected) {
+          marker.style.transform = 'translateY(-50%) scale(1)'
+        }
       })
       
       marker.addEventListener('click', (e) => {
         e.stopPropagation()
+        e.preventDefault()
         this.selectControlPoint(index)
       })
+      
+      // Add delete button for selected marker
+      if (isSelected && controlPoints.length > 2) {
+        const deleteBtn = document.createElement('div')
+        deleteBtn.innerHTML = '×'
+        deleteBtn.style.cssText = `
+          position: absolute;
+          top: -8px;
+          right: -8px;
+          width: 18px;
+          height: 18px;
+          background-color: #dc2626;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          font-weight: bold;
+          cursor: pointer;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          pointer-events: all;
+          z-index: 20;
+        `
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          this.removeControlPoint(index)
+        })
+        deleteBtn.addEventListener('mouseenter', () => {
+          deleteBtn.style.backgroundColor = '#b91c1c'
+          deleteBtn.style.transform = 'scale(1.1)'
+        })
+        deleteBtn.addEventListener('mouseleave', () => {
+          deleteBtn.style.backgroundColor = '#dc2626'
+          deleteBtn.style.transform = 'scale(1)'
+        })
+        marker.appendChild(deleteBtn)
+      }
       
       container.appendChild(marker)
     })

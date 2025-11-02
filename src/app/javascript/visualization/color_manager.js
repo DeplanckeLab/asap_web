@@ -302,12 +302,28 @@ export class ColorManager {
 
   // Initialize default gradient based on value distribution
   initializeDefaultGradient() {
+    console.log('🎨 initializeDefaultGradient called')
+    console.log('🎨 currentMetadataVector:', this.controller.currentMetadataVector)
+    console.log('🎨 data_type:', this.controller.currentMetadataVector?.data_type)
+    
     if (!this.controller.currentMetadataVector || this.controller.currentMetadataVector.data_type !== 'NUMERIC') {
+      console.warn('🎨 ⚠️ Cannot initialize gradient - missing metadata vector or not NUMERIC type')
       return
     }
 
     const values = this.controller.currentMetadataVector.values
-    this.controller.gradientControlPoints = this.determineGradientForValues(values)
+    console.log('🎨 Values length:', values ? values.length : 0)
+    
+    if (!values || values.length === 0) {
+      console.warn('🎨 ⚠️ Cannot initialize gradient - no values in metadata vector')
+      return
+    }
+    
+    const controlPoints = this.determineGradientForValues(values)
+    console.log('🎨 Determined control points:', controlPoints)
+    
+    this.controller.gradientControlPoints = controlPoints
+    console.log('🎨 Set gradientControlPoints:', this.controller.gradientControlPoints)
   }
   
   // Determine appropriate gradient based on value distribution

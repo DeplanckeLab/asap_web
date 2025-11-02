@@ -1213,13 +1213,18 @@ export class DataManager {
 
   // Create a hash of the current color state for change detection
   getColorStateHash() {
+    // Include gradient control points in hash so cache is invalidated when gradient changes
+    const gradientPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    const gradientHash = gradientPoints ? JSON.stringify(gradientPoints.map(p => ({ position: p.position, color: p.color }))) : null
+    
     return JSON.stringify({
       currentMetadataId: this.controller.currentMetadataId,
       currentMetadataType: this.controller.currentMetadataVector?.data_type,
       categoryOrder: this.controller.categoryOrder,
       customColorRange: this.controller.customColorRange,
       currentColorScheme: this.controller.currentColorScheme,
-      filteredIndices: this.controller.currentVisibleCells
+      filteredIndices: this.controller.currentVisibleCells,
+      gradientHash: gradientHash // Include gradient in hash for proper cache invalidation
     })
   }
 

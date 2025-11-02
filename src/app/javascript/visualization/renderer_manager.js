@@ -775,22 +775,31 @@ export class RendererManager {
 
   // Render modal gradient preview
   renderModalGradientPreview() {
-    // This method should render the gradient preview in the modal
-    // For now, just log that it was called
-    console.log('🎨 Rendering modal gradient preview')
+    // Delegate to gradientManager
+    if (this.controller.gradientManager) {
+      this.controller.gradientManager.renderModalGradientPreview()
+    } else {
+      console.warn('🎨 ⚠️ gradientManager not available')
+    }
   }
 
   // Render modal control point markers
   renderModalControlPointMarkers() {
-    // This method should render control point markers in the modal
-    // For now, just log that it was called
-    console.log('🎨 Rendering modal control point markers')
+    // Delegate to gradientManager
+    if (this.controller.gradientManager) {
+      this.controller.gradientManager.renderModalControlPointMarkers()
+    } else {
+      console.warn('🎨 ⚠️ gradientManager not available')
+    }
   }
 
   // Render control points list
   renderControlPointsList() {
-    // This method should render the control points list in the modal
-    // For now, just log that it was called
-    console.log('🎨 Rendering control points list')
+    // Delegate to gradientManager
+    if (this.controller.gradientManager) {
+      this.controller.gradientManager.renderControlPointsList()
+    } else {
+      console.warn('🎨 ⚠️ gradientManager not available')
+    }
   }
 }

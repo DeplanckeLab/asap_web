@@ -729,8 +729,12 @@ export class DataManager {
     
     // Initialize gradient BEFORE updating visualization for continuous metadata
     if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
-      // Initialize default gradient based on data distribution
-      this.controller.colorManager.initializeDefaultGradient()
+      // Load stored gradient for this metadata (or initialize default if none exists)
+      this.controller.gradientManager.loadGradientForMetadata(metadataId)
+      
+      // Force reordering of points when switching metadata (values are different even if order preference is same)
+      this.controller._lastNumericOrderApplied = null
+      console.log('📊 [ORDERING] Reset _lastNumericOrderApplied to force reordering for new metadata')
     }
     
     // Update visualization with metadata coloring

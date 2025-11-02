@@ -13,22 +13,15 @@ export class GradientManager {
     }
 
     console.log('🎨 Opening gradient editor modal')
+    console.log('🎨 Current metadata ID:', this.controller.currentMetadataId)
     console.log('🎨 Current metadata vector:', this.controller.currentMetadataVector)
-    console.log('🎨 Existing gradientControlPoints:', this.controller.gradientControlPoints)
-    console.log('🎨 Existing customGradientControlPoints:', this.controller.customGradientControlPoints)
 
     // Close any open control point editor to start fresh
     this.controller.closeControlPointEditor()
     this.controller.selectedControlPointIndex = undefined
 
-    // Initialize gradient control points if not already set
-    if (!this.controller.gradientControlPoints && !this.controller.customGradientControlPoints) {
-      console.log('🎨 No gradient points found - initializing default gradient')
-      this.controller.colorManager.initializeDefaultGradient()
-      console.log('🎨 After initialization, gradientControlPoints:', this.controller.gradientControlPoints)
-    } else {
-      console.log('🎨 Using existing gradient control points')
-    }
+    // Load gradient for current metadata (or initialize default if none exists)
+    this.loadGradientForMetadata(this.controller.currentMetadataId)
     
     // Calculate and store min/max values for the current metadata
     if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
@@ -229,6 +222,9 @@ export class GradientManager {
       this.applyPendingControlPointChanges()
     }
     
+    // Save gradient for current metadata before closing
+    this.saveGradientForMetadata(this.controller.currentMetadataId)
+    
     const modal = document.getElementById('gradient-editor-modal')
     if (modal) {
       modal.style.display = 'none'
@@ -426,6 +422,9 @@ export class GradientManager {
       this.controller.selectedControlPointIndex--
     }
     
+    // Save gradient for current metadata
+    this.saveGradientForMetadata(this.controller.currentMetadataId)
+    
     // Update preview
     this.updateGradientDisplay()
     
@@ -491,6 +490,63 @@ export class GradientManager {
     console.log('🎨 updateGradientDisplay: after reapplyColors, customGradientControlPoints', this.controller.customGradientControlPoints)
   }
 
+  // Load gradient for a specific metadata ID
+  loadGradientForMetadata(metadataId) {
+    if (!metadataId) {
+      console.warn('🎨 ⚠️ Cannot load gradient - no metadata ID')
+      return
+    }
+    
+    console.log('🎨 Loading gradient for metadata:', metadataId)
+    
+    // CRITICAL: Clear existing gradient values first to avoid using previous metadata's gradient
+    this.controller.gradientControlPoints = null
+    this.controller.customGradientControlPoints = null
+    
+    // Check if we have a stored gradient for this metadata
+    const storedGradient = this.controller.metadataGradients.get(metadataId)
+    
+    if (storedGradient) {
+      console.log('🎨 Found stored gradient for metadata:', storedGradient)
+      // Restore stored gradient
+      this.controller.gradientControlPoints = storedGradient.gradientControlPoints ? 
+        JSON.parse(JSON.stringify(storedGradient.gradientControlPoints)) : null
+      this.controller.customGradientControlPoints = storedGradient.customGradientControlPoints ? 
+        JSON.parse(JSON.stringify(storedGradient.customGradientControlPoints)) : null
+      console.log('🎨 Restored gradient - gradientControlPoints:', this.controller.gradientControlPoints)
+      console.log('🎨 Restored gradient - customGradientControlPoints:', this.controller.customGradientControlPoints)
+    } else {
+      // No stored gradient - initialize default
+      console.log('🎨 No stored gradient found - initializing default gradient')
+      this.controller.colorManager.initializeDefaultGradient()
+      console.log('🎨 After initialization, gradientControlPoints:', this.controller.gradientControlPoints)
+      
+      // Save the default gradient for this metadata
+      this.saveGradientForMetadata(metadataId)
+    }
+  }
+  
+  // Save current gradient for a specific metadata ID
+  saveGradientForMetadata(metadataId) {
+    if (!metadataId) {
+      console.warn('🎨 ⚠️ Cannot save gradient - no metadata ID')
+      return
+    }
+    
+    console.log('🎨 Saving gradient for metadata:', metadataId)
+    
+    // Store current gradient state
+    const gradientState = {
+      gradientControlPoints: this.controller.gradientControlPoints ? 
+        JSON.parse(JSON.stringify(this.controller.gradientControlPoints)) : null,
+      customGradientControlPoints: this.controller.customGradientControlPoints ? 
+        JSON.parse(JSON.stringify(this.controller.customGradientControlPoints)) : null
+    }
+    
+    this.controller.metadataGradients.set(metadataId, gradientState)
+    console.log('🎨 Saved gradient state:', gradientState)
+  }
+
   // Get color from gradient at normalized position (0-1)
   getColorFromGradient(normalizedValue) {
     // Handle invalid values
@@ -511,8 +567,15 @@ export class GradientManager {
     let leftPoint = null
     let rightPoint = null
     
+    // Check if normalizedValue exactly matches a control point
     for (let i = 0; i < sorted.length; i++) {
       const point = sorted[i]
+      if (Math.abs(point.position - normalizedValue) < 0.0001) {
+        // Exact match (or very close) - return this point's color directly
+        console.log(`🎨 getColorFromGradient: Exact match at position ${point.position} for normalizedValue ${normalizedValue}`)
+        return point.color
+      }
+      
       if (point.position <= normalizedValue) {
         leftPoint = point
       }
@@ -530,12 +593,27 @@ export class GradientManager {
       return leftPoint.color
     }
     if (!leftPoint && !rightPoint) {
+      console.warn('🎨 ⚠️ getColorFromGradient: No control points found for normalizedValue', normalizedValue)
       return 0x000000 // Black fallback
+    }
+    
+    // If leftPoint and rightPoint are the same (same position), return that color directly
+    if (Math.abs(leftPoint.position - rightPoint.position) < 0.0001) {
+      return leftPoint.color
     }
     
     // Interpolate between the two points
     const t = (normalizedValue - leftPoint.position) / (rightPoint.position - leftPoint.position)
-    return this.interpolateColor(leftPoint.color, rightPoint.color, t)
+    
+    // Clamp t to valid range to avoid NaN
+    const clampedT = Math.max(0, Math.min(1, t))
+    
+    if (isNaN(clampedT)) {
+      console.warn('🎨 ⚠️ getColorFromGradient: NaN in interpolation, normalizedValue:', normalizedValue, 'leftPoint:', leftPoint, 'rightPoint:', rightPoint)
+      return leftPoint.color // Fallback to left point color
+    }
+    
+    return this.interpolateColor(leftPoint.color, rightPoint.color, clampedT)
   }
 
   // Interpolate between two colors

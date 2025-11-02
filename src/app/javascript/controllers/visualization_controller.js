@@ -317,6 +317,9 @@ export default class extends Controller {
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
+    // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints })
+    this.metadataGradients = new Map()
+    
     // Memory management for metadata vectors
     this.metadataUsageTracker = new Map() // Track when metadata was last accessed
     this.maxMetadataInMemory = 5 // Default buffer size, will be adjusted based on dataset size
@@ -655,6 +658,7 @@ export default class extends Controller {
     // Reset ordering flags so they'll be reapplied for this new embedding
     this._lastCategoryOrderApplied = null
     this._lastNumericOrderApplied = null
+    this._lastNumericMetadataId = null // Track which metadata the ordering was applied to
     
     // Initialize display order array (identity mapping initially)
     // displayOrder[drawPosition] = originalCellIndex
@@ -2300,8 +2304,29 @@ export default class extends Controller {
           
           if (isVisible) {
             const value = values[cellIndex]
-            const normalizedValue = range > 0 ? (value - minVal) / range : 0.5
+            
+            // Handle edge case: if range is 0 (all values same), use 0.5
+            // Otherwise normalize to 0-1 range
+            let normalizedValue
+            if (range > 0) {
+              normalizedValue = (value - minVal) / range
+              // Clamp to valid range to handle floating point precision issues
+              normalizedValue = Math.max(0, Math.min(1, normalizedValue))
+            } else {
+              normalizedValue = 0.5
+            }
+            
+            // Debug for zero values
+            if (value === 0.0 || Math.abs(value) < 0.0001) {
+              console.log(`🎨 [ZERO DEBUG] value=${value}, minVal=${minVal}, maxVal=${maxVal}, range=${range}, normalizedValue=${normalizedValue}`)
+            }
+            
             const color = this.gradientManager.getColorFromGradient(normalizedValue)
+            
+            // Debug for zero values if color is black (unexpected)
+            if ((value === 0.0 || Math.abs(value) < 0.0001) && color === 0x000000) {
+              console.warn(`🎨 ⚠️ [ZERO DEBUG] Zero value got black color! normalizedValue=${normalizedValue}`)
+            }
             
             colorMap.set(drawPos, color)
             this.originalPointColors.set(cellIndex, color) // Store by cell index
@@ -2320,11 +2345,19 @@ export default class extends Controller {
         this.reglRenderer.updateColors(colorMap)
         
         // Check if we need to reorder points for numeric display
-        const needsReordering = !this._lastNumericOrderApplied || this._lastNumericOrderApplied !== this.numericalOrder
+        // Force reordering if:
+        // 1. Order hasn't been applied yet
+        // 2. Order preference changed
+        // 3. Metadata changed (values are different even if order preference is same)
+        const metadataChanged = !this._lastNumericMetadataId || this._lastNumericMetadataId !== coloringMetadataVector.id
+        const orderChanged = !this._lastNumericOrderApplied || this._lastNumericOrderApplied !== this.numericalOrder
+        const needsReordering = orderChanged || metadataChanged
         
         if (needsReordering) {
-          console.log('📊 [ReGL] Applying numeric display order (first time or order changed)...')
+          console.log('📊 [ReGL] Applying numeric display order (first time, order changed, or metadata changed)...')
+          console.log('📊 [ReGL] Order changed:', orderChanged, 'Metadata changed:', metadataChanged)
           this._lastNumericOrderApplied = this.numericalOrder
+          this._lastNumericMetadataId = coloringMetadataVector.id
           
           // Reorder points in buffer based on z-index (this will re-render and redraw overlay)
           this.reorderPointsForNumericDisplay(values, minVal, maxVal)
@@ -5379,6 +5412,9 @@ export default class extends Controller {
       // Sort and update display
       controlPoints.sort((a, b) => a.position - b.position)
       
+      // Save gradient for current metadata
+      this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
+      
       // Update selected index after sorting
       const sortedIndex = controlPoints.findIndex(p => 
         Math.abs(p.position - position) < 0.0001
@@ -5690,6 +5726,9 @@ export default class extends Controller {
       return
     }
     
+    // Save gradient for current metadata
+    mainController.gradientManager.saveGradientForMetadata(mainController.currentMetadataId)
+    
     // Update display using main controller
     mainController.gradientManager.updateGradientDisplay()
     console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after updateGradientDisplay', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
@@ -5726,6 +5765,9 @@ export default class extends Controller {
     
     // Reinitialize default gradient
     this.colorManager.initializeDefaultGradient()
+    
+    // Save the reset gradient for current metadata
+    this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
     
     this.closeControlPointEditor()
     this.rendererManager.renderModalGradientPreview()

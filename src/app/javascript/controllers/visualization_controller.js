@@ -9,6 +9,7 @@ import { GradientManager } from "visualization/gradient_manager"
 import { MemoryManager } from "visualization/memory_manager"
 import { PerformanceManager } from "visualization/performance_manager"
 import { DownloadManager } from "visualization/download_manager"
+import { GeneManager } from "visualization/gene_manager"
 
 console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
@@ -35,6 +36,12 @@ export default class extends Controller {
   
   get hasEmbeddingSelectTarget() {
     return !!this.embeddingSelectTarget
+  }
+
+  // Helper method to get project identifier from URL (supports ID, key, or public_id)
+  getProjectIdentifier() {
+    const pathMatch = window.location.pathname.match(/\/projects\/([^\/]+)/)
+    return pathMatch ? pathMatch[1] : null
   }
 
   connect() {
@@ -68,6 +75,7 @@ export default class extends Controller {
     this.memoryManager = new MemoryManager(this)
     this.performanceManager = new PerformanceManager(this)
     this.downloadManager = new DownloadManager(this)
+    this.geneManager = new GeneManager(this)
     
     // RENDERER CHOICE: 'regl' only
     this.rendererType = 'regl' // 🎯 Using ReGL for better performance
@@ -463,8 +471,8 @@ export default class extends Controller {
       const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata coordinates endpoint
-      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
-      const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -574,8 +582,8 @@ export default class extends Controller {
       const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata coordinates endpoint
-      const projectId = window.location.pathname.split('/')[2]
-      const url = `/projects/${projectId}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
       // Get CSRF token
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -759,8 +767,8 @@ export default class extends Controller {
       const loomFile = this.getCurrentLoomFileForRequest()
       
       // Build the URL for the metadata vectors endpoint (single request for all)
-      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
-      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataIds.join(',')}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_vectors?metadata_ids=${metadataIds.join(',')}&loom_file=${encodeURIComponent(loomFile || '')}`
       
       //console.log('Fetching all metadata vectors in single request from URL:', url)
       
@@ -854,8 +862,8 @@ export default class extends Controller {
       }
       
       // Build the URL for the single metadata vector endpoint
-      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
-      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
       // Additional debugging for sex and age metadata
       if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
@@ -1159,8 +1167,8 @@ export default class extends Controller {
       }
       
       // Build the URL for the single metadata vector endpoint
-      const projectId = window.location.pathname.split('/')[2]
-      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile)}`
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile)}`
       
       // Get CSRF token safely
       const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
@@ -2137,6 +2145,10 @@ export default class extends Controller {
     // Render with current coloring (will reuse sprites if type matches)
     this.renderPointsWithCurrentColoring()
     
+    // Update category distribution bar plots for all unfolded metadata sections
+    // This ensures bar plots are shown when coloring is active
+    this.dataManager.updateAllCategoryDistributions()
+    
   }
 
   // Render all points using the current coloring scheme
@@ -2952,6 +2964,12 @@ export default class extends Controller {
       this.categoryLabelsContainer.removeChildren()
       this.categoryLabelsContainer.visible = false
     }
+    
+    // Hide all category distribution bar plots when coloring is cleared
+    const allCanvases = document.querySelectorAll('.category-distribution-canvas')
+    allCanvases.forEach(canvas => {
+      canvas.style.display = 'none'
+    })
     
     console.log('🎨 Successfully cleared metadata coloring')
   }
@@ -10132,12 +10150,23 @@ export default class extends Controller {
       return
     }
     
+    // Get all canvases for this metadata
+    const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
+    
     // Get the metadata vector used for coloring (currentMetadataVector)
     const coloringMetadataVector = this.currentMetadataVector
     if (!coloringMetadataVector || !coloringMetadataVector.values) {
-      // No coloring active, don't draw distributions
+      // No coloring active, hide bar plots to make categories more compact
+      canvases.forEach(canvas => {
+        canvas.style.display = 'none'
+      })
       return
     }
+    
+    // Show bar plots when coloring is active
+    canvases.forEach(canvas => {
+      canvas.style.display = 'block'
+    })
     
     // Check if coloring is continuous or categorical
     if (coloringMetadataVector.data_type === 'NUMERIC') {
@@ -10171,9 +10200,6 @@ export default class extends Controller {
     
     // Get category colors from color manager
     const categoryColors = this.colorManager.getCategoryColors(sortedColoringCategories.length)
-    
-    // Get all canvases for this metadata
-    const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
     
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
@@ -10304,6 +10330,11 @@ export default class extends Controller {
     
     // Get all canvases for this metadata
     const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
+    
+    // Show bar plots when coloring is active
+    canvases.forEach(canvas => {
+      canvas.style.display = 'block'
+    })
     
     // Use the same color range logic as the scatter plot
     // This ensures the gradient mapping is identical

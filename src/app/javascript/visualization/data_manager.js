@@ -312,8 +312,10 @@ export class DataManager {
       const loomFile = this.controller.hasLoomFileSelectTarget ? this.controller.loomFileSelectTarget.value : this.controller.defaultLoomFileValue
       
       // Build the URL for the single metadata vector endpoint
-      const projectId = window.location.pathname.split('/')[2] // Extract project ID from URL
-      const url = `/projects/${projectId}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+      // Extract project identifier from URL (supports ID, key, or public_id)
+      const pathMatch = window.location.pathname.match(/\/projects\/([^\/]+)/)
+      const projectIdentifier = pathMatch ? pathMatch[1] : null
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_vectors?metadata_ids=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
       
       //console.log(`Fetching single metadata vector from URL: ${url}`)
       
@@ -1511,12 +1513,24 @@ export class DataManager {
     
     expandedSections.forEach(section => {
       const metadataId = parseInt(section.dataset.metadataItem)
-      // Check if this section is expanded (has visible canvases)
-      const canvases = section.querySelectorAll('.category-distribution-canvas')
-      console.log(`🎨 [BAR PLOTS] Metadata ${metadataId}: ${canvases.length} canvases found`)
       
-      if (canvases.length > 0 && canvases[0].offsetParent !== null) {
-        // Section is expanded, update its distributions
+      // Check if this section is expanded by checking if the categories div is visible
+      // (not by checking canvas visibility, as canvases might be hidden when no coloring is active)
+      const header = section.querySelector('[data-action*="toggleMetadata"]')
+      if (!header) return
+      
+      const categoriesDiv = header.nextElementSibling
+      if (!categoriesDiv || categoriesDiv.style.display === 'none') {
+        // Section is not expanded, skip it
+        return
+      }
+      
+      // Section is expanded, update its distributions
+      // This will show/hide canvases based on whether coloring is active
+      const canvases = section.querySelectorAll('.category-distribution-canvas')
+      console.log(`🎨 [BAR PLOTS] Metadata ${metadataId}: ${canvases.length} canvases found, section expanded`)
+      
+      if (canvases.length > 0) {
         console.log(`🎨 [BAR PLOTS] Redrawing distributions for metadata ${metadataId}`)
         this.controller.drawCategoryDistributions(metadataId)
       }

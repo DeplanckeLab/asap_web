@@ -51,7 +51,7 @@
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
             <% categorical_count = (@h_metadata[@default_loom_file]&.dig('cell', 'DISCRETE')&.count || 0) %>
-            <span style="background-color: #3b82f6; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
+            <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= categorical_count %>
             </span>
           </div>
@@ -280,7 +280,7 @@
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
             <% continuous_count = @h_metadata[@default_loom_file]&.dig('cell', 'NUMERIC')&.select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 }&.count || 0 %>
-            <span style="background-color: #3b82f6; color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; min-width: 20px; text-align: center;">
+            <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= continuous_count %>
             </span>
           </div>
@@ -602,12 +602,36 @@
     
     <!-- Top Section: Gene Expression Panel -->
     <div style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;">
-      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
         <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
-        <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Search and visualize gene expression</p>
+        <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
       </div>
-      <div style="flex: 1; padding: 20px; overflow-y: auto;">
-        <p>Gene expression content will go here</p>
+      <div style="flex: 1; padding: 20px; overflow-y: auto; min-height: 0;">
+        <div style="margin-bottom: 20px;">
+          <div style="position: relative;">
+            <!-- Gene Tags Container with Input -->
+            <div id="gene-tags-container" style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; min-height: 42px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; align-items: center; transition: border-color 0.2s; cursor: text;"
+                 onclick="document.getElementById('gene-autocomplete-input').focus()">
+              <input 
+                type="text" 
+                id="gene-autocomplete-input" 
+                placeholder="Type or paste gene names (comma, space, or Enter to add)..."
+                style="flex: 1; min-width: 120px; padding: 0; border: none; border-radius: 0; font-size: 14px; outline: none; background: transparent;"
+                onfocus="document.getElementById('gene-tags-container').style.borderColor='#3b82f6'"
+                onblur="document.getElementById('gene-tags-container').style.borderColor='#d1d5db'"
+              />
+            </div>
+            <div id="gene-autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-top: none; border-radius: 0 0 6px 6px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: -1px;"></div>
+          </div>
+        </div>
+
+        <!-- Gene Results Summary -->
+        <div id="gene-results-summary" style="display: none; margin-bottom: 20px; padding: 12px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+          <div id="gene-results-stats" style="font-size: 13px; margin-bottom: 8px;"></div>
+          <div id="gene-not-found-link" style="display: none;"></div>
+        </div>
+
+        <div id="gene-expression-results" style="margin-top: 20px;"></div>
       </div>
     </div>
 
@@ -620,9 +644,9 @@
 
     <!-- Bottom Section: Selections Panel -->
     <div style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column;">
-      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
         <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Selections</h2>
-        <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Manage cell and gene set selections</p>
+        <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
       </div>
 
       <!-- Selection Tabs -->
@@ -646,9 +670,9 @@
       </div>
 
       <!-- Tab Content -->
-      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
         <!-- Cells Tab Content -->
-        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow-y: auto;">
+        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <div style="margin-bottom: 16px;">
             <!-- Cell count with action buttons -->
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
@@ -714,7 +738,7 @@
         </div>
 
         <!-- Gene Sets Tab Content -->
-        <div id="gene-sets-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; display: none;">
+        <div id="gene-sets-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0; display: none;">
           <div style="margin-bottom: 16px;">
             <div style="font-size: 14px; color: #6b7280; margin-bottom: 12px;">
               Manage gene sets for analysis

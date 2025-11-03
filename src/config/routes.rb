@@ -13,6 +13,7 @@ Rails.application.routes.draw do
       get :tsv_from_json
       get :metadata_coordinates
       get :metadata_vectors
+      get :gene_expression
     end
   end
   

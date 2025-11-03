@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file]
 
   # GET /projects or /projects.json
   def index
@@ -234,9 +234,145 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/get_file
   def get_file
-    # Placeholder for get_file action
-    render plain: "File for project #{@project.key}"
+    begin
+      unless ENV["USER_DATA_DIR"]
+        Rails.logger.error "get_file: USER_DATA_DIR environment variable is not set"
+        render json: { error: 'Server configuration error' }, status: 500
+        return
+      end
+
+      unless @project.user_id
+        Rails.logger.error "get_file: Project #{@project.id} has no user_id"
+        render json: { error: 'Project has no associated user' }, status: 500
+        return
+      end
+
+      project_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
+      run_id = (params[:run_id]) ? params[:run_id] : nil #((params[:filename] and m = params[:filename].match(/^(\d+)\.\w{1,3}/)) ? m[1].to_i : nil)                                                                                               
+      step_name = params[:step]
+      if run_id
+        run =  Run.where(:id => run_id).first
+        h_outputs = Basic.safe_parse_json(run.output_json, {})
+        h_file_by_id = {}
+        h_outputs.each_key do |k|
+          h_outputs[k].each_key do |k2|
+            t = k2.split(":")
+            relative_path = t[0]
+            full_path = project_dir + relative_path
+            h_file_by_id[h_outputs[k][k2]['onum']]={:filename => h_outputs[k][k2]['filename'], :filepath => full_path}
+          end
+        end
+        step_name = (step = run.step) ? step.name : nil
+      end
+  
+      filepath = nil
+      filename = nil
+      if params[:onum]
+        filename = h_file_by_id[params[:onum].to_i][:filename]
+        filepath = h_file_by_id[params[:onum].to_i][:filepath]
+      elsif params[:filename]
+        filename = params[:filename]
+        # Use @project.key instead of params[:key] since we already have the project loaded
+        tmp_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
+        tmp_dir += step_name if step_name
+        tmp_dir += params[:run_id].to_s if params[:run_id]
+        filepath = tmp_dir + filename
+        Rails.logger.info "get_file: Constructed filepath for filename param: #{filepath}"
+      end
+
+      if filename.nil?
+        Rails.logger.error "get_file: No filename provided and no onum provided"
+        render :plain => "Filename or onum parameter required", status: 400
+        return
+      end
+      
+      ext = filename.split(".").last
+      #    obj = c.constantize if params[:step] and c= params[:step].classify and ['GeneSet'].include?(c)                                                                                                                                          
+      #    obj = Run                                                                                                                                                                                                                               
+  
+      # Allow JSON files from parsing/cell_filtering steps for autocomplete (they're project data files)
+      json_allowed = (ext == 'json' && (step_name == 'parsing' || step_name == 'cell_filtering'))
+      
+      Rails.logger.info "get_file: filename=#{filename}, step_name=#{step_name}, ext=#{ext}, json_allowed=#{json_allowed}, filepath=#{filepath}"
+      Rails.logger.info "get_file: readable?=#{readable?(@project)}, exportable?=#{exportable?(@project)}"
+      
+      authorized = readable?(@project) and (exportable?(@project) or ['png', 'pdf', 'jpeg', 'jpg'].include?(ext)) or (step_name == 'visualization' and filename.match(/trajectory/) and ext == 'json') or (step_name and run and exportable_item?(@project, run)) or json_allowed
+      Rails.logger.info "get_file: authorized=#{authorized}"
+      
+      if authorized
+  
+        ## export to h5ad                                                                                                                                                                                                                          
+        if filepath.to_s.match(/output\.h5ad$/)
+          loom_filepath = filepath.dup.to_s
+          loom_filepath.gsub!(/\.h5ad$/, '.loom')
+          if !File.exist? filepath or (File.exist? filepath and File.ctime(filepath) < File.mtime(loom_filepath))  ## convert everytime                                                                                                           \
+                                                                                                                                                                                                                                                   
+            h_env = Basic.safe_parse_json(@project.version.env_json, {})
+            docker_name = "#{h_env['docker_images']['asap_run']['name']}:#{h_env['docker_images']['asap_run']['tag']}"
+            loom_filepath = filepath.dup.to_s
+            loom_filepath.gsub!(/\.h5ad$/, '.loom')
+            # if !File.exist? project_dir + h5ad_file                                                                                                                                                                                              
+            rscript_cmd = "Rscript -e 'library(\\\"sceasy\\\"); loom_file <- \\\"#{loom_filepath}\\\"; sceasy::convertFormat(loom_file, from=\\\"loom\\\", to=\\\"anndata\\\", outFile=\\\"#{filepath.to_s}\\\")'"
+            data_dir = ENV["DATA_DIR"] || ENV["USER_DATA_DIR"]
+            cmd = "docker run --entrypoint '/bin/sh' --rm -v #{data_dir}:#{data_dir} #{docker_name} -c \"#{rscript_cmd}\""
+            logger.debug("CREATE H5AD file: " + cmd)
+            `#{cmd}`
+          end
+        end
+        if File.exist? filepath
+          if ['exec.err', 'exec.out'].include? filename
+            content = File.read(filepath)
+            content.gsub!(project_dir.to_s, "$PROJECT_DIR")
+            send_data content, type: params[:content_type] || 'text', # type: 'application/octet-stream'                                                                                                                                           
+            x_sendfile: true, buffer_size: 512, disposition: (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name,  run_id, filename].compact.join("_")) : ''
+          elsif ext == 'json' || filename.match(/\.json$/)
+            # For JSON files, read and return content directly (needed for autocomplete_genes.json)
+            Rails.logger.info "get_file: Reading JSON file from path: #{filepath}"
+            if File.exist?(filepath)
+              Rails.logger.info "get_file: File exists, size: #{File.size(filepath)} bytes"
+              content = File.read(filepath)
+              Rails.logger.info "get_file: File read successfully, content length: #{content.length} chars"
+              begin
+                json_data = JSON.parse(content)
+                Rails.logger.info "get_file: JSON parsed successfully, keys: #{json_data.keys.inspect}"
+                render json: json_data, content_type: 'application/json'
+              rescue JSON::ParserError => e
+                Rails.logger.error "Error parsing JSON file #{filename}: #{e.message}"
+                Rails.logger.error "File content preview (first 500 chars): #{content[0..500]}"
+                render json: { error: 'Invalid JSON file' }, status: 500
+              end
+            else
+              Rails.logger.error "get_file: JSON file does not exist at path: #{filepath}"
+              render json: { error: 'File not found' }, status: 404
+            end
+          else
+            logger.debug "FILEPATH:" + filepath.to_s
+            new_filepath = filepath.to_s.gsub(/^\/data\/asap2/, '/rails_send_file')
+
+                       path = filepath.to_s.gsub(/\/data\/asap2/, "/rails_send_file") #"/rails_send_file/FB2020_05.sql.gz.05"                                                                                                                      
+             headers['Content-Disposition'] = (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name,  run_id, filename].compact.join("_")) : ''
+              headers['X-Accel-Redirect'] = path #'/download_public/uploads/stories/' + params[:story_id] +'/' + params[:story_id] + '.zip'                                                                                                        
+             # headers["X-Accel-Mapping"]=  "/data/asap2/=/rails_send_file/"                                                                                                                                                                       
+             headers['Content-Type'] = "application/octet-stream"
+             headers['Content-Length'] = File.size filepath
+            render :nothing => true
+  
+          end
+        else
+          render :plain => "This file doesn't exist."
+        end
+      else
+        Rails.logger.warn "get_file: Unauthorized access attempt for project #{@project.id}, filename: #{filename}"
+        render :plain => 'Not authorized to download this file.', status: 403
+      end
+  
+    rescue => e
+      Rails.logger.error "get_file: Exception occurred: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: 'Internal server error', message: e.message }, status: 500
+    end
   end
+
 
   # GET /projects/1/get_loom_files_json
   def get_loom_files_json
@@ -463,10 +599,112 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/1/gene_expression.json?stable_id=123&loom_file=parsing/output.loom
+  def gene_expression
+    begin
+      stable_id = params[:stable_id]
+      loom_file = params[:loom_file] || 'parsing/output.loom'
+      
+      unless stable_id
+        render json: { error: 'stable_id parameter is required' }, status: 400
+        return
+      end
+
+      loom_path = @project_dir + loom_file
+      
+      # Find gene metadata with _StableID name
+      gene_metadata = Annot.where(project_id: @project.id, dim: 2, name: '/row_attrs/_StableID')
+                             .where("filepath = ?", loom_file)
+                             .first
+      
+      unless gene_metadata
+        render json: { error: 'Gene metadata _StableID not found' }, status: 404
+        return
+      end
+
+      # Get the stable ID vector to find the index
+      stable_id_vector = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      
+      # Find the index where stable_id matches
+      gene_index = nil
+      stable_id_vector.each_with_index do |value, index|
+        if value.to_s == stable_id.to_s
+          gene_index = index
+          break
+        end
+      end
+
+      unless gene_index
+        render json: { error: "Gene with stable_id #{stable_id} not found" }, status: 404
+        return
+      end
+
+      # Get expression data for this gene index (0-based index)
+      # get_pathway_data expects 1-based indexes, so add 1
+      expression_data = H5DataService.get_pathway_data([gene_index + 1], loom_path.to_s)
+      
+      # Extract the expression values
+      # The response should have a 'values' array where each element is a row (gene)
+      expression_values = []
+      if expression_data && expression_data['values']
+        if expression_data['values'].is_a?(Array) && expression_data['values'].length > 0
+          # If it's an array of arrays, get the first row
+          # If it's a single array (one row returned), use it directly
+          first_value = expression_data['values'][0]
+          if first_value.is_a?(Array)
+            expression_values = first_value
+          else
+            # Single row returned directly
+            expression_values = expression_data['values']
+          end
+        end
+      end
+
+      render json: {
+        stable_id: stable_id.to_s,
+        gene_index: gene_index,
+        expression_values: expression_values,
+        nber_cols: expression_data ? expression_data['nber_cols'] : 0
+      }
+    rescue => e
+      Rails.logger.error "Error loading gene expression: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: 'Failed to load gene expression', message: e.message }, status: 500
+    end
+  end
+
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_project
-      @project = Project.find(params.expect(:id))
+      identifier = params.expect(:id)
+      
+      # Try to find by numeric ID first (for backward compatibility)
+      if identifier.match?(/^\d+$/)
+        @project = Project.find_by(id: identifier.to_i)
+      end
+      
+      # Try to find by key if not found
+      if @project.nil?
+        @project = Project.find_by(key: identifier)
+      end
+      
+      # Try to find by public_id if still not found
+      if @project.nil?
+        # public_id might be numeric or in format like "ASAP49"
+        if identifier.match?(/^ASAP\d+$/i)
+          # Extract numeric part from "ASAP49" format
+          numeric_part = identifier.match(/\d+$/).to_s.to_i
+          @project = Project.find_by(public_id: numeric_part)
+        else
+          @project = Project.find_by(public_id: identifier.to_i) if identifier.match?(/^\d+$/)
+        end
+      end
+      
+      # Raise error if project not found
+      unless @project
+        raise ActiveRecord::RecordNotFound, "Project not found with identifier: #{identifier}"
+      end
+      
       @project_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
     end
 

@@ -18,8 +18,9 @@ module ApplicationHelper
     end
   end
   
-  def exportable?(project)
-    # Check if project has runs and is not in sandbox mode or user is admin
+  # Note: exportable? is now defined in ProjectAuthorization concern
+  # This method checks if project has runs and exportable data
+  def has_exportable_data?(project)
     return false unless project
     project.runs.any? && (!project.sandbox? || admin?)
   end

@@ -671,6 +671,9 @@ export class DataManager {
       compression_info: vectorData.compression_info
     }
     
+    // Update adapt color range button visibility for all range sliders
+    this.controller.updateAllRangeSliderButtonAppearances()
+    
     try {
       console.log(`✅ [DEBUG] Set currentMetadataVector at:`, new Error().stack)
     } catch (e) {

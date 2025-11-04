@@ -499,6 +499,20 @@ export class GeneManager {
 
   removeGeneTag(index) {
     if (index >= 0 && index < this.geneTags.length) {
+      const geneToRemove = this.geneTags[index]
+      const geneMetadataId = geneToRemove ? `gene_${geneToRemove.stableId}` : null
+      
+      // Check if this gene is currently being used for coloring
+      const isCurrentlyColoring = geneMetadataId && this.controller?.currentMetadataVector?.id === geneMetadataId
+      
+      if (isCurrentlyColoring) {
+        console.log(`🧬 Removing gene ${geneToRemove.stableId} that is currently being used for coloring - clearing coloring`)
+        // Clear the coloring since the gene is being removed
+        this.controller.resetAllWaterDropButtons()
+        this.controller.removeAllCategoryColors()
+        this.controller.clearMetadataColoring()
+      }
+      
       this.geneTags.splice(index, 1)
       // Update badge when gene is removed
       this.updateGeneCountBadge()
@@ -510,6 +524,19 @@ export class GeneManager {
   removeGeneByStableId(stableId) {
     const index = this.geneTags.findIndex(g => g.stableId === stableId)
     if (index !== -1) {
+      const geneMetadataId = `gene_${stableId}`
+      
+      // Check if this gene is currently being used for coloring
+      const isCurrentlyColoring = this.controller?.currentMetadataVector?.id === geneMetadataId
+      
+      if (isCurrentlyColoring) {
+        console.log(`🧬 Removing gene ${stableId} that is currently being used for coloring - clearing coloring`)
+        // Clear the coloring since the gene is being removed
+        this.controller.resetAllWaterDropButtons()
+        this.controller.removeAllCategoryColors()
+        this.controller.clearMetadataColoring()
+      }
+      
       this.geneTags.splice(index, 1)
       // Update badge when gene is removed
       this.updateGeneCountBadge()
@@ -1593,6 +1620,49 @@ export class GeneManager {
       }
     } else {
       chevron.style.transform = 'rotate(0deg)'
+      
+      // Check if this gene is currently being used for coloring
+      const geneMetadataId = `gene_${geneId}`
+      console.log(`🧬 [GENE COLLAPSE] Collapsing gene ${geneId}`)
+      console.log(`🧬 [GENE COLLAPSE] Checking coloring state:`, {
+        hasController: !!this.controller,
+        currentMetadataVectorId: this.controller?.currentMetadataVector?.id || 'none',
+        geneMetadataId: geneMetadataId,
+        isCurrentlyColoring: this.controller?.currentMetadataVector?.id === geneMetadataId
+      })
+      
+      const isCurrentlyColoring = this.controller?.currentMetadataVector?.id === geneMetadataId
+      
+      if (isCurrentlyColoring) {
+        console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is currently being used for coloring - clearing coloring`)
+        console.log(`🧬 [GENE COLLAPSE] Step 1: Resetting all water drop buttons...`)
+        try {
+          this.controller.resetAllWaterDropButtons()
+          console.log(`🧬 [GENE COLLAPSE] Step 1: resetAllWaterDropButtons() completed`)
+        } catch (error) {
+          console.error(`🧬 [GENE COLLAPSE] Error in resetAllWaterDropButtons():`, error)
+        }
+        
+        console.log(`🧬 [GENE COLLAPSE] Step 2: Removing category colors...`)
+        try {
+          this.controller.removeAllCategoryColors()
+          console.log(`🧬 [GENE COLLAPSE] Step 2: removeAllCategoryColors() completed`)
+        } catch (error) {
+          console.error(`🧬 [GENE COLLAPSE] Error in removeAllCategoryColors():`, error)
+        }
+        
+        console.log(`🧬 [GENE COLLAPSE] Step 3: Clearing metadata coloring...`)
+        try {
+          this.controller.clearMetadataColoring()
+          console.log(`🧬 [GENE COLLAPSE] Step 3: clearMetadataColoring() completed`)
+        } catch (error) {
+          console.error(`🧬 [GENE COLLAPSE] Error in clearMetadataColoring():`, error)
+        }
+        
+        console.log(`🧬 [GENE COLLAPSE] All coloring clearing steps completed`)
+      } else {
+        console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is NOT currently being used for coloring - no need to clear`)
+      }
       
       // Collapse with animation
       rangeSection.style.maxHeight = '0px'

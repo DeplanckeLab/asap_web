@@ -212,6 +212,9 @@ export default class extends Controller {
     this.updateSliderUI()
     this.updateSelectedCellsCount()
     this.drawDensityPlot()
+    
+    // Update button appearance to show/hide based on coloring state
+    this.updateButtonAppearance()
   }
 
   // Start dragging a handle
@@ -1126,7 +1129,21 @@ export default class extends Controller {
     }
     
     const button = this.adaptColorRangeButtonTarget
-    console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled)
+    
+    // Check if this metadata/gene is currently being used for coloring
+    const isColoringActive = this.visualizationController?.currentMetadataVector?.id === this.metadataIdValue
+    
+    console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled, 'coloring active:', isColoringActive)
+    
+    // Hide button if coloring is not active
+    if (!isColoringActive) {
+      button.style.display = 'none'
+      console.log('🎨 Hiding adapt color range button - coloring not active for this metadata')
+      return
+    }
+    
+    // Show button if coloring is active
+    button.style.display = 'flex'
     
     if (this.adaptColorRangeEnabled) {
       // Active state - green colors

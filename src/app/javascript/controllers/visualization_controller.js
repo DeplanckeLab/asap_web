@@ -2268,11 +2268,19 @@ export default class extends Controller {
 
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
+    console.log('🎨 [RENDER] renderPointsWithCurrentColoring() called')
+    console.log('🎨 [RENDER] State check:', {
+      hasReglRenderer: !!this.reglRenderer,
+      hasCurrentCoordinates: !!this.currentCoordinates,
+      currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      currentMetadataVector: this.currentMetadataVector?.id || 'none',
+      currentMetadataId: this.currentMetadataId || 'none'
+    })
 
     // Performance optimization: check if color state has changed
     const currentColorHash = this.dataManager.getColorStateHash()
     if (this.lastColorUpdateHash === currentColorHash && this.colorUpdateCache.has('lastColorMap')) {
-      console.log('🎨 [ReGL] Using cached color update (no color state change)')
+      console.log('🎨 [RENDER] Using cached color update (no color state change)')
       const cachedColorMap = this.colorUpdateCache.get('lastColorMap')
       
       // IMPORTANT: If display order was reset (e.g., after embedding switch),
@@ -2317,8 +2325,16 @@ export default class extends Controller {
     // Check if we have metadata coloring active
     // FIXED: Use getColoringMetadataVector() to get the correct metadata for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
+    console.log('🎨 [RENDER] Checking for coloring metadata vector:', {
+      hasColoringMetadataVector: !!coloringMetadataVector,
+      coloringMetadataVectorId: coloringMetadataVector?.id || 'none',
+      coloringMetadataVectorName: coloringMetadataVector?.name || 'none',
+      currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
+      currentMetadataId: this.currentMetadataId || 'none'
+    })
+    
     if (coloringMetadataVector) {
-      // console.log(`🎨 [ReGL] Applying ${coloringMetadataVector.data_type} metadata colors`)
+      console.log(`🎨 [RENDER] Applying ${coloringMetadataVector.data_type} metadata colors for: ${coloringMetadataVector.name}`)
       
       if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Discrete metadata coloring with category ordering
@@ -2493,8 +2509,16 @@ export default class extends Controller {
       }
     } else {
       // Default blue coloring
-      console.log('🎨 [ReGL] Applying default blue colors')
+      console.log('🎨 [RENDER] Applying default blue colors (no coloring metadata vector)')
+      console.log('🎨 [RENDER] Default blue coloring details:', {
+        displayOrderLength: this.displayOrder?.length || 0,
+        visibleSetSize: visibleSet?.size || 'all',
+        defaultColor: '0x3b82f6'
+      })
       const defaultColor = 0x3b82f6
+      let visibleCount = 0
+      let hiddenCount = 0
+      
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
@@ -2502,15 +2526,26 @@ export default class extends Controller {
         if (isVisible) {
           colorMap.set(drawPos, defaultColor)
           this.originalPointColors.set(cellIndex, defaultColor) // Store by cell index
+          visibleCount++
         } else {
           // Hide filtered-out points
           colorMap.set(drawPos, 0x00000000)
+          hiddenCount++
         }
       }
       
+      console.log('🎨 [RENDER] Default blue coloring applied:', {
+        totalPoints: this.displayOrder.length,
+        visiblePoints: visibleCount,
+        hiddenPoints: hiddenCount,
+        colorMapSize: colorMap.size
+      })
+      
       // Update colors in ReGL
+      console.log('🎨 [RENDER] Updating ReGL renderer with default blue colors...')
       this.reglRenderer.updateColors(colorMap)
       this.reglRenderer.render()
+      console.log('🎨 [RENDER] ReGL renderer updated and rendered')
     }
     
     // Redraw the Canvas 2D overlay (grid, axes, labels/legend) to ensure everything is visible
@@ -3006,6 +3041,9 @@ export default class extends Controller {
         controller.initializeSlider()
         console.log('🎚️ Range slider controller initialized successfully with range:', { currentMin, currentMax })
         
+        // Update button appearance to show/hide based on coloring state
+        controller.updateButtonAppearance()
+        
         // Draw the initial histogram
         controller.drawDensityPlot()
       } else {
@@ -3076,40 +3114,71 @@ export default class extends Controller {
   
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
-    console.log('🎨 clearMetadataColoring() called')
-    console.log('🎨 Checking prerequisites:', {
+    console.log('🎨 [CLEAR COLORING] clearMetadataColoring() called')
+    console.log('🎨 [CLEAR COLORING] Checking prerequisites:', {
       rendererType: this.rendererType,
       reglRenderer: !!this.reglRenderer,
+      pixiRendererId: this.reglRenderer?.instanceId || 'none',
       pixiApp: !!this.pixiApp,
       scatterContainer: !!this.scatterContainer,
       currentCoordinates: !!this.currentCoordinates,
-      currentBounds: !!this.currentBounds
+      currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      currentBounds: !!this.currentBounds,
+      currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
+      currentMetadataId: this.currentMetadataId || 'none'
     })
     
     // Check for renderer availability (either ReGL or PixiJS)
     const hasRenderer = !!this.reglRenderer
     
     if (!hasRenderer || !this.currentCoordinates || !this.currentBounds) {
-      console.log('🎨 Cannot clear coloring - missing renderer or coordinates')
+      console.error('🎨 [CLEAR COLORING] ❌ Cannot clear coloring - missing prerequisites:', {
+        hasRenderer,
+        hasCurrentCoordinates: !!this.currentCoordinates,
+        hasCurrentBounds: !!this.currentBounds
+      })
       return
     }
     
-    console.log('🎨 Clearing metadata coloring, returning to default blue')
-    console.log('🎨 [DEBUG] clearMetadataColoring() called - clearing currentMetadataVector')
-    console.trace('Call stack:')
+    console.log('🎨 [CLEAR COLORING] All prerequisites met, proceeding to clear coloring')
+    console.log('🎨 [CLEAR COLORING] Clearing metadata coloring, returning to default blue')
+    console.log('🎨 [CLEAR COLORING] Before clearing - currentMetadataVector:', {
+      id: this.currentMetadataVector?.id || 'none',
+      name: this.currentMetadataVector?.name || 'none',
+      dataType: this.currentMetadataVector?.data_type || 'none'
+    })
+    console.trace('🎨 [CLEAR COLORING] Call stack:')
     
     // Clear current metadata vector
+    const oldMetadataId = this.currentMetadataVector?.id || this.currentMetadataId || 'none'
     this.currentMetadataVector = null
     this.currentMetadataId = null
+    console.log('🎨 [CLEAR COLORING] Cleared currentMetadataVector and currentMetadataId (was:', oldMetadataId, ')')
     
     // Clear custom color range
+    const oldCustomColorRange = this.customColorRange
     this.customColorRange = null
+    console.log('🎨 [CLEAR COLORING] Cleared customColorRange (was:', oldCustomColorRange, ')')
+    
+    // Update adapt color range button visibility for all range sliders
+    console.log('🎨 [CLEAR COLORING] Updating range slider button appearances...')
+    this.updateAllRangeSliderButtonAppearances()
+    console.log('🎨 [CLEAR COLORING] Range slider button appearances updated')
     
     // Clear the cached color map since we're clearing metadata
+    console.log('🎨 [CLEAR COLORING] Clearing color map cache...')
     this.colorManager.clearColorMapCache()
+    console.log('🎨 [CLEAR COLORING] Color map cache cleared')
     
     // Render points with default blue coloring based on renderer type
-    this.renderPointsWithCurrentColoring()
+    console.log('🎨 [CLEAR COLORING] Calling renderPointsWithCurrentColoring() to render default blue...')
+    try {
+      this.renderPointsWithCurrentColoring()
+      console.log('🎨 [CLEAR COLORING] renderPointsWithCurrentColoring() completed successfully')
+    } catch (error) {
+      console.error('🎨 [CLEAR COLORING] ❌ Error in renderPointsWithCurrentColoring():', error)
+      console.error('🎨 [CLEAR COLORING] Error stack:', error.stack)
+    }
     
     
     // Clear any existing legend (both discrete and continuous)
@@ -4185,6 +4254,9 @@ export default class extends Controller {
     
     // Clear cached color map
     this.colorManager.clearColorMapCache()
+    
+    // Update adapt color range button visibility for all range sliders
+    this.updateAllRangeSliderButtonAppearances()
     
     // Initialize gradient for gene expression (synchronous - just loads from storage)
     this.gradientManager.loadGradientForMetadata(geneMetadataId)
@@ -7605,6 +7677,9 @@ export default class extends Controller {
       
       // Clear the color map cache to force fresh color assignment
       this.colorManager.clearColorMapCache()
+      
+      // Update adapt color range button visibility for all range sliders
+      this.updateAllRangeSliderButtonAppearances()
       
       // Re-activate the water drop button
       if (activeButton) {
@@ -11990,6 +12065,19 @@ export default class extends Controller {
             this.redrawPlot()
           }, 100)
         }
+      }
+    })
+  }
+
+  // Update adapt color range button visibility for all range sliders
+  updateAllRangeSliderButtonAppearances() {
+    // Find all range slider controllers and trigger their button appearance updates
+    const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
+    rangeSliderElements.forEach(element => {
+      // Get the Stimulus controller instance
+      const controller = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+      if (controller && typeof controller.updateButtonAppearance === 'function') {
+        controller.updateButtonAppearance()
       }
     })
   }

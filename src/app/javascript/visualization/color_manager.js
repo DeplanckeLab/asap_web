@@ -213,39 +213,64 @@ export class ColorManager {
 
   // Get the metadata vector that is currently being used for coloring
   getColoringMetadataVector() {
+    console.log('🎨 [GET COLORING] getColoringMetadataVector() called')
+    
     // First, check if there's a metadata vector that has a visible legend
     // Look for active legend elements in the DOM
     const activeLegend = document.querySelector('.metadata-legend:not([style*="display: none"])')
+    console.log('🎨 [GET COLORING] Checking for active legend:', {
+      foundActiveLegend: !!activeLegend,
+      legendMetadataId: activeLegend?.dataset.metadataId || 'none'
+    })
     if (activeLegend) {
       const metadataId = activeLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        console.log('🎨 [GET COLORING] Found coloring metadata vector from active legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Fallback: check for active color legend (for continuous metadata)
     const activeColorLegend = document.querySelector('.color-legend:not([style*="display: none"])')
+    console.log('🎨 [GET COLORING] Checking for active color legend:', {
+      foundActiveColorLegend: !!activeColorLegend,
+      colorLegendMetadataId: activeColorLegend?.dataset.metadataId || 'none'
+    })
     if (activeColorLegend) {
       const metadataId = activeColorLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        console.log('🎨 [GET COLORING] Found coloring metadata vector from active color legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Fallback: check for active gradient legend (for continuous metadata)
     const activeGradientLegend = document.querySelector('.gradient-legend:not([style*="display: none"])')
+    console.log('🎨 [GET COLORING] Checking for active gradient legend:', {
+      foundActiveGradientLegend: !!activeGradientLegend,
+      gradientLegendMetadataId: activeGradientLegend?.dataset.metadataId || 'none'
+    })
     if (activeGradientLegend) {
       const metadataId = activeGradientLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
+        console.log('🎨 [GET COLORING] Found coloring metadata vector from active gradient legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Final fallback: use currentMetadataVector if it exists and has values
+    console.log('🎨 [GET COLORING] Checking currentMetadataVector:', {
+      hasCurrentMetadataVector: !!this.controller.currentMetadataVector,
+      currentMetadataVectorId: this.controller.currentMetadataVector?.id || 'none',
+      hasValues: !!this.controller.currentMetadataVector?.values,
+      valuesLength: this.controller.currentMetadataVector?.values?.length || 0
+    })
     if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
+      console.log('🎨 [GET COLORING] Returning currentMetadataVector:', this.controller.currentMetadataVector.id)
       return this.controller.currentMetadataVector
     }
     
+    console.log('🎨 [GET COLORING] No coloring metadata vector found - returning null')
     return null
   }
 

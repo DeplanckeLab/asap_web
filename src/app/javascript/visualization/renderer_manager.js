@@ -665,14 +665,43 @@ export class RendererManager {
   // Initialize scatter plot with coordinates
   async initializeScatterPlot(coordinates) {
     try {
-      
-      console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
+      // CRITICAL: Check if renderer already exists with state and matching coordinate count
+      // If so, we should reuse it instead of destroying it!
+      if (this.controller.reglRenderer) {
+        const hasState = this.controller.reglRenderer.numPoints > 0 || 
+                         (this.controller.reglRenderer.positions && this.controller.reglRenderer.positions.length > 0) ||
+                         (this.controller.reglRenderer.colors && this.controller.reglRenderer.colors.length > 0)
+        const coordinateCount = coordinates.length
+        const rendererPointCount = this.controller.reglRenderer.numPoints || 
+                                   (this.controller.reglRenderer.positions ? this.controller.reglRenderer.positions.length / 2 : 0)
+        
+        if (hasState && rendererPointCount === coordinateCount) {
+          console.log(`⏱️ [PERF] Step 3: Reusing existing ${this.controller.rendererType.toUpperCase()} renderer (FAST PATH - renderer has state)`)
+          console.log(`⏱️ [PERF] Renderer instance: ${this.controller.reglRenderer.instanceId}, points: ${rendererPointCount}`)
+          // Renderer already exists with correct state - just render the coordinates
+          await this.controller.renderScatterPlot(coordinates)
+          return
+        } else {
+          console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render or count mismatch)`)
+          console.log(`⏱️ [PERF] Existing renderer state: hasState=${hasState}, rendererPoints=${rendererPointCount}, newPoints=${coordinateCount}`)
+        }
+      } else {
+        console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
+      }
       
       // Clear existing renderers
-
       if (this.controller.reglRenderer) {
+        const oldRendererId = this.controller.reglRenderer.instanceId
+        const oldRendererState = {
+          numPoints: this.controller.reglRenderer.numPoints,
+          hasPositions: !!this.controller.reglRenderer.positions,
+          hasColors: !!this.controller.reglRenderer.colors
+        }
+        console.log(`⏱️ [PERF] Destroying existing renderer: ${oldRendererId}`, oldRendererState)
+        console.trace(`⏱️ [PERF] Stack trace for renderer destruction`)
         this.controller.reglRenderer.destroy()
         this.controller.reglRenderer = null
+        console.log(`⏱️ [PERF] Renderer destroyed and set to null`)
       }
       
       // Reset canvas listeners flag so they get reattached to the new canvas
@@ -715,8 +744,11 @@ export class RendererManager {
         })
         
         // Initialize ReGL renderer
+        console.log(`⏱️ [PERF] Creating new ReglRenderer in initializeScatterPlot`)
+        console.trace(`⏱️ [PERF] Stack trace for renderer creation in initializeScatterPlot`)
         this.controller.reglRenderer = new ReglRenderer(canvas)
         this.controller.canvas = canvas
+        console.log(`⏱️ [PERF] New renderer created: ${this.controller.reglRenderer.instanceId}`)
         
         console.log('ReGL canvas added to container:', canvas)
         

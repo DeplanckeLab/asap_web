@@ -40,6 +40,7 @@
 <div data-controller="visualization" 
      data-visualization-embeddings-by-loom-value="<%= (@all_embeddings_by_loom || {}).to_json %>"
      data-visualization-default-loom-file-value="<%= @default_loom_file.present? ? @default_loom_file : 'parsing/output.loom' %>"
+     data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
@@ -268,10 +269,10 @@
       </div>
 
       <!-- Draggable Divider -->
-      <div id="metadata-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s;" 
+      <div id="metadata-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s; box-sizing: border-box; flex-shrink: 0;" 
            onmouseover="this.style.backgroundColor='#9ca3af'" 
            onmouseout="this.style.backgroundColor='#d1d5db'">
-        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px;"></div>
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px; pointer-events: none;"></div>
       </div>
 
       <!-- Continuous Metadata Section -->
@@ -598,32 +599,42 @@
        onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
 
   <!-- Right Panel: Split into Gene Expression and Selections -->
-  <div id="right-panel" style="width: 320px; height: 100vh; display: flex; flex-direction: column;">
+  <div id="right-panel" style="width: 320px; height: 100vh; display: flex; flex-direction: column; overflow: hidden;">
     
     <!-- Top Section: Gene Expression Panel -->
-    <div style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;">
-      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
-        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
-        <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
-      </div>
-      <div style="flex: 1; padding: 20px; overflow-y: auto; min-height: 0;">
-        <div style="margin-bottom: 20px;">
-          <div style="position: relative;">
-            <!-- Gene Tags Container with Input -->
-            <div id="gene-tags-container" style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; min-height: 42px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; align-items: center; transition: border-color 0.2s; cursor: text;"
-                 onclick="document.getElementById('gene-autocomplete-input').focus()">
-              <input 
-                type="text" 
-                id="gene-autocomplete-input" 
-                placeholder="Type or paste gene names (comma, space, or Enter to add)..."
-                style="flex: 1; min-width: 120px; padding: 0; border: none; border-radius: 0; font-size: 14px; outline: none; background: transparent;"
-                onfocus="document.getElementById('gene-tags-container').style.borderColor='#3b82f6'"
-                onblur="document.getElementById('gene-tags-container').style.borderColor='#d1d5db'"
-              />
-            </div>
-            <div id="gene-autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-top: none; border-radius: 0 0 6px 6px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: -1px;"></div>
-          </div>
+    <div id="gene-expression-panel" style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
+          <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
+          <button id="add-gene-set-btn" style="display: none; align-items: center; justify-content: center; padding: 4px 8px; background-color: #3b82f6; color: white; border: none; border-radius: 12px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;" 
+                  onmouseover="this.style.backgroundColor='#2563eb'" 
+                  onmouseout="this.style.backgroundColor='#3b82f6'"
+                  title="Add gene set">
+            +
+          </button>
         </div>
+        <!-- Gene Tags Container with Input -->
+        <div style="position: relative;">
+          <div id="gene-tags-container" style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; min-height: 42px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; align-items: center; transition: border-color 0.2s; cursor: text;"
+               onclick="document.getElementById('gene-autocomplete-input').focus()">
+            <input 
+              type="text" 
+              id="gene-autocomplete-input" 
+              placeholder="Type or paste gene names (comma, space, or Enter to add)..."
+              style="flex: 1; min-width: 120px; padding: 0; border: none; border-radius: 0; font-size: 14px; outline: none; background: transparent;"
+              onfocus="document.getElementById('gene-tags-container').style.borderColor='#3b82f6'"
+              onblur="document.getElementById('gene-tags-container').style.borderColor='#d1d5db'"
+            />
+          </div>
+          <div id="gene-autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-top: none; border-radius: 0 0 6px 6px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: -1px;"></div>
+        </div>
+        <!-- Gene Input Status Message -->
+        <div id="gene-input-status" style="display: none; margin-top: 8px; padding: 8px 12px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px;">
+          <div id="gene-input-status-text" style="color: #0369a1;"></div>
+        </div>
+      </div>
+      <div style="flex: 1; padding: 20px; padding-top: 0; overflow-y: auto; min-height: 0;">
 
         <!-- Gene Results Summary -->
         <div id="gene-results-summary" style="display: none; margin-bottom: 20px; padding: 12px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
@@ -631,19 +642,19 @@
           <div id="gene-not-found-link" style="display: none;"></div>
         </div>
 
-        <div id="gene-expression-results" style="margin-top: 20px;"></div>
+        <div id="gene-expression-results"></div>
       </div>
     </div>
 
     <!-- Draggable Divider -->
-    <div id="right-panel-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s;" 
+    <div id="right-panel-divider" style="height: 4px; background-color: #d1d5db; cursor: row-resize; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; position: relative; transition: background-color 0.2s; box-sizing: border-box; flex-shrink: 0;" 
          onmouseover="this.style.backgroundColor='#9ca3af'" 
          onmouseout="this.style.backgroundColor='#d1d5db'">
-      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px;"></div>
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background-color: #9ca3af; border-radius: 1px; pointer-events: none;"></div>
     </div>
 
     <!-- Bottom Section: Selections Panel -->
-    <div style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column;">
+    <div id="selections-panel" style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
         <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Selections</h2>
         <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
@@ -894,7 +905,6 @@
       </div>
       
     </div>
-    
   </div>
 </div>
 

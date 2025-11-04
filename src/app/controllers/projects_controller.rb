@@ -622,42 +622,111 @@ class ProjectsController < ApplicationController
         return
       end
 
+      # Use the metadata's actual name path from the database
+      # This might be different from the hardcoded path
+      stable_id_path = gene_metadata.name
+      Rails.logger.info "Using stable_id path from metadata: #{stable_id_path} (filepath: #{gene_metadata.filepath})"
+      
       # Get the stable ID vector to find the index
-      stable_id_vector = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      Rails.logger.info "Extracting stable_id vector from: #{loom_path} at path: #{stable_id_path}"
+      Rails.logger.info "File exists? #{File.exist?(loom_path)}"
+      
+      begin
+        # Call get_metadata_vector and capture any issues
+        Rails.logger.info "Calling H5DataService.get_metadata_vector with loom_path: #{loom_path}, metadata_path: #{stable_id_path}"
+        stable_id_vector = H5DataService.get_metadata_vector(loom_path.to_s, stable_id_path)
+        Rails.logger.info "get_metadata_vector returned: type=#{stable_id_vector.class}, size=#{stable_id_vector.respond_to?(:length) ? stable_id_vector.length : 'N/A'}"
+      rescue => e
+        Rails.logger.error "Error extracting stable_id vector: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        # Return more detailed error to help debug
+        render json: { error: "Failed to extract stable ID vector: #{e.message}. File: #{loom_file}, Path: #{loom_path}. Please check Rails logs for ASAP.jar command output." }, status: 500
+        return
+      end
+      
+      Rails.logger.info "Gene expression lookup: stable_id=#{stable_id} (type: #{stable_id.class}), loom_file=#{loom_file}, vector_size=#{stable_id_vector.length}"
+      
+      if stable_id_vector.nil? || stable_id_vector.empty?
+        Rails.logger.error "Stable ID vector is empty or nil! Path used: #{stable_id_path}, Loom file path: #{loom_path}, Loom file param: #{loom_file}"
+        # Try alternative path as fallback
+        fallback_path = '/row_attrs/_StableID'
+        Rails.logger.info "Trying fallback path: #{fallback_path}"
+        begin
+          stable_id_vector = H5DataService.get_metadata_vector(loom_path.to_s, fallback_path)
+          Rails.logger.info "Fallback path result: vector_size=#{stable_id_vector.length if stable_id_vector}"
+        rescue => e
+          Rails.logger.error "Fallback path also failed: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+        end
+        
+        if stable_id_vector.nil? || stable_id_vector.empty?
+          error_msg = "Stable ID vector is empty. Loom file: #{loom_file} (full path: #{loom_path}). Tried metadata path: #{stable_id_path} and fallback: #{fallback_path}. Check if _StableID metadata exists in the loom file."
+          Rails.logger.error error_msg
+          render json: { error: error_msg }, status: 404
+          return
+        end
+      end
+      
+      # Log first few values to see format
+      sample_values = stable_id_vector.first(10).map(&:to_s)
+      Rails.logger.info "Sample stable_id values from vector (first 10): #{sample_values.inspect}"
+      Rails.logger.info "Sample value types: #{stable_id_vector.first(5).map { |v| "#{v} (#{v.class})" }.join(', ')}"
       
       # Find the index where stable_id matches
       gene_index = nil
       stable_id_vector.each_with_index do |value, index|
-        if value.to_s == stable_id.to_s
+        # Convert both to string and strip whitespace for comparison
+        value_str = value.to_s.strip
+        stable_id_str = stable_id.to_s.strip
+        
+        if value_str == stable_id_str
           gene_index = index
+          Rails.logger.info "Found gene at index #{index}: value=#{value_str}, stable_id=#{stable_id_str}"
           break
         end
       end
 
       unless gene_index
-        render json: { error: "Gene with stable_id #{stable_id} not found" }, status: 404
+        # Log more details for debugging
+        Rails.logger.warn "Gene not found. Looking for: '#{stable_id.to_s}' (type: #{stable_id.class})"
+        Rails.logger.warn "Sample values from vector: #{sample_values.inspect}"
+        Rails.logger.warn "Checking if any value matches (with type conversion)..."
+        stable_id_vector.first(10).each_with_index do |val, idx|
+          Rails.logger.warn "  [#{idx}] value='#{val}' (#{val.class}) == '#{stable_id}' (#{stable_id.class})? #{val.to_s.strip == stable_id.to_s.strip}"
+        end
+        render json: { error: "Gene with stable_id #{stable_id} not found. Sample values in file: #{sample_values.first(5).join(', ')}" }, status: 404
         return
       end
 
-      # Get expression data for this gene index (0-based index)
-      # get_pathway_data expects 1-based indexes, so add 1
+      # Get expression data for this gene index
+      # gene_index is 0-based from the stable_id_vector.each_with_index
+      # get_pathway_data converts 1-based IDs to 0-based indexes, so pass gene_index + 1
+      Rails.logger.info "Extracting expression data for gene_index: #{gene_index} (0-based), passing #{gene_index + 1} (1-based) to get_pathway_data"
       expression_data = H5DataService.get_pathway_data([gene_index + 1], loom_path.to_s)
+      
+      Rails.logger.info "Expression data response: nber_rows=#{expression_data['nber_rows']}, nber_cols=#{expression_data['nber_cols']}, values type=#{expression_data['values']&.class}, values length=#{expression_data['values']&.length}"
       
       # Extract the expression values
       # The response should have a 'values' array where each element is a row (gene)
+      # For a single row request, values[0] should be the row (array of expression values)
       expression_values = []
       if expression_data && expression_data['values']
         if expression_data['values'].is_a?(Array) && expression_data['values'].length > 0
-          # If it's an array of arrays, get the first row
-          # If it's a single array (one row returned), use it directly
-          first_value = expression_data['values'][0]
-          if first_value.is_a?(Array)
-            expression_values = first_value
+          # get_pathway_data returns values as an array of rows
+          # Each row is an array of expression values for all cells
+          first_row = expression_data['values'][0]
+          if first_row.is_a?(Array)
+            # This is the row we want - array of expression values
+            expression_values = first_row
+            Rails.logger.info "Extracted expression values: #{expression_values.length} cells"
           else
-            # Single row returned directly
-            expression_values = expression_data['values']
+            Rails.logger.warn "Unexpected format: first row is not an array, type=#{first_row.class}"
           end
+        else
+          Rails.logger.warn "No values found in expression_data response"
         end
+      else
+        Rails.logger.warn "Invalid expression_data response: #{expression_data.inspect}"
       end
 
       render json: {

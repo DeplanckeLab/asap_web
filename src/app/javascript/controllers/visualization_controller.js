@@ -48,6 +48,32 @@ export default class extends Controller {
     // Generate unique ID for this controller instance
     this.instanceId = Math.random().toString(36).substring(7)
     console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
+    console.trace(`🚀 Visualization controller connect() call stack:`)
+    
+    // Check if this is a reconnection (modules already initialized)
+    const isReconnection = this.dataManager && this.geneManager && this.memoryManager
+    
+    // Check if renderer already exists with state before initializing canvas
+    if (this.reglRenderer) {
+      const hasState = this.reglRenderer.numPoints > 0 || 
+                       (this.reglRenderer.positions && this.reglRenderer.positions.length > 0) ||
+                       (this.reglRenderer.colors && this.reglRenderer.colors.length > 0)
+      console.log(`🚀 [CONNECT] Renderer already exists:`, {
+        rendererInstanceId: this.reglRenderer.instanceId,
+        hasState: hasState,
+        numPoints: this.reglRenderer.numPoints,
+        hasPositions: !!this.reglRenderer.positions,
+        hasColors: !!this.reglRenderer.colors,
+        isReconnection: isReconnection
+      })
+      
+      if (hasState && isReconnection) {
+        console.log(`🚀 [CONNECT] Reconnection detected with renderer state - skipping initializeCanvas() to preserve state`)
+        // Don't call initializeCanvas() if renderer already has state and modules are initialized
+        // This prevents destroying the renderer during Stimulus reconnection
+        return // Skip the rest of connect() initialization that might recreate the renderer
+      }
+    }
     
     // DEBUG: Add direct event listener to measure Stimulus overhead
     setTimeout(() => {
@@ -79,11 +105,23 @@ export default class extends Controller {
     
     // RENDERER CHOICE: 'regl' only
     this.rendererType = 'regl' // 🎯 Using ReGL for better performance
+    // CRITICAL: Don't overwrite existing renderer if it has state
+    // Only initialize to null if it doesn't exist
+    if (this.reglRenderer === undefined) {
     this.reglRenderer = null // Will hold ReGL renderer instance
+    }
     this.pixiApp = null // Not used, kept for compatibility
     
-    // Initialize canvas and renderer
+    // Initialize canvas and renderer (only if renderer doesn't already have state)
+    // This check is now in connect() above, but we still need to call it if renderer doesn't exist or has no state
+    if (!this.reglRenderer || 
+        (this.reglRenderer.numPoints === 0 && 
+         (!this.reglRenderer.positions || this.reglRenderer.positions.length === 0) &&
+         (!this.reglRenderer.colors || this.reglRenderer.colors.length === 0))) {
     this.initializeCanvas()
+    } else {
+      console.log(`🚀 [CONNECT] Skipping initializeCanvas() - renderer has state`)
+    }
     
     // Initialize IndexedDB for storing metadata on disk instead of memory
     this.memoryManager.initializeIndexedDB()
@@ -165,7 +203,33 @@ export default class extends Controller {
     this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
     
     // Expose controller globally for range slider access
+    // CRITICAL: Only overwrite window.visualizationController if:
+    // 1. It doesn't exist yet, OR
+    // 2. The existing one has no state (was never initialized), OR  
+    // 3. This instance has state (preserve the one with state)
+    const existingController = window.visualizationController
+    const existingHasState = existingController?.reglRenderer?.numPoints > 0 || 
+                             (existingController?.reglRenderer?.positions && existingController.reglRenderer.positions.length > 0) ||
+                             (existingController?.reglRenderer?.colors && existingController.reglRenderer.colors.length > 0)
+    const thisHasState = this.reglRenderer?.numPoints > 0 || 
+                         (this.reglRenderer?.positions && this.reglRenderer.positions.length > 0) ||
+                         (this.reglRenderer?.colors && this.reglRenderer.colors.length > 0)
+    
+    if (!existingController || !existingHasState || thisHasState) {
+      // Only set if no existing controller, or existing has no state, or this one has state
+      if (existingController && existingHasState && !thisHasState) {
+        console.log('🚀 [CONNECT] Preserving existing visualization controller with state in window.visualizationController')
+        console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
+        console.log('🚀 [CONNECT] This renderer ID:', this.reglRenderer?.instanceId || 'none')
+        // Don't overwrite - keep the existing one
+      } else {
     window.visualizationController = this
+        console.log('🚀 [CONNECT] Set window.visualizationController to this instance')
+      }
+    } else {
+      console.log('🚀 [CONNECT] Keeping existing visualization controller with state in window.visualizationController')
+      console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
+    }
     
     // Expose emergency diagnostic function
     window.runEmergencyDiagnostic = () => this.performanceManager.runEmergencyDiagnostic()
@@ -311,9 +375,10 @@ export default class extends Controller {
     this.boundCloseDropdowns = this.closeAllDropdowns.bind(this)
     document.addEventListener('click', this.boundCloseDropdowns)
     
-    // Initialize draggable divider
+    // Initialize draggable dividers
     setTimeout(() => {
-      this.initializeDraggableDivider()
+      this.initializeDraggableDivider() // Metadata divider
+      this.initializeRightPanelDivider() // Gene Expression / Selections divider
     }, 500)
     
     // Add window resize listener
@@ -661,7 +726,9 @@ export default class extends Controller {
     const originalBounds = this.dataManager.calculateBounds(coordinates)
     //const bounds = originalBounds
     this.currentBounds = originalBounds
+    // ALWAYS preserve currentCoordinates - this is critical for filtering
     this.currentCoordinates = coordinates
+    console.log(`🎯 [ReGL] Stored currentCoordinates: ${coordinates.length} points`)
     
     // Reset ordering flags so they'll be reapplied for this new embedding
     this._lastCategoryOrderApplied = null
@@ -2124,9 +2191,57 @@ export default class extends Controller {
     const { data_type, values, compression_info } = this.currentMetadataVector
     
     // Get existing coordinates for coloring
+    // CRITICAL: If coordinates are missing but renderer has state, try to restore them
     if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
-      console.error('No coordinates available for coloring')
+      console.log('⚠️ No coordinates available for coloring - attempting to restore from renderer state')
+      
+      // Try to restore from renderer if it has positions
+      if (this.reglRenderer && this.reglRenderer.positions && this.reglRenderer.positions.length > 0) {
+        // positions is Float32Array: [x1, y1, x2, y2, ...]
+        // We need to convert back to [[x, y], [x, y], ...] format
+        const numPoints = this.reglRenderer.positions.length / 2
+        console.log(`🔄 Restoring ${numPoints} coordinates from renderer positions`)
+        
+        // Get bounds from currentBounds if available, or calculate from renderer
+        let bounds = this.currentBounds
+        if (!bounds && this.reglRenderer.positions) {
+          let minX = Infinity, maxX = -Infinity
+          let minY = Infinity, maxY = -Infinity
+          for (let i = 0; i < this.reglRenderer.positions.length; i += 2) {
+            minX = Math.min(minX, this.reglRenderer.positions[i])
+            maxX = Math.max(maxX, this.reglRenderer.positions[i])
+            minY = Math.min(minY, this.reglRenderer.positions[i + 1])
+            maxY = Math.max(maxY, this.reglRenderer.positions[i + 1])
+          }
+          bounds = { minX, maxX, minY, maxY }
+        }
+        
+        // Convert positions back to coordinate pairs (denormalize from screen space)
+        // This requires interactionHandler to denormalize, but we can use a simpler approach:
+        // Store the positions as-is and ensure displayOrder exists
+        this.currentCoordinates = new Array(numPoints)
+        for (let i = 0; i < numPoints; i++) {
+          // positions are in screen space, but we need original space
+          // For now, use positions as-is (they're already normalized)
+          this.currentCoordinates[i] = [
+            this.reglRenderer.positions[i * 2],
+            this.reglRenderer.positions[i * 2 + 1]
+          ]
+        }
+        
+        // Ensure displayOrder exists
+        if (!this.displayOrder || this.displayOrder.length === 0) {
+          this.displayOrder = new Array(numPoints)
+          for (let i = 0; i < numPoints; i++) {
+            this.displayOrder[i] = i
+          }
+        }
+        
+        console.log(`✅ Restored ${numPoints} coordinates from renderer state`)
+      } else {
+        console.error('❌ No coordinates available for coloring and cannot restore from renderer')
       return
+      }
     }
     
     // Ensure we have the same number of values as coordinates
@@ -2328,17 +2443,7 @@ export default class extends Controller {
               normalizedValue = 0.5
             }
             
-            // Debug for zero values
-            if (value === 0.0 || Math.abs(value) < 0.0001) {
-              console.log(`🎨 [ZERO DEBUG] value=${value}, minVal=${minVal}, maxVal=${maxVal}, range=${range}, normalizedValue=${normalizedValue}`)
-            }
-            
             const color = this.gradientManager.getColorFromGradient(normalizedValue)
-            
-            // Debug for zero values if color is black (unexpected)
-            if ((value === 0.0 || Math.abs(value) < 0.0001) && color === 0x000000) {
-              console.warn(`🎨 ⚠️ [ZERO DEBUG] Zero value got black color! normalizedValue=${normalizedValue}`)
-            }
             
             colorMap.set(drawPos, color)
             this.originalPointColors.set(cellIndex, color) // Store by cell index
@@ -2807,17 +2912,33 @@ export default class extends Controller {
 
   // Initialize inline range slider with metadata values
   initializeInlineRangeSlider(metadataId, values) {
-    console.log('🎚️ Initializing inline range slider for metadata:', metadataId)
+    const isGene = metadataId && metadataId.startsWith('gene_')
+    const logPrefix = isGene ? '🧬 [SLIDER INIT]' : '🎚️ [SLIDER INIT]'
+    
+    // Check renderer state BEFORE initialization (for debugging)
+    if (isGene) {
+      console.log(`${logPrefix} Renderer state BEFORE initializeInlineRangeSlider (gene):`, {
+        hasReglRenderer: !!this.reglRenderer,
+        rendererInstanceId: this.reglRenderer?.instanceId || 'none',
+        numPoints: this.reglRenderer?.numPoints || 0,
+        hasPositions: !!this.reglRenderer?.positions,
+        positionsLength: this.reglRenderer?.positions?.length || 0,
+        hasCurrentCoordinates: !!this.currentCoordinates,
+        currentCoordinatesLength: this.currentCoordinates?.length || 0
+      })
+    }
+    
+    console.log(`${logPrefix} Initializing inline range slider for metadata:`, metadataId)
     
     if (!values || !Array.isArray(values)) {
-      console.error('❌ Invalid values provided to initializeInlineRangeSlider:', values)
+      console.error(`❌ ${logPrefix} Invalid values provided to initializeInlineRangeSlider:`, values)
       return
     }
     
     const minVal = this.dataManager.safeMin(values)
     const maxVal = this.dataManager.safeMax(values)
     
-    console.log('🎚️ Calculated min/max values:', { minVal, maxVal, valuesLength: values.length })
+    console.log(`${logPrefix} Calculated min/max values:`, { minVal, maxVal, valuesLength: values.length })
     
     // Check if there's an existing selected range for this metadata - preserve it!
     const existingRange = this.selectedRanges?.[metadataId]
@@ -2825,10 +2946,15 @@ export default class extends Controller {
     const currentMax = existingRange?.max ?? maxVal
     
     if (existingRange) {
-      console.log('🎚️ Preserving existing range for slider:', existingRange)
+      console.log(`${logPrefix} Preserving existing range for slider:`, existingRange)
     }
     
     // Store the data with preserved range if it exists
+    if (!this.inlineRangeSliderData) {
+      this.inlineRangeSliderData = {}
+      console.log(`${logPrefix} Created inlineRangeSliderData object`)
+    }
+    
     this.inlineRangeSliderData[metadataId] = {
       min: minVal,
       max: maxVal,
@@ -2837,15 +2963,42 @@ export default class extends Controller {
       values: values
     }
     
+    console.log(`${logPrefix} Stored in inlineRangeSliderData:`, {
+      metadataId,
+      min: minVal,
+      max: maxVal,
+      currentMin,
+      currentMax,
+      valuesLength: values.length,
+      allKeys: Object.keys(this.inlineRangeSliderData)
+    })
+    
+    // Verify loadedMetadataVectors has this metadata (critical for filtering)
+    if (isGene) {
+      const hasInLoadedVectors = !!this.loadedMetadataVectors?.[metadataId]
+      console.log(`${logPrefix} Verification - loadedMetadataVectors has ${metadataId}:`, hasInLoadedVectors)
+      if (!hasInLoadedVectors) {
+        console.error(`❌ ${logPrefix} CRITICAL: ${metadataId} NOT in loadedMetadataVectors!`)
+        console.error(`❌ ${logPrefix} loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
+      }
+    }
+    
     // Find the range slider controller and update its values
     const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${metadataId}"]`)
-    console.log('🎚️ Looking for range slider element:', rangeSliderElement)
+    console.log(`${logPrefix} Looking for range slider element:`, rangeSliderElement)
     
     if (rangeSliderElement) {
       const controller = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
       console.log('🎚️ Found range slider controller:', controller)
       
       if (controller) {
+        // CRITICAL: Ensure the range slider controller has the correct visualization controller reference
+        // Pass this instance directly to avoid getting a stale reference
+        controller.visualizationController = this
+        controller.dataManager = this.dataManager
+        controller.rendererManager = this.rendererManager
+        console.log('🎚️ Updated range slider controller with visualization controller instance:', this.instanceId)
+        
         controller.minValue = minVal
         controller.maxValue = maxVal
         controller.currentMinValue = currentMin  // Use preserved value
@@ -3422,6 +3575,147 @@ export default class extends Controller {
     //console.log('Draggable divider initialized')
   }
 
+  // Initialize draggable divider for right panel (Gene Expression / Selections)
+  initializeRightPanelDivider() {
+    const divider = document.getElementById('right-panel-divider')
+    if (!divider) {
+      console.error('Right panel divider element not found')
+      return
+    }
+    
+    // Find panels
+    const geneExpressionPanel = document.getElementById('gene-expression-panel')
+    const selectionsPanel = document.getElementById('selections-panel')
+    const container = divider.parentElement // right-panel
+    
+    if (!geneExpressionPanel || !selectionsPanel || !container) {
+      console.error('Required elements for right panel divider not found', { 
+        geneExpressionPanel: !!geneExpressionPanel, 
+        selectionsPanel: !!selectionsPanel, 
+        container: !!container 
+      })
+      return
+    }
+    
+    console.log('Right panel divider initialization - elements found:', {
+      divider: !!divider,
+      geneExpressionPanel: !!geneExpressionPanel,
+      selectionsPanel: !!selectionsPanel,
+      container: !!container
+    })
+    
+    let isDragging = false
+    let startY = 0
+    let startHeight = 0
+    
+    // Minimum heights for panels (in pixels)
+    const minPanelHeight = 100
+    
+    const startDrag = (e) => {
+      console.log('Right panel divider: startDrag triggered', e)
+      isDragging = true
+      startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0)
+      startHeight = geneExpressionPanel.offsetHeight
+      
+      console.log('Right panel divider: Start drag', { startY, startHeight, panelHeight: geneExpressionPanel.offsetHeight })
+      
+      // Disable transition during drag for smoother movement
+      divider.style.transition = 'none'
+      geneExpressionPanel.style.transition = 'none'
+      selectionsPanel.style.transition = 'none'
+      
+      // Add visual feedback
+      document.body.style.cursor = 'row-resize'
+      divider.style.backgroundColor = '#6B7280'
+      
+      // Prevent text selection during drag
+      document.body.style.userSelect = 'none'
+      
+      if (e.preventDefault) e.preventDefault()
+      if (e.stopPropagation) e.stopPropagation()
+    }
+    
+    const doDrag = (e) => {
+      if (!isDragging) return
+      
+      const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : startY)
+      const deltaY = clientY - startY
+      const newHeight = startHeight + deltaY
+      
+      // Calculate container height
+      const containerHeight = container.offsetHeight - divider.offsetHeight
+      
+      // Apply constraints
+      const constrainedHeight = Math.max(minPanelHeight, Math.min(newHeight, containerHeight - minPanelHeight))
+      
+      // Update gene expression panel height (use pixels for more precise control)
+      geneExpressionPanel.style.height = constrainedHeight + 'px'
+      geneExpressionPanel.style.flex = 'none' // Override flex: 1
+      
+      // Selections panel will automatically take remaining space due to flex: 1
+      selectionsPanel.style.flex = '1 1 0%'
+      selectionsPanel.style.minHeight = `${minPanelHeight}px`
+      
+      if (e.preventDefault) e.preventDefault()
+    }
+    
+    const stopDrag = () => {
+      if (!isDragging) return
+      
+      isDragging = false
+      
+      // Re-enable transitions
+      divider.style.transition = ''
+      geneExpressionPanel.style.transition = ''
+      selectionsPanel.style.transition = ''
+      
+      // Remove visual feedback
+      document.body.style.cursor = ''
+      divider.style.backgroundColor = ''
+      document.body.style.userSelect = ''
+      
+      console.log('Right panel divider: Stop drag')
+    }
+    
+    // Event listeners - use capture phase to ensure we catch the event
+    // Test if divider is clickable
+    divider.addEventListener('click', (e) => {
+      console.log('Right panel divider: Click detected', e)
+    })
+    
+    divider.addEventListener('mousedown', startDrag, true)
+    
+    // Also try without capture as fallback
+    divider.addEventListener('mousedown', (e) => {
+      console.log('Right panel divider: mousedown (non-capture) detected', e)
+    }, false)
+    document.addEventListener('mousemove', doDrag)
+    document.addEventListener('mouseup', stopDrag)
+    document.addEventListener('mouseleave', stopDrag)
+    
+    // Also handle touch events for mobile
+    const handleTouchStart = (e) => {
+      if (e.touches.length === 1) {
+        startDrag(e)
+      }
+    }
+    const handleTouchMove = (e) => {
+      if (isDragging && e.touches.length === 1) {
+        doDrag(e)
+      }
+    }
+    const handleTouchEnd = () => {
+      stopDrag()
+    }
+    
+    divider.addEventListener('touchstart', handleTouchStart, { passive: false })
+    document.addEventListener('touchmove', handleTouchMove, { passive: false })
+    document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('touchcancel', handleTouchEnd)
+    
+    console.log('Right panel draggable divider initialized with event listeners')
+  }
+
   // Handle water drop button clicks
   waterDropClicked(event) {
     event.preventDefault()
@@ -3650,10 +3944,278 @@ export default class extends Controller {
     //console.log('=== WATER DROP CLICK COMPLETE ===')
   }
   
-  // Reset all water drop buttons to grey
+  // Handle gene expression coloring (similar to waterDropClicked but for genes)
+  async geneWaterDropClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const button = event.currentTarget
+    const geneId = button.dataset.geneId
+    const geneName = button.dataset.geneName
+    const geneMetadataId = `gene_${geneId}`
+    const isCurrentlyActive = button.dataset.active === 'true'
+    
+    console.log('🧬 Gene water drop clicked:', { geneId, geneName, geneMetadataId, isCurrentlyActive })
+    
+    if (isCurrentlyActive) {
+      // Button is already active - deselect it
+      console.log('🧬 Gene button is already active - deselecting...')
+      this.resetAllWaterDropButtons()
+      this.removeAllCategoryColors()
+      this.clearMetadataColoring()
+      return
+    }
+    
+    // Get gene expression data from GeneManager
+    const geneManager = this.geneManager
+    if (!geneManager) {
+      console.error('❌ GeneManager not available')
+      alert('Gene manager not initialized.')
+      return
+    }
+    
+    // Try to find expression data - handle both string and number keys
+    let expressionData = null
+    const geneIdNum = parseInt(geneId)
+    const geneIdStr = String(geneId)
+    
+    if (geneManager.geneExpressionData) {
+      expressionData = geneManager.geneExpressionData[geneId] || 
+                       geneManager.geneExpressionData[geneIdNum] || 
+                       geneManager.geneExpressionData[geneIdStr]
+    }
+    
+    // If data not found in memory, try IndexedDB first (fast disk access)
+    if (!expressionData && this.memoryManager) {
+      console.log('🧬 Expression data not in memory, checking IndexedDB...')
+      const dbData = await this.memoryManager.loadGeneExpressionFromIndexedDB(geneIdStr)
+      if (dbData && dbData.values && dbData.values.length > 0) {
+        // Found in database - load into memory immediately
+        const stableIdKey = geneIdStr
+        geneManager.geneExpressionData[stableIdKey] = {
+          values: dbData.values,
+          stats: dbData.stats || geneManager.calculateExpressionStats(dbData.values),
+          geneIndex: dbData.geneIndex,
+          stableId: dbData.stableId || geneIdNum,
+          symbol: dbData.symbol || geneName
+        }
+        
+        // Also store with numeric key for compatibility
+        if (!isNaN(geneIdNum)) {
+          geneManager.geneExpressionData[geneIdNum] = geneManager.geneExpressionData[stableIdKey]
+        }
+        
+        // Store in loadedMetadataVectors so filtering system can find it
+        const geneMetadataId = `gene_${geneIdStr}`
+        if (!this.loadedMetadataVectors) {
+          this.loadedMetadataVectors = {}
+        }
+        const minVal = this.dataManager.safeMin(dbData.values)
+        const maxVal = this.dataManager.safeMax(dbData.values)
+        this.loadedMetadataVectors[geneMetadataId] = {
+          id: geneMetadataId,
+          name: dbData.symbol || geneName,
+          display_name: dbData.symbol || geneName,
+          data_type: 'NUMERIC',
+          values: dbData.values,
+          compression_info: {
+            min_val: minVal,
+            max_val: maxVal,
+            data_type: 'NUMERIC'
+          }
+        }
+        
+        // Update status icon
+        if (this.uiManager) {
+          this.uiManager.updateGeneStatusIcon(geneIdStr, 'in-memory')
+        }
+        
+        expressionData = geneManager.geneExpressionData[stableIdKey]
+        console.log('🧬 Loaded gene expression from IndexedDB into memory')
+      }
+    }
+    
+    // If still not found, try to load from server
+    if (!expressionData) {
+      console.log('🧬 Expression data not found in memory or IndexedDB, attempting to load from server...')
+      
+      // First, try to find the gene in the DOM to extract gene information
+      const geneDiv = document.querySelector(`[data-gene-item="${geneId}"], [data-gene-item="${geneIdNum}"]`)
+      
+      let gene = null
+      
+      if (geneDiv) {
+        // Extract gene info from the DOM
+        const header = geneDiv.querySelector('.gene-header')
+        const geneNameFromDom = header?.querySelector('div[title]')?.getAttribute('title') || geneName
+        
+        // Try to parse gene info from the title or find it in geneTags
+        const geneTag = geneManager.geneTags?.find(g => 
+          String(g.stableId) === geneIdStr || 
+          String(g.stableId) === String(geneIdNum) ||
+          g.stableId === geneIdNum
+        )
+        
+        if (geneTag) {
+          gene = geneTag
+        } else {
+          // Construct gene object from available info
+          // Try to extract Ensembl ID from the DOM if available
+          const geneText = header?.textContent || ''
+          const ensemblMatch = geneText.match(/(FBgn\d+)/)
+          const ensemblId = ensemblMatch ? ensemblMatch[1] : null
+          
+          gene = {
+            symbol: geneName,
+            ensemblId: ensemblId || '',
+            stableId: geneIdNum || parseInt(geneId),
+            query: geneName
+          }
+        }
+        
+        if (gene) {
+          console.log('🧬 Found gene, loading expression data from server...', gene)
+          const resultsContainer = document.getElementById('gene-expression-results')
+          if (resultsContainer) {
+            // Load the data from server
+            await geneManager.loadGeneExpressionData(gene, resultsContainer)
+            // Try again to get the data with all possible keys
+            expressionData = geneManager.geneExpressionData[gene.stableId] ||
+                             geneManager.geneExpressionData[String(gene.stableId)] ||
+                             geneManager.geneExpressionData[geneId] ||
+                             geneManager.geneExpressionData[geneIdNum] ||
+                             geneManager.geneExpressionData[geneIdStr]
+          }
+        }
+      }
+    }
+    
+    if (!expressionData) {
+      console.error('❌ Gene expression data not available for gene:', geneId)
+      console.error('Available gene IDs in expressionData:', Object.keys(geneManager.geneExpressionData || {}))
+      console.error('Available gene tags:', geneManager.geneTags?.map(g => ({ symbol: g.symbol, stableId: g.stableId })))
+      
+      // Check if there's a loading or error state
+      const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"], .gene-status-icon[data-gene-id="${geneIdNum}"]`)
+      if (statusIcon) {
+        const isVisible = statusIcon.style.display !== 'none' && statusIcon.style.display !== ''
+        const title = statusIcon.title || ''
+        const bgColor = statusIcon.style.backgroundColor || ''
+        
+        if (isVisible && bgColor.includes('rgb(220, 38, 38)')) {
+          // Error state (red background)
+          alert(`Expression data failed to load: ${title.replace('Error: ', '')}`)
+        } else if (isVisible && bgColor.includes('rgb(156, 163, 175)')) {
+          // Loading state (gray background)
+          alert('Expression data is still loading. Please wait a moment and try again.')
+        } else {
+          // Status icon exists but not in error/loading state - might have failed silently
+          alert('Expression data not available for this gene. Please check if the data loaded successfully (look for the status icon).')
+        }
+      } else {
+        // No status icon found - gene might not have been loaded yet
+        alert('Expression data not available for this gene. The gene may need to be added first, or the data may have failed to load.')
+      }
+      return
+    }
+    
+    const values = expressionData.values
+    
+    if (!values || values.length === 0) {
+      console.error('❌ No expression values available for gene:', geneId)
+      alert('No expression values available for this gene.')
+      return
+    }
+    
+    // Reset all water drop buttons
+    this.resetAllWaterDropButtons()
+    this.hideAllResetButtons()
+    this.removeAllCategoryColors()
+    
+    // Set this button to active
+    this.setWaterDropButtonActive(button)
+    
+    // Only show spinner if data needs to be loaded (not already in memory)
+    const wasLoading = !expressionData
+    if (wasLoading) {
+      this.uiManager.showMetadataDropdownSpinner()
+    }
+    
+    // Calculate min/max for color range
+    const minVal = this.dataManager.safeMin(values)
+    const maxVal = this.dataManager.safeMax(values)
+    
+    // Check for existing range
+    const existingRange = this.selectedRanges?.[geneMetadataId]
+    
+    if (existingRange) {
+      console.log('🧬 Preserving existing range for gene:', existingRange)
+      this.setColorRange(existingRange.min, existingRange.max)
+    } else {
+      console.log('🧬 Setting full color range for gene:', minVal, maxVal)
+      this.setColorRange(minVal, maxVal)
+    }
+    
+    // Create a metadata-like vector object for the visualization system
+    const geneMetadataVector = {
+      id: geneMetadataId,
+      name: geneName,
+      display_name: geneName,
+      data_type: 'NUMERIC',
+      values: values,
+      compression_info: {
+        min_val: minVal,
+        max_val: maxVal,
+        data_type: 'NUMERIC'
+      },
+      nber_rows: 1,
+      nber_cols: values.length
+    }
+    
+    // Store in loaded metadata vectors (similar to how metadata is stored)
+    // Use controller.loadedMetadataVectors (not dataManager.loadedMetadataVectors) so filtering system can find it
+    if (!this.loadedMetadataVectors) {
+      this.loadedMetadataVectors = {}
+    }
+    this.loadedMetadataVectors[geneMetadataId] = geneMetadataVector
+    
+    // Set as current metadata vector
+    this.currentMetadataVector = geneMetadataVector
+    this.currentMetadataId = geneMetadataId
+    
+    // Clear cached color map
+    this.colorManager.clearColorMapCache()
+    
+    // Initialize gradient for gene expression (synchronous - just loads from storage)
+    this.gradientManager.loadGradientForMetadata(geneMetadataId)
+    
+    // Force reordering of points
+    this._lastNumericOrderApplied = null
+    
+    // Update visualization with gene expression coloring (synchronous when data in memory)
+    this.updateVisualizationWithMetadataVector()
+    
+    // Update distribution bars (synchronous)
+    this.dataManager.updateAllCategoryDistributions()
+    
+    // Update cell filtering after loading gene vector (same as continuous metadata)
+    // Pass shouldUpdateColors=true for gene expression to ensure colors are rendered after filtering
+    // This ensures renderer state is properly initialized and coordinates are available for filtering
+    const shouldUpdateColors = true
+    this.dataManager.updateCellFiltering(shouldUpdateColors)
+    
+    // Hide spinner only if we showed it
+    if (wasLoading) {
+      this.uiManager.hideMetadataDropdownSpinner()
+    }
+    
+    console.log('🧬 Gene expression coloring applied successfully', wasLoading ? '(after loading)' : '(instant from memory)')
+  }
+  
+  // Reset all water drop buttons to grey (including gene buttons)
   resetAllWaterDropButtons() {
     //console.log('resetAllWaterDropButtons: Starting...')
-    const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"]')
+    const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"], [data-action*="geneWaterDropClicked"]')
     //console.log('resetAllWaterDropButtons: Found', allButtons.length, 'buttons')
     allButtons.forEach((button, index) => {
       //console.log(`resetAllWaterDropButtons: Resetting button ${index}:`, button)
@@ -4234,6 +4796,65 @@ export default class extends Controller {
       return
     }
     
+    // CRITICAL: Check if renderer already exists with state
+    // If it does, we should NOT recreate it - this would destroy the state!
+    if (this.reglRenderer) {
+      const hasState = this.reglRenderer.numPoints > 0 || 
+                       (this.reglRenderer.positions && this.reglRenderer.positions.length > 0) ||
+                       (this.reglRenderer.colors && this.reglRenderer.colors.length > 0)
+      
+      if (hasState) {
+        console.log('🔄 [CANVAS] Renderer already exists with state, skipping initialization:', {
+          rendererInstanceId: this.reglRenderer.instanceId,
+          numPoints: this.reglRenderer.numPoints,
+          hasPositions: !!this.reglRenderer.positions,
+          hasColors: !!this.reglRenderer.colors
+        })
+        return
+      } else {
+        // Renderer exists but has no state - check if plot is visible
+        // If plot is visible, something is wrong - we shouldn't replace the renderer
+        const plotContainer = document.querySelector('.plot-container')
+        const plotVisible = plotContainer && plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0
+        const hasCanvasInDOM = this.canvas && this.canvas.parentElement
+        
+        if (plotVisible || hasCanvasInDOM) {
+          console.error('🔄 [CANVAS] CRITICAL: Renderer has no state but plot is visible!')
+          console.error('🔄 [CANVAS] This suggests the renderer reference is wrong or state was lost.')
+          console.error('🔄 [CANVAS] Renderer instance:', this.reglRenderer.instanceId)
+          console.error('🔄 [CANVAS] Plot visible:', plotVisible, 'Canvas in DOM:', hasCanvasInDOM)
+          console.trace('🔄 [CANVAS] Stack trace for initializeCanvas call')
+          // Don't recreate - preserve the renderer reference even if it seems wrong
+          // The actual rendering might be working with a different renderer instance
+          return
+        } else {
+          console.log('🔄 [CANVAS] Renderer exists but has no state, and plot is not visible, will recreate:', {
+            rendererInstanceId: this.reglRenderer.instanceId
+          })
+        }
+      }
+    }
+    
+    // Check if canvas already exists and is valid
+    if (this.canvas && this.canvas.parentElement === plotContainer) {
+      console.log('🔄 [CANVAS] Canvas already exists, reusing it')
+      // Canvas already exists, just ensure renderer is set up
+      if (!this.reglRenderer) {
+        console.log('🔄 [CANVAS] Creating renderer for existing canvas')
+        console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas')
+        this.reglRenderer = new ReglRenderer(this.canvas)
+        console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
+      } else {
+        console.log('🔄 [CANVAS] Renderer already exists, preserving:', {
+          rendererInstanceId: this.reglRenderer.instanceId,
+          numPoints: this.reglRenderer.numPoints,
+          hasPositions: !!this.reglRenderer.positions,
+          hasColors: !!this.reglRenderer.colors
+        })
+      }
+      return
+    }
+    
     console.log('🔄 [CANVAS] Initializing canvas and ReGL renderer...')
     
     // Create ReGL canvas for points (layer 1)
@@ -4253,7 +4874,9 @@ export default class extends Controller {
     
     // Initialize ReGL renderer
     console.log('🔄 [CANVAS] Initializing ReGL renderer...')
+    console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas (new canvas)')
     this.reglRenderer = new ReglRenderer(canvas)
+    console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
     
     // Create HTML Canvas 2D overlay for axes/grid/labels
     const overlayCanvas = document.createElement('canvas')
@@ -8774,17 +9397,27 @@ export default class extends Controller {
   // Enable range slider for continuous metadata
 
   // Optimized method to show/hide points without re-rendering
-  updatePointVisibility(filteredIndices) {
+  async updatePointVisibility(filteredIndices) {
+    console.log('🎨 [VISIBILITY] updatePointVisibility called:', {
+      rendererType: this.rendererType,
+      filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null',
+      hasScatterContainer: !!this.scatterContainer,
+      scatterContainerChildren: this.scatterContainer?.children?.length
+    })
+    
     // ReGL path: update point visibility by modifying alpha channel
     if (this.rendererType === 'regl') {
+      console.log('🎨 [VISIBILITY] Using ReGL path')
       return this.updatePointVisibilityReGL(filteredIndices)
     }
     
     // PixiJS path
     if (!this.scatterContainer || !this.scatterContainer.children) {
-      console.log('No scatter container or children - cannot update visibility')
+      console.log('🎨 [VISIBILITY] No scatter container or children - cannot update visibility')
       return
     }
+    
+    console.log('🎨 [VISIBILITY] Using PixiJS path')
 
     const startTime = performance.now()
     let visibleCount = 0
@@ -8836,30 +9469,280 @@ export default class extends Controller {
   }
   // Update point visibility in ReGL mode by hiding filtered-out points
   // OPTIMIZED: Uses cached colors and only recalculates when coloring metadata changes
-  updatePointVisibilityReGL(filteredIndices) {
-    if (!this.reglRenderer || !this.currentCoordinates) {
-      console.log('⚠️ [ReGL] Cannot update visibility - missing renderer or coordinates')
+  async updatePointVisibilityReGL(filteredIndices) {
+    console.log('🎨 [ReGL] updatePointVisibilityReGL called:', {
+      hasReglRenderer: !!this.reglRenderer,
+      hasCurrentCoordinates: !!this.currentCoordinates,
+      currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      hasDisplayOrder: !!this.displayOrder,
+      displayOrderLength: this.displayOrder?.length || 0,
+      filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null'
+    })
+    
+    // Check if renderer is ready: must have renderer
+    if (!this.reglRenderer) {
+      console.log('🎨 [ReGL] Cannot update visibility - missing renderer')
       return
+    }
+    
+    // Log renderer state for debugging
+    console.log('🎨 [ReGL] Renderer direct state check:', {
+      numPoints: this.reglRenderer.numPoints,
+      hasPositions: !!this.reglRenderer.positions,
+      positionsLength: this.reglRenderer.positions?.length,
+      hasColors: !!this.reglRenderer.colors,
+      colorsLength: this.reglRenderer.colors?.length,
+      hasPositionBuffer: !!this.reglRenderer.positionBuffer,
+      hasColorBuffer: !!this.reglRenderer.colorBuffer,
+      hasRegl: !!this.reglRenderer.regl
+    })
+    
+    // Verify renderer is connected to the canvas
+    if (this.canvas && this.reglRenderer.canvas !== this.canvas) {
+      console.warn('🎨 [ReGL] WARNING: Renderer canvas does not match controller canvas!')
+      console.warn('🎨 [ReGL] Controller canvas:', this.canvas)
+      console.warn('🎨 [ReGL] Renderer canvas:', this.reglRenderer.canvas)
+      console.warn('🎨 [ReGL] This may indicate the renderer was recreated')
+    }
+    
+    // If displayOrder doesn't exist, we need to create it
+    // But we need to know how many points there are
+    if (!this.displayOrder || this.displayOrder.length === 0) {
+      // Try to determine number of points from renderer state
+      // Same logic as in regl_renderer.js render() method
+      let numPoints = 0
+      
+      // First check renderer's direct properties (most reliable)
+      if (this.reglRenderer.numPoints && this.reglRenderer.numPoints > 0) {
+        numPoints = this.reglRenderer.numPoints
+        console.log('🎨 [ReGL] Using renderer.numPoints:', numPoints)
+      } else if (this.reglRenderer.positions && this.reglRenderer.positions.length > 0) {
+        // positions is a Float32Array: [x1, y1, x2, y2, ...], so numPoints = length / 2
+        numPoints = this.reglRenderer.positions.length / 2
+        console.log('🎨 [ReGL] Inferring numPoints from positions array length:', numPoints, '(positions length:', this.reglRenderer.positions.length, ')')
+        // Update numPoints in renderer for consistency
+        this.reglRenderer.numPoints = numPoints
+      } else if (this.currentCoordinates && this.currentCoordinates.length > 0) {
+        // Fallback: use currentCoordinates if available
+        numPoints = this.currentCoordinates.length
+        console.log('🎨 [ReGL] Using currentCoordinates length for numPoints:', numPoints)
+      } else if (this.numPoints && this.numPoints > 0) {
+        // Fallback: use controller's stored numPoints (set in renderScatterPlot)
+        numPoints = this.numPoints
+        console.log('🎨 [ReGL] Using controller numPoints:', numPoints)
+      } else if (this.reglRenderer.colors && this.reglRenderer.colors.length > 0) {
+        // Fallback: infer from colors array length (colors is RGBA, so numPoints = length / 4)
+        numPoints = this.reglRenderer.colors.length / 4
+        console.log('🎨 [ReGL] Inferring numPoints from colors array length:', numPoints, '(colors length:', this.reglRenderer.colors.length, ')')
+        // Update numPoints in renderer for consistency
+        this.reglRenderer.numPoints = numPoints
+      } else if (this.decompressedCoordinatesCache) {
+        // Try to get coordinates from cache
+        console.log('🎨 [ReGL] Checking decompressedCoordinatesCache:', {
+          cacheExists: !!this.decompressedCoordinatesCache,
+          cacheSize: this.decompressedCoordinatesCache.size,
+          cacheKeys: Array.from(this.decompressedCoordinatesCache.keys())
+        })
+        
+        // If metadataData is not available, use the first (or only) entry in the cache
+        let cachedCoords = null
+        if (this.metadataData && this.metadataData.name) {
+          const embeddingId = this.metadataData.name
+          console.log('🎨 [ReGL] Looking for embeddingId in cache:', embeddingId)
+          cachedCoords = this.decompressedCoordinatesCache.get(embeddingId)
+          if (cachedCoords) {
+            console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', cachedCoords.length)
+          } else {
+            console.log('🎨 [ReGL] No coordinates found in cache for embeddingId:', embeddingId)
+          }
+        } else {
+          // No metadataData, but cache exists - use first entry
+          console.log('🎨 [ReGL] metadataData not available, trying first cache entry')
+          const firstCacheKey = this.decompressedCoordinatesCache.keys().next().value
+          if (firstCacheKey) {
+            console.log('🎨 [ReGL] Using first cache entry:', firstCacheKey)
+            cachedCoords = this.decompressedCoordinatesCache.get(firstCacheKey)
+            if (cachedCoords) {
+              console.log('🎨 [ReGL] Found coordinates in first cache entry, length:', cachedCoords.length)
+            } else {
+              console.log('🎨 [ReGL] First cache entry exists but coordinates are null/undefined')
+            }
+          } else {
+            console.log('🎨 [ReGL] Cache exists but has no keys')
+          }
+        }
+        if (cachedCoords && cachedCoords.length > 0) {
+          numPoints = cachedCoords.length
+          console.log('🎨 [ReGL] Using cached decompressed coordinates length for numPoints:', numPoints)
+        } else {
+          console.log('🎨 [ReGL] Could not get coordinates from cache')
+        }
+      }
+      
+      if (numPoints === 0) {
+        // Renderer has no positions and no coordinates available
+        // This means the plot hasn't been rendered yet, or renderer state is lost
+        console.log('🎨 [ReGL] Cannot determine number of points - renderer not initialized')
+        console.log('🎨 [ReGL] Renderer state:', {
+          hasNumPoints: !!this.reglRenderer.numPoints,
+          numPoints: this.reglRenderer.numPoints,
+          hasPositions: !!this.reglRenderer.positions,
+          positionsLength: this.reglRenderer.positions?.length,
+          hasPositionBuffer: !!this.reglRenderer.positionBuffer,
+          hasColorBuffer: !!this.reglRenderer.colorBuffer,
+          hasCurrentCoordinates: !!this.currentCoordinates,
+          currentCoordinatesLength: this.currentCoordinates?.length,
+          hasMetadataData: !!this.metadataData,
+          hasDecompressedCache: !!this.decompressedCoordinatesCache,
+          cacheSize: this.decompressedCoordinatesCache?.size || 0
+        })
+        
+        // If plot is visible (canvas exists and has been drawn), try to restore state
+        // Try multiple sources for coordinates:
+        // 1. currentCoordinates (if available)
+        // 2. decompressedCoordinatesCache (if metadataData exists)
+        // 3. Any coordinates in the cache (use first available)
+        let coordinatesToUse = null
+        
+        if (this.currentCoordinates && this.currentCoordinates.length > 0) {
+          coordinatesToUse = this.currentCoordinates
+          console.log('🎨 [ReGL] Found coordinates in currentCoordinates:', coordinatesToUse.length)
+        } else if (this.metadataData && this.metadataData.name && this.decompressedCoordinatesCache) {
+          const embeddingId = this.metadataData.name
+          coordinatesToUse = this.decompressedCoordinatesCache.get(embeddingId)
+          if (coordinatesToUse) {
+            console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', coordinatesToUse.length)
+          }
+        } else if (this.decompressedCoordinatesCache && this.decompressedCoordinatesCache.size > 0) {
+          // Try any available coordinates in cache
+          const firstKey = this.decompressedCoordinatesCache.keys().next().value
+          if (firstKey) {
+            coordinatesToUse = this.decompressedCoordinatesCache.get(firstKey)
+            if (coordinatesToUse) {
+              console.log('🎨 [ReGL] Found coordinates in cache (first available):', firstKey, 'length:', coordinatesToUse.length)
+            }
+          }
+        }
+        
+        if (this.canvas && coordinatesToUse && coordinatesToUse.length > 0) {
+          console.log('🎨 [ReGL] Plot is visible but renderer state missing - attempting to restore state by re-rendering')
+          console.log('🎨 [ReGL] Re-rendering with', coordinatesToUse.length, 'coordinates')
+          // Store coordinates for next time
+          this.currentCoordinates = coordinatesToUse
+          // Re-render to restore renderer state
+          await this.renderScatterPlot(coordinatesToUse)
+          // After re-rendering, numPoints should be available
+          numPoints = coordinatesToUse.length
+          console.log('🎨 [ReGL] State restored, numPoints:', numPoints)
+        } else {
+          console.log('🎨 [ReGL] Cannot restore state - missing coordinates or canvas')
+          console.log('🎨 [ReGL] Available sources:', {
+            hasCanvas: !!this.canvas,
+            hasCurrentCoordinates: !!this.currentCoordinates,
+            currentCoordinatesLength: this.currentCoordinates?.length || 0,
+            hasMetadataData: !!this.metadataData,
+            metadataDataName: this.metadataData?.name,
+            hasDecompressedCache: !!this.decompressedCoordinatesCache,
+            cacheSize: this.decompressedCoordinatesCache?.size || 0,
+            cacheKeys: this.decompressedCoordinatesCache ? Array.from(this.decompressedCoordinatesCache.keys()) : []
+          })
+          // Skip update - plot will update when renderScatterPlot is called
+          return
+        }
+      }
+      
+      if (numPoints > 0) {
+        console.log('🎨 [ReGL] Creating identity displayOrder for', numPoints, 'points')
+        this.displayOrder = new Array(numPoints)
+        for (let i = 0; i < numPoints; i++) {
+          this.displayOrder[i] = i
+        }
+        
+        // If renderer has no colorBuffer, we can't update colors
+        // But if colors array exists, we can create the buffer
+        if (!this.reglRenderer.colorBuffer) {
+          if (this.reglRenderer.colors && this.reglRenderer.colors.length > 0) {
+            // Colors array exists but buffer is missing - create it
+            console.log('🎨 [ReGL] Colors array exists but colorBuffer missing, creating buffer...')
+            this.reglRenderer.colorBuffer = this.reglRenderer.regl.buffer(this.reglRenderer.colors)
+            console.log('🎨 [ReGL] Color buffer created')
+          } else {
+            console.warn('🎨 [ReGL] WARNING: Renderer has no colorBuffer and no colors array')
+            console.warn('🎨 [ReGL] Renderer buffer state:', {
+              hasPositionBuffer: !!this.reglRenderer.positionBuffer,
+              hasColorBuffer: !!this.reglRenderer.colorBuffer,
+              hasPositions: !!this.reglRenderer.positions,
+              positionsLength: this.reglRenderer.positions?.length,
+              hasColors: !!this.reglRenderer.colors,
+              colorsLength: this.reglRenderer.colors?.length,
+              numPoints: this.reglRenderer.numPoints,
+              hasRegl: !!this.reglRenderer.regl,
+              canvasExists: !!this.canvas,
+              canvasWidth: this.canvas?.width,
+              canvasHeight: this.canvas?.height
+            })
+            console.warn('🎨 [ReGL] Skipping visibility update - renderer needs colors/buffers set via renderScatterPlot()')
+            return
+          }
+        }
+        
+        // Position buffer is needed for rendering, but not for color updates
+        // If it's missing, we can still update colors (they'll be applied on next render)
+        if (!this.reglRenderer.positionBuffer) {
+          console.warn('🎨 [ReGL] WARNING: Position buffer missing, but proceeding with color update')
+        }
+      } else {
+        console.log('🎨 [ReGL] Cannot update visibility - numPoints is 0')
+        return
+      }
     }
     
     const startTime = performance.now()
     console.log('🎨 [ReGL] Updating point visibility based on filters')
     console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
+    if (filteredIndices && filteredIndices.length > 0) {
+      console.log('🎨 [ReGL] First 10 filtered indices:', filteredIndices.slice(0, 10))
+      console.log('🎨 [ReGL] Last 10 filtered indices:', filteredIndices.slice(-10))
+    }
     console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
     
     // Convert filteredIndices to Set for O(1) lookup
     // filteredIndices contains ORIGINAL cell indices
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    console.log('🎨 [ReGL] filteredSet created:', filteredSet ? `Set with ${filteredSet.size} indices` : 'null (all visible)')
+    if (filteredSet && filteredSet.size > 0) {
+      const sampleIndices = Array.from(filteredSet).slice(0, 5)
+      console.log('🎨 [ReGL] Sample indices in filteredSet:', sampleIndices)
+    }
     
     // Get the metadata vector that is actually being used for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
+    console.log('🎨 [ReGL] Coloring metadata:', coloringMetadataVector ? coloringMetadataVector.id : 'none')
     
     // Check if we need to recalculate colors (only when coloring metadata changes)
     const needsColorRecalculation = this.colorManager.shouldRecalculateColors(coloringMetadataVector)
     
-    if (needsColorRecalculation) {
+    // Also check if cache is empty - if so, populate it
+    const cacheEmpty = !this.cachedColorsByCellIndex || this.cachedColorsByCellIndex.size === 0
+    console.log('🎨 [ReGL] Color cache state:', {
+      exists: !!this.cachedColorsByCellIndex,
+      size: this.cachedColorsByCellIndex?.size || 0,
+      isEmpty: cacheEmpty,
+      needsRecalculation: needsColorRecalculation
+    })
+    
+    if (needsColorRecalculation || cacheEmpty) {
+      if (cacheEmpty) {
+        console.log('🎨 [ReGL] Color cache is empty, populating with default or calculated colors')
+      } else {
       console.log('🎨 [ReGL] Recalculating colors due to coloring metadata change')
+      }
       this.colorManager.calculateAndCacheColors(coloringMetadataVector)
+      console.log('🎨 [ReGL] Color cache after population:', {
+        size: this.cachedColorsByCellIndex?.size || 0,
+        hasSample: this.cachedColorsByCellIndex?.has(0) || false,
+        sampleColor: this.cachedColorsByCellIndex?.get(0)?.toString(16) || 'none'
+      })
     }
     
     // Create color map to hide/show points based on filtering
@@ -8868,8 +9751,10 @@ export default class extends Controller {
     let visibleCount = 0
     let hiddenCount = 0
     
-    // Sample a few points to debug
-    const sampleIndices = [0, 100, 1000, 5000]
+    console.log(`🎨 [ReGL] Building color map for ${this.displayOrder.length} points, filteredSet size: ${filteredSet ? filteredSet.size : 'null (all visible)'}`)
+    
+    // Sample a few points to debug visibility logic
+    const samplePositions = [0, 100, 1000, 5000, 10000]
     
     // Use displayOrder to map draw positions to cell indices
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
@@ -8882,28 +9767,42 @@ export default class extends Controller {
         colorMap.set(drawPos, cachedColor)
         visibleCount++
         
-        if (sampleIndices.includes(drawPos)) {
-          // console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: VISIBLE, color 0x${cachedColor.toString(16)}`)
+        if (samplePositions.includes(drawPos)) {
+          console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE, color=0x${cachedColor.toString(16)}`)
         }
       } else {
         // Hide point by making it fully transparent
         colorMap.set(drawPos, 0x00000000)
         hiddenCount++
         
-        if (sampleIndices.includes(drawPos)) {
-          // console.log(`🎨 [Sample] drawPos ${drawPos}, cellIndex ${cellIndex}: HIDDEN, color 0x00000000`)
+        if (samplePositions.includes(drawPos)) {
+          console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, HIDDEN (not in filteredSet), color=0x00000000`)
         }
       }
     }
     
-    console.log(`🎨 [ReGL] About to update ${colorMap.size} colors`)
+    console.log(`🎨 [ReGL] Color map built: ${visibleCount} visible, ${hiddenCount} hidden, total: ${colorMap.size}`)
+    console.log('🎨 [ReGL] Sample color map entries:', {
+      first5: Array.from(colorMap.entries()).slice(0, 5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`),
+      last5: Array.from(colorMap.entries()).slice(-5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`)
+    })
+    console.log(`🎨 [ReGL] About to call updateColors with ${colorMap.size} color updates`)
     
     // Update colors (which includes alpha channel)
+    const updateColorsStart = performance.now()
     this.reglRenderer.updateColors(colorMap)
+    const updateColorsTime = performance.now() - updateColorsStart
+    console.log(`🎨 [ReGL] updateColors completed in ${updateColorsTime.toFixed(2)}ms`)
+    
+    const renderStart = performance.now()
     this.reglRenderer.render()
+    const renderTime = performance.now() - renderStart
+    console.log(`🎨 [ReGL] render() completed in ${renderTime.toFixed(2)}ms`)
+    
+    console.log(`🎨 [ReGL] Visibility update completed`)
     
     const elapsed = performance.now() - startTime
-    console.log(`🎨 [ReGL] Visibility updated: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
+    console.log(`🎨 [ReGL] Total visibility update time: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update the point count display with detailed filtering information
@@ -9040,10 +9939,23 @@ export default class extends Controller {
 
   // Get cell indices that fall within the specified range for continuous metadata
   getCellsForMetadataRange(metadataId, range) {
+    // Debug logging for gene filtering
+    if (metadataId && metadataId.startsWith('gene_')) {
+      console.log(`🔍 [GENE FILTER] getCellsForMetadataRange called for gene: ${metadataId}`)
+      console.log(`🔍 [GENE FILTER] Range:`, range)
+      console.log(`🔍 [GENE FILTER] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
+      console.log(`🔍 [GENE FILTER] Has gene in loadedMetadataVectors:`, !!this.loadedMetadataVectors?.[metadataId])
+    }
+    
     // Find the metadata vector for this metadata ID
     const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector || !metadataVector.values) {
       console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
+      if (metadataId && metadataId.startsWith('gene_')) {
+        console.error(`❌ [GENE FILTER] CRITICAL: Gene metadata vector not found!`)
+        console.error(`❌ [GENE FILTER] loadedMetadataVectors:`, this.loadedMetadataVectors)
+        console.error(`❌ [GENE FILTER] currentMetadataVector:`, this.currentMetadataVector)
+      }
       return []
     }
 
@@ -9402,6 +10314,21 @@ export default class extends Controller {
         
       // Initialize the inline range slider with the loaded values (just the histogram, no coloring)
         this.initializeInlineRangeSlider(metadataId, values)
+        
+      // Check renderer state after initialization (for debugging - compare with gene initialization)
+      console.log('🎚️ [CONTINUOUS INIT] Checking renderer state after initialization...')
+      const continuousRendererState = {
+        hasReglRenderer: !!this.reglRenderer,
+        rendererInstanceId: this.reglRenderer?.instanceId || 'none',
+        numPoints: this.reglRenderer?.numPoints || 0,
+        hasPositions: !!this.reglRenderer?.positions,
+        positionsLength: this.reglRenderer?.positions?.length || 0,
+        hasCurrentCoordinates: !!this.currentCoordinates,
+        currentCoordinatesLength: this.currentCoordinates?.length || 0,
+        hasDisplayOrder: !!this.displayOrder,
+        displayOrderLength: this.displayOrder?.length || 0
+      }
+      console.log('🎚️ [CONTINUOUS INIT] Renderer state:', continuousRendererState)
         
       console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
       }).catch(error => {
@@ -10571,6 +11498,86 @@ export default class extends Controller {
   // Delegate download to DownloadManager
   async downloadGlobalDistribution(event) {
     return this.downloadManager.downloadGlobalDistribution(event)
+  }
+
+  async downloadGeneExpression(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const button = event.currentTarget
+    const geneId = button.dataset.geneId
+    const geneMetadataId = button.dataset.metadataId || `gene_${geneId}`
+    
+    console.log('🧬 Download gene expression:', { geneId, geneMetadataId })
+    
+    // Get gene expression data from GeneManager
+    const geneManager = this.geneManager
+    if (!geneManager || !geneManager.geneExpressionData || !geneManager.geneExpressionData[geneId]) {
+      console.error('❌ Gene expression data not available for gene:', geneId)
+      alert('Expression data not available for this gene.')
+      return
+    }
+    
+    const expressionData = geneManager.geneExpressionData[geneId]
+    const values = expressionData.values
+    
+    if (!values || values.length === 0) {
+      alert('No expression values available for this gene.')
+      return
+    }
+    
+    // Get filtered cell indices (if any filters are active)
+    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    const hasFilters = filteredSet !== null
+    
+    // Calculate statistics
+    const stats = expressionData.stats || {}
+    const minVal = Math.min(...values.filter(v => !isNaN(v) && isFinite(v)))
+    const maxVal = Math.max(...values.filter(v => !isNaN(v) && isFinite(v)))
+    const meanVal = stats.mean || 0
+    const medianVal = stats.median || 0
+    const stdDevVal = stats.stdDev || 0
+    
+    // Find gene symbol
+    const geneTag = geneManager.geneTags.find(g => String(g.stableId) === String(geneId))
+    const geneSymbol = geneTag?.symbol || geneId
+    
+    // Create CSV content
+    let csvContent = `Gene Expression Data: ${geneSymbol}\n`
+    csvContent += `Gene ID: ${geneId}\n`
+    csvContent += `Total Cells: ${values.length}\n`
+    csvContent += `Min: ${minVal.toFixed(4)}\n`
+    csvContent += `Max: ${maxVal.toFixed(4)}\n`
+    csvContent += `Mean: ${meanVal.toFixed(4)}\n`
+    csvContent += `Median: ${medianVal.toFixed(4)}\n`
+    csvContent += `Std Dev: ${stdDevVal.toFixed(4)}\n\n`
+    
+    if (hasFilters) {
+      csvContent += `Filtered Cells: ${filteredIndices.length}\n\n`
+    }
+    
+    csvContent += `Cell Index,Expression Value${hasFilters ? ',Filtered' : ''}\n`
+    
+    values.forEach((value, index) => {
+      const isFiltered = hasFilters ? filteredSet.has(index) : true
+      if (!hasFilters || isFiltered) {
+        csvContent += `${index},${value.toFixed(6)}${hasFilters ? `,${isFiltered ? 'Yes' : 'No'}` : ''}\n`
+      }
+    })
+    
+    // Download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `gene_${geneId}_expression.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    console.log('🧬 Gene expression data downloaded')
   }
 
   // Old implementation moved to DownloadManager

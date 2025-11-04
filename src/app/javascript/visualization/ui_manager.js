@@ -493,6 +493,32 @@ export class UIManager {
     }
   }
 
+  // Update gene filter switch visibility (similar to updateFilterSwitchVisibility but for genes)
+  updateGeneFilterSwitchVisibility(geneId, geneMetadataId) {
+    const filterSwitch = document.querySelector(`.gene-filter-switch[data-gene-id="${geneId}"]`)
+    if (!filterSwitch) return
+    
+    // Check if there's a selected range for this gene
+    const hasActiveFilter = this.controller.selectedRanges && this.controller.selectedRanges[geneMetadataId]
+    
+    if (hasActiveFilter) {
+      // Show the switch
+      filterSwitch.style.display = 'flex'
+      // Ensure it's ON by default when first showing
+      if (filterSwitch.dataset.filterEnabled !== 'false') {
+        filterSwitch.dataset.filterEnabled = 'true'
+        filterSwitch.style.backgroundColor = '#10b981' // green
+        const switchToggle = filterSwitch.querySelector('div')
+        if (switchToggle) {
+          switchToggle.style.transform = 'translateX(14px)'
+        }
+      }
+    } else {
+      // Hide switch if no selection
+      filterSwitch.style.display = 'none'
+    }
+  }
+
   // Update metadata status icon based on loading state
   // States: 'not-loaded', 'downloading', 'in-db', 'in-memory'
   updateMetadataStatusIcon(metadataId, state) {
@@ -540,6 +566,64 @@ export class UIManager {
         
       default:
         console.warn(`Unknown status icon state: ${state}`)
+    }
+  }
+
+  // Update gene status icon based on loading state
+  // States: 'not-loaded', 'downloading', 'in-db', 'in-memory', 'error'
+  updateGeneStatusIcon(geneId, state, errorMessage = null) {
+    const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)
+    if (!statusIcon) return
+    
+    const icon = statusIcon.querySelector('i')
+    if (!icon) return
+    
+    // Show the icon
+    statusIcon.style.display = 'flex'
+    
+    switch (state) {
+      case 'not-loaded':
+        // Gray circle with animated spinner
+        statusIcon.style.backgroundColor = '#9ca3af'
+        icon.className = 'fas fa-spinner fa-spin'
+        icon.style.color = 'white'
+        statusIcon.title = 'Waiting...'
+        break
+        
+      case 'downloading':
+        // Blue circle with spinner
+        statusIcon.style.backgroundColor = '#3b82f6'
+        icon.className = 'fas fa-spinner fa-spin'
+        icon.style.color = 'white'
+        statusIcon.title = 'Downloading from server...'
+        break
+        
+      case 'in-db':
+        // Orange circle with check
+        statusIcon.style.backgroundColor = '#f59e0b'
+        icon.className = 'fas fa-check'
+        icon.style.color = 'white'
+        statusIcon.title = 'Gene expression in database (on disk)'
+        break
+        
+      case 'in-memory':
+        // Green circle with check
+        statusIcon.style.backgroundColor = '#10b981'
+        icon.className = 'fas fa-check'
+        icon.style.color = 'white'
+        statusIcon.title = 'Gene expression in memory (fast access)'
+        break
+        
+      case 'error':
+        // Red circle with exclamation
+        statusIcon.style.backgroundColor = '#dc2626'
+        icon.className = 'fas fa-exclamation-circle'
+        icon.style.color = 'white'
+        statusIcon.title = errorMessage ? `Error: ${errorMessage}` : 'Error loading expression data'
+        break
+        
+      default:
+        console.warn(`Unknown gene status icon state: ${state}`)
     }
   }
 
@@ -699,8 +783,23 @@ export class UIManager {
   // Update all range slider counts
   updateAllRangeSliderCounts() {
     // Find all range slider controllers and trigger their count updates
+    // Only update sliders that have been initialized (have data in inlineRangeSliderData)
     const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
     rangeSliderElements.forEach(element => {
+      // Get the metadata ID from the element
+      const metadataId = element.getAttribute('data-range-slider-metadata-id-value')
+      if (!metadataId) return
+      
+      // Check if slider data is available before trying to update
+      const hasSliderData = this.controller.inlineRangeSliderData && 
+                           this.controller.inlineRangeSliderData[metadataId] &&
+                           this.controller.inlineRangeSliderData[metadataId].values
+      
+      if (!hasSliderData) {
+        // Skip sliders that haven't been initialized yet
+        return
+      }
+      
       // Get the Stimulus controller instance
       const controller = this.controller.application?.getControllerForElementAndIdentifier(element, 'range-slider')
       if (controller && typeof controller.updateSelectedCellsCount === 'function') {

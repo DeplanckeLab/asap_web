@@ -112,9 +112,23 @@ export class ColorManager {
     if (!coloringMetadataVector || !coloringMetadataVector.values) {
       // No coloring metadata, use default colors
       this.controller.cachedColorsByCellIndex = new Map()
-      for (let i = 0; i < this.controller.currentCoordinates.length; i++) {
-        this.controller.cachedColorsByCellIndex.set(i, 0x3b82f6) // Default blue
+      
+      // Determine number of points from displayOrder, currentCoordinates, or renderer
+      let numPoints = 0
+      if (this.controller.displayOrder && this.controller.displayOrder.length > 0) {
+        numPoints = this.controller.displayOrder.length
+      } else if (this.controller.currentCoordinates && this.controller.currentCoordinates.length > 0) {
+        numPoints = this.controller.currentCoordinates.length
+      } else if (this.controller.reglRenderer && this.controller.reglRenderer.numPoints > 0) {
+        numPoints = this.controller.reglRenderer.numPoints
       }
+      
+      if (numPoints > 0) {
+        for (let i = 0; i < numPoints; i++) {
+          this.controller.cachedColorsByCellIndex.set(i, 0x3b82f6) // Default blue
+        }
+      }
+      
       this.controller.lastColoringMetadataId = null
       this.controller.lastColorRange = null
       return

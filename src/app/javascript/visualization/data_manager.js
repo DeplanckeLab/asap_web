@@ -819,13 +819,372 @@ export class DataManager {
     this.updateAllCategoryDistributions()
     
     // Use requestAnimationFrame for smooth updates
-    requestAnimationFrame(() => {
+    requestAnimationFrame(async () => {
+      // Debug: Check what metadata is being filtered
+      const isGeneFiltering = filteredIndices !== null && 
+                             this.controller.selectedRanges && 
+                             Object.keys(this.controller.selectedRanges).some(id => id.startsWith('gene_'))
+      
+      if (isGeneFiltering) {
+        console.log('🧬 [FILTER] Gene filtering detected - checking renderer state...')
+      }
+      
+      // Only update visualization if renderer is ready
+      // For ReGL: check if coordinates and displayOrder are set (these are set when renderScatterPlot is called)
+      // Also check if renderer has internal state (positions/colors) as fallback
+      const hasCanvas = this.controller.canvas && 
+                       this.controller.canvas.width > 0 && 
+                       this.controller.canvas.height > 0
+      
+      if (isGeneFiltering) {
+        console.log('🧬 [FILTER] Canvas check:', {
+          hasCanvas,
+          canvasWidth: this.controller.canvas?.width,
+          canvasHeight: this.controller.canvas?.height,
+          canvasExists: !!this.controller.canvas
+        })
+      }
+      
+      // Check if renderer has internal state (positions or colors)
+      // This is critical - renderer may have state even if currentCoordinates/displayOrder are missing
+      let hasRendererState = false
+      let rendererNumPoints = 0
+      if (this.controller.reglRenderer) {
+        // Log renderer instance identity for debugging scope issues
+        const rendererId = this.controller.reglRenderer.canvas?.id || 
+                          `canvas_${this.controller.reglRenderer.canvas?.width}x${this.controller.reglRenderer.canvas?.height}` ||
+                          'unknown'
+        console.log('🎨 [FILTER] Renderer instance check:', {
+          rendererExists: !!this.controller.reglRenderer,
+          rendererInstanceId: this.controller.reglRenderer.instanceId || 'no-instance-id',
+          rendererId: rendererId,
+          rendererCanvas: this.controller.reglRenderer.canvas,
+          controllerCanvas: this.controller.canvas,
+          sameInstance: this.controller.reglRenderer.canvas === this.controller.canvas,
+          numPoints: this.controller.reglRenderer.numPoints,
+          hasPositions: !!this.controller.reglRenderer.positions,
+          positionsLength: this.controller.reglRenderer.positions?.length,
+          hasColors: !!this.controller.reglRenderer.colors,
+          colorsLength: this.controller.reglRenderer.colors?.length,
+          hasPositionBuffer: !!this.controller.reglRenderer.positionBuffer,
+          hasColorBuffer: !!this.controller.reglRenderer.colorBuffer,
+          reglExists: !!this.controller.reglRenderer.regl
+        })
+        
+        if (this.controller.reglRenderer.numPoints > 0) {
+          hasRendererState = true
+          rendererNumPoints = this.controller.reglRenderer.numPoints
+        } else if (this.controller.reglRenderer.positions && this.controller.reglRenderer.positions.length > 0) {
+          hasRendererState = true
+          rendererNumPoints = this.controller.reglRenderer.positions.length / 2
+        } else if (this.controller.reglRenderer.colors && this.controller.reglRenderer.colors.length > 0) {
+          hasRendererState = true
+          rendererNumPoints = this.controller.reglRenderer.colors.length / 4
+        }
+      } else {
+        console.log('🎨 [FILTER] Renderer instance is null or undefined')
+      }
+      
+      // Renderer is ready if we have ANY of these:
+      // 1. currentCoordinates AND displayOrder exist (normal case - metadata loaded)
+      // 2. OR canvas exists AND renderer has internal state (can infer displayOrder from renderer)
+      // 3. OR we have coordinates in cache (can restore from cache)
+      // 4. OR we have metadataData (can decompress coordinates)
+      // 5. OR renderer has positions (can restore coordinates from positions)
+      const hasCoordinatesInController = this.controller.currentCoordinates && 
+                                        this.controller.currentCoordinates.length > 0
+      const hasCoordinatesInCache = this.controller.decompressedCoordinatesCache && 
+                                    this.controller.decompressedCoordinatesCache.size > 0
+      const hasMetadataData = !!this.controller.metadataData
+      const hasRendererPositions = this.controller.reglRenderer && 
+                                   this.controller.reglRenderer.positions && 
+                                   this.controller.reglRenderer.positions.length > 0
+      const hasCoordinatesAvailable = hasCoordinatesInController || 
+                                     hasCoordinatesInCache || 
+                                     hasMetadataData ||
+                                     hasRendererPositions
+      
+      const reglReady = this.controller.rendererType === 'regl' && 
+                       this.controller.reglRenderer && 
+                       hasCanvas &&
+                       ((this.controller.currentCoordinates && 
+                         this.controller.displayOrder &&
+                         this.controller.displayOrder.length > 0) || 
+                        hasRendererState ||
+                        hasCoordinatesAvailable)  // If we have coordinates available, we can restore/initialize
+      
+      const pixiReady = this.controller.rendererType === 'pixi' && this.controller.scatterContainer
+      
+      const isRendererReady = reglReady || pixiReady
+      
+      // CRITICAL: If renderer has state but currentCoordinates/displayOrder are missing,
+      // create displayOrder from renderer state BEFORE checking isRendererReady
+      // This handles the case where plot was rendered but coordinates weren't stored
+      if (hasRendererState && rendererNumPoints > 0 && 
+          (!this.controller.displayOrder || this.controller.displayOrder.length === 0)) {
+        console.log('🎨 [FILTER] Renderer has state but displayOrder missing - creating from renderer state')
+        this.controller.displayOrder = new Array(rendererNumPoints)
+        for (let i = 0; i < rendererNumPoints; i++) {
+          this.controller.displayOrder[i] = i
+        }
+        console.log('🎨 [FILTER] Created displayOrder from renderer state:', rendererNumPoints, 'points')
+        
+        // Re-evaluate isRendererReady now that displayOrder exists
+        reglReady = this.controller.rendererType === 'regl' && 
+                   this.controller.reglRenderer && 
+                   hasCanvas &&
+                   ((this.controller.currentCoordinates && 
+                     this.controller.displayOrder &&
+                     this.controller.displayOrder.length > 0) || 
+                    hasRendererState ||
+                    hasCoordinatesAvailable)
+        isRendererReady = reglReady || pixiReady
+      }
+      
+      console.log('🎨 [FILTER] About to update visualization:', {
+        rendererType: this.controller.rendererType,
+        hasReglRenderer: !!this.controller.reglRenderer,
+        hasCanvas: hasCanvas,
+        canvasWidth: this.controller.canvas?.width || 0,
+        canvasHeight: this.controller.canvas?.height || 0,
+        hasCurrentCoordinates: !!this.controller.currentCoordinates,
+        currentCoordinatesLength: this.controller.currentCoordinates?.length || 0,
+        hasDisplayOrder: !!this.controller.displayOrder,
+        displayOrderLength: this.controller.displayOrder?.length || 0,
+        hasRendererState: !!hasRendererState,
+        rendererNumPoints: this.controller.reglRenderer?.numPoints || 0,
+        rendererPositionsLength: this.controller.reglRenderer?.positions?.length || 0,
+        rendererColorsLength: this.controller.reglRenderer?.colors?.length || 0,
+        hasScatterContainer: !!this.controller.scatterContainer,
+        isRendererReady: isRendererReady,
+        filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null',
+        shouldUpdateColors: shouldUpdateColors,
+        reglReady: reglReady
+      })
+      
+      if (!isRendererReady) {
+        // Renderer not ready - try to restore/initialize state if we have coordinates available
+        if (this.controller.rendererType === 'regl' && 
+            this.controller.reglRenderer && 
+            hasCanvas &&
+            hasCoordinatesAvailable) {
+          
+          // If renderer has internal state (positions/colors), we can infer numPoints
+          // and create displayOrder without needing currentCoordinates
+          const rendererHasPositions = this.controller.reglRenderer.positions && this.controller.reglRenderer.positions.length > 0
+          const rendererHasColors = this.controller.reglRenderer.colors && this.controller.reglRenderer.colors.length > 0
+          
+          if (rendererHasPositions || rendererHasColors) {
+            // Renderer has state - infer numPoints and create displayOrder
+            let numPoints = 0
+            if (this.controller.reglRenderer.numPoints > 0) {
+              numPoints = this.controller.reglRenderer.numPoints
+            } else if (rendererHasPositions) {
+              numPoints = this.controller.reglRenderer.positions.length / 2
+              this.controller.reglRenderer.numPoints = numPoints
+            } else if (rendererHasColors) {
+              numPoints = this.controller.reglRenderer.colors.length / 4
+              this.controller.reglRenderer.numPoints = numPoints
+            }
+            
+            if (numPoints > 0 && (!this.controller.displayOrder || this.controller.displayOrder.length === 0)) {
+              console.log('🎨 [FILTER] Creating displayOrder from renderer state:', numPoints, 'points')
+              this.controller.displayOrder = new Array(numPoints)
+              for (let i = 0; i < numPoints; i++) {
+                this.controller.displayOrder[i] = i
+              }
+              console.log('🎨 [FILTER] displayOrder created, proceeding with visibility update')
+              // Continue with visibility update
+            } else if (numPoints === 0) {
+              console.log('🎨 [FILTER] Cannot infer numPoints from renderer state')
+              console.log('🎨 [FILTER] Skipping visualization update - renderer not ready yet')
+              return
+            } else {
+              // displayOrder already exists, proceed
+              console.log('🎨 [FILTER] displayOrder exists, proceeding with visibility update')
+            }
+          } else {
+            // No renderer state - but plot is visible, so renderer must have been used
+            // Check if we can get coordinates from the last rendered embedding
+            // The coordinates should be in decompressedCoordinatesCache if an embedding was loaded
+            console.log('🎨 [FILTER] Renderer has no internal state but plot is visible - attempting to restore')
+            console.log('🎨 [FILTER] Checking cache and metadataData:', {
+              hasMetadataData: !!this.controller.metadataData,
+              metadataDataName: this.controller.metadataData?.name,
+              hasCache: !!this.controller.decompressedCoordinatesCache,
+              cacheSize: this.controller.decompressedCoordinatesCache?.size || 0,
+              cacheKeys: this.controller.decompressedCoordinatesCache ? Array.from(this.controller.decompressedCoordinatesCache.keys()) : []
+            })
+            
+            let coordinatesToRestore = null
+            
+            // First, try to get coordinates using metadataData.name (if available)
+            if (this.controller.metadataData && this.controller.metadataData.name && this.controller.decompressedCoordinatesCache) {
+              const embeddingId = this.controller.metadataData.name
+              coordinatesToRestore = this.controller.decompressedCoordinatesCache.get(embeddingId)
+              if (coordinatesToRestore) {
+                console.log('🎨 [FILTER] Found coordinates in cache for embeddingId:', embeddingId, 'length:', coordinatesToRestore.length)
+              } else {
+                console.log('🎨 [FILTER] No coordinates in cache for embeddingId:', embeddingId)
+              }
+            }
+            
+            // If not found, try any available coordinates in cache
+            if (!coordinatesToRestore && this.controller.decompressedCoordinatesCache && this.controller.decompressedCoordinatesCache.size > 0) {
+              const firstKey = this.controller.decompressedCoordinatesCache.keys().next().value
+              if (firstKey) {
+                coordinatesToRestore = this.controller.decompressedCoordinatesCache.get(firstKey)
+                if (coordinatesToRestore) {
+                  console.log('🎨 [FILTER] Found coordinates in cache (first available):', firstKey, 'length:', coordinatesToRestore.length)
+                }
+              }
+            }
+            
+            // If still no coordinates, try to decompress from metadataData if available
+            if (!coordinatesToRestore && this.controller.metadataData) {
+              console.log('🎨 [FILTER] No coordinates in cache - attempting to decompress from metadataData...')
+              try {
+                const decompressedCoords = this.decompressBinaryCoordinates(this.controller.metadataData.binaryData)
+                if (decompressedCoords && decompressedCoords.length > 0) {
+                  // Cache them for next time
+                  const embeddingId = this.controller.metadataData.name
+                  if (!this.controller.decompressedCoordinatesCache) {
+                    this.controller.decompressedCoordinatesCache = new Map()
+                  }
+                  this.controller.decompressedCoordinatesCache.set(embeddingId, decompressedCoords)
+                  coordinatesToRestore = decompressedCoords
+                  console.log('🎨 [FILTER] Decompressed coordinates from metadataData:', decompressedCoords.length, 'points')
+                }
+              } catch (error) {
+                console.error('🎨 [FILTER] Failed to decompress coordinates from metadataData:', error)
+              }
+            }
+            
+            // If still no coordinates, check if we can get them from the renderer's canvas dimensions
+            // This handles the case where the plot is visible but coordinates weren't stored
+            if (!coordinatesToRestore && this.controller.canvas && 
+                this.controller.canvas.width > 0 && this.controller.canvas.height > 0) {
+              console.log('🎨 [FILTER] Plot is visible but no coordinates - checking if we can infer from renderer...')
+              // If renderer has positions, we can restore coordinates from them
+              if (this.controller.reglRenderer && this.controller.reglRenderer.positions && 
+                  this.controller.reglRenderer.positions.length > 0) {
+                const numPoints = this.controller.reglRenderer.positions.length / 2
+                console.log(`🎨 [FILTER] Found ${numPoints} points in renderer positions - restoring coordinates...`)
+                // Create coordinates from positions (they're in screen space, but we can use them)
+                coordinatesToRestore = new Array(numPoints)
+                for (let i = 0; i < numPoints; i++) {
+                  coordinatesToRestore[i] = [
+                    this.controller.reglRenderer.positions[i * 2],
+                    this.controller.reglRenderer.positions[i * 2 + 1]
+                  ]
+                }
+                console.log(`🎨 [FILTER] Restored ${coordinatesToRestore.length} coordinates from renderer positions`)
+              }
+            }
+            
+            // If still no coordinates, check if controller has coordinates stored from a previous render
+            if (!coordinatesToRestore) {
+              console.log('🎨 [FILTER] No coordinates in cache, metadataData, or renderer positions - checking if controller has coordinates stored...')
+              
+              // Last resort: Check if controller has coordinates stored from a previous render
+              // Even if renderer state is lost, controller might still have coordinates
+              if (this.controller.currentCoordinates && this.controller.currentCoordinates.length > 0) {
+                console.log('🎨 [FILTER] Found coordinates in controller.currentCoordinates:', this.controller.currentCoordinates.length)
+                coordinatesToRestore = this.controller.currentCoordinates
+              } else {
+                // Check if plot is visible (canvas exists) - this means an embedding WAS loaded at some point
+                const plotIsVisible = this.controller.canvas && 
+                                    this.controller.canvas.width > 0 && 
+                                    this.controller.canvas.height > 0 &&
+                                    this.controller.canvas.parentElement &&
+                                    this.controller.canvas.parentElement.offsetWidth > 0
+                
+                console.error('❌ [FILTER] CRITICAL ERROR: Renderer has lost its state!')
+                console.error('❌ [FILTER] Renderer instance:', this.controller.reglRenderer?.instanceId || 'unknown')
+                if (this.controller.reglRenderer?.createdAt) {
+                  const ageMs = Date.now() - this.controller.reglRenderer.createdAt
+                  const ageSec = (ageMs / 1000).toFixed(1)
+                  console.error('❌ [FILTER] Renderer was created:', this.controller.reglRenderer.createdAtTime, `(${ageSec}s ago)`)
+                }
+                console.error('❌ [FILTER] Renderer state:', {
+                  numPoints: this.controller.reglRenderer?.numPoints || 0,
+                  hasPositions: !!this.controller.reglRenderer?.positions,
+                  positionsLength: this.controller.reglRenderer?.positions?.length || 0,
+                  hasColors: !!this.controller.reglRenderer?.colors,
+                  colorsLength: this.controller.reglRenderer?.colors?.length || 0,
+                  hasCurrentCoordinates: false,
+                  currentCoordinatesLength: 0,
+                  hasDisplayOrder: false,
+                  displayOrderLength: 0,
+                  hasMetadataData: !!this.controller.metadataData,
+                  metadataDataName: this.controller.metadataData?.name,
+                  cacheSize: this.controller.decompressedCoordinatesCache?.size || 0,
+                  plotIsVisible: plotIsVisible
+                })
+                
+                // Provide specific guidance based on the state
+                if (!this.controller.metadataData) {
+                  console.error('❌ [FILTER] ROOT CAUSE: No embedding has been loaded!')
+                  console.error('❌ [FILTER] The renderer was created during page initialization but never initialized with coordinates')
+                  console.error('❌ [FILTER] SOLUTION: Load an embedding from the dropdown menu before filtering by gene expression')
+                  console.error('❌ [FILTER] NOTE: Gene expression filtering requires an embedding to be loaded first')
+                } else if (plotIsVisible) {
+                  console.error('❌ [FILTER] ROOT CAUSE: Plot is visible but renderer state was lost!')
+                  console.error('❌ [FILTER] This suggests the renderer was recreated or state was cleared')
+                  console.error('❌ [FILTER] Embedding data exists but coordinates were not restored')
+                  console.error('❌ [FILTER] This may be a bug - please report this issue')
+                } else {
+                  console.error('❌ [FILTER] ROOT CAUSE: Renderer was created but never initialized with coordinates')
+                  console.error('❌ [FILTER] Embedding data exists but renderer state is missing')
+                  console.error('❌ [FILTER] This suggests initializeScatterPlot() was never called or failed')
+                }
+                
+                console.error('❌ [FILTER] The plot will not update - please reload the page or load an embedding')
+                console.error('❌ [FILTER] Call stack when error was detected:')
+                console.trace('❌ [FILTER] Renderer state loss detection')
+                return
+              }
+            }
+            
+            if (coordinatesToRestore && coordinatesToRestore.length > 0) {
+              console.log('🎨 [FILTER] Restoring coordinates and re-rendering plot...')
+              this.controller.currentCoordinates = coordinatesToRestore
+              await this.controller.renderScatterPlot(coordinatesToRestore)
+              console.log('🎨 [FILTER] Coordinates restored, proceeding with visibility update')
+              // After restoring, we now have renderer state, so continue with the update below
+              // Don't return - fall through to the visibility update code
+            } else {
+              console.error('❌ [FILTER] CRITICAL ERROR: Cannot restore renderer state!')
+              console.error('❌ [FILTER] - Cache is empty')
+              console.error('❌ [FILTER] - currentCoordinates missing')
+              console.error('❌ [FILTER] - Cannot decompress from metadataData')
+              console.error('❌ [FILTER] - Renderer has no state (numPoints:', this.controller.reglRenderer?.numPoints || 0, ')')
+              console.error('❌ [FILTER] The plot will not update - please reload the page or load an embedding')
+              return
+            }
+          }
+        } else {
+          // Renderer not ready and no coordinates available - skip visualization update
+          console.log('🎨 [FILTER] Skipping visualization update - renderer not ready and no coordinates available')
+          console.log('🎨 [FILTER] State:', {
+            hasRenderer: !!this.controller.reglRenderer,
+            hasCanvas: hasCanvas,
+            hasCoordinatesInController: hasCoordinatesInController,
+            hasCoordinatesInCache: hasCoordinatesInCache,
+            hasMetadataData: hasMetadataData
+          })
+          return
+        }
+      }
+      
       // If we need to update colors (e.g., color range adapted), render colors first
       if (shouldUpdateColors && this.controller.currentMetadataVector) {
+        console.log('🎨 [FILTER] Updating colors via renderPointsWithCurrentColoring')
         this.controller.renderPointsWithCurrentColoring()
       } else {
         // Otherwise just update visibility
-        this.controller.updatePointVisibility(filteredIndices)
+          console.log('🎨 [FILTER] Updating visibility via updatePointVisibility, filteredIndices:', filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)')
+          await this.controller.updatePointVisibility(filteredIndices)
       }
       
       // Re-render category labels after filtering (ReGL mode only)
@@ -880,6 +1239,18 @@ export class DataManager {
           const range = this.controller.selectedRanges[metadataId]
           const hasRange = range && (range.min !== undefined && range.max !== undefined)
           const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
+          
+          // Debug logging for gene filtering
+          if (metadataId && metadataId.startsWith('gene_')) {
+            console.log(`🔍 [FILTER] Gene filtering check for ${metadataId}:`, {
+              hasRange,
+              hasLoadedVector,
+              range,
+              loadedMetadataVectorsKeys: Object.keys(this.controller.loadedMetadataVectors || {}),
+              selectedRangesKeys: Object.keys(this.controller.selectedRanges || {})
+            })
+          }
+          
           return hasRange && hasLoadedVector
         })
       : []

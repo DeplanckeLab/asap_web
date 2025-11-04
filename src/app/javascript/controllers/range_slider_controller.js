@@ -38,15 +38,51 @@ export default class extends Controller {
     this.adaptColorRangeEnabled = false
     
     // Get the main visualization controller and its modules
-    this.visualizationController = window.visualizationController
+    // CRITICAL: Always get the controller directly from the DOM element
+    // This ensures we get the same instance that Stimulus is managing for that element
+    // Don't rely on window.visualizationController which might be stale
+    let visualizationController = null
+    const visualizationElement = document.querySelector('[data-controller="visualization"]')
+    if (visualizationElement) {
+      visualizationController = this.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
+      if (visualizationController) {
+        console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', visualizationController.instanceId)
+        // Update window reference to keep it in sync
+        window.visualizationController = visualizationController
+      } else {
+        console.warn('🎚️ [RANGE SLIDER] Could not get controller from DOM element, falling back to window.visualizationController')
+        visualizationController = window.visualizationController
+      }
+    } else {
+      console.warn('🎚️ [RANGE SLIDER] Visualization element not found, falling back to window.visualizationController')
+      visualizationController = window.visualizationController
+    }
+    
+    this.visualizationController = visualizationController
     this.dataManager = this.visualizationController?.dataManager
     this.rendererManager = this.visualizationController?.rendererManager
     console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
+    console.log('🎚️ Range slider controller connected, controller instance ID:', this.visualizationController?.instanceId || 'none')
+    console.log('🎚️ Range slider controller connected, renderer instance ID:', this.visualizationController?.reglRenderer?.instanceId || 'none')
     console.log('🎚️ Range slider controller connected, dataManager:', !!this.dataManager)
     console.log('🎚️ Range slider controller connected, rendererManager:', !!this.rendererManager)
     
     // Initialize button appearance
     this.updateButtonAppearance()
+    
+    // Check if data is already available (e.g., for genes that loaded data before slider connected)
+    if (this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]) {
+      const sliderData = this.visualizationController.inlineRangeSliderData[this.metadataIdValue]
+      if (sliderData.values && sliderData.min !== undefined && sliderData.max !== undefined) {
+        console.log('🎚️ Data already available, initializing slider immediately')
+        this.minValue = sliderData.min
+        this.maxValue = sliderData.max
+        this.currentMinValue = sliderData.currentMin ?? sliderData.min
+        this.currentMaxValue = sliderData.currentMax ?? sliderData.max
+        this.initializeSlider()
+        return
+      }
+    }
     
     // Don't initialize immediately - wait for values to be set by the main controller
     console.log('🎚️ Range slider controller ready, waiting for initialization')
@@ -94,10 +130,81 @@ export default class extends Controller {
       return
     }
     
+    // CRITICAL: Only update the visualization controller reference if:
+    // 1. We don't have one, OR
+    // 2. The one we have doesn't have the data we need
+    // Don't overwrite if it was explicitly set by the caller (e.g., initializeInlineRangeSlider)
+    if (!this.visualizationController) {
+      // Get from DOM if we don't have a reference
+      const visualizationElement = document.querySelector('[data-controller="visualization"]')
+      if (visualizationElement) {
+        const domController = this.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
+        if (domController) {
+          console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', domController.instanceId)
+          this.visualizationController = domController
+          this.dataManager = domController.dataManager
+          this.rendererManager = domController.rendererManager
+          window.visualizationController = domController
+        }
+      }
+    } else {
+      // We have a reference - verify it has the data we need
+      const hasData = this.visualizationController.inlineRangeSliderData?.[this.metadataIdValue]
+      const hasInlineRangeSliderData = !!this.visualizationController.inlineRangeSliderData
+      const inlineRangeSliderDataKeys = this.visualizationController.inlineRangeSliderData ? Object.keys(this.visualizationController.inlineRangeSliderData) : []
+      
+      console.log('🎚️ [RANGE SLIDER] Checking current controller for data:', {
+        controllerId: this.visualizationController.instanceId,
+        hasInlineRangeSliderData,
+        inlineRangeSliderDataKeys,
+        hasDataForThisMetadata: hasData,
+        metadataId: this.metadataIdValue
+      })
+      
+      if (!hasData) {
+        // Try to get a different instance that might have the data
+        const visualizationElement = document.querySelector('[data-controller="visualization"]')
+        if (visualizationElement) {
+          const domController = this.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
+          if (domController && domController !== this.visualizationController) {
+            // Check if the DOM controller has the data
+            const domHasData = domController.inlineRangeSliderData?.[this.metadataIdValue]
+            const domHasInlineRangeSliderData = !!domController.inlineRangeSliderData
+            const domInlineRangeSliderDataKeys = domController.inlineRangeSliderData ? Object.keys(domController.inlineRangeSliderData) : []
+            
+            console.log('🎚️ [RANGE SLIDER] Checking DOM controller for data:', {
+              controllerId: domController.instanceId,
+              hasInlineRangeSliderData: domHasInlineRangeSliderData,
+              inlineRangeSliderDataKeys: domInlineRangeSliderDataKeys,
+              hasDataForThisMetadata: domHasData,
+              metadataId: this.metadataIdValue
+            })
+            
+            if (domHasData) {
+              console.log('🎚️ [RANGE SLIDER] Current controller missing data, switching to DOM controller with data')
+              console.log('🎚️ [RANGE SLIDER] Old controller ID:', this.visualizationController?.instanceId || 'none')
+              console.log('🎚️ [RANGE SLIDER] New controller ID:', domController.instanceId)
+              this.visualizationController = domController
+              this.dataManager = domController.dataManager
+              this.rendererManager = domController.rendererManager
+              window.visualizationController = domController
+            } else {
+              console.log('🎚️ [RANGE SLIDER] Neither controller has data, keeping current reference (was explicitly set)')
+            }
+          }
+        }
+      } else {
+        console.log('🎚️ [RANGE SLIDER] Current controller has data, keeping reference')
+      }
+    }
+    
     // Check if visualization controller and data are available
     console.log('🎚️ Checking data availability:', {
       hasVisualizationController: !!this.visualizationController,
+      controllerInstanceId: this.visualizationController?.instanceId || 'none',
+      rendererInstanceId: this.visualizationController?.reglRenderer?.instanceId || 'none',
       hasInlineRangeSliderData: !!this.visualizationController?.inlineRangeSliderData,
+      inlineRangeSliderDataKeys: this.visualizationController?.inlineRangeSliderData ? Object.keys(this.visualizationController.inlineRangeSliderData) : [],
       hasMetadataData: !!this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue],
       metadataId: this.metadataIdValue
     })
@@ -243,14 +350,14 @@ export default class extends Controller {
   }
   
   // Update checkbox color: green if full range, orange if subrange
-  // Also updates the filter state icon
+  // Also updates the filter state icon (for both metadata and genes)
   updateCheckboxColor() {
     // Check if current range is the full range (with small tolerance for floating point)
     const tolerance = (this.maxValue - this.minValue) * 0.001 // 0.1% tolerance
     const isFullRange = Math.abs(this.currentMinValue - this.minValue) < tolerance && 
                         Math.abs(this.currentMaxValue - this.maxValue) < tolerance
     
-    // Update the filter state icon (new UI)
+    // Update the filter state icon for metadata (new UI)
     const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${this.metadataIdValue}"]`)
     if (filterStateIcon) {
       const icon = filterStateIcon.querySelector('i')
@@ -270,6 +377,33 @@ export default class extends Controller {
           icon.style.color = 'white'
         }
         filterStateIcon.title = `Subrange selected: ${this.currentMinValue.toFixed(3)} - ${this.currentMaxValue.toFixed(3)}`
+      }
+    }
+    
+    // Update the filter state icon for genes (if this is a gene slider)
+    if (this.metadataIdValue && this.metadataIdValue.startsWith('gene_')) {
+      const geneId = this.metadataIdValue.replace('gene_', '')
+      const geneFilterStateIcon = document.querySelector(`.gene-filter-state-icon[data-gene-id="${geneId}"]`)
+      if (geneFilterStateIcon) {
+        geneFilterStateIcon.style.display = 'flex'
+        const icon = geneFilterStateIcon.querySelector('i')
+        if (isFullRange) {
+          // Full range - white background, gray icon
+          geneFilterStateIcon.style.backgroundColor = 'white'
+          geneFilterStateIcon.style.borderColor = '#d1d5db'
+          if (icon) {
+            icon.style.color = '#9ca3af'
+          }
+          geneFilterStateIcon.title = 'No filter applied (full range)'
+        } else {
+          // Subrange - orange background, white icon
+          geneFilterStateIcon.style.backgroundColor = '#f59e0b'
+          geneFilterStateIcon.style.borderColor = '#f59e0b'
+          if (icon) {
+            icon.style.color = 'white'
+          }
+          geneFilterStateIcon.title = `Subrange selected: ${this.currentMinValue.toFixed(3)} - ${this.currentMaxValue.toFixed(3)}`
+        }
       }
     }
     
@@ -316,7 +450,8 @@ export default class extends Controller {
     // Get the metadata values from the visualization controller
     const sliderData = this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]
     if (!sliderData || !sliderData.values) {
-      console.log('🎚️ No slider data available for count update')
+      console.error('🎚️ [ERROR] No slider data available for count update for metadata:', this.metadataIdValue)
+      console.error('🎚️ [ERROR] Available keys in inlineRangeSliderData:', Object.keys(this.visualizationController?.inlineRangeSliderData || {}))
       return
     }
     
@@ -419,8 +554,11 @@ export default class extends Controller {
   performPlotUpdate() {
     if (!this.visualizationController || !this.dataManager) return
     
+    const isGene = this.metadataIdValue && this.metadataIdValue.startsWith('gene_')
+    const logPrefix = isGene ? '🧬 [SLIDER UPDATE]' : '🚀 [PERF]'
+    
     const startTime = performance.now()
-    console.log('🚀 [PERF] performPlotUpdate started for metadata:', this.metadataIdValue)
+    console.log(`${logPrefix} performPlotUpdate started for metadata:`, this.metadataIdValue)
     
     // Update the color range in the main visualization
     const colorRangeStart = performance.now()
@@ -447,7 +585,7 @@ export default class extends Controller {
       )
     }
     const colorRangeTime = performance.now() - colorRangeStart
-    console.log(`🚀 [PERF] updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
+    console.log(`${logPrefix} updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
     
     // Check if we're showing the full range (no filtering needed)
     const isFullRange = this.currentMinValue <= this.minValue && this.currentMaxValue >= this.maxValue
@@ -456,6 +594,9 @@ export default class extends Controller {
       // Remove from selectedRanges to disable filtering
       if (this.visualizationController.selectedRanges) {
         delete this.visualizationController.selectedRanges[this.metadataIdValue]
+      }
+      if (isGene) {
+        console.log(`${logPrefix} Full range selected - removing from selectedRanges`)
       }
     } else {
       // Store the range in selectedRanges for unified filtering
@@ -466,6 +607,13 @@ export default class extends Controller {
         min: this.currentMinValue,
         max: this.currentMaxValue
       }
+      if (isGene) {
+        console.log(`${logPrefix} Stored range in selectedRanges:`, {
+          metadataId: this.metadataIdValue,
+          range: this.visualizationController.selectedRanges[this.metadataIdValue],
+          allRanges: Object.keys(this.visualizationController.selectedRanges)
+        })
+      }
     }
     
     // Clear the filter cache and trigger a re-render with unified filtering
@@ -474,11 +622,76 @@ export default class extends Controller {
       this.visualizationController.filterCache.clear()
     }
     const cacheClearTime = performance.now() - cacheClearStart
-    console.log(`🚀 [PERF] filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
+    console.log(`${logPrefix} filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
     // Update filter switch visibility based on whether there's a selection
     if (this.visualizationController.uiManager) {
       this.visualizationController.uiManager.updateFilterSwitchVisibility(this.metadataIdValue)
+      
+      // Also update gene filter switch visibility if this is a gene slider
+      if (this.metadataIdValue && this.metadataIdValue.startsWith('gene_')) {
+        const geneId = this.metadataIdValue.replace('gene_', '')
+        this.visualizationController.uiManager.updateGeneFilterSwitchVisibility(geneId, this.metadataIdValue)
+      }
+    }
+    
+    // Verify loadedMetadataVectors has the gene before filtering (critical check)
+    if (isGene) {
+      const hasInLoadedVectors = !!this.visualizationController.loadedMetadataVectors?.[this.metadataIdValue]
+      console.log(`${logPrefix} BEFORE updateCellFiltering - loadedMetadataVectors has ${this.metadataIdValue}:`, hasInLoadedVectors)
+      if (!hasInLoadedVectors) {
+        console.error(`❌ ${logPrefix} CRITICAL: ${this.metadataIdValue} NOT in loadedMetadataVectors before filtering!`)
+        console.error(`❌ ${logPrefix} loadedMetadataVectors keys:`, Object.keys(this.visualizationController.loadedMetadataVectors || {}))
+        
+        // CRITICAL: Try to restore the gene metadata from inlineRangeSliderData
+        // The metadata might be in a different controller instance
+        const sliderData = this.visualizationController.inlineRangeSliderData?.[this.metadataIdValue]
+        if (sliderData && sliderData.values) {
+          console.log(`${logPrefix} Attempting to restore gene metadata from inlineRangeSliderData`)
+          
+          // Create the metadata vector structure
+          const minVal = this.visualizationController.dataManager?.safeMin(sliderData.values) ?? Math.min(...sliderData.values)
+          const maxVal = this.visualizationController.dataManager?.safeMax(sliderData.values) ?? Math.max(...sliderData.values)
+          
+          if (!this.visualizationController.loadedMetadataVectors) {
+            this.visualizationController.loadedMetadataVectors = {}
+          }
+          
+          // Extract gene ID from metadata ID (gene_219 -> 219)
+          const geneId = this.metadataIdValue.replace('gene_', '')
+          
+          this.visualizationController.loadedMetadataVectors[this.metadataIdValue] = {
+            id: this.metadataIdValue,
+            name: `Gene ${geneId}`,
+            display_name: `Gene ${geneId}`,
+            data_type: 'NUMERIC',
+            values: sliderData.values,
+            compression_info: {
+              min_val: minVal,
+              max_val: maxVal,
+              data_type: 'NUMERIC'
+            },
+            nber_rows: 1,
+            nber_cols: sliderData.values.length
+          }
+          
+          console.log(`${logPrefix} Restored gene metadata in loadedMetadataVectors: ${this.metadataIdValue}`)
+          console.log(`${logPrefix} loadedMetadataVectors keys after restore:`, Object.keys(this.visualizationController.loadedMetadataVectors))
+        } else {
+          console.error(`❌ ${logPrefix} Cannot restore - inlineRangeSliderData also missing ${this.metadataIdValue}`)
+        }
+      }
+      
+      // Check renderer state before filtering (for debugging)
+      console.log(`${logPrefix} Renderer state BEFORE updateCellFiltering (gene filtering):`, {
+        hasReglRenderer: !!this.visualizationController.reglRenderer,
+        rendererInstanceId: this.visualizationController.reglRenderer?.instanceId || 'none',
+        numPoints: this.visualizationController.reglRenderer?.numPoints || 0,
+        hasPositions: !!this.visualizationController.reglRenderer?.positions,
+        positionsLength: this.visualizationController.reglRenderer?.positions?.length || 0,
+        hasCurrentCoordinates: !!this.visualizationController.currentCoordinates,
+        currentCoordinatesLength: this.visualizationController.currentCoordinates?.length || 0
+      })
     }
     
     // Trigger unified filtering (which will update ALL counts and render)
@@ -486,10 +699,13 @@ export default class extends Controller {
     if (this.dataManager.updateCellFiltering) {
       // Pass shouldUpdateColors=true if we're adapting the color range
       const shouldUpdateColors = this.adaptColorRangeEnabled
+      console.log(`${logPrefix} Calling updateCellFiltering with shouldUpdateColors:`, shouldUpdateColors)
       this.dataManager.updateCellFiltering(shouldUpdateColors)
+    } else {
+      console.error(`❌ ${logPrefix} dataManager.updateCellFiltering is not available!`)
     }
     const filterTime = performance.now() - filterStart
-    console.log(`🚀 [PERF] updateCellFiltering took ${filterTime.toFixed(2)}ms`)
+    console.log(`${logPrefix} updateCellFiltering took ${filterTime.toFixed(2)}ms`)
     
     // Only update the color legend if we're adapting the color range
     // (otherwise the legend doesn't change, so no need to redraw)
@@ -531,8 +747,24 @@ export default class extends Controller {
     console.log('🎨 Drawing density plot with', sliderData.values.length, 'values')
     
     const canvas = this.canvasTarget
+    if (!canvas) {
+      console.log('🎨 Canvas target not found, returning')
+      return
+    }
+    
     const ctx = canvas.getContext('2d')
     const rect = canvas.getBoundingClientRect()
+    
+    // Check if canvas is visible (has non-zero dimensions)
+    if (rect.width === 0 || rect.height === 0) {
+      console.log('🎨 Canvas has zero dimensions, retrying after a short delay')
+      // Retry after a short delay in case the element is becoming visible
+      setTimeout(() => {
+        this.drawDensityPlot()
+      }, 100)
+      return
+    }
+    
     const dpr = window.devicePixelRatio || 1
     
     // Set canvas size

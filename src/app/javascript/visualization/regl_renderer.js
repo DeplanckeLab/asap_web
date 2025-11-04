@@ -7,6 +7,18 @@ import createREGL from 'regl'
 
 export class ReglRenderer {
   constructor(canvas) {
+    // Generate unique ID for this renderer instance to track scope issues
+    this.instanceId = Math.random().toString(36).substring(7)
+    console.log(`🚀 [ReGL] Creating new ReglRenderer instance - ID: ${this.instanceId}`)
+    console.log(`🚀 [ReGL] Canvas element:`, canvas)
+    console.log(`🚀 [ReGL] Canvas dimensions: ${canvas.width}x${canvas.height}`)
+    console.log(`🚀 [ReGL] Canvas parent:`, canvas.parentElement)
+    console.trace(`🚀 [ReGL] ReglRenderer constructor call stack for instance ${this.instanceId}:`)
+    
+    // Store creation timestamp for debugging
+    this.createdAt = Date.now()
+    this.createdAtTime = new Date().toISOString()
+    
     this.canvas = canvas
     this.regl = null
     this.drawPoints = null
@@ -232,8 +244,23 @@ export class ReglRenderer {
   updateColors(colorMap) {
     const startTime = performance.now()
     
+    console.log(`🎨 [ReGL] updateColors called with ${colorMap.size} color updates`)
+    console.log(`🎨 [ReGL] Renderer state: numPoints=${this.numPoints}, colorsLength=${this.colors?.length || 0}, hasColorBuffer=${!!this.colorBuffer}`)
+    
+    if (!this.colors || !this.colorBuffer) {
+      console.error('🎨 [ReGL] ERROR: Cannot update colors - colors array or colorBuffer missing')
+      return this
+    }
+    
+    let transparentCount = 0
+    let visibleCount = 0
+    const sampleUpdates = []
+    
     colorMap.forEach((hexColor, index) => {
-      if (index >= this.numPoints) return
+      if (index >= this.numPoints) {
+        console.warn(`🎨 [ReGL] WARNING: Index ${index} >= numPoints ${this.numPoints}, skipping`)
+        return
+      }
       
       const offset = index * 4
       
@@ -243,6 +270,11 @@ export class ReglRenderer {
         this.colors[offset + 1] = 0
         this.colors[offset + 2] = 0
         this.colors[offset + 3] = 0 // Fully transparent
+        transparentCount++
+        
+        if (sampleUpdates.length < 5 && index < 100) {
+          sampleUpdates.push(`idx${index}: transparent (0x00000000)`)
+        }
       }
       // Check if this is an RGBA color (> 0xFFFFFF means 32-bit RGBA)
       else if (hexColor > 0xFFFFFF) {
@@ -256,6 +288,11 @@ export class ReglRenderer {
         this.colors[offset + 1] = g
         this.colors[offset + 2] = b
         this.colors[offset + 3] = a
+        visibleCount++
+        
+        if (sampleUpdates.length < 5 && index < 100) {
+          sampleUpdates.push(`idx${index}: rgba(${r.toFixed(2)},${g.toFixed(2)},${b.toFixed(2)},${a.toFixed(2)})`)
+        }
       } else {
         // RGB format: 0xRRGGBB - set alpha to 1.0 (fully opaque)
         const r = ((hexColor >> 16) & 0xFF) / 255
@@ -266,10 +303,34 @@ export class ReglRenderer {
         this.colors[offset + 1] = g
         this.colors[offset + 2] = b
         this.colors[offset + 3] = 1.0 // Always set to fully opaque for normal colors
+        visibleCount++
+        
+        if (sampleUpdates.length < 5 && index < 100) {
+          sampleUpdates.push(`idx${index}: rgb(${r.toFixed(2)},${g.toFixed(2)},${b.toFixed(2)}) alpha=1.0`)
+        }
       }
     })
     
+    console.log(`🎨 [ReGL] Color updates: ${visibleCount} visible, ${transparentCount} hidden`)
+    console.log(`🎨 [ReGL] Sample color updates:`, sampleUpdates.slice(0, 5))
+    
+    console.log(`🎨 [ReGL] Updating color buffer with subdata...`)
     this.colorBuffer.subdata(this.colors)
+    console.log(`🎨 [ReGL] Color buffer updated`)
+    
+    // Verify a few color values after update
+    const verifyIndices = [0, 100, 1000]
+    console.log(`🎨 [ReGL] Verifying colors after update:`)
+    verifyIndices.forEach(idx => {
+      if (idx < this.numPoints) {
+        const offset = idx * 4
+        const r = this.colors[offset]
+        const g = this.colors[offset + 1]
+        const b = this.colors[offset + 2]
+        const a = this.colors[offset + 3]
+        console.log(`🎨 [ReGL]   idx ${idx}: rgba(${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)},${a.toFixed(3)})`)
+      }
+    })
     
     const elapsed = performance.now() - startTime
     console.log(`🎨 [ReGL] Updated ${colorMap.size.toLocaleString()} colors in ${elapsed.toFixed(2)}ms`)
@@ -332,39 +393,50 @@ export class ReglRenderer {
    */
   render() {
     console.log('🚀 [ReGL] render() called')
-    console.log('🚀 [ReGL] positionBuffer:', !!this.positionBuffer)
-    console.log('🚀 [ReGL] colorBuffer:', !!this.colorBuffer)
-    console.log('🚀 [ReGL] numPoints:', this.numPoints)
     
     if (!this.positionBuffer || !this.colorBuffer) {
       console.log('🚀 [ReGL] Missing buffers, skipping render')
+      console.log('🚀 [ReGL] Buffer state:', {
+        hasPositionBuffer: !!this.positionBuffer,
+        hasColorBuffer: !!this.colorBuffer,
+        numPoints: this.numPoints
+      })
       return
     }
     
-    console.log('🚀 [ReGL] Clearing canvas...')
-    // Clear canvas to black background for debugging
+    // Calculate count from positions if numPoints is not set or is 0
+    let count = this.numPoints
+    if (!count || count === 0) {
+      if (this.positions && this.positions.length > 0) {
+        // positions is Float32Array: [x1, y1, x2, y2, ...], so count = length / 2
+        count = this.positions.length / 2
+        console.log('🚀 [ReGL] Calculated count from positions array:', count)
+        // Update numPoints for future use
+        this.numPoints = count
+      } else {
+        console.log('🚀 [ReGL] Cannot determine count - numPoints is 0 and positions not available')
+        return
+      }
+    }
+    
+    console.log(`🚀 [ReGL] Rendering ${count} points with pointSize=${this.pointSize}`)
+    console.log(`🚀 [ReGL] Canvas size: ${this.canvas.width}x${this.canvas.height}`)
+    
+    // Clear canvas
     this.regl.clear({
       color: [1, 1, 1, 1], // White background
       depth: 1
     })
     
-    console.log('🚀 [ReGL] Drawing points...')
-    console.log('🚀 [ReGL] Point size:', this.pointSize)
-    console.log('🚀 [ReGL] Canvas size:', { width: this.canvas.width, height: this.canvas.height })
-    
-    // Debug: Check ReGL viewport
-    const viewport = this.regl._gl.getParameter(this.regl._gl.VIEWPORT)
-    console.log('🚀 [ReGL] Viewport:', viewport)
-    
+    console.log('🚀 [ReGL] Calling drawPoints...')
     // Draw points (positions are already in screen/pixel coordinates)
     this.drawPoints({
       positions: this.positionBuffer,
       colors: this.colorBuffer,
-      count: this.numPoints,
+      count: count,
       pointSize: this.pointSize
     })
-    
-    console.log('🚀 [ReGL] Render completed')
+    console.log('🚀 [ReGL] drawPoints completed')
   }
   
   /**

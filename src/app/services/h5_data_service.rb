@@ -158,15 +158,29 @@ class H5DataService
 
   # Extract the full metadata vector for all cells (one value per cell)
   def self.get_metadata_vector(h5_file, metadata_path)
+    error_details = {}
     begin
       # Use ASAP.jar to extract the full metadata vector (with values)
       cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -meta #{metadata_path} -loom #{h5_file}"
       Rails.logger.info "Executing ASAP.jar command: #{cmd}"
-      result = `#{cmd}`
-      Rails.logger.info "Command exit status: #{$?.exitstatus}"
+      file_exists = File.exist?(h5_file)
+      Rails.logger.info "File exists? #{file_exists}"
+      error_details[:file_exists] = file_exists
+      error_details[:file_path] = h5_file
+      
+      # Use Open3.capture3 to properly capture stdout and stderr
+      stdout, stderr, status = Open3.capture3(cmd)
+      result = stdout
+      
+      Rails.logger.info "Command exit status: #{status.exitstatus}"
       Rails.logger.info "Command output length: #{result.length} characters"
+      Rails.logger.info "Command stderr: #{stderr}" if stderr && !stderr.empty?
+      
+      error_details[:exit_status] = status.exitstatus
+      error_details[:stdout_length] = result.length
+      error_details[:stderr] = stderr if stderr && !stderr.empty?
 
-      if $?.success?
+      if status.success?
         begin
           # Parse JSON - handle both single vectors and coordinate pairs
           json_data = JSON.parse(result)
@@ -190,8 +204,14 @@ class H5DataService
               end
             when 1
               # Single vector - return as array of single values
+              # Handle case where values might be nested in another array
               single_vector = json_data['values']
               if single_vector.is_a?(Array)
+                # Check if it's nested: [[values]] vs [values]
+                if single_vector.length == 1 && single_vector[0].is_a?(Array)
+                  Rails.logger.info "Detected nested array format, unwrapping"
+                  single_vector = single_vector[0]
+                end
                 Rails.logger.info "Successfully extracted metadata vector with #{single_vector.length} single values from #{metadata_path}"
                 return single_vector
               else
@@ -199,30 +219,90 @@ class H5DataService
                 return []
               end
             else
-              Rails.logger.error "Unexpected nber_rows value: #{json_data['nber_rows']} (expected 1 or 2)"
+              nber_rows = json_data['nber_rows']
+              nber_cols = json_data['nber_cols'] || 0
+              
+              # Handle case where nber_rows equals the number of genes (row metadata)
+              # For row attributes like _StableID, nber_rows is the number of rows (genes)
+              # and values should be a flat array with one value per row
+              if json_data['values'].is_a?(Array)
+                if nber_rows > 2 && nber_cols == 1
+                  # This is row metadata: nber_rows = number of genes, nber_cols = 1 (one value per gene)
+                  # Values should be a flat array: [val1, val2, val3, ...]
+                  Rails.logger.info "Detected row metadata format: nber_rows=#{nber_rows} (genes), nber_cols=#{nber_cols}"
+                  
+                  # Check if values is nested or flat
+                  if json_data['values'].length == 1 && json_data['values'][0].is_a?(Array)
+                    # Nested: [[val1, val2, ...]]
+                    single_vector = json_data['values'][0]
+                    Rails.logger.info "Unwrapping nested array, extracted #{single_vector.length} values"
+                    return single_vector
+                  elsif json_data['values'].all? { |v| !v.is_a?(Array) }
+                    # Flat array: [val1, val2, ...]
+                    Rails.logger.info "Using flat array directly, extracted #{json_data['values'].length} values"
+                    return json_data['values']
+                  else
+                    # Mixed or unexpected format
+                    Rails.logger.warn "Unexpected mixed format in values array"
+                    # Try to flatten it
+                    flattened = json_data['values'].flatten
+                    Rails.logger.info "Flattened array, extracted #{flattened.length} values"
+                    return flattened
+                  end
+                else
+                  # Unknown format, log and try to handle
+                  Rails.logger.warn "Unexpected nber_rows value: #{nber_rows}, nber_cols: #{nber_cols}"
+                  Rails.logger.warn "Values array length: #{json_data['values'].length}"
+                  Rails.logger.warn "First value type: #{json_data['values'][0]&.class}"
+                  
+                  # Try to extract a flat vector if possible
+                  if json_data['values'].all? { |v| !v.is_a?(Array) }
+                    Rails.logger.warn "All values are non-array, using directly"
+                    return json_data['values']
+                  elsif json_data['values'].length == 1 && json_data['values'][0].is_a?(Array)
+                    Rails.logger.warn "Single nested array, unwrapping"
+                    return json_data['values'][0]
+                  end
+                end
+              end
+              
+              error_msg = "Unexpected nber_rows value: #{nber_rows} (expected 1 or 2, or row metadata format)"
+              Rails.logger.error error_msg
               Rails.logger.error "JSON structure: #{json_data.keys}" if json_data.is_a?(Hash)
-              Rails.logger.error "Raw output: #{result[0..500]}..." # Show first 500 chars
-              return []
+              Rails.logger.error "nber_cols: #{nber_cols}"
+              Rails.logger.error "Values length: #{json_data['values']&.length}"
+              Rails.logger.error "Values first element type: #{json_data['values']&.first&.class}"
+              raise "Metadata extraction failed: #{error_msg}. JSON keys: #{json_data.keys.inspect}. Check Rails logs for full details."
             end
           else
-            Rails.logger.error "Invalid JSON format: 'values' is not an array"
+            error_msg = "Invalid JSON format: 'values' is not an array"
+            Rails.logger.error error_msg
             Rails.logger.error "JSON structure: #{json_data.keys}" if json_data.is_a?(Hash)
             Rails.logger.error "values type: #{json_data['values']&.class}"
             Rails.logger.error "Raw output: #{result[0..500]}..." # Show first 500 chars
-            return []
+            raise "Metadata extraction failed: #{error_msg}. Check Rails logs for full details."
           end
         rescue JSON::ParserError => e
-          Rails.logger.error "Failed to parse JSON from metadata vector extraction: #{e.message}"
-          Rails.logger.error "Raw output: #{result}"
-          return []
+          error_msg = "Failed to parse JSON from metadata vector extraction: #{e.message}"
+          Rails.logger.error error_msg
+          Rails.logger.error "Raw output: #{result[0..1000]}" # First 1000 chars
+          raise "Metadata extraction failed: #{error_msg}. Raw output preview: #{result[0..200]}. Check Rails logs for full details."
         end
       else
-        Rails.logger.error "Failed to extract metadata vector from #{metadata_path}: #{result}"
-        []
+        error_msg = "ASAP.jar command failed (exit status: #{status.exitstatus})"
+        Rails.logger.error error_msg
+        Rails.logger.error "Command: #{cmd}"
+        Rails.logger.error "STDOUT: #{stdout[0..500]}" # First 500 chars
+        Rails.logger.error "STDERR: #{stderr}" if stderr && !stderr.empty?
+        Rails.logger.error "File path: #{h5_file}, exists: #{File.exist?(h5_file)}"
+        error_details[:error] = error_msg
+        error_details[:stdout_preview] = stdout[0..500] if stdout
+        raise "Metadata extraction failed: #{error_msg}. STDERR: #{stderr}. Check Rails logs for full details."
       end
     rescue => e
       Rails.logger.error "Error extracting metadata vector from #{metadata_path}: #{e.message}"
-      []
+      Rails.logger.error e.backtrace.join("\n")
+      raise e
     end
   end
 end

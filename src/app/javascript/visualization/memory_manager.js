@@ -46,7 +46,7 @@ export class MemoryManager {
   // Initialize IndexedDB for metadata storage
   initializeIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open('ASAPMetadataDB', 1)
+      const request = indexedDB.open('ASAPMetadataDB', 2)
       
       request.onerror = () => {
         console.error('❌ [INDEXEDDB] Failed to open database')
@@ -61,6 +61,10 @@ export class MemoryManager {
       
       request.onupgradeneeded = (event) => {
         const db = event.target.result
+        const oldVersion = event.oldVersion
+        const newVersion = event.newVersion
+        
+        console.log(`📦 [INDEXEDDB] Upgrading database from version ${oldVersion} to ${newVersion}`)
         
         // Create object store for metadata
         if (!db.objectStoreNames.contains('metadata')) {
@@ -73,6 +77,13 @@ export class MemoryManager {
         if (!db.objectStoreNames.contains('coordinates')) {
           const coordinatesStore = db.createObjectStore('coordinates', { keyPath: 'id' })
           console.log('✅ [INDEXEDDB] Coordinates store created')
+        }
+        
+        // Create object store for gene expression data (version 2+)
+        if (!db.objectStoreNames.contains('geneExpression')) {
+          const geneExpressionStore = db.createObjectStore('geneExpression', { keyPath: 'id' })
+          geneExpressionStore.createIndex('timestamp', 'timestamp', { unique: false })
+          console.log('✅ [INDEXEDDB] Gene expression store created')
         }
       }
     })
@@ -635,6 +646,128 @@ export class MemoryManager {
         reject(clearRequest.error)
       }
     })
+  }
+
+  // Store gene expression data in IndexedDB
+  async storeGeneExpressionInIndexedDB(geneId, expressionData) {
+    if (!this.controller.db) return false
+    
+    try {
+      const transaction = this.controller.db.transaction(['geneExpression'], 'readwrite')
+      const objectStore = transaction.objectStore('geneExpression')
+      
+      // Store expression values as JSON (they're already numbers, not binary)
+      const dataToStore = {
+        id: `gene_${geneId}`,
+        geneId: geneId,
+        symbol: expressionData.symbol || '',
+        values: expressionData.values,
+        stats: expressionData.stats || {},
+        geneIndex: expressionData.geneIndex,
+        stableId: expressionData.stableId,
+        loomFile: this.controller.currentLoomFile || this.controller.getCurrentLoomFileForRequest?.() || 'parsing/output.loom',
+        timestamp: Date.now()
+      }
+      
+      objectStore.put(dataToStore)
+      
+      return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => {
+          console.log(`💾 Stored gene expression ${geneId} in IndexedDB (${expressionData.values?.length || 0} values)`)
+          resolve(true)
+        }
+        transaction.onerror = () => {
+          console.error(`💾 Failed to store gene expression ${geneId} in IndexedDB`)
+          reject(false)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error storing gene expression in IndexedDB:', error)
+      return false
+    }
+  }
+
+  // Load gene expression data from IndexedDB
+  async loadGeneExpressionFromIndexedDB(geneId) {
+    if (!this.controller.db) {
+      console.log(`💾 IndexedDB not available for gene expression ${geneId}`)
+      return null
+    }
+    
+    try {
+      const transaction = this.controller.db.transaction(['geneExpression'], 'readonly')
+      const objectStore = transaction.objectStore('geneExpression')
+      const request = objectStore.get(`gene_${geneId}`)
+      
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+          if (request.result) {
+            const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
+            const storedLoom = request.result.loomFile || 'parsing/output.loom'
+            
+            console.log(`💾 IndexedDB lookup for gene expression ${geneId}:`, {
+              found: true,
+              storedLoomFile: storedLoom,
+              currentLoomFile: currentLoom,
+              match: storedLoom === currentLoom
+            })
+            
+            if (storedLoom === currentLoom) {
+              console.log(`💾 ✅ Loaded gene expression ${geneId} from IndexedDB (disk storage)`)
+              resolve({
+                values: request.result.values,
+                stats: request.result.stats || {},
+                geneIndex: request.result.geneIndex,
+                stableId: request.result.stableId,
+                symbol: request.result.symbol
+              })
+            } else {
+              console.log(`💾 ⚠️ Loom file mismatch, ignoring cached gene expression for ${geneId}`)
+              resolve(null)
+            }
+          } else {
+            console.log(`💾 Gene expression ${geneId} not found in IndexedDB`)
+            resolve(null)
+          }
+        }
+        request.onerror = () => {
+          console.error(`💾 Failed to load gene expression ${geneId} from IndexedDB:`, request.error)
+          resolve(null)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error loading gene expression from IndexedDB:', error)
+      return null
+    }
+  }
+
+  // Check if gene expression data is in IndexedDB
+  async checkGeneExpressionInDatabase(geneId) {
+    if (!this.controller.db) return false
+    
+    try {
+      const transaction = this.controller.db.transaction(['geneExpression'], 'readonly')
+      const objectStore = transaction.objectStore('geneExpression')
+      const request = objectStore.get(`gene_${geneId}`)
+      
+      return new Promise((resolve) => {
+        request.onsuccess = () => {
+          if (request.result) {
+            const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
+            const storedLoom = request.result.loomFile || 'parsing/output.loom'
+            resolve(storedLoom === currentLoom)
+          } else {
+            resolve(false)
+          }
+        }
+        request.onerror = () => {
+          resolve(false)
+        }
+      })
+    } catch (error) {
+      console.error('💾 Error checking gene expression in database:', error)
+      return false
+    }
   }
 }
 

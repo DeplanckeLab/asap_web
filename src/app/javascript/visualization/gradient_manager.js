@@ -572,7 +572,6 @@ export class GradientManager {
       const point = sorted[i]
       if (Math.abs(point.position - normalizedValue) < 0.0001) {
         // Exact match (or very close) - return this point's color directly
-        console.log(`🎨 getColorFromGradient: Exact match at position ${point.position} for normalizedValue ${normalizedValue}`)
         return point.color
       }
       

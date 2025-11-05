@@ -124,18 +124,31 @@
                     <i class="fas fa-file-download" style="font-size: 14px;"></i>
                   </button>
                   
-                  <!-- Water Drop Button -->
-                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
-                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
-                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
-                          data-metadata-name="<%= metadata.display_name %>"
-                          data-metadata-id="<%= metadata.id %>"
-                          data-metadata-type="<%= metadata.data_type.name %>"
-                          data-active="false"
-                          onclick="event.stopPropagation()">
-                    <i class="fas fa-palette" style="font-size: 16px;"></i>
-                  </button>
+                  <!-- Button Group: X button and Coloring -->
+                  <div style="display: flex; flex-direction: row; gap: 4px; align-items: center;">
+                    <!-- X Button -->
+                    <button class="categorical-x-btn"
+                            data-metadata-id="<%= metadata.id %>"
+                            style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
+                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            title="X axis"
+                            onclick="event.stopPropagation()">
+                      x
+                    </button>
+                    <!-- Water Drop Button -->
+                    <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                            onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                            onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                            data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                            data-metadata-name="<%= metadata.display_name %>"
+                            data-metadata-id="<%= metadata.id %>"
+                            data-metadata-type="<%= metadata.data_type.name %>"
+                            data-active="false"
+                            onclick="event.stopPropagation()">
+                      <i class="fas fa-palette" style="font-size: 16px;"></i>
+                    </button>
+                  </div>
                 </div>
                 <!-- Categories (initially hidden) -->
                 <div style="padding-left: 32px; padding-bottom: 8px; display: none;">
@@ -343,18 +356,41 @@
                     <i class="fas fa-file-download" style="font-size: 14px;"></i>
                   </button>
                   
-                  <!-- Water Drop Button -->
-                  <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
-                          onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
-                          onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                          data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
-                          data-metadata-name="<%= metadata.display_name %>"
-                          data-metadata-id="<%= metadata.id %>"
-                          data-metadata-type="NUMERIC"
-                          data-active="false"
-                          onclick="event.stopPropagation()">
-                    <i class="fas fa-palette" style="font-size: 16px;"></i>
-                  </button>
+                  <!-- Button Group: X, Y buttons and Coloring -->
+                  <div style="display: flex; flex-direction: row; gap: 4px; align-items: center;">
+                    <!-- X Button -->
+                    <button class="continuous-x-btn"
+                            data-metadata-id="<%= metadata.id %>"
+                            style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
+                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            title="X axis"
+                            onclick="event.stopPropagation()">
+                      x
+                    </button>
+                    <!-- Y Button -->
+                    <button class="continuous-y-btn"
+                            data-metadata-id="<%= metadata.id %>"
+                            style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
+                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            title="Y axis"
+                            onclick="event.stopPropagation()">
+                      y
+                    </button>
+                    <!-- Water Drop Button -->
+                    <button style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                            onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                            onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                            data-action="click->visualization#waterDropClicked mouseenter->visualization#preloadMetadataVector mouseleave->visualization#cancelPreload"
+                            data-metadata-name="<%= metadata.display_name %>"
+                            data-metadata-id="<%= metadata.id %>"
+                            data-metadata-type="NUMERIC"
+                            data-active="false"
+                            onclick="event.stopPropagation()">
+                      <i class="fas fa-palette" style="font-size: 16px;"></i>
+                    </button>
+                  </div>
                 </div>
                 <!-- Range Slider Section (initially hidden) -->
                 <div class="metadata-range-section" style="padding: 12px; border-top: 1px solid #f3f4f6; display: none; background-color: #fafafa;">

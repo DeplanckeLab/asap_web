@@ -1138,22 +1138,45 @@ export class GeneManager {
           <i class="fas fa-file-download" style="font-size: 14px;"></i>
         </button>
         
-        <!-- Water Drop Button (Coloring) -->
-        <button class="gene-color-btn"
-                data-action="click->visualization#geneWaterDropClicked"
-                data-gene-id="${gene.stableId}"
-                data-gene-name="${gene.symbol}"
-                data-metadata-id="gene_${gene.stableId}"
-                data-metadata-name="${gene.symbol}"
-                data-metadata-type="NUMERIC"
-                data-active="false"
-                style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
-                onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
-                onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
-                title="Color by expression"
-                onclick="event.stopPropagation()">
-          <i class="fas fa-palette" style="font-size: 16px;"></i>
-        </button>
+        <!-- Button Group: X, Y buttons and Coloring -->
+        <div style="display: flex; flex-direction: row; gap: 4px; align-items: center; margin-right: 4px;">
+          <!-- X Button -->
+          <button class="gene-x-btn"
+                  data-gene-id="${gene.stableId}"
+                  style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
+                  onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                  onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                  title="X axis"
+                  onclick="event.stopPropagation()">
+            x
+          </button>
+          <!-- Y Button -->
+          <button class="gene-y-btn"
+                  data-gene-id="${gene.stableId}"
+                  style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
+                  onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                  onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                  title="Y axis"
+                  onclick="event.stopPropagation()">
+            y
+          </button>
+          <!-- Water Drop Button (Coloring) -->
+          <button class="gene-color-btn"
+                  data-action="click->visualization#geneWaterDropClicked"
+                  data-gene-id="${gene.stableId}"
+                  data-gene-name="${gene.symbol}"
+                  data-metadata-id="gene_${gene.stableId}"
+                  data-metadata-name="${gene.symbol}"
+                  data-metadata-type="NUMERIC"
+                  data-active="false"
+                  style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                  onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }" 
+                  onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
+                  title="Color by expression"
+                  onclick="event.stopPropagation()">
+            <i class="fas fa-palette" style="font-size: 16px;"></i>
+          </button>
+        </div>
         
         <!-- Remove Button -->
         <button 

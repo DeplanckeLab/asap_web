@@ -5067,9 +5067,64 @@ export default class extends Controller {
     // Clear cached canvas rect
     this.cachedCanvasRect = null
     
+    // Check if filtering is active - if so, add white overlay to hide canvas during resize
+    const hasActiveFiltering = (preservedSelectedCategories && Object.keys(preservedSelectedCategories).length > 0) ||
+                               (preservedSelectedRanges && Object.keys(preservedSelectedRanges).length > 0)
+    
+    // Restore filtering state BEFORE initialization
+    if (hasActiveFiltering) {
+      // Restore selectedCategories
+      if (preservedSelectedCategories) {
+        this.selectedCategories = {}
+        for (const [metadataId, categorySet] of Object.entries(preservedSelectedCategories)) {
+          this.selectedCategories[metadataId] = new Set(categorySet)
+        }
+        console.log('🔄 [RESIZE] Restored selectedCategories for', Object.keys(this.selectedCategories).length, 'metadata')
+      }
+      
+      // Restore selectedRanges
+      if (preservedSelectedRanges) {
+        this.selectedRanges = { ...preservedSelectedRanges }
+        console.log('🔄 [RESIZE] Restored selectedRanges for', Object.keys(this.selectedRanges).length, 'metadata')
+      }
+    }
+    
     // Reinitialize the scatter plot from scratch - this will create new canvas/renderer with correct size
     console.log('🔄 [RESIZE] Reinitializing scatter plot from scratch with', this.currentCoordinates.length, 'coordinates...')
     await this.rendererManager.initializeScatterPlot(this.currentCoordinates)
+    
+    // Add white overlay AFTER initialization to cover canvas during resize (container might be cleared during init)
+    let resizeOverlay = null
+    if (hasActiveFiltering) {
+      console.log('🔄 [RESIZE] Adding white overlay to prevent glitch during resize...')
+      const plotContainer = document.querySelector('.plot-container')
+      if (plotContainer) {
+        // Remove any existing overlay first
+        const existingOverlay = document.getElementById('resize-filter-overlay')
+        if (existingOverlay) {
+          existingOverlay.remove()
+        }
+        
+        // Create white overlay div
+        resizeOverlay = document.createElement('div')
+        resizeOverlay.id = 'resize-filter-overlay'
+        // Ensure plot container has position relative for absolute positioning to work
+        if (getComputedStyle(plotContainer).position === 'static') {
+          plotContainer.style.position = 'relative'
+        }
+        resizeOverlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; background-color: white; z-index: 99999; pointer-events: none;'
+        plotContainer.appendChild(resizeOverlay)
+        console.log('🔄 [RESIZE] White overlay added, plotContainer:', {
+          container: plotContainer,
+          containerPosition: getComputedStyle(plotContainer).position,
+          overlay: resizeOverlay,
+          overlayStyle: resizeOverlay.style.cssText,
+          containerChildren: plotContainer.children.length
+        })
+      } else {
+        console.warn('🔄 [RESIZE] Plot container not found!')
+      }
+    }
     
     // Restore preserved bounds and reapply them
     if (preservedBounds) {
@@ -5095,7 +5150,11 @@ export default class extends Controller {
         
         // Update positions in renderer with preserved bounds
         this.reglRenderer.setPositions(screenCoordinates)
-        this.reglRenderer.render()
+        
+        // Don't render yet if filtering is active - wait for filtering to be applied
+        if (!preservedSelectedCategories && !preservedSelectedRanges) {
+          this.reglRenderer.render()
+        }
         
         // Redraw overlay elements with preserved bounds
         if (this.rendererManager) {
@@ -5119,42 +5178,49 @@ export default class extends Controller {
       }
     }
     
-    // Restore filtering state and reapply filtering
-    if (preservedSelectedCategories || preservedSelectedRanges) {
-      console.log('🔄 [RESIZE] Restoring filtering state...')
-      
-      // Restore selectedCategories
-      if (preservedSelectedCategories) {
-        this.selectedCategories = {}
-        for (const [metadataId, categorySet] of Object.entries(preservedSelectedCategories)) {
-          this.selectedCategories[metadataId] = new Set(categorySet)
-        }
-        console.log('🔄 [RESIZE] Restored selectedCategories for', Object.keys(this.selectedCategories).length, 'metadata')
-      }
-      
-      // Restore selectedRanges
-      if (preservedSelectedRanges) {
-        this.selectedRanges = { ...preservedSelectedRanges }
-        console.log('🔄 [RESIZE] Restored selectedRanges for', Object.keys(this.selectedRanges).length, 'metadata')
-      }
-      
-      // Reapply filtering - this will update visibility based on preserved filters
-      if (this.dataManager) {
-        console.log('🔄 [RESIZE] Reapplying filtering...')
-        this.dataManager.updateCellFiltering()
-      }
-    }
-    
-    // Restore and reapply coloring
+    // Restore metadata vector reference before filtering (needed for filtering logic)
     if (preservedMetadataVector && preservedMetadataId) {
-      console.log('🔄 [RESIZE] Restoring coloring state...')
       this.currentMetadataVector = preservedMetadataVector
       this.currentMetadataId = preservedMetadataId
-      
-      // Reapply coloring
-      if (this.reglRenderer) {
-        console.log('🔄 [RESIZE] Reapplying coloring...')
-        this.renderPointsWithCurrentColoring()
+    }
+    
+    // Now apply filtering (will update visibility and render)
+    if (hasActiveFiltering) {
+      // Reapply filtering - this will update visibility based on preserved filters
+      if (this.dataManager) {
+        console.log('🔄 [RESIZE] Reapplying filtering after bounds restoration...')
+        // Trigger filtering update (this uses requestAnimationFrame internally)
+        this.dataManager.updateCellFiltering()
+        
+        // Wait for the filtering's internal requestAnimationFrame to complete
+        // Then apply coloring and remove overlay
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            // After filtering is applied, restore coloring if needed
+            if (preservedMetadataVector && preservedMetadataId && this.reglRenderer) {
+              console.log('🔄 [RESIZE] Reapplying coloring after filtering...')
+              this.renderPointsWithCurrentColoring()
+            }
+            
+            // Remove white overlay after both filtering and coloring are applied
+            // Use one more requestAnimationFrame to ensure rendering is complete
+            requestAnimationFrame(() => {
+              if (resizeOverlay && resizeOverlay.parentNode) {
+                resizeOverlay.remove()
+                console.log('🔄 [RESIZE] White overlay removed after filtering and coloring applied')
+              }
+            })
+          })
+        })
+      }
+    } else {
+      // No filtering - restore coloring
+      if (preservedMetadataVector && preservedMetadataId) {
+        console.log('🔄 [RESIZE] Restoring coloring state (no filtering)...')
+        if (this.reglRenderer) {
+          console.log('🔄 [RESIZE] Reapplying coloring...')
+          this.renderPointsWithCurrentColoring()
+        }
       }
     }
     

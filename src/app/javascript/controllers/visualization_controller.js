@@ -5027,14 +5027,27 @@ export default class extends Controller {
       return
     }
     
-    // Preserve current state (bounds for pan/zoom, displayOrder for filtering)
+    // Preserve current state (bounds for pan/zoom, displayOrder for filtering, filtering/coloring state)
     const preservedBounds = this.currentBounds
     const preservedDisplayOrder = this.displayOrder ? [...this.displayOrder] : null
     const preservedMetadataVector = this.currentMetadataVector
     const preservedMetadataId = this.currentMetadataId
     
+    // Preserve filtering state (selectedCategories and selectedRanges)
+    const preservedSelectedCategories = this.selectedCategories && Object.keys(this.selectedCategories).length > 0 ? {} : null
+    if (preservedSelectedCategories && this.selectedCategories) {
+      for (const [metadataId, categorySet] of Object.entries(this.selectedCategories)) {
+        preservedSelectedCategories[metadataId] = new Set(categorySet)
+      }
+    }
+    const preservedSelectedRanges = this.selectedRanges && Object.keys(this.selectedRanges).length > 0 ? { ...this.selectedRanges } : null
+    
     console.log('🔄 [RESIZE] Preserved bounds:', preservedBounds)
     console.log('🔄 [RESIZE] Preserved displayOrder length:', preservedDisplayOrder ? preservedDisplayOrder.length : null)
+    console.log('🔄 [RESIZE] Preserved filtering state:', {
+      selectedCategories: preservedSelectedCategories ? Object.keys(preservedSelectedCategories).length : 0,
+      selectedRanges: preservedSelectedRanges ? Object.keys(preservedSelectedRanges).length : 0
+    })
     
     // Force destroy existing renderer to ensure complete reinitialization
     if (this.reglRenderer) {
@@ -5103,6 +5116,45 @@ export default class extends Controller {
         }
         
         console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
+      }
+    }
+    
+    // Restore filtering state and reapply filtering
+    if (preservedSelectedCategories || preservedSelectedRanges) {
+      console.log('🔄 [RESIZE] Restoring filtering state...')
+      
+      // Restore selectedCategories
+      if (preservedSelectedCategories) {
+        this.selectedCategories = {}
+        for (const [metadataId, categorySet] of Object.entries(preservedSelectedCategories)) {
+          this.selectedCategories[metadataId] = new Set(categorySet)
+        }
+        console.log('🔄 [RESIZE] Restored selectedCategories for', Object.keys(this.selectedCategories).length, 'metadata')
+      }
+      
+      // Restore selectedRanges
+      if (preservedSelectedRanges) {
+        this.selectedRanges = { ...preservedSelectedRanges }
+        console.log('🔄 [RESIZE] Restored selectedRanges for', Object.keys(this.selectedRanges).length, 'metadata')
+      }
+      
+      // Reapply filtering - this will update visibility based on preserved filters
+      if (this.dataManager) {
+        console.log('🔄 [RESIZE] Reapplying filtering...')
+        this.dataManager.updateCellFiltering()
+      }
+    }
+    
+    // Restore and reapply coloring
+    if (preservedMetadataVector && preservedMetadataId) {
+      console.log('🔄 [RESIZE] Restoring coloring state...')
+      this.currentMetadataVector = preservedMetadataVector
+      this.currentMetadataId = preservedMetadataId
+      
+      // Reapply coloring
+      if (this.reglRenderer) {
+        console.log('🔄 [RESIZE] Reapplying coloring...')
+        this.renderPointsWithCurrentColoring()
       }
     }
     
@@ -11407,54 +11459,65 @@ export default class extends Controller {
       })
       
       // Add mousemove event listener for tooltip
-      if (!canvas.dataset.tooltipInitialized) {
-        canvas.dataset.tooltipInitialized = 'true'
-        canvas.style.cursor = 'pointer'
-        
-        // Create custom tooltip element if it doesn't exist
-        let tooltip = document.getElementById('category-bar-tooltip')
-        if (!tooltip) {
-          tooltip = document.createElement('div')
-          tooltip.id = 'category-bar-tooltip'
-          tooltip.style.cssText = `
-            position: fixed;
-            background-color: rgba(0, 0, 0, 0.85);
-            color: white;
-            padding: 6px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            pointer-events: none;
-            z-index: 10000;
-            display: none;
-            white-space: nowrap;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-          `
-          document.body.appendChild(tooltip)
-        }
-        
-        canvas.addEventListener('mousemove', (e) => {
-          const rect = canvas.getBoundingClientRect()
-          const x = e.clientX - rect.left
-          const segments = JSON.parse(canvas.dataset.segments || '[]')
-          
-          // Find which segment the mouse is over
-          const hoveredSegment = segments.find(seg => x >= seg.startX && x < seg.endX)
-          
-          if (hoveredSegment) {
-            const tooltipText = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
-            tooltip.textContent = tooltipText
-            tooltip.style.display = 'block'
-            tooltip.style.left = `${e.clientX + 10}px`
-            tooltip.style.top = `${e.clientY + 10}px`
-          } else {
-            tooltip.style.display = 'none'
-          }
-        })
-        
-        canvas.addEventListener('mouseleave', () => {
-          tooltip.style.display = 'none'
-        })
+      // Remove old listeners if they exist (to handle switching between categorical and continuous)
+      if (canvas._tooltipHandler) {
+        canvas.removeEventListener('mousemove', canvas._tooltipHandler)
+        canvas.removeEventListener('mouseleave', canvas._tooltipLeaveHandler)
       }
+      
+      canvas.style.cursor = 'pointer'
+      
+      // Create custom tooltip element if it doesn't exist
+      let tooltip = document.getElementById('category-bar-tooltip')
+      if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = 'category-bar-tooltip'
+        tooltip.style.cssText = `
+          position: fixed;
+          background-color: rgba(0, 0, 0, 0.85);
+          color: white;
+          padding: 6px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          pointer-events: none;
+          z-index: 10000;
+          display: none;
+          white-space: nowrap;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        `
+        document.body.appendChild(tooltip)
+      }
+      
+      // Create tooltip handler for categorical data
+      const tooltipHandler = (e) => {
+        const rect = canvas.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const segments = JSON.parse(canvas.dataset.segments || '[]')
+        
+        // Find which segment the mouse is over
+        const hoveredSegment = segments.find(seg => x >= seg.startX && x < seg.endX)
+        
+        if (hoveredSegment) {
+          const tooltipText = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
+          tooltip.textContent = tooltipText
+          tooltip.style.display = 'block'
+          tooltip.style.left = `${e.clientX + 10}px`
+          tooltip.style.top = `${e.clientY + 10}px`
+        } else {
+          tooltip.style.display = 'none'
+        }
+      }
+      
+      const leaveHandler = () => {
+        tooltip.style.display = 'none'
+      }
+      
+      canvas.addEventListener('mousemove', tooltipHandler)
+      canvas.addEventListener('mouseleave', leaveHandler)
+      
+      // Store handlers for later removal (using object properties, not dataset)
+      canvas._tooltipHandler = tooltipHandler
+      canvas._tooltipLeaveHandler = leaveHandler
     })
   }
 
@@ -11627,74 +11690,84 @@ export default class extends Controller {
         }
       })
       
-      // Add mousemove event listener for tooltip (only once)
-      if (!canvas.dataset.tooltipInitialized) {
-        canvas.dataset.tooltipInitialized = 'true'
-        canvas.style.cursor = 'pointer'
-        
-        // Create custom tooltip element if it doesn't exist
-        let tooltip = document.getElementById('category-bar-tooltip')
-        if (!tooltip) {
-          tooltip = document.createElement('div')
-          tooltip.id = 'category-bar-tooltip'
-          tooltip.style.cssText = `
-            position: fixed;
-            background-color: rgba(0, 0, 0, 0.85);
-            color: white;
-            padding: 6px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            pointer-events: none;
-            z-index: 10000;
-            display: none;
-            white-space: nowrap;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-          `
-          document.body.appendChild(tooltip)
-        }
-        
-        const tooltipHandler = (e) => {
-          const rect = canvas.getBoundingClientRect()
-          const x = e.clientX - rect.left
-          const bins = JSON.parse(canvas.dataset.bins || '[]')
-          const stats = JSON.parse(canvas.dataset.stats || '{}')
-          
-          // Calculate cumulative widths to find which bin was hovered
-          let cumulativeWidth = 0
-          let hoveredBin = null
-          
-          for (const bin of bins) {
-            if (bin.count > 0) {
-              const segmentWidth = (bin.count / stats.count) * rect.width
-              if (x >= cumulativeWidth && x < cumulativeWidth + segmentWidth) {
-                hoveredBin = bin
-                break
-              }
-              cumulativeWidth += segmentWidth
-            }
-          }
-          
-          if (hoveredBin) {
-            const tooltipText = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
-            tooltip.textContent = tooltipText
-            tooltip.style.display = 'block'
-            tooltip.style.left = `${e.clientX + 10}px`
-            tooltip.style.top = `${e.clientY + 10}px`
-          } else {
-            // Show overall stats
-            const tooltipText = `Min: ${stats.min?.toFixed(2)}, Max: ${stats.max?.toFixed(2)}, Mean: ${stats.mean?.toFixed(2)}, Median: ${stats.median?.toFixed(2)} (${stats.count} cells)`
-            tooltip.textContent = tooltipText
-            tooltip.style.display = 'block'
-            tooltip.style.left = `${e.clientX + 10}px`
-            tooltip.style.top = `${e.clientY + 10}px`
-          }
-        }
-        
-        canvas.addEventListener('mousemove', tooltipHandler)
-        canvas.addEventListener('mouseleave', () => {
-          tooltip.style.display = 'none'
-        })
+      // Add mousemove event listener for tooltip
+      // Remove old listeners if they exist (to handle switching between categorical and continuous)
+      if (canvas._tooltipHandler) {
+        canvas.removeEventListener('mousemove', canvas._tooltipHandler)
+        canvas.removeEventListener('mouseleave', canvas._tooltipLeaveHandler)
       }
+      
+      canvas.style.cursor = 'pointer'
+      
+      // Create custom tooltip element if it doesn't exist
+      let tooltip = document.getElementById('category-bar-tooltip')
+      if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = 'category-bar-tooltip'
+        tooltip.style.cssText = `
+          position: fixed;
+          background-color: rgba(0, 0, 0, 0.85);
+          color: white;
+          padding: 6px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          pointer-events: none;
+          z-index: 10000;
+          display: none;
+          white-space: nowrap;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        `
+        document.body.appendChild(tooltip)
+      }
+      
+      // Create tooltip handler for continuous data
+      const tooltipHandler = (e) => {
+        const rect = canvas.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const bins = JSON.parse(canvas.dataset.bins || '[]')
+        const stats = JSON.parse(canvas.dataset.stats || '{}')
+        
+        // Calculate cumulative widths to find which bin was hovered
+        let cumulativeWidth = 0
+        let hoveredBin = null
+        
+        for (const bin of bins) {
+          if (bin.count > 0) {
+            const segmentWidth = (bin.count / stats.count) * rect.width
+            if (x >= cumulativeWidth && x < cumulativeWidth + segmentWidth) {
+              hoveredBin = bin
+              break
+            }
+            cumulativeWidth += segmentWidth
+          }
+        }
+        
+        if (hoveredBin) {
+          const tooltipText = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
+          tooltip.textContent = tooltipText
+          tooltip.style.display = 'block'
+          tooltip.style.left = `${e.clientX + 10}px`
+          tooltip.style.top = `${e.clientY + 10}px`
+        } else {
+          // Show overall stats
+          const tooltipText = `Min: ${stats.min?.toFixed(2)}, Max: ${stats.max?.toFixed(2)}, Mean: ${stats.mean?.toFixed(2)}, Median: ${stats.median?.toFixed(2)} (${stats.count} cells)`
+          tooltip.textContent = tooltipText
+          tooltip.style.display = 'block'
+          tooltip.style.left = `${e.clientX + 10}px`
+          tooltip.style.top = `${e.clientY + 10}px`
+        }
+      }
+      
+      const leaveHandler = () => {
+        tooltip.style.display = 'none'
+      }
+      
+      canvas.addEventListener('mousemove', tooltipHandler)
+      canvas.addEventListener('mouseleave', leaveHandler)
+      
+      // Store handlers for later removal (using object properties, not dataset)
+      canvas._tooltipHandler = tooltipHandler
+      canvas._tooltipLeaveHandler = leaveHandler
     })
   }
   
@@ -12200,8 +12273,35 @@ export default class extends Controller {
         if (this.reglRenderer) {
           setTimeout(() => {
             this.redrawPlot()
+            // Refresh histograms and barplots when column resizing ends
+            // (bins/bar widths depend on the size of the plot)
+            this.refreshHistogramsAndBarplots()
           }, 100)
+        } else {
+          // Even if there's no reglRenderer, we should refresh histograms and barplots
+          this.refreshHistogramsAndBarplots()
         }
+      }
+    })
+  }
+
+  // Refresh all histograms and barplots (useful when column size changes)
+  refreshHistogramsAndBarplots() {
+    // Use requestAnimationFrame to ensure the browser has updated the layout
+    // before we try to read canvas dimensions
+    requestAnimationFrame(() => {
+      // Refresh all histograms (from range slider controllers)
+      const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
+      rangeSliderElements.forEach(element => {
+        const controller = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+        if (controller && typeof controller.drawDensityPlot === 'function') {
+          controller.drawDensityPlot()
+        }
+      })
+      
+      // Refresh all barplots (category distributions)
+      if (this.dataManager && typeof this.dataManager.updateAllCategoryDistributions === 'function') {
+        this.dataManager.updateAllCategoryDistributions()
       }
     })
   }

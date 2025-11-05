@@ -338,14 +338,39 @@ export class UIManager {
         }
       }
       
-      // Show ON/OFF switch only if there are selected categories
+      // Show ON/OFF switch only if there are selected categories AND not all are selected
       const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
       if (filterSwitch) {
-        const hasSelection = this.controller.selectedCategories && 
-                            this.controller.selectedCategories[metadataId] &&
-                            this.controller.selectedCategories[metadataId].size > 0
+        let hasActiveFilter = false
         
-        if (hasSelection) {
+        if (this.controller.selectedCategories && 
+            this.controller.selectedCategories[metadataId] &&
+            this.controller.selectedCategories[metadataId].size > 0) {
+          
+          // Get total number of categories from metadata vector
+          let totalCount = 0
+          
+          if (metadataVector) {
+            if (metadataVector.values) {
+              // Normal case: count unique values
+              const allCategories = new Set(metadataVector.values)
+              totalCount = allCategories.size
+            } else if (metadataVector.compression_info?.single_category) {
+              // Single category compression: only 1 category
+              totalCount = 1
+            } else if (metadataVector.compression_info?.categories) {
+              // Compressed data: use categories array
+              totalCount = metadataVector.compression_info.categories.length
+            }
+            
+            const selectedCount = this.controller.selectedCategories[metadataId].size
+            
+            // Only show switch if not all categories are selected (i.e., there's actual filtering)
+            hasActiveFilter = selectedCount < totalCount
+          }
+        }
+        
+        if (hasActiveFilter) {
           filterSwitch.style.display = 'flex'
           // Initialize as ON (enabled)
           filterSwitch.dataset.filterEnabled = 'true'
@@ -355,7 +380,7 @@ export class UIManager {
             switchToggle.style.transform = 'translateX(14px)'
           }
         } else {
-          // Hide switch if no selection
+          // Hide switch if no filtering (all categories selected or no selection)
           filterSwitch.style.display = 'none'
         }
       }

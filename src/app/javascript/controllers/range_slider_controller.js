@@ -770,12 +770,20 @@ export default class extends Controller {
     
     const dpr = window.devicePixelRatio || 1
     
-    // Set canvas size
+    // Set canvas internal resolution to match display size
+    // Note: We intentionally do NOT set canvas.style.width/height here because
+    // the canvas should adapt to its container (which has width: 100% in CSS)
+    // Setting explicit pixel values would prevent it from adapting to column resizing
+    // The CSS handles the display size, we only update the internal resolution
     canvas.width = rect.width * dpr
     canvas.height = rect.height * dpr
     ctx.scale(dpr, dpr)
-    canvas.style.width = rect.width + 'px'
-    canvas.style.height = rect.height + 'px'
+    
+    // Clear any fixed pixel width/height that might have been set previously
+    // This allows the canvas to adapt to container width changes via CSS
+    if (canvas.style.width && !canvas.style.width.includes('%')) {
+      canvas.style.width = ''
+    }
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)

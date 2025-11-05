@@ -5002,6 +5002,114 @@ export default class extends Controller {
   
   // Redraw the plot after resize
   async redrawPlot() {
+    console.log('🔄 [RESIZE] Starting redrawPlot - forcing complete reinitialization...')
+    
+    // Check if we have coordinates
+    if (!this.currentCoordinates) {
+      console.log('🔄 [RESIZE] Cannot redraw - missing coordinates')
+      return
+    }
+    
+    const plotContainer = document.querySelector('.plot-container')
+    if (!plotContainer) {
+      console.log('🔄 [RESIZE] Plot container not found')
+      return
+    }
+    
+    // Get new dimensions from container
+    const newWidth = plotContainer.clientWidth
+    const newHeight = plotContainer.clientHeight
+    
+    console.log('🔄 [RESIZE] Resizing to', newWidth, 'x', newHeight)
+    
+    if (newWidth <= 0 || newHeight <= 0) {
+      console.log('🔄 [RESIZE] Invalid dimensions, skipping resize')
+      return
+    }
+    
+    // Preserve current state (bounds for pan/zoom, displayOrder for filtering)
+    const preservedBounds = this.currentBounds
+    const preservedDisplayOrder = this.displayOrder ? [...this.displayOrder] : null
+    const preservedMetadataVector = this.currentMetadataVector
+    const preservedMetadataId = this.currentMetadataId
+    
+    console.log('🔄 [RESIZE] Preserved bounds:', preservedBounds)
+    console.log('🔄 [RESIZE] Preserved displayOrder length:', preservedDisplayOrder ? preservedDisplayOrder.length : null)
+    
+    // Force destroy existing renderer to ensure complete reinitialization
+    if (this.reglRenderer) {
+      console.log('🔄 [RESIZE] Destroying existing renderer for complete reinitialization')
+      this.reglRenderer.destroy()
+      this.reglRenderer = null
+    }
+    
+    // Clear canvas references so they get recreated with correct size
+    this.canvas = null
+    this.overlayCanvas = null
+    this.overlayCtx = null
+    
+    // Reset canvas listeners flag
+    this.canvasListenersSetup = false
+    
+    // Clear cached canvas rect
+    this.cachedCanvasRect = null
+    
+    // Reinitialize the scatter plot from scratch - this will create new canvas/renderer with correct size
+    console.log('🔄 [RESIZE] Reinitializing scatter plot from scratch with', this.currentCoordinates.length, 'coordinates...')
+    await this.rendererManager.initializeScatterPlot(this.currentCoordinates)
+    
+    // Restore preserved bounds and reapply them
+    if (preservedBounds) {
+      console.log('🔄 [RESIZE] Restoring preserved bounds and re-normalizing positions...')
+      this.currentBounds = preservedBounds
+      
+      // Restore display order if it was preserved
+      if (preservedDisplayOrder && preservedDisplayOrder.length === this.currentCoordinates.length) {
+        this.displayOrder = preservedDisplayOrder
+        console.log('🔄 [RESIZE] Restored displayOrder with', preservedDisplayOrder.length, 'entries')
+      }
+      
+      // Re-normalize all positions with preserved bounds for the new canvas size
+      if (this.reglRenderer && this.interactionHandler) {
+        const coordinatesToUse = this.displayOrder ? this.displayOrder.map(i => this.currentCoordinates[i]) : this.currentCoordinates
+        const screenCoordinates = new Float32Array(coordinatesToUse.length * 2)
+        
+        for (let i = 0; i < coordinatesToUse.length; i++) {
+          const [x, y] = coordinatesToUse[i]
+          screenCoordinates[i * 2] = this.interactionHandler.normalizeX(x, preservedBounds)
+          screenCoordinates[i * 2 + 1] = this.interactionHandler.normalizeY(y, preservedBounds)
+        }
+        
+        // Update positions in renderer with preserved bounds
+        this.reglRenderer.setPositions(screenCoordinates)
+        this.reglRenderer.render()
+        
+        // Redraw overlay elements with preserved bounds
+        if (this.rendererManager) {
+          this.rendererManager.renderGrid()
+          this.rendererManager.renderAxes()
+          
+          if (preservedMetadataVector) {
+            // Restore metadata vector reference
+            this.currentMetadataVector = preservedMetadataVector
+            this.currentMetadataId = preservedMetadataId
+            
+            if (preservedMetadataVector.data_type === 'DISCRETE' || preservedMetadataVector.data_type === 'STRING') {
+              this.rendererManager.renderCategoryLabels()
+            } else if (preservedMetadataVector.data_type === 'NUMERIC') {
+              this.renderContinuousColorLegend()
+            }
+          }
+        }
+        
+        console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
+      }
+    }
+    
+    console.log('🔄 [RESIZE] Redraw completed')
+  }
+  
+  /*  async redrawPlot() {
     console.log('🔄 [RESIZE] Starting simple redrawPlot...')
     
     // Check if we have the necessary components
@@ -5045,12 +5153,31 @@ export default class extends Controller {
     // Clear cached canvas rect to force fresh calculation after resize
     this.cachedCanvasRect = null
     
-    // If renderer exists and has state, just resize it without reinitializing
-    // This prevents shift by preserving the coordinate normalization
-    if (this.reglRenderer && this.reglRenderer.numPoints > 0) {
-      console.log('🔄 [RESIZE] Resizing existing renderer without reinitializing...')
+    // If renderer exists and has state, resize it and re-normalize positions to new dimensions
+    // This prevents shift by recalculating positions with the new canvas dimensions
+    if (this.reglRenderer && this.reglRenderer.numPoints > 0 && this.currentCoordinates && this.currentBounds) {
+      console.log('🔄 [RESIZE] Resizing existing renderer and re-normalizing positions...')
+      
+      const oldWidth = this.canvas.width
+      const oldHeight = this.canvas.height
+      
+      // Update canvas dimensions
       this.canvas.width = newWidth
       this.canvas.height = newHeight
+      
+      // Re-normalize all positions to the new canvas dimensions
+      // This is critical to prevent shift when other operations happen
+      const screenCoordinates = new Float32Array(this.currentCoordinates.length * 2)
+      for (let i = 0; i < this.currentCoordinates.length; i++) {
+        const [x, y] = this.currentCoordinates[i]
+        screenCoordinates[i * 2] = this.interactionHandler.normalizeX(x, this.currentBounds)
+        screenCoordinates[i * 2 + 1] = this.interactionHandler.normalizeY(y, this.currentBounds)
+      }
+      
+      // Update positions in renderer with new normalized coordinates
+      this.reglRenderer.setPositions(screenCoordinates)
+      
+      // Update viewport and render
       this.reglRenderer.resize(newWidth, newHeight)
       this.reglRenderer.render()
       
@@ -5064,7 +5191,7 @@ export default class extends Controller {
           this.renderContinuousColorLegend()
         }
       }
-      console.log('🔄 [RESIZE] Renderer resized without reinitializing')
+      console.log('🔄 [RESIZE] Renderer resized and positions re-normalized from', oldWidth, 'x', oldHeight, 'to', newWidth, 'x', newHeight)
       return
     }
     
@@ -5075,7 +5202,7 @@ export default class extends Controller {
     
     console.log('🔄 [RESIZE] Simple redraw completed')
   }
-
+*/
   // Set interaction mode (internal method)
   setInteractionMode(mode) {
     this.interactionMode = mode

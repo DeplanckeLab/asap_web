@@ -3173,7 +3173,7 @@ export default class extends Controller {
     // Render points with default blue coloring based on renderer type
     console.log('🎨 [CLEAR COLORING] Calling renderPointsWithCurrentColoring() to render default blue...')
     try {
-      this.renderPointsWithCurrentColoring()
+    this.renderPointsWithCurrentColoring()
       console.log('🎨 [CLEAR COLORING] renderPointsWithCurrentColoring() completed successfully')
     } catch (error) {
       console.error('🎨 [CLEAR COLORING] ❌ Error in renderPointsWithCurrentColoring():', error)
@@ -5036,20 +5036,6 @@ export default class extends Controller {
       this.overlayCtx.clearRect(0, 0, newWidth, newHeight)
     }
     
-    // Store old dimensions before updating
-    const oldWidth = this.canvas.width
-    const oldHeight = this.canvas.height
-    
-    // Set canvas dimensions explicitly to avoid fractional values from getBoundingClientRect
-    this.canvas.width = newWidth
-    this.canvas.height = newHeight
-    
-    // Update ReGL viewport to match the exact canvas dimensions
-    if (this.reglRenderer && this.reglRenderer.regl && this.reglRenderer.regl._gl) {
-      this.reglRenderer.regl._gl.viewport(0, 0, newWidth, newHeight)
-      console.log('🔄 [RESIZE] Canvas and viewport set to:', newWidth, 'x', newHeight)
-    }
-    
     // Reset coordinate normalization debug flags to see fresh debug info
     if (this.interactionHandler) {
       this.interactionHandler._normalizeLogged = false
@@ -5059,7 +5045,31 @@ export default class extends Controller {
     // Clear cached canvas rect to force fresh calculation after resize
     this.cachedCanvasRect = null
     
+    // If renderer exists and has state, just resize it without reinitializing
+    // This prevents shift by preserving the coordinate normalization
+    if (this.reglRenderer && this.reglRenderer.numPoints > 0) {
+      console.log('🔄 [RESIZE] Resizing existing renderer without reinitializing...')
+      this.canvas.width = newWidth
+      this.canvas.height = newHeight
+      this.reglRenderer.resize(newWidth, newHeight)
+      this.reglRenderer.render()
+      
+      // Redraw overlay
+      this.rendererManager.renderGrid()
+      this.rendererManager.renderAxes()
+      if (this.currentMetadataVector) {
+        if (this.currentMetadataVector.data_type === 'DISCRETE' || this.currentMetadataVector.data_type === 'STRING') {
+          this.rendererManager.renderCategoryLabels()
+        } else if (this.currentMetadataVector.data_type === 'NUMERIC') {
+          this.renderContinuousColorLegend()
+        }
+      }
+      console.log('🔄 [RESIZE] Renderer resized without reinitializing')
+      return
+    }
+    
     // Call the same method as when switching visualization metadata
+    // This will properly reinitialize the scatter plot with the new canvas dimensions
     console.log('🔄 [RESIZE] Calling updateMetadata like metadata switch...')
     this.updateMetadata()
     

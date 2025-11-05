@@ -1143,9 +1143,11 @@ export class GeneManager {
           <!-- X Button -->
           <button class="gene-x-btn"
                   data-gene-id="${gene.stableId}"
+                  data-action="click->visualization#xButtonClicked"
+                  data-active="false"
                   style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
-                  onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                  onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                  onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
+                  onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
                   title="X axis"
                   onclick="event.stopPropagation()">
             x
@@ -1153,9 +1155,11 @@ export class GeneManager {
           <!-- Y Button -->
           <button class="gene-y-btn"
                   data-gene-id="${gene.stableId}"
+                  data-action="click->visualization#yButtonClicked"
+                  data-active="false"
                   style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
-                  onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                  onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                  onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
+                  onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
                   title="Y axis"
                   onclick="event.stopPropagation()">
             y

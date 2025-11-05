@@ -1202,6 +1202,9 @@ export class DataManager {
           this.controller.rendererManager.renderCategoryLabels()
         }
       }
+      
+      // Refresh 2D plot if open (filtering may have changed which points are visible)
+      this.controller.customPlotManager.refresh2DPlotIfOpen()
     })
   }
 

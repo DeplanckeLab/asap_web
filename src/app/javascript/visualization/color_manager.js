@@ -9,7 +9,7 @@ export class ColorManager {
   }
 
   // Color calculation and caching
-  getColorAndAlpha(pointIndex) {
+  getColorAndAlpha(pointIndex, coloringMetadataVector = null) {
     const hasSelection = this.controller.selectedCells && this.controller.selectedCells.size > 0
     const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(pointIndex)
     
@@ -24,7 +24,10 @@ export class ColorManager {
     // Find the metadata vector that is actually being used for coloring
     // This should be the one that has a visible legend/color scheme active
     // This fixes the issue where new dots appear with wrong colors when filtering constraints are relaxed
-    const coloringMetadataVector = this.getColoringMetadataVector()
+    // Allow passing in the coloring vector to avoid repeated DOM queries
+    if (!coloringMetadataVector) {
+      coloringMetadataVector = this.getColoringMetadataVector()
+    }
     
     if (coloringMetadataVector && coloringMetadataVector.values && coloringMetadataVector.values[pointIndex] !== undefined) {
       const { data_type, values, compression_info } = coloringMetadataVector
@@ -37,26 +40,47 @@ export class ColorManager {
           const domOrderCategories = this.controller.getCategoriesForMetadata(coloringMetadataVector.id)
           if (domOrderCategories && domOrderCategories.length > 0) {
             const categoryNames = domOrderCategories.map(cat => cat.name)
-            this.controller._cachedColorMap = this.controller.createDiscreteColorMap(categoryNames, coloringMetadataVector.id)
+            this.controller._cachedColorMap = this.createDiscreteColorMap(categoryNames, coloringMetadataVector.id)
           } else {
             // Fallback to alphabetical order if DOM order not available
             const uniqueValues = [...new Set(values.filter(v => v !== null && v !== undefined))]
-            this.controller._cachedColorMap = this.controller.createDiscreteColorMap(uniqueValues, coloringMetadataVector.id)
+            this.controller._cachedColorMap = this.createDiscreteColorMap(uniqueValues, coloringMetadataVector.id)
           }
           this.controller._cachedColorMapMetadataId = coloringMetadataVector.id
         }
         
-        const colorInfo = this.controller._cachedColorMap.get(value)
-        if (colorInfo) {
-          baseColor = colorInfo.color
-        }
+        // _cachedColorMap is a plain object, not a Map
+        baseColor = this.controller._cachedColorMap[value] || 0x3b82f6
       } else if (data_type === 'NUMERIC') {
         // For numeric data, use the continuous color mapping
-        const normalizedValue = this.controller.normalizeNumericValue(value, compression_info)
-        const colorInfo = this.controller.valueToColor(normalizedValue)
-        if (colorInfo) {
-          baseColor = colorInfo.color
+        // Get effective color range (respects user-set range slider)
+        const effectiveRange = this.controller.getEffectiveColorRange()
+        let minVal, maxVal
+        
+        if (effectiveRange) {
+          minVal = effectiveRange.min
+          maxVal = effectiveRange.max
+        } else if (compression_info) {
+          minVal = compression_info.min_val
+          maxVal = compression_info.max_val
+        } else {
+          // Fallback: use value as-is (shouldn't happen normally)
+          minVal = value
+          maxVal = value
         }
+        
+        const range = maxVal - minVal
+        let normalizedValue
+        if (range > 0) {
+          normalizedValue = (value - minVal) / range
+          // Clamp to valid range
+          normalizedValue = Math.max(0, Math.min(1, normalizedValue))
+        } else {
+          normalizedValue = 0.5
+        }
+        
+        // Use gradient manager to get color
+        baseColor = this.controller.gradientManager.getColorFromGradient(normalizedValue)
       }
     }
     
@@ -213,64 +237,65 @@ export class ColorManager {
 
   // Get the metadata vector that is currently being used for coloring
   getColoringMetadataVector() {
-    console.log('🎨 [GET COLORING] getColoringMetadataVector() called')
+    // Temporarily reduce logging to prevent infinite loop spam
+    // console.log('🎨 [GET COLORING] getColoringMetadataVector() called')
     
     // First, check if there's a metadata vector that has a visible legend
     // Look for active legend elements in the DOM
     const activeLegend = document.querySelector('.metadata-legend:not([style*="display: none"])')
-    console.log('🎨 [GET COLORING] Checking for active legend:', {
-      foundActiveLegend: !!activeLegend,
-      legendMetadataId: activeLegend?.dataset.metadataId || 'none'
-    })
+    // console.log('🎨 [GET COLORING] Checking for active legend:', {
+    //   foundActiveLegend: !!activeLegend,
+    //   legendMetadataId: activeLegend?.dataset.metadataId || 'none'
+    // })
     if (activeLegend) {
       const metadataId = activeLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
-        console.log('🎨 [GET COLORING] Found coloring metadata vector from active legend:', metadataId)
+        // console.log('🎨 [GET COLORING] Found coloring metadata vector from active legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Fallback: check for active color legend (for continuous metadata)
     const activeColorLegend = document.querySelector('.color-legend:not([style*="display: none"])')
-    console.log('🎨 [GET COLORING] Checking for active color legend:', {
-      foundActiveColorLegend: !!activeColorLegend,
-      colorLegendMetadataId: activeColorLegend?.dataset.metadataId || 'none'
-    })
+    // console.log('🎨 [GET COLORING] Checking for active color legend:', {
+    //   foundActiveColorLegend: !!activeColorLegend,
+    //   colorLegendMetadataId: activeColorLegend?.dataset.metadataId || 'none'
+    // })
     if (activeColorLegend) {
       const metadataId = activeColorLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
-        console.log('🎨 [GET COLORING] Found coloring metadata vector from active color legend:', metadataId)
+        // console.log('🎨 [GET COLORING] Found coloring metadata vector from active color legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Fallback: check for active gradient legend (for continuous metadata)
     const activeGradientLegend = document.querySelector('.gradient-legend:not([style*="display: none"])')
-    console.log('🎨 [GET COLORING] Checking for active gradient legend:', {
-      foundActiveGradientLegend: !!activeGradientLegend,
-      gradientLegendMetadataId: activeGradientLegend?.dataset.metadataId || 'none'
-    })
+    // console.log('🎨 [GET COLORING] Checking for active gradient legend:', {
+    //   foundActiveGradientLegend: !!activeGradientLegend,
+    //   gradientLegendMetadataId: activeGradientLegend?.dataset.metadataId || 'none'
+    // })
     if (activeGradientLegend) {
       const metadataId = activeGradientLegend.dataset.metadataId
       if (metadataId && this.controller.loadedMetadataVectors[metadataId]) {
-        console.log('🎨 [GET COLORING] Found coloring metadata vector from active gradient legend:', metadataId)
+        // console.log('🎨 [GET COLORING] Found coloring metadata vector from active gradient legend:', metadataId)
         return this.controller.loadedMetadataVectors[metadataId]
       }
     }
     
     // Final fallback: use currentMetadataVector if it exists and has values
-    console.log('🎨 [GET COLORING] Checking currentMetadataVector:', {
-      hasCurrentMetadataVector: !!this.controller.currentMetadataVector,
-      currentMetadataVectorId: this.controller.currentMetadataVector?.id || 'none',
-      hasValues: !!this.controller.currentMetadataVector?.values,
-      valuesLength: this.controller.currentMetadataVector?.values?.length || 0
-    })
+    // console.log('🎨 [GET COLORING] Checking currentMetadataVector:', {
+    //   hasCurrentMetadataVector: !!this.controller.currentMetadataVector,
+    //   currentMetadataVectorId: this.controller.currentMetadataVector?.id || 'none',
+    //   hasValues: !!this.controller.currentMetadataVector?.values,
+    //   valuesLength: this.controller.currentMetadataVector?.values?.length || 0
+    // })
     if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
-      console.log('🎨 [GET COLORING] Returning currentMetadataVector:', this.controller.currentMetadataVector.id)
+      // console.log('🎨 [GET COLORING] Returning currentMetadataVector:', this.controller.currentMetadataVector.id)
       return this.controller.currentMetadataVector
     }
     
-    console.log('🎨 [GET COLORING] No coloring metadata vector found - returning null')
+    // console.log('🎨 [GET COLORING] No coloring metadata vector found - returning null')
     return null
   }
 

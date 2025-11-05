@@ -10,6 +10,7 @@ import { MemoryManager } from "visualization/memory_manager"
 import { PerformanceManager } from "visualization/performance_manager"
 import { DownloadManager } from "visualization/download_manager"
 import { GeneManager } from "visualization/gene_manager"
+import { CustomPlotManager } from "visualization/custom_plot_manager"
 
 console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
@@ -102,6 +103,7 @@ export default class extends Controller {
     this.performanceManager = new PerformanceManager(this)
     this.downloadManager = new DownloadManager(this)
     this.geneManager = new GeneManager(this)
+    this.customPlotManager = new CustomPlotManager(this)
     
     // RENDERER CHOICE: 'regl' only
     this.rendererType = 'regl' // 🎯 Using ReGL for better performance
@@ -195,6 +197,10 @@ export default class extends Controller {
     this.lastPointSize = null // Track last point size for optimization
     this.visibilityOnlyUpdate = false // When true, try to only toggle visibility
     this.spritesRenderType = null // Track what type of rendering created current sprites: 'discrete', 'numeric', or 'default'
+    
+    // Track selected x and y buttons for 2D plot modal
+    this.selectedXButton = null
+    this.selectedYButton = null
     
     // Cache for decompressed embedding coordinates (avoid re-decompressing)
     this.decompressedCoordinatesCache = new Map() // Key: embeddingId, Value: decompressed coordinates
@@ -2299,11 +2305,17 @@ export default class extends Controller {
         // Clear the flag and update cache with new colorMap
         this._displayOrderWasReset = false
         this.colorUpdateCache.set('lastColorMap', colorMap)
+        
+        // Refresh 2D plot if open
+        this.customPlotManager.refresh2DPlotIfOpen()
         return
       }
       
       this.reglRenderer.updateColors(cachedColorMap)
       this.reglRenderer.render()
+      
+      // Refresh 2D plot if open
+      this.customPlotManager.refresh2DPlotIfOpen()
       return
     }
     
@@ -2405,6 +2417,9 @@ export default class extends Controller {
           // Redraw overlay is handled by reorderPointsForCategoryDisplay
           const elapsed = performance.now() - startTime
           console.log(`🎨 [ReGL] Color update with reordering completed in ${elapsed.toFixed(2)}ms`)
+          
+          // Refresh 2D plot if open
+          this.customPlotManager.refresh2DPlotIfOpen()
           return // Early exit - reordering already rendered everything
         }
         
@@ -2498,6 +2513,9 @@ export default class extends Controller {
           // Redraw overlay and legend is handled by reorderPointsForNumericDisplay
           const elapsed = performance.now() - startTime
           console.log(`🎨 [ReGL] Color update with numeric reordering completed in ${elapsed.toFixed(2)}ms`)
+          
+          // Refresh 2D plot if open
+          this.customPlotManager.refresh2DPlotIfOpen()
           return // Early exit - reordering already rendered everything
         } else {
           // Just render without reordering
@@ -2505,6 +2523,9 @@ export default class extends Controller {
           
           // Render continuous color legend
           this.renderContinuousColorLegend()
+          
+          // Refresh 2D plot if open
+          this.customPlotManager.refresh2DPlotIfOpen()
         }
       }
     } else {
@@ -2546,6 +2567,9 @@ export default class extends Controller {
       this.reglRenderer.updateColors(colorMap)
       this.reglRenderer.render()
       console.log('🎨 [RENDER] ReGL renderer updated and rendered')
+      
+      // Refresh 2D plot if open
+      this.customPlotManager.refresh2DPlotIfOpen()
     }
     
     // Redraw the Canvas 2D overlay (grid, axes, labels/legend) to ensure everything is visible
@@ -2567,6 +2591,9 @@ export default class extends Controller {
     const elapsed = performance.now() - startTime
     this.recordPerformanceMetrics('ColorUpdate', elapsed)
     console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
+    
+    // Refresh 2D plot if open
+    this.customPlotManager.refresh2DPlotIfOpen()
     
     // Refresh fixed tooltip if one is displayed
     this.refreshFixedTooltipIfNeeded()
@@ -4306,6 +4333,145 @@ export default class extends Controller {
     button.dataset.active = 'true'
     //console.log('setWaterDropButtonActive: Button now has color:', button.style.color)
   }
+  
+  // Reset all x buttons to inactive state
+  resetAllXButtons() {
+    const allXButtons = document.querySelectorAll('.categorical-x-btn, .continuous-x-btn, .gene-x-btn')
+    allXButtons.forEach((button) => {
+      button.style.color = '#9ca3af'
+      button.style.backgroundColor = ''
+      button.dataset.active = 'false'
+    })
+  }
+  
+  // Set an x button to active (blue)
+  setXButtonActive(button) {
+    button.style.color = '#3b82f6'
+    button.style.backgroundColor = '#dbeafe'
+    button.dataset.active = 'true'
+  }
+  
+  // Reset all y buttons to inactive state
+  resetAllYButtons() {
+    const allYButtons = document.querySelectorAll('.continuous-y-btn, .gene-y-btn')
+    allYButtons.forEach((button) => {
+      button.style.color = '#9ca3af'
+      button.style.backgroundColor = ''
+      button.dataset.active = 'false'
+    })
+  }
+  
+  // Set a y button to active (blue)
+  setYButtonActive(button) {
+    button.style.color = '#3b82f6'
+    button.style.backgroundColor = '#dbeafe'
+    button.dataset.active = 'true'
+  }
+  
+  // Handle x button clicks
+  xButtonClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const button = event.currentTarget
+    const isCurrentlyActive = button.dataset.active === 'true'
+    
+    if (isCurrentlyActive) {
+      // Button is already active - deselect it
+      this.resetAllXButtons()
+      this.selectedXButton = null
+      this.customPlotManager.close2DPlotModal()
+      return
+    }
+    
+    // Button is not active - select it
+    // Reset all x buttons first
+    this.resetAllXButtons()
+    
+    // Set this button to active
+    this.setXButtonActive(button)
+    
+    // Store selected x button info
+    let metadataName = 'Unknown'
+    if (button.dataset.geneId) {
+      // For genes, try to get name from gene manager
+      const geneId = button.dataset.geneId
+      const gene = this.geneManager?.geneTags?.find(g => String(g.stableId) === String(geneId))
+      metadataName = gene?.symbol || button.dataset.geneName || `Gene ${geneId}`
+    } else {
+      // For metadata, get from DOM or dataset
+      const metadataItem = button.closest('[data-metadata-item]')
+      if (metadataItem) {
+        const nameElement = metadataItem.querySelector('div[style*="font-size: 14px"][title]')
+        metadataName = nameElement?.textContent?.trim() || nameElement?.getAttribute('title') || button.dataset.metadataName || 'Unknown'
+      } else {
+        metadataName = button.dataset.metadataName || 'Unknown'
+      }
+    }
+    
+    this.selectedXButton = {
+      button: button,
+      metadataId: button.dataset.metadataId || button.dataset.geneId,
+      isGene: !!button.dataset.geneId,
+      metadataName: metadataName
+    }
+    
+    // Check if both x and y are selected
+    this.customPlotManager.checkAndOpen2DPlotModal()
+  }
+  
+  // Handle y button clicks
+  yButtonClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    const button = event.currentTarget
+    const isCurrentlyActive = button.dataset.active === 'true'
+    
+    if (isCurrentlyActive) {
+      // Button is already active - deselect it
+      this.resetAllYButtons()
+      this.selectedYButton = null
+      this.customPlotManager.close2DPlotModal()
+      return
+    }
+    
+    // Button is not active - select it
+    // Reset all y buttons first
+    this.resetAllYButtons()
+    
+    // Set this button to active
+    this.setYButtonActive(button)
+    
+    // Store selected y button info
+    let metadataName = 'Unknown'
+    if (button.dataset.geneId) {
+      // For genes, try to get name from gene manager
+      const geneId = button.dataset.geneId
+      const gene = this.geneManager?.geneTags?.find(g => String(g.stableId) === String(geneId))
+      metadataName = gene?.symbol || button.dataset.geneName || `Gene ${geneId}`
+    } else {
+      // For metadata, get from DOM or dataset
+      const metadataItem = button.closest('[data-metadata-item]')
+      if (metadataItem) {
+        const nameElement = metadataItem.querySelector('div[style*="font-size: 14px"][title]')
+        metadataName = nameElement?.textContent?.trim() || nameElement?.getAttribute('title') || button.dataset.metadataName || 'Unknown'
+      } else {
+        metadataName = button.dataset.metadataName || 'Unknown'
+      }
+    }
+    
+    this.selectedYButton = {
+      button: button,
+      metadataId: button.dataset.metadataId || button.dataset.geneId,
+      isGene: !!button.dataset.geneId,
+      metadataName: metadataName
+    }
+    
+    // Check if both x and y are selected
+    this.customPlotManager.checkAndOpen2DPlotModal()
+  }
+  
   
   // Remove all category colors from all metadata
   removeAllCategoryColors() {

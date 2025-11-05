@@ -129,9 +129,11 @@
                     <!-- X Button -->
                     <button class="categorical-x-btn"
                             data-metadata-id="<%= metadata.id %>"
+                            data-action="click->visualization#xButtonClicked"
+                            data-active="false"
                             style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
-                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
+                            onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
                             title="X axis"
                             onclick="event.stopPropagation()">
                       x
@@ -361,9 +363,11 @@
                     <!-- X Button -->
                     <button class="continuous-x-btn"
                             data-metadata-id="<%= metadata.id %>"
+                            data-action="click->visualization#xButtonClicked"
+                            data-active="false"
                             style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
-                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
+                            onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
                             title="X axis"
                             onclick="event.stopPropagation()">
                       x
@@ -371,9 +375,11 @@
                     <!-- Y Button -->
                     <button class="continuous-y-btn"
                             data-metadata-id="<%= metadata.id %>"
+                            data-action="click->visualization#yButtonClicked"
+                            data-active="false"
                             style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
-                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
+                            onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
                             title="Y axis"
                             onclick="event.stopPropagation()">
                       y
@@ -1139,6 +1145,55 @@
         </button>
     </div>
   </div>
+</div>
+
+<!-- 2D Plot Modal -->
+<div id="2d-plot-modal" style="display: none; position: fixed; top: 100px; left: 50%; transform: translateX(-50%); width: 50vh; height: 50vh; min-width: 400px; min-height: 300px; max-width: 90vw; max-height: 90vh; background: white; border: 1px solid #d1d5db; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); z-index: 10000; overflow: hidden; flex-direction: column;">
+  <!-- Header -->
+  <div id="2d-plot-header" 
+       style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-radius: 12px 12px 0 0; cursor: move; user-select: none; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; color: #6b7280; flex-shrink: 0;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/>
+        </svg>
+      </div>
+      <h3 id="2d-plot-title" style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Custom plot</h3>
+    </div>
+    <button id="close-2d-plot-modal" 
+            style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px; border-radius: 4px; transition: background-color 0.2s; flex-shrink: 0; margin-left: 8px;" 
+            onmouseover="this.style.backgroundColor='#e5e7eb'"
+            onmouseout="this.style.backgroundColor='transparent'"
+            title="Close">
+      <i class="fas fa-times"></i>
+    </button>
+  </div>
+  
+  <!-- Content -->
+  <div style="flex: 1; overflow: auto; padding: 16px;">
+    
+    <!-- Plot Container -->
+    <div style="width: 100%; height: 100%; min-width: min-content; overflow: auto;">
+      <canvas id="2d-plot-canvas" width="800" height="600" style="border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; display: block;"></canvas>
+    </div>
+    
+    <!-- Loading Indicator -->
+    <div id="2d-plot-loading" style="display: none; text-align: center; padding: 20px; color: #6b7280;">
+      <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px;"></i>
+      <div>Loading data...</div>
+    </div>
+  </div>
+  
+  <!-- Resize Handles -->
+  <div id="2d-plot-resize-right" style="position: absolute; top: 0; right: 0; width: 4px; height: 100%; cursor: col-resize; z-index: 10001; background-color: transparent; transition: background-color 0.2s;" 
+       onmouseover="this.style.backgroundColor='#3b82f6'"
+       onmouseout="this.style.backgroundColor='transparent'"></div>
+  <div id="2d-plot-resize-bottom" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; cursor: row-resize; z-index: 10001; background-color: transparent; transition: background-color 0.2s;" 
+       onmouseover="this.style.backgroundColor='#3b82f6'"
+       onmouseout="this.style.backgroundColor='transparent'"></div>
+  <div id="2d-plot-resize-corner" style="position: absolute; bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; z-index: 10001; background-color: transparent; transition: background-color 0.2s;" 
+       onmouseover="this.style.backgroundColor='#3b82f6'"
+       onmouseout="this.style.backgroundColor='transparent'"></div>
 </div>
 
 

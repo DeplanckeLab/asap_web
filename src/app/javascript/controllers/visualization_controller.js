@@ -2517,7 +2517,8 @@ export default class extends Controller {
           this._lastNumericMetadataId = coloringMetadataVector.id
           
           // Reorder points in buffer based on z-index (this will re-render and redraw overlay)
-          this.reorderPointsForNumericDisplay(values, minVal, maxVal)
+          // Pass visibleSet so filtered cells are hidden during reordering
+          this.reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet)
           
           // Redraw overlay and legend is handled by reorderPointsForNumericDisplay
           const elapsed = performance.now() - startTime
@@ -7686,7 +7687,7 @@ export default class extends Controller {
   }
   // Reorder display order based on numeric values (painter's algorithm)
   // Uses displayOrder array - does NOT modify original data
-  reorderPointsForNumericDisplay(values, minVal, maxVal) {
+  reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet = null) {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
       console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
@@ -7748,9 +7749,16 @@ export default class extends Controller {
       screenCoordinates[drawPos * 2] = this.interactionHandler.normalizeX(dataX, this.currentBounds)
       screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
       
-      // Get color for this cell
-      const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
-      colorMap.set(drawPos, color)
+      // CRITICAL FIX: Check if cell is visible (filtered) before getting color
+      // If filtered, use transparent. Otherwise use color from originalPointColors or default blue
+      const isVisible = !visibleSet || visibleSet.has(cellIndex)
+      if (isVisible) {
+        const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        colorMap.set(drawPos, color)
+      } else {
+        // Hide filtered-out points
+        colorMap.set(drawPos, 0x00000000)
+      }
     }
     
     // Update ReGL buffers with reordered data

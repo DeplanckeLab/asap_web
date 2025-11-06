@@ -3142,6 +3142,10 @@ export default class extends Controller {
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
     console.log('🎨 [CLEAR COLORING] clearMetadataColoring() called')
+    console.log('🎨 [CLEAR COLORING] Current filter state:', {
+      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      hasFilter: !!this.currentVisibleCells
+    })
     console.log('🎨 [CLEAR COLORING] Checking prerequisites:', {
       rendererType: this.rendererType,
       reglRenderer: !!this.reglRenderer,
@@ -3199,9 +3203,17 @@ export default class extends Controller {
     
     // Render points with default blue coloring based on renderer type
     console.log('🎨 [CLEAR COLORING] Calling renderPointsWithCurrentColoring() to render default blue...')
+    console.log('🎨 [CLEAR COLORING] Filter state before renderPointsWithCurrentColoring:', {
+      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      hasFilter: !!this.currentVisibleCells
+    })
     try {
     this.renderPointsWithCurrentColoring()
       console.log('🎨 [CLEAR COLORING] renderPointsWithCurrentColoring() completed successfully')
+      console.log('🎨 [CLEAR COLORING] Filter state after renderPointsWithCurrentColoring:', {
+        currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+        hasFilter: !!this.currentVisibleCells
+      })
     } catch (error) {
       console.error('🎨 [CLEAR COLORING] ❌ Error in renderPointsWithCurrentColoring():', error)
       console.error('🎨 [CLEAR COLORING] Error stack:', error.stack)
@@ -7057,6 +7069,12 @@ export default class extends Controller {
   selectPointsInLasso() {
     if (!this.currentCoordinates || this.lassoPoints.length < 3) return
     
+    console.log('[LASSO] selectPointsInLasso called')
+    console.log('[LASSO] Current filter state:', {
+      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      hasFilter: !!this.currentVisibleCells
+    })
+    
     console.log(`⏱️ [LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
     const selectionStart = performance.now()
     
@@ -7161,10 +7179,27 @@ export default class extends Controller {
     // Store the current metadata state before deactivating (for restore on cancel/save)
     this.storeMetadataStateBeforeSelection()
     
+    // Store current filter state before clearing coloring
+    const filterStateBeforeClear = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
+    console.log('[LASSO] Storing filter state before clearMetadataColoring:', {
+      hasFilter: !!filterStateBeforeClear,
+      filterSize: filterStateBeforeClear ? filterStateBeforeClear.size : 'null'
+    })
+    
     // Deactivate the coloring button (turn blue palette button to grey)
     this.resetAllWaterDropButtons()
     this.removeAllCategoryColors()
     this.clearMetadataColoring()
+    
+    // Verify filter state after clearMetadataColoring
+    console.log('[LASSO] Filter state after clearMetadataColoring:', {
+      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      hasFilter: !!this.currentVisibleCells,
+      filterPreserved: filterStateBeforeClear ? 
+        (this.currentVisibleCells ? 
+          (this.currentVisibleCells.length === filterStateBeforeClear.size) : false) : 
+        (!this.currentVisibleCells)
+    })
     
     // Update selection count display
     this.updateSelectionCount()
@@ -7176,6 +7211,16 @@ export default class extends Controller {
   updateSelectedPointColors() {
     const numPoints = this.rendererType === 'regl' ? this.numPoints : (this.pointSprites?.length || 0)
     console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${numPoints} total`)
+    
+    // Get current filter state
+    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
+    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+    console.log('[UPDATE COLORS] Filter state in updateSelectedPointColors:', {
+      filteredIndices: filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)',
+      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      hasFilter: !!visibleSet
+    })
+    
     const updateStart = performance.now()
     
     // ReGL PATH: Update color buffer
@@ -7192,8 +7237,17 @@ export default class extends Controller {
         console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
         // Set selected cells to red, unselected to faded original color
         // Use displayOrder to correctly map draw positions to cell indices
+        // IMPORTANT: Respect current filter - hide filtered-out cells
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          
+          if (!isVisible) {
+            // Hide filtered-out points
+            colorMap.set(drawPos, 0x00000000)
+            continue
+          }
+          
           if (this.selectedCells.has(cellIndex)) {
             colorMap.set(drawPos, 0xff0000) // Red
           } else {
@@ -7206,8 +7260,17 @@ export default class extends Controller {
         console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
         // Restore original colors
         // Use displayOrder to correctly map draw positions to cell indices
+        // IMPORTANT: Respect current filter - hide filtered-out cells
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          
+          if (!isVisible) {
+            // Hide filtered-out points
+            colorMap.set(drawPos, 0x00000000)
+            continue
+          }
+          
           const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
           colorMap.set(drawPos, originalColor)
         }
@@ -10500,7 +10563,20 @@ export default class extends Controller {
 
   // Clear incremental filtering state
   clearIncrementalState() {
-    this.currentVisibleCells = null
+    const hadFilter = !!this.currentVisibleCells
+    const filterSize = this.currentVisibleCells ? this.currentVisibleCells.length : 0
+    const hasActiveFilterCriteria = (this.selectedCategories && Object.keys(this.selectedCategories).length > 0) ||
+                                    (this.selectedRanges && Object.keys(this.selectedRanges).length > 0)
+    
+    console.log('[CLEAR STATE] clearIncrementalState called', {
+      hadFilter: hadFilter,
+      filterSize: filterSize,
+      hasActiveFilterCriteria: hasActiveFilterCriteria,
+      selectedCategories: this.selectedCategories ? Object.keys(this.selectedCategories).length : 0,
+      selectedRanges: this.selectedRanges ? Object.keys(this.selectedRanges).length : 0
+    })
+    
+    // Clear cache and state (needed for recalculation)
     this.lastFilterState = null
     this.filterCache.clear()
     
@@ -10510,7 +10586,19 @@ export default class extends Controller {
     this.lastColorUpdateHash = null
     this.colorUpdateCache.clear()
     
-    //console.log('Cleared incremental filtering state after embedding change')
+    // IMPORTANT: Only clear currentVisibleCells if there are no active filter criteria
+    // If filter criteria exist, we should preserve the filter results OR trigger recalculation
+    // Setting to null here causes the filter to appear "lost" even though criteria are preserved
+    if (!hasActiveFilterCriteria) {
+      // No active filters - safe to clear
+      this.currentVisibleCells = null
+      console.log('[CLEAR STATE] Cleared currentVisibleCells (no active filter criteria)')
+    } else {
+      // Active filter criteria exist - keep currentVisibleCells but mark cache as invalid
+      // The filter will be recalculated on next updateCellFiltering() call
+      console.log('[CLEAR STATE] Preserved currentVisibleCells (active filter criteria exist, will be recalculated)')
+      // Note: currentVisibleCells is kept, but lastFilterState is cleared so it will be recalculated
+    }
   }
 
   // Clear all checkbox selections when switching metadata

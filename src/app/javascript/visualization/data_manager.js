@@ -1836,10 +1836,63 @@ export class DataManager {
       }
     }
     
+    // Check if there are active filters BEFORE rendering to avoid glitch
+    const hasActiveFilters = (this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0) ||
+                             (this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0)
+    console.log(`📊 [EMBEDDING] Active filters check (before render):`, {
+      hasSelectedCategories: !!(this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0),
+      hasSelectedRanges: !!(this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0),
+      hasActiveFilters: hasActiveFilters
+    })
+    
     // Update visualization with the new coordinate data
     console.log(`📊 [EMBEDDING] Updating visualization with new coordinates...`)
     this.updateVisualizationWithMetadata()
-    console.log(`📊 [EMBEDDING] Visualization updated, checking for active coloring...`)
+    console.log(`📊 [EMBEDDING] Visualization updated, checking for active coloring and filters...`)
+    
+    // IMPORTANT: Apply filters IMMEDIATELY after plot initialization to avoid glitch
+    // Do this BEFORE coloring so filtered points are hidden from the start
+    if (hasActiveFilters) {
+      console.log(`🔍 [EMBEDDING] Applying filters immediately after embedding switch (before coloring)...`)
+      // Calculate filtered indices synchronously
+      const filteredIndices = this.getIncrementalFilteredIndices()
+      
+      // Update the current visible cells state immediately
+      this.controller.currentVisibleCells = filteredIndices
+      
+      // Update visualization synchronously to hide filtered points immediately
+      // This prevents the glitch where all points are briefly visible
+      if (this.controller.reglRenderer && this.controller.displayOrder && this.controller.displayOrder.length > 0) {
+        const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+        const colorMap = new Map()
+        
+        // Hide filtered-out points immediately by setting their colors to transparent
+        for (let drawPos = 0; drawPos < this.controller.displayOrder.length; drawPos++) {
+          const cellIndex = this.controller.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          
+          if (!isVisible) {
+            // Hide filtered-out points immediately
+            colorMap.set(drawPos, 0x00000000)
+          } else {
+            // Keep default color for visible points (will be updated by coloring next)
+            colorMap.set(drawPos, 0x3b82f6)
+          }
+        }
+        
+        // Update colors synchronously to hide filtered points immediately
+        this.controller.reglRenderer.updateColors(colorMap)
+        this.controller.reglRenderer.render()
+        console.log(`🔍 [EMBEDDING] Filtered points hidden immediately (${filteredIndices ? filteredIndices.length : 'all'} visible)`)
+      }
+      
+      // Now do the full filtering update (which includes UI updates) asynchronously
+      // This won't cause a glitch since we've already hidden the points
+      this.performCellFilteringUpdate(false)
+      console.log(`🔍 [EMBEDDING] Filters applied immediately`)
+    } else {
+      console.log(`📊 [EMBEDDING] No active filters to reapply`)
+    }
     
     // If there's a currently active metadata vector (coloring), reapply it to the new embedding
     if (this.controller.currentMetadataVector && this.controller.currentMetadataId) {

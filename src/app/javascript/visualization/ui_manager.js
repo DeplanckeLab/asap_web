@@ -316,14 +316,25 @@ export class UIManager {
       // Show select all/none checkbox
       const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
       if (selectAllCheckbox) {
+        // Check if checkbox has already been initialized (has a background color set)
+        // This prevents changing the checkbox state when clicking the waterdrop button
+        const hasExistingState = selectAllCheckbox.style.backgroundColor && 
+                                 selectAllCheckbox.style.backgroundColor !== '' &&
+                                 selectAllCheckbox.style.backgroundColor !== 'transparent'
+        
         selectAllCheckbox.style.display = 'flex'
-        // Initialize as checked with white background
-        selectAllCheckbox.style.backgroundColor = 'white'
-        selectAllCheckbox.style.borderColor = '#d1d5db'
-        const icon = selectAllCheckbox.querySelector('i')
-        if (icon) {
-          icon.style.display = 'block'
-          icon.style.color = '#10b981' // green checkmark
+        
+        // Only initialize state if checkbox hasn't been initialized before
+        // This preserves the checkbox state when clicking the waterdrop button
+        if (!hasExistingState) {
+          // Initialize as checked with white background
+          selectAllCheckbox.style.backgroundColor = 'white'
+          selectAllCheckbox.style.borderColor = '#d1d5db'
+          const icon = selectAllCheckbox.querySelector('i')
+          if (icon) {
+            icon.style.display = 'block'
+            icon.style.color = '#10b981' // green checkmark
+          }
         }
         
         // Check if there's only one category - if so, disable the checkbox

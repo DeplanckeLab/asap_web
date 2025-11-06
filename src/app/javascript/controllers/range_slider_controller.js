@@ -770,6 +770,36 @@ export default class extends Controller {
     
     const dpr = window.devicePixelRatio || 1
     
+    // Calculate required height based on content
+    // We need space for: top margin + plot area + bottom margin (with axis labels)
+    // First, estimate text width for min/max values to calculate margins
+    const tempCtx = document.createElement('canvas').getContext('2d')
+    tempCtx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    const minValueText = this.minValue.toFixed(3)
+    const maxValueText = this.maxValue.toFixed(3)
+    const minTextMetrics = tempCtx.measureText(minValueText)
+    const maxTextMetrics = tempCtx.measureText(maxValueText)
+    const maxTextWidth = Math.max(minTextMetrics.width, maxTextMetrics.width)
+    
+    // Calculate required margins
+    const estimatedLeftMargin = Math.max(35, 15 + maxTextWidth / 2)
+    const estimatedRightMargin = Math.max(15, maxTextWidth / 2 + 5)
+    const estimatedBottomMargin = 35 // Space for tick labels (10px) + axis title (12px) + padding (13px) - reduced
+    const estimatedTopMargin = 10
+    const tooltipSpace = 30 // Space for tooltip below the plot (20px height + 10px padding)
+    const minPlotHeight = 30 // Minimum plot area height
+    const requiredHeight = estimatedTopMargin + minPlotHeight + estimatedBottomMargin + tooltipSpace
+    
+    // Adjust canvas height if current height is too small
+    const containerDiv = canvas.parentElement
+    if (containerDiv && (rect.height < requiredHeight || !canvas.style.height)) {
+      canvas.style.height = `${requiredHeight}px`
+      // Recalculate rect after height change
+      const newRect = canvas.getBoundingClientRect()
+      rect.width = newRect.width
+      rect.height = newRect.height
+    }
+    
     // Set canvas internal resolution to match display size
     // Note: We intentionally do NOT set canvas.style.width/height here because
     // the canvas should adapt to its container (which has width: 100% in CSS)
@@ -791,11 +821,20 @@ export default class extends Controller {
     // Clear stored canvas data for tooltip
     this.originalCanvasData = null
     
-    // Define margins for axis titles
-    const leftMargin = 30
-    const bottomMargin = 25
+    // Calculate text metrics to determine required margins (after scaling)
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    const minTextMetricsScaled = ctx.measureText(minValueText)
+    const maxTextMetricsScaled = ctx.measureText(maxValueText)
+    const maxTextWidthScaled = Math.max(minTextMetricsScaled.width, maxTextMetricsScaled.width)
+    
+    // Define margins for axis titles and tick labels
+    // Left margin needs to accommodate rotated Y-axis title and potential tick labels
+    const leftMargin = Math.max(35, 15 + maxTextWidthScaled / 2)
+    // Bottom margin needs space for X-axis title and tick labels (reduced to move axis higher)
+    const bottomMargin = Math.max(30, 20 + 10)
     const topMargin = 10
-    const rightMargin = 10
+    // Right margin needs space for potential tick labels
+    const rightMargin = Math.max(15, maxTextWidthScaled / 2 + 5)
     
     // Calculate plot area
     const plotWidth = rect.width - leftMargin - rightMargin
@@ -873,22 +912,31 @@ export default class extends Controller {
     const overlayWidth = (maxPercent - minPercent) * plotWidth
     ctx.fillRect(overlayX, topMargin, overlayWidth, plotHeight)
     
-    // Draw axis titles
+    // Draw axis titles and tick labels
     ctx.fillStyle = '#374151'
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    
+    // Draw X-axis tick labels (min and max values) - moved higher
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const xAxisY = rect.height - bottomMargin + 2
+    ctx.fillText(minValueText, leftMargin, xAxisY)
+    ctx.fillText(maxValueText, rect.width - rightMargin, xAxisY)
+    
+    // Draw X-axis title (below tick labels) - moved higher
     ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    
-    // X-axis title (bottom) - moved closer to axis
     const xAxisTitle = 'Value bins'
-    ctx.fillText(xAxisTitle, rect.width / 2, rect.height - 15)
+    ctx.fillText(xAxisTitle, rect.width / 2, rect.height - bottomMargin + 15)
     
-    // Y-axis title (left side, rotated) - moved up
+    // Y-axis title (left side, rotated)
     ctx.save()
     ctx.translate(15, rect.height / 2 - 10)
     ctx.rotate(-Math.PI / 2)
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
+    ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     const yAxisTitle = 'Density'
     ctx.fillText(yAxisTitle, 0, 0)
     ctx.restore()
@@ -946,26 +994,42 @@ export default class extends Controller {
       this.originalCanvasData = ctx.getImageData(0, 0, canvas.width, canvas.height)
     }
     
-    // Tooltip content
-    const rangeText = `${bin.range.min.toFixed(3)} - ${bin.range.max.toFixed(3)}`
-    const densityText = `${bin.density.toFixed(1)}%`
+    // Tooltip content - combine on single line with cell count
+    const tooltipText = `${bin.range.min.toFixed(3)} - ${bin.range.max.toFixed(3)} (${bin.count} cells, ${bin.density.toFixed(1)}%)`
     
-    // Calculate tooltip position (top right corner of plot)
-    const tooltipX = rect.width - 10
-    const tooltipY = 10
+    // Calculate tooltip width based on text content
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    const textMetrics = ctx.measureText(tooltipText)
+    const tooltipWidth = textMetrics.width + 16
+    const tooltipHeight = 20
+    
+    // Calculate margins to match drawDensityPlot (recalculate to ensure consistency)
+    const minValueText = this.minValue.toFixed(3)
+    const maxValueText = this.maxValue.toFixed(3)
+    const minTextMetrics = ctx.measureText(minValueText)
+    const maxTextMetrics = ctx.measureText(maxValueText)
+    const maxTextWidth = Math.max(minTextMetrics.width, maxTextMetrics.width)
+    
+    const leftMargin = Math.max(35, 15 + maxTextWidth / 2)
+    const rightMargin = Math.max(15, maxTextWidth / 2 + 5)
+    const bottomMargin = Math.max(30, 20 + 10)
+    const plotBottom = rect.height - bottomMargin
+    
+    // Position tooltip below the plot area, centered on mouse X position
+    // Clamp to ensure tooltip stays within canvas bounds
+    const tooltipX = Math.max(leftMargin + tooltipWidth / 2, 
+                      Math.min(mouseX, rect.width - rightMargin - tooltipWidth / 2))
+    const tooltipY = plotBottom + 5
     
     // Draw tooltip background
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
-    ctx.fillRect(tooltipX - 80, tooltipY, 80, 40)
+    ctx.fillRect(tooltipX - tooltipWidth / 2, tooltipY, tooltipWidth, tooltipHeight)
     
-    // Draw tooltip text
+    // Draw tooltip text (single line)
     ctx.fillStyle = 'white'
-    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-    ctx.textAlign = 'right'
+    ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    
-    ctx.fillText(rangeText, tooltipX - 5, tooltipY + 5)
-    ctx.fillText(densityText, tooltipX - 5, tooltipY + 20)
+    ctx.fillText(tooltipText, tooltipX, tooltipY + 4)
   }
 
   // Hide tooltip

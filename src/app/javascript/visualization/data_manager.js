@@ -821,6 +821,9 @@ export class DataManager {
     // Update category distribution bar plots to reflect filtered cells
     this.updateAllCategoryDistributions()
     
+    // Redraw all density plots (histograms in range sliders) to reflect filtered cells
+    this.redrawAllDensityPlots()
+    
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(async () => {
       // Debug: Check what metadata is being filtered
@@ -1910,6 +1913,18 @@ export class DataManager {
       if (canvases.length > 0) {
         console.log(`🎨 [BAR PLOTS] Redrawing distributions for metadata ${metadataId}`)
         this.controller.drawCategoryDistributions(metadataId)
+      }
+    })
+  }
+  
+  // Redraw all density plots (histograms in range sliders) to reflect filtered cells
+  redrawAllDensityPlots() {
+    // Find all range slider controllers and redraw their density plots
+    const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
+    rangeSliderElements.forEach(element => {
+      const controller = this.controller.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+      if (controller && typeof controller.drawDensityPlot === 'function') {
+        controller.drawDensityPlot()
       }
     })
   }

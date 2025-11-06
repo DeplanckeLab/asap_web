@@ -801,12 +801,37 @@ export default class extends Controller {
     const plotWidth = rect.width - leftMargin - rightMargin
     const plotHeight = rect.height - topMargin - bottomMargin
     
-    // Create histogram
+    // Get filtered cell indices (if any filters are active)
+    // This ensures the histogram only shows cells that pass all active filters
+    const filteredIndices = this.visualizationController?.dataManager?.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Check if there's a range filter on this metadata
+    const rangeFilter = this.visualizationController?.selectedRanges && this.visualizationController.selectedRanges[this.metadataIdValue]
+    const hasRangeFilter = rangeFilter && rangeFilter.min !== undefined && rangeFilter.max !== undefined
+    
+    // Filter values to only include those from filtered cells AND within the selected range (if a range filter exists)
+    const filteredValues = []
+    sliderData.values.forEach((value, index) => {
+      // Only include values from cells that pass all filters
+      if (!filteredSet || filteredSet.has(index)) {
+        // If there's a range filter on this metadata, also check that the value is within the range
+        if (hasRangeFilter) {
+          if (value >= rangeFilter.min && value <= rangeFilter.max) {
+            filteredValues.push(value)
+          }
+        } else {
+          filteredValues.push(value)
+        }
+      }
+    })
+    
+    // Create histogram using only filtered values
     const numBins = 50
     const binWidth = (this.maxValue - this.minValue) / numBins
     const bins = new Array(numBins).fill(0)
     
-    sliderData.values.forEach(value => {
+    filteredValues.forEach(value => {
       const binIndex = Math.min(Math.floor((value - this.minValue) / binWidth), numBins - 1)
       bins[binIndex]++
     })
@@ -815,9 +840,11 @@ export default class extends Controller {
     const barWidth = plotWidth / numBins
     
     // Store bin data for hover tooltip
+    // Use filteredValues.length for density calculation
+    const totalFilteredCount = filteredValues.length
     this.binData = bins.map((count, i) => ({
       count,
-      density: (count / sliderData.values.length) * 100,
+      density: totalFilteredCount > 0 ? (count / totalFilteredCount) * 100 : 0,
       range: {
         min: this.minValue + i * binWidth,
         max: this.minValue + (i + 1) * binWidth

@@ -2,6 +2,7 @@
 export class GradientManager {
   constructor(controller) {
     this.controller = controller
+    this.isDraggingControlPoint = false // Flag to prevent marker re-rendering during drag
   }
 
   // Open gradient editor modal
@@ -49,18 +50,24 @@ export class GradientManager {
     // Show modal
     modal.style.display = 'flex'
     
-    // Initialize gradient editor with current gradient
-    this.controller.rendererManager.renderModalGradientPreview()
-    this.controller.rendererManager.renderModalControlPointMarkers()
-    this.controller.rendererManager.renderControlPointsList()
-    
-    // Attach event listeners to buttons since the modal is outside the controller scope
-    this.attachModalButtonListeners()
-    
-    // Attach click listener to gradient canvas
-    this.attachGradientCanvasListener()
-    
-    console.log('🎨 Modal opened and rendered')
+    // Wait for layout to settle before rendering markers
+    // This ensures the canvas has its final width
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // Initialize gradient editor with current gradient
+        this.controller.rendererManager.renderModalGradientPreview()
+        this.controller.rendererManager.renderModalControlPointMarkers()
+        this.controller.rendererManager.renderControlPointsList()
+        
+        // Attach event listeners to buttons since the modal is outside the controller scope
+        this.attachModalButtonListeners()
+        
+        // Attach click listener to gradient canvas
+        this.attachGradientCanvasListener()
+        
+        console.log('🎨 Modal opened and rendered')
+      })
+    })
   }
   
   // Attach click listener to gradient canvas
@@ -763,6 +770,12 @@ export class GradientManager {
   
   // Render control point markers on the gradient bar in modal
   renderModalControlPointMarkers() {
+    // Don't re-render markers if we're currently dragging one
+    // This prevents the marker from jumping during drag
+    if (this.isDraggingControlPoint) {
+      return
+    }
+    
     const container = document.getElementById('gradient-editor-control-points')
     if (!container) {
       console.warn('🎨 ⚠️ Control points container not found')
@@ -793,7 +806,10 @@ export class GradientManager {
     const canvas = document.getElementById('gradient-editor-preview-canvas')
     if (!canvas) return
     
-    const canvasWidth = canvas.offsetWidth
+    // Use getBoundingClientRect for more accurate width, especially when layout is still settling
+    // Try multiple methods to get canvas width - getBoundingClientRect can return 0 if not fully laid out
+    const canvasRect = canvas.getBoundingClientRect()
+    const canvasWidth = canvasRect.width || canvas.offsetWidth || canvas.clientWidth || canvas.width
     const selectedIndex = this.controller.selectedControlPointIndex
     
     // Create a marker for each control point
@@ -816,9 +832,9 @@ export class GradientManager {
         border-radius: 50%;
         background-color: #${point.color.toString(16).padStart(6, '0')};
         box-shadow: 0 2px 6px rgba(0,0,0,${isSelected ? '0.5' : '0.3'});
-        cursor: pointer;
+        cursor: grab;
         pointer-events: all;
-        transition: all 0.2s;
+        transition: transform 0.2s, box-shadow 0.2s;
         z-index: ${isSelected ? 10 : 1};
       `
       
@@ -834,11 +850,263 @@ export class GradientManager {
         }
       })
       
-      marker.addEventListener('click', (e) => {
+      // Add drag functionality
+      let isDragging = false
+      let dragStartMouseX = 0
+      let dragStartMarkerCenterX = 0
+      let dragStartPosition = 0
+      let dragStartColor = point.color
+      let hasMoved = false
+      const DRAG_THRESHOLD = 3 // pixels of movement before considering it a drag
+      
+      const startDrag = (e) => {
+        // Don't start drag if clicking on delete button
+        if (e.target !== marker && e.target.closest('div[style*="background-color: #dc2626"]')) {
+          return
+        }
+        
+        isDragging = true
+        hasMoved = false
+        this.isDraggingControlPoint = true // Set flag to prevent marker re-rendering
+        
+        // Store the control point's position and color first
+        dragStartPosition = point.position
+        dragStartColor = point.color
+        
+        // Get the actual mouse position relative to the canvas
+        const rect = canvas.getBoundingClientRect()
+        // Try multiple methods to get canvas width - getBoundingClientRect can return 0 if not fully laid out
+        const canvasWidth = rect.width || canvas.offsetWidth || canvas.clientWidth || canvas.width
+        dragStartMouseX = (e.clientX || e.touches[0].clientX) - rect.left
+        
+        // If canvas width is 0, we can't calculate positions correctly
+        // In this case, use the mouse position directly and calculate from control point
+        if (canvasWidth === 0) {
+          console.warn('🎨 WARNING: Canvas width is 0 at drag start!', {
+            rectWidth: rect.width,
+            offsetWidth: canvas.offsetWidth,
+            clientWidth: canvas.clientWidth,
+            width: canvas.width,
+            rect: rect
+          })
+          // Use mouse position as marker center (approximation)
+          dragStartMarkerCenterX = dragStartMouseX
+        } else {
+          // Get the marker's ACTUAL current visual position (not calculated from data)
+          // This prevents jumps if there's any mismatch
+          const markerRect = marker.getBoundingClientRect()
+          const containerElement = document.getElementById('gradient-editor-control-points')
+          if (containerElement) {
+            const containerRect = containerElement.getBoundingClientRect()
+            const actualMarkerCenterX = markerRect.left + (markerRect.width / 2) - containerRect.left
+            // Use the actual visual position as the starting point
+            dragStartMarkerCenterX = actualMarkerCenterX
+          } else {
+            // Fallback: calculate from control point position
+            dragStartMarkerCenterX = dragStartPosition * canvasWidth
+          }
+        }
+        
+        console.log('🎨 DRAG START:', {
+          controlPointIndex: index,
+          dragStartPosition: dragStartPosition,
+          dragStartColor: dragStartColor,
+          canvasWidth: canvasWidth,
+          dragStartMouseX: dragStartMouseX,
+          dragStartMarkerCenterX: dragStartMarkerCenterX,
+          markerLeft: marker.style.left,
+          calculatedFromPosition: dragStartPosition * canvasWidth
+        })
+        
+        // Don't prevent default yet - wait until we know it's a drag
+        // This allows click events to work if user just clicks without dragging
         e.stopPropagation()
-        e.preventDefault()
-        this.selectControlPoint(index)
+        
+        // Change cursor to indicate draggability
+        marker.style.cursor = 'grabbing'
+        document.body.style.cursor = 'grabbing'
+      }
+      
+      marker.addEventListener('click', (e) => {
+        // Only select if we didn't drag (or moved less than threshold)
+        if (!hasMoved) {
+          e.stopPropagation()
+          e.preventDefault()
+          this.selectControlPoint(index)
+        }
       })
+      
+      const doDrag = (e) => {
+        if (!isDragging) return
+        
+        const rect = canvas.getBoundingClientRect()
+        const currentMouseX = (e.clientX || e.touches[0].clientX) - rect.left
+        const mouseDeltaX = Math.abs(currentMouseX - dragStartMouseX)
+        
+        // Only consider it a drag if moved more than threshold
+        if (mouseDeltaX > DRAG_THRESHOLD) {
+          if (!hasMoved) {
+            // First time crossing threshold - now prevent default and disable transitions
+            hasMoved = true
+            e.preventDefault()
+            marker.style.transition = 'none'
+            document.body.style.userSelect = 'none'
+          }
+        } else {
+          // Still too small to be a drag, don't update position yet
+          return
+        }
+        
+        // Calculate the new marker center position
+        // The marker center moves by the same amount as the mouse
+        const mouseMovement = currentMouseX - dragStartMouseX
+        const newMarkerCenterX = dragStartMarkerCenterX + mouseMovement
+        
+        // Use getBoundingClientRect for more accurate width
+        // Try multiple methods to get canvas width - getBoundingClientRect can return 0 if not fully laid out
+        const canvasRect = canvas.getBoundingClientRect()
+        const canvasWidth = canvasRect.width || canvas.offsetWidth || canvas.clientWidth || canvas.width
+        
+        // Prevent division by zero - if canvas width is still 0, abort this drag update
+        if (canvasWidth === 0) {
+          console.warn('🎨 DRAG MOVE: Canvas width is 0, skipping update')
+          return
+        }
+        
+        // Convert marker center position to normalized position (0-1)
+        const rawPosition = newMarkerCenterX / canvasWidth
+        const newPosition = Math.max(0, Math.min(1, rawPosition))
+        
+        console.log('🎨 DRAG MOVE:', {
+          currentMouseX: currentMouseX,
+          dragStartMouseX: dragStartMouseX,
+          mouseMovement: mouseMovement,
+          dragStartMarkerCenterX: dragStartMarkerCenterX,
+          newMarkerCenterX: newMarkerCenterX,
+          canvasWidth: canvasWidth,
+          rawPosition: rawPosition,
+          newPosition: newPosition,
+          clamped: rawPosition !== newPosition
+        })
+        
+        // Ensure we have custom gradient
+        if (!this.controller.customGradientControlPoints) {
+          this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+            ? [...this.controller.gradientControlPoints] 
+            : []
+        }
+        
+        // Find the control point by color (should be unique)
+        const controlPoints = this.controller.customGradientControlPoints
+        const targetPoint = controlPoints.find(p => p.color === dragStartColor)
+        
+        if (targetPoint) {
+          const oldPosition = targetPoint.position
+          targetPoint.position = newPosition
+          
+          console.log('🎨 DRAG UPDATE:', {
+            foundPoint: !!targetPoint,
+            oldPosition: oldPosition,
+            newPosition: newPosition,
+            positionChange: newPosition - oldPosition
+          })
+          
+          // Update marker position visually
+          const markerSize = isSelected ? 20 : 16
+          const newX = newPosition * canvasWidth - (markerSize / 2)
+          marker.style.left = `${newX}px`
+          
+          console.log('🎨 DRAG VISUAL:', {
+            markerSize: markerSize,
+            calculatedNewX: newX,
+            newLeftStyle: marker.style.left
+          })
+          
+          // Update position input if this point is selected
+          if (isSelected) {
+            const positionInput = document.getElementById('gradient-control-point-position')
+            if (positionInput) {
+              const actualValue = this.controller.positionToActualValue(newPosition)
+              positionInput.value = actualValue.toFixed(3)
+            }
+          }
+          
+          // Update gradient preview in real-time
+          this.controller.rendererManager.renderModalGradientPreview()
+        } else {
+          console.warn('🎨 DRAG ERROR: Target point not found!', {
+            dragStartColor: dragStartColor,
+            controlPoints: controlPoints.map(p => ({ color: p.color, position: p.position }))
+          })
+        }
+      }
+      
+      const endDrag = (e) => {
+        if (!isDragging) return
+        
+        const wasDragging = hasMoved
+        isDragging = false
+        this.isDraggingControlPoint = false // Clear flag to allow marker re-rendering
+        marker.style.cursor = 'grab'
+        marker.style.transition = 'transform 0.2s, box-shadow 0.2s'
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        
+        // If we didn't actually drag, don't do any updates
+        // The click handler will take care of opening the editor
+        if (!wasDragging) {
+          hasMoved = false
+          return
+        }
+        
+        // Ensure we have custom gradient
+        if (!this.controller.customGradientControlPoints) {
+          this.controller.customGradientControlPoints = this.controller.gradientControlPoints 
+            ? [...this.controller.gradientControlPoints] 
+            : []
+        }
+        
+        const controlPoints = this.controller.customGradientControlPoints
+        
+        // Find the dragged point by color (more reliable than index)
+        const draggedPoint = controlPoints.find(p => p.color === dragStartColor)
+        
+        if (draggedPoint) {
+          // Sort control points by position
+          controlPoints.sort((a, b) => a.position - b.position)
+          
+          // Find new index after sorting
+          const newIndex = controlPoints.findIndex(p => 
+            p.color === dragStartColor
+          )
+          
+          if (newIndex >= 0) {
+            // Update selected index if this was the selected point
+            if (this.controller.selectedControlPointIndex !== undefined) {
+              const wasSelected = this.controller.selectedControlPointIndex === index
+              if (wasSelected || controlPoints[this.controller.selectedControlPointIndex]?.color === dragStartColor) {
+                this.controller.selectedControlPointIndex = newIndex
+              }
+            }
+          }
+          
+          // Re-render markers to update positions
+          this.renderModalControlPointMarkers()
+          
+          // Update gradient display
+          this.updateGradientDisplay()
+        }
+      }
+      
+      // Mouse events
+      marker.addEventListener('mousedown', startDrag)
+      document.addEventListener('mousemove', doDrag)
+      document.addEventListener('mouseup', endDrag)
+      
+      // Touch events
+      marker.addEventListener('touchstart', startDrag, { passive: false })
+      document.addEventListener('touchmove', doDrag, { passive: false })
+      document.addEventListener('touchend', endDrag)
       
       // Add delete button for selected marker
       if (isSelected && controlPoints.length > 2) {

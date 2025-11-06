@@ -777,6 +777,14 @@ export default class extends Controller {
     // Set initial point size
     this.reglRenderer.setPointSize(this.currentPointSize || 4)
     
+    // Populate originalPointColors with default colors for all cells
+    // This ensures selected cells can be shown even if no coloring is active
+    const defaultColor = 0x3b82f6 // Default blue
+    for (let i = 0; i < coordinates.length; i++) {
+      this.originalPointColors.set(i, defaultColor)
+    }
+    console.log(`🎯 [ReGL] Populated originalPointColors with ${coordinates.length} default colors`)
+    
     // Render first frame
     console.log('🔍 DEBUG: About to render first frame')
     this.reglRenderer.render()
@@ -7207,6 +7215,53 @@ export default class extends Controller {
     // Update colors of selected points without re-rendering (preserves pan/zoom state)
     this.updateSelectedPointColors()
   }
+
+  // Reorder displayOrder to put selected cells at the end (drawn last, appear on top)
+  reorderDisplayOrderForSelectedCells() {
+    if (!this.reglRenderer || !this.displayOrder || !this.currentCoordinates || this.selectedCells.size === 0) {
+      return
+    }
+    
+    console.log(`📊 [SELECTION] Reordering displayOrder to put ${this.selectedCells.size} selected cells on top`)
+    const startTime = performance.now()
+    
+    // Separate selected and unselected cells
+    const unselected = []
+    const selected = []
+    
+    for (let i = 0; i < this.displayOrder.length; i++) {
+      const cellIndex = this.displayOrder[i]
+      if (this.selectedCells.has(cellIndex)) {
+        selected.push(cellIndex)
+      } else {
+        unselected.push(cellIndex)
+      }
+    }
+    
+    // Rebuild displayOrder: unselected first, then selected (drawn last = on top)
+    const newDisplayOrder = [...unselected, ...selected]
+    
+    // Update displayOrder array
+    for (let i = 0; i < newDisplayOrder.length; i++) {
+      this.displayOrder[i] = newDisplayOrder[i]
+    }
+    
+    // Rebuild screen coordinates buffer with new order
+    const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
+    for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+      const cellIndex = this.displayOrder[drawPos]
+      const [x, y] = this.currentCoordinates[cellIndex]
+      screenCoordinates[drawPos * 2] = this.interactionHandler.normalizeX(x, this.currentBounds)
+      screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(y, this.currentBounds)
+    }
+    
+    // Update renderer with new positions
+    this.reglRenderer.updatePositions(screenCoordinates)
+    
+    const elapsed = performance.now() - startTime
+    console.log(`📊 [SELECTION] Reordered displayOrder in ${elapsed.toFixed(2)}ms (${unselected.length} unselected, ${selected.length} selected)`)
+  }
+
   // Update colors of selected points without re-rendering (preserves pan/zoom state)
   updateSelectedPointColors() {
     const numPoints = this.rendererType === 'regl' ? this.numPoints : (this.pointSprites?.length || 0)
@@ -7231,6 +7286,12 @@ export default class extends Controller {
       }
       
       const hasSelections = this.selectedCells.size > 0
+      
+      // Reorder displayOrder to put selected cells on top
+      if (hasSelections && this.displayOrder && this.currentCoordinates) {
+        this.reorderDisplayOrderForSelectedCells()
+      }
+      
       const colorMap = new Map()
       
       if (hasSelections) {

@@ -1904,6 +1904,23 @@ export class DataManager {
     } else {
       console.log(`📊 [EMBEDDING] No active coloring to reapply (currentMetadataVector: ${!!this.controller.currentMetadataVector}, currentMetadataId: ${this.controller.currentMetadataId})`)
     }
+    
+    // If there are selected cells, update colors to show them on top
+    // updateSelectedPointColors will handle reordering displayOrder
+    // Use double requestAnimationFrame to ensure this happens after all rendering is complete
+    if (this.controller.selectedCells && this.controller.selectedCells.size > 0) {
+      console.log(`📊 [EMBEDDING] Scheduling selected cells update after embedding switch (${this.controller.selectedCells.size} selected)`)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          // Double-check that renderer is still ready and selected cells still exist
+          if (this.controller.reglRenderer && this.controller.displayOrder && 
+              this.controller.selectedCells && this.controller.selectedCells.size > 0) {
+            console.log(`📊 [EMBEDDING] Updating selected cells display (${this.controller.selectedCells.size} selected)`)
+            this.controller.updateSelectedPointColors()
+          }
+        })
+      })
+    }
   }
 
   // Clear metadata data

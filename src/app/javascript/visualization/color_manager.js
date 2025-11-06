@@ -36,16 +36,29 @@ export class ColorManager {
       if (data_type === 'DISCRETE') {
         // Cache the color map to avoid recalculating for every point
         if (!this.controller._cachedColorMap || this.controller._cachedColorMapMetadataId !== coloringMetadataVector.id) {
-          // Use DOM order (same as legend) for consistent color assignment
-          const domOrderCategories = this.controller.getCategoriesForMetadata(coloringMetadataVector.id)
-          if (domOrderCategories && domOrderCategories.length > 0) {
-            const categoryNames = domOrderCategories.map(cat => cat.name)
-            this.controller._cachedColorMap = this.createDiscreteColorMap(categoryNames, coloringMetadataVector.id)
+          // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+          // Otherwise fall back to unique categories from values
+          // This ensures colors remain stable even when categories have 0 visible cells
+          let allCategories
+          if (compression_info && compression_info.categories) {
+            allCategories = [...compression_info.categories]
           } else {
-            // Fallback to alphabetical order if DOM order not available
-            const uniqueValues = [...new Set(values.filter(v => v !== null && v !== undefined))]
-            this.controller._cachedColorMap = this.createDiscreteColorMap(uniqueValues, coloringMetadataVector.id)
+            allCategories = [...new Set(values.filter(v => v !== null && v !== undefined))]
           }
+          
+          const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
+          
+          // Create color map using stable sorted order
+          const categoryColors = this.getCategoryColors()
+          this.controller._cachedColorMap = {}
+          stableSortedCategories.forEach((cat, idx) => {
+            const colorValue = categoryColors[idx % categoryColors.length]
+            const color = typeof colorValue === 'string' 
+              ? parseInt(colorValue.replace('#', ''), 16)
+              : colorValue
+            this.controller._cachedColorMap[cat] = color
+          })
+          
           this.controller._cachedColorMapMetadataId = coloringMetadataVector.id
         }
         
@@ -167,20 +180,26 @@ export class ColorManager {
     if (data_type === 'DISCRETE') {
       // Discrete metadata coloring
       const categoryColors = this.getCategoryColors()
-      const domOrderCategories = this.controller.getCategoriesForMetadata(coloringMetadataVector.id)
-      let categoryToIndex = {}
       
-      if (domOrderCategories && domOrderCategories.length > 0) {
-        const categoryNames = domOrderCategories.map(cat => cat.name)
-        categoryNames.forEach((cat, idx) => {
-          categoryToIndex[cat] = idx
-        })
+      // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+      // Otherwise fall back to unique categories from values
+      // This ensures colors remain stable even when categories have 0 visible cells
+      let allCategories
+      if (compression_info && compression_info.categories) {
+        allCategories = [...compression_info.categories]
       } else {
-        const uniqueCategories = [...new Set(values)]
-        uniqueCategories.forEach((cat, idx) => {
-          categoryToIndex[cat] = idx
-        })
+        allCategories = [...new Set(values)]
       }
+      
+      // Use stable sorted categories (always largest-first) for consistent color assignment
+      // This ensures colors match between legend and points regardless of display order
+      const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
+      
+      // Build category-to-index map using stable sorted order
+      let categoryToIndex = {}
+      stableSortedCategories.forEach((cat, idx) => {
+        categoryToIndex[cat] = idx
+      })
       
       // Cache colors for all points
       for (let i = 0; i < values.length; i++) {

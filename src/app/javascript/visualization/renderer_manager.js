@@ -387,18 +387,18 @@ export class RendererManager {
     console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
     
     // Get category colors using the same logic as plot dots for consistency
-    // Use DOM order (same as legend) for consistent color assignment
-    const domOrderCategories = this.controller.getCategoriesForMetadata(this.controller.currentMetadataVector.id)
-    let colorMap = {}
-    
-    if (domOrderCategories && domOrderCategories.length > 0) {
-      const categoryNames = domOrderCategories.map(cat => cat.name)
-      colorMap = this.controller.colorManager.createDiscreteColorMap(categoryNames, this.controller.currentMetadataVector.id)
+    // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+    // Otherwise fall back to unique categories from values
+    // This ensures colors remain stable even when categories have 0 visible cells
+    let allCategories
+    if (this.controller.currentMetadataVector.compression_info && this.controller.currentMetadataVector.compression_info.categories) {
+      allCategories = [...this.controller.currentMetadataVector.compression_info.categories]
     } else {
-      // Fallback to original categories if DOM not available
-      const uniqueCategories = [...new Set(values)]
-      colorMap = this.controller.colorManager.createDiscreteColorMap(uniqueCategories, this.controller.currentMetadataVector.id)
+      allCategories = [...new Set(values)]
     }
+    
+    const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
+    const colorMap = this.controller.colorManager.createDiscreteColorMap(stableSortedCategories, this.controller.currentMetadataVector.id)
     
     // Clear old labels array for this rendering
     const newLabels = []

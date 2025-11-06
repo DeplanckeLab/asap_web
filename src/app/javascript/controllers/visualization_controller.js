@@ -2360,26 +2360,27 @@ export default class extends Controller {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.colorManager.getCategoryColors()
         
-        // Build category-to-index map using DOM order (same as legend)
-        const domOrderCategories = this.getCategoriesForMetadata(coloringMetadataVector.id)
-        let categoryToIndex = {}
-        
-        if (domOrderCategories && domOrderCategories.length > 0) {
-          // Use DOM order for consistent color assignment
-          const categoryNames = domOrderCategories.map(cat => cat.name)
-          categoryNames.forEach((cat, idx) => {
-            categoryToIndex[cat] = idx
-          })
+        // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+        // Otherwise fall back to unique categories from values
+        // This ensures colors remain stable even when categories have 0 visible cells
+        let allCategories
+        if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
+          allCategories = [...coloringMetadataVector.compression_info.categories]
         } else {
-          // Fallback to Set order if DOM not available
-          const uniqueCategories = [...new Set(coloringMetadataVector.values)]
-          uniqueCategories.forEach((cat, idx) => {
-            categoryToIndex[cat] = idx
-          })
+          allCategories = [...new Set(coloringMetadataVector.values)]
         }
         
-        const uniqueCategories = Object.keys(categoryToIndex)
-        console.log(`🎨 [ReGL] ${uniqueCategories.length} categories, ${categoryColors.length} colors available`)
+        // Use stable sorted categories (always largest-first) for consistent color assignment
+        // This ensures colors match between legend and points regardless of display order
+        const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
+        
+        // Build category-to-index map using stable sorted order
+        let categoryToIndex = {}
+        stableSortedCategories.forEach((cat, idx) => {
+          categoryToIndex[cat] = idx
+        })
+        
+        console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
         
         // Assign colors using displayOrder, hiding filtered-out cells
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
@@ -4542,7 +4543,7 @@ export default class extends Controller {
         return
       }
       
-      // Get categories data
+      // Get categories data from DOM (for display order)
       //console.log('Getting categories for metadata...')
       const categories = this.getCategoriesForMetadata(metadataId)
       //console.log('Categories data:', categories)
@@ -4551,6 +4552,31 @@ export default class extends Controller {
         console.log('No categories found')
         return
       }
+      
+      // Get metadata vector to calculate stable sorted categories for color assignment
+      const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+      if (!metadataVector || !metadataVector.values) {
+        console.log('No metadata vector found for stable color assignment')
+        return
+      }
+      
+      // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+      // Otherwise fall back to unique categories from values
+      // This ensures colors remain stable even when categories have 0 visible cells
+      let allCategories
+      if (metadataVector.compression_info && metadataVector.compression_info.categories) {
+        allCategories = [...metadataVector.compression_info.categories]
+      } else {
+        allCategories = [...new Set(metadataVector.values)]
+      }
+      
+      const stableSortedCategories = this.getStableSortedCategories(metadataVector.values, allCategories)
+      
+      // Create a map from category name to its index in the stable sorted order
+      const categoryToStableIndex = {}
+      stableSortedCategories.forEach((cat, idx) => {
+        categoryToStableIndex[cat] = idx
+      })
     
     // Add colored disks to each category
     const categoryItems = categoriesContainer.querySelectorAll('div[style*="display: flex; justify-content: space-between"]')
@@ -4562,7 +4588,9 @@ export default class extends Controller {
       item.style.paddingLeft = '20px' // Make space for the color disk
       
       const categoryName = item.querySelector('span').textContent.trim()
-      const color = this.getCategoryColor(categoryName, index, metadataId)
+      // Use stable index for color assignment (not DOM index)
+      const stableIndex = categoryToStableIndex[categoryName] !== undefined ? categoryToStableIndex[categoryName] : index
+      const color = this.getCategoryColor(categoryName, stableIndex, metadataId)
       
       //console.log(`Adding color disk for "${categoryName}" (index ${index}) with color ${color}`)
       
@@ -11754,7 +11782,7 @@ export default class extends Controller {
     const filteredIndices = this.dataManager.getFilteredCellIndices()
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     
-    // Count occurrences of each coloring category (filtered only)
+    // Count occurrences of each coloring category (filtered only) for display
     const coloringCategoryCounts = {}
     const totalCells = coloringMetadataVector.values.length
     
@@ -11765,13 +11793,33 @@ export default class extends Controller {
       }
     }
     
-    // Sort coloring categories by count (largest first) to match plot ordering
+    // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
+    // Otherwise fall back to unique categories from values
+    // This ensures colors remain stable even when categories have 0 visible cells
+    let allCategories
+    if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
+      allCategories = [...coloringMetadataVector.compression_info.categories]
+    } else {
+      allCategories = [...new Set(coloringMetadataVector.values)]
+    }
+    
+    // Get stable sorted categories (same as points and legend) for consistent color assignment
+    const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
+    
+    // Create a map from category name to its stable color index
+    const categoryToColorIndex = {}
+    stableSortedCategories.forEach((cat, idx) => {
+      categoryToColorIndex[cat] = idx
+    })
+    
+    // Get category colors from color manager (use full palette)
+    const categoryColors = this.colorManager.getCategoryColors()
+    
+    // Sort visible coloring categories by count (largest first) for display order only
+    // But use stable color indices for actual color assignment
     const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
-    
-    // Get category colors from color manager
-    const categoryColors = this.colorManager.getCategoryColors(sortedColoringCategories.length)
     
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
@@ -11795,9 +11843,13 @@ export default class extends Controller {
       const segments = []
       let currentX = 0
       
-      sortedColoringCategories.forEach((coloringCategory, index) => {
+      sortedColoringCategories.forEach((coloringCategory) => {
         const count = distributionCounts[coloringCategory] || 0
         if (count > 0) {
+          // Use stable color index (not the index in the filtered sorted list)
+          const stableColorIndex = categoryToColorIndex[coloringCategory] !== undefined ? categoryToColorIndex[coloringCategory] : 0
+          const color = categoryColors[stableColorIndex % categoryColors.length]
+          
           const percentage = (count / cellsInDisplayedCategory.length) * 100
           const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width
           
@@ -11807,7 +11859,7 @@ export default class extends Controller {
             percentage: percentage,
             startX: currentX,
             endX: currentX + segmentWidth,
-            color: categoryColors[index % categoryColors.length]
+            color: color
           })
           
           currentX += segmentWidth

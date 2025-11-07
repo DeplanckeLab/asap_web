@@ -678,31 +678,135 @@
         <!-- Matrix/Layer Selection Dropdown -->
         <% matrices = (@expression_matrices_by_loom[@default_loom_file] || []).sort_by(&:name) %>
         <% base_matrix = matrices.find { |annot| annot.name == '/matrix' } %>
-        <div style="margin-top: 12px;">
-          <label for="gene-expression-matrix-select" style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px;">Expression Matrix/Layer</label>
-          <select id="gene-expression-matrix-select" 
-                  style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background-color: white; color: #374151; cursor: pointer; transition: border-color 0.2s;"
-                  onfocus="this.style.borderColor='#3b82f6'"
-                  onblur="this.style.borderColor='#d1d5db'"
-                  onchange="(function(select){
-                    const option = select.options[select.selectedIndex]
-                    const annotId = option.dataset.annotId || null
-                    const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager
-                    if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
-                      console.log('[UI] Matrix dropdown change detected:', select.value, 'annot_id:', annotId)
-                      geneMgr.onMatrixLayerChange(select.value, annotId)
-                    } else {
-                      console.warn('[UI] Gene manager not available when matrix dropdown changed')
-                    }
-                  })(this)">
-            <option value="/matrix" data-annot-id="<%= base_matrix&.id %>">/matrix</option>
-            <% matrices.each do |matrix| %>
-              <% next if matrix.name == '/matrix' %>
-              <% label = matrix.label.presence || matrix.display_name || matrix.name %>
-              <option value="<%= matrix.name %>" data-annot-id="<%= matrix.id %>"><%= label %> (<%= matrix.name %>)</option>
-            <% end %>
-          </select>
+        <% latest_matrix = matrices.max_by(&:id) %>
+        <% default_matrix = latest_matrix || base_matrix %>
+        <% default_layer = default_matrix&.name || '/matrix' %>
+        <% default_annot_id = default_matrix&.id ? default_matrix.id.to_s : '' %>
+        <% default_label = (default_matrix&.label.presence || default_matrix&.display_name || default_matrix&.name || '/matrix') %>
+        <div style="margin-top: -6px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7280; position: relative;">
+          <span>Values from</span>
+          <a href="#"
+             id="matrix-selection-link"
+             data-layer="<%= default_layer %>"
+             data-annot-id="<%= default_annot_id %>"
+             style="font-weight: 600; color: #2563eb; text-decoration: none; cursor: pointer;"
+             onclick="(function(event){
+               event.preventDefault();
+               event.stopPropagation();
+               const menu = document.getElementById('matrix-selection-menu');
+               if (!menu) return;
+               const isVisible = menu.style.display === 'block';
+               if (isVisible) {
+                 menu.style.display = 'none';
+                 if (window.__matrixOutsideHandler) {
+                   document.removeEventListener('click', window.__matrixOutsideHandler);
+                   window.__matrixOutsideHandler = null;
+                 }
+               } else {
+                 menu.style.display = 'block';
+                 window.__matrixOutsideHandler = function(evt) {
+                   if (!menu.contains(evt.target) && evt.target !== event.currentTarget) {
+                     menu.style.display = 'none';
+                     document.removeEventListener('click', window.__matrixOutsideHandler);
+                     window.__matrixOutsideHandler = null;
+                   }
+                 };
+                 document.addEventListener('click', window.__matrixOutsideHandler);
+               }
+             })(event)">
+            <%= default_label %>
+          </a>
+          <div id="matrix-selection-menu" style="display: none; position: absolute; top: 18px; left: 78px; background: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); z-index: 2000; min-width: 200px;">
+            <div style="max-height: 220px; overflow-y: auto;">
+              <div data-value="/matrix" data-annot-id="<%= base_matrix&.id %>" data-label="/matrix" data-selected="<%= default_layer == '/matrix' %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= default_layer == '/matrix' ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
+                   onmouseover="this.dataset.selected !== 'true' && (this.style.backgroundColor='#f3f4f6')"
+                   onmouseout="this.dataset.selected !== 'true' ? this.style.backgroundColor='' : this.style.backgroundColor='#eff6ff'"
+                   onclick="(function(item){
+                     document.querySelectorAll('#matrix-selection-menu div[data-value]').forEach(function(el){
+                       el.dataset.selected = 'false';
+                       el.style.backgroundColor = '';
+                       el.style.fontWeight = '';
+                     });
+                     item.dataset.selected = 'true';
+                     item.style.backgroundColor = '#eff6ff';
+                     item.style.fontWeight = '600';
+                     const menu = document.getElementById('matrix-selection-menu');
+                     if (menu) menu.style.display = 'none';
+                     if (window.__matrixOutsideHandler) {
+                       document.removeEventListener('click', window.__matrixOutsideHandler);
+                       window.__matrixOutsideHandler = null;
+                     }
+                     const link = document.getElementById('matrix-selection-link');
+                     if (link) {
+                       link.textContent = item.dataset.label;
+                       link.dataset.layer = item.dataset.value;
+                       link.dataset.annotId = item.dataset.annotId || '';
+                     }
+                     const annotId = item.dataset.annotId || null;
+                     const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
+                     if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
+                       console.log('[UI] Matrix dropdown change detected:', item.dataset.value, 'annot_id:', annotId);
+                       geneMgr.onMatrixLayerChange(item.dataset.value, annotId);
+                     }
+                   })(this)">
+                /matrix
+              </div>
+              <% matrices.each do |matrix| %>
+                <% next if matrix.name == '/matrix' %>
+                <% label = matrix.label.presence || matrix.display_name || matrix.name %>
+                <% selected = default_layer == matrix.name %>
+                <div data-value="<%= matrix.name %>" data-annot-id="<%= matrix.id %>" data-label="<%= label %>" data-selected="<%= selected %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= selected ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
+                     onmouseover="this.dataset.selected !== 'true' && (this.style.backgroundColor='#f3f4f6')"
+                     onmouseout="this.dataset.selected !== 'true' ? this.style.backgroundColor='' : this.style.backgroundColor='#eff6ff'"
+                     onclick="(function(item){
+                       document.querySelectorAll('#matrix-selection-menu div[data-value]').forEach(function(el){
+                         el.dataset.selected = 'false';
+                         el.style.backgroundColor = '';
+                         el.style.fontWeight = '';
+                       });
+                       item.dataset.selected = 'true';
+                       item.style.backgroundColor = '#eff6ff';
+                       item.style.fontWeight = '600';
+                       const menu = document.getElementById('matrix-selection-menu');
+                       if (menu) menu.style.display = 'none';
+                       if (window.__matrixOutsideHandler) {
+                         document.removeEventListener('click', window.__matrixOutsideHandler);
+                         window.__matrixOutsideHandler = null;
+                       }
+                       const link = document.getElementById('matrix-selection-link');
+                       if (link) {
+                         link.textContent = item.dataset.label;
+                         link.dataset.layer = item.dataset.value;
+                         link.dataset.annotId = item.dataset.annotId || '';
+                       }
+                       const annotId = item.dataset.annotId || null;
+                       const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
+                       if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
+                         console.log('[UI] Matrix dropdown change detected:', item.dataset.value, 'annot_id:', annotId);
+                         geneMgr.onMatrixLayerChange(item.dataset.value, annotId);
+                       }
+                     })(this)">
+                  <%= label %>
+                  <span style="color: #9ca3af; font-size: 11px; margin-left: 4px;"><%= matrix.name %></span>
+                </div>
+              <% end %>
+            </div>
+          </div>
         </div>
+        <script>
+          document.addEventListener('DOMContentLoaded', function() {
+            const link = document.getElementById('matrix-selection-link')
+            if (!link) return
+            const defaultLayer = link.dataset.layer || link.textContent?.trim() || '/matrix'
+            const defaultAnnotId = link.dataset.annotId ? String(link.dataset.annotId) : null
+            const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager
+            if (geneMgr) {
+              geneMgr.currentMatrixLayer = defaultLayer
+              geneMgr.currentMatrixAnnotId = defaultAnnotId
+              geneMgr.matrixInitialized = true
+            }
+          })
+        </script>
       </div>
       <div style="flex: 1; padding: 20px; padding-top: 0; overflow-y: auto; min-height: 0;">
 

@@ -11,6 +11,7 @@ export class GeneManager {
     this.geneExpressionData = {} // Store expression values per gene: {stableId: {values: [...], stats: {...}}}
     this.currentMatrixLayer = '/matrix' // Default to /matrix
     this.currentMatrixAnnotId = null // Annot ID for the current matrix/layer
+    this.matrixInitialized = false
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
     console.log('GeneManager: Constructor initialized, window.geneManager set')
@@ -54,6 +55,7 @@ export class GeneManager {
     })
     this.currentMatrixLayer = nextLayer
     this.currentMatrixAnnotId = nextAnnotId
+    this.matrixInitialized = true
     
     // Clear all gene expression data vectors with old annot_id
     if (this.controller && this.controller.loadedMetadataVectors) {
@@ -620,22 +622,40 @@ export class GeneManager {
       container.appendChild(input)
     }
 
-    // Initialize current matrix selection based on dropdown if available
-    const matrixSelect = document.getElementById('gene-expression-matrix-select')
-    if (matrixSelect && matrixSelect.options.length > 0) {
-      const option = matrixSelect.options[matrixSelect.selectedIndex]
-      const optionValue = option.value || '/matrix'
-      const optionAnnotId = option.dataset.annotId
-      const resolvedAnnotId = optionAnnotId && optionAnnotId !== '' ? String(optionAnnotId) : null
+    this.syncMatrixSelectionFromUI()
+  }
 
-      if (this.currentMatrixLayer !== optionValue || this.currentMatrixAnnotId !== resolvedAnnotId) {
-        this.currentMatrixLayer = optionValue
-        this.currentMatrixAnnotId = resolvedAnnotId
-        console.log('GeneManager: initial matrix selection detected', {
-          layer: this.currentMatrixLayer,
-          annotId: this.currentMatrixAnnotId
+  syncMatrixSelectionFromUI() {
+    let selectedLayer = null
+    let selectedAnnotId = null
+
+    const select = document.getElementById('gene-expression-matrix-select')
+    if (select && select.options.length > 0) {
+      const option = select.options[select.selectedIndex]
+      selectedLayer = option?.value || '/matrix'
+      const optionAnnotId = option?.dataset?.annotId
+      selectedAnnotId = optionAnnotId && optionAnnotId !== '' ? String(optionAnnotId) : null
+    } else {
+      const link = document.getElementById('matrix-selection-link')
+      if (link) {
+        selectedLayer = link.dataset.layer || link.textContent?.trim() || '/matrix'
+        const linkAnnot = link.dataset.annotId
+        selectedAnnotId = linkAnnot && linkAnnot !== '' ? String(linkAnnot) : null
+      }
+    }
+
+    if (selectedLayer) {
+      if (this.currentMatrixLayer !== selectedLayer || this.currentMatrixAnnotId !== selectedAnnotId) {
+        console.log('GeneManager: syncMatrixSelectionFromUI detected mismatch', {
+          previousLayer: this.currentMatrixLayer,
+          previousAnnotId: this.currentMatrixAnnotId,
+          selectedLayer,
+          selectedAnnotId
         })
       }
+      this.currentMatrixLayer = selectedLayer
+      this.currentMatrixAnnotId = selectedAnnotId
+      this.matrixInitialized = true
     }
   }
 
@@ -1340,6 +1360,7 @@ export class GeneManager {
   }
 
   displayBulkGene(gene, container) {
+    this.syncMatrixSelectionFromUI()
     const geneDiv = document.createElement('div')
     geneDiv.id = `gene-result-${gene.stableId}`
     geneDiv.setAttribute('data-gene-item', gene.stableId)
@@ -1622,6 +1643,7 @@ export class GeneManager {
   }
 
   async loadGeneExpressionData(gene, container) {
+    this.syncMatrixSelectionFromUI()
     const geneId = String(gene.stableId)
     const { baseKey: baseMetadataId, layerKey: geneMetadataId } = this.getGeneMetadataKeys(geneId, this.currentMatrixAnnotId)
     const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)

@@ -10,6 +10,40 @@ export class CustomPlotManager {
     this.violinPointPositions = new Map()
   }
 
+  resolveGeneMetadataIdentifiers(buttonInfo) {
+    if (!buttonInfo || !buttonInfo.button) return null
+
+    const gm = this.controller?.geneManager
+    const buttonEl = buttonInfo.button
+
+    let stableId = buttonEl.dataset?.geneId || buttonInfo.metadataId
+    if (!stableId) return null
+
+    let stableIdStr = String(stableId)
+    if (stableIdStr.startsWith('gene_')) {
+      stableIdStr = stableIdStr.slice(5)
+    }
+
+    const baseKey = gm && typeof gm.getBaseGeneMetadataId === 'function'
+      ? gm.getBaseGeneMetadataId(stableIdStr)
+      : `gene_${stableIdStr}`
+
+    let layerKey = buttonEl.dataset?.layerMetadataId || buttonInfo.layerMetadataId || null
+    if (!layerKey) {
+      if (gm && typeof gm.getGeneMetadataId === 'function') {
+        layerKey = gm.getGeneMetadataId(stableIdStr, gm.currentMatrixAnnotId)
+      } else {
+        layerKey = baseKey
+      }
+    }
+
+    return {
+      stableId: stableIdStr,
+      baseKey,
+      layerKey
+    }
+  }
+
   // Check if both x and y are selected and open modal
   checkAndOpen2DPlotModal() {
     if (this.controller.selectedXButton && this.controller.selectedYButton) {
@@ -293,188 +327,115 @@ export class CustomPlotManager {
     
     
     try {
-      // Load x and y data vectors
-      const xMetadataId = this.controller.selectedXButton.isGene ? `gene_${this.controller.selectedXButton.metadataId}` : this.controller.selectedXButton.metadataId
-      const yMetadataId = this.controller.selectedYButton.isGene ? `gene_${this.controller.selectedYButton.metadataId}` : this.controller.selectedYButton.metadataId
-      
-      console.log('📊 Loading data for 2D plot:', { xMetadataId, yMetadataId })
+      const xButtonInfo = this.controller.selectedXButton
+      const yButtonInfo = this.controller.selectedYButton
+      const xIsGene = !!xButtonInfo?.isGene
+      const yIsGene = !!yButtonInfo?.isGene
+      const xGeneInfo = xIsGene ? this.resolveGeneMetadataIdentifiers(xButtonInfo) : null
+      const yGeneInfo = yIsGene ? this.resolveGeneMetadataIdentifiers(yButtonInfo) : null
+
+      const xMetadataId = xIsGene ? (xGeneInfo?.layerKey || xGeneInfo?.baseKey || xButtonInfo.metadataId) : xButtonInfo.metadataId
+      const yMetadataId = yIsGene ? (yGeneInfo?.layerKey || yGeneInfo?.baseKey || yButtonInfo.metadataId) : yButtonInfo.metadataId
+
+      console.log('📊 Loading data for 2D plot:', {
+        xMetadataId,
+        yMetadataId,
+        xStableId: xGeneInfo?.stableId,
+        yStableId: yGeneInfo?.stableId,
+        xBaseMetadataId: xGeneInfo?.baseKey,
+        yBaseMetadataId: yGeneInfo?.baseKey,
+        currentLayer: this.controller?.geneManager?.currentMatrixLayer,
+        currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
+      })
       
       // Load x vector
       let xVector = null
-      if (this.controller.selectedXButton.isGene) {
-        // Load gene expression data
-        const geneId = this.controller.selectedXButton.metadataId
-        const geneIdStr = String(geneId)
-        const geneIdNum = Number(geneId)
-        const geneMetadataId = `gene_${geneId}`
-        
-        // First check loadedMetadataVectors
-        if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-          xVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          console.log(`📊 X-axis: Found gene ${geneId} in loadedMetadataVectors`)
+      if (xIsGene) {
+        if (!xGeneInfo) {
+          console.warn('📊 X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
         } else {
-          // Try to find in geneExpressionData with all key formats
-          let geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-          
-          if (geneData && geneData.values && geneData.values.length > 0) {
-            console.log(`📊 X-axis: Found gene ${geneId} in geneExpressionData, creating vector`)
-            const minVal = this.controller.dataManager.safeMin(geneData.values)
-            const maxVal = this.controller.dataManager.safeMax(geneData.values)
-            xVector = {
-              id: geneMetadataId,
-              name: geneData.symbol || `Gene ${geneId}`,
-              display_name: geneData.symbol || `Gene ${geneId}`,
-              data_type: 'NUMERIC',
-              values: geneData.values,
-              compression_info: {
-                min_val: minVal,
-                max_val: maxVal,
-                data_type: 'NUMERIC'
-              }
+          const stableId = xGeneInfo.stableId
+          const stableIdNum = Number(stableId)
+          const candidateKeys = [...new Set([xGeneInfo.layerKey, xGeneInfo.baseKey].filter(Boolean))]
+          const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+
+          for (const key of candidateKeys) {
+            if (this.controller.loadedMetadataVectors?.[key]?.values) {
+              xVector = this.controller.loadedMetadataVectors[key]
+              console.log(`📊 X-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
+              break
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = xVector
-          } else {
-            // Try to find gene in geneTags
-            let gene = this.controller.geneManager?.geneTags?.find(g => 
-              g.stableId === geneId || 
-              String(g.stableId) === geneIdStr || 
-              g.stableId === geneIdNum ||
-              String(g.stableId) === String(geneId)
-            )
-            
-            // If not in geneTags, try to get gene info from the button element
-            if (!gene && this.controller.selectedXButton.button) {
-              const button = this.controller.selectedXButton.button
-              const buttonGeneId = button.dataset.geneId
-              if (buttonGeneId) {
-                // Try to find gene with the button's geneId
-                gene = this.controller.geneManager?.geneTags?.find(g => 
-                  String(g.stableId) === String(buttonGeneId) || 
-                  g.stableId === Number(buttonGeneId)
-                )
+          }
+
+          if (!xVector) {
+            let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              console.log(`📊 X-axis: Found gene ${stableId} in geneExpressionData`)
+            } else {
+              let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
+
+              if (!gene && xButtonInfo.button) {
+                const buttonGeneId = xButtonInfo.button.dataset?.geneId
+                if (buttonGeneId) {
+                  gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === String(buttonGeneId) || Number(g.stableId) === Number(buttonGeneId))
+                }
               }
-            }
-            
-            // If still no gene, try to construct one from available info
-            if (!gene) {
-              console.warn(`📊 X-axis: Gene ${geneId} not in geneTags, attempting to load directly`)
-              // Try to load using the geneId directly - GeneManager might handle it
-              if (this.controller.geneManager) {
-                try {
-                  // Ensure geneExpressionData exists
-                  if (!this.controller.geneManager.geneExpressionData) {
-                    this.controller.geneManager.geneExpressionData = {}
-                    console.warn(`📊 X-axis: geneExpressionData was undefined, initialized as empty object`)
-                  }
-                  
-                  // Check if we can find the gene data by searching all geneExpressionData keys
-                  const allGeneKeys = Object.keys(this.controller.geneManager.geneExpressionData)
-                  console.log(`📊 X-axis: Searching ${allGeneKeys.length} keys in geneExpressionData for gene ${geneId}`)
-                  
-                  const matchingKey = allGeneKeys.find(k => {
-                    const kStr = String(k)
-                    const kNum = Number(k)
-                    return kStr === geneIdStr || 
-                           k === geneIdStr ||
-                           kNum === geneIdNum ||
-                           String(kNum) === geneIdStr ||
-                           k === geneId ||
-                           k === geneIdNum
-                  })
-                  
-                  if (matchingKey) {
-                    geneData = this.controller.geneManager.geneExpressionData[matchingKey]
-                    console.log(`📊 X-axis: Found gene data under key "${matchingKey}" (original search: ${geneId})`)
-                  } else {
-                    console.log(`📊 X-axis: Gene ${geneId} not found in existing keys, attempting to load from server`)
-                    // Try to load from server using the geneId
+
+              if (!gene) {
+                console.warn(`📊 X-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
+                if (this.controller.geneManager) {
+                  try {
                     const geneObj = {
-                      stableId: geneIdNum || parseInt(geneId),
-                      symbol: this.controller.selectedXButton.metadataName || `Gene ${geneId}`,
+                      stableId: stableIdNum || parseInt(stableId, 10),
+                      symbol: xButtonInfo.metadataName || `Gene ${stableId}`,
                       ensemblId: '',
-                      query: this.controller.selectedXButton.metadataName || `Gene ${geneId}`
+                      query: xButtonInfo.metadataName || `Gene ${stableId}`
                     }
                     await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
-                    // Check again after loading - try all key formats
-                    geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                              this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                              this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-                    
-                    if (!geneData) {
-                      // Search all keys again after loading
-                      const allKeysAfterLoad = Object.keys(this.controller.geneManager.geneExpressionData || {})
-                      const matchingKeyAfterLoad = allKeysAfterLoad.find(k => {
-                        const kStr = String(k)
-                        const kNum = Number(k)
-                        return kStr === geneIdStr || 
-                               k === geneIdStr ||
-                               kNum === geneIdNum ||
-                               String(kNum) === geneIdStr ||
-                               k === geneId ||
-                               k === geneIdNum
-                      })
-                      if (matchingKeyAfterLoad) {
-                        geneData = this.controller.geneManager.geneExpressionData[matchingKeyAfterLoad]
-                        console.log(`📊 X-axis: Found gene data after loading under key "${matchingKeyAfterLoad}"`)
-                      }
-                    }
+                    geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+                  } catch (error) {
+                    console.error(`📊 X-axis: Failed to lazily load gene ${stableId}`, error)
                   }
-                } catch (error) {
-                  console.error(`Failed to load gene expression data for X-axis gene ${geneId}:`, error)
                 }
               } else {
-                console.error(`📊 X-axis: geneManager is not available`)
-              }
-            } else {
-              // Gene found in geneTags, load it
-              try {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-              } catch (error) {
-                console.error(`Failed to load gene expression data for X-axis gene ${geneId}:`, error)
-          }
-            }
-            
-            // Check again after loading attempt
-          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
-            xVector = this.controller.loadedMetadataVectors[geneMetadataId]
-              console.log(`📊 X-axis: Gene ${geneId} loaded into loadedMetadataVectors`)
-            } else {
-              // Check geneExpressionData again with all formats
-              geneData = geneData || 
-                        this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-              
-              if (geneData && geneData.values && geneData.values.length > 0) {
-                console.log(`📊 X-axis: Creating vector from geneExpressionData after loading`)
-            const minVal = this.controller.dataManager.safeMin(geneData.values)
-            const maxVal = this.controller.dataManager.safeMax(geneData.values)
-            xVector = {
-              id: geneMetadataId,
-              name: geneData.symbol || `Gene ${geneId}`,
-              display_name: geneData.symbol || `Gene ${geneId}`,
-              data_type: 'NUMERIC',
-              values: geneData.values,
-              compression_info: {
-                min_val: minVal,
-                max_val: maxVal,
-                data_type: 'NUMERIC'
+                try {
+                  await this.controller.geneManager.loadGeneExpressionData(gene, null)
+                  geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+                } catch (error) {
+                  console.error(`📊 X-axis: Error loading gene ${stableId} from geneTags`, error)
+                }
               }
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = xVector
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              const minVal = this.controller.dataManager.safeMin(geneData.values)
+              const maxVal = this.controller.dataManager.safeMax(geneData.values)
+              xVector = {
+                id: xGeneInfo.layerKey,
+                name: geneData.symbol || `Gene ${stableId}`,
+                display_name: geneData.symbol || `Gene ${stableId}`,
+                data_type: 'NUMERIC',
+                values: geneData.values,
+                compression_info: {
+                  min_val: minVal,
+                  max_val: maxVal,
+                  data_type: 'NUMERIC'
+                }
               }
+              if (!this.controller.loadedMetadataVectors) {
+                this.controller.loadedMetadataVectors = {}
+              }
+              candidateKeys.forEach(key => {
+                this.controller.loadedMetadataVectors[key] = xVector
+              })
             }
           }
         }
       } else {
-        // Load metadata vector
         xVector = await this.controller.dataManager.loadSingleMetadataVector(xMetadataId)
         if (xVector) {
-          // Ensure values are decompressed
           if (!xVector.values && xVector.compressed_data) {
-            // Decompress if needed
             if (xVector.data_type === 'DISCRETE' || xVector.data_type === 'STRING') {
               xVector.values = this.controller.dataManager.decompressDiscreteMetadataVector(xVector.compressed_data, xVector.compression_info)
             } else if (xVector.data_type === 'NUMERIC') {
@@ -487,180 +448,92 @@ export class CustomPlotManager {
       
       // Load y vector
       let yVector = null
-      if (this.controller.selectedYButton.isGene) {
-        // Load gene expression data
-        const geneId = this.controller.selectedYButton.metadataId
-        const geneIdStr = String(geneId)
-        const geneIdNum = Number(geneId)
-        const geneMetadataId = `gene_${geneId}`
-        
-        // First check loadedMetadataVectors
-        if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-          yVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          console.log(`📊 Y-axis: Found gene ${geneId} in loadedMetadataVectors`)
+      if (yIsGene) {
+        if (!yGeneInfo) {
+          console.warn('📊 Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
         } else {
-          // Try to find in geneExpressionData with all key formats
-          let geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-          
-          if (geneData && geneData.values && geneData.values.length > 0) {
-            console.log(`📊 Y-axis: Found gene ${geneId} in geneExpressionData, creating vector`)
-            const minVal = this.controller.dataManager.safeMin(geneData.values)
-            const maxVal = this.controller.dataManager.safeMax(geneData.values)
-            yVector = {
-              id: geneMetadataId,
-              name: geneData.symbol || `Gene ${geneId}`,
-              display_name: geneData.symbol || `Gene ${geneId}`,
-              data_type: 'NUMERIC',
-              values: geneData.values,
-              compression_info: {
-                min_val: minVal,
-                max_val: maxVal,
-                data_type: 'NUMERIC'
-              }
+          const stableId = yGeneInfo.stableId
+          const stableIdNum = Number(stableId)
+          const candidateKeys = [...new Set([yGeneInfo.layerKey, yGeneInfo.baseKey].filter(Boolean))]
+          const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+
+          for (const key of candidateKeys) {
+            if (this.controller.loadedMetadataVectors?.[key]?.values) {
+              yVector = this.controller.loadedMetadataVectors[key]
+              console.log(`📊 Y-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
+              break
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = yVector
-          } else {
-            // Try to find gene in geneTags
-            let gene = this.controller.geneManager?.geneTags?.find(g => 
-              g.stableId === geneId || 
-              String(g.stableId) === geneIdStr || 
-              g.stableId === geneIdNum ||
-              String(g.stableId) === String(geneId)
-            )
-            
-            // If not in geneTags, try to get gene info from the button element
-            if (!gene && this.controller.selectedYButton.button) {
-              const button = this.controller.selectedYButton.button
-              const buttonGeneId = button.dataset.geneId
-              if (buttonGeneId) {
-                // Try to find gene with the button's geneId
-                gene = this.controller.geneManager?.geneTags?.find(g => 
-                  String(g.stableId) === String(buttonGeneId) || 
-                  g.stableId === Number(buttonGeneId)
-                )
+          }
+
+          if (!yVector) {
+            let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              console.log(`📊 Y-axis: Found gene ${stableId} in geneExpressionData`)
+            } else {
+              let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
+
+              if (!gene && yButtonInfo.button) {
+                const buttonGeneId = yButtonInfo.button.dataset?.geneId
+                if (buttonGeneId) {
+                  gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === String(buttonGeneId) || Number(g.stableId) === Number(buttonGeneId))
+                }
               }
-            }
-            
-            // If still no gene, try to construct one from available info
-            if (!gene) {
-              console.warn(`📊 Y-axis: Gene ${geneId} not in geneTags, attempting to load directly`)
-              // Try to load using the geneId directly - GeneManager might handle it
-              if (this.controller.geneManager) {
-                try {
-                  // Ensure geneExpressionData exists
-                  if (!this.controller.geneManager.geneExpressionData) {
-                    this.controller.geneManager.geneExpressionData = {}
-                    console.warn(`📊 Y-axis: geneExpressionData was undefined, initialized as empty object`)
-                  }
-                  
-                  // Check if we can find the gene data by searching all geneExpressionData keys
-                  const allGeneKeys = Object.keys(this.controller.geneManager.geneExpressionData)
-                  console.log(`📊 Y-axis: Searching ${allGeneKeys.length} keys in geneExpressionData for gene ${geneId}`)
-                  
-                  const matchingKey = allGeneKeys.find(k => {
-                    const kStr = String(k)
-                    const kNum = Number(k)
-                    return kStr === geneIdStr || 
-                           k === geneIdStr ||
-                           kNum === geneIdNum ||
-                           String(kNum) === geneIdStr ||
-                           k === geneId ||
-                           k === geneIdNum
-                  })
-                  
-                  if (matchingKey) {
-                    geneData = this.controller.geneManager.geneExpressionData[matchingKey]
-                    console.log(`📊 Y-axis: Found gene data under key "${matchingKey}" (original search: ${geneId})`)
-                  } else {
-                    console.log(`📊 Y-axis: Gene ${geneId} not found in existing keys, attempting to load from server`)
-                    // Try to load from server using the geneId
+
+              if (!gene) {
+                console.warn(`📊 Y-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
+                if (this.controller.geneManager) {
+                  try {
                     const geneObj = {
-                      stableId: geneIdNum || parseInt(geneId),
-                      symbol: this.controller.selectedYButton.metadataName || `Gene ${geneId}`,
+                      stableId: stableIdNum || parseInt(stableId, 10),
+                      symbol: yButtonInfo.metadataName || `Gene ${stableId}`,
                       ensemblId: '',
-                      query: this.controller.selectedYButton.metadataName || `Gene ${geneId}`
+                      query: yButtonInfo.metadataName || `Gene ${stableId}`
                     }
                     await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
-                    // Check again after loading - try all key formats
-                    geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                              this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                              this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-                    
-                    if (!geneData) {
-                      // Search all keys again after loading
-                      const allKeysAfterLoad = Object.keys(this.controller.geneManager.geneExpressionData || {})
-                      const matchingKeyAfterLoad = allKeysAfterLoad.find(k => {
-                        const kStr = String(k)
-                        const kNum = Number(k)
-                        return kStr === geneIdStr || 
-                               k === geneIdStr ||
-                               kNum === geneIdNum ||
-                               String(kNum) === geneIdStr ||
-                               k === geneId ||
-                               k === geneIdNum
-                      })
-                      if (matchingKeyAfterLoad) {
-                        geneData = this.controller.geneManager.geneExpressionData[matchingKeyAfterLoad]
-                        console.log(`📊 Y-axis: Found gene data after loading under key "${matchingKeyAfterLoad}"`)
-                      }
-                    }
+                    geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+                  } catch (error) {
+                    console.error(`📊 Y-axis: Failed to lazily load gene ${stableId}`, error)
                   }
-                } catch (error) {
-                  console.error(`Failed to load gene expression data for Y-axis gene ${geneId}:`, error)
                 }
               } else {
-                console.error(`📊 Y-axis: geneManager is not available`)
-              }
-            } else {
-              // Gene found in geneTags, load it
-              try {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-              } catch (error) {
-                console.error(`Failed to load gene expression data for Y-axis gene ${geneId}:`, error)
-          }
-            }
-            
-            // Check again after loading attempt
-          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
-            yVector = this.controller.loadedMetadataVectors[geneMetadataId]
-              console.log(`📊 Y-axis: Gene ${geneId} loaded into loadedMetadataVectors`)
-            } else {
-              // Check geneExpressionData again with all formats
-              geneData = geneData || 
-                        this.controller.geneManager?.geneExpressionData?.[geneId] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
-                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
-              
-              if (geneData && geneData.values && geneData.values.length > 0) {
-                console.log(`📊 Y-axis: Creating vector from geneExpressionData after loading`)
-            const minVal = this.controller.dataManager.safeMin(geneData.values)
-            const maxVal = this.controller.dataManager.safeMax(geneData.values)
-            yVector = {
-              id: geneMetadataId,
-              name: geneData.symbol || `Gene ${geneId}`,
-              display_name: geneData.symbol || `Gene ${geneId}`,
-              data_type: 'NUMERIC',
-              values: geneData.values,
-              compression_info: {
-                min_val: minVal,
-                max_val: maxVal,
-                data_type: 'NUMERIC'
+                try {
+                  await this.controller.geneManager.loadGeneExpressionData(gene, null)
+                  geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+                } catch (error) {
+                  console.error(`📊 Y-axis: Error loading gene ${stableId} from geneTags`, error)
+                }
               }
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = yVector
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              const minVal = this.controller.dataManager.safeMin(geneData.values)
+              const maxVal = this.controller.dataManager.safeMax(geneData.values)
+              yVector = {
+                id: yGeneInfo.layerKey,
+                name: geneData.symbol || `Gene ${stableId}`,
+                display_name: geneData.symbol || `Gene ${stableId}`,
+                data_type: 'NUMERIC',
+                values: geneData.values,
+                compression_info: {
+                  min_val: minVal,
+                  max_val: maxVal,
+                  data_type: 'NUMERIC'
+                }
               }
+              if (!this.controller.loadedMetadataVectors) {
+                this.controller.loadedMetadataVectors = {}
+              }
+              candidateKeys.forEach(key => {
+                this.controller.loadedMetadataVectors[key] = yVector
+              })
             }
           }
         }
       } else {
-        // Load metadata vector
         yVector = await this.controller.dataManager.loadSingleMetadataVector(yMetadataId)
         if (yVector) {
-          // Ensure values are decompressed
           if (!yVector.values && yVector.compressed_data) {
-            // Decompress if needed
             if (yVector.data_type === 'DISCRETE' || yVector.data_type === 'STRING') {
               yVector.values = this.controller.dataManager.decompressDiscreteMetadataVector(yVector.compressed_data, yVector.compression_info)
             } else if (yVector.data_type === 'NUMERIC') {
@@ -672,12 +545,20 @@ export class CustomPlotManager {
       }
       
       if (!xVector || !yVector) {
-        const xIsGene = this.controller.selectedXButton.isGene
-        const yIsGene = this.controller.selectedYButton.isGene
-        const xId = this.controller.selectedXButton.metadataId
-        const yId = this.controller.selectedYButton.metadataId
-        const xName = this.controller.selectedXButton.metadataName
-        const yName = this.controller.selectedYButton.metadataName
+        const xButtonInfo = this.controller.selectedXButton
+        const yButtonInfo = this.controller.selectedYButton
+        const xIsGene = !!xButtonInfo?.isGene
+        const yIsGene = !!yButtonInfo?.isGene
+        const xGeneInfo = xIsGene ? this.resolveGeneMetadataIdentifiers(xButtonInfo) : null
+        const yGeneInfo = yIsGene ? this.resolveGeneMetadataIdentifiers(yButtonInfo) : null
+        const xStableId = xGeneInfo?.stableId || xButtonInfo?.button?.dataset?.geneId || xButtonInfo?.metadataId
+        const yStableId = yGeneInfo?.stableId || yButtonInfo?.button?.dataset?.geneId || yButtonInfo?.metadataId
+        const xLayerKey = xGeneInfo?.layerKey || (xStableId ? `gene_${xStableId}` : xButtonInfo?.metadataId)
+        const yLayerKey = yGeneInfo?.layerKey || (yStableId ? `gene_${yStableId}` : yButtonInfo?.metadataId)
+        const xBaseKey = xGeneInfo?.baseKey || (xStableId ? `gene_${xStableId}` : xButtonInfo?.metadataId)
+        const yBaseKey = yGeneInfo?.baseKey || (yStableId ? `gene_${yStableId}` : yButtonInfo?.metadataId)
+        const xName = xButtonInfo?.metadataName
+        const yName = yButtonInfo?.metadataName
         
         // Build detailed diagnostic information
         let errorDetails = []
@@ -686,48 +567,56 @@ export class CustomPlotManager {
           yVector: !!yVector,
           xIsGene,
           yIsGene,
-          xId,
-          yId,
-          xName,
-          yName
+          xStableId,
+          yStableId,
+          xLayerKey,
+          yLayerKey,
+          xBaseKey,
+          yBaseKey,
+          currentLayer: this.controller?.geneManager?.currentMatrixLayer,
+          currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
         }
         
         if (!xVector) {
           if (xIsGene) {
-            const xIdStr = String(xId)
-            const xIdNum = Number(xId)
-            const xMetadataId = `gene_${xId}`
+            const stableIdStr = String(xStableId)
+            const stableIdNum = Number(stableIdStr)
             
-            // Check all possible locations
             const xInGeneTags = !!this.controller.geneManager?.geneTags?.find(g => 
-              String(g.stableId) === xIdStr || g.stableId === xIdNum || String(g.stableId) === String(xId)
+              String(g.stableId) === stableIdStr || Number(g.stableId) === stableIdNum
             )
-            const xInExpressionData = !!(this.controller.geneManager?.geneExpressionData?.[xId] ||
-                                        this.controller.geneManager?.geneExpressionData?.[xIdStr] ||
-                                        this.controller.geneManager?.geneExpressionData?.[xIdNum])
-            const xInLoadedVectors = !!this.controller.loadedMetadataVectors?.[xMetadataId]
-            const xExpressionDataKeys = Object.keys(this.controller.geneManager?.geneExpressionData || {})
+            const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+            const xInExpressionData = !!(geneDataStore[stableIdStr] || geneDataStore[stableIdNum])
+            const xInLoadedVectors = !!(this.controller.loadedMetadataVectors?.[xLayerKey] || this.controller.loadedMetadataVectors?.[xBaseKey])
+            const xExpressionDataKeys = Object.keys(geneDataStore)
             const xLoadedVectorsKeys = Object.keys(this.controller.loadedMetadataVectors || {}).filter(k => k.startsWith('gene_'))
             
-            errorDetails.push(`X-axis gene "${xName}" (ID: ${xId}) could not be loaded.`)
+            errorDetails.push(`X-axis gene "${xName}" (stable ID: ${stableIdStr}) could not be loaded.`)
             errorDetails.push(`  - In geneTags: ${xInGeneTags}`)
-            errorDetails.push(`  - In geneExpressionData: ${xInExpressionData} (checked keys: ${xId}, "${xIdStr}", ${xIdNum})`)
-            errorDetails.push(`  - In loadedMetadataVectors: ${xInLoadedVectors} (key: "${xMetadataId}")`)
+            errorDetails.push(`  - In geneExpressionData: ${xInExpressionData} (checked keys: ${[stableIdStr, stableIdNum].join(', ')})`)
+            errorDetails.push(`  - In loadedMetadataVectors: ${xInLoadedVectors} (checked: ${[xLayerKey, xBaseKey].filter(Boolean).join(', ') || 'none'})`)
             
             if (xExpressionDataKeys.length > 0) {
               const matchingKeys = xExpressionDataKeys.filter(k => 
-                k === String(xId) || k === String(xIdNum) || Number(k) === xIdNum
+                k === stableIdStr || Number(k) === stableIdNum
               )
               errorDetails.push(`  - Matching geneExpressionData keys: ${matchingKeys.length > 0 ? matchingKeys.join(', ') : 'none'}`)
               errorDetails.push(`  - First 10 geneExpressionData keys: ${xExpressionDataKeys.slice(0, 10).join(', ')}`)
             } else {
-              errorDetails.push(`  - geneExpressionData is empty or undefined`)
+              errorDetails.push('  - geneExpressionData is empty or undefined')
             }
             
             if (xLoadedVectorsKeys.length > 0) {
               errorDetails.push(`  - First 10 loadedMetadataVectors gene keys: ${xLoadedVectorsKeys.slice(0, 10).join(', ')}`)
             } else {
-              errorDetails.push(`  - No gene keys found in loadedMetadataVectors`)
+              errorDetails.push('  - No gene keys found in loadedMetadataVectors')
+            }
+            
+            if (xInExpressionData) {
+              const xGeneData = geneDataStore[stableIdStr] || geneDataStore[stableIdNum]
+              if (xGeneData) {
+                errorDetails.push(`  - geneExpressionData found but: hasValues=${!!xGeneData.values}, valuesLength=${xGeneData.values?.length || 0}`)
+              }
             }
             
             consoleDetails.xInGeneTags = xInGeneTags
@@ -735,57 +624,49 @@ export class CustomPlotManager {
             consoleDetails.xInLoadedVectors = xInLoadedVectors
             consoleDetails.xExpressionDataKeys = xExpressionDataKeys.slice(0, 20)
             consoleDetails.xLoadedVectorsKeys = xLoadedVectorsKeys.slice(0, 20)
-            consoleDetails.xCheckedKeys = [xId, xIdStr, xIdNum]
-            consoleDetails.xMetadataId = xMetadataId
           } else {
-            errorDetails.push(`X-axis metadata "${xName}" (ID: ${xMetadataId}) could not be loaded.`)
-            errorDetails.push(`  - The metadata may not exist in the dataset.`)
+            errorDetails.push(`X-axis metadata "${xName}" (ID: ${xLayerKey}) could not be loaded.`)
+            errorDetails.push('  - The metadata may not exist in the dataset.')
           }
         }
         
         if (!yVector) {
           if (yIsGene) {
-            const yIdStr = String(yId)
-            const yIdNum = Number(yId)
-            const yMetadataId = `gene_${yId}`
+            const stableIdStr = String(yStableId)
+            const stableIdNum = Number(stableIdStr)
             
-            // Check all possible locations
             const yInGeneTags = !!this.controller.geneManager?.geneTags?.find(g => 
-              String(g.stableId) === yIdStr || g.stableId === yIdNum || String(g.stableId) === String(yId)
+              String(g.stableId) === stableIdStr || Number(g.stableId) === stableIdNum
             )
-            const yInExpressionData = !!(this.controller.geneManager?.geneExpressionData?.[yId] ||
-                                        this.controller.geneManager?.geneExpressionData?.[yIdStr] ||
-                                        this.controller.geneManager?.geneExpressionData?.[yIdNum])
-            const yInLoadedVectors = !!this.controller.loadedMetadataVectors?.[yMetadataId]
-            const yExpressionDataKeys = Object.keys(this.controller.geneManager?.geneExpressionData || {})
+            const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+            const yInExpressionData = !!(geneDataStore[stableIdStr] || geneDataStore[stableIdNum])
+            const yInLoadedVectors = !!(this.controller.loadedMetadataVectors?.[yLayerKey] || this.controller.loadedMetadataVectors?.[yBaseKey])
+            const yExpressionDataKeys = Object.keys(geneDataStore)
             const yLoadedVectorsKeys = Object.keys(this.controller.loadedMetadataVectors || {}).filter(k => k.startsWith('gene_'))
             
-            errorDetails.push(`Y-axis gene "${yName}" (ID: ${yId}) could not be loaded.`)
+            errorDetails.push(`Y-axis gene "${yName}" (stable ID: ${stableIdStr}) could not be loaded.`)
             errorDetails.push(`  - In geneTags: ${yInGeneTags}`)
-            errorDetails.push(`  - In geneExpressionData: ${yInExpressionData} (checked keys: ${yId}, "${yIdStr}", ${yIdNum})`)
-            errorDetails.push(`  - In loadedMetadataVectors: ${yInLoadedVectors} (key: "${yMetadataId}")`)
+            errorDetails.push(`  - In geneExpressionData: ${yInExpressionData} (checked keys: ${[stableIdStr, stableIdNum].join(', ')})`)
+            errorDetails.push(`  - In loadedMetadataVectors: ${yInLoadedVectors} (checked: ${[yLayerKey, yBaseKey].filter(Boolean).join(', ') || 'none'})`)
             
             if (yExpressionDataKeys.length > 0) {
               const matchingKeys = yExpressionDataKeys.filter(k => 
-                k === String(yId) || k === String(yIdNum) || Number(k) === yIdNum
+                k === stableIdStr || Number(k) === stableIdNum
               )
               errorDetails.push(`  - Matching geneExpressionData keys: ${matchingKeys.length > 0 ? matchingKeys.join(', ') : 'none'}`)
               errorDetails.push(`  - First 10 geneExpressionData keys: ${yExpressionDataKeys.slice(0, 10).join(', ')}`)
             } else {
-              errorDetails.push(`  - geneExpressionData is empty or undefined`)
+              errorDetails.push('  - geneExpressionData is empty or undefined')
             }
             
             if (yLoadedVectorsKeys.length > 0) {
               errorDetails.push(`  - First 10 loadedMetadataVectors gene keys: ${yLoadedVectorsKeys.slice(0, 10).join(', ')}`)
             } else {
-              errorDetails.push(`  - No gene keys found in loadedMetadataVectors`)
+              errorDetails.push('  - No gene keys found in loadedMetadataVectors')
             }
             
-            // If data exists but vector wasn't created, show why
             if (yInExpressionData) {
-              const yGeneData = this.controller.geneManager.geneExpressionData[yId] ||
-                               this.controller.geneManager.geneExpressionData[yIdStr] ||
-                               this.controller.geneManager.geneExpressionData[yIdNum]
+              const yGeneData = geneDataStore[stableIdStr] || geneDataStore[stableIdNum]
               if (yGeneData) {
                 errorDetails.push(`  - geneExpressionData found but: hasValues=${!!yGeneData.values}, valuesLength=${yGeneData.values?.length || 0}`)
               }
@@ -796,11 +677,9 @@ export class CustomPlotManager {
             consoleDetails.yInLoadedVectors = yInLoadedVectors
             consoleDetails.yExpressionDataKeys = yExpressionDataKeys.slice(0, 20)
             consoleDetails.yLoadedVectorsKeys = yLoadedVectorsKeys.slice(0, 20)
-            consoleDetails.yCheckedKeys = [yId, yIdStr, yIdNum]
-            consoleDetails.yMetadataId = yMetadataId
           } else {
-            errorDetails.push(`Y-axis metadata "${yName}" (ID: ${yMetadataId}) could not be loaded.`)
-            errorDetails.push(`  - The metadata may not exist in the dataset.`)
+            errorDetails.push(`Y-axis metadata "${yName}" (ID: ${yLayerKey}) could not be loaded.`)
+            errorDetails.push('  - The metadata may not exist in the dataset.')
           }
         }
         
@@ -932,38 +811,82 @@ export class CustomPlotManager {
       const canvas = document.getElementById('2d-plot-canvas')
       if (!canvas) return
       
+      const xButtonInfo = this.controller.selectedXButton
+      const yButtonInfo = this.controller.selectedYButton
+      const xIsGene = !!xButtonInfo?.isGene
+      const yIsGene = !!yButtonInfo?.isGene
+      const xGeneInfo = xIsGene ? this.resolveGeneMetadataIdentifiers(xButtonInfo) : null
+      const yGeneInfo = yIsGene ? this.resolveGeneMetadataIdentifiers(yButtonInfo) : null
+      const xMetadataId = xIsGene ? (xGeneInfo?.layerKey || xGeneInfo?.baseKey || xButtonInfo.metadataId) : xButtonInfo.metadataId
+      const yMetadataId = yIsGene ? (yGeneInfo?.layerKey || yGeneInfo?.baseKey || yButtonInfo.metadataId) : yButtonInfo.metadataId
+      
+      // Log current layer usage for verification
+      console.log('📊 Refreshing 2D plot with metadata IDs:', {
+        xMetadataId,
+        yMetadataId,
+        xStableId: xGeneInfo?.stableId,
+        yStableId: yGeneInfo?.stableId,
+        currentLayer: this.controller?.geneManager?.currentMatrixLayer,
+        currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
+      })
+      
       // Get filtered indices
       const filteredIndices = this.controller.dataManager?.getIncrementalFilteredIndices()
       
-      // Load x and y data vectors (same as open2DPlotModal)
-      const xMetadataId = this.controller.selectedXButton.isGene ? `gene_${this.controller.selectedXButton.metadataId}` : this.controller.selectedXButton.metadataId
-      const yMetadataId = this.controller.selectedYButton.isGene ? `gene_${this.controller.selectedYButton.metadataId}` : this.controller.selectedYButton.metadataId
-      
       // Load x vector
       let xVector = null
-      if (this.controller.selectedXButton.isGene) {
-        const geneId = this.controller.selectedXButton.metadataId
-        const geneMetadataId = `gene_${geneId}`
-        if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-          xVector = this.controller.loadedMetadataVectors[geneMetadataId]
+      if (xIsGene) {
+        if (!xGeneInfo) {
+          console.warn('📊 Refresh X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
         } else {
-          const gene = this.controller.geneManager.geneTags?.find(g => g.stableId === geneId || String(g.stableId) === String(geneId))
-          if (gene) {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-          }
-          if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-            xVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          } else if (this.controller.geneManager.geneExpressionData[geneId]?.values) {
-            // Store in loadedMetadataVectors for consistency
-            const geneVector = {
-              id: geneMetadataId,
-              name: gene.symbol,
-              values: this.controller.geneManager.geneExpressionData[geneId].values,
-              data_type: 'NUMERIC',
-              compression_info: this.controller.geneManager.geneExpressionData[geneId].compression_info
+          const stableId = xGeneInfo.stableId
+          const stableIdNum = Number(stableId)
+          const candidateKeys = [...new Set([xGeneInfo.layerKey, xGeneInfo.baseKey].filter(Boolean))]
+          const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+
+          for (const key of candidateKeys) {
+            if (this.controller.loadedMetadataVectors?.[key]?.values) {
+              xVector = this.controller.loadedMetadataVectors[key]
+              break
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = geneVector
-            xVector = geneVector
+          }
+
+          if (!xVector) {
+            let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
+            if (!geneData || !geneData.values || geneData.values.length === 0) {
+              let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
+              if (!gene && xButtonInfo.button?.dataset?.geneId) {
+                const buttonGeneId = xButtonInfo.button.dataset.geneId
+                gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === String(buttonGeneId) || Number(g.stableId) === Number(buttonGeneId))
+              }
+
+              if (gene) {
+                await this.controller.geneManager.loadGeneExpressionData(gene, null)
+                geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+              }
+            }
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              const minVal = this.controller.dataManager.safeMin(geneData.values)
+              const maxVal = this.controller.dataManager.safeMax(geneData.values)
+              xVector = {
+                id: xGeneInfo.layerKey,
+                name: geneData.symbol || `Gene ${stableId}`,
+                data_type: 'NUMERIC',
+                values: geneData.values,
+                compression_info: {
+                  min_val: minVal,
+                  max_val: maxVal,
+                  data_type: 'NUMERIC'
+                }
+              }
+              if (!this.controller.loadedMetadataVectors) {
+                this.controller.loadedMetadataVectors = {}
+              }
+              candidateKeys.forEach(key => {
+                this.controller.loadedMetadataVectors[key] = xVector
+              })
+            }
           }
         }
       } else {
@@ -972,29 +895,58 @@ export class CustomPlotManager {
       
       // Load y vector
       let yVector = null
-      if (this.controller.selectedYButton.isGene) {
-        const geneId = this.controller.selectedYButton.metadataId
-        const geneMetadataId = `gene_${geneId}`
-        if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-          yVector = this.controller.loadedMetadataVectors[geneMetadataId]
+      if (yIsGene) {
+        if (!yGeneInfo) {
+          console.warn('📊 Refresh Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
         } else {
-          const gene = this.controller.geneManager.geneTags?.find(g => g.stableId === geneId || String(g.stableId) === String(geneId))
-          if (gene) {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-          }
-          if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
-            yVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          } else if (this.controller.geneManager.geneExpressionData[geneId]?.values) {
-            // Store in loadedMetadataVectors for consistency
-            const geneVector = {
-              id: geneMetadataId,
-              name: gene.symbol,
-              values: this.controller.geneManager.geneExpressionData[geneId].values,
-              data_type: 'NUMERIC',
-              compression_info: this.controller.geneManager.geneExpressionData[geneId].compression_info
+          const stableId = yGeneInfo.stableId
+          const stableIdNum = Number(stableId)
+          const candidateKeys = [...new Set([yGeneInfo.layerKey, yGeneInfo.baseKey].filter(Boolean))]
+          const geneDataStore = this.controller.geneManager?.geneExpressionData || {}
+
+          for (const key of candidateKeys) {
+            if (this.controller.loadedMetadataVectors?.[key]?.values) {
+              yVector = this.controller.loadedMetadataVectors[key]
+              break
             }
-            this.controller.loadedMetadataVectors[geneMetadataId] = geneVector
-            yVector = geneVector
+          }
+
+          if (!yVector) {
+            let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
+            if (!geneData || !geneData.values || geneData.values.length === 0) {
+              let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
+              if (!gene && yButtonInfo.button?.dataset?.geneId) {
+                const buttonGeneId = yButtonInfo.button.dataset.geneId
+                gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === String(buttonGeneId) || Number(g.stableId) === Number(buttonGeneId))
+              }
+
+              if (gene) {
+                await this.controller.geneManager.loadGeneExpressionData(gene, null)
+                geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
+              }
+            }
+
+            if (geneData && geneData.values && geneData.values.length > 0) {
+              const minVal = this.controller.dataManager.safeMin(geneData.values)
+              const maxVal = this.controller.dataManager.safeMax(geneData.values)
+              yVector = {
+                id: yGeneInfo.layerKey,
+                name: geneData.symbol || `Gene ${stableId}`,
+                data_type: 'NUMERIC',
+                values: geneData.values,
+                compression_info: {
+                  min_val: minVal,
+                  max_val: maxVal,
+                  data_type: 'NUMERIC'
+                }
+              }
+              if (!this.controller.loadedMetadataVectors) {
+                this.controller.loadedMetadataVectors = {}
+              }
+              candidateKeys.forEach(key => {
+                this.controller.loadedMetadataVectors[key] = yVector
+              })
+            }
           }
         }
       } else {
@@ -1002,7 +954,7 @@ export class CustomPlotManager {
       }
       
       if (!xVector || !yVector) {
-        console.error('Cannot refresh 2D plot - missing vectors')
+        console.error('Cannot refresh 2D plot - missing vectors', { xVectorExists: !!xVector, yVectorExists: !!yVector })
         return
       }
       

@@ -8382,6 +8382,9 @@ export default class extends Controller {
 
     if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
       this.customPlotManager.onSelectionUpdated()
+      if (typeof this.customPlotManager.refresh2DPlotIfOpen === 'function') {
+        this.customPlotManager.refresh2DPlotIfOpen()
+      }
     }
     
     // Clear any lasso graphics

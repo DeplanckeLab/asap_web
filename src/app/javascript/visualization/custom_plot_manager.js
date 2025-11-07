@@ -8,6 +8,19 @@ export class CustomPlotManager {
     this.controller = controller
     // Cache for point positions in violin plots (to avoid recomputing on resize)
     this.violinPointPositions = new Map()
+    this.currentPlotPoints = []
+    this.currentPickTolerance = 12
+    this.currentCanvas = null
+    this.canvasEventHandlers = null
+    this.currentPlotType = null
+    this.lastHoverCellId = null
+    this.currentCanvasContext = null
+    this.selectionOverlayCanvas = null
+    this.selectionOverlayCtx = null
+    this.lassoOverlayCanvas = null
+    this.lassoOverlayCtx = null
+    this.isDrawingLasso = false
+    this.customLassoPoints = []
   }
 
   resolveGeneMetadataIdentifiers(buttonInfo) {
@@ -62,6 +75,7 @@ export class CustomPlotManager {
     if (modal) {
       modal.style.display = 'none'
     }
+    this.detachCanvasInteractions()
   }
   
   // Make 2D plot modal draggable
@@ -296,6 +310,428 @@ export class CustomPlotManager {
     if (this.controller.selectedXButton && this.controller.selectedYButton) {
       this.refresh2DPlotIfOpen()
     }
+  }
+  
+  setupCanvasInteractions(canvas) {
+    if (!canvas) return
+    if (this.currentCanvas && this.currentCanvas !== canvas) {
+      this.detachCanvasInteractions()
+    }
+    if (!this.canvasEventHandlers) {
+      this.canvasEventHandlers = {
+        mousemove: (event) => this.handleCanvasMouseMove(event),
+        click: (event) => this.handleCanvasClick(event),
+        mouseleave: () => this.handleCanvasMouseLeave(),
+        mousedown: (event) => this.handleCanvasMouseDown(event),
+        mouseup: (event) => this.handleCanvasMouseUp(event)
+      }
+    }
+    if (this.currentCanvas !== canvas) {
+      canvas.addEventListener('mousemove', this.canvasEventHandlers.mousemove)
+      canvas.addEventListener('click', this.canvasEventHandlers.click)
+      canvas.addEventListener('mouseleave', this.canvasEventHandlers.mouseleave)
+      canvas.addEventListener('mousedown', this.canvasEventHandlers.mousedown)
+      canvas.addEventListener('mouseup', this.canvasEventHandlers.mouseup)
+      this.currentCanvas = canvas
+      this.handleInteractionModeChange(this.controller.interactionMode)
+    }
+    this.ensureSelectionOverlay(canvas)
+  }
+  
+  detachCanvasInteractions() {
+    if (this.currentCanvas && this.canvasEventHandlers) {
+      this.currentCanvas.removeEventListener('mousemove', this.canvasEventHandlers.mousemove)
+      this.currentCanvas.removeEventListener('click', this.canvasEventHandlers.click)
+      this.currentCanvas.removeEventListener('mouseleave', this.canvasEventHandlers.mouseleave)
+      this.currentCanvas.removeEventListener('mousedown', this.canvasEventHandlers.mousedown)
+      this.currentCanvas.removeEventListener('mouseup', this.canvasEventHandlers.mouseup)
+    }
+    this.currentCanvas = null
+    this.lastHoverCellId = null
+    this.currentPlotPoints = []
+    this.removeOverlays()
+  }
+  
+  handleInteractionModeChange(mode) {
+    if (!this.currentCanvas) return
+    if (mode === 'pick') {
+      this.currentCanvas.style.cursor = 'pointer'
+    } else {
+      this.currentCanvas.style.cursor = 'default'
+      if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      if (mode !== 'lasso') {
+        this.isDrawingLasso = false
+        this.customLassoPoints = []
+        this.clearLassoOverlay()
+      }
+      if (mode === 'lasso' && this.currentCanvas) {
+        this.currentCanvas.style.cursor = 'crosshair'
+      }
+    }
+  }
+  
+  handleCanvasMouseMove(event) {
+    if (!this.currentCanvas) {
+      return
+    }
+    const mode = this.controller.interactionMode
+    if (mode === 'lasso') {
+      this.currentCanvas.style.cursor = 'crosshair'
+      if (!this.isDrawingLasso) {
+        return
+      }
+      const rect = this.currentCanvas.getBoundingClientRect()
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+      const lastPoint = this.customLassoPoints[this.customLassoPoints.length - 1]
+      if (!lastPoint || this.getDistanceBetweenPoints(lastPoint, { x: mouseX, y: mouseY }) >= 1.5) {
+        this.customLassoPoints.push({ x: mouseX, y: mouseY })
+        this.drawLassoPath()
+      }
+      return
+    }
+    if (!this.currentPlotPoints || this.currentPlotPoints.length === 0) {
+      return
+    }
+    if (mode !== 'pick') {
+      this.currentCanvas.style.cursor = 'default'
+      if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      return
+    }
+    this.currentCanvas.style.cursor = 'pointer'
+    if (this.controller.isTooltipFixed) {
+      return
+    }
+    const rect = this.currentCanvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    const closest = this.findClosestPoint(mouseX, mouseY)
+    if (!closest) {
+      if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      return
+    }
+    const tooltipLeft = event.clientX + 12
+    const tooltipTop = event.clientY + 12
+    const hasMoved = !this.controller.lastTooltipPosition ||
+      Math.abs(this.controller.lastTooltipPosition.left - tooltipLeft) > 2 ||
+      Math.abs(this.controller.lastTooltipPosition.top - tooltipTop) > 2
+    if (this.lastHoverCellId !== closest.point.cellIndex || hasMoved) {
+      this.controller.lastTooltipPosition = { left: tooltipLeft, top: tooltipTop }
+      const cellId = closest.point.cellIndex
+      const cellName = cellId.toString()
+      if (typeof this.controller.showSimpleTooltip === 'function') {
+        this.controller.showSimpleTooltip(cellName, null, { x: tooltipLeft, y: tooltipTop }, cellId, false)
+      }
+      this.lastHoverCellId = cellId
+    }
+  }
+  
+  handleCanvasClick(event) {
+    if (!this.currentCanvas || !this.currentPlotPoints || this.currentPlotPoints.length === 0) {
+      return
+    }
+    if (this.controller.interactionMode === 'lasso') {
+      return
+    }
+    if (this.controller.interactionMode !== 'pick') {
+      return
+    }
+    const rect = this.currentCanvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    const closest = this.findClosestPoint(mouseX, mouseY)
+    if (!closest) {
+      if (this.controller.isTooltipFixed && typeof this.controller.unfixTooltip === 'function') {
+        this.controller.unfixTooltip()
+      } else if (typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const tooltipLeft = event.clientX + 12
+    const tooltipTop = event.clientY + 12
+    this.controller.lastTooltipPosition = { left: tooltipLeft, top: tooltipTop }
+    if (typeof this.controller.fixTooltipToCell === 'function') {
+      this.controller.fixTooltipToCell(closest.point.cellIndex, mouseX, mouseY)
+    } else if (typeof this.controller.showSimpleTooltip === 'function') {
+      const cellId = closest.point.cellIndex
+      const cellName = cellId.toString()
+      this.controller.isTooltipFixed = true
+      this.controller.fixedTooltipCellId = cellId
+      this.controller.showSimpleTooltip(cellName, null, { x: tooltipLeft, y: tooltipTop }, cellId, true)
+    }
+    this.lastHoverCellId = closest.point.cellIndex
+  }
+  
+  handleCanvasMouseLeave() {
+    if (this.currentCanvas) {
+      this.currentCanvas.style.cursor = 'default'
+    }
+    if (this.isDrawingLasso) {
+      this.finishCustomLassoSelection(false)
+    }
+    if (this.controller && !this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
+      this.controller.hideSimpleTooltip()
+    }
+    this.lastHoverCellId = null
+  }
+
+  handleCanvasMouseDown(event) {
+    if (!this.currentCanvas) return
+    if (this.controller.interactionMode !== 'lasso') return
+    if (event.button !== 0) return
+    event.preventDefault()
+    const rect = this.currentCanvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    this.isDrawingLasso = true
+    this.customLassoPoints = [{ x: mouseX, y: mouseY }]
+    this.ensureLassoOverlay(this.currentCanvas)
+    this.drawLassoPath()
+  }
+
+  handleCanvasMouseUp(event) {
+    if (!this.isDrawingLasso) return
+    if (this.controller.interactionMode !== 'lasso') {
+      this.finishCustomLassoSelection(false)
+      return
+    }
+    event.preventDefault()
+    const rect = this.currentCanvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    const lastPoint = this.customLassoPoints[this.customLassoPoints.length - 1]
+    if (!lastPoint || this.getDistanceBetweenPoints(lastPoint, { x: mouseX, y: mouseY }) >= 1) {
+      this.customLassoPoints.push({ x: mouseX, y: mouseY })
+    }
+    this.finishCustomLassoSelection(true)
+  }
+
+  finishCustomLassoSelection(applySelection) {
+    if (!this.isDrawingLasso) return
+    this.isDrawingLasso = false
+    this.drawLassoPath(true)
+    if (applySelection) {
+      this.applyCustomLassoSelection()
+    }
+    setTimeout(() => {
+      this.clearLassoOverlay()
+      this.customLassoPoints = []
+    }, 300)
+  }
+
+  applyCustomLassoSelection() {
+    if (!this.currentPlotPoints || this.currentPlotPoints.length === 0) {
+      return
+    }
+    if (!this.customLassoPoints || this.customLassoPoints.length < 3) {
+      return
+    }
+
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const point of this.customLassoPoints) {
+      if (point.x < minX) minX = point.x
+      if (point.x > maxX) maxX = point.x
+      if (point.y < minY) minY = point.y
+      if (point.y > maxY) maxY = point.y
+    }
+
+    const selectedIndices = []
+    for (const point of this.currentPlotPoints) {
+      if (point.canvasX < minX || point.canvasX > maxX || point.canvasY < minY || point.canvasY > maxY) {
+        continue
+      }
+      if (this.controller && typeof this.controller.isPointInPolygon === 'function') {
+        if (this.controller.isPointInPolygon(point.canvasX, point.canvasY, this.customLassoPoints)) {
+          selectedIndices.push(point.cellIndex)
+        }
+      }
+    }
+
+    if (selectedIndices.length > 0 && typeof this.controller.applySelectionFromIndices === 'function') {
+      this.controller.applySelectionFromIndices(selectedIndices, {
+        source: 'custom-plot-lasso',
+        replaceExisting: false,
+        updateCustomPlot: true
+      })
+    }
+  }
+
+  onSelectionUpdated() {
+    if (!this.currentCanvas) return
+    this.drawSelectionHighlights()
+  }
+
+  getDistanceBetweenPoints(pointA, pointB) {
+    if (!pointA || !pointB) return Infinity
+    const dx = pointB.x - pointA.x
+    const dy = pointB.y - pointA.y
+    return Math.sqrt(dx * dx + dy * dy)
+  }
+
+  ensureOverlayCanvas(baseCanvas, type) {
+    if (!baseCanvas) return null
+    const parent = baseCanvas.parentElement
+    if (!parent) return null
+    const computedStyle = window.getComputedStyle(parent)
+    if (computedStyle.position === 'static') {
+      parent.style.position = 'relative'
+    }
+
+    let overlayCanvas
+    if (type === 'selection') {
+      overlayCanvas = this.selectionOverlayCanvas
+      if (!overlayCanvas) {
+        overlayCanvas = document.createElement('canvas')
+        overlayCanvas.style.position = 'absolute'
+        overlayCanvas.style.top = '0'
+        overlayCanvas.style.left = '0'
+        overlayCanvas.style.pointerEvents = 'none'
+        overlayCanvas.style.zIndex = '3'
+        parent.appendChild(overlayCanvas)
+        this.selectionOverlayCanvas = overlayCanvas
+        this.selectionOverlayCtx = overlayCanvas.getContext('2d')
+      }
+    } else if (type === 'lasso') {
+      overlayCanvas = this.lassoOverlayCanvas
+      if (!overlayCanvas) {
+        overlayCanvas = document.createElement('canvas')
+        overlayCanvas.style.position = 'absolute'
+        overlayCanvas.style.top = '0'
+        overlayCanvas.style.left = '0'
+        overlayCanvas.style.pointerEvents = 'none'
+        overlayCanvas.style.zIndex = '4'
+        parent.appendChild(overlayCanvas)
+        this.lassoOverlayCanvas = overlayCanvas
+        this.lassoOverlayCtx = overlayCanvas.getContext('2d')
+      }
+    }
+
+    if (!overlayCanvas) return null
+
+    overlayCanvas.width = baseCanvas.width
+    overlayCanvas.height = baseCanvas.height
+    overlayCanvas.style.width = baseCanvas.style.width || `${baseCanvas.width}px`
+    overlayCanvas.style.height = baseCanvas.style.height || `${baseCanvas.height}px`
+
+    if (type === 'selection') {
+      return this.selectionOverlayCtx
+    }
+    if (type === 'lasso') {
+      return this.lassoOverlayCtx
+    }
+    return null
+  }
+
+  ensureSelectionOverlay(canvas) {
+    return this.ensureOverlayCanvas(canvas, 'selection')
+  }
+
+  ensureLassoOverlay(canvas) {
+    return this.ensureOverlayCanvas(canvas, 'lasso')
+  }
+
+  drawSelectionHighlights() {
+    if (!this.currentCanvas) return
+    const ctx = this.ensureSelectionOverlay(this.currentCanvas)
+    if (!ctx) return
+    ctx.clearRect(0, 0, this.currentCanvas.width, this.currentCanvas.height)
+    const selectedCells = this.controller?.selectedCells
+    if (!selectedCells || selectedCells.size === 0) {
+      return
+    }
+    ctx.fillStyle = '#ff0000'
+    for (const point of this.currentPlotPoints) {
+      if (selectedCells.has(point.cellIndex)) {
+        const radius = Math.max(point.radius || 2, 2)
+        ctx.beginPath()
+        ctx.arc(point.canvasX, point.canvasY, radius, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+
+  clearLassoOverlay() {
+    if (this.lassoOverlayCtx && this.lassoOverlayCanvas) {
+      this.lassoOverlayCtx.clearRect(0, 0, this.lassoOverlayCanvas.width, this.lassoOverlayCanvas.height)
+    }
+  }
+
+  drawLassoPath(closePath = false) {
+    if (!this.currentCanvas) return
+    const ctx = this.ensureLassoOverlay(this.currentCanvas)
+    if (!ctx) return
+    ctx.clearRect(0, 0, this.lassoOverlayCanvas.width, this.lassoOverlayCanvas.height)
+    if (!this.customLassoPoints || this.customLassoPoints.length === 0) return
+
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = '#3b82f6'
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.15)'
+
+    ctx.beginPath()
+    ctx.moveTo(this.customLassoPoints[0].x, this.customLassoPoints[0].y)
+    for (let i = 1; i < this.customLassoPoints.length; i++) {
+      ctx.lineTo(this.customLassoPoints[i].x, this.customLassoPoints[i].y)
+    }
+    if (closePath && this.customLassoPoints.length >= 3) {
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.stroke()
+  }
+
+  removeOverlays() {
+    if (this.selectionOverlayCanvas && this.selectionOverlayCanvas.parentElement) {
+      this.selectionOverlayCanvas.parentElement.removeChild(this.selectionOverlayCanvas)
+    }
+    if (this.lassoOverlayCanvas && this.lassoOverlayCanvas.parentElement) {
+      this.lassoOverlayCanvas.parentElement.removeChild(this.lassoOverlayCanvas)
+    }
+    this.selectionOverlayCanvas = null
+    this.selectionOverlayCtx = null
+    this.lassoOverlayCanvas = null
+    this.lassoOverlayCtx = null
+  }
+  
+  findClosestPoint(mouseX, mouseY) {
+    if (!this.currentPlotPoints || this.currentPlotPoints.length === 0) {
+      return null
+    }
+    let closestPoint = null
+    let minDistSq = Infinity
+    for (const point of this.currentPlotPoints) {
+      const dx = point.canvasX - mouseX
+      const dy = point.canvasY - mouseY
+      const distSq = dx * dx + dy * dy
+      if (distSq < minDistSq) {
+        minDistSq = distSq
+        closestPoint = point
+      }
+    }
+    if (!closestPoint) {
+      return null
+    }
+    const distance = Math.sqrt(minDistSq)
+    const tolerance = Math.max(this.currentPickTolerance, closestPoint.radius ? closestPoint.radius * 5 : this.currentPickTolerance)
+    if (distance <= tolerance) {
+      return { point: closestPoint, distance }
+    }
+    return null
   }
   
   // Open 2D plot modal and render plot
@@ -980,6 +1416,7 @@ export class CustomPlotManager {
     const ctx = canvas.getContext('2d')
     const width = canvas.width
     const height = canvas.height
+    this.currentCanvasContext = ctx
     
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
@@ -1146,13 +1583,14 @@ export class CustomPlotManager {
     
     // Draw points
     const pointSize = 2
+    const plotPoints = []
     for (const point of dataPoints) {
-      const x = scaleX(point.x)
-      const y = scaleY(point.y)
+      const canvasX = scaleX(point.x)
+      const canvasY = scaleY(point.y)
       
       // Get color for this point
       let color = '#3b82f6' // Default blue
-      if (coloringVector) {
+      if (coloringVector && this.controller.colorManager && typeof this.controller.colorManager.getColorAndAlpha === 'function') {
         const { color: pointColor } = this.controller.colorManager.getColorAndAlpha(point.cellIndex, coloringVector)
         // Convert hex number to CSS color string
         color = '#' + pointColor.toString(16).padStart(6, '0')
@@ -1160,9 +1598,20 @@ export class CustomPlotManager {
       
       ctx.fillStyle = color
       ctx.beginPath()
-      ctx.arc(x, y, pointSize, 0, Math.PI * 2)
+      ctx.arc(canvasX, canvasY, pointSize, 0, Math.PI * 2)
       ctx.fill()
+      plotPoints.push({ cellIndex: point.cellIndex, canvasX, canvasY, radius: pointSize })
     }
+    
+    if (plotPoints.length > 0) {
+      this.currentPlotPoints = plotPoints
+      this.currentPickTolerance = Math.max(pointSize * 4, 12)
+      this.currentPlotType = 'scatter'
+    } else {
+      this.currentPlotPoints = []
+    }
+    this.setupCanvasInteractions(canvas)
+    this.drawSelectionHighlights()
     
     console.log('📊 Scatter plot rendered with', dataPoints.length, 'points')
   }
@@ -1174,6 +1623,7 @@ export class CustomPlotManager {
     const ctx = canvas.getContext('2d')
     const width = canvas.width
     const height = canvas.height
+    this.currentCanvasContext = ctx
     
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
@@ -1354,6 +1804,7 @@ export class CustomPlotManager {
     // Draw points first (so violin lines appear above)
     const pointSize = 1.0 // Smaller radius
     const pointAreaWidth = violinWidth * 0.6 // Narrower area for points (was 0.8)
+    const plotPoints = []
     
     // Create a cache key based on the current data to detect when to clear cache
     const cacheKey = `${categories.join(',')}_${filteredIndices ? filteredIndices.length : 'all'}`
@@ -1390,7 +1841,7 @@ export class CustomPlotManager {
         
         // Get color for this point from current coloring
         let color = '#3b82f6' // Default blue
-        if (coloringVector) {
+        if (coloringVector && this.controller.colorManager && typeof this.controller.colorManager.getColorAndAlpha === 'function') {
           const { color: pointColor } = this.controller.colorManager.getColorAndAlpha(point.cellIndex, coloringVector)
           // Convert hex number to CSS color string
           color = '#' + pointColor.toString(16).padStart(6, '0')
@@ -1400,8 +1851,18 @@ export class CustomPlotManager {
         ctx.beginPath()
         ctx.arc(pointX, y, pointSize, 0, Math.PI * 2)
         ctx.fill()
+        plotPoints.push({ cellIndex: point.cellIndex, canvasX: pointX, canvasY: y, radius: pointSize })
       }
     })
+    if (plotPoints.length > 0) {
+      this.currentPlotPoints = plotPoints
+      this.currentPickTolerance = Math.max(pointSize * 6, 14)
+      this.currentPlotType = 'violin'
+    } else {
+      this.currentPlotPoints = []
+    }
+    this.setupCanvasInteractions(canvas)
+    this.drawSelectionHighlights()
     
     // Draw violins after points (so they appear above)
     categories.forEach((category, catIndex) => {

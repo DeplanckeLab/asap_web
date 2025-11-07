@@ -5035,6 +5035,9 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: pan')
     this.setInteractionMode('pan')
     this.updateButtonStates('pan')
+    if (this.customPlotManager && typeof this.customPlotManager.handleInteractionModeChange === 'function') {
+      this.customPlotManager.handleInteractionModeChange('pan')
+    }
     
     // Re-enable sprite interactivity
     if (this.scatterContainer) {
@@ -5050,6 +5053,9 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: lasso')
     this.setInteractionMode('lasso')
     this.updateButtonStates('lasso')
+    if (this.customPlotManager && typeof this.customPlotManager.handleInteractionModeChange === 'function') {
+      this.customPlotManager.handleInteractionModeChange('lasso')
+    }
     
     // Disable sprite interactivity for smooth mouse movements
     if (this.scatterContainer) {
@@ -5065,6 +5071,9 @@ export default class extends Controller {
     //console.log('Setting interaction mode to: pick')
     this.setInteractionMode('pick')
     this.updateButtonStates('pick')
+    if (this.customPlotManager && typeof this.customPlotManager.handleInteractionModeChange === 'function') {
+      this.customPlotManager.handleInteractionModeChange('pick')
+    }
     
     // Re-enable sprite interactivity
     if (this.scatterContainer) {
@@ -7208,6 +7217,35 @@ export default class extends Controller {
     const selectionTime = performance.now() - selectionStart
     console.log(`⏱️ [LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
     
+    this.applySelectionFromIndices(selectedIndices, {
+      source: 'main-lasso',
+      replaceExisting: false,
+      updateCustomPlot: true
+    })
+  }
+
+  applySelectionFromIndices(selectedIndices, options = {}) {
+    if (!Array.isArray(selectedIndices) || selectedIndices.length === 0) {
+      console.log('[SELECTION] No indices provided for applySelectionFromIndices')
+      return
+    }
+
+    const {
+      replaceExisting = false,
+      source = 'unknown',
+      updateCustomPlot = true
+    } = options
+
+    console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}`)
+
+    if (!this.selectedCells) {
+      this.selectedCells = new Set()
+    }
+
+    if (replaceExisting) {
+      this.selectedCells.clear()
+    }
+
     // Add to selected cells set
     selectedIndices.forEach(index => {
       this.selectedCells.add(index)
@@ -7218,7 +7256,7 @@ export default class extends Controller {
     
     // Store current filter state before clearing coloring
     const filterStateBeforeClear = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
-    console.log('[LASSO] Storing filter state before clearMetadataColoring:', {
+    console.log('[SELECTION] Storing filter state before clearMetadataColoring:', {
       hasFilter: !!filterStateBeforeClear,
       filterSize: filterStateBeforeClear ? filterStateBeforeClear.size : 'null'
     })
@@ -7229,7 +7267,7 @@ export default class extends Controller {
     this.clearMetadataColoring()
     
     // Verify filter state after clearMetadataColoring
-    console.log('[LASSO] Filter state after clearMetadataColoring:', {
+    console.log('[SELECTION] Filter state after clearMetadataColoring:', {
       currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
       hasFilter: !!this.currentVisibleCells,
       filterPreserved: filterStateBeforeClear ? 
@@ -7240,9 +7278,16 @@ export default class extends Controller {
     
     // Update selection count display
     this.updateSelectionCount()
+    if (this.uiManager && typeof this.uiManager.updateSelectedCellsCount === 'function') {
+      this.uiManager.updateSelectedCellsCount()
+    }
     
     // Update colors of selected points without re-rendering (preserves pan/zoom state)
     this.updateSelectedPointColors()
+
+    if (updateCustomPlot && this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
+      this.customPlotManager.onSelectionUpdated()
+    }
   }
 
   // Reorder displayOrder to put selected cells at the end (drawn last, appear on top)
@@ -7534,27 +7579,12 @@ export default class extends Controller {
       return
     }
     
-    // Add all visible cells to selection
-    visibleCells.forEach(cellId => {
-      this.selectedCells.add(cellId)
+    this.applySelectionFromIndices(visibleCells, {
+      source: 'add-all-visible',
+      replaceExisting: false,
+      updateCustomPlot: true
     })
-    
-    //(`Added ${visibleCells.length} visible cells to selection`)
-    
-    // Store the current metadata state before deactivating (for restore on cancel/save)
-    this.storeMetadataStateBeforeSelection()
-    
-    // Deactivate the coloring button (turn blue palette button to grey)
-    this.resetAllWaterDropButtons()
-    this.removeAllCategoryColors()
-    this.clearMetadataColoring()
-    
-    // Update the selection count display
-    this.uiManager.updateSelectedCellsCount()
-    
-    // Update point colors to show selection
-    this.updateSelectedPointColors()
-    
+
     // Update button state
     this.uiManager.updateAddAllVisibleButtonState()
   }
@@ -7949,6 +7979,9 @@ export default class extends Controller {
       
       // Update the cell count display
       this.uiManager.updateSelectedCellsCount()
+      if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
+        this.customPlotManager.onSelectionUpdated()
+      }
       
       // Clear any lasso graphics
       if (this.lassoGraphics) {
@@ -8319,6 +8352,10 @@ export default class extends Controller {
     
     // Update the cell count display
     this.uiManager.updateSelectedCellsCount()
+
+    if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
+      this.customPlotManager.onSelectionUpdated()
+    }
     
     // Clear any lasso graphics
     if (this.lassoGraphics) {

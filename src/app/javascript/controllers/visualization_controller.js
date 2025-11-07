@@ -2392,12 +2392,13 @@ export default class extends Controller {
             const categoryIndex = categoryToIndex[category] || 0
             const colorValue = categoryColors[categoryIndex % categoryColors.length]
             
-            const color = typeof colorValue === 'string' 
+            const metadataColor = typeof colorValue === 'string' 
               ? parseInt(colorValue.replace('#', ''), 16)
               : colorValue
             
-            colorMap.set(drawPos, color)
-            this.originalPointColors.set(cellIndex, color) // Store by cell index
+            this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
+            const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+            colorMap.set(drawPos, isSelected ? 0xff0000 : metadataColor)
           } else {
             // Hide filtered-out points
             colorMap.set(drawPos, 0x00000000)
@@ -2483,10 +2484,11 @@ export default class extends Controller {
               normalizedValue = 0.5
             }
             
-            const color = this.gradientManager.getColorFromGradient(normalizedValue)
+            const metadataColor = this.gradientManager.getColorFromGradient(normalizedValue)
             
-            colorMap.set(drawPos, color)
-            this.originalPointColors.set(cellIndex, color) // Store by cell index
+            this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
+            const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+            colorMap.set(drawPos, isSelected ? 0xff0000 : metadataColor)
           } else {
             // Hide filtered-out points
             colorMap.set(drawPos, 0x00000000)
@@ -2500,7 +2502,7 @@ export default class extends Controller {
         
         // Update colors in ReGL (but don't render yet, we'll reorder first)
         this.reglRenderer.updateColors(colorMap)
-        
+
         // Check if we need to reorder points for numeric display
         // Force reordering if:
         // 1. Order hasn't been applied yet
@@ -2555,8 +2557,9 @@ export default class extends Controller {
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
         if (isVisible) {
-          colorMap.set(drawPos, defaultColor)
           this.originalPointColors.set(cellIndex, defaultColor) // Store by cell index
+          const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+          colorMap.set(drawPos, isSelected ? 0xff0000 : defaultColor)
           visibleCount++
         } else {
           // Hide filtered-out points
@@ -7360,6 +7363,9 @@ export default class extends Controller {
       }
       
       const hasSelections = this.selectedCells.size > 0
+      if (!this.cachedColorsByCellIndex) {
+        this.cachedColorsByCellIndex = new Map()
+      }
       
       // Reorder displayOrder to put selected cells on top
       if (hasSelections && this.displayOrder && this.currentCoordinates) {
@@ -7380,15 +7386,18 @@ export default class extends Controller {
           if (!isVisible) {
             // Hide filtered-out points
             colorMap.set(drawPos, 0x00000000)
+            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
             continue
           }
           
           if (this.selectedCells.has(cellIndex)) {
             colorMap.set(drawPos, 0xff0000) // Red
+            this.cachedColorsByCellIndex.set(cellIndex, 0xff0000)
           } else {
             // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
             const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
             colorMap.set(drawPos, originalColor)
+            this.cachedColorsByCellIndex.set(cellIndex, originalColor)
           }
         }
       } else {
@@ -7403,11 +7412,13 @@ export default class extends Controller {
           if (!isVisible) {
             // Hide filtered-out points
             colorMap.set(drawPos, 0x00000000)
+            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
             continue
           }
           
           const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
           colorMap.set(drawPos, originalColor)
+          this.cachedColorsByCellIndex.set(cellIndex, originalColor)
         }
       }
       
@@ -7415,16 +7426,17 @@ export default class extends Controller {
       this.reglRenderer.render()
       
       this.previouslySelectedCells = new Set(this.selectedCells)
+      this.colorUpdateCache.set('lastColorMap', colorMap)
       const updateTime = performance.now() - updateStart
       console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
       return
     }
     
     // PixiJS PATH (original)
-    if (!this.pointSprites || this.pointSprites.length === 0) {
+    /*if (!this.pointSprites || this.pointSprites.length === 0) {
       console.log('⚠️ No sprites available for color update')
       return
-    }
+    }*/
     
     const hasSelections = this.selectedCells.size > 0
     const wasEmpty = !this.previouslySelectedCells || this.previouslySelectedCells.size === 0
@@ -7437,6 +7449,10 @@ export default class extends Controller {
       console.log(`⏱️ [PERF] First selection - updating all ${this.pointSprites.length} sprites`)
       const allUpdateStart = performance.now()
       
+      if (!this.cachedColorsByCellIndex) {
+        this.cachedColorsByCellIndex = new Map()
+      }
+
       for (let i = 0; i < this.pointSprites.length; i++) {
         const sprite = this.pointSprites[i]
         if (!sprite || sprite.destroyed) continue
@@ -7444,8 +7460,11 @@ export default class extends Controller {
         if (this.selectedCells.has(i)) {
           sprite.tint = 0xff0000
           sprite.alpha = 1.0
+          this.cachedColorsByCellIndex.set(i, 0xff0000)
         } else {
           sprite.alpha = 0.3 // Fade unselected (keep existing color)
+          const originalColor = this.originalPointColors.get(i) || sprite.tint || 0x3b82f6
+          this.cachedColorsByCellIndex.set(i, originalColor)
         }
       }
       
@@ -7461,6 +7480,9 @@ export default class extends Controller {
         if (sprite && !sprite.destroyed) {
           sprite.tint = 0xff0000
           sprite.alpha = 1.0
+          if (this.cachedColorsByCellIndex) {
+            this.cachedColorsByCellIndex.set(cellId, 0xff0000)
+          }
         }
       }
       
@@ -7478,6 +7500,9 @@ export default class extends Controller {
         const originalColor = this.originalPointColors.get(i) || 0x3b82f6
         sprite.tint = originalColor
         sprite.alpha = 1.0
+        if (this.cachedColorsByCellIndex) {
+          this.cachedColorsByCellIndex.set(i, originalColor)
+        }
       }
       
       const clearTime = performance.now() - clearStart
@@ -7698,8 +7723,9 @@ export default class extends Controller {
       screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
       
       // Get color for this cell
-      const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
-      colorMap.set(drawPos, color)
+      const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+      const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+      colorMap.set(drawPos, isSelected ? 0xff0000 : baseColor)
     }
     
     // Update ReGL buffers with reordered data
@@ -7783,8 +7809,9 @@ export default class extends Controller {
       // If filtered, use transparent. Otherwise use color from originalPointColors or default blue
       const isVisible = !visibleSet || visibleSet.has(cellIndex)
       if (isVisible) {
-        const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
-        colorMap.set(drawPos, color)
+        const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+        colorMap.set(drawPos, isSelected ? 0xff0000 : baseColor)
       } else {
         // Hide filtered-out points
         colorMap.set(drawPos, 0x00000000)

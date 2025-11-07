@@ -162,7 +162,8 @@ export class ColorManager {
       
       if (numPoints > 0) {
         for (let i = 0; i < numPoints; i++) {
-          this.controller.cachedColorsByCellIndex.set(i, 0x3b82f6) // Default blue
+          const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
+          this.controller.cachedColorsByCellIndex.set(i, isSelected ? 0xff0000 : 0x3b82f6) // Default blue with selection override
         }
       }
       
@@ -209,7 +210,8 @@ export class ColorManager {
         const color = typeof colorValue === 'string' 
           ? parseInt(colorValue.replace('#', ''), 16)
           : colorValue
-        this.controller.cachedColorsByCellIndex.set(i, color)
+        const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
+        this.controller.cachedColorsByCellIndex.set(i, isSelected ? 0xff0000 : color)
       }
       
     } else if (data_type === 'NUMERIC') {
@@ -235,7 +237,8 @@ export class ColorManager {
         const value = values[i]
         const normalizedValue = range > 0 ? (value - minVal) / range : 0.5
         const color = this.controller.getColorFromGradient(normalizedValue)
-        this.controller.cachedColorsByCellIndex.set(i, color)
+        const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
+        this.controller.cachedColorsByCellIndex.set(i, isSelected ? 0xff0000 : color)
       }
       
       // Cache the color range for future comparisons

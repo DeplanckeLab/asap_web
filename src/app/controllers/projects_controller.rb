@@ -88,6 +88,7 @@ class ProjectsController < ApplicationController
 
     # Preload expression matrices (dim = 3) grouped by loom file
     @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)
+                                        .order(id: :asc)
                                         .group_by(&:filepath)
     
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []

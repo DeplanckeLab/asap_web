@@ -1400,6 +1400,7 @@ export class GeneManager {
                 data-action="click->visualization#downloadGeneExpression"
                 data-gene-id="${gene.stableId}"
                 data-metadata-id="${baseMetadataId}"
+                data-layer-metadata-id="${layerMetadataId}"
                 style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
                 onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                 onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
@@ -1415,6 +1416,7 @@ export class GeneManager {
                   data-gene-id="${gene.stableId}"
                   data-action="click->visualization#xButtonClicked"
                   data-active="false"
+                  data-layer-metadata-id="${layerMetadataId}"
                   style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
                   onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
                   onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
@@ -1427,6 +1429,7 @@ export class GeneManager {
                   data-gene-id="${gene.stableId}"
                   data-action="click->visualization#yButtonClicked"
                   data-active="false"
+                  data-layer-metadata-id="${layerMetadataId}"
                   style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-style: italic; font-family: 'Times New Roman', serif;"
                   onmouseover="if(this.dataset.active !== 'true') { this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6'; }"
                   onmouseout="if(this.dataset.active !== 'true') { this.style.color='#9ca3af'; this.style.backgroundColor=''; }"
@@ -1440,6 +1443,7 @@ export class GeneManager {
                   data-gene-id="${gene.stableId}"
                   data-gene-name="${gene.symbol}"
                   data-metadata-id="${baseMetadataId}"
+                  data-layer-metadata-id="${layerMetadataId}"
                   data-metadata-name="${gene.symbol}"
                   data-metadata-type="NUMERIC"
                   data-active="false"
@@ -1470,6 +1474,7 @@ export class GeneManager {
         <!-- Range Slider -->
         <div data-controller="range-slider" 
              data-range-slider-metadata-id-value="${layerMetadataId}"
+             data-layer-metadata-id-value="${layerMetadataId}"
              data-range-slider-min-value="0"
              data-range-slider-max-value="1"
              data-range-slider-current-min-value="0"
@@ -1873,10 +1878,20 @@ export class GeneManager {
         if (geneContainer) {
           geneContainer.querySelectorAll('[data-metadata-id]').forEach(el => {
             el.dataset.metadataId = baseMetadataId
+            el.dataset.layerMetadataId = geneMetadataId
           })
           geneContainer.querySelectorAll('[data-range-slider-metadata-id-value]').forEach(el => {
             el.dataset.rangeSliderMetadataIdValue = geneMetadataId
+            el.dataset.layerMetadataIdValue = geneMetadataId
           })
+        }
+        if (this.controller?.selectedXButton?.button?.dataset?.geneId === geneId) {
+          this.controller.selectedXButton.metadataId = geneMetadataId
+          this.controller.selectedXButton.baseMetadataId = baseMetadataId
+        }
+        if (this.controller?.selectedYButton?.button?.dataset?.geneId === geneId) {
+          this.controller.selectedYButton.metadataId = geneMetadataId
+          this.controller.selectedYButton.baseMetadataId = baseMetadataId
         }
       } else if (statusIcon) {
         statusIcon.style.display = 'none'

@@ -9,7 +9,126 @@ export class GeneManager {
     this.geneTags = [] // Array of {symbol, ensemblId, stableId, query}
     this.notFoundQueries = [] // Queries that didn't match
     this.geneExpressionData = {} // Store expression values per gene: {stableId: {values: [...], stats: {...}}}
+    this.currentMatrixLayer = '/matrix' // Default to /matrix
+    this.currentMatrixAnnotId = null // Annot ID for the current matrix/layer
+    // Expose globally for diagnostics and inline handlers
+    window.geneManager = this
+    console.log('GeneManager: Constructor initialized, window.geneManager set')
     this.init()
+  }
+
+  // Base metadata key (without layer/annotId)
+  getBaseGeneMetadataId(geneId) {
+    return `gene_${geneId}`
+  }
+
+  // Generate gene metadata ID for specific annot_id (defaults to current layer)
+  getGeneMetadataId(geneId, annotId = null) {
+    const baseKey = this.getBaseGeneMetadataId(geneId)
+    const resolvedAnnotId = annotId !== null ? annotId : this.currentMatrixAnnotId
+    if (resolvedAnnotId && resolvedAnnotId !== '') {
+      return `${baseKey}_${resolvedAnnotId}`
+    }
+    return baseKey
+  }
+
+  getGeneMetadataKeys(geneId, annotId = null) {
+    const baseKey = this.getBaseGeneMetadataId(geneId)
+    const layerKey = this.getGeneMetadataId(geneId, annotId)
+    return { baseKey, layerKey }
+  }
+
+  // Handle matrix/layer selection change
+  async onMatrixLayerChange(layerPath, annotId) {
+    const previousLayer = this.currentMatrixLayer
+    const previousAnnotId = this.currentMatrixAnnotId
+    const nextLayer = layerPath || '/matrix'
+    const nextAnnotId = annotId && annotId !== '' ? String(annotId) : null
+    const initialGeneCount = this.geneTags?.length || 0
+    console.log('GeneManager: applying matrix change', {
+      previousLayer,
+      previousAnnotId,
+      nextLayer,
+      nextAnnotId,
+      genes: initialGeneCount
+    })
+    this.currentMatrixLayer = nextLayer
+    this.currentMatrixAnnotId = nextAnnotId
+    
+    // Clear all gene expression data vectors with old annot_id
+    if (this.controller && this.controller.loadedMetadataVectors) {
+      const keysToRemove = Object.keys(this.controller.loadedMetadataVectors).filter(key => key.startsWith('gene_'))
+
+      keysToRemove.forEach(key => delete this.controller.loadedMetadataVectors[key])
+      console.log('GeneManager: cleared cached vectors', { removed: keysToRemove.length })
+    } else {
+      console.log('GeneManager: no cached vectors to clear')
+    }
+    
+    // Clear cached gene expression data
+    this.geneExpressionData = {}
+    
+    // Clear inline range slider data for genes
+    if (this.controller && this.controller.inlineRangeSliderData) {
+      const sliderKeysToRemove = Object.keys(this.controller.inlineRangeSliderData).filter(key => key.startsWith('gene_'))
+
+      sliderKeysToRemove.forEach(key => delete this.controller.inlineRangeSliderData[key])
+      console.log('GeneManager: cleared slider caches', { removed: sliderKeysToRemove.length })
+    } else {
+      console.log('GeneManager: no slider cache to clear')
+    }
+    
+    const genesToReload = new Map()
+    const addGeneDescriptor = (stableId, symbol = null, ensembl = '', query = null) => {
+      if (!stableId) return
+      const stableIdStr = String(stableId)
+      const stableIdNum = Number(stableId)
+      const key = stableIdStr
+      if (genesToReload.has(key)) return
+      genesToReload.set(key, {
+        stableId: isNaN(stableIdNum) ? stableIdStr : stableIdNum,
+        symbol: symbol || `Gene ${stableIdStr}`,
+        ensemblId: ensembl || '',
+        query: query || symbol || stableIdStr
+      })
+    }
+
+    if (Array.isArray(this.geneTags)) {
+      this.geneTags.forEach(gene => addGeneDescriptor(gene.stableId, gene.symbol, gene.ensemblId, gene.query))
+    }
+
+    const collectFromButton = (buttonInfo) => {
+      if (!buttonInfo || !buttonInfo.isGene) return
+      const buttonEl = buttonInfo.button
+      const stableId = buttonEl?.dataset?.geneId || buttonInfo.metadataId
+      const symbol = buttonInfo.metadataName || buttonEl?.dataset?.geneName
+      addGeneDescriptor(stableId, symbol)
+    }
+
+    collectFromButton(this.controller?.selectedXButton)
+    collectFromButton(this.controller?.selectedYButton)
+
+    const currentVectorId = this.controller?.currentMetadataVector?.id
+    if (currentVectorId && typeof currentVectorId === 'string' && currentVectorId.startsWith('gene_')) {
+      const parts = currentVectorId.split('_')
+      if (parts.length >= 2) {
+        addGeneDescriptor(parts[1])
+      }
+    }
+
+    if (genesToReload.size > 0) {
+      console.log('GeneManager: reloading genes for new layer', { genes: genesToReload.size })
+      const resultsDiv = document.getElementById('gene-expression-results')
+      const reloadPromises = Array.from(genesToReload.values()).map(gene => this.loadGeneExpressionData(gene, resultsDiv))
+      await Promise.all(reloadPromises)
+    } else {
+      console.log('GeneManager: no genes to reload for new layer')
+    }
+
+    // Refresh custom 2D plot if open
+    if (this.controller?.customPlotManager) {
+      await this.controller.customPlotManager.refresh2DPlotIfOpen()
+    }
   }
 
   init() {
@@ -464,8 +583,13 @@ export class GeneManager {
       this.geneTags.push(gene)
       // Update badge when gene is added
       this.updateGeneCountBadge()
-      // Don't render tags, just process the gene
-      this.processAllGenes()
+      // Only add the new gene instead of re-rendering all genes
+      // This preserves the state of existing genes (filter icons, expansion, etc.)
+      const resultsDiv = document.getElementById('gene-expression-results')
+      if (resultsDiv) {
+        this.displayBulkGene(gene, resultsDiv)
+        this.loadGeneExpressionData(gene, resultsDiv)
+      }
     }
 
     // Clear input
@@ -495,15 +619,34 @@ export class GeneManager {
       }
       container.appendChild(input)
     }
+
+    // Initialize current matrix selection based on dropdown if available
+    const matrixSelect = document.getElementById('gene-expression-matrix-select')
+    if (matrixSelect && matrixSelect.options.length > 0) {
+      const option = matrixSelect.options[matrixSelect.selectedIndex]
+      const optionValue = option.value || '/matrix'
+      const optionAnnotId = option.dataset.annotId
+      const resolvedAnnotId = optionAnnotId && optionAnnotId !== '' ? String(optionAnnotId) : null
+
+      if (this.currentMatrixLayer !== optionValue || this.currentMatrixAnnotId !== resolvedAnnotId) {
+        this.currentMatrixLayer = optionValue
+        this.currentMatrixAnnotId = resolvedAnnotId
+        console.log('GeneManager: initial matrix selection detected', {
+          layer: this.currentMatrixLayer,
+          annotId: this.currentMatrixAnnotId
+        })
+      }
+    }
   }
 
   removeGeneTag(index) {
     if (index >= 0 && index < this.geneTags.length) {
       const geneToRemove = this.geneTags[index]
-      const geneMetadataId = geneToRemove ? `gene_${geneToRemove.stableId}` : null
+      const metadataKeys = geneToRemove ? this.getGeneMetadataKeys(String(geneToRemove.stableId), this.currentMatrixAnnotId) : null
+      const metadataIds = metadataKeys ? [metadataKeys.baseKey, metadataKeys.layerKey] : []
       
       // Check if this gene is currently being used for coloring
-      const isCurrentlyColoring = geneMetadataId && this.controller?.currentMetadataVector?.id === geneMetadataId
+      const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
       
       if (isCurrentlyColoring) {
         console.log(`🧬 Removing gene ${geneToRemove.stableId} that is currently being used for coloring - clearing coloring`)
@@ -512,6 +655,20 @@ export class GeneManager {
         this.controller.removeAllCategoryColors()
         this.controller.clearMetadataColoring()
       }
+      
+      // Clear cached data for this gene
+      metadataIds.forEach(id => {
+        if (!id) return
+        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
+          delete this.controller.loadedMetadataVectors[id]
+        }
+        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
+          delete this.controller.inlineRangeSliderData[id]
+        }
+        if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
+          delete this.controller.selectedRanges[id]
+        }
+      })
       
       this.geneTags.splice(index, 1)
       // Update badge when gene is removed
@@ -524,10 +681,11 @@ export class GeneManager {
   removeGeneByStableId(stableId) {
     const index = this.geneTags.findIndex(g => g.stableId === stableId)
     if (index !== -1) {
-      const geneMetadataId = `gene_${stableId}`
+      const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
+      const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
       
       // Check if this gene is currently being used for coloring
-      const isCurrentlyColoring = this.controller?.currentMetadataVector?.id === geneMetadataId
+      const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
       
       if (isCurrentlyColoring) {
         console.log(`🧬 Removing gene ${stableId} that is currently being used for coloring - clearing coloring`)
@@ -536,6 +694,19 @@ export class GeneManager {
         this.controller.removeAllCategoryColors()
         this.controller.clearMetadataColoring()
       }
+      
+      metadataIds.forEach(id => {
+        if (!id) return
+        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
+          delete this.controller.loadedMetadataVectors[id]
+        }
+        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
+          delete this.controller.inlineRangeSliderData[id]
+        }
+        if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
+          delete this.controller.selectedRanges[id]
+        }
+      })
       
       this.geneTags.splice(index, 1)
       // Update badge when gene is removed
@@ -575,11 +746,13 @@ export class GeneManager {
         this.geneTags.push(matched)
         // Update badge when gene is added
         this.updateGeneCountBadge()
-        // Don't render tags, just process the gene
-        // Process all genes after a short delay to batch updates
-        setTimeout(() => {
-          this.processAllGenes()
-        }, 100)
+        // Only add the new gene instead of re-rendering all genes
+        // This preserves the state of existing genes (filter icons, expansion, etc.)
+        const resultsDiv = document.getElementById('gene-expression-results')
+        if (resultsDiv) {
+          this.displayBulkGene(matched, resultsDiv)
+          this.loadGeneExpressionData(matched, resultsDiv)
+        }
         return { found: true, gene: matched }
       }
       return { found: true, gene: matched, duplicate: true }
@@ -766,6 +939,95 @@ export class GeneManager {
     for (const gene of this.geneTags) {
       await this.loadGeneExpressionData(gene, resultsDiv)
     }
+    
+    // Restore filter state icons for all genes that have subranges selected
+    // This is needed because displayBulkGene recreates the DOM, losing the icon state
+    // We check selectedRanges to determine if a gene has a subrange, and restore the icon accordingly
+    setTimeout(() => {
+      for (const gene of this.geneTags) {
+        const geneId = String(gene.stableId)
+        const geneMetadataId = this.getGeneMetadataId(geneId, this.currentMatrixAnnotId)
+        
+        // Check if this gene has a subrange in selectedRanges
+        const selectedRange = this.controller?.selectedRanges?.[geneMetadataId]
+        const geneFilterStateIcon = document.querySelector(`.gene-filter-state-icon[data-gene-id="${geneId}"]`)
+        
+        if (geneFilterStateIcon) {
+          if (selectedRange && selectedRange.min !== undefined && selectedRange.max !== undefined) {
+            // Check if it's a subrange (not the full range)
+            // We need to get the min/max values to compare
+            const sliderData = this.controller?.inlineRangeSliderData?.[geneMetadataId]
+            if (sliderData) {
+              const minVal = sliderData.min
+              const maxVal = sliderData.max
+              const tolerance = (maxVal - minVal) * 0.001 // 0.1% tolerance
+              const isFullRange = Math.abs(selectedRange.min - minVal) < tolerance && 
+                                  Math.abs(selectedRange.max - maxVal) < tolerance
+              
+              // Show the icon
+              geneFilterStateIcon.style.display = 'flex'
+              const icon = geneFilterStateIcon.querySelector('i')
+              
+              if (isFullRange) {
+                // Full range - white background, gray icon
+                geneFilterStateIcon.style.backgroundColor = 'white'
+                geneFilterStateIcon.style.borderColor = '#d1d5db'
+                if (icon) {
+                  icon.style.color = '#9ca3af'
+                }
+                geneFilterStateIcon.title = 'No filter applied (full range)'
+              } else {
+                // Subrange - orange background, white icon
+                geneFilterStateIcon.style.backgroundColor = '#f59e0b'
+                geneFilterStateIcon.style.borderColor = '#f59e0b'
+                if (icon) {
+                  icon.style.color = 'white'
+                }
+                geneFilterStateIcon.title = `Subrange selected: ${selectedRange.min.toFixed(3)} - ${selectedRange.max.toFixed(3)}`
+              }
+            } else {
+              // Slider data not available yet, but we have a range - assume it's a subrange
+              geneFilterStateIcon.style.display = 'flex'
+              const icon = geneFilterStateIcon.querySelector('i')
+              geneFilterStateIcon.style.backgroundColor = '#f59e0b'
+              geneFilterStateIcon.style.borderColor = '#f59e0b'
+              if (icon) {
+                icon.style.color = 'white'
+              }
+              geneFilterStateIcon.title = `Subrange selected: ${selectedRange.min.toFixed(3)} - ${selectedRange.max.toFixed(3)}`
+            }
+          } else {
+            // No subrange selected - hide the icon or show as full range
+            // Only show if the gene is unfolded (has a range slider visible)
+            const rangeSection = document.querySelector(`.gene-range-section[data-gene-id="${geneId}"]`)
+            if (rangeSection && rangeSection.style.display !== 'none') {
+              geneFilterStateIcon.style.display = 'flex'
+              const icon = geneFilterStateIcon.querySelector('i')
+              geneFilterStateIcon.style.backgroundColor = 'white'
+              geneFilterStateIcon.style.borderColor = '#d1d5db'
+              if (icon) {
+                icon.style.color = '#9ca3af'
+              }
+              geneFilterStateIcon.title = 'No filter applied (full range)'
+            }
+          }
+        }
+        
+        // Also try to trigger updateCheckboxColor if the range slider controller is available
+        const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${geneMetadataId}"]`)
+        if (rangeSliderElement && this.controller) {
+          const rangeSliderController = this.controller.application?.getControllerForElementAndIdentifier(
+            rangeSliderElement,
+            'range-slider'
+          )
+          
+          if (rangeSliderController) {
+            // Trigger updateCheckboxColor to ensure consistency
+            rangeSliderController.updateCheckboxColor()
+          }
+        }
+      }
+    }, 100)
   }
 
   displayGeneInfo(gene) {
@@ -807,8 +1069,13 @@ export class GeneManager {
         console.warn('GeneManager: Could not get current loom file, using default:', e.message)
       }
 
-      // Call the gene expression endpoint
-      const url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+      // Build URL with matrix/layer parameter if not default
+      let url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+      if (this.currentMatrixAnnotId) {
+        url += `&annot_id=${encodeURIComponent(this.currentMatrixAnnotId)}`
+      } else if (this.currentMatrixLayer && this.currentMatrixLayer !== '/matrix') {
+        url += `&layer=${encodeURIComponent(this.currentMatrixLayer)}`
+      }
       
       const response = await fetch(url)
       if (!response.ok) {
@@ -1080,6 +1347,9 @@ export class GeneManager {
     
     // Build gene name display: symbol + Ensembl ID + (stable ID if admin)
     const stableIdDisplay = this.isAdmin ? ` (${gene.stableId})` : ''
+    const geneIdStr = String(gene.stableId)
+    const { baseKey: baseMetadataId, layerKey: layerMetadataId } = this.getGeneMetadataKeys(geneIdStr, this.currentMatrixAnnotId)
+    const geneIdNum = parseInt(geneIdStr)
     
     geneDiv.innerHTML = `
       <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
@@ -1129,7 +1399,7 @@ export class GeneManager {
         <button class="gene-download-btn"
                 data-action="click->visualization#downloadGeneExpression"
                 data-gene-id="${gene.stableId}"
-                data-metadata-id="gene_${gene.stableId}"
+                data-metadata-id="${baseMetadataId}"
                 style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
                 onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                 onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
@@ -1169,7 +1439,7 @@ export class GeneManager {
                   data-action="click->visualization#geneWaterDropClicked"
                   data-gene-id="${gene.stableId}"
                   data-gene-name="${gene.symbol}"
-                  data-metadata-id="gene_${gene.stableId}"
+                  data-metadata-id="${baseMetadataId}"
                   data-metadata-name="${gene.symbol}"
                   data-metadata-type="NUMERIC"
                   data-active="false"
@@ -1199,7 +1469,7 @@ export class GeneManager {
            style="padding: 12px; border-top: 1px solid #f3f4f6; display: none; background-color: #fafafa;">
         <!-- Range Slider -->
         <div data-controller="range-slider" 
-             data-range-slider-metadata-id-value="gene_${gene.stableId}"
+             data-range-slider-metadata-id-value="${layerMetadataId}"
              data-range-slider-min-value="0"
              data-range-slider-max-value="1"
              data-range-slider-current-min-value="0"
@@ -1295,16 +1565,13 @@ export class GeneManager {
     
     // Ensure slider data is initialized when gene expression data is loaded
     // This will be called again when data loads, but also try to initialize if data is already available
-    const geneIdStr = String(gene.stableId)
-    const geneIdNum = parseInt(gene.stableId)
     const existingData = this.geneExpressionData[geneIdStr] || 
                          this.geneExpressionData[geneIdNum] || 
                          this.geneExpressionData[String(geneIdNum)]
     if (existingData && existingData.values && this.controller) {
       // Data already available, initialize slider data
-      const geneMetadataId = `gene_${geneIdStr}`
       if (this.controller.initializeInlineRangeSlider) {
-        this.controller.initializeInlineRangeSlider(geneMetadataId, existingData.values)
+        this.controller.initializeInlineRangeSlider(layerMetadataId, existingData.values)
       }
     }
   }
@@ -1313,6 +1580,7 @@ export class GeneManager {
   async checkGeneStatus(geneId) {
     const geneIdStr = String(geneId)
     const geneIdNum = parseInt(geneId)
+    const { baseKey: baseMetadataId, layerKey: layerMetadataId } = this.getGeneMetadataKeys(geneIdStr, this.currentMatrixAnnotId)
     
     // Check if in memory
     const inMemory = this.geneExpressionData[geneIdStr] || 
@@ -1328,7 +1596,11 @@ export class GeneManager {
     
     // Check if in database
     if (this.controller && this.controller.memoryManager) {
-      const inDatabase = await this.controller.memoryManager.checkGeneExpressionInDatabase(geneIdStr)
+      const inDatabase = await this.controller.memoryManager.checkGeneExpressionInDatabase(geneIdStr, {
+        metadataKey: layerMetadataId,
+        baseKey: baseMetadataId,
+        expectedAnnotId: this.currentMatrixAnnotId
+      })
       if (inDatabase) {
         if (this.controller && this.controller.uiManager) {
           this.controller.uiManager.updateGeneStatusIcon(geneIdStr, 'in-db')
@@ -1346,9 +1618,18 @@ export class GeneManager {
 
   async loadGeneExpressionData(gene, container) {
     const geneId = String(gene.stableId)
+    const { baseKey: baseMetadataId, layerKey: geneMetadataId } = this.getGeneMetadataKeys(geneId, this.currentMatrixAnnotId)
     const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)
     const loadingDiv = document.getElementById(`gene-expression-loading-${gene.stableId}`)
     
+    console.log('GeneManager: load request', {
+      geneId,
+      baseMetadataId,
+      layerMetadataId: geneMetadataId,
+      layer: this.currentMatrixLayer,
+      annotId: this.currentMatrixAnnotId
+    })
+
     // Check if already in memory
     const geneIdNum = parseInt(geneId)
     const inMemory = this.geneExpressionData[geneId] || 
@@ -1363,29 +1644,40 @@ export class GeneManager {
       if (loadingDiv) {
         loadingDiv.style.display = 'none'
       }
+      console.log('GeneManager: using cached expression data', { geneId, values: inMemory.values.length })
       return
     }
     
     // Check IndexedDB first (disk storage)
     if (this.controller && this.controller.memoryManager) {
       // Check if in database first
-      const inDatabase = await this.controller.memoryManager.checkGeneExpressionInDatabase(geneId)
+    const inDatabase = await this.controller.memoryManager.checkGeneExpressionInDatabase(geneId, {
+      metadataKey: geneMetadataId,
+      baseKey: baseMetadataId
+    })
       if (inDatabase) {
         this.controller.uiManager.updateGeneStatusIcon(geneId, 'in-db')
       } else {
         this.controller.uiManager.updateGeneStatusIcon(geneId, 'not-loaded')
       }
       
-      const dbData = await this.controller.memoryManager.loadGeneExpressionFromIndexedDB(geneId)
+      const dbData = await this.controller.memoryManager.loadGeneExpressionFromIndexedDB(geneId, {
+        metadataKey: geneMetadataId,
+        baseKey: baseMetadataId,
+        expectedAnnotId: this.currentMatrixAnnotId
+      })
       if (dbData && dbData.values && dbData.values.length > 0) {
         // Found in database - load into memory
         const stableIdKey = String(gene.stableId)
-        const expressionData = {
+      const expressionData = {
           values: dbData.values,
           stats: dbData.stats || this.calculateExpressionStats(dbData.values),
           geneIndex: dbData.geneIndex,
           stableId: dbData.stableId || gene.stableId,
-          symbol: dbData.symbol || gene.symbol
+        symbol: dbData.symbol || gene.symbol,
+        annotId: dbData.annotId ?? this.currentMatrixAnnotId,
+        metadataId: dbData.metadataId || geneMetadataId,
+        baseMetadataId: dbData.baseMetadataId || baseMetadataId
         }
         
         this.geneExpressionData[stableIdKey] = expressionData
@@ -1396,13 +1688,12 @@ export class GeneManager {
         }
         
         // Store in loadedMetadataVectors so filtering system can find it
-        const geneMetadataId = `gene_${geneId}`
         if (!this.controller.loadedMetadataVectors) {
           this.controller.loadedMetadataVectors = {}
         }
         const minVal = this.controller.dataManager.safeMin(expressionData.values)
         const maxVal = this.controller.dataManager.safeMax(expressionData.values)
-        this.controller.loadedMetadataVectors[geneMetadataId] = {
+        const restoredVector = {
           id: geneMetadataId,
           name: gene.symbol,
           display_name: gene.symbol,
@@ -1414,11 +1705,19 @@ export class GeneManager {
             data_type: 'NUMERIC'
           }
         }
+        this.controller.loadedMetadataVectors[geneMetadataId] = restoredVector
+        if (baseMetadataId !== geneMetadataId) {
+          this.controller.loadedMetadataVectors[baseMetadataId] = restoredVector
+        }
         
         // Initialize slider data immediately (needed for count updates)
         if (this.controller && this.controller.initializeInlineRangeSlider) {
           this.controller.initializeInlineRangeSlider(geneMetadataId, expressionData.values)
+          if (baseMetadataId !== geneMetadataId && this.controller.inlineRangeSliderData) {
+            this.controller.inlineRangeSliderData[baseMetadataId] = this.controller.inlineRangeSliderData[geneMetadataId]
+          }
         }
+        console.log('GeneManager: restored from IndexedDB', { geneId, metadataId: geneMetadataId })
         
         // Update status icon to in-memory (loaded from DB into memory)
         this.controller.uiManager.updateGeneStatusIcon(geneId, 'in-memory')
@@ -1459,9 +1758,15 @@ export class GeneManager {
         console.warn('GeneManager: Could not get current loom file, using default:', e.message)
       }
 
-      const url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(gene.stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+      // Build URL with matrix/layer parameter if not default
+      let url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(gene.stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+      if (this.currentMatrixAnnotId) {
+        url += `&annot_id=${encodeURIComponent(this.currentMatrixAnnotId)}`
+      } else if (this.currentMatrixLayer && this.currentMatrixLayer !== '/matrix') {
+        url += `&layer=${encodeURIComponent(this.currentMatrixLayer)}`
+      }
       
-      console.log(`GeneManager: Loading expression data for gene ${gene.symbol} (stable_id: ${gene.stableId}) from ${loomFile}`)
+      console.log('GeneManager: fetching expression data', { geneId, layer: this.currentMatrixLayer, annotId: this.currentMatrixAnnotId })
       
       const response = await fetch(url)
       if (!response.ok) {
@@ -1477,7 +1782,7 @@ export class GeneManager {
       if (data.error) {
         // Include message if available
         const errorMessage = data.message ? `${data.error}: ${data.message}` : data.error
-        console.error(`GeneManager: Response error for gene ${gene.symbol}:`, data)
+        console.error('GeneManager: server returned error', { geneId, layer: this.currentMatrixLayer, payload: data })
         throw new Error(errorMessage)
       }
       
@@ -1496,7 +1801,10 @@ export class GeneManager {
         stats: stats,
         geneIndex: data.gene_index,
         stableId: data.stable_id,
-        symbol: gene.symbol
+        symbol: gene.symbol,
+        annotId: this.currentMatrixAnnotId,
+        metadataId: geneMetadataId,
+        baseMetadataId: baseMetadataId
       }
       
       this.geneExpressionData[stableIdKey] = expressionData
@@ -1507,14 +1815,13 @@ export class GeneManager {
       }
       
       // Store in loadedMetadataVectors so filtering system can find it
-      const geneMetadataId = `gene_${geneId}`
       if (this.controller && !this.controller.loadedMetadataVectors) {
         this.controller.loadedMetadataVectors = {}
       }
       if (this.controller) {
         const minVal = this.controller.dataManager.safeMin(expressionValues)
         const maxVal = this.controller.dataManager.safeMax(expressionValues)
-        this.controller.loadedMetadataVectors[geneMetadataId] = {
+        const vector = {
           id: geneMetadataId,
           name: gene.symbol,
           display_name: gene.symbol,
@@ -1526,21 +1833,33 @@ export class GeneManager {
             data_type: 'NUMERIC'
           }
         }
+        this.controller.loadedMetadataVectors[geneMetadataId] = vector
+        if (baseMetadataId !== geneMetadataId) {
+          this.controller.loadedMetadataVectors[baseMetadataId] = vector
+        }
         
         // Initialize slider data immediately (needed for count updates)
         if (this.controller.initializeInlineRangeSlider) {
           this.controller.initializeInlineRangeSlider(geneMetadataId, expressionValues)
+          if (baseMetadataId !== geneMetadataId && this.controller.inlineRangeSliderData) {
+            this.controller.inlineRangeSliderData[baseMetadataId] = this.controller.inlineRangeSliderData[geneMetadataId]
+          }
         }
+
+        console.log('GeneManager: stored expression vector', { geneId, baseMetadataId, layerMetadataId: geneMetadataId, values: expressionValues.length })
       }
       
       // Store in IndexedDB for persistence
       if (this.controller && this.controller.memoryManager) {
-        this.controller.memoryManager.storeGeneExpressionInIndexedDB(geneId, {
+        this.controller.memoryManager.storeGeneExpressionInIndexedDB(geneMetadataId, geneId, {
           values: expressionValues,
           stats: stats,
           geneIndex: data.gene_index,
           stableId: data.stable_id,
-          symbol: gene.symbol
+          symbol: gene.symbol,
+          annotId: this.currentMatrixAnnotId,
+          metadataId: geneMetadataId,
+          baseMetadataId: baseMetadataId
         }).catch(error => {
           console.warn('Failed to store gene expression in IndexedDB:', error)
         })
@@ -1549,6 +1868,16 @@ export class GeneManager {
       // Update status icon to in-memory
       if (this.controller && this.controller.uiManager) {
         this.controller.uiManager.updateGeneStatusIcon(geneId, 'in-memory')
+        // Update gene card DOM metadata identifiers to reflect new annot_id
+        const geneContainer = document.querySelector(`[data-gene-item="${gene.stableId}"]`)
+        if (geneContainer) {
+          geneContainer.querySelectorAll('[data-metadata-id]').forEach(el => {
+            el.dataset.metadataId = baseMetadataId
+          })
+          geneContainer.querySelectorAll('[data-range-slider-metadata-id-value]').forEach(el => {
+            el.dataset.rangeSliderMetadataIdValue = geneMetadataId
+          })
+        }
       } else if (statusIcon) {
         statusIcon.style.display = 'none'
       }
@@ -1632,7 +1961,7 @@ export class GeneManager {
           this.initializeGeneRangeSlider(geneId)
           // Also trigger a redraw of the density plot after a short delay to ensure canvas is visible
           setTimeout(() => {
-            const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="gene_${geneId}"]`)
+            const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${this.getGeneMetadataId(geneId, this.currentMatrixAnnotId)}"]`)
             if (rangeSliderElement) {
               const controller = this.controller?.application?.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
               if (controller && controller.drawDensityPlot) {
@@ -1727,7 +2056,7 @@ export class GeneManager {
     })
     
     const values = expressionData.values
-    const geneMetadataId = `gene_${geneIdStr}`
+    const geneMetadataId = this.getGeneMetadataId(geneIdStr, this.currentMatrixAnnotId)
     
     console.log(`🧬 [GENE INIT] Gene metadata ID: ${geneMetadataId}`)
     

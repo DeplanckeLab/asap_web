@@ -649,31 +649,45 @@ export class MemoryManager {
   }
 
   // Store gene expression data in IndexedDB
-  async storeGeneExpressionInIndexedDB(geneId, expressionData) {
+  async storeGeneExpressionInIndexedDB(metadataKey, geneId, expressionData) {
     if (!this.controller.db) return false
     
     try {
       const transaction = this.controller.db.transaction(['geneExpression'], 'readwrite')
       const objectStore = transaction.objectStore('geneExpression')
-      
-      // Store expression values as JSON (they're already numbers, not binary)
-      const dataToStore = {
-        id: `gene_${geneId}`,
+      const baseKey = `gene_${geneId}`
+      const primaryKey = metadataKey && metadataKey.length > 0 ? metadataKey : baseKey
+      const loomFile = this.controller.currentLoomFile || this.controller.getCurrentLoomFileForRequest?.() || 'parsing/output.loom'
+      const timestamp = Date.now()
+      const annotId = expressionData.annotId ?? null
+      const metadataId = primaryKey
+      const baseMetadataId = baseKey
+      const template = {
         geneId: geneId,
         symbol: expressionData.symbol || '',
         values: expressionData.values,
         stats: expressionData.stats || {},
         geneIndex: expressionData.geneIndex,
         stableId: expressionData.stableId,
-        loomFile: this.controller.currentLoomFile || this.controller.getCurrentLoomFileForRequest?.() || 'parsing/output.loom',
-        timestamp: Date.now()
+        loomFile,
+        annotId,
+        metadataId,
+        baseMetadataId,
+        timestamp
       }
-      
-      objectStore.put(dataToStore)
-      
+      const entries = [{ id: primaryKey, ...template }]
+      if (primaryKey !== baseKey) {
+        entries.push({ id: baseKey, ...template })
+      }
+      entries.forEach(entry => objectStore.put(entry))
       return new Promise((resolve, reject) => {
         transaction.oncomplete = () => {
-          console.log(`💾 Stored gene expression ${geneId} in IndexedDB (${expressionData.values?.length || 0} values)`)
+          console.log('💾 Stored gene expression in IndexedDB', {
+            geneId,
+            keys: entries.map(e => e.id),
+            values: expressionData.values?.length || 0,
+            annotId
+          })
           resolve(true)
         }
         transaction.onerror = () => {
@@ -688,86 +702,100 @@ export class MemoryManager {
   }
 
   // Load gene expression data from IndexedDB
-  async loadGeneExpressionFromIndexedDB(geneId) {
+  async loadGeneExpressionFromIndexedDB(geneId, options = {}) {
     if (!this.controller.db) {
       console.log(`💾 IndexedDB not available for gene expression ${geneId}`)
       return null
     }
     
-    try {
-      const transaction = this.controller.db.transaction(['geneExpression'], 'readonly')
-      const objectStore = transaction.objectStore('geneExpression')
-      const request = objectStore.get(`gene_${geneId}`)
-      
-      return new Promise((resolve, reject) => {
+    const keys = []
+    if (options.metadataKey) keys.push(options.metadataKey)
+    if (options.baseKey && !keys.includes(options.baseKey)) keys.push(options.baseKey)
+    const legacyKey = `gene_${geneId}`
+    if (!keys.includes(legacyKey)) keys.push(legacyKey)
+    
+    const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
+    const expectedAnnotId = options.expectedAnnotId ?? null
+    
+    for (const key of keys) {
+      const record = await this._getGeneExpressionRecord(key)
+      if (!record) {
+        continue
+      }
+
+      const storedLoom = record.loomFile || 'parsing/output.loom'
+      const annotId = record.annotId ?? null
+      if (storedLoom !== currentLoom) {
+        console.log('💾 ⚠️ Loom mismatch, skipping cached expression', { geneId, key, storedLoom, currentLoom })
+        continue
+      }
+      if (expectedAnnotId !== null && annotId !== expectedAnnotId) {
+        console.log('💾 ⚠️ Annot mismatch, skipping cached expression', { geneId, key, annotId, expectedAnnotId })
+        continue
+      }
+      console.log('💾 ✅ Loaded gene expression from IndexedDB', {
+        geneId,
+        key,
+        values: record.values?.length || 0,
+        annotId
+      })
+
+      return {
+        values: record.values,
+        stats: record.stats || {},
+        geneIndex: record.geneIndex,
+        stableId: record.stableId,
+        symbol: record.symbol,
+        annotId: annotId,
+        metadataId: record.metadataId || key
+      }
+    }
+
+    console.log(`💾 Gene expression ${geneId} not found in IndexedDB for keys:`, keys)
+    return null
+  }
+
+  async _getGeneExpressionRecord(key) {
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.controller.db.transaction(['geneExpression'], 'readonly')
+        const objectStore = transaction.objectStore('geneExpression')
+        const request = objectStore.get(key)
+
         request.onsuccess = () => {
-          if (request.result) {
-            const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
-            const storedLoom = request.result.loomFile || 'parsing/output.loom'
-            
-            console.log(`💾 IndexedDB lookup for gene expression ${geneId}:`, {
-              found: true,
-              storedLoomFile: storedLoom,
-              currentLoomFile: currentLoom,
-              match: storedLoom === currentLoom
-            })
-            
-            if (storedLoom === currentLoom) {
-              console.log(`💾 ✅ Loaded gene expression ${geneId} from IndexedDB (disk storage)`)
-              resolve({
-                values: request.result.values,
-                stats: request.result.stats || {},
-                geneIndex: request.result.geneIndex,
-                stableId: request.result.stableId,
-                symbol: request.result.symbol
-              })
-            } else {
-              console.log(`💾 ⚠️ Loom file mismatch, ignoring cached gene expression for ${geneId}`)
-              resolve(null)
-            }
-          } else {
-            console.log(`💾 Gene expression ${geneId} not found in IndexedDB`)
-            resolve(null)
-          }
+          resolve(request.result || null)
         }
         request.onerror = () => {
-          console.error(`💾 Failed to load gene expression ${geneId} from IndexedDB:`, request.error)
           resolve(null)
         }
-      })
-    } catch (error) {
-      console.error('💾 Error loading gene expression from IndexedDB:', error)
-      return null
-    }
+      } catch (error) {
+        console.error('💾 Error accessing IndexedDB record:', error)
+        resolve(null)
+      }
+    })
   }
 
   // Check if gene expression data is in IndexedDB
-  async checkGeneExpressionInDatabase(geneId) {
+  async checkGeneExpressionInDatabase(geneId, options = {}) {
     if (!this.controller.db) return false
-    
-    try {
-      const transaction = this.controller.db.transaction(['geneExpression'], 'readonly')
-      const objectStore = transaction.objectStore('geneExpression')
-      const request = objectStore.get(`gene_${geneId}`)
-      
-      return new Promise((resolve) => {
-        request.onsuccess = () => {
-          if (request.result) {
-            const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
-            const storedLoom = request.result.loomFile || 'parsing/output.loom'
-            resolve(storedLoom === currentLoom)
-          } else {
-            resolve(false)
-          }
-        }
-        request.onerror = () => {
-          resolve(false)
-        }
-      })
-    } catch (error) {
-      console.error('💾 Error checking gene expression in database:', error)
-      return false
+    const keys = []
+    if (options.metadataKey) keys.push(options.metadataKey)
+    if (options.baseKey && !keys.includes(options.baseKey)) keys.push(options.baseKey)
+    const legacyKey = `gene_${geneId}`
+    if (!keys.includes(legacyKey)) keys.push(legacyKey)
+    const expectedAnnotId = options.expectedAnnotId ?? null
+
+    for (const key of keys) {
+      const record = await this._getGeneExpressionRecord(key)
+      if (!record) continue
+      const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
+      const storedLoom = record.loomFile || 'parsing/output.loom'
+      const annotId = record.annotId ?? null
+      if (storedLoom === currentLoom && (expectedAnnotId === null || annotId === expectedAnnotId)) {
+        return true
+      }
     }
+    return false
   }
 }
 

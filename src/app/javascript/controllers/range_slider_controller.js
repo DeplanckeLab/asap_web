@@ -33,6 +33,7 @@ export default class extends Controller {
     this.lastPlotUpdate = 0
     this.plotUpdateThrottle = 16 // ~60fps (16ms)
     this.dragUpdateScheduled = false
+    this.pendingDensityPlotTimeout = null
     
     // Color range adaptation button state
     this.adaptColorRangeEnabled = false
@@ -91,6 +92,10 @@ export default class extends Controller {
   disconnect() {
     // Clean up event listeners
     this.stopDrag()
+    if (this.pendingDensityPlotTimeout) {
+      clearTimeout(this.pendingDensityPlotTimeout)
+      this.pendingDensityPlotTimeout = null
+    }
   }
 
   // Helper methods for safely calculating min/max on large arrays
@@ -212,6 +217,8 @@ export default class extends Controller {
     this.updateSliderUI()
     this.updateSelectedCellsCount()
     this.drawDensityPlot()
+    // Update checkbox color and filter state icon to restore state after DOM recreation
+    this.updateCheckboxColor()
     
     // Update button appearance to show/hide based on coloring state
     this.updateButtonAppearance()
@@ -727,44 +734,47 @@ export default class extends Controller {
     console.log(`🚀 [PERF] performPlotUpdate completed in ${totalTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
 
+  isPlotVisible() {
+    if (!this.element) return false
+    if (this.element.offsetParent === null) return false
+    const rects = this.element.getClientRects()
+    return rects.length > 0
+  }
+
+  scheduleDensityPlotRender(delay = 120) {
+    if (this.pendingDensityPlotTimeout) return
+    this.pendingDensityPlotTimeout = setTimeout(() => {
+      this.pendingDensityPlotTimeout = null
+      this.drawDensityPlot()
+    }, delay)
+  }
+
   // Draw the density plot
   drawDensityPlot() {
-    console.log('🎨 drawDensityPlot called for metadata:', this.metadataIdValue)
-    console.log('🎨 hasCanvasTarget:', this.hasCanvasTarget)
-    
     if (!this.hasCanvasTarget) {
-      console.log('🎨 No canvas target, returning')
       return
     }
-    
+    if (!this.isPlotVisible()) {
+      this.scheduleDensityPlotRender()
+      return
+    }
+
     const sliderData = this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]
-    console.log('🎨 Slider data available:', !!sliderData)
-    console.log('🎨 Values available:', !!sliderData?.values)
-    console.log('🎨 inlineRangeSliderData keys:', Object.keys(this.visualizationController?.inlineRangeSliderData || {}))
-    
-    if (!sliderData || !sliderData.values) {
-      console.log('🎨 No slider data or values, returning')
+    if (!sliderData || !sliderData.values || sliderData.values.length === 0) {
       return
     }
-    
-    console.log('🎨 Drawing density plot with', sliderData.values.length, 'values')
-    
+
     const canvas = this.canvasTarget
     if (!canvas) {
-      console.log('🎨 Canvas target not found, returning')
       return
     }
-    
+
     const ctx = canvas.getContext('2d')
     const rect = canvas.getBoundingClientRect()
-    
-    // Check if canvas is visible (has non-zero dimensions)
+
+    // Check if canvas currently has non-zero dimensions
     if (rect.width === 0 || rect.height === 0) {
-      console.log('🎨 Canvas has zero dimensions, retrying after a short delay')
-      // Retry after a short delay in case the element is becoming visible
-      setTimeout(() => {
-        this.drawDensityPlot()
-      }, 100)
+      this.scheduleDensityPlotRender()
       return
     }
     
@@ -773,7 +783,8 @@ export default class extends Controller {
     // Calculate required height based on content
     // We need space for: top margin + plot area + bottom margin (with axis labels)
     // First, estimate text width for min/max values to calculate margins
-    const tempCtx = document.createElement('canvas').getContext('2d')
+    const tempCanvas = document.createElement('canvas')
+    const tempCtx = tempCanvas.getContext('2d')
     tempCtx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     const minValueText = this.minValue.toFixed(3)
     const maxValueText = this.maxValue.toFixed(3)

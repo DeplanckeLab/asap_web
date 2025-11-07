@@ -1,5 +1,6 @@
 require 'open3'
 require 'json'
+require 'shellwords'
 
 class H5DataService
   # 1. Gene expression data
@@ -27,11 +28,12 @@ class H5DataService
   end
 
   # 1b. Pathway expression data (same as genes but from pathway-specific loom file)
-  def self.get_pathway_data(pathway_ids, h5_path)
+  def self.get_pathway_data(pathway_ids, h5_path, annot_name = '/matrix')
     # Use indexes (IDs) instead of names to avoid comma-separation issues
     # Convert pathway IDs to 0-based indexes (assuming IDs start from 1)
     indexes = pathway_ids.map { |id| (id.to_i - 1).to_s }
-    cmd = "java -jar lib/ASAP.jar -T ExtractRow -loom #{h5_path} -iAnnot /matrix -indexes #{indexes.join(',')}"
+    annot_flag = Shellwords.escape(annot_name)
+    cmd = "java -jar lib/ASAP.jar -T ExtractRow -loom #{h5_path} -iAnnot #{annot_flag} -indexes #{indexes.join(',')}"
 
     stdout, stderr, status = Open3.capture3(cmd)
 

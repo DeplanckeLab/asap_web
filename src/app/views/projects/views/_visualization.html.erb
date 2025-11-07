@@ -675,6 +675,34 @@
         <div id="gene-input-status" style="display: none; margin-top: 8px; padding: 8px 12px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px;">
           <div id="gene-input-status-text" style="color: #0369a1;"></div>
         </div>
+        <!-- Matrix/Layer Selection Dropdown -->
+        <% matrices = (@expression_matrices_by_loom[@default_loom_file] || []).sort_by(&:name) %>
+        <% base_matrix = matrices.find { |annot| annot.name == '/matrix' } %>
+        <div style="margin-top: 12px;">
+          <label for="gene-expression-matrix-select" style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px;">Expression Matrix/Layer</label>
+          <select id="gene-expression-matrix-select" 
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background-color: white; color: #374151; cursor: pointer; transition: border-color 0.2s;"
+                  onfocus="this.style.borderColor='#3b82f6'"
+                  onblur="this.style.borderColor='#d1d5db'"
+                  onchange="(function(select){
+                    const option = select.options[select.selectedIndex]
+                    const annotId = option.dataset.annotId || null
+                    const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager
+                    if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
+                      console.log('[UI] Matrix dropdown change detected:', select.value, 'annot_id:', annotId)
+                      geneMgr.onMatrixLayerChange(select.value, annotId)
+                    } else {
+                      console.warn('[UI] Gene manager not available when matrix dropdown changed')
+                    }
+                  })(this)">
+            <option value="/matrix" data-annot-id="<%= base_matrix&.id %>">/matrix</option>
+            <% matrices.each do |matrix| %>
+              <% next if matrix.name == '/matrix' %>
+              <% label = matrix.label.presence || matrix.display_name || matrix.name %>
+              <option value="<%= matrix.name %>" data-annot-id="<%= matrix.id %>"><%= label %> (<%= matrix.name %>)</option>
+            <% end %>
+          </select>
+        </div>
       </div>
       <div style="flex: 1; padding: 20px; padding-top: 0; overflow-y: auto; min-height: 0;">
 

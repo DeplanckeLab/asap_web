@@ -304,22 +304,22 @@ export class CustomPlotManager {
       if (this.controller.selectedXButton.isGene) {
         // Load gene expression data
         const geneId = this.controller.selectedXButton.metadataId
+        const geneIdStr = String(geneId)
+        const geneIdNum = Number(geneId)
         const geneMetadataId = `gene_${geneId}`
+        
+        // First check loadedMetadataVectors
         if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
           xVector = this.controller.loadedMetadataVectors[geneMetadataId]
+          console.log(`📊 X-axis: Found gene ${geneId} in loadedMetadataVectors`)
         } else {
-          // Load gene data - find the gene and load its expression
-          const gene = this.controller.geneManager.geneTags?.find(g => g.stableId === geneId || String(g.stableId) === String(geneId))
-          if (gene) {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-          }
-          // GeneManager stores data in loadedMetadataVectors when gene is loaded
-          // Also check geneExpressionData as fallback
-          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
-            xVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          } else if (this.controller.geneManager.geneExpressionData[geneId]) {
-            // Create vector from gene expression data
-            const geneData = this.controller.geneManager.geneExpressionData[geneId]
+          // Try to find in geneExpressionData with all key formats
+          let geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+          
+          if (geneData && geneData.values && geneData.values.length > 0) {
+            console.log(`📊 X-axis: Found gene ${geneId} in geneExpressionData, creating vector`)
             const minVal = this.controller.dataManager.safeMin(geneData.values)
             const maxVal = this.controller.dataManager.safeMax(geneData.values)
             xVector = {
@@ -335,6 +335,137 @@ export class CustomPlotManager {
               }
             }
             this.controller.loadedMetadataVectors[geneMetadataId] = xVector
+          } else {
+            // Try to find gene in geneTags
+            let gene = this.controller.geneManager?.geneTags?.find(g => 
+              g.stableId === geneId || 
+              String(g.stableId) === geneIdStr || 
+              g.stableId === geneIdNum ||
+              String(g.stableId) === String(geneId)
+            )
+            
+            // If not in geneTags, try to get gene info from the button element
+            if (!gene && this.controller.selectedXButton.button) {
+              const button = this.controller.selectedXButton.button
+              const buttonGeneId = button.dataset.geneId
+              if (buttonGeneId) {
+                // Try to find gene with the button's geneId
+                gene = this.controller.geneManager?.geneTags?.find(g => 
+                  String(g.stableId) === String(buttonGeneId) || 
+                  g.stableId === Number(buttonGeneId)
+                )
+              }
+            }
+            
+            // If still no gene, try to construct one from available info
+            if (!gene) {
+              console.warn(`📊 X-axis: Gene ${geneId} not in geneTags, attempting to load directly`)
+              // Try to load using the geneId directly - GeneManager might handle it
+              if (this.controller.geneManager) {
+                try {
+                  // Ensure geneExpressionData exists
+                  if (!this.controller.geneManager.geneExpressionData) {
+                    this.controller.geneManager.geneExpressionData = {}
+                    console.warn(`📊 X-axis: geneExpressionData was undefined, initialized as empty object`)
+                  }
+                  
+                  // Check if we can find the gene data by searching all geneExpressionData keys
+                  const allGeneKeys = Object.keys(this.controller.geneManager.geneExpressionData)
+                  console.log(`📊 X-axis: Searching ${allGeneKeys.length} keys in geneExpressionData for gene ${geneId}`)
+                  
+                  const matchingKey = allGeneKeys.find(k => {
+                    const kStr = String(k)
+                    const kNum = Number(k)
+                    return kStr === geneIdStr || 
+                           k === geneIdStr ||
+                           kNum === geneIdNum ||
+                           String(kNum) === geneIdStr ||
+                           k === geneId ||
+                           k === geneIdNum
+                  })
+                  
+                  if (matchingKey) {
+                    geneData = this.controller.geneManager.geneExpressionData[matchingKey]
+                    console.log(`📊 X-axis: Found gene data under key "${matchingKey}" (original search: ${geneId})`)
+                  } else {
+                    console.log(`📊 X-axis: Gene ${geneId} not found in existing keys, attempting to load from server`)
+                    // Try to load from server using the geneId
+                    const geneObj = {
+                      stableId: geneIdNum || parseInt(geneId),
+                      symbol: this.controller.selectedXButton.metadataName || `Gene ${geneId}`,
+                      ensemblId: '',
+                      query: this.controller.selectedXButton.metadataName || `Gene ${geneId}`
+                    }
+                    await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
+                    // Check again after loading - try all key formats
+                    geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                              this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                              this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+                    
+                    if (!geneData) {
+                      // Search all keys again after loading
+                      const allKeysAfterLoad = Object.keys(this.controller.geneManager.geneExpressionData || {})
+                      const matchingKeyAfterLoad = allKeysAfterLoad.find(k => {
+                        const kStr = String(k)
+                        const kNum = Number(k)
+                        return kStr === geneIdStr || 
+                               k === geneIdStr ||
+                               kNum === geneIdNum ||
+                               String(kNum) === geneIdStr ||
+                               k === geneId ||
+                               k === geneIdNum
+                      })
+                      if (matchingKeyAfterLoad) {
+                        geneData = this.controller.geneManager.geneExpressionData[matchingKeyAfterLoad]
+                        console.log(`📊 X-axis: Found gene data after loading under key "${matchingKeyAfterLoad}"`)
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Failed to load gene expression data for X-axis gene ${geneId}:`, error)
+                }
+              } else {
+                console.error(`📊 X-axis: geneManager is not available`)
+              }
+            } else {
+              // Gene found in geneTags, load it
+              try {
+            await this.controller.geneManager.loadGeneExpressionData(gene, null)
+              } catch (error) {
+                console.error(`Failed to load gene expression data for X-axis gene ${geneId}:`, error)
+          }
+            }
+            
+            // Check again after loading attempt
+          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
+            xVector = this.controller.loadedMetadataVectors[geneMetadataId]
+              console.log(`📊 X-axis: Gene ${geneId} loaded into loadedMetadataVectors`)
+            } else {
+              // Check geneExpressionData again with all formats
+              geneData = geneData || 
+                        this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+              
+              if (geneData && geneData.values && geneData.values.length > 0) {
+                console.log(`📊 X-axis: Creating vector from geneExpressionData after loading`)
+            const minVal = this.controller.dataManager.safeMin(geneData.values)
+            const maxVal = this.controller.dataManager.safeMax(geneData.values)
+            xVector = {
+              id: geneMetadataId,
+              name: geneData.symbol || `Gene ${geneId}`,
+              display_name: geneData.symbol || `Gene ${geneId}`,
+              data_type: 'NUMERIC',
+              values: geneData.values,
+              compression_info: {
+                min_val: minVal,
+                max_val: maxVal,
+                data_type: 'NUMERIC'
+              }
+            }
+            this.controller.loadedMetadataVectors[geneMetadataId] = xVector
+              }
+            }
           }
         }
       } else {
@@ -359,22 +490,22 @@ export class CustomPlotManager {
       if (this.controller.selectedYButton.isGene) {
         // Load gene expression data
         const geneId = this.controller.selectedYButton.metadataId
+        const geneIdStr = String(geneId)
+        const geneIdNum = Number(geneId)
         const geneMetadataId = `gene_${geneId}`
+        
+        // First check loadedMetadataVectors
         if (this.controller.loadedMetadataVectors[geneMetadataId] && this.controller.loadedMetadataVectors[geneMetadataId].values) {
           yVector = this.controller.loadedMetadataVectors[geneMetadataId]
+          console.log(`📊 Y-axis: Found gene ${geneId} in loadedMetadataVectors`)
         } else {
-          // Load gene data - find the gene and load its expression
-          const gene = this.controller.geneManager.geneTags?.find(g => g.stableId === geneId || String(g.stableId) === String(geneId))
-          if (gene) {
-            await this.controller.geneManager.loadGeneExpressionData(gene, null)
-          }
-          // GeneManager stores data in loadedMetadataVectors when gene is loaded
-          // Also check geneExpressionData as fallback
-          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
-            yVector = this.controller.loadedMetadataVectors[geneMetadataId]
-          } else if (this.controller.geneManager.geneExpressionData[geneId]) {
-            // Create vector from gene expression data
-            const geneData = this.controller.geneManager.geneExpressionData[geneId]
+          // Try to find in geneExpressionData with all key formats
+          let geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+          
+          if (geneData && geneData.values && geneData.values.length > 0) {
+            console.log(`📊 Y-axis: Found gene ${geneId} in geneExpressionData, creating vector`)
             const minVal = this.controller.dataManager.safeMin(geneData.values)
             const maxVal = this.controller.dataManager.safeMax(geneData.values)
             yVector = {
@@ -390,6 +521,137 @@ export class CustomPlotManager {
               }
             }
             this.controller.loadedMetadataVectors[geneMetadataId] = yVector
+          } else {
+            // Try to find gene in geneTags
+            let gene = this.controller.geneManager?.geneTags?.find(g => 
+              g.stableId === geneId || 
+              String(g.stableId) === geneIdStr || 
+              g.stableId === geneIdNum ||
+              String(g.stableId) === String(geneId)
+            )
+            
+            // If not in geneTags, try to get gene info from the button element
+            if (!gene && this.controller.selectedYButton.button) {
+              const button = this.controller.selectedYButton.button
+              const buttonGeneId = button.dataset.geneId
+              if (buttonGeneId) {
+                // Try to find gene with the button's geneId
+                gene = this.controller.geneManager?.geneTags?.find(g => 
+                  String(g.stableId) === String(buttonGeneId) || 
+                  g.stableId === Number(buttonGeneId)
+                )
+              }
+            }
+            
+            // If still no gene, try to construct one from available info
+            if (!gene) {
+              console.warn(`📊 Y-axis: Gene ${geneId} not in geneTags, attempting to load directly`)
+              // Try to load using the geneId directly - GeneManager might handle it
+              if (this.controller.geneManager) {
+                try {
+                  // Ensure geneExpressionData exists
+                  if (!this.controller.geneManager.geneExpressionData) {
+                    this.controller.geneManager.geneExpressionData = {}
+                    console.warn(`📊 Y-axis: geneExpressionData was undefined, initialized as empty object`)
+                  }
+                  
+                  // Check if we can find the gene data by searching all geneExpressionData keys
+                  const allGeneKeys = Object.keys(this.controller.geneManager.geneExpressionData)
+                  console.log(`📊 Y-axis: Searching ${allGeneKeys.length} keys in geneExpressionData for gene ${geneId}`)
+                  
+                  const matchingKey = allGeneKeys.find(k => {
+                    const kStr = String(k)
+                    const kNum = Number(k)
+                    return kStr === geneIdStr || 
+                           k === geneIdStr ||
+                           kNum === geneIdNum ||
+                           String(kNum) === geneIdStr ||
+                           k === geneId ||
+                           k === geneIdNum
+                  })
+                  
+                  if (matchingKey) {
+                    geneData = this.controller.geneManager.geneExpressionData[matchingKey]
+                    console.log(`📊 Y-axis: Found gene data under key "${matchingKey}" (original search: ${geneId})`)
+                  } else {
+                    console.log(`📊 Y-axis: Gene ${geneId} not found in existing keys, attempting to load from server`)
+                    // Try to load from server using the geneId
+                    const geneObj = {
+                      stableId: geneIdNum || parseInt(geneId),
+                      symbol: this.controller.selectedYButton.metadataName || `Gene ${geneId}`,
+                      ensemblId: '',
+                      query: this.controller.selectedYButton.metadataName || `Gene ${geneId}`
+                    }
+                    await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
+                    // Check again after loading - try all key formats
+                    geneData = this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                              this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                              this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+                    
+                    if (!geneData) {
+                      // Search all keys again after loading
+                      const allKeysAfterLoad = Object.keys(this.controller.geneManager.geneExpressionData || {})
+                      const matchingKeyAfterLoad = allKeysAfterLoad.find(k => {
+                        const kStr = String(k)
+                        const kNum = Number(k)
+                        return kStr === geneIdStr || 
+                               k === geneIdStr ||
+                               kNum === geneIdNum ||
+                               String(kNum) === geneIdStr ||
+                               k === geneId ||
+                               k === geneIdNum
+                      })
+                      if (matchingKeyAfterLoad) {
+                        geneData = this.controller.geneManager.geneExpressionData[matchingKeyAfterLoad]
+                        console.log(`📊 Y-axis: Found gene data after loading under key "${matchingKeyAfterLoad}"`)
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Failed to load gene expression data for Y-axis gene ${geneId}:`, error)
+                }
+              } else {
+                console.error(`📊 Y-axis: geneManager is not available`)
+              }
+            } else {
+              // Gene found in geneTags, load it
+              try {
+            await this.controller.geneManager.loadGeneExpressionData(gene, null)
+              } catch (error) {
+                console.error(`Failed to load gene expression data for Y-axis gene ${geneId}:`, error)
+          }
+            }
+            
+            // Check again after loading attempt
+          if (this.controller.loadedMetadataVectors[geneMetadataId]) {
+            yVector = this.controller.loadedMetadataVectors[geneMetadataId]
+              console.log(`📊 Y-axis: Gene ${geneId} loaded into loadedMetadataVectors`)
+            } else {
+              // Check geneExpressionData again with all formats
+              geneData = geneData || 
+                        this.controller.geneManager?.geneExpressionData?.[geneId] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdStr] ||
+                        this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+              
+              if (geneData && geneData.values && geneData.values.length > 0) {
+                console.log(`📊 Y-axis: Creating vector from geneExpressionData after loading`)
+            const minVal = this.controller.dataManager.safeMin(geneData.values)
+            const maxVal = this.controller.dataManager.safeMax(geneData.values)
+            yVector = {
+              id: geneMetadataId,
+              name: geneData.symbol || `Gene ${geneId}`,
+              display_name: geneData.symbol || `Gene ${geneId}`,
+              data_type: 'NUMERIC',
+              values: geneData.values,
+              compression_info: {
+                min_val: minVal,
+                max_val: maxVal,
+                data_type: 'NUMERIC'
+              }
+            }
+            this.controller.loadedMetadataVectors[geneMetadataId] = yVector
+              }
+            }
           }
         }
       } else {
@@ -410,9 +672,143 @@ export class CustomPlotManager {
       }
       
       if (!xVector || !yVector) {
-        console.error('Failed to load data vectors for 2D plot', { xVector: !!xVector, yVector: !!yVector })
+        const xIsGene = this.controller.selectedXButton.isGene
+        const yIsGene = this.controller.selectedYButton.isGene
+        const xId = this.controller.selectedXButton.metadataId
+        const yId = this.controller.selectedYButton.metadataId
+        const xName = this.controller.selectedXButton.metadataName
+        const yName = this.controller.selectedYButton.metadataName
+        
+        // Build detailed diagnostic information
+        let errorDetails = []
+        let consoleDetails = {
+          xVector: !!xVector,
+          yVector: !!yVector,
+          xIsGene,
+          yIsGene,
+          xId,
+          yId,
+          xName,
+          yName
+        }
+        
+        if (!xVector) {
+          if (xIsGene) {
+            const xIdStr = String(xId)
+            const xIdNum = Number(xId)
+            const xMetadataId = `gene_${xId}`
+            
+            // Check all possible locations
+            const xInGeneTags = !!this.controller.geneManager?.geneTags?.find(g => 
+              String(g.stableId) === xIdStr || g.stableId === xIdNum || String(g.stableId) === String(xId)
+            )
+            const xInExpressionData = !!(this.controller.geneManager?.geneExpressionData?.[xId] ||
+                                        this.controller.geneManager?.geneExpressionData?.[xIdStr] ||
+                                        this.controller.geneManager?.geneExpressionData?.[xIdNum])
+            const xInLoadedVectors = !!this.controller.loadedMetadataVectors?.[xMetadataId]
+            const xExpressionDataKeys = Object.keys(this.controller.geneManager?.geneExpressionData || {})
+            const xLoadedVectorsKeys = Object.keys(this.controller.loadedMetadataVectors || {}).filter(k => k.startsWith('gene_'))
+            
+            errorDetails.push(`X-axis gene "${xName}" (ID: ${xId}) could not be loaded.`)
+            errorDetails.push(`  - In geneTags: ${xInGeneTags}`)
+            errorDetails.push(`  - In geneExpressionData: ${xInExpressionData} (checked keys: ${xId}, "${xIdStr}", ${xIdNum})`)
+            errorDetails.push(`  - In loadedMetadataVectors: ${xInLoadedVectors} (key: "${xMetadataId}")`)
+            
+            if (xExpressionDataKeys.length > 0) {
+              const matchingKeys = xExpressionDataKeys.filter(k => 
+                k === String(xId) || k === String(xIdNum) || Number(k) === xIdNum
+              )
+              errorDetails.push(`  - Matching geneExpressionData keys: ${matchingKeys.length > 0 ? matchingKeys.join(', ') : 'none'}`)
+              errorDetails.push(`  - First 10 geneExpressionData keys: ${xExpressionDataKeys.slice(0, 10).join(', ')}`)
+            } else {
+              errorDetails.push(`  - geneExpressionData is empty or undefined`)
+            }
+            
+            if (xLoadedVectorsKeys.length > 0) {
+              errorDetails.push(`  - First 10 loadedMetadataVectors gene keys: ${xLoadedVectorsKeys.slice(0, 10).join(', ')}`)
+            } else {
+              errorDetails.push(`  - No gene keys found in loadedMetadataVectors`)
+            }
+            
+            consoleDetails.xInGeneTags = xInGeneTags
+            consoleDetails.xInExpressionData = xInExpressionData
+            consoleDetails.xInLoadedVectors = xInLoadedVectors
+            consoleDetails.xExpressionDataKeys = xExpressionDataKeys.slice(0, 20)
+            consoleDetails.xLoadedVectorsKeys = xLoadedVectorsKeys.slice(0, 20)
+            consoleDetails.xCheckedKeys = [xId, xIdStr, xIdNum]
+            consoleDetails.xMetadataId = xMetadataId
+          } else {
+            errorDetails.push(`X-axis metadata "${xName}" (ID: ${xMetadataId}) could not be loaded.`)
+            errorDetails.push(`  - The metadata may not exist in the dataset.`)
+          }
+        }
+        
+        if (!yVector) {
+          if (yIsGene) {
+            const yIdStr = String(yId)
+            const yIdNum = Number(yId)
+            const yMetadataId = `gene_${yId}`
+            
+            // Check all possible locations
+            const yInGeneTags = !!this.controller.geneManager?.geneTags?.find(g => 
+              String(g.stableId) === yIdStr || g.stableId === yIdNum || String(g.stableId) === String(yId)
+            )
+            const yInExpressionData = !!(this.controller.geneManager?.geneExpressionData?.[yId] ||
+                                        this.controller.geneManager?.geneExpressionData?.[yIdStr] ||
+                                        this.controller.geneManager?.geneExpressionData?.[yIdNum])
+            const yInLoadedVectors = !!this.controller.loadedMetadataVectors?.[yMetadataId]
+            const yExpressionDataKeys = Object.keys(this.controller.geneManager?.geneExpressionData || {})
+            const yLoadedVectorsKeys = Object.keys(this.controller.loadedMetadataVectors || {}).filter(k => k.startsWith('gene_'))
+            
+            errorDetails.push(`Y-axis gene "${yName}" (ID: ${yId}) could not be loaded.`)
+            errorDetails.push(`  - In geneTags: ${yInGeneTags}`)
+            errorDetails.push(`  - In geneExpressionData: ${yInExpressionData} (checked keys: ${yId}, "${yIdStr}", ${yIdNum})`)
+            errorDetails.push(`  - In loadedMetadataVectors: ${yInLoadedVectors} (key: "${yMetadataId}")`)
+            
+            if (yExpressionDataKeys.length > 0) {
+              const matchingKeys = yExpressionDataKeys.filter(k => 
+                k === String(yId) || k === String(yIdNum) || Number(k) === yIdNum
+              )
+              errorDetails.push(`  - Matching geneExpressionData keys: ${matchingKeys.length > 0 ? matchingKeys.join(', ') : 'none'}`)
+              errorDetails.push(`  - First 10 geneExpressionData keys: ${yExpressionDataKeys.slice(0, 10).join(', ')}`)
+            } else {
+              errorDetails.push(`  - geneExpressionData is empty or undefined`)
+            }
+            
+            if (yLoadedVectorsKeys.length > 0) {
+              errorDetails.push(`  - First 10 loadedMetadataVectors gene keys: ${yLoadedVectorsKeys.slice(0, 10).join(', ')}`)
+            } else {
+              errorDetails.push(`  - No gene keys found in loadedMetadataVectors`)
+            }
+            
+            // If data exists but vector wasn't created, show why
+            if (yInExpressionData) {
+              const yGeneData = this.controller.geneManager.geneExpressionData[yId] ||
+                               this.controller.geneManager.geneExpressionData[yIdStr] ||
+                               this.controller.geneManager.geneExpressionData[yIdNum]
+              if (yGeneData) {
+                errorDetails.push(`  - geneExpressionData found but: hasValues=${!!yGeneData.values}, valuesLength=${yGeneData.values?.length || 0}`)
+              }
+            }
+            
+            consoleDetails.yInGeneTags = yInGeneTags
+            consoleDetails.yInExpressionData = yInExpressionData
+            consoleDetails.yInLoadedVectors = yInLoadedVectors
+            consoleDetails.yExpressionDataKeys = yExpressionDataKeys.slice(0, 20)
+            consoleDetails.yLoadedVectorsKeys = yLoadedVectorsKeys.slice(0, 20)
+            consoleDetails.yCheckedKeys = [yId, yIdStr, yIdNum]
+            consoleDetails.yMetadataId = yMetadataId
+          } else {
+            errorDetails.push(`Y-axis metadata "${yName}" (ID: ${yMetadataId}) could not be loaded.`)
+            errorDetails.push(`  - The metadata may not exist in the dataset.`)
+          }
+        }
+        
+        console.error('Failed to load data vectors for 2D plot - Detailed diagnostics:', consoleDetails)
+        console.error('Full error details:', errorDetails)
+        
         if (loadingDiv) loadingDiv.style.display = 'none'
-        alert('Failed to load data for 2D plot')
+        alert('Failed to load data for 2D plot\n\n' + errorDetails.join('\n') + '\n\nPlease check the browser console for more details.')
         return
       }
       
@@ -677,32 +1073,120 @@ export class CustomPlotManager {
     const xRange = xMax - xMin || 1
     const yRange = yMax - yMin || 1
     
-    // Padding for axes
-    const padding = 60
+    // Padding for axes (left, right, top, bottom)
+    const leftPadding = 70
+    const rightPadding = 20
+    const topPadding = 20
+    const bottomPadding = 70
     
     // Scale functions
-    const scaleX = (x) => padding + ((x - xMin) / xRange) * (width - 2 * padding)
-    const scaleY = (y) => height - padding - ((y - yMin) / yRange) * (height - 2 * padding)
+    const scaleX = (x) => leftPadding + ((x - xMin) / xRange) * (width - leftPadding - rightPadding)
+    const scaleY = (y) => height - bottomPadding - ((y - yMin) / yRange) * (height - topPadding - bottomPadding)
+    
+    // Calculate tick spacing
+    const xTickSpacing = this.calculateTickSpacing(xRange)
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    // Draw grid lines first (behind everything)
+    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([2, 2])
+    
+    // Vertical grid lines (aligned with X-axis ticks)
+    const xStart = Math.ceil(xMin / xTickSpacing) * xTickSpacing
+    const xEnd = Math.floor(xMax / xTickSpacing) * xTickSpacing
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const x = scaleX(value)
+      if (x >= leftPadding && x <= width - rightPadding) {
+        ctx.beginPath()
+        ctx.moveTo(x, topPadding)
+        ctx.lineTo(x, height - bottomPadding)
+        ctx.stroke()
+      }
+    }
+    
+    // Horizontal grid lines (aligned with Y-axis ticks)
+    const yStart = Math.ceil(yMin / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(yMax / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const y = scaleY(value)
+      if (y >= topPadding && y <= height - bottomPadding) {
+        ctx.beginPath()
+        ctx.moveTo(leftPadding, y)
+        ctx.lineTo(width - rightPadding, y)
+        ctx.stroke()
+      }
+    }
+    
+    ctx.setLineDash([])
     
     // Draw axes
     ctx.strokeStyle = '#d1d5db'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(padding, height - padding)
-    ctx.lineTo(width - padding, height - padding)
-    ctx.moveTo(padding, height - padding)
-    ctx.lineTo(padding, padding)
+    ctx.moveTo(leftPadding, height - bottomPadding)
+    ctx.lineTo(width - rightPadding, height - bottomPadding)
+    ctx.moveTo(leftPadding, height - bottomPadding)
+    ctx.lineTo(leftPadding, topPadding)
     ctx.stroke()
     
-    // Draw axis labels
+    // Draw tick marks and labels
     ctx.fillStyle = '#374151'
-    ctx.font = '12px sans-serif'
+    ctx.font = '11px sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText(this.controller.selectedXButton.metadataName, width / 2, height - 10)
+    ctx.textBaseline = 'top'
+    
+    // X-axis ticks and labels
+    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
+      const x = scaleX(value)
+      if (x >= leftPadding && x <= width - rightPadding) {
+        // Tick mark
+        ctx.beginPath()
+        ctx.moveTo(x, height - bottomPadding)
+        ctx.lineTo(x, height - bottomPadding + 5)
+        ctx.stroke()
+        
+        // Label
+        ctx.fillText(this.formatTickValue(value), x, height - bottomPadding + 8)
+      }
+    }
+    
+    // Y-axis ticks and labels
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const y = scaleY(value)
+      if (y >= topPadding && y <= height - bottomPadding) {
+        // Tick mark
+        ctx.beginPath()
+        ctx.moveTo(leftPadding, y)
+        ctx.lineTo(leftPadding - 5, y)
+        ctx.stroke()
+        
+        // Label
+        ctx.fillText(this.formatTickValue(value), leftPadding - 8, y)
+      }
+    }
+    
+    // Draw axis titles
+    ctx.fillStyle = '#374151'
+    ctx.font = '13px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const xLabel = this.getAxisLabel(this.controller.selectedXButton)
+    const xLines = xLabel.split('\n')
+    xLines.forEach((line, index) => {
+      ctx.fillText(line, width / 2, height - bottomPadding + 28 + index * 16)
+    })
+    const yLabel = this.getAxisLabel(this.controller.selectedYButton)
+    const yLines = yLabel.split('\n')
     ctx.save()
     ctx.translate(15, height / 2)
     ctx.rotate(-Math.PI / 2)
-    ctx.fillText(this.controller.selectedYButton.metadataName, 0, 0)
+    ctx.textAlign = 'center'
+    yLines.forEach((line, index) => {
+      ctx.fillText(line, 0, index * 16)
+    })
     ctx.restore()
     
     // Get coloring metadata vector for point colors
@@ -826,6 +1310,29 @@ export class CustomPlotManager {
     
     const scaleY = (y) => height - bottomPadding - ((y - yMin) / yRange) * plotHeight
     
+    // Calculate tick spacing for Y-axis
+    const yTickSpacing = this.calculateTickSpacing(yRange)
+    
+    // Draw grid lines first (behind everything)
+    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([2, 2])
+    
+    // Horizontal grid lines (aligned with Y-axis ticks)
+    const yStart = Math.ceil(yMin / yTickSpacing) * yTickSpacing
+    const yEnd = Math.floor(yMax / yTickSpacing) * yTickSpacing
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const y = scaleY(value)
+      if (y >= topPadding && y <= height - bottomPadding) {
+        ctx.beginPath()
+        ctx.moveTo(sidePadding, y)
+        ctx.lineTo(width - sidePadding, y)
+        ctx.stroke()
+      }
+    }
+    
+    ctx.setLineDash([])
+    
     // Draw axes
     ctx.strokeStyle = '#d1d5db'
     ctx.lineWidth = 1
@@ -836,17 +1343,44 @@ export class CustomPlotManager {
     ctx.lineTo(sidePadding, topPadding)
     ctx.stroke()
     
-    // Draw axis labels
+    // Draw Y-axis tick marks and labels
     ctx.fillStyle = '#374151'
-    ctx.font = '12px sans-serif'
+    ctx.font = '11px sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
+      const y = scaleY(value)
+      if (y >= topPadding && y <= height - bottomPadding) {
+        // Tick mark
+        ctx.beginPath()
+        ctx.moveTo(sidePadding, y)
+        ctx.lineTo(sidePadding - 5, y)
+        ctx.stroke()
+        
+        // Label
+        ctx.fillText(this.formatTickValue(value), sidePadding - 8, y)
+      }
+    }
+    
+    // Draw axis titles
+    ctx.fillStyle = '#374151'
+    ctx.font = '13px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    // Place axis title below the plot area (not in the middle)
-    ctx.fillText(this.controller.selectedXButton.metadataName, width / 2, height - bottomPadding + maxTextHeight + 15)
+    const xLabel = this.getAxisLabel(this.controller.selectedXButton)
+    const xLines = xLabel.split('\n')
+    xLines.forEach((line, index) => {
+      ctx.fillText(line, width / 2, height - bottomPadding + maxTextHeight + 15 + index * 16)
+    })
+    const yLabel = this.getAxisLabel(this.controller.selectedYButton)
+    const yLines = yLabel.split('\n')
     ctx.save()
     ctx.translate(15, height / 2)
     ctx.rotate(-Math.PI / 2)
-    ctx.fillText(this.controller.selectedYButton.metadataName, 0, 0)
+    ctx.textAlign = 'center'
+    yLines.forEach((line, index) => {
+      ctx.fillText(line, 0, index * 16)
+    })
     ctx.restore()
     
     // Get category colors from categorical metadata
@@ -972,6 +1506,129 @@ export class CustomPlotManager {
     })
     
     console.log('📊 Violin plot rendered with', categories.length, 'categories')
+  }
+  
+  // Get axis label with gene symbol and Ensembl ID if available
+  getAxisLabel(selectedButton) {
+    if (!selectedButton) {
+      return 'Unknown'
+    }
+    if (selectedButton.isGene) {
+      const geneId = selectedButton.metadataId
+      const geneIdStr = String(geneId)
+      const geneIdNum = Number(geneId)
+      let symbol = null
+      let ensemblId = ''
+
+      if (selectedButton.button) {
+        const geneNameFromButton = selectedButton.button.dataset.geneName
+        if (geneNameFromButton) {
+          symbol = geneNameFromButton
+        }
+      }
+
+      if (this.controller.geneManager?.geneTags) {
+        for (const g of this.controller.geneManager.geneTags) {
+          if (String(g.stableId) === geneIdStr || g.stableId === geneId || g.stableId === geneIdNum || String(g.stableId) === String(geneIdNum) || Number(g.stableId) === geneIdNum) {
+            symbol = g.symbol || symbol
+            ensemblId = g.ensemblId || ensemblId
+            break
+          }
+        }
+      }
+
+      if (!symbol || !ensemblId) {
+        const geneDiv = document.querySelector(`[data-gene-item="${geneId}"], [data-gene-item="${geneIdStr}"]`)
+        if (geneDiv) {
+          const header = geneDiv.querySelector('.gene-header')
+          if (header) {
+            const titleText = header.getAttribute('title') || header.textContent || ''
+            const titleMatch = titleText.match(/^(.+?)\s+(FBgn\d+)\s+\{/)
+            if (titleMatch) {
+              if (!symbol) symbol = titleMatch[1].trim()
+              if (!ensemblId) ensemblId = titleMatch[2].trim()
+            } else {
+              const symbolElement = header.querySelector('div[style*="font-size: 14px"]')
+              if (symbolElement && !symbol) {
+                const clonedElement = symbolElement.cloneNode(true)
+                const ensemblSpan = clonedElement.querySelector('span[style*="monospace"]')
+                if (ensemblSpan) {
+                  ensemblSpan.remove()
+                }
+                symbol = clonedElement.textContent.trim()
+              }
+              const ensemblElement = header.querySelector('span[style*="monospace"]')
+              if (ensemblElement && !ensemblId) {
+                ensemblId = ensemblElement.textContent.trim()
+              }
+            }
+          }
+        }
+      }
+
+      if (!symbol) {
+        const geneData = this.controller.geneManager?.geneExpressionData?.[geneId] || this.controller.geneManager?.geneExpressionData?.[geneIdStr] || this.controller.geneManager?.geneExpressionData?.[geneIdNum]
+        if (geneData && geneData.symbol) {
+          symbol = geneData.symbol
+        }
+      }
+
+      if (!symbol) {
+        symbol = selectedButton.metadataName || `Gene ${geneId}`
+      }
+
+      let matrixLabel = ''
+      if (this.controller.geneManager?.currentMatrixLayer) {
+        const layer = this.controller.geneManager.currentMatrixLayer
+        matrixLabel = layer
+      }
+
+      if (ensemblId && ensemblId.trim() !== '') {
+        return matrixLabel ? `Gene expression of ${symbol} ${ensemblId}\n${matrixLabel}` : `Gene expression of ${symbol} ${ensemblId}`
+      } else {
+        return matrixLabel ? `Gene expression of ${symbol}\n${matrixLabel}` : `Gene expression of ${symbol}`
+      }
+    }
+    return selectedButton.metadataName || 'Unknown'
+  }
+
+  // Calculate tick spacing for nice round numbers
+  calculateTickSpacing(range) {
+    const targetTicks = 6
+    const roughSpacing = range / targetTicks
+    
+    const magnitude = Math.pow(10, Math.floor(Math.log10(roughSpacing)))
+    const normalized = roughSpacing / magnitude
+    
+    let niceSpacing
+    if (normalized <= 1) {
+      niceSpacing = 1
+    } else if (normalized <= 2) {
+      niceSpacing = 2
+    } else if (normalized <= 5) {
+      niceSpacing = 5
+    } else {
+      niceSpacing = 10
+    }
+    
+    return niceSpacing * magnitude
+  }
+
+  // Format tick value for display
+  formatTickValue(value) {
+    if (Number.isInteger(value)) {
+      return value.toString()
+    }
+    
+    if (Math.abs(value) >= 100) {
+      return value.toFixed(1).replace(/\.0$/, '')
+    } else if (Math.abs(value) >= 10) {
+      return value.toFixed(2).replace(/\.0+$/, '')
+    } else if (Math.abs(value) >= 1) {
+      return value.toFixed(3).replace(/\.0+$/, '')
+    } else {
+      return value.toFixed(4).replace(/\.0+$/, '')
+    }
   }
   
   // Calculate kernel density estimate for violin plots

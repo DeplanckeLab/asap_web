@@ -85,6 +85,10 @@ class ProjectsController < ApplicationController
     Rails.logger.debug "🔍 [DEBUG] All loom files: #{all_loom_files.inspect}"
     @default_loom_file = @available_loom_files.first || all_loom_files.first || 'parsing/output.loom'
     Rails.logger.debug "🔍 [DEBUG] Default loom file set to: #{@default_loom_file}"
+
+    # Preload expression matrices (dim = 3) grouped by loom file
+    @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)
+                                        .group_by(&:filepath)
     
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 
@@ -611,7 +615,20 @@ class ProjectsController < ApplicationController
       end
 
       loom_path = @project_dir + loom_file
-      
+      # Resolve the expression matrix (Annot with dim 3)
+      matrix_annot = nil
+      if params[:annot_id].present?
+        matrix_annot = Annot.find_by(id: params[:annot_id], project_id: @project.id, filepath: loom_file, dim: 3)
+      end
+      if matrix_annot.nil? && params[:layer].present?
+        matrix_annot = Annot.where(project_id: @project.id, filepath: loom_file, dim: 3, name: params[:layer]).first
+      end
+      matrix_annot ||= Annot.where(project_id: @project.id, filepath: loom_file, dim: 3, name: '/matrix').first
+      matrix_name = matrix_annot&.name || '/matrix'
+      matrix_annot_id = matrix_annot&.id
+
+      Rails.logger.info "Using expression matrix: #{matrix_name} (annot_id: #{matrix_annot_id || 'none'})"
+
       # Find gene metadata with _StableID name
       gene_metadata = Annot.where(project_id: @project.id, dim: 2, name: '/row_attrs/_StableID')
                              .where("filepath = ?", loom_file)
@@ -702,7 +719,7 @@ class ProjectsController < ApplicationController
       # gene_index is 0-based from the stable_id_vector.each_with_index
       # get_pathway_data converts 1-based IDs to 0-based indexes, so pass gene_index + 1
       Rails.logger.info "Extracting expression data for gene_index: #{gene_index} (0-based), passing #{gene_index + 1} (1-based) to get_pathway_data"
-      expression_data = H5DataService.get_pathway_data([gene_index + 1], loom_path.to_s)
+      expression_data = H5DataService.get_pathway_data([gene_index + 1], loom_path.to_s, matrix_name)
       
       Rails.logger.info "Expression data response: nber_rows=#{expression_data['nber_rows']}, nber_cols=#{expression_data['nber_cols']}, values type=#{expression_data['values']&.class}, values length=#{expression_data['values']&.length}"
       
@@ -733,7 +750,9 @@ class ProjectsController < ApplicationController
         stable_id: stable_id.to_s,
         gene_index: gene_index,
         expression_values: expression_values,
-        nber_cols: expression_data ? expression_data['nber_cols'] : 0
+        nber_cols: expression_data ? expression_data['nber_cols'] : 0,
+        matrix_name: matrix_name,
+        annot_id: matrix_annot_id
       }
     rescue => e
       Rails.logger.error "Error loading gene expression: #{e.message}"

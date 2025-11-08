@@ -2323,6 +2323,7 @@ export default class extends Controller {
       this.reglRenderer.render()
       
       // Refresh 2D plot if open
+      this.renderPointsWithCurrentColoring()
       this.customPlotManager.refresh2DPlotIfOpen()
       return
     }

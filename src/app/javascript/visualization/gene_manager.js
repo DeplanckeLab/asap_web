@@ -12,6 +12,12 @@ export class GeneManager {
     this.currentMatrixLayer = '/matrix' // Default to /matrix
     this.currentMatrixAnnotId = null // Annot ID for the current matrix/layer
     this.matrixInitialized = false
+    this.autocompleteLoaded = false
+    this.geneSearchVisible = false
+    this.geneSearchVisibilityTimer = null
+    this.defaultGeneTagsDisplay = null
+    this.defaultMatrixSelectionDisplay = null
+    this.matrixSelectionWrapper = null
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
     // console.log('GeneManager: Constructor initialized, window.geneManager set')
@@ -133,6 +139,172 @@ export class GeneManager {
     }
   }
 
+  initializeGeneSearchUI(tagsContainer, input) {
+    if (!this.defaultGeneTagsDisplay || this.defaultGeneTagsDisplay === 'none') {
+      this.defaultGeneTagsDisplay = tagsContainer.style.display && tagsContainer.style.display !== 'none'
+        ? tagsContainer.style.display
+        : 'flex'
+    }
+    tagsContainer.style.display = 'none'
+    input.setAttribute('disabled', 'disabled')
+
+    const matrixLink = document.getElementById('matrix-selection-link')
+    if (matrixLink) {
+      const wrapper = matrixLink.parentElement
+      if (wrapper) {
+        this.matrixSelectionWrapper = wrapper
+        if (!this.defaultMatrixSelectionDisplay || this.defaultMatrixSelectionDisplay === 'none') {
+          this.defaultMatrixSelectionDisplay = wrapper.style.display && wrapper.style.display !== 'none'
+            ? wrapper.style.display
+            : 'flex'
+        }
+        wrapper.style.display = 'none'
+      }
+    }
+
+    this.updateGeneSearchAvailabilityMessage('Loading genes…')
+    this.startGeneSearchVisibilityWatcher()
+    this.updateGeneSearchVisibility()
+  }
+
+  startGeneSearchVisibilityWatcher() {
+    if (this.geneSearchVisibilityTimer) return
+    this.geneSearchVisibilityTimer = setInterval(() => {
+      this.updateGeneSearchVisibility()
+    }, 500)
+  }
+
+  resolveVisualizationController() {
+    if (this.controller?.application) {
+      const visualizationElement = document.querySelector('[data-controller="visualization"]')
+      if (visualizationElement) {
+        const domController = this.controller.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
+        if (domController) {
+          return domController
+        }
+      }
+    }
+    if (window.visualizationController) {
+      return window.visualizationController
+    }
+    return this.controller || null
+  }
+
+  updateGeneSearchAvailabilityMessage(message) {
+    const statusDiv = document.getElementById('gene-input-status')
+    const statusTextDiv = document.getElementById('gene-input-status-text')
+    if (!statusDiv || !statusTextDiv) return
+
+    if (message) {
+      statusDiv.dataset.statusType = 'availability'
+      statusDiv.style.backgroundColor = 'transparent'
+      statusDiv.style.border = 'none'
+      statusDiv.style.padding = '0'
+      statusTextDiv.innerHTML = `
+        <span style="
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-style: italic;
+          color: #111827;
+        ">
+          <span style="
+            width: 16px;
+            height: 16px;
+            border: 2px solid #4b5563;
+            border-top-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            animation: gm-spinner 0.75s linear infinite;
+          "></span>
+          ${message}
+        </span>
+      `
+      this.injectSpinnerKeyframes()
+      statusDiv.style.display = 'block'
+    } else if (statusDiv.dataset.statusType === 'availability') {
+      statusDiv.style.display = 'none'
+      statusDiv.style.backgroundColor = ''
+      statusDiv.style.border = ''
+      statusDiv.style.padding = ''
+      statusTextDiv.textContent = ''
+      delete statusDiv.dataset.statusType
+    }
+  }
+
+  injectSpinnerKeyframes() {
+    if (document.getElementById('gm-spinner-keyframes')) return
+    const style = document.createElement('style')
+    style.id = 'gm-spinner-keyframes'
+    style.textContent = `
+      @keyframes gm-spinner {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+    `
+    document.head.appendChild(style)
+  }
+
+  updateGeneSearchVisibility() {
+    const tagsContainer = document.getElementById('gene-tags-container')
+    const input = document.getElementById('gene-autocomplete-input')
+    if (!tagsContainer || !input) return
+
+    const resolvedController = this.resolveVisualizationController()
+    if (resolvedController && resolvedController !== this.controller) {
+      this.controller = resolvedController
+    }
+
+    const ready = this.autocompleteLoaded && this.isRendererReadyForGeneSearch(this.controller)
+
+    if (ready) {
+      if (!this.geneSearchVisible) {
+        tagsContainer.style.display = this.defaultGeneTagsDisplay || 'flex'
+        input.removeAttribute('disabled')
+        this.geneSearchVisible = true
+        this.updateGeneSearchAvailabilityMessage(null)
+        if (this.matrixSelectionWrapper) {
+          this.matrixSelectionWrapper.style.display = this.defaultMatrixSelectionDisplay || 'flex'
+        }
+      }
+      if (this.geneSearchVisibilityTimer) {
+        clearInterval(this.geneSearchVisibilityTimer)
+        this.geneSearchVisibilityTimer = null
+      }
+    } else {
+      if (this.geneSearchVisible) {
+        tagsContainer.style.display = 'none'
+        input.setAttribute('disabled', 'disabled')
+        this.geneSearchVisible = false
+        if (this.matrixSelectionWrapper) {
+          this.matrixSelectionWrapper.style.display = 'none'
+        }
+      }
+      this.updateGeneSearchAvailabilityMessage('Loading genes…')
+    }
+  }
+
+  isRendererReadyForGeneSearch(controller) {
+    if (!controller) return false
+    const renderer = controller.reglRenderer
+    const hasRendererState = !!(renderer && (
+      (typeof renderer.numPoints === 'number' && renderer.numPoints > 0) ||
+      (renderer.positions && renderer.positions.length > 0) ||
+      (renderer.colors && renderer.colors.length > 0)
+    ))
+    const hasCoordinates = Array.isArray(controller.currentCoordinates) && controller.currentCoordinates.length > 0
+    let canvasVisible = false
+    if (controller.canvas && controller.canvas.parentElement) {
+      const parent = controller.canvas.parentElement
+      canvasVisible = parent.offsetWidth > 0 && parent.offsetHeight > 0
+    }
+    if (!canvasVisible) {
+      const plotContainer = document.querySelector('.plot-container')
+      canvasVisible = !!(plotContainer && plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0)
+    }
+    return canvasVisible && (hasRendererState || hasCoordinates)
+  }
+
   init() {
     // console.log('GeneManager: Initializing...')
     // Extract project identifier from URL (could be ID, key, or public_id like ASAP49)
@@ -155,6 +327,7 @@ export class GeneManager {
     if (input && tagsContainer) {
       // console.log('GeneManager: Combined input field found, setting up listeners')
       let debounceTimer = null
+      this.initializeGeneSearchUI(tagsContainer, input)
       
       // Render initial tags (input is already in container from HTML)
       this.renderGeneTags()
@@ -443,12 +616,16 @@ export class GeneManager {
         this.totalGeneCount = 0
         this.updateGeneCountBadge()
       }
+      this.autocompleteLoaded = true
+      this.updateGeneSearchVisibility()
     } catch (error) {
       console.error('GeneManager: Error loading autocomplete data:', error)
       console.error('GeneManager: Error stack:', error.stack)
       this.autocompleteData = []
       this.totalGeneCount = 0
       this.updateGeneCountBadge()
+      this.autocompleteLoaded = true
+      this.updateGeneSearchVisibility()
     }
   }
 
@@ -826,10 +1003,15 @@ export class GeneManager {
     if (!statusDiv || !statusTextDiv) return
 
     if (foundCount === 0 && notFoundCount === 0) {
-      statusDiv.style.display = 'none'
+      if (statusDiv.dataset.statusType === 'summary') {
+        delete statusDiv.dataset.statusType
+        statusDiv.style.display = 'none'
+        statusTextDiv.innerHTML = ''
+      }
       return
     }
 
+    statusDiv.dataset.statusType = 'summary'
     statusDiv.style.display = 'block'
     
     let message = ''
@@ -2069,64 +2251,48 @@ export class GeneManager {
   }
 
   initializeGeneRangeSlider(geneId) {
-    // console.log(`🧬 [GENE INIT] initializeGeneRangeSlider called for gene: ${geneId}`)
-    
-    // Try to find expression data - handle both string and number keys
-    const geneIdNum = parseInt(geneId)
-    const geneIdStr = String(geneId)
-    const expressionData = this.geneExpressionData[geneId] || 
-                           this.geneExpressionData[geneIdNum] || 
-                           this.geneExpressionData[geneIdStr]
-    
-    if (!expressionData || !expressionData.values) {
-      console.error(`❌ [GENE INIT] No expression data available for gene ${geneId}`)
-      console.error(`❌ [GENE INIT] Available gene IDs:`, Object.keys(this.geneExpressionData || {}))
+    const resolvedController = this.resolveVisualizationController()
+    if (resolvedController && resolvedController !== this.controller) {
+      this.controller = resolvedController
+    }
+
+    if (!this.controller) {
+      console.warn(`[GENE INIT] Visualization controller unavailable for gene ${geneId}`)
       return
     }
-    
-    // console.log(`🧬 [GENE INIT] Found expression data:`, {
-      // valuesLength: expressionData.values?.length,
-      // hasStats: !!expressionData.stats,
-      // geneId,
-      // geneIdNum,
-      // geneIdStr
-    // })
-    
+
+    const geneIdNum = parseInt(geneId)
+    const geneIdStr = String(geneId)
+    const expressionData = this.geneExpressionData[geneId] ||
+                           this.geneExpressionData[geneIdNum] ||
+                           this.geneExpressionData[geneIdStr]
+
+    if (!expressionData || !expressionData.values) {
+      console.warn(`[GENE INIT] No expression data available for gene ${geneId}`)
+      console.warn('[GENE INIT] Available gene IDs:', Object.keys(this.geneExpressionData || {}))
+      return
+    }
+
     const values = expressionData.values
     const geneMetadataId = this.getGeneMetadataId(geneIdStr, this.currentMatrixAnnotId)
-    
-    // console.log(`🧬 [GENE INIT] Gene metadata ID: ${geneMetadataId}`)
-    
-    // CRITICAL: Store in loadedMetadataVectors BEFORE initializing slider
-    // This ensures filtering works even if user hasn't clicked the coloring button yet
-    // (Same pattern as continuous metadata which populates loadedMetadataVectors when expanding)
-    if (this.controller) {
-      if (!this.controller.loadedMetadataVectors) {
-        this.controller.loadedMetadataVectors = {}
-        // console.log(`🧬 [GENE INIT] Created loadedMetadataVectors object`)
-      }
-      
-      // Check if already stored (e.g., from geneWaterDropClicked)
-      if (!this.controller.loadedMetadataVectors[geneMetadataId]) {
+
+    if (!this.controller.loadedMetadataVectors) {
+      this.controller.loadedMetadataVectors = {}
+    }
+
+    if (!this.controller.loadedMetadataVectors[geneMetadataId]) {
+      if (!this.controller.dataManager) {
+        console.warn('[GENE INIT] DataManager not available; skipping metadata vector registration')
+      } else {
         const minVal = this.controller.dataManager.safeMin(values)
         const maxVal = this.controller.dataManager.safeMax(values)
-        
-        // Get gene name from geneTags or use stable ID
-        const geneTag = this.geneTags?.find(g => 
-          String(g.stableId) === geneIdStr || 
+        const geneTag = this.geneTags?.find(g =>
+          String(g.stableId) === geneIdStr ||
           String(g.stableId) === String(geneIdNum) ||
           g.stableId === geneIdNum
         )
         const geneName = geneTag?.symbol || `Gene ${geneIdStr}`
-        
-        // console.log(`🧬 [GENE INIT] Creating metadata vector:`, {
-          // geneMetadataId,
-          // geneName,
-          // minVal,
-          // maxVal,
-          // valuesLength: values.length
-        // })
-        
+
         this.controller.loadedMetadataVectors[geneMetadataId] = {
           id: geneMetadataId,
           name: geneName,
@@ -2141,224 +2307,24 @@ export class GeneManager {
           nber_rows: 1,
           nber_cols: values.length
         }
-        // console.log(`✅ [GENE INIT] Stored gene metadata in loadedMetadataVectors: ${geneMetadataId}`)
-        // console.log(`✅ [GENE INIT] loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors))
-      } else {
-        // console.log(`🧬 [GENE INIT] Gene metadata already in loadedMetadataVectors: ${geneMetadataId}`)
       }
-    } else {
-      console.error(`❌ [GENE INIT] Controller not available!`)
-      return
     }
-    
-    // Use the visualization controller's initializeInlineRangeSlider method
-    // This handles setting up the range slider data and initializing the controller
-    if (this.controller && this.controller.initializeInlineRangeSlider) {
-      // Check renderer state BEFORE calling initializeInlineRangeSlider
-      // console.log(`🧬 [GENE INIT] Renderer state BEFORE initializeInlineRangeSlider:`)
-      
-      // CRITICAL: Check if there's a canvas element that might have a different renderer
-      const plotContainer = document.querySelector('.plot-container')
-      const canvasElements = plotContainer ? plotContainer.querySelectorAll('canvas') : []
-      // console.log(`🧬 [GENE INIT] Found ${canvasElements.length} canvas elements in plot container`)
-      
-      const beforeState = {
-        hasReglRenderer: !!this.controller.reglRenderer,
-        rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
-        numPoints: this.controller.reglRenderer?.numPoints || 0,
-        hasPositions: !!this.controller.reglRenderer?.positions,
-        positionsLength: this.controller.reglRenderer?.positions?.length || 0,
-        hasColors: !!this.controller.reglRenderer?.colors,
-        colorsLength: this.controller.reglRenderer?.colors?.length || 0,
-        hasCurrentCoordinates: !!this.controller.currentCoordinates,
-        currentCoordinatesLength: this.controller.currentCoordinates?.length || 0,
-        canvasReference: this.controller.canvas?.id || 'no-id',
-        canvasInDOM: !!this.controller.canvas?.parentElement,
-        canvasCount: canvasElements.length
-      }
-      // console.log(`🧬 [GENE INIT] Before state:`, beforeState)
-      
-      // If renderer has no state but plot is visible, something is wrong
-      // Check if there's a renderer with state attached to the canvas elements
-      if (this.controller.reglRenderer && this.controller.reglRenderer.numPoints === 0) {
-        console.error(`❌ [GENE INIT] CRITICAL: Renderer exists but has NO state!`)
-        console.error(`❌ [GENE INIT] Renderer instance: ${this.controller.reglRenderer.instanceId}`)
-        console.error(`❌ [GENE INIT] Created at: ${this.controller.reglRenderer.createdAtTime || 'unknown'}`)
-        console.error(`❌ [GENE INIT] This renderer should have state if plot is visible!`)
-        
-        // Try to find a renderer with state by checking canvas elements
-        const plotContainer = document.querySelector('.plot-container')
-        if (plotContainer) {
-          const canvases = plotContainer.querySelectorAll('canvas')
-          // console.log(`❌ [GENE INIT] Found ${canvases.length} canvas elements in plot container`)
-          canvases.forEach((canvas, index) => {
-            // Check if this canvas has a renderer attached (check canvas.__reglRenderer or similar)
-            // console.log(`❌ [GENE INIT] Canvas ${index}:`, {
-              // width: canvas.width,
-              // height: canvas.height,
-              // parentElement: canvas.parentElement,
-              // id: canvas.id || 'no-id'
-            // })
-          })
-        }
-        
-        // Check if there's a different renderer instance that has state
-        // by looking at window or other references
-        if (window.visualizationController && window.visualizationController !== this.controller) {
-          const windowRenderer = window.visualizationController.reglRenderer
-          if (windowRenderer && windowRenderer.numPoints > 0) {
-            console.error(`❌ [GENE INIT] Found different renderer with state in window.visualizationController!`)
-            console.error(`❌ [GENE INIT] Window renderer ID: ${windowRenderer.instanceId}, numPoints: ${windowRenderer.numPoints}`)
-            console.error(`❌ [GENE INIT] This controller renderer ID: ${this.controller.reglRenderer.instanceId}`)
-            
-            // CRITICAL: Switch to the controller that has the renderer with state
-            // console.log(`❌ [GENE INIT] Switching to window.visualizationController which has renderer with state`)
-            const oldControllerId = this.controller.instanceId
-            this.controller = window.visualizationController
-            const newControllerId = this.controller.instanceId
-            // console.log(`❌ [GENE INIT] Switched from controller ${oldControllerId} to ${newControllerId}`)
-            // console.log(`❌ [GENE INIT] New renderer ID: ${this.controller.reglRenderer.instanceId}, numPoints: ${this.controller.reglRenderer.numPoints}`)
-          }
-        }
-        
-        // Also try to get the controller directly from the DOM element
-        // This ensures we get the actual Stimulus-managed instance
-        const visualizationElement = document.querySelector('[data-controller="visualization"]')
-        if (visualizationElement && this.controller && this.controller.application) {
-          const domController = this.controller.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
-          if (domController && domController !== this.controller) {
-            const domRenderer = domController.reglRenderer
-            if (domRenderer && domRenderer.numPoints > 0) {
-              // console.log(`❌ [GENE INIT] Found controller from DOM with renderer that has state`)
-              // console.log(`❌ [GENE INIT] DOM controller ID: ${domController.instanceId}`)
-              // console.log(`❌ [GENE INIT] DOM renderer ID: ${domRenderer.instanceId}, numPoints: ${domRenderer.numPoints}`)
-              // console.log(`❌ [GENE INIT] Switching to DOM controller`)
-              this.controller = domController
-            }
-          }
-        }
-        
-        console.trace(`❌ [GENE INIT] Stack trace for renderer state check`)
-      }
-      
-      // console.log(`🧬 [GENE INIT] Calling initializeInlineRangeSlider for ${geneMetadataId}`)
+
+    if (typeof this.controller.initializeInlineRangeSlider === 'function') {
       this.controller.initializeInlineRangeSlider(geneMetadataId, values)
-      
-      // Check renderer state AFTER calling initializeInlineRangeSlider (but before checking in detail)
-      // console.log(`🧬 [GENE INIT] Renderer state AFTER initializeInlineRangeSlider:`)
-      const afterState = {
-        hasReglRenderer: !!this.controller.reglRenderer,
-        rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
-        numPoints: this.controller.reglRenderer?.numPoints || 0,
-        hasPositions: !!this.controller.reglRenderer?.positions,
-        positionsLength: this.controller.reglRenderer?.positions?.length || 0,
-        hasCurrentCoordinates: !!this.controller.currentCoordinates,
-        currentCoordinatesLength: this.controller.currentCoordinates?.length || 0
-      }
-      // console.log(`🧬 [GENE INIT] After state:`, afterState)
-      
-      // Check if renderer changed
-      if (beforeState.rendererInstanceId !== afterState.rendererInstanceId) {
-        console.error(`❌ [GENE INIT] CRITICAL: Renderer instance changed during initialization!`)
-        console.error(`❌ [GENE INIT] Before: ${beforeState.rendererInstanceId}, After: ${afterState.rendererInstanceId}`)
-        console.trace(`❌ [GENE INIT] Renderer instance change detected`)
-      }
-      
-      if (beforeState.numPoints > 0 && afterState.numPoints === 0) {
-        console.error(`❌ [GENE INIT] CRITICAL: Renderer lost state during initialization!`)
-        console.error(`❌ [GENE INIT] Before numPoints: ${beforeState.numPoints}, After: ${afterState.numPoints}`)
-        console.trace(`❌ [GENE INIT] Renderer state loss detected`)
-      }
-      
-      // Verify inlineRangeSliderData was set
-      if (this.controller.inlineRangeSliderData && this.controller.inlineRangeSliderData[geneMetadataId]) {
-        // console.log(`✅ [GENE INIT] inlineRangeSliderData set for ${geneMetadataId}:`, {
-          // min: this.controller.inlineRangeSliderData[geneMetadataId].min,
-          // max: this.controller.inlineRangeSliderData[geneMetadataId].max,
-          // valuesLength: this.controller.inlineRangeSliderData[geneMetadataId].values?.length
-        // })
-      } else {
-        console.error(`❌ [GENE INIT] inlineRangeSliderData NOT set for ${geneMetadataId}!`)
-      }
-      
-      // CRITICAL: Verify renderer state is ready for filtering
-      // console.log(`🧬 [GENE INIT] Checking renderer state after initialization...`)
-      
-      // Check if plot is visible (canvas exists and has dimensions)
-      const plotIsVisible = !!(this.controller.canvas && 
-                            this.controller.canvas.width > 0 && 
-                            this.controller.canvas.height > 0 &&
-                            this.controller.canvas.parentElement &&
-                            this.controller.canvas.parentElement.offsetWidth > 0)
-      
-      const rendererState = {
-        hasReglRenderer: !!this.controller.reglRenderer,
-        rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
-        numPoints: this.controller.reglRenderer?.numPoints || 0,
-        hasPositions: !!this.controller.reglRenderer?.positions,
-        positionsLength: this.controller.reglRenderer?.positions?.length || 0,
-        hasColors: !!this.controller.reglRenderer?.colors,
-        colorsLength: this.controller.reglRenderer?.colors?.length || 0,
-        hasCurrentCoordinates: !!this.controller.currentCoordinates,
-        currentCoordinatesLength: this.controller.currentCoordinates?.length || 0,
-        hasDisplayOrder: !!this.controller.displayOrder,
-        displayOrderLength: this.controller.displayOrder?.length || 0,
-        hasMetadataData: !!this.controller.metadataData,
-        metadataDataName: this.controller.metadataData?.name,
-        hasCache: !!this.controller.decompressedCoordinatesCache,
-        cacheSize: this.controller.decompressedCoordinatesCache?.size || 0,
-        plotIsVisible: plotIsVisible,
-        canvasWidth: this.controller.canvas?.width || 0,
-        canvasHeight: this.controller.canvas?.height || 0
-      }
-      
-      // Check if renderer is ready for filtering
-      const hasRendererState = rendererState.numPoints > 0 || 
-                               rendererState.positionsLength > 0 || 
-                               rendererState.colorsLength > 0
-      const hasCoordinates = rendererState.hasCurrentCoordinates || 
-                             rendererState.hasMetadataData || 
-                             rendererState.cacheSize > 0
-      const isRendererReady = rendererState.hasReglRenderer && 
-                              ((rendererState.hasCurrentCoordinates && rendererState.hasDisplayOrder) ||
-                               (hasRendererState && hasCoordinates))
-      
-      // console.log(`🧬 [GENE INIT] Renderer state:`, rendererState)
-      // console.log(`🧬 [GENE INIT] Renderer readiness:`, {
-        // hasRendererState,
-        // hasCoordinates,
-        // isRendererReady,
-        // readyForFiltering: isRendererReady || hasCoordinates,
-        // plotIsVisible
-      // })
-      
-      // CRITICAL: If plot is visible but renderer has no state, this is a problem!
-      if (plotIsVisible && !hasRendererState && !hasCoordinates) {
-        console.error(`❌ [GENE INIT] CRITICAL: Plot is visible but renderer has NO state!`)
-        console.error(`❌ [GENE INIT] This means the renderer was recreated or state was cleared`)
-        console.error(`❌ [GENE INIT] Renderer instance ID: ${rendererState.rendererInstanceId}`)
-        console.error(`❌ [GENE INIT] This will cause filtering to fail!`)
-        console.trace(`❌ [GENE INIT] Call stack when renderer state loss detected`)
-      } else if (!isRendererReady && !hasCoordinates) {
-        console.error(`❌ [GENE INIT] WARNING: Renderer may not be ready for filtering!`)
-        console.error(`❌ [GENE INIT] - No coordinates available`)
-        console.error(`❌ [GENE INIT] - No renderer state`)
-        console.error(`❌ [GENE INIT] - Plot visible: ${plotIsVisible}`)
-        console.error(`❌ [GENE INIT] - Filtering may fail when slider is moved`)
-      } else {
-        // console.log(`✅ [GENE INIT] Renderer appears ready for filtering`)
-      }
-      
-      // Wait a bit for the controller to connect, then update the filter switch visibility
-      setTimeout(() => {
-        if (this.controller && this.controller.uiManager) {
-          this.controller.uiManager.updateGeneFilterSwitchVisibility(geneId, geneMetadataId)
-        }
-      }, 100)
+      this.updateGeneSearchVisibility()
     } else {
-      console.error(`❌ [GENE INIT] Controller or initializeInlineRangeSlider method not available`)
-      console.error(`❌ [GENE INIT] Controller:`, !!this.controller)
-      console.error(`❌ [GENE INIT] initializeInlineRangeSlider:`, !!this.controller?.initializeInlineRangeSlider)
+      console.warn('[GENE INIT] initializeInlineRangeSlider is not available on the visualization controller')
+    }
+
+    if (!this.controller.inlineRangeSliderData || !this.controller.inlineRangeSliderData[geneMetadataId]) {
+      console.warn(`[GENE INIT] inlineRangeSliderData not set for ${geneMetadataId}`)
+    }
+
+    if (this.controller && this.controller.uiManager) {
+      setTimeout(() => {
+        this.controller?.uiManager?.updateGeneFilterSwitchVisibility(geneId, geneMetadataId)
+      }, 100)
     }
   }
 

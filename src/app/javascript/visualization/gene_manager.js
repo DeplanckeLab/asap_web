@@ -162,7 +162,7 @@ export class GeneManager {
       }
     }
 
-    this.updateGeneSearchAvailabilityMessage('Loading genes…')
+    this.updateGeneSearchAvailabilityMessage('Loading gene data…')
     this.startGeneSearchVisibilityWatcher()
     this.updateGeneSearchVisibility()
   }
@@ -190,24 +190,48 @@ export class GeneManager {
     return this.controller || null
   }
 
+  clearGeneSearchAvailabilityMessage() {
+    const statusDiv = document.getElementById('gene-input-status')
+    const statusTextDiv = document.getElementById('gene-input-status-text')
+    if (!statusDiv || !statusTextDiv) return
+
+    statusDiv.style.display = 'none'
+    statusDiv.style.backgroundColor = ''
+    statusDiv.style.border = ''
+    statusDiv.style.padding = ''
+    statusTextDiv.textContent = ''
+    delete statusDiv.dataset.statusType
+  }
+
+  hideGeneAvailabilityMessage() {
+    const statusDiv = document.getElementById('gene-input-status')
+    if (!statusDiv) return
+    statusDiv.classList.add('gene-loading-hidden')
+    statusDiv.dataset.statusLocked = 'true'
+    statusDiv.style.display = 'none'
+  }
+
   updateGeneSearchAvailabilityMessage(message) {
     const statusDiv = document.getElementById('gene-input-status')
     const statusTextDiv = document.getElementById('gene-input-status-text')
     if (!statusDiv || !statusTextDiv) return
 
     const normalizedMessage = typeof message === 'string' ? message.trim().toLowerCase() : ''
-    const isLoadingMessage = normalizedMessage === 'loading genes…' || normalizedMessage === 'loading genes...' || normalizedMessage === 'loading genes'
-    const shouldSuppress = !message || normalizedMessage === '' || (isLoadingMessage && this.geneSearchVisible)
+    const isLoadingMessage = normalizedMessage === 'loading gene data…' ||
+      normalizedMessage === 'loading gene data...' ||
+      normalizedMessage === 'loading gene data' ||
+      normalizedMessage === 'loading genes…' ||
+      normalizedMessage === 'loading genes...' ||
+      normalizedMessage === 'loading genes'
+    if (statusDiv.dataset.statusLocked === 'true' && isLoadingMessage) {
+      return
+    }
+    const shouldSuppress = !message ||
+      normalizedMessage === '' ||
+      (isLoadingMessage && this.geneSearchVisible)
     
     if (shouldSuppress) {
-      if (statusDiv.dataset.statusType === 'availability') {
-        statusDiv.style.display = 'none'
-        statusDiv.style.backgroundColor = ''
-        statusDiv.style.border = ''
-        statusDiv.style.padding = ''
-        statusTextDiv.textContent = ''
-        delete statusDiv.dataset.statusType
-      }
+      this.clearGeneSearchAvailabilityMessage()
       return
     }
 
@@ -275,13 +299,15 @@ export class GeneManager {
 
     if (ready) {
       if (!this.geneSearchVisible) {
+        this.hideGeneAvailabilityMessage()
         tagsContainer.style.display = this.defaultGeneTagsDisplay || 'flex'
         input.removeAttribute('disabled')
         this.geneSearchVisible = true
-        this.updateGeneSearchAvailabilityMessage(null)
         if (this.matrixSelectionWrapper) {
           this.matrixSelectionWrapper.style.display = this.defaultMatrixSelectionDisplay || 'flex'
         }
+      } else {
+        this.clearGeneSearchAvailabilityMessage()
       }
       if (this.geneSearchVisibilityTimer) {
         clearInterval(this.geneSearchVisibilityTimer)
@@ -1018,6 +1044,7 @@ export class GeneManager {
     const statusTextDiv = document.getElementById('gene-input-status-text')
     if (!statusDiv || !statusTextDiv) return
 
+    delete statusDiv.dataset.statusLocked
     if (foundCount === 0 && notFoundCount === 0) {
       if (statusDiv.dataset.statusType === 'summary') {
         delete statusDiv.dataset.statusType

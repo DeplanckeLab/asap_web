@@ -359,6 +359,51 @@ export default class extends Controller {
     this.updateCheckboxColor()
   }
   
+  setFilterControlsDisabled(isDisabled) {
+    const rangeSection = this.element.closest('.gene-range-section') || this.element.closest('.metadata-range-section')
+    if (rangeSection) {
+      rangeSection.style.opacity = isDisabled ? '0.5' : '1'
+    }
+    
+    if (this.hasMinInputTarget) {
+      this.minInputTarget.disabled = isDisabled
+      this.minInputTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.minInputTarget.style.cursor = isDisabled ? 'not-allowed' : 'default'
+    }
+    if (this.hasMaxInputTarget) {
+      this.maxInputTarget.disabled = isDisabled
+      this.maxInputTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.maxInputTarget.style.cursor = isDisabled ? 'not-allowed' : 'default'
+    }
+    
+    if (this.hasMinHandleTarget) {
+      this.minHandleTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.minHandleTarget.style.pointerEvents = isDisabled ? 'none' : 'auto'
+      this.minHandleTarget.style.cursor = isDisabled ? 'not-allowed' : 'grab'
+      this.minHandleTarget.style.backgroundColor = isDisabled ? '#d1d5db' : '#3b82f6'
+    }
+    if (this.hasMaxHandleTarget) {
+      this.maxHandleTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.maxHandleTarget.style.pointerEvents = isDisabled ? 'none' : 'auto'
+      this.maxHandleTarget.style.cursor = isDisabled ? 'not-allowed' : 'grab'
+      this.maxHandleTarget.style.backgroundColor = isDisabled ? '#d1d5db' : '#3b82f6'
+    }
+    
+    if (this.hasActiveTrackTarget) {
+      this.activeTrackTarget.style.backgroundColor = isDisabled ? '#d1d5db' : '#3b82f6'
+    }
+    
+    if (this.hasAdaptColorRangeButtonTarget) {
+      this.adaptColorRangeButtonTarget.disabled = isDisabled
+      this.adaptColorRangeButtonTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.adaptColorRangeButtonTarget.style.cursor = isDisabled ? 'not-allowed' : 'pointer'
+    }
+    
+    if (typeof this.drawDensityPlot === 'function') {
+      this.drawDensityPlot()
+    }
+  }
+  
   // Update checkbox color: green if full range, orange if subrange
   // Also updates the filter state icon (for both metadata and genes)
   updateCheckboxColor() {
@@ -392,8 +437,9 @@ export default class extends Controller {
     
     // Update the filter state icon for genes (if this is a gene slider)
     if (this.metadataIdValue && this.metadataIdValue.startsWith('gene_')) {
-      const geneId = this.metadataIdValue.replace('gene_', '')
-      const geneFilterStateIcon = document.querySelector(`.gene-filter-state-icon[data-gene-id="${geneId}"]`)
+      const geneIdToken = this.metadataIdValue.slice(5)
+      const stableGeneId = geneIdToken.split('_')[0]
+      const geneFilterStateIcon = document.querySelector(`.gene-filter-state-icon[data-gene-id="${stableGeneId}"]`)
       if (geneFilterStateIcon) {
         geneFilterStateIcon.style.display = 'flex'
         const icon = geneFilterStateIcon.querySelector('i')
@@ -640,8 +686,9 @@ export default class extends Controller {
       
       // Also update gene filter switch visibility if this is a gene slider
       if (this.metadataIdValue && this.metadataIdValue.startsWith('gene_')) {
-        const geneId = this.metadataIdValue.replace('gene_', '')
-        this.visualizationController.uiManager.updateGeneFilterSwitchVisibility(geneId, this.metadataIdValue)
+        const geneIdToken = this.metadataIdValue.slice(5)
+        const stableGeneId = geneIdToken.split('_')[0]
+        this.visualizationController.uiManager.updateGeneFilterSwitchVisibility(stableGeneId, this.metadataIdValue)
       }
     }
     

@@ -195,6 +195,22 @@ export class GeneManager {
     const statusTextDiv = document.getElementById('gene-input-status-text')
     if (!statusDiv || !statusTextDiv) return
 
+    const normalizedMessage = typeof message === 'string' ? message.trim().toLowerCase() : ''
+    const isLoadingMessage = normalizedMessage === 'loading genes…' || normalizedMessage === 'loading genes...' || normalizedMessage === 'loading genes'
+    const shouldSuppress = !message || normalizedMessage === '' || (isLoadingMessage && this.geneSearchVisible)
+    
+    if (shouldSuppress) {
+      if (statusDiv.dataset.statusType === 'availability') {
+        statusDiv.style.display = 'none'
+        statusDiv.style.backgroundColor = ''
+        statusDiv.style.border = ''
+        statusDiv.style.padding = ''
+        statusTextDiv.textContent = ''
+        delete statusDiv.dataset.statusType
+      }
+      return
+    }
+
     if (message) {
       statusDiv.dataset.statusType = 'availability'
       statusDiv.style.backgroundColor = 'transparent'
@@ -1199,19 +1215,15 @@ export class GeneManager {
               geneFilterStateIcon.title = `Subrange selected: ${selectedRange.min.toFixed(3)} - ${selectedRange.max.toFixed(3)}`
             }
           } else {
-            // No subrange selected - hide the icon or show as full range
-            // Only show if the gene is unfolded (has a range slider visible)
-            const rangeSection = document.querySelector(`.gene-range-section[data-gene-id="${geneId}"]`)
-            if (rangeSection && rangeSection.style.display !== 'none') {
-              geneFilterStateIcon.style.display = 'flex'
-              const icon = geneFilterStateIcon.querySelector('i')
-              geneFilterStateIcon.style.backgroundColor = 'white'
-              geneFilterStateIcon.style.borderColor = '#d1d5db'
-              if (icon) {
-                icon.style.color = '#9ca3af'
-              }
-              geneFilterStateIcon.title = 'No filter applied (full range)'
+            // No subrange selected - show default state
+            geneFilterStateIcon.style.display = 'flex'
+            const icon = geneFilterStateIcon.querySelector('i')
+            geneFilterStateIcon.style.backgroundColor = 'white'
+            geneFilterStateIcon.style.borderColor = '#d1d5db'
+            if (icon) {
+              icon.style.color = '#9ca3af'
             }
+            geneFilterStateIcon.title = 'No filter applied (full range)'
           }
         }
         
@@ -1574,8 +1586,8 @@ export class GeneManager {
         <!-- Filter State Icon (shows if a subrange is selected) -->
         <div class="gene-filter-state-icon" 
              data-gene-id="${gene.stableId}"
-             title="No filter applied"
-             style="margin-right: 8px; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; background-color: white; border: 2px solid #d1d5db; border-radius: 4px; transition: all 0.2s;">
+             title="No filter applied (full range)"
+             style="margin-right: 8px; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; background-color: white; border: 2px solid #d1d5db; border-radius: 4px; transition: all 0.2s;">
           <i class="fas fa-sliders" style="font-size: 12px; color: #9ca3af;"></i>
         </div>
         <!-- Content -->
@@ -2349,7 +2361,35 @@ export class GeneManager {
     const isEnabled = filterSwitch.dataset.filterEnabled === 'true'
     const newState = !isEnabled
     const geneIdStr = String(geneId)
-    const geneMetadataId = `gene_${geneIdStr}`
+    const geneMetadataId = this.getGeneMetadataId(geneIdStr, this.currentMatrixAnnotId)
+    const baseGeneMetadataId = this.getBaseGeneMetadataId(geneIdStr)
+    
+    const resolveExistingMetadataId = (collection) => {
+      if (!collection) return null
+      if (collection[geneMetadataId]) return geneMetadataId
+      if (collection[baseGeneMetadataId]) return baseGeneMetadataId
+      return null
+    }
+    
+    const geneDiv = document.querySelector(`[data-gene-item="${geneId}"]`)
+    const rangeSection = geneDiv ? geneDiv.querySelector('.gene-range-section') : null
+    const sliderElement = rangeSection ? rangeSection.querySelector('[data-controller="range-slider"]') : null
+    
+    let rangeSliderController = null
+    if (this.controller?.application?.getControllerForElementAndIdentifier) {
+      if (sliderElement) {
+        try {
+          rangeSliderController = this.controller.application.getControllerForElementAndIdentifier(
+            sliderElement,
+            'range-slider'
+          )
+        } catch (error) {
+          console.warn('GeneManager: Unable to resolve range slider controller for gene', geneIdStr, error)
+        }
+      }
+    }
+    
+    let sliderMetadataId = rangeSliderController?.metadataIdValue || geneMetadataId
     
     filterSwitch.dataset.filterEnabled = newState.toString()
     
@@ -2361,28 +2401,39 @@ export class GeneManager {
       }
       
       // Enable filtering - restore saved range or initialize with full range
-      if (this.controller && this.controller.savedRanges && this.controller.savedRanges[geneMetadataId]) {
-        // Restore saved range
-        if (!this.controller.selectedRanges) this.controller.selectedRanges = {}
-        this.controller.selectedRanges[geneMetadataId] = { ...this.controller.savedRanges[geneMetadataId] }
-      } else {
-        // No saved range - initialize with full range from slider
-        const geneDiv = document.querySelector(`[data-gene-item="${geneId}"]`)
-        if (geneDiv) {
-          const rangeSection = geneDiv.querySelector('.gene-range-section')
-          if (rangeSection) {
-            const rangeSliderController = this.controller.application?.getControllerForElementAndIdentifier(
-              rangeSection.querySelector('[data-controller="range-slider"]'),
-              'range-slider'
-            )
-            if (rangeSliderController) {
-              const min = rangeSliderController.minValue
-              const max = rangeSliderController.maxValue
-              if (!this.controller.selectedRanges) this.controller.selectedRanges = {}
-              this.controller.selectedRanges[geneMetadataId] = { min, max }
-            }
-          }
+      if (this.controller) {
+        const existingSavedKey = resolveExistingMetadataId(this.controller.savedRanges)
+        if (existingSavedKey && this.controller.savedRanges[existingSavedKey]) {
+          if (!this.controller.selectedRanges) this.controller.selectedRanges = {}
+          this.controller.selectedRanges[geneMetadataId] = { ...this.controller.savedRanges[existingSavedKey] }
+        } else if (rangeSliderController) {
+          const min = rangeSliderController.minValue
+          const max = rangeSliderController.maxValue
+          if (!this.controller.selectedRanges) this.controller.selectedRanges = {}
+          this.controller.selectedRanges[geneMetadataId] = { min, max }
+        } else {
+          console.warn('GeneManager: No saved range or slider controller available to initialize gene filter')
         }
+      } else {
+        console.warn('GeneManager: controller unavailable when enabling gene filter switch')
+      }
+      
+      if (this.controller?.disabledFilters instanceof Set) {
+        this.controller.disabledFilters.delete(sliderMetadataId)
+        this.controller.disabledFilters.delete(baseGeneMetadataId)
+      }
+      
+      if (!rangeSliderController && sliderElement && this.controller?.application?.getControllerForElementAndIdentifier) {
+        try {
+          rangeSliderController = this.controller.application.getControllerForElementAndIdentifier(sliderElement, 'range-slider')
+          sliderMetadataId = rangeSliderController?.metadataIdValue || geneMetadataId
+        } catch (error) {
+          console.warn('GeneManager: Unable to resolve range slider controller when enabling gene filter', error)
+        }
+      }
+      
+      if (rangeSliderController?.setFilterControlsDisabled) {
+        rangeSliderController.setFilterControlsDisabled(false)
       }
     } else {
       filterSwitch.style.backgroundColor = '#d1d5db'
@@ -2394,11 +2445,39 @@ export class GeneManager {
       // Disable filtering - save current range and remove from selectedRanges
       if (this.controller) {
         if (!this.controller.savedRanges) this.controller.savedRanges = {}
-        if (this.controller.selectedRanges && this.controller.selectedRanges[geneMetadataId]) {
-          this.controller.savedRanges[geneMetadataId] = { ...this.controller.selectedRanges[geneMetadataId] }
-          delete this.controller.selectedRanges[geneMetadataId]
+        const existingSelectedKey = resolveExistingMetadataId(this.controller.selectedRanges)
+        if (existingSelectedKey && this.controller.selectedRanges && this.controller.selectedRanges[existingSelectedKey]) {
+          const storedRange = { ...this.controller.selectedRanges[existingSelectedKey] }
+          this.controller.savedRanges[geneMetadataId] = storedRange
+          if (existingSelectedKey !== geneMetadataId) {
+            this.controller.savedRanges[existingSelectedKey] = storedRange
+          }
+          delete this.controller.selectedRanges[existingSelectedKey]
         }
       }
+      
+      if (!this.controller?.disabledFilters || !(this.controller.disabledFilters instanceof Set)) {
+        this.controller.disabledFilters = new Set(this.controller?.disabledFilters || [])
+      }
+      this.controller.disabledFilters.add(sliderMetadataId)
+      this.controller.disabledFilters.add(baseGeneMetadataId)
+      
+      if (!rangeSliderController && sliderElement && this.controller?.application?.getControllerForElementAndIdentifier) {
+        try {
+          rangeSliderController = this.controller.application.getControllerForElementAndIdentifier(sliderElement, 'range-slider')
+          sliderMetadataId = rangeSliderController?.metadataIdValue || geneMetadataId
+        } catch (error) {
+          console.warn('GeneManager: Unable to resolve range slider controller when disabling gene filter', error)
+        }
+      }
+      
+      if (rangeSliderController?.setFilterControlsDisabled) {
+        rangeSliderController.setFilterControlsDisabled(true)
+      }
+    }
+    
+    if (rangeSliderController && typeof rangeSliderController.drawDensityPlot === 'function') {
+      rangeSliderController.drawDensityPlot()
     }
     
     // Update filtering

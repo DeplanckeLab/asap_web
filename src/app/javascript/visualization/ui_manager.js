@@ -853,7 +853,7 @@ export class UIManager {
     
     // DEBUG: Log who's calling this function
     // console.log(`⏱️ [PERF] updateSidebarCategoryCounts called from:`)
-    console.trace()
+    //console.trace()
     
     // Find all category checkboxes that are currently visible (display !== 'none')
     const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')

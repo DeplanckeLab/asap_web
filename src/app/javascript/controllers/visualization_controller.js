@@ -11453,8 +11453,8 @@ export default class extends Controller {
     const maxCount = this.dataManager.safeMax(histogram)
     
     // Draw histogram
-    ctx.fillStyle = '#3b82f6'
-    ctx.strokeStyle = '#1d4ed8'
+    ctx.fillStyle = '#4b5563'
+    ctx.strokeStyle = '#374151'
     ctx.lineWidth = 1
     
     const margins = this.rendererManager.getPlotMargins()
@@ -11473,7 +11473,7 @@ export default class extends Controller {
     const minX = ((currentMin - min) / (max - min)) * width
     const maxX = ((currentMax - min) / (max - min)) * width
     
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.18)'
     ctx.fillRect(minX, 0, maxX - minX, height)
     
     // Draw range lines

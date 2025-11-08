@@ -953,7 +953,7 @@ export default class extends Controller {
     }))
     
     // Draw bars
-    ctx.fillStyle = '#e0e0e0'
+    ctx.fillStyle = '#9ca3af'
     this.binData.forEach((bin, i) => {
       ctx.fillRect(bin.x, bin.y, bin.width, bin.height)
     })
@@ -965,7 +965,7 @@ export default class extends Controller {
     
     // Check if filter is disabled (gray) or enabled (blue)
     const isFilterDisabled = this.visualizationController?.disabledFilters?.has(this.metadataIdValue)
-    ctx.fillStyle = isFilterDisabled ? 'rgba(209, 213, 219, 0.5)' : 'rgba(0, 123, 255, 0.3)' // gray or blue
+    ctx.fillStyle = isFilterDisabled ? 'rgba(209, 213, 219, 0.5)' : 'rgba(59, 130, 246, 0.18)' // gray or blue
     const overlayX = leftMargin + minPercent * plotWidth
     const overlayWidth = (maxPercent - minPercent) * plotWidth
     ctx.fillRect(overlayX, topMargin, overlayWidth, plotHeight)

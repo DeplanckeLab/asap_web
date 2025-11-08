@@ -741,6 +741,17 @@ export default class extends Controller {
     this._lastNumericOrderApplied = null
     this._lastNumericMetadataId = null // Track which metadata the ordering was applied to
     
+    // Invalidate color caches because coordinates are being replaced
+    if (this.colorUpdateCache) {
+      this.colorUpdateCache.clear()
+    }
+    if (this.cachedColorsByCellIndex) {
+      this.cachedColorsByCellIndex.clear()
+    }
+    this.lastColorUpdateHash = null
+    this.lastColoringMetadataId = null
+    this.lastColorRange = null
+    
     // Initialize display order array (identity mapping initially)
     // displayOrder[drawPosition] = originalCellIndex
     this.displayOrder = new Array(coordinates.length)
@@ -779,6 +790,9 @@ export default class extends Controller {
     
     // Populate originalPointColors with default colors for all cells
     // This ensures selected cells can be shown even if no coloring is active
+    if (this.originalPointColors) {
+      this.originalPointColors.clear()
+    }
     const defaultColor = 0x3b82f6 // Default blue
     for (let i = 0; i < coordinates.length; i++) {
       this.originalPointColors.set(i, defaultColor)

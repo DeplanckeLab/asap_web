@@ -60,7 +60,7 @@ export class CustomPlotManager {
   // Check if both x and y are selected and open modal
   checkAndOpen2DPlotModal() {
     if (this.controller.selectedXButton && this.controller.selectedYButton) {
-      console.log('📊 Both x and y buttons selected, opening 2D plot modal...')
+      // console.log('Both x and y buttons selected, opening 2D plot modal...')
       this.open2DPlotModal()
     }
   }
@@ -773,22 +773,22 @@ export class CustomPlotManager {
       const xMetadataId = xIsGene ? (xGeneInfo?.layerKey || xGeneInfo?.baseKey || xButtonInfo.metadataId) : xButtonInfo.metadataId
       const yMetadataId = yIsGene ? (yGeneInfo?.layerKey || yGeneInfo?.baseKey || yButtonInfo.metadataId) : yButtonInfo.metadataId
 
-      console.log('📊 Loading data for 2D plot:', {
-        xMetadataId,
-        yMetadataId,
-        xStableId: xGeneInfo?.stableId,
-        yStableId: yGeneInfo?.stableId,
-        xBaseMetadataId: xGeneInfo?.baseKey,
-        yBaseMetadataId: yGeneInfo?.baseKey,
-        currentLayer: this.controller?.geneManager?.currentMatrixLayer,
-        currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
-      })
+      // console.log('Loading data for 2D plot:', {
+      //   xMetadataId,
+      //   yMetadataId,
+      //   xStableId: xGeneInfo?.stableId,
+      //   yStableId: yGeneInfo?.stableId,
+      //   xBaseMetadataId: xGeneInfo?.baseKey,
+      //   yBaseMetadataId: yGeneInfo?.baseKey,
+      //   currentLayer: this.controller?.geneManager?.currentMatrixLayer,
+      //   currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
+      // })
       
       // Load x vector
       let xVector = null
       if (xIsGene) {
         if (!xGeneInfo) {
-          console.warn('📊 X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
+          console.warn('X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
         } else {
           const stableId = xGeneInfo.stableId
           const stableIdNum = Number(stableId)
@@ -798,7 +798,7 @@ export class CustomPlotManager {
           for (const key of candidateKeys) {
             if (this.controller.loadedMetadataVectors?.[key]?.values) {
               xVector = this.controller.loadedMetadataVectors[key]
-              console.log(`📊 X-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
+              // console.log(`X-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
               break
             }
           }
@@ -807,7 +807,7 @@ export class CustomPlotManager {
             let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
 
             if (geneData && geneData.values && geneData.values.length > 0) {
-              console.log(`📊 X-axis: Found gene ${stableId} in geneExpressionData`)
+              // console.log(`X-axis: Found gene ${stableId} in geneExpressionData`)
             } else {
               let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
 
@@ -819,7 +819,7 @@ export class CustomPlotManager {
               }
 
               if (!gene) {
-                console.warn(`📊 X-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
+                console.warn(`X-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
                 if (this.controller.geneManager) {
                   try {
                     const geneObj = {
@@ -831,7 +831,7 @@ export class CustomPlotManager {
                     await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
                     geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
                   } catch (error) {
-                    console.error(`📊 X-axis: Failed to lazily load gene ${stableId}`, error)
+                    console.error(`X-axis: Failed to lazily load gene ${stableId}`, error)
                   }
                 }
               } else {
@@ -839,7 +839,7 @@ export class CustomPlotManager {
                   await this.controller.geneManager.loadGeneExpressionData(gene, null)
                   geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
                 } catch (error) {
-                  console.error(`📊 X-axis: Error loading gene ${stableId} from geneTags`, error)
+                  console.error(`X-axis: Error loading gene ${stableId} from geneTags`, error)
                 }
               }
             }
@@ -886,7 +886,7 @@ export class CustomPlotManager {
       let yVector = null
       if (yIsGene) {
         if (!yGeneInfo) {
-          console.warn('📊 Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
+          console.warn('Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
         } else {
           const stableId = yGeneInfo.stableId
           const stableIdNum = Number(stableId)
@@ -896,7 +896,7 @@ export class CustomPlotManager {
           for (const key of candidateKeys) {
             if (this.controller.loadedMetadataVectors?.[key]?.values) {
               yVector = this.controller.loadedMetadataVectors[key]
-              console.log(`📊 Y-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
+              // console.log(`Y-axis: Found gene ${stableId} in loadedMetadataVectors using key ${key}`)
               break
             }
           }
@@ -905,7 +905,7 @@ export class CustomPlotManager {
             let geneData = geneDataStore[stableId] || geneDataStore[stableIdNum]
 
             if (geneData && geneData.values && geneData.values.length > 0) {
-              console.log(`📊 Y-axis: Found gene ${stableId} in geneExpressionData`)
+              // console.log(`Y-axis: Found gene ${stableId} in geneExpressionData`)
             } else {
               let gene = this.controller.geneManager?.geneTags?.find(g => String(g.stableId) === stableId || Number(g.stableId) === stableIdNum)
 
@@ -917,7 +917,7 @@ export class CustomPlotManager {
               }
 
               if (!gene) {
-                console.warn(`📊 Y-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
+                console.warn(`Y-axis: Gene ${stableId} not found in geneTags; attempting lazy load`)
                 if (this.controller.geneManager) {
                   try {
                     const geneObj = {
@@ -929,7 +929,7 @@ export class CustomPlotManager {
                     await this.controller.geneManager.loadGeneExpressionData(geneObj, null)
                     geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
                   } catch (error) {
-                    console.error(`📊 Y-axis: Failed to lazily load gene ${stableId}`, error)
+                    console.error(`Y-axis: Failed to lazily load gene ${stableId}`, error)
                   }
                 }
               } else {
@@ -937,7 +937,7 @@ export class CustomPlotManager {
                   await this.controller.geneManager.loadGeneExpressionData(gene, null)
                   geneData = this.controller.geneManager?.geneExpressionData?.[stableId] || this.controller.geneManager?.geneExpressionData?.[stableIdNum]
                 } catch (error) {
-                  console.error(`📊 Y-axis: Error loading gene ${stableId} from geneTags`, error)
+                  console.error(`Y-axis: Error loading gene ${stableId} from geneTags`, error)
                 }
               }
             }
@@ -1240,7 +1240,7 @@ export class CustomPlotManager {
       return
     }
     
-    console.log('📊 Refreshing 2D plot modal due to coloring change')
+    // console.log('Refreshing 2D plot modal due to coloring change')
     
     try {
       // Get the canvas and data vectors
@@ -1257,14 +1257,14 @@ export class CustomPlotManager {
       const yMetadataId = yIsGene ? (yGeneInfo?.layerKey || yGeneInfo?.baseKey || yButtonInfo.metadataId) : yButtonInfo.metadataId
       
       // Log current layer usage for verification
-      console.log('📊 Refreshing 2D plot with metadata IDs:', {
-        xMetadataId,
-        yMetadataId,
-        xStableId: xGeneInfo?.stableId,
-        yStableId: yGeneInfo?.stableId,
-        currentLayer: this.controller?.geneManager?.currentMatrixLayer,
-        currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
-      })
+      // console.log('Refreshing 2D plot with metadata IDs:', {
+      //   xMetadataId,
+      //   yMetadataId,
+      //   xStableId: xGeneInfo?.stableId,
+      //   yStableId: yGeneInfo?.stableId,
+      //   currentLayer: this.controller?.geneManager?.currentMatrixLayer,
+      //   currentAnnotId: this.controller?.geneManager?.currentMatrixAnnotId
+      // })
       
       // Get filtered indices
       const filteredIndices = this.controller.dataManager?.getIncrementalFilteredIndices()
@@ -1273,7 +1273,7 @@ export class CustomPlotManager {
       let xVector = null
       if (xIsGene) {
         if (!xGeneInfo) {
-          console.warn('📊 Refresh X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
+          console.warn('Refresh X-axis: Unable to resolve gene metadata identifiers', xButtonInfo)
         } else {
           const stableId = xGeneInfo.stableId
           const stableIdNum = Number(stableId)
@@ -1333,7 +1333,7 @@ export class CustomPlotManager {
       let yVector = null
       if (yIsGene) {
         if (!yGeneInfo) {
-          console.warn('📊 Refresh Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
+          console.warn('Refresh Y-axis: Unable to resolve gene metadata identifiers', yButtonInfo)
         } else {
           const stableId = yGeneInfo.stableId
           const stableIdNum = Number(stableId)
@@ -1411,7 +1411,7 @@ export class CustomPlotManager {
   
   // Render scatter plot for 2D modal (both x and y are numerical)
   async renderScatterPlot2D(canvas, xVector, yVector, filteredIndices) {
-    console.log('📊 Rendering scatter plot 2D')
+    // console.log('Rendering scatter plot 2D')
     
     const ctx = canvas.getContext('2d')
     const width = canvas.width
@@ -1435,13 +1435,23 @@ export class CustomPlotManager {
     // Apply filtering
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     const dataPoints = []
+    let xMin = Infinity
+    let xMax = -Infinity
+    let yMin = Infinity
+    let yMax = -Infinity
     for (let i = 0; i < xValues.length; i++) {
       if (!filteredSet || filteredSet.has(i)) {
+        const x = xValues[i]
+        const y = yValues[i]
         dataPoints.push({
-          x: xValues[i],
-          y: yValues[i],
+          x,
+          y,
           cellIndex: i
         })
+        if (x < xMin) xMin = x
+        if (x > xMax) xMax = x
+        if (y < yMin) yMin = y
+        if (y > yMax) yMax = y
       }
     }
     
@@ -1453,11 +1463,11 @@ export class CustomPlotManager {
       return
     }
     
-    // Calculate bounds
-    const xMin = Math.min(...dataPoints.map(p => p.x))
-    const xMax = Math.max(...dataPoints.map(p => p.x))
-    const yMin = Math.min(...dataPoints.map(p => p.y))
-    const yMax = Math.max(...dataPoints.map(p => p.y))
+    // Calculate bounds (ensure finite defaults)
+    if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+      console.error('Unable to determine bounds for scatter plot', { xMin, xMax, yMin, yMax })
+      return
+    }
     
     const xRange = xMax - xMin || 1
     const yRange = yMax - yMin || 1
@@ -1613,12 +1623,12 @@ export class CustomPlotManager {
     this.setupCanvasInteractions(canvas)
     this.drawSelectionHighlights()
     
-    console.log('📊 Scatter plot rendered with', dataPoints.length, 'points')
+    // console.log('Scatter plot rendered with', dataPoints.length, 'points')
   }
   
   // Render violin plot for 2D modal (x is categorical)
   async renderViolinPlot2D(canvas, xVector, yVector, filteredIndices) {
-    console.log('📊 Rendering violin plot 2D')
+    // console.log('Rendering violin plot 2D')
     
     const ctx = canvas.getContext('2d')
     const width = canvas.width
@@ -1918,7 +1928,7 @@ export class CustomPlotManager {
       ctx.restore()
     })
     
-    console.log('📊 Violin plot rendered with', categories.length, 'categories')
+    // console.log('Violin plot rendered with', categories.length, 'categories')
   }
   
   // Get axis label with gene symbol and Ensembl ID if available

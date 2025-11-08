@@ -3527,9 +3527,19 @@ export default class extends Controller {
         // Trigger reflow to ensure transition works
         categoriesDiv.offsetHeight
         
-        // Expand with animation
-        categoriesDiv.style.maxHeight = '2000px' // Larger for categories list
+        // Expand with animation to the element's natural height
+        const targetHeight = categoriesDiv.scrollHeight
+        categoriesDiv.style.maxHeight = `${targetHeight}px`
         categoriesDiv.style.opacity = '1'
+        
+        const handleExpandTransitionEnd = (event) => {
+          if (event.propertyName === 'max-height') {
+            categoriesDiv.style.maxHeight = 'none'
+            categoriesDiv.style.overflow = 'visible'
+            categoriesDiv.removeEventListener('transitionend', handleExpandTransitionEnd)
+          }
+        }
+        categoriesDiv.addEventListener('transitionend', handleExpandTransitionEnd)
         // console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Load metadata vector when expanding categories (for future coloring)
@@ -3607,12 +3617,26 @@ export default class extends Controller {
         }, 300) // Match transition duration
       } else {
         // Collapse with animation
+        categoriesDiv.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+        categoriesDiv.style.overflow = 'hidden'
+        
+        // If maxHeight is 'none', set it to the current height so the transition works
+        if (categoriesDiv.style.maxHeight === '' || categoriesDiv.style.maxHeight === 'none') {
+          categoriesDiv.style.maxHeight = `${categoriesDiv.scrollHeight}px`
+          // Trigger reflow
+          categoriesDiv.offsetHeight
+        }
+        
         categoriesDiv.style.maxHeight = '0px'
         categoriesDiv.style.opacity = '0'
         
         // Hide after transition completes
         setTimeout(() => {
           categoriesDiv.style.display = 'none'
+          categoriesDiv.style.maxHeight = ''
+          categoriesDiv.style.opacity = ''
+          categoriesDiv.style.transition = ''
+          categoriesDiv.style.overflow = ''
         }, 300) // Match transition duration
       }
       

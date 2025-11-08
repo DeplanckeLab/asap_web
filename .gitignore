@@ -44,3 +44,4 @@ src/package-lock.json
 
 # Ignore Byebug command history file.
 #.byebug_history
+.env_asap_run

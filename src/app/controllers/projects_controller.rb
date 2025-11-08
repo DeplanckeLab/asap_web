@@ -566,7 +566,12 @@ class ProjectsController < ApplicationController
         Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"
         Rails.logger.info "Metadata path: #{metadata.name}, Data type: #{metadata.data_type.name}"
         Rails.logger.info "Loom file path: #{loom_path}"
-        Rails.logger.info "Full command will be: java -jar lib/ASAP.jar -T ExtractMetadata -meta '#{metadata.name}' -loom '#{loom_path}'"
+        preview_cmd = H5DataService.asap_command(
+          '-T', 'ExtractMetadata',
+          '-meta', metadata.name,
+          '-loom', loom_path.to_s
+        )
+        Rails.logger.info "Full command will be: #{H5DataService.command_to_string(preview_cmd)}"
         
         # Get the raw metadata vector
         raw_vector = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)

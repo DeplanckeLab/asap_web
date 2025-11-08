@@ -3,15 +3,27 @@ require 'json'
 require 'shellwords'
 
 class H5DataService
+  ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run').freeze
+
+  def self.asap_command(*args)
+    ['docker', 'exec', ASAP_RUN_CONTAINER, 'java', '-jar', '/srv/ASAP.jar'] + args
+  end
+
+  def self.command_to_string(cmd_array)
+    Shellwords.join(cmd_array)
+  end
+
   # 1. Gene expression data
   def self.get_gene_data(genes, h5_path)
-    # Construct the command to query the h5 file
-    # Adjust the command based on your actual h5 query tool
-    # Escape gene names that might contain special characters
-    escaped_genes = genes.map { |g| g.gsub("'", "\\'") }
-    cmd = "java -jar lib/ASAP.jar -T ExtractRow -loom #{h5_path} -iAnnot /matrix -names '#{escaped_genes.join(',')}'"
+    sanitized_genes = genes.map(&:to_s)
+    cmd = asap_command(
+      '-T', 'ExtractRow',
+      '-loom', h5_path,
+      '-iAnnot', '/matrix',
+      '-names', sanitized_genes.join(',')
+    )
 
-    stdout, stderr, status = Open3.capture3(cmd)
+    stdout, stderr, status = Open3.capture3(*cmd)
 
     if status.success?
       begin
@@ -32,10 +44,14 @@ class H5DataService
     # Use indexes (IDs) instead of names to avoid comma-separation issues
     # Convert pathway IDs to 0-based indexes (assuming IDs start from 1)
     indexes = pathway_ids.map { |id| (id.to_i - 1).to_s }
-    annot_flag = Shellwords.escape(annot_name)
-    cmd = "java -jar lib/ASAP.jar -T ExtractRow -loom #{h5_path} -iAnnot #{annot_flag} -indexes #{indexes.join(',')}"
+    cmd = asap_command(
+      '-T', 'ExtractRow',
+      '-loom', h5_path,
+      '-iAnnot', annot_name,
+      '-indexes', indexes.join(',')
+    )
 
-    stdout, stderr, status = Open3.capture3(cmd)
+    stdout, stderr, status = Open3.capture3(*cmd)
 
     if status.success?
       begin
@@ -59,9 +75,13 @@ class H5DataService
 
   # 3. Annotation categories (category => [cell_ids])
   def self.get_annotation_categories(h5_path, annot_name, dataset_metadata_path = nil)
-    cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -meta /col_attrs/#{annot_name} -loom #{h5_path}"
+    cmd = asap_command(
+      '-T', 'ExtractMetadata',
+      '-meta', "/col_attrs/#{annot_name}",
+      '-loom', h5_path
+    )
 
-    stdout, stderr, status = Open3.capture3(cmd)
+    stdout, stderr, status = Open3.capture3(*cmd)
 
     raise "Failed to extract annotation metadata: #{stderr}" unless status.success?
 
@@ -75,8 +95,12 @@ class H5DataService
 
       # If dataset name is provided, check for dataset filtering
       if dataset_metadata_path and dataset_metadata_path.strip != "Integrated"
-        dataset_cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -meta /col_attrs/Condition -loom #{h5_path}"
-        dataset_stdout, dataset_stderr, dataset_status = Open3.capture3(dataset_cmd)
+        dataset_cmd = asap_command(
+          '-T', 'ExtractMetadata',
+          '-meta', '/col_attrs/Condition',
+          '-loom', h5_path
+        )
+        dataset_stdout, dataset_stderr, dataset_status = Open3.capture3(*dataset_cmd)
 
         if dataset_status.success?
           dataset_meta = JSON.parse(dataset_stdout)
@@ -128,28 +152,33 @@ class H5DataService
   def self.get_metadata_values(h5_file, metadata_path)
     begin
       # Use ASAP.jar to extract metadata values with -no-values flag for clean summary
-      cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -no-values -meta #{metadata_path} -loom #{h5_file}"
-      result = `#{cmd}`
+      cmd = asap_command(
+        '-T', 'ExtractMetadata',
+        '-no-values',
+        '-meta', metadata_path,
+        '-loom', h5_file
+      )
+      stdout, stderr, status = Open3.capture3(*cmd)
 
-      if $?.success?
+      if status.success?
         # Parse the JSON output to extract unique category names
         begin
-          json_data = JSON.parse(result)
+          json_data = JSON.parse(stdout)
           categories = json_data['categories']
           if categories
             # Return just the category names (keys) as an array
             categories.keys.sort
           else
-            Rails.logger.error "No categories found in metadata output: #{result}"
+            Rails.logger.error "No categories found in metadata output: #{stdout}"
             []
           end
         rescue JSON::ParserError => e
           Rails.logger.error "Failed to parse JSON from metadata extraction: #{e.message}"
-          Rails.logger.error "Raw output: #{result}"
+          Rails.logger.error "Raw output: #{stdout}"
           []
         end
       else
-        Rails.logger.error "Failed to extract metadata from #{metadata_path}: #{result}"
+        Rails.logger.error "Failed to extract metadata from #{metadata_path}: #{stderr}"
         []
       end
     rescue => e
@@ -163,15 +192,19 @@ class H5DataService
     error_details = {}
     begin
       # Use ASAP.jar to extract the full metadata vector (with values)
-      cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -meta #{metadata_path} -loom #{h5_file}"
-      Rails.logger.info "Executing ASAP.jar command: #{cmd}"
+      cmd = asap_command(
+        '-T', 'ExtractMetadata',
+        '-meta', metadata_path,
+        '-loom', h5_file
+      )
+      Rails.logger.info "Executing ASAP.jar command: #{command_to_string(cmd)}"
       file_exists = File.exist?(h5_file)
       Rails.logger.info "File exists? #{file_exists}"
       error_details[:file_exists] = file_exists
       error_details[:file_path] = h5_file
       
       # Use Open3.capture3 to properly capture stdout and stderr
-      stdout, stderr, status = Open3.capture3(cmd)
+      stdout, stderr, status = Open3.capture3(*cmd)
       result = stdout
       
       Rails.logger.info "Command exit status: #{status.exitstatus}"
@@ -293,7 +326,7 @@ class H5DataService
       else
         error_msg = "ASAP.jar command failed (exit status: #{status.exitstatus})"
         Rails.logger.error error_msg
-        Rails.logger.error "Command: #{cmd}"
+        Rails.logger.error "Command: #{command_to_string(cmd)}"
         Rails.logger.error "STDOUT: #{stdout[0..500]}" # First 500 chars
         Rails.logger.error "STDERR: #{stderr}" if stderr && !stderr.empty?
         Rails.logger.error "File path: #{h5_file}, exists: #{File.exist?(h5_file)}"

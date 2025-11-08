@@ -12472,9 +12472,10 @@ export default class extends Controller {
     }
     
     // Sheet 1 (or 2 if filters exist): Category Summary (with total and filtered counts)
+    const metadataLabel = displayedMetadataVector.name || 'Category'
     const summaryData = hasFilters 
-      ? [['Category', 'Total Cells', 'Total %', 'Filtered Cells', 'Filtered %']]
-      : [['Category', 'Cell Count', 'Percentage']]
+      ? [[metadataLabel, 'Total Cells', 'Total %', 'Filtered Cells', 'Filtered %']]
+      : [[metadataLabel, 'Cell Count', 'Percentage']]
     
     sortedCategories.forEach(category => {
       const totalCount = totalCategoryCounts[category] || 0
@@ -12516,7 +12517,7 @@ export default class extends Controller {
     const filename = `${projectKey}_${displayedMetadataName}_all-categories${coloringSuffix}.xlsx`
     
     // Write and download
-    window.XLSX.writeFile(wb, filename)
+    window.XLSX.writeFile(wb, filename, { cellStyles: true })
     
     // console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
   }
@@ -12537,8 +12538,14 @@ export default class extends Controller {
             // Only add if not all categories are selected (i.e., it's actually filtering)
             if (selectedCats.size < allCategories.length) {
               const selectedList = [...selectedCats].join(', ')
-              const filterDetail = `Selected ${selectedCats.size} of ${allCategories.length} categories: ${selectedList}`
-              filtersData.push(['Categorical', metadataName, filterDetail])
+              const unselectedCategories = allCategories.filter(category => !selectedCats.has(category))
+              const unselectedList = unselectedCategories.join(', ')
+              
+              const selectedDetail = `Selected (${selectedCats.size}/${allCategories.length}): ${selectedList || 'none'}`
+              const unselectedDetail = `Unselected (${unselectedCategories.length}/${allCategories.length}): ${unselectedList || 'none'}`
+              
+              filtersData.push(['Categorical', metadataName, selectedDetail])
+              filtersData.push(['', '', unselectedDetail])
             }
           }
         }
@@ -12558,8 +12565,17 @@ export default class extends Controller {
           if (metadataVector) {
             const metadataName = metadataVector.name || `Metadata ${metadataId}`
             const values = metadataVector.values.filter(v => v !== null && v !== undefined && !isNaN(v))
-            const globalMin = Math.min(...values)
-            const globalMax = Math.max(...values)
+            
+            if (values.length === 0) {
+              continue
+            }
+            
+            let globalMin = Infinity
+            let globalMax = -Infinity
+            values.forEach(value => {
+              if (value < globalMin) globalMin = value
+              if (value > globalMax) globalMax = value
+            })
             
             // Check if it's a subrange (not the full range)
             const isFullRange = (Math.abs(range.min - globalMin) < 0.0001 && Math.abs(range.max - globalMax) < 0.0001)
@@ -12575,6 +12591,7 @@ export default class extends Controller {
     // Only add the sheet if there are actual filters (more than just the header row)
     if (filtersData.length > 1) {
       const ws = window.XLSX.utils.aoa_to_sheet(filtersData)
+      
       window.XLSX.utils.book_append_sheet(wb, ws, 'Active Filters')
     }
   }
@@ -12593,8 +12610,11 @@ export default class extends Controller {
     })
     
     // Create distribution data for counts and percentages separately
-    const distributionCountsData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (# cells)`)]]
-    const distributionPercentagesData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (% cells)`)]]
+    const displayedLabel = displayedMetadataVector.name || 'Category'
+    const coloringLabel = coloringMetadataVector.name || 'Coloring'
+    const columnHeader = `${displayedLabel} \\ ${coloringLabel}`
+    const distributionCountsData = [[columnHeader, ...sortedColoringCategories.map(cat => `${cat} (# cells)`)]]
+    const distributionPercentagesData = [[columnHeader, ...sortedColoringCategories.map(cat => `${cat} (% cells)`)]]
     
     sortedCategories.forEach(displayedCategory => {
       // Find cells in this category (filtered only)

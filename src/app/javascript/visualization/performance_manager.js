@@ -9,12 +9,12 @@ export class PerformanceManager {
     this.controller.performanceMetrics.lastUpdateTime = duration
     this.controller.performanceMetrics.maxUpdateTime = Math.max(this.controller.performanceMetrics.maxUpdateTime, duration)
     
-    console.log(`📊 [PERF] ${operationName}: ${duration.toFixed(2)}ms (Total updates: ${this.controller.performanceMetrics.updateCount})`)
+    // console.log(`📊 [PERF] ${operationName}: ${duration.toFixed(2)}ms (Total updates: ${this.controller.performanceMetrics.updateCount})`)
   }
 
   // Assess performance after preloading
   async assessPerformanceAfterPreload() {
-    console.log(`\n🔍 [PERF] Assessing performance after preloading...`)
+    // console.log(`\n🔍 [PERF] Assessing performance after preloading...`)
     
     // Memory usage analysis
     const memoryInfo = this.controller.memoryManager.logMemoryUsage('Performance Assessment')
@@ -23,8 +23,8 @@ export class PerformanceManager {
     const loadedMetadataCount = Object.keys(this.controller.loadedMetadataVectors).length
     const loadingCount = this.controller.loadingMetadataVectors.size
     
-    console.log(`📊 [PERF] Loaded metadata vectors: ${loadedMetadataCount}`)
-    console.log(`📊 [PERF] Currently loading: ${loadingCount}`)
+    // console.log(`📊 [PERF] Loaded metadata vectors: ${loadedMetadataCount}`)
+    // console.log(`📊 [PERF] Currently loading: ${loadingCount}`)
     
     // Estimate total memory usage
     let totalEstimatedMemory = 0
@@ -36,20 +36,20 @@ export class PerformanceManager {
       }
     })
     
-    console.log(`📊 [PERF] Estimated metadata memory usage: ${totalEstimatedMemory.toFixed(2)}MB`)
+    // console.log(`📊 [PERF] Estimated metadata memory usage: ${totalEstimatedMemory.toFixed(2)}MB`)
     
     // Performance recommendations
     if (loadedMetadataCount > 10) {
-      console.log(`⚠️ [PERF] High metadata count (${loadedMetadataCount}) - consider enabling auto-cleanup`)
+      // console.log(`⚠️ [PERF] High metadata count (${loadedMetadataCount}) - consider enabling auto-cleanup`)
     }
     
     if (totalEstimatedMemory > 100) {
-      console.log(`⚠️ [PERF] High memory usage (${totalEstimatedMemory.toFixed(2)}MB) - consider reducing buffer size`)
+      // console.log(`⚠️ [PERF] High memory usage (${totalEstimatedMemory.toFixed(2)}MB) - consider reducing buffer size`)
     }
     
     // Check if memory optimization is needed
     if (loadedMetadataCount > this.controller.maxMetadataInMemory || totalEstimatedMemory > 200) {
-      console.log(`🔧 [PERF] Triggering memory optimization...`)
+      // console.log(`🔧 [PERF] Triggering memory optimization...`)
       this.controller.memoryManager.optimizeMemoryUsage()
     }
     
@@ -62,48 +62,48 @@ export class PerformanceManager {
 
   // Run emergency diagnostic
   runEmergencyDiagnostic() {
-    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Starting...`)
+    // console.log(`🚨 [EMERGENCY DIAGNOSTIC] Starting...`)
     
-    console.log(`🔍 Loading call counts:`, this.controller.loadingCallCount ? Object.fromEntries(this.controller.loadingCallCount) : 'None')
-    console.log(`🔍 Current metadata ID:`, this.controller.currentMetadataId)
-    console.log(`🔍 Current coordinates length:`, this.controller.currentCoordinates?.length || 0)
-    console.log(`🔍 Current visible cells:`, this.controller.currentVisibleCells?.length || 0)
-    console.log(`🔍 Selected cells:`, this.controller.selectedCells?.size || 0)
-    console.log(`🔍 Loaded metadata vectors:`, Object.keys(this.controller.loadedMetadataVectors))
-    console.log(`🔍 Currently loading:`, Array.from(this.controller.loadingMetadataVectors))
+    // console.log(`🔍 Loading call counts:`, this.controller.loadingCallCount ? Object.fromEntries(this.controller.loadingCallCount) : 'None')
+    // console.log(`🔍 Current metadata ID:`, this.controller.currentMetadataId)
+    // console.log(`🔍 Current coordinates length:`, this.controller.currentCoordinates?.length || 0)
+    // console.log(`🔍 Current visible cells:`, this.controller.currentVisibleCells?.length || 0)
+    // console.log(`🔍 Selected cells:`, this.controller.selectedCells?.size || 0)
+    // console.log(`🔍 Loaded metadata vectors:`, Object.keys(this.controller.loadedMetadataVectors))
+    // console.log(`🔍 Currently loading:`, Array.from(this.controller.loadingMetadataVectors))
     
     // Check renderer state
-    console.log(`🔍 Renderer type:`, this.controller.rendererType)
-    console.log(`🔍 ReGL renderer:`, !!this.controller.reglRenderer)
-    console.log(`🔍 PIXI app:`, !!this.controller.pixiApp)
+    // console.log(`🔍 Renderer type:`, this.controller.rendererType)
+    // console.log(`🔍 ReGL renderer:`, !!this.controller.reglRenderer)
+    // console.log(`🔍 PIXI app:`, !!this.controller.pixiApp)
     
     // Check canvas state
     const canvas = document.querySelector('canvas')
     if (canvas) {
-      console.log(`🔍 Canvas dimensions:`, canvas.width, 'x', canvas.height)
-      console.log(`🔍 Canvas style:`, canvas.style.cssText)
+      // console.log(`🔍 Canvas dimensions:`, canvas.width, 'x', canvas.height)
+      // console.log(`🔍 Canvas style:`, canvas.style.cssText)
     } else {
-      console.log(`❌ Canvas not found!`)
+      // console.log(`❌ Canvas not found!`)
     }
     
     // Check plot container
     const plotContainer = document.querySelector('.plot-container')
     if (plotContainer) {
-      console.log(`🔍 Plot container found:`, plotContainer.className)
-      console.log(`🔍 Plot container dimensions:`, plotContainer.offsetWidth, 'x', plotContainer.offsetHeight)
+      // console.log(`🔍 Plot container found:`, plotContainer.className)
+      // console.log(`🔍 Plot container dimensions:`, plotContainer.offsetWidth, 'x', plotContainer.offsetHeight)
     } else {
-      console.log(`❌ Plot container not found!`)
+      // console.log(`❌ Plot container not found!`)
     }
     
     // Memory check
     this.controller.memoryManager.logMemoryUsage('Emergency Diagnostic')
     
-    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Complete`)
+    // console.log(`🚨 [EMERGENCY DIAGNOSTIC] Complete`)
   }
 
   // Create diagnostic button for troubleshooting
   createDiagnosticButton() {
-    console.log('🔍 [DIAGNOSTIC] Creating diagnostic button...')
+    // console.log('🔍 [DIAGNOSTIC] Creating diagnostic button...')
     
     // Hide the diagnostic button - return early without creating it
     return
@@ -111,7 +111,7 @@ export class PerformanceManager {
     // Check if button already exists
     let diagnosticBtn = document.getElementById('emergency-diagnostic-btn')
     if (diagnosticBtn) {
-      console.log('🔍 [DIAGNOSTIC] Button already exists, removing old one')
+      // console.log('🔍 [DIAGNOSTIC] Button already exists, removing old one')
       diagnosticBtn.remove()
     }
     
@@ -139,17 +139,17 @@ export class PerformanceManager {
     })
     
     document.body.appendChild(diagnosticBtn)
-    console.log('🔍 [DIAGNOSTIC] Emergency diagnostic button created')
+    // console.log('🔍 [DIAGNOSTIC] Emergency diagnostic button created')
     
     // Auto-hide after 30 seconds
     setTimeout(() => {
       if (diagnosticBtn && diagnosticBtn.parentNode) {
         diagnosticBtn.remove()
-        console.log('🔍 [DIAGNOSTIC] Button auto-hidden after 30 seconds')
+        // console.log('🔍 [DIAGNOSTIC] Button auto-hidden after 30 seconds')
       }
     }, 30000)
     
-    console.log('🔍 [DIAGNOSTIC] You can also call window.showDiagnosticButton() to manually show the button')
+    // console.log('🔍 [DIAGNOSTIC] You can also call window.showDiagnosticButton() to manually show the button')
   }
 
   // Show diagnostic button manually
@@ -159,11 +159,11 @@ export class PerformanceManager {
 
   // Run emergency diagnostic
   runEmergencyDiagnostic() {
-    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Starting...`)
+    // console.log(`🚨 [EMERGENCY DIAGNOSTIC] Starting...`)
     
-    console.log(`🔍 Loading call counts:`, this.controller.loadingCallCount ? Object.fromEntries(this.controller.loadingCallCount) : 'None')
-    console.log(`🔍 Currently loading:`, Array.from(this.controller.loadingMetadataVectors))
-    console.log(`🔍 Loaded in memory:`, Object.keys(this.controller.loadedMetadataVectors))
+    // console.log(`🔍 Loading call counts:`, this.controller.loadingCallCount ? Object.fromEntries(this.controller.loadingCallCount) : 'None')
+    // console.log(`🔍 Currently loading:`, Array.from(this.controller.loadingMetadataVectors))
+    // console.log(`🔍 Loaded in memory:`, Object.keys(this.controller.loadedMetadataVectors))
     
     // Check for problematic metadata
     if (this.controller.loadingCallCount) {
@@ -176,7 +176,7 @@ export class PerformanceManager {
       }
     }
     
-    console.log(`🚨 [EMERGENCY DIAGNOSTIC] Complete`)
+    // console.log(`🚨 [EMERGENCY DIAGNOSTIC] Complete`)
   }
 
   // Open memory diagnostic window
@@ -398,23 +398,23 @@ export class PerformanceManager {
       const inspectMemoryBtn = document.getElementById('inspect-memory')
       if (inspectMemoryBtn) {
         inspectMemoryBtn.addEventListener('click', () => {
-          console.log('🔍 [MANUAL INSPECT] Inspecting memory directly...')
-          console.log('🔍 [MANUAL INSPECT] controller:', this.controller)
-          console.log('🔍 [MANUAL INSPECT] controller.instanceId:', this.controller.instanceId)
-          console.log('🔍 [MANUAL INSPECT] controller.identifier:', this.controller.identifier)
-          console.log('🔍 [MANUAL INSPECT] controller.element:', this.controller.element)
-          console.log('🔍 [MANUAL INSPECT] typeof loadedMetadataVectors:', typeof this.controller.loadedMetadataVectors)
-          console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors is null?:', this.controller.loadedMetadataVectors === null)
-          console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors is undefined?:', this.controller.loadedMetadataVectors === undefined)
-          console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors:', this.controller.loadedMetadataVectors)
-          console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors keys:', Object.keys(this.controller.loadedMetadataVectors || {}))
-          console.log('🔍 [MANUAL INSPECT] binaryDataCache:', this.controller.binaryDataCache)
-          console.log('🔍 [MANUAL INSPECT] binaryDataCache.size:', this.controller.binaryDataCache?.size)
-          console.log('🔍 [MANUAL INSPECT] metadataData:', this.controller.metadataData)
-          console.log('🔍 [MANUAL INSPECT] currentMetadataVector:', this.controller.currentMetadataVector)
-          console.log('🔍 [MANUAL INSPECT] currentMetadataId:', this.controller.currentMetadataId)
-          console.log('🔍 [MANUAL INSPECT] embeddingsByLoomValue:', this.controller.embeddingsByLoomValue)
-          console.log('🔍 [MANUAL INSPECT] Coloring metadata vector:', this.controller.colorManager?.getColoringMetadataVector())
+          // console.log('🔍 [MANUAL INSPECT] Inspecting memory directly...')
+          // console.log('🔍 [MANUAL INSPECT] controller:', this.controller)
+          // console.log('🔍 [MANUAL INSPECT] controller.instanceId:', this.controller.instanceId)
+          // console.log('🔍 [MANUAL INSPECT] controller.identifier:', this.controller.identifier)
+          // console.log('🔍 [MANUAL INSPECT] controller.element:', this.controller.element)
+          // console.log('🔍 [MANUAL INSPECT] typeof loadedMetadataVectors:', typeof this.controller.loadedMetadataVectors)
+          // console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors is null?:', this.controller.loadedMetadataVectors === null)
+          // console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors is undefined?:', this.controller.loadedMetadataVectors === undefined)
+          // console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors:', this.controller.loadedMetadataVectors)
+          // console.log('🔍 [MANUAL INSPECT] loadedMetadataVectors keys:', Object.keys(this.controller.loadedMetadataVectors || {}))
+          // console.log('🔍 [MANUAL INSPECT] binaryDataCache:', this.controller.binaryDataCache)
+          // console.log('🔍 [MANUAL INSPECT] binaryDataCache.size:', this.controller.binaryDataCache?.size)
+          // console.log('🔍 [MANUAL INSPECT] metadataData:', this.controller.metadataData)
+          // console.log('🔍 [MANUAL INSPECT] currentMetadataVector:', this.controller.currentMetadataVector)
+          // console.log('🔍 [MANUAL INSPECT] currentMetadataId:', this.controller.currentMetadataId)
+          // console.log('🔍 [MANUAL INSPECT] embeddingsByLoomValue:', this.controller.embeddingsByLoomValue)
+          // console.log('🔍 [MANUAL INSPECT] Coloring metadata vector:', this.controller.colorManager?.getColoringMetadataVector())
           alert('Check browser console (F12) for detailed memory inspection')
         })
       }
@@ -423,7 +423,7 @@ export class PerformanceManager {
 
   // Gather diagnostic data
   async gatherMemoryDiagnosticData() {
-    console.log('🔍 [DIAGNOSTIC] Gathering memory diagnostic data...')
+    // console.log('🔍 [DIAGNOSTIC] Gathering memory diagnostic data...')
     
     // Debug: Log all relevant controller properties
     // Try to get size safely
@@ -431,16 +431,16 @@ export class PerformanceManager {
     let binaryDataCacheKeys = []
     try {
       if (this.controller.binaryDataCache) {
-        console.log('🔍 [DIAGNOSTIC] binaryDataCache details:', {
-          constructor: this.controller.binaryDataCache.constructor.name,
-          hasSize: 'size' in this.controller.binaryDataCache,
-          size: this.controller.binaryDataCache.size,
-          sizeType: typeof this.controller.binaryDataCache.size
-        })
+        // console.log('🔍 [DIAGNOSTIC] binaryDataCache details:', {
+          // constructor: this.controller.binaryDataCache.constructor.name,
+          // hasSize: 'size' in this.controller.binaryDataCache,
+          // size: this.controller.binaryDataCache.size,
+          // sizeType: typeof this.controller.binaryDataCache.size
+        // })
         binaryDataCacheSize = this.controller.binaryDataCache.size
         binaryDataCacheKeys = Array.from(this.controller.binaryDataCache.keys())
       } else {
-        console.log('🔍 [DIAGNOSTIC] binaryDataCache is falsy:', this.controller.binaryDataCache)
+        // console.log('🔍 [DIAGNOSTIC] binaryDataCache is falsy:', this.controller.binaryDataCache)
       }
     } catch (e) {
       console.error('Error accessing binaryDataCache:', e)
@@ -454,36 +454,36 @@ export class PerformanceManager {
       if (this.controller.metadataData) {
         metadataDataName = this.controller.metadataData.name || 'no name'
       }
-      console.log('🔍 [DIAGNOSTIC] metadataData details:', {
-        exists: !!this.controller.metadataData,
-        name: metadataDataName
-      })
+      // console.log('🔍 [DIAGNOSTIC] metadataData details:', {
+        // exists: !!this.controller.metadataData,
+        // name: metadataDataName
+      // })
     } catch (e) {
       console.error('Error accessing metadataData:', e)
     }
     
-    console.log('🔍 [DIAGNOSTIC] Controller properties:', {
-      hasLoadedMetadataVectors: !!this.controller.loadedMetadataVectors,
-      loadedMetadataVectorsKeys: Object.keys(this.controller.loadedMetadataVectors || {}),
-      hasBinaryDataCache: !!this.controller.binaryDataCache,
-      binaryDataCacheType: typeof this.controller.binaryDataCache,
-      binaryDataCacheConstructor: this.controller.binaryDataCache ? this.controller.binaryDataCache.constructor.name : 'N/A',
-      binaryDataCacheSize: binaryDataCacheSize,
-      binaryDataCacheKeys: binaryDataCacheKeys,
-      hasEmbeddingsByLoomValue: !!this.controller.embeddingsByLoomValue,
-      embeddingsByLoomValueKeys: this.controller.embeddingsByLoomValue ? Object.keys(this.controller.embeddingsByLoomValue) : [],
-      hasLoadingMetadataVectors: !!this.controller.loadingMetadataVectors,
-      loadingMetadataVectorsSize: this.controller.loadingMetadataVectors ? this.controller.loadingMetadataVectors.size : 0
-    })
+    // console.log('🔍 [DIAGNOSTIC] Controller properties:', {
+      // hasLoadedMetadataVectors: !!this.controller.loadedMetadataVectors,
+      // loadedMetadataVectorsKeys: Object.keys(this.controller.loadedMetadataVectors || {}),
+      // hasBinaryDataCache: !!this.controller.binaryDataCache,
+      // binaryDataCacheType: typeof this.controller.binaryDataCache,
+      // binaryDataCacheConstructor: this.controller.binaryDataCache ? this.controller.binaryDataCache.constructor.name : 'N/A',
+      // binaryDataCacheSize: binaryDataCacheSize,
+      // binaryDataCacheKeys: binaryDataCacheKeys,
+      // hasEmbeddingsByLoomValue: !!this.controller.embeddingsByLoomValue,
+      // embeddingsByLoomValueKeys: this.controller.embeddingsByLoomValue ? Object.keys(this.controller.embeddingsByLoomValue) : [],
+      // hasLoadingMetadataVectors: !!this.controller.loadingMetadataVectors,
+      // loadingMetadataVectorsSize: this.controller.loadingMetadataVectors ? this.controller.loadingMetadataVectors.size : 0
+    // })
     
-    console.log('🔍 [DIAGNOSTIC] About to calculate counts...')
-    console.log('🔍 [DIAGNOSTIC] this.controller:', this.controller)
-    console.log('🔍 [DIAGNOSTIC] this.controller.loadedMetadataVectors:', this.controller.loadedMetadataVectors)
-    console.log('🔍 [DIAGNOSTIC] typeof loadedMetadataVectors:', typeof this.controller.loadedMetadataVectors)
-    console.log('🔍 [DIAGNOSTIC] Object.keys(loadedMetadataVectors):', Object.keys(this.controller.loadedMetadataVectors || {}))
+    // console.log('🔍 [DIAGNOSTIC] About to calculate counts...')
+    // console.log('🔍 [DIAGNOSTIC] this.controller:', this.controller)
+    // console.log('🔍 [DIAGNOSTIC] this.controller.loadedMetadataVectors:', this.controller.loadedMetadataVectors)
+    // console.log('🔍 [DIAGNOSTIC] typeof loadedMetadataVectors:', typeof this.controller.loadedMetadataVectors)
+    // console.log('🔍 [DIAGNOSTIC] Object.keys(loadedMetadataVectors):', Object.keys(this.controller.loadedMetadataVectors || {}))
     
     const metadataCount = Object.keys(this.controller.loadedMetadataVectors || {}).length
-    console.log('🔍 [DIAGNOSTIC] Calculated metadataCount:', metadataCount)
+    // console.log('🔍 [DIAGNOSTIC] Calculated metadataCount:', metadataCount)
     
     const embeddingCount = typeof binaryDataCacheSize === 'number' ? binaryDataCacheSize : 0
     const currentEmbeddingLoaded = !!this.controller.metadataData // Check if currently loaded embedding exists
@@ -491,11 +491,11 @@ export class PerformanceManager {
     const memoryCount = metadataCount + embeddingCount + (currentMetadataLoaded ? 1 : 0) // Total items in memory
     const loadingCount = this.controller.loadingMetadataVectors ? this.controller.loadingMetadataVectors.size : 0
     
-    console.log('🔍 [DIAGNOSTIC] Final counts:', { metadataCount, embeddingCount, currentMetadataLoaded, memoryCount })
+    // console.log('🔍 [DIAGNOSTIC] Final counts:', { metadataCount, embeddingCount, currentMetadataLoaded, memoryCount })
     const maxMemory = this.controller.maxMetadataInMemory || 10
     const memoryUsage = Math.round((metadataCount / maxMemory) * 100)
     
-    console.log('🔍 [DIAGNOSTIC] Counts:', { metadataCount, embeddingCount, memoryCount, loadingCount, currentEmbeddingLoaded })
+    // console.log('🔍 [DIAGNOSTIC] Counts:', { metadataCount, embeddingCount, memoryCount, loadingCount, currentEmbeddingLoaded })
 
     // Count metadata types
     let continuousCount = 0
@@ -529,16 +529,16 @@ export class PerformanceManager {
     if (this.controller.db) {
       try {
         // Get current loom file - use more robust method
-        console.log('🔍 [DEBUG] Diagnostic loom file detection:', {
-          currentLoomFile: this.controller.currentLoomFile,
-          defaultLoomFileValue: this.controller.defaultLoomFileValue
-        })
+        // console.log('🔍 [DEBUG] Diagnostic loom file detection:', {
+          // currentLoomFile: this.controller.currentLoomFile,
+          // defaultLoomFileValue: this.controller.defaultLoomFileValue
+        // })
         
         // If currentLoomFile is not set, try to get it from the same logic as connect method
         if (!this.controller.currentLoomFile) {
-          console.log('🔍 [DEBUG] currentLoomFile not set, using fallback logic')
+          // console.log('🔍 [DEBUG] currentLoomFile not set, using fallback logic')
           const fallbackLoomFile = this.controller.defaultLoomFileValue || 'parsing/output.loom'
-          console.log('🔍 [DEBUG] Using fallback loom file:', fallbackLoomFile)
+          // console.log('🔍 [DEBUG] Using fallback loom file:', fallbackLoomFile)
           currentLoomFile = fallbackLoomFile
         } else {
           currentLoomFile = this.controller.currentLoomFile
@@ -547,7 +547,7 @@ export class PerformanceManager {
         // Note: We avoid accessing loomFileSelectTarget directly to prevent Stimulus errors
         // The currentLoomFile should already be set correctly by the controller's connect method
         
-        console.log('🔍 [DEBUG] Final diagnostic loom file:', currentLoomFile)
+        // console.log('🔍 [DEBUG] Final diagnostic loom file:', currentLoomFile)
         
         // First, try to count items
         try {
@@ -558,7 +558,7 @@ export class PerformanceManager {
           await new Promise((resolve, reject) => {
             countRequest.onsuccess = () => {
               dbCount = countRequest.result
-              console.log(`📊 Database count: ${dbCount} items`)
+              // console.log(`📊 Database count: ${dbCount} items`)
               resolve()
             }
             countRequest.onerror = () => {
@@ -581,7 +581,7 @@ export class PerformanceManager {
           await new Promise((resolve, reject) => {
             getAllRequest.onsuccess = () => {
               const allItems = getAllRequest.result || []
-              console.log(`📊 Retrieved ${allItems.length} items from database`)
+              // console.log(`📊 Retrieved ${allItems.length} items from database`)
               
               allItems.forEach(item => {
                 if (item.data_type === 'NUMERIC') {
@@ -596,7 +596,7 @@ export class PerformanceManager {
                 }
               })
               
-              console.log(`📊 Matching loom items: ${matchingLoomCount}/${allItems.length}`)
+              // console.log(`📊 Matching loom items: ${matchingLoomCount}/${allItems.length}`)
               resolve()
             }
             getAllRequest.onerror = () => {
@@ -667,12 +667,12 @@ export class PerformanceManager {
 
   // Clear memory cache
   clearMemoryCache() {
-    console.log('🚨 [DEBUG] clearMemoryCache() called - clearing all memory!')
+    // console.log('🚨 [DEBUG] clearMemoryCache() called - clearing all memory!')
     console.trace('Call stack:')
     this.controller.loadedMetadataVectors = {}
     this.controller.binaryDataCache.clear()
     this.controller.metadataUsageTracker = {}
-    console.log('Memory cache cleared')
+    // console.log('Memory cache cleared')
   }
 
   // Clear database cache
@@ -680,38 +680,38 @@ export class PerformanceManager {
     if (this.controller.memoryManager) {
       this.controller.memoryManager.clearIndexedDBCache()
     }
-    console.log('Database cache cleared')
+    // console.log('Database cache cleared')
   }
 
   // List all items in the database
   async listDatabaseItems() {
-    console.log('🔍 [DEBUG] Starting database listing...')
-    console.log('🔍 [DEBUG] Controller db:', !!this.controller.db)
-    console.log('🔍 [DEBUG] Controller:', this.controller)
+    // console.log('🔍 [DEBUG] Starting database listing...')
+    // console.log('🔍 [DEBUG] Controller db:', !!this.controller.db)
+    // console.log('🔍 [DEBUG] Controller:', this.controller)
     
     if (!this.controller.db) {
-      console.log('❌ IndexedDB not available')
+      // console.log('❌ IndexedDB not available')
       return
     }
 
     try {
-      console.log('🔍 [DEBUG] Creating transaction...')
+      // console.log('🔍 [DEBUG] Creating transaction...')
       const transaction = this.controller.db.transaction(['metadata'], 'readonly')
       const objectStore = transaction.objectStore('metadata')
       
-      console.log('🔍 [DEBUG] Object store created, getting all items...')
+      // console.log('🔍 [DEBUG] Object store created, getting all items...')
       const getAllRequest = objectStore.getAll()
       
       await new Promise((resolve, reject) => {
         getAllRequest.onsuccess = () => {
-          console.log('🔍 [DEBUG] getAll request successful')
+          // console.log('🔍 [DEBUG] getAll request successful')
           const allItems = getAllRequest.result
           // If currentLoomFile is not set, try to get it from the same logic as connect method
           let currentLoom = 'Unknown'
           if (!this.controller.currentLoomFile) {
-            console.log('🔍 [DEBUG] currentLoomFile not set in database listing, using fallback logic')
+            // console.log('🔍 [DEBUG] currentLoomFile not set in database listing, using fallback logic')
             const fallbackLoomFile = this.controller.defaultLoomFileValue || 'parsing/output.loom'
-            console.log('🔍 [DEBUG] Using fallback loom file for database listing:', fallbackLoomFile)
+            // console.log('🔍 [DEBUG] Using fallback loom file for database listing:', fallbackLoomFile)
             currentLoom = fallbackLoomFile
           } else {
             currentLoom = this.controller.currentLoomFile
@@ -720,25 +720,25 @@ export class PerformanceManager {
           // Note: We avoid accessing loomFileSelectTarget directly to prevent Stimulus errors
           // The currentLoom should already be set correctly by the fallback logic above
           
-          console.log(`\n🗄️ [DATABASE LIST] Found ${allItems.length} items in IndexedDB:`)
-          console.log(`📁 Current Loom File: ${currentLoom}`)
-          console.log('=' * 80)
+          // console.log(`\n🗄️ [DATABASE LIST] Found ${allItems.length} items in IndexedDB:`)
+          // console.log(`📁 Current Loom File: ${currentLoom}`)
+          // console.log('=' * 80)
           
           if (allItems.length === 0) {
-            console.log('📭 No items found in database')
+            // console.log('📭 No items found in database')
           } else {
             allItems.forEach((item, index) => {
               const isMatching = item.loomFile === currentLoom
               const status = isMatching ? '✅ MATCH' : '❌ MISMATCH'
-              console.log(`${index + 1}. ${item.name || 'Unknown'} (ID: ${item.id})`)
-              console.log(`   Type: ${item.data_type || 'Unknown'}`)
-              console.log(`   Loom: ${item.loomFile || 'Unknown'} ${status}`)
-              console.log(`   Timestamp: ${new Date(item.timestamp || 0).toLocaleString()}`)
-              console.log('')
+              // console.log(`${index + 1}. ${item.name || 'Unknown'} (ID: ${item.id})`)
+              // console.log(`   Type: ${item.data_type || 'Unknown'}`)
+              // console.log(`   Loom: ${item.loomFile || 'Unknown'} ${status}`)
+              // console.log(`   Timestamp: ${new Date(item.timestamp || 0).toLocaleString()}`)
+              // console.log('')
             })
             
             const matchingItems = allItems.filter(item => item.loomFile === currentLoom)
-            console.log(`📊 Summary: ${matchingItems.length}/${allItems.length} items match current loom file`)
+            // console.log(`📊 Summary: ${matchingItems.length}/${allItems.length} items match current loom file`)
           }
           
           resolve()

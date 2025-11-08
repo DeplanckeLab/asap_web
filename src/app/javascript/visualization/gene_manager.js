@@ -14,7 +14,7 @@ export class GeneManager {
     this.matrixInitialized = false
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
-    console.log('GeneManager: Constructor initialized, window.geneManager set')
+    // console.log('GeneManager: Constructor initialized, window.geneManager set')
     this.init()
   }
 
@@ -46,13 +46,13 @@ export class GeneManager {
     const nextLayer = layerPath || '/matrix'
     const nextAnnotId = annotId && annotId !== '' ? String(annotId) : null
     const initialGeneCount = this.geneTags?.length || 0
-    console.log('GeneManager: applying matrix change', {
-      previousLayer,
-      previousAnnotId,
-      nextLayer,
-      nextAnnotId,
-      genes: initialGeneCount
-    })
+    // console.log('GeneManager: applying matrix change', {
+      // previousLayer,
+      // previousAnnotId,
+      // nextLayer,
+      // nextAnnotId,
+      // genes: initialGeneCount
+    // })
     this.currentMatrixLayer = nextLayer
     this.currentMatrixAnnotId = nextAnnotId
     this.matrixInitialized = true
@@ -62,9 +62,9 @@ export class GeneManager {
       const keysToRemove = Object.keys(this.controller.loadedMetadataVectors).filter(key => key.startsWith('gene_'))
 
       keysToRemove.forEach(key => delete this.controller.loadedMetadataVectors[key])
-      console.log('GeneManager: cleared cached vectors', { removed: keysToRemove.length })
+      // console.log('GeneManager: cleared cached vectors', { removed: keysToRemove.length })
     } else {
-      console.log('GeneManager: no cached vectors to clear')
+      // console.log('GeneManager: no cached vectors to clear')
     }
     
     // Clear cached gene expression data
@@ -75,9 +75,9 @@ export class GeneManager {
       const sliderKeysToRemove = Object.keys(this.controller.inlineRangeSliderData).filter(key => key.startsWith('gene_'))
 
       sliderKeysToRemove.forEach(key => delete this.controller.inlineRangeSliderData[key])
-      console.log('GeneManager: cleared slider caches', { removed: sliderKeysToRemove.length })
+      // console.log('GeneManager: cleared slider caches', { removed: sliderKeysToRemove.length })
     } else {
-      console.log('GeneManager: no slider cache to clear')
+      // console.log('GeneManager: no slider cache to clear')
     }
     
     const genesToReload = new Map()
@@ -119,12 +119,12 @@ export class GeneManager {
     }
 
     if (genesToReload.size > 0) {
-      console.log('GeneManager: reloading genes for new layer', { genes: genesToReload.size })
+      // console.log('GeneManager: reloading genes for new layer', { genes: genesToReload.size })
       const resultsDiv = document.getElementById('gene-expression-results')
       const reloadPromises = Array.from(genesToReload.values()).map(gene => this.loadGeneExpressionData(gene, resultsDiv))
       await Promise.all(reloadPromises)
     } else {
-      console.log('GeneManager: no genes to reload for new layer')
+      // console.log('GeneManager: no genes to reload for new layer')
     }
 
     // Refresh custom 2D plot if open
@@ -134,12 +134,12 @@ export class GeneManager {
   }
 
   init() {
-    console.log('GeneManager: Initializing...')
+    // console.log('GeneManager: Initializing...')
     // Extract project identifier from URL (could be ID, key, or public_id like ASAP49)
     const pathMatch = window.location.pathname.match(/\/projects\/([^\/]+)/)
     if (pathMatch) {
       this.projectIdentifier = pathMatch[1] // Use identifier instead of just ID
-      console.log('GeneManager: Project identifier extracted:', this.projectIdentifier)
+      // console.log('GeneManager: Project identifier extracted:', this.projectIdentifier)
     } else {
       console.warn('GeneManager: Could not extract project identifier from URL:', window.location.pathname)
     }
@@ -147,13 +147,13 @@ export class GeneManager {
     // Check if user is admin from data attribute
     const visualizationElement = document.querySelector('[data-controller="visualization"]')
     this.isAdmin = visualizationElement && visualizationElement.dataset.isAdmin === 'true'
-    console.log('GeneManager: Is admin:', this.isAdmin)
+    // console.log('GeneManager: Is admin:', this.isAdmin)
 
     // Setup combined input field with tags
     const input = document.getElementById('gene-autocomplete-input')
     const tagsContainer = document.getElementById('gene-tags-container')
     if (input && tagsContainer) {
-      console.log('GeneManager: Combined input field found, setting up listeners')
+      // console.log('GeneManager: Combined input field found, setting up listeners')
       let debounceTimer = null
       
       // Render initial tags (input is already in container from HTML)
@@ -161,7 +161,7 @@ export class GeneManager {
       
       input.addEventListener('input', (e) => {
         const value = e.target.value
-        console.log('GeneManager: Input event triggered, value:', value)
+        // console.log('GeneManager: Input event triggered, value:', value)
         
         // Check for separators (comma, space, newline) to process completed genes
         const separatorMatch = value.match(/[,,\s\n]+/)
@@ -206,7 +206,7 @@ export class GeneManager {
       })
 
       input.addEventListener('focus', () => {
-        console.log('GeneManager: Input focused, current value:', input.value)
+        // console.log('GeneManager: Input focused, current value:', input.value)
         if (input.value.trim() && this.currentMatches.length > 0) {
           this.showDropdown()
         }
@@ -260,7 +260,7 @@ export class GeneManager {
 
     // Load autocomplete data on page load
     if (this.projectIdentifier) {
-      console.log('GeneManager: Loading autocomplete data on initialization...')
+      // console.log('GeneManager: Loading autocomplete data on initialization...')
       this.loadAutocompleteData()
     }
 
@@ -283,7 +283,7 @@ export class GeneManager {
         const geneDivs = resultsDiv ? resultsDiv.querySelectorAll('[id^="gene-result-"]') : []
         const geneCount = geneDivs.length
         
-        console.log('GeneManager: Add button clicked, found', geneCount, 'gene divs in DOM')
+        // console.log('GeneManager: Add button clicked, found', geneCount, 'gene divs in DOM')
         
         if (geneCount === 0) {
           alert('No genes selected. Please select genes before creating a gene set.')
@@ -336,7 +336,7 @@ export class GeneManager {
   }
 
   async loadAutocompleteData(runId = null) {
-    console.log('GeneManager: loadAutocompleteData called, runId:', runId)
+    // console.log('GeneManager: loadAutocompleteData called, runId:', runId)
     if (!this.projectIdentifier) {
       console.warn('GeneManager: No project identifier found')
       return
@@ -349,16 +349,16 @@ export class GeneManager {
 
       if (runId) {
         url = `/projects/${encodeURIComponent(this.projectIdentifier)}/get_file?filename=autocomplete_genes.json&step=cell_filtering&run_id=${encodeURIComponent(runId)}&display=true`
-        console.log('GeneManager: Attempting to load run-specific file:', url)
+        // console.log('GeneManager: Attempting to load run-specific file:', url)
         try {
           const response = await fetch(url)
-          console.log('GeneManager: Run-specific response status:', response.status, 'ok:', response.ok)
+          // console.log('GeneManager: Run-specific response status:', response.status, 'ok:', response.ok)
           if (response.ok) {
             const contentType = response.headers.get('content-type')
-            console.log('GeneManager: Run-specific content-type:', contentType)
+            // console.log('GeneManager: Run-specific content-type:', contentType)
             if (contentType && contentType.includes('application/json')) {
               data = await response.json()
-              console.log('GeneManager: Run-specific data loaded, has search:', !!data.search, 'search length:', data.search?.length)
+              // console.log('GeneManager: Run-specific data loaded, has search:', !!data.search, 'search length:', data.search?.length)
             } else {
               console.warn('GeneManager: Run-specific response is not JSON, content-type:', contentType)
             }
@@ -373,7 +373,7 @@ export class GeneManager {
       // Fall back to parsing directory file if run-specific file not found
       if (!data || !data.search) {
         url = `/projects/${encodeURIComponent(this.projectIdentifier)}/get_file?filename=autocomplete_genes.json&step=parsing&display=true`
-        console.log('GeneManager: Attempting to load parsing file:', url)
+        // console.log('GeneManager: Attempting to load parsing file:', url)
         try {
           const response = await fetch(url, {
             method: 'GET',
@@ -382,25 +382,25 @@ export class GeneManager {
               'Accept': 'application/json'
             }
           })
-          console.log('GeneManager: Parsing response status:', response.status, 'ok:', response.ok)
+          // console.log('GeneManager: Parsing response status:', response.status, 'ok:', response.ok)
           if (response.ok) {
             const contentType = response.headers.get('content-type')
-            console.log('GeneManager: Parsing content-type:', contentType)
+            // console.log('GeneManager: Parsing content-type:', contentType)
             
             // Try to parse as JSON first
             try {
               data = await response.json()
-              console.log('GeneManager: Parsing data loaded as JSON, has search:', !!data.search, 'search length:', data.search?.length)
+              // console.log('GeneManager: Parsing data loaded as JSON, has search:', !!data.search, 'search length:', data.search?.length)
             } catch (jsonError) {
               // If JSON parsing fails, try as text
               console.warn('GeneManager: Failed to parse as JSON, trying as text:', jsonError)
               const text = await response.text()
-              console.log('GeneManager: Parsing response text (first 500 chars):', text.substring(0, 500))
+              // console.log('GeneManager: Parsing response text (first 500 chars):', text.substring(0, 500))
               
               // Try to parse the text as JSON
               try {
                 data = JSON.parse(text)
-                console.log('GeneManager: Successfully parsed text as JSON')
+                // console.log('GeneManager: Successfully parsed text as JSON')
               } catch (parseError) {
                 console.error('GeneManager: Failed to parse response text as JSON:', parseError)
               }
@@ -416,7 +416,7 @@ export class GeneManager {
             console.warn('GeneManager: Parsing response not OK, status:', response.status, response.statusText)
             try {
               const errorText = await response.text()
-              console.log('GeneManager: Parsing error response (first 500 chars):', errorText.substring(0, 500))
+              // console.log('GeneManager: Parsing error response (first 500 chars):', errorText.substring(0, 500))
             } catch (textError) {
               console.error('GeneManager: Could not read error response text:', textError)
             }
@@ -433,8 +433,8 @@ export class GeneManager {
         this.autocompleteData = data.search
         const geneCount = this.autocompleteData.length
         this.totalGeneCount = geneCount
-        console.log(`GeneManager: Successfully loaded ${geneCount} genes for autocomplete`)
-        console.log('GeneManager: First 3 entries:', this.autocompleteData.slice(0, 3))
+        // console.log(`GeneManager: Successfully loaded ${geneCount} genes for autocomplete`)
+        // console.log('GeneManager: First 3 entries:', this.autocompleteData.slice(0, 3))
         // Update the gene count badge
         this.updateGeneCountBadge()
       } else {
@@ -453,9 +453,9 @@ export class GeneManager {
   }
 
   handleInput(query) {
-    console.log('GeneManager: handleInput called with query:', query)
+    // console.log('GeneManager: handleInput called with query:', query)
     if (!query || query.trim().length === 0) {
-      console.log('GeneManager: Empty query, hiding dropdown')
+      // console.log('GeneManager: Empty query, hiding dropdown')
       this.hideDropdown()
       return
     }
@@ -465,7 +465,7 @@ export class GeneManager {
       return
     }
 
-    console.log('GeneManager: Searching in', this.autocompleteData.length, 'entries')
+    // console.log('GeneManager: Searching in', this.autocompleteData.length, 'entries')
     const searchTerm = query.toLowerCase().trim()
     this.currentMatches = this.autocompleteData
       .filter(entry => {
@@ -487,19 +487,19 @@ export class GeneManager {
       })
       .slice(0, 10) // Limit to 10 results
 
-    console.log('GeneManager: Found', this.currentMatches.length, 'matches for query:', searchTerm)
+    // console.log('GeneManager: Found', this.currentMatches.length, 'matches for query:', searchTerm)
     if (this.currentMatches.length > 0) {
-      console.log('GeneManager: First match:', this.currentMatches[0])
+      // console.log('GeneManager: First match:', this.currentMatches[0])
       this.renderDropdown()
       this.showDropdown()
     } else {
-      console.log('GeneManager: No matches found, hiding dropdown')
+      // console.log('GeneManager: No matches found, hiding dropdown')
       this.hideDropdown()
     }
   }
 
   renderDropdown() {
-    console.log('GeneManager: renderDropdown called with', this.currentMatches.length, 'matches')
+    // console.log('GeneManager: renderDropdown called with', this.currentMatches.length, 'matches')
     const dropdown = document.getElementById('gene-autocomplete-dropdown')
     if (!dropdown) {
       console.error('GeneManager: Dropdown element not found! ID: gene-autocomplete-dropdown')
@@ -546,7 +546,7 @@ export class GeneManager {
     const dropdown = document.getElementById('gene-autocomplete-dropdown')
     if (dropdown) {
       dropdown.style.display = 'block'
-      console.log('GeneManager: Dropdown shown')
+      // console.log('GeneManager: Dropdown shown')
     } else {
       console.error('GeneManager: Cannot show dropdown - element not found')
     }
@@ -556,7 +556,7 @@ export class GeneManager {
     const dropdown = document.getElementById('gene-autocomplete-dropdown')
     if (dropdown) {
       dropdown.style.display = 'none'
-      console.log('GeneManager: Dropdown hidden')
+      // console.log('GeneManager: Dropdown hidden')
     } else {
       console.error('GeneManager: Cannot hide dropdown - element not found')
     }
@@ -646,12 +646,12 @@ export class GeneManager {
 
     if (selectedLayer) {
       if (this.currentMatrixLayer !== selectedLayer || this.currentMatrixAnnotId !== selectedAnnotId) {
-        console.log('GeneManager: syncMatrixSelectionFromUI detected mismatch', {
-          previousLayer: this.currentMatrixLayer,
-          previousAnnotId: this.currentMatrixAnnotId,
-          selectedLayer,
-          selectedAnnotId
-        })
+        // console.log('GeneManager: syncMatrixSelectionFromUI detected mismatch', {
+          // previousLayer: this.currentMatrixLayer,
+          // previousAnnotId: this.currentMatrixAnnotId,
+          // selectedLayer,
+          // selectedAnnotId
+        // })
       }
       this.currentMatrixLayer = selectedLayer
       this.currentMatrixAnnotId = selectedAnnotId
@@ -669,7 +669,7 @@ export class GeneManager {
       const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
       
       if (isCurrentlyColoring) {
-        console.log(`🧬 Removing gene ${geneToRemove.stableId} that is currently being used for coloring - clearing coloring`)
+        // console.log(`🧬 Removing gene ${geneToRemove.stableId} that is currently being used for coloring - clearing coloring`)
         // Clear the coloring since the gene is being removed
         this.controller.resetAllWaterDropButtons()
         this.controller.removeAllCategoryColors()
@@ -708,7 +708,7 @@ export class GeneManager {
       const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
       
       if (isCurrentlyColoring) {
-        console.log(`🧬 Removing gene ${stableId} that is currently being used for coloring - clearing coloring`)
+        // console.log(`🧬 Removing gene ${stableId} that is currently being used for coloring - clearing coloring`)
         // Clear the coloring since the gene is being removed
         this.controller.resetAllWaterDropButtons()
         this.controller.removeAllCategoryColors()
@@ -751,7 +751,7 @@ export class GeneManager {
 
     // Wait for autocomplete data if needed
     if (!this.autocompleteData || this.autocompleteData.length === 0) {
-      console.log('GeneManager: Waiting for autocomplete data...')
+      // console.log('GeneManager: Waiting for autocomplete data...')
       setTimeout(() => {
         this.processGeneInput(query, trackNotFound)
       }, 500)
@@ -781,7 +781,7 @@ export class GeneManager {
       if (trackNotFound && !this.notFoundQueries.includes(query.trim())) {
         this.notFoundQueries.push(query.trim())
       }
-      console.log('GeneManager: Gene not found:', query)
+      // console.log('GeneManager: Gene not found:', query)
       return { found: false, query: query.trim() }
     }
   }
@@ -863,7 +863,7 @@ export class GeneManager {
 
   async processAllGenes() {
     // Check renderer state before processing genes (for debugging)
-    console.log('🧬 [GENE ADD] processAllGenes called, checking renderer state before DOM manipulation:')
+    // console.log('🧬 [GENE ADD] processAllGenes called, checking renderer state before DOM manipulation:')
     const beforeProcessState = {
       hasReglRenderer: !!this.controller.reglRenderer,
       rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
@@ -873,7 +873,7 @@ export class GeneManager {
       hasCurrentCoordinates: !!this.controller.currentCoordinates,
       currentCoordinatesLength: this.controller.currentCoordinates?.length || 0
     }
-    console.log('🧬 [GENE ADD] Before processAllGenes state:', beforeProcessState)
+    // console.log('🧬 [GENE ADD] Before processAllGenes state:', beforeProcessState)
     
     // CRITICAL: Store renderer reference before DOM manipulation
     // The gene container is OUTSIDE the visualization controller, so DOM changes
@@ -931,7 +931,7 @@ export class GeneManager {
     }
     
     // Check renderer state after DOM manipulation (for debugging)
-    console.log('🧬 [GENE ADD] After innerHTML = "", checking renderer state:')
+    // console.log('🧬 [GENE ADD] After innerHTML = "", checking renderer state:')
     const afterDOMState = {
       hasReglRenderer: !!this.controller.reglRenderer,
       rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
@@ -941,7 +941,7 @@ export class GeneManager {
       hasCurrentCoordinates: !!this.controller.currentCoordinates,
       currentCoordinatesLength: this.controller.currentCoordinates?.length || 0
     }
-    console.log('🧬 [GENE ADD] After DOM manipulation state:', afterDOMState)
+    // console.log('🧬 [GENE ADD] After DOM manipulation state:', afterDOMState)
     
     // Check if renderer changed during DOM manipulation
     if (beforeProcessState.rendererInstanceId !== afterDOMState.rendererInstanceId) {
@@ -1272,7 +1272,7 @@ export class GeneManager {
 
     // Wait for autocomplete data if not loaded yet
     if (!this.autocompleteData || this.autocompleteData.length === 0) {
-      console.log('GeneManager: Autocomplete data not loaded, waiting...')
+      // console.log('GeneManager: Autocomplete data not loaded, waiting...')
       await this.loadAutocompleteData()
       
       // Try again after a short delay
@@ -1280,7 +1280,7 @@ export class GeneManager {
     }
 
     const geneQueries = this.parseBulkGeneInput(inputText)
-    console.log('GeneManager: Processing', geneQueries.length, 'genes:', geneQueries)
+    // console.log('GeneManager: Processing', geneQueries.length, 'genes:', geneQueries)
 
     // Match genes
     this.processedGenes = []
@@ -1649,13 +1649,13 @@ export class GeneManager {
     const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)
     const loadingDiv = document.getElementById(`gene-expression-loading-${gene.stableId}`)
     
-    console.log('GeneManager: load request', {
-      geneId,
-      baseMetadataId,
-      layerMetadataId: geneMetadataId,
-      layer: this.currentMatrixLayer,
-      annotId: this.currentMatrixAnnotId
-    })
+    // console.log('GeneManager: load request', {
+      // geneId,
+      // baseMetadataId,
+      // layerMetadataId: geneMetadataId,
+      // layer: this.currentMatrixLayer,
+      // annotId: this.currentMatrixAnnotId
+    // })
 
     // Check if already in memory
     const geneIdNum = parseInt(geneId)
@@ -1671,7 +1671,7 @@ export class GeneManager {
       if (loadingDiv) {
         loadingDiv.style.display = 'none'
       }
-      console.log('GeneManager: using cached expression data', { geneId, values: inMemory.values.length })
+      // console.log('GeneManager: using cached expression data', { geneId, values: inMemory.values.length })
       return
     }
     
@@ -1744,7 +1744,7 @@ export class GeneManager {
             this.controller.inlineRangeSliderData[baseMetadataId] = this.controller.inlineRangeSliderData[geneMetadataId]
           }
         }
-        console.log('GeneManager: restored from IndexedDB', { geneId, metadataId: geneMetadataId })
+        // console.log('GeneManager: restored from IndexedDB', { geneId, metadataId: geneMetadataId })
         
         // Update status icon to in-memory (loaded from DB into memory)
         this.controller.uiManager.updateGeneStatusIcon(geneId, 'in-memory')
@@ -1793,7 +1793,7 @@ export class GeneManager {
         url += `&layer=${encodeURIComponent(this.currentMatrixLayer)}`
       }
       
-      console.log('GeneManager: fetching expression data', { geneId, layer: this.currentMatrixLayer, annotId: this.currentMatrixAnnotId })
+      // console.log('GeneManager: fetching expression data', { geneId, layer: this.currentMatrixLayer, annotId: this.currentMatrixAnnotId })
       
       const response = await fetch(url)
       if (!response.ok) {
@@ -1873,7 +1873,7 @@ export class GeneManager {
           }
         }
 
-        console.log('GeneManager: stored expression vector', { geneId, baseMetadataId, layerMetadataId: geneMetadataId, values: expressionValues.length })
+        // console.log('GeneManager: stored expression vector', { geneId, baseMetadataId, layerMetadataId: geneMetadataId, values: expressionValues.length })
       }
       
       // Store in IndexedDB for persistence
@@ -2009,52 +2009,52 @@ export class GeneManager {
         }, 350)
       } else {
         // Data not loaded yet, it will initialize when loaded
-        console.log(`GeneManager: Expression data not yet loaded for gene ${geneId}, will initialize when ready`)
+        // console.log(`GeneManager: Expression data not yet loaded for gene ${geneId}, will initialize when ready`)
       }
     } else {
       chevron.style.transform = 'rotate(0deg)'
       
       // Check if this gene is currently being used for coloring
       const geneMetadataId = `gene_${geneId}`
-      console.log(`🧬 [GENE COLLAPSE] Collapsing gene ${geneId}`)
-      console.log(`🧬 [GENE COLLAPSE] Checking coloring state:`, {
-        hasController: !!this.controller,
-        currentMetadataVectorId: this.controller?.currentMetadataVector?.id || 'none',
-        geneMetadataId: geneMetadataId,
-        isCurrentlyColoring: this.controller?.currentMetadataVector?.id === geneMetadataId
-      })
+      // console.log(`🧬 [GENE COLLAPSE] Collapsing gene ${geneId}`)
+      // console.log(`🧬 [GENE COLLAPSE] Checking coloring state:`, {
+        // hasController: !!this.controller,
+        // currentMetadataVectorId: this.controller?.currentMetadataVector?.id || 'none',
+        // geneMetadataId: geneMetadataId,
+        // isCurrentlyColoring: this.controller?.currentMetadataVector?.id === geneMetadataId
+      // })
       
       const isCurrentlyColoring = this.controller?.currentMetadataVector?.id === geneMetadataId
       
       if (isCurrentlyColoring) {
-        console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is currently being used for coloring - clearing coloring`)
-        console.log(`🧬 [GENE COLLAPSE] Step 1: Resetting all water drop buttons...`)
+        // console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is currently being used for coloring - clearing coloring`)
+        // console.log(`🧬 [GENE COLLAPSE] Step 1: Resetting all water drop buttons...`)
         try {
           this.controller.resetAllWaterDropButtons()
-          console.log(`🧬 [GENE COLLAPSE] Step 1: resetAllWaterDropButtons() completed`)
+          // console.log(`🧬 [GENE COLLAPSE] Step 1: resetAllWaterDropButtons() completed`)
         } catch (error) {
           console.error(`🧬 [GENE COLLAPSE] Error in resetAllWaterDropButtons():`, error)
         }
         
-        console.log(`🧬 [GENE COLLAPSE] Step 2: Removing category colors...`)
+        // console.log(`🧬 [GENE COLLAPSE] Step 2: Removing category colors...`)
         try {
           this.controller.removeAllCategoryColors()
-          console.log(`🧬 [GENE COLLAPSE] Step 2: removeAllCategoryColors() completed`)
+          // console.log(`🧬 [GENE COLLAPSE] Step 2: removeAllCategoryColors() completed`)
         } catch (error) {
           console.error(`🧬 [GENE COLLAPSE] Error in removeAllCategoryColors():`, error)
         }
         
-        console.log(`🧬 [GENE COLLAPSE] Step 3: Clearing metadata coloring...`)
+        // console.log(`🧬 [GENE COLLAPSE] Step 3: Clearing metadata coloring...`)
         try {
           this.controller.clearMetadataColoring()
-          console.log(`🧬 [GENE COLLAPSE] Step 3: clearMetadataColoring() completed`)
+          // console.log(`🧬 [GENE COLLAPSE] Step 3: clearMetadataColoring() completed`)
         } catch (error) {
           console.error(`🧬 [GENE COLLAPSE] Error in clearMetadataColoring():`, error)
         }
         
-        console.log(`🧬 [GENE COLLAPSE] All coloring clearing steps completed`)
+        // console.log(`🧬 [GENE COLLAPSE] All coloring clearing steps completed`)
       } else {
-        console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is NOT currently being used for coloring - no need to clear`)
+        // console.log(`🧬 [GENE COLLAPSE] Gene ${geneId} is NOT currently being used for coloring - no need to clear`)
       }
       
       // Collapse with animation
@@ -2069,7 +2069,7 @@ export class GeneManager {
   }
 
   initializeGeneRangeSlider(geneId) {
-    console.log(`🧬 [GENE INIT] initializeGeneRangeSlider called for gene: ${geneId}`)
+    // console.log(`🧬 [GENE INIT] initializeGeneRangeSlider called for gene: ${geneId}`)
     
     // Try to find expression data - handle both string and number keys
     const geneIdNum = parseInt(geneId)
@@ -2084,18 +2084,18 @@ export class GeneManager {
       return
     }
     
-    console.log(`🧬 [GENE INIT] Found expression data:`, {
-      valuesLength: expressionData.values?.length,
-      hasStats: !!expressionData.stats,
-      geneId,
-      geneIdNum,
-      geneIdStr
-    })
+    // console.log(`🧬 [GENE INIT] Found expression data:`, {
+      // valuesLength: expressionData.values?.length,
+      // hasStats: !!expressionData.stats,
+      // geneId,
+      // geneIdNum,
+      // geneIdStr
+    // })
     
     const values = expressionData.values
     const geneMetadataId = this.getGeneMetadataId(geneIdStr, this.currentMatrixAnnotId)
     
-    console.log(`🧬 [GENE INIT] Gene metadata ID: ${geneMetadataId}`)
+    // console.log(`🧬 [GENE INIT] Gene metadata ID: ${geneMetadataId}`)
     
     // CRITICAL: Store in loadedMetadataVectors BEFORE initializing slider
     // This ensures filtering works even if user hasn't clicked the coloring button yet
@@ -2103,7 +2103,7 @@ export class GeneManager {
     if (this.controller) {
       if (!this.controller.loadedMetadataVectors) {
         this.controller.loadedMetadataVectors = {}
-        console.log(`🧬 [GENE INIT] Created loadedMetadataVectors object`)
+        // console.log(`🧬 [GENE INIT] Created loadedMetadataVectors object`)
       }
       
       // Check if already stored (e.g., from geneWaterDropClicked)
@@ -2119,13 +2119,13 @@ export class GeneManager {
         )
         const geneName = geneTag?.symbol || `Gene ${geneIdStr}`
         
-        console.log(`🧬 [GENE INIT] Creating metadata vector:`, {
-          geneMetadataId,
-          geneName,
-          minVal,
-          maxVal,
-          valuesLength: values.length
-        })
+        // console.log(`🧬 [GENE INIT] Creating metadata vector:`, {
+          // geneMetadataId,
+          // geneName,
+          // minVal,
+          // maxVal,
+          // valuesLength: values.length
+        // })
         
         this.controller.loadedMetadataVectors[geneMetadataId] = {
           id: geneMetadataId,
@@ -2141,10 +2141,10 @@ export class GeneManager {
           nber_rows: 1,
           nber_cols: values.length
         }
-        console.log(`✅ [GENE INIT] Stored gene metadata in loadedMetadataVectors: ${geneMetadataId}`)
-        console.log(`✅ [GENE INIT] loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors))
+        // console.log(`✅ [GENE INIT] Stored gene metadata in loadedMetadataVectors: ${geneMetadataId}`)
+        // console.log(`✅ [GENE INIT] loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors))
       } else {
-        console.log(`🧬 [GENE INIT] Gene metadata already in loadedMetadataVectors: ${geneMetadataId}`)
+        // console.log(`🧬 [GENE INIT] Gene metadata already in loadedMetadataVectors: ${geneMetadataId}`)
       }
     } else {
       console.error(`❌ [GENE INIT] Controller not available!`)
@@ -2155,12 +2155,12 @@ export class GeneManager {
     // This handles setting up the range slider data and initializing the controller
     if (this.controller && this.controller.initializeInlineRangeSlider) {
       // Check renderer state BEFORE calling initializeInlineRangeSlider
-      console.log(`🧬 [GENE INIT] Renderer state BEFORE initializeInlineRangeSlider:`)
+      // console.log(`🧬 [GENE INIT] Renderer state BEFORE initializeInlineRangeSlider:`)
       
       // CRITICAL: Check if there's a canvas element that might have a different renderer
       const plotContainer = document.querySelector('.plot-container')
       const canvasElements = plotContainer ? plotContainer.querySelectorAll('canvas') : []
-      console.log(`🧬 [GENE INIT] Found ${canvasElements.length} canvas elements in plot container`)
+      // console.log(`🧬 [GENE INIT] Found ${canvasElements.length} canvas elements in plot container`)
       
       const beforeState = {
         hasReglRenderer: !!this.controller.reglRenderer,
@@ -2176,7 +2176,7 @@ export class GeneManager {
         canvasInDOM: !!this.controller.canvas?.parentElement,
         canvasCount: canvasElements.length
       }
-      console.log(`🧬 [GENE INIT] Before state:`, beforeState)
+      // console.log(`🧬 [GENE INIT] Before state:`, beforeState)
       
       // If renderer has no state but plot is visible, something is wrong
       // Check if there's a renderer with state attached to the canvas elements
@@ -2190,15 +2190,15 @@ export class GeneManager {
         const plotContainer = document.querySelector('.plot-container')
         if (plotContainer) {
           const canvases = plotContainer.querySelectorAll('canvas')
-          console.log(`❌ [GENE INIT] Found ${canvases.length} canvas elements in plot container`)
+          // console.log(`❌ [GENE INIT] Found ${canvases.length} canvas elements in plot container`)
           canvases.forEach((canvas, index) => {
             // Check if this canvas has a renderer attached (check canvas.__reglRenderer or similar)
-            console.log(`❌ [GENE INIT] Canvas ${index}:`, {
-              width: canvas.width,
-              height: canvas.height,
-              parentElement: canvas.parentElement,
-              id: canvas.id || 'no-id'
-            })
+            // console.log(`❌ [GENE INIT] Canvas ${index}:`, {
+              // width: canvas.width,
+              // height: canvas.height,
+              // parentElement: canvas.parentElement,
+              // id: canvas.id || 'no-id'
+            // })
           })
         }
         
@@ -2212,12 +2212,12 @@ export class GeneManager {
             console.error(`❌ [GENE INIT] This controller renderer ID: ${this.controller.reglRenderer.instanceId}`)
             
             // CRITICAL: Switch to the controller that has the renderer with state
-            console.log(`❌ [GENE INIT] Switching to window.visualizationController which has renderer with state`)
+            // console.log(`❌ [GENE INIT] Switching to window.visualizationController which has renderer with state`)
             const oldControllerId = this.controller.instanceId
             this.controller = window.visualizationController
             const newControllerId = this.controller.instanceId
-            console.log(`❌ [GENE INIT] Switched from controller ${oldControllerId} to ${newControllerId}`)
-            console.log(`❌ [GENE INIT] New renderer ID: ${this.controller.reglRenderer.instanceId}, numPoints: ${this.controller.reglRenderer.numPoints}`)
+            // console.log(`❌ [GENE INIT] Switched from controller ${oldControllerId} to ${newControllerId}`)
+            // console.log(`❌ [GENE INIT] New renderer ID: ${this.controller.reglRenderer.instanceId}, numPoints: ${this.controller.reglRenderer.numPoints}`)
           }
         }
         
@@ -2229,10 +2229,10 @@ export class GeneManager {
           if (domController && domController !== this.controller) {
             const domRenderer = domController.reglRenderer
             if (domRenderer && domRenderer.numPoints > 0) {
-              console.log(`❌ [GENE INIT] Found controller from DOM with renderer that has state`)
-              console.log(`❌ [GENE INIT] DOM controller ID: ${domController.instanceId}`)
-              console.log(`❌ [GENE INIT] DOM renderer ID: ${domRenderer.instanceId}, numPoints: ${domRenderer.numPoints}`)
-              console.log(`❌ [GENE INIT] Switching to DOM controller`)
+              // console.log(`❌ [GENE INIT] Found controller from DOM with renderer that has state`)
+              // console.log(`❌ [GENE INIT] DOM controller ID: ${domController.instanceId}`)
+              // console.log(`❌ [GENE INIT] DOM renderer ID: ${domRenderer.instanceId}, numPoints: ${domRenderer.numPoints}`)
+              // console.log(`❌ [GENE INIT] Switching to DOM controller`)
               this.controller = domController
             }
           }
@@ -2241,11 +2241,11 @@ export class GeneManager {
         console.trace(`❌ [GENE INIT] Stack trace for renderer state check`)
       }
       
-      console.log(`🧬 [GENE INIT] Calling initializeInlineRangeSlider for ${geneMetadataId}`)
+      // console.log(`🧬 [GENE INIT] Calling initializeInlineRangeSlider for ${geneMetadataId}`)
       this.controller.initializeInlineRangeSlider(geneMetadataId, values)
       
       // Check renderer state AFTER calling initializeInlineRangeSlider (but before checking in detail)
-      console.log(`🧬 [GENE INIT] Renderer state AFTER initializeInlineRangeSlider:`)
+      // console.log(`🧬 [GENE INIT] Renderer state AFTER initializeInlineRangeSlider:`)
       const afterState = {
         hasReglRenderer: !!this.controller.reglRenderer,
         rendererInstanceId: this.controller.reglRenderer?.instanceId || 'none',
@@ -2255,7 +2255,7 @@ export class GeneManager {
         hasCurrentCoordinates: !!this.controller.currentCoordinates,
         currentCoordinatesLength: this.controller.currentCoordinates?.length || 0
       }
-      console.log(`🧬 [GENE INIT] After state:`, afterState)
+      // console.log(`🧬 [GENE INIT] After state:`, afterState)
       
       // Check if renderer changed
       if (beforeState.rendererInstanceId !== afterState.rendererInstanceId) {
@@ -2272,17 +2272,17 @@ export class GeneManager {
       
       // Verify inlineRangeSliderData was set
       if (this.controller.inlineRangeSliderData && this.controller.inlineRangeSliderData[geneMetadataId]) {
-        console.log(`✅ [GENE INIT] inlineRangeSliderData set for ${geneMetadataId}:`, {
-          min: this.controller.inlineRangeSliderData[geneMetadataId].min,
-          max: this.controller.inlineRangeSliderData[geneMetadataId].max,
-          valuesLength: this.controller.inlineRangeSliderData[geneMetadataId].values?.length
-        })
+        // console.log(`✅ [GENE INIT] inlineRangeSliderData set for ${geneMetadataId}:`, {
+          // min: this.controller.inlineRangeSliderData[geneMetadataId].min,
+          // max: this.controller.inlineRangeSliderData[geneMetadataId].max,
+          // valuesLength: this.controller.inlineRangeSliderData[geneMetadataId].values?.length
+        // })
       } else {
         console.error(`❌ [GENE INIT] inlineRangeSliderData NOT set for ${geneMetadataId}!`)
       }
       
       // CRITICAL: Verify renderer state is ready for filtering
-      console.log(`🧬 [GENE INIT] Checking renderer state after initialization...`)
+      // console.log(`🧬 [GENE INIT] Checking renderer state after initialization...`)
       
       // Check if plot is visible (canvas exists and has dimensions)
       const plotIsVisible = !!(this.controller.canvas && 
@@ -2323,14 +2323,14 @@ export class GeneManager {
                               ((rendererState.hasCurrentCoordinates && rendererState.hasDisplayOrder) ||
                                (hasRendererState && hasCoordinates))
       
-      console.log(`🧬 [GENE INIT] Renderer state:`, rendererState)
-      console.log(`🧬 [GENE INIT] Renderer readiness:`, {
-        hasRendererState,
-        hasCoordinates,
-        isRendererReady,
-        readyForFiltering: isRendererReady || hasCoordinates,
-        plotIsVisible
-      })
+      // console.log(`🧬 [GENE INIT] Renderer state:`, rendererState)
+      // console.log(`🧬 [GENE INIT] Renderer readiness:`, {
+        // hasRendererState,
+        // hasCoordinates,
+        // isRendererReady,
+        // readyForFiltering: isRendererReady || hasCoordinates,
+        // plotIsVisible
+      // })
       
       // CRITICAL: If plot is visible but renderer has no state, this is a problem!
       if (plotIsVisible && !hasRendererState && !hasCoordinates) {
@@ -2346,7 +2346,7 @@ export class GeneManager {
         console.error(`❌ [GENE INIT] - Plot visible: ${plotIsVisible}`)
         console.error(`❌ [GENE INIT] - Filtering may fail when slider is moved`)
       } else {
-        console.log(`✅ [GENE INIT] Renderer appears ready for filtering`)
+        // console.log(`✅ [GENE INIT] Renderer appears ready for filtering`)
       }
       
       // Wait a bit for the controller to connect, then update the filter switch visibility
@@ -2440,7 +2440,7 @@ export class GeneManager {
       this.controller.dataManager.updateCellFiltering()
     }
     
-    console.log(`GeneManager: Toggle filter for gene ${geneId}: ${newState ? 'enabled' : 'disabled'}`)
+    // console.log(`GeneManager: Toggle filter for gene ${geneId}: ${newState ? 'enabled' : 'disabled'}`)
   }
 
 
@@ -2547,7 +2547,7 @@ export class GeneManager {
     // Remove any existing modal first to prevent duplicates
     const existingOverlay = document.getElementById('gene-set-modal-overlay')
     if (existingOverlay) {
-      console.log('GeneManager: Removing existing modal overlay before creating new one')
+      // console.log('GeneManager: Removing existing modal overlay before creating new one')
       if (existingOverlay.parentNode) {
         existingOverlay.parentNode.removeChild(existingOverlay)
       } else {
@@ -2641,12 +2641,12 @@ export class GeneManager {
     
     // Simple close function
     const closeModal = () => {
-      console.log('GeneManager: closeModal called')
+      // console.log('GeneManager: closeModal called')
       
       // Remove by ID to handle any instance
       const overlayToRemove = document.getElementById('gene-set-modal-overlay')
       if (overlayToRemove) {
-        console.log('GeneManager: Removing overlay by ID')
+        // console.log('GeneManager: Removing overlay by ID')
         if (overlayToRemove.parentNode) {
           overlayToRemove.parentNode.removeChild(overlayToRemove)
         } else {
@@ -2676,7 +2676,7 @@ export class GeneManager {
       
       // Check if click is on close or cancel button
       if (button && (button.id === 'close-add-gene-set-modal' || button.id === 'cancel-add-gene-set-btn')) {
-        console.log('GeneManager: Close/Cancel button clicked via delegation', button.id, target)
+        // console.log('GeneManager: Close/Cancel button clicked via delegation', button.id, target)
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
@@ -2694,7 +2694,7 @@ export class GeneManager {
     // Close on overlay background click
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
-        console.log('GeneManager: Overlay background clicked')
+        // console.log('GeneManager: Overlay background clicked')
         closeModal()
       }
     })
@@ -2721,7 +2721,7 @@ export class GeneManager {
         }))
       }
       
-      console.log('GeneManager: Submitting gene set:', geneSet)
+      // console.log('GeneManager: Submitting gene set:', geneSet)
       
       // TODO: Implement API call to save gene set
       // For now, just log and close

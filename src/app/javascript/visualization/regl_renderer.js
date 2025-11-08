@@ -9,11 +9,11 @@ export class ReglRenderer {
   constructor(canvas) {
     // Generate unique ID for this renderer instance to track scope issues
     this.instanceId = Math.random().toString(36).substring(7)
-    console.log(`🚀 [ReGL] Creating new ReglRenderer instance - ID: ${this.instanceId}`)
-    console.log(`🚀 [ReGL] Canvas element:`, canvas)
-    console.log(`🚀 [ReGL] Canvas dimensions: ${canvas.width}x${canvas.height}`)
-    console.log(`🚀 [ReGL] Canvas parent:`, canvas.parentElement)
-    console.trace(`🚀 [ReGL] ReglRenderer constructor call stack for instance ${this.instanceId}:`)
+    // console.log(`🚀 [ReGL] Creating new ReglRenderer instance - ID: ${this.instanceId}`)
+    // console.log(`🚀 [ReGL] Canvas element:`, canvas)
+    // console.log(`🚀 [ReGL] Canvas dimensions: ${canvas.width}x${canvas.height}`)
+    // console.log(`🚀 [ReGL] Canvas parent:`, canvas.parentElement)
+    //console.trace(`🚀 [ReGL] ReglRenderer constructor call stack for instance ${this.instanceId}:`)
     
     // Store creation timestamp for debugging
     this.createdAt = Date.now()
@@ -139,14 +139,14 @@ export class ReglRenderer {
    */
   setPositions(coordinates) {
     const startTime = performance.now()
-    console.log('🚀 [ReGL] setPositions called with:', typeof coordinates, coordinates.length)
+    // console.log('🚀 [ReGL] setPositions called with:', typeof coordinates, coordinates.length)
     
     // coordinates is a flat Float32Array: [x1, y1, x2, y2, x3, y3, ...]
     // So number of points = length / 2
     if (coordinates instanceof Float32Array) {
       this.numPoints = coordinates.length / 2
       this.positions = coordinates
-      console.log('🚀 [ReGL] Using Float32Array, numPoints:', this.numPoints)
+      // console.log('🚀 [ReGL] Using Float32Array, numPoints:', this.numPoints)
     } else {
       // Fallback: convert array of pairs to Float32Array
       this.numPoints = coordinates.length
@@ -155,25 +155,25 @@ export class ReglRenderer {
         this.positions[i * 2] = coordinates[i][0]
         this.positions[i * 2 + 1] = coordinates[i][1]
       }
-      console.log('🚀 [ReGL] Converted to Float32Array, numPoints:', this.numPoints)
+      // console.log('🚀 [ReGL] Converted to Float32Array, numPoints:', this.numPoints)
     }
     
-    console.log('🚀 [ReGL] Creating position buffer...')
+    // console.log('🚀 [ReGL] Creating position buffer...')
     // Create or update buffer
     if (this.positionBuffer) {
       this.positionBuffer.destroy()
     }
     this.positionBuffer = this.regl.buffer(this.positions)
-    console.log('🚀 [ReGL] Position buffer created')
+    // console.log('🚀 [ReGL] Position buffer created')
     
     // Initialize colors if needed
     if (!this.colors || this.colors.length !== this.numPoints * 4) {
-      console.log('🚀 [ReGL] Initializing default colors...')
+      // console.log('🚀 [ReGL] Initializing default colors...')
       this.initializeDefaultColors()
     }
     
     const elapsed = performance.now() - startTime
-    console.log(`🚀 [ReGL] Set ${this.numPoints.toLocaleString()} positions in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🚀 [ReGL] Set ${this.numPoints.toLocaleString()} positions in ${elapsed.toFixed(2)}ms`)
     
     return this
   }
@@ -209,7 +209,7 @@ export class ReglRenderer {
     
     const elapsed = performance.now() - startTime
     const pointsPerSec = (this.numPoints / elapsed * 1000).toLocaleString(Math.floor)
-    console.log(`⚡ [ReGL] Updated ${this.numPoints.toLocaleString()} positions in ${elapsed.toFixed(2)}ms (${pointsPerSec} points/sec)`)
+    // console.log(`⚡ [ReGL] Updated ${this.numPoints.toLocaleString()} positions in ${elapsed.toFixed(2)}ms (${pointsPerSec} points/sec)`)
     
     return this
   }
@@ -244,8 +244,8 @@ export class ReglRenderer {
   updateColors(colorMap) {
     const startTime = performance.now()
     
-    console.log(`🎨 [ReGL] updateColors called with ${colorMap.size} color updates`)
-    console.log(`🎨 [ReGL] Renderer state: numPoints=${this.numPoints}, colorsLength=${this.colors?.length || 0}, hasColorBuffer=${!!this.colorBuffer}`)
+    // console.log(`🎨 [ReGL] updateColors called with ${colorMap.size} color updates`)
+    // console.log(`🎨 [ReGL] Renderer state: numPoints=${this.numPoints}, colorsLength=${this.colors?.length || 0}, hasColorBuffer=${!!this.colorBuffer}`)
     
     if (!this.colors || !this.colorBuffer) {
       console.error('🎨 [ReGL] ERROR: Cannot update colors - colors array or colorBuffer missing')
@@ -311,16 +311,16 @@ export class ReglRenderer {
       }
     })
     
-    console.log(`🎨 [ReGL] Color updates: ${visibleCount} visible, ${transparentCount} hidden`)
-    console.log(`🎨 [ReGL] Sample color updates:`, sampleUpdates.slice(0, 5))
+    // console.log(`🎨 [ReGL] Color updates: ${visibleCount} visible, ${transparentCount} hidden`)
+    // console.log(`🎨 [ReGL] Sample color updates:`, sampleUpdates.slice(0, 5))
     
-    console.log(`🎨 [ReGL] Updating color buffer with subdata...`)
+    // console.log(`🎨 [ReGL] Updating color buffer with subdata...`)
     this.colorBuffer.subdata(this.colors)
-    console.log(`🎨 [ReGL] Color buffer updated`)
+    // console.log(`🎨 [ReGL] Color buffer updated`)
     
     // Verify a few color values after update
     const verifyIndices = [0, 100, 1000]
-    console.log(`🎨 [ReGL] Verifying colors after update:`)
+    // console.log(`🎨 [ReGL] Verifying colors after update:`)
     verifyIndices.forEach(idx => {
       if (idx < this.numPoints) {
         const offset = idx * 4
@@ -328,12 +328,12 @@ export class ReglRenderer {
         const g = this.colors[offset + 1]
         const b = this.colors[offset + 2]
         const a = this.colors[offset + 3]
-        console.log(`🎨 [ReGL]   idx ${idx}: rgba(${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)},${a.toFixed(3)})`)
+        // console.log(`🎨 [ReGL]   idx ${idx}: rgba(${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)},${a.toFixed(3)})`)
       }
     })
     
     const elapsed = performance.now() - startTime
-    console.log(`🎨 [ReGL] Updated ${colorMap.size.toLocaleString()} colors in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎨 [ReGL] Updated ${colorMap.size.toLocaleString()} colors in ${elapsed.toFixed(2)}ms`)
     
     return this
   }
@@ -392,15 +392,15 @@ export class ReglRenderer {
    * Render the current frame
    */
   render() {
-    console.log('🚀 [ReGL] render() called')
+    // console.log('🚀 [ReGL] render() called')
     
     if (!this.positionBuffer || !this.colorBuffer) {
-      console.log('🚀 [ReGL] Missing buffers, skipping render')
-      console.log('🚀 [ReGL] Buffer state:', {
-        hasPositionBuffer: !!this.positionBuffer,
-        hasColorBuffer: !!this.colorBuffer,
-        numPoints: this.numPoints
-      })
+      // console.log('🚀 [ReGL] Missing buffers, skipping render')
+      // console.log('🚀 [ReGL] Buffer state:', {
+        // hasPositionBuffer: !!this.positionBuffer,
+        // hasColorBuffer: !!this.colorBuffer,
+        // numPoints: this.numPoints
+      // })
       return
     }
     
@@ -410,17 +410,17 @@ export class ReglRenderer {
       if (this.positions && this.positions.length > 0) {
         // positions is Float32Array: [x1, y1, x2, y2, ...], so count = length / 2
         count = this.positions.length / 2
-        console.log('🚀 [ReGL] Calculated count from positions array:', count)
+        // console.log('🚀 [ReGL] Calculated count from positions array:', count)
         // Update numPoints for future use
         this.numPoints = count
       } else {
-        console.log('🚀 [ReGL] Cannot determine count - numPoints is 0 and positions not available')
+        // console.log('🚀 [ReGL] Cannot determine count - numPoints is 0 and positions not available')
         return
       }
     }
     
-    console.log(`🚀 [ReGL] Rendering ${count} points with pointSize=${this.pointSize}`)
-    console.log(`🚀 [ReGL] Canvas size: ${this.canvas.width}x${this.canvas.height}`)
+    // console.log(`🚀 [ReGL] Rendering ${count} points with pointSize=${this.pointSize}`)
+    // console.log(`🚀 [ReGL] Canvas size: ${this.canvas.width}x${this.canvas.height}`)
     
     // Clear canvas
     this.regl.clear({
@@ -428,7 +428,7 @@ export class ReglRenderer {
       depth: 1
     })
     
-    console.log('🚀 [ReGL] Calling drawPoints...')
+    // console.log('🚀 [ReGL] Calling drawPoints...')
     // Draw points (positions are already in screen/pixel coordinates)
     this.drawPoints({
       positions: this.positionBuffer,
@@ -436,7 +436,7 @@ export class ReglRenderer {
       count: count,
       pointSize: this.pointSize
     })
-    console.log('🚀 [ReGL] drawPoints completed')
+    // console.log('🚀 [ReGL] drawPoints completed')
   }
   
   /**
@@ -449,7 +449,7 @@ export class ReglRenderer {
     // Update ReGL viewport to match new canvas size
     if (this.regl && this.regl._gl) {
       this.regl._gl.viewport(0, 0, width, height)
-      console.log('🔄 [ReGL] Viewport updated to:', width, 'x', height)
+      // console.log('🔄 [ReGL] Viewport updated to:', width, 'x', height)
     }
     
     return this
@@ -461,19 +461,19 @@ export class ReglRenderer {
   handleResize() {
     // Get the actual rendered size of the canvas
     const rect = this.canvas.getBoundingClientRect()
-    console.log('🔄 [ReGL] handleResize called:', {
-      rectWidth: rect.width,
-      rectHeight: rect.height,
-      canvasWidth: this.canvas.width,
-      canvasHeight: this.canvas.height
-    })
+    // console.log('🔄 [ReGL] handleResize called:', {
+      // rectWidth: rect.width,
+      // rectHeight: rect.height,
+      // canvasWidth: this.canvas.width,
+      // canvasHeight: this.canvas.height
+    // })
     
     if (rect.width > 0 && rect.height > 0) {
       this.resize(rect.width, rect.height)
-      console.log('🔄 [ReGL] After resize:', {
-        canvasWidth: this.canvas.width,
-        canvasHeight: this.canvas.height
-      })
+      // console.log('🔄 [ReGL] After resize:', {
+        // canvasWidth: this.canvas.width,
+        // canvasHeight: this.canvas.height
+      // })
       // Re-render with new canvas size
       if (this.positionBuffer && this.colorBuffer && this.numPoints > 0) {
         this.render()

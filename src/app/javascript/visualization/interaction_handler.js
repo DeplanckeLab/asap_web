@@ -11,7 +11,7 @@ export class InteractionHandler {
 
   // Interaction setup
   setupInteractionSystem() {
-    console.log('🔧 Setting up interaction system')
+    // console.log('🔧 Setting up interaction system')
     
     // Set up interaction mode buttons
     const panBtn = document.getElementById('pan-mode-btn')
@@ -23,7 +23,7 @@ export class InteractionHandler {
       this.controller.updateButtonStates('pan')
       this.controller.updateControlInstructions()
     } else {
-      console.log('Interaction mode buttons not found')
+      // console.log('Interaction mode buttons not found')
     }
     
     // Set up canvas event listeners when PIXI app becomes available
@@ -31,15 +31,15 @@ export class InteractionHandler {
   }
 
   setupCanvasListeners() {
-    console.log('Setting up canvas listeners')
+    // console.log('Setting up canvas listeners')
     
     // Canvas should exist now since this is called after canvas creation
     if (this.controller.canvas && !this.controller.canvasListenersSetup) {
-      console.log('Canvas found, setting up interaction listeners')
+      // console.log('Canvas found, setting up interaction listeners')
       this.controller.addInteractionEventListeners()
       this.controller.canvasListenersSetup = true
     } else {
-      console.log('Canvas not available for interaction setup')
+      // console.log('Canvas not available for interaction setup')
     }
   }
 

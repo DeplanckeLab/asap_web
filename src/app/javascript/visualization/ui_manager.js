@@ -29,12 +29,12 @@ export class UIManager {
   }
 
   createTooltipDynamically() {
-    console.log('🎯 [Tooltip] Creating tooltip dynamically')
+    // console.log('🎯 [Tooltip] Creating tooltip dynamically')
     
     // Remove existing tooltip if it exists
     const existingTooltip = document.getElementById('point-tooltip')
     if (existingTooltip) {
-      console.log('🎯 [Tooltip] Removing existing tooltip')
+      // console.log('🎯 [Tooltip] Removing existing tooltip')
       existingTooltip.remove()
     }
     
@@ -67,12 +67,12 @@ export class UIManager {
     // Add to body
     document.body.appendChild(this.controller.tooltip)
     
-    console.log('🎯 [Tooltip] Tooltip created dynamically:', {
-      tooltip: this.controller.tooltip,
-      tooltipContent: this.controller.tooltipContent,
-      parentNode: this.controller.tooltip.parentNode,
-      tooltipId: this.controller.tooltip.id
-    })
+    // console.log('🎯 [Tooltip] Tooltip created dynamically:', {
+      // tooltip: this.controller.tooltip,
+      // tooltipContent: this.controller.tooltipContent,
+      // parentNode: this.controller.tooltip.parentNode,
+      // tooltipId: this.controller.tooltip.id
+    // })
   }
 
   showTooltip(x, y, content) {
@@ -179,7 +179,7 @@ export class UIManager {
       button.disabled = false
       button.style.cursor = 'pointer'
     } else {
-      console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
+      // console.log(`Could not find water drop button for metadata ID: ${metadataId}`)
     }
   }
 
@@ -299,17 +299,17 @@ export class UIManager {
 
   // Show checkboxes for metadata
   showCheckboxesForMetadata(metadataId) {
-    console.log(`🔍 [UI] showCheckboxesForMetadata called for ${metadataId}`)
+    // console.log(`🔍 [UI] showCheckboxesForMetadata called for ${metadataId}`)
     
     const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
-    console.log(`🔍 [UI] getMetadataVectorById result for ${metadataId}:`, metadataVector ? 'found' : 'not found')
+    // console.log(`🔍 [UI] getMetadataVectorById result for ${metadataId}:`, metadataVector ? 'found' : 'not found')
     
     const isCategorical = metadataVector?.data_type === 'DISCRETE'
     const isContinuous = metadataVector?.data_type === 'NUMERIC'
     
     if (isCategorical) {
       // For categorical metadata, show the new UI elements
-      console.log(`🔍 [UI] Processing categorical metadata ${metadataId}`)
+      // console.log(`🔍 [UI] Processing categorical metadata ${metadataId}`)
       
       // Status icon updates should be handled by data loading logic, not UI display logic
       
@@ -402,7 +402,7 @@ export class UIManager {
       // (in initializeCheckboxesForMetadata), which loads the full metadata vector.
     } else if (isContinuous) {
       // For continuous metadata, show the new UI elements (status icon, filter state icon, and filter switch)
-      console.log(`🔍 [UI] Processing continuous metadata ${metadataId}`)
+      // console.log(`🔍 [UI] Processing continuous metadata ${metadataId}`)
       
       // Status icon updates should be handled by data loading logic, not UI display logic
       
@@ -439,7 +439,7 @@ export class UIManager {
         }
       }
     } else {
-      console.log(`🔍 [DEBUG] No metadata checkbox found for metadata ${metadataId}`)
+      // console.log(`🔍 [DEBUG] No metadata checkbox found for metadata ${metadataId}`)
     }
     
     // Show all category checkboxes for this metadata
@@ -668,7 +668,7 @@ export class UIManager {
     // Initialize checkboxes only for the currently loaded metadata
     const metadataId = this.controller.currentMetadataId
     if (!metadataId) {
-      console.log('⚠️ No current metadata ID - skipping checkbox initialization')
+      // console.log('⚠️ No current metadata ID - skipping checkbox initialization')
       return
     }
 
@@ -852,7 +852,7 @@ export class UIManager {
     const perfStart = performance.now()
     
     // DEBUG: Log who's calling this function
-    console.log(`⏱️ [PERF] updateSidebarCategoryCounts called from:`)
+    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts called from:`)
     console.trace()
     
     // Find all category checkboxes that are currently visible (display !== 'none')
@@ -873,7 +873,7 @@ export class UIManager {
       return categoriesDiv.style.display !== 'none'
     })
     
-    console.log(`⏱️ [PERF] updateSidebarCategoryCounts: Processing ${visibleCheckboxes.length}/${allCategoryCheckboxes.length} visible checkboxes`)
+    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts: Processing ${visibleCheckboxes.length}/${allCategoryCheckboxes.length} visible checkboxes`)
     
     // Convert currentVisibleCells to Set once for O(1) lookups
     const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
@@ -928,7 +928,7 @@ export class UIManager {
     })
     
     const perfTime = performance.now() - perfStart
-    console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)
     
     if (perfTime > 100) {
       console.warn(`⚠️ [PERF] updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
@@ -1038,7 +1038,7 @@ export class UIManager {
       }
       axesCheckbox.addEventListener('change', this.controller.boundAxesToggle)
     } else {
-      console.log('Axes checkbox not found during initialization!')
+      // console.log('Axes checkbox not found during initialization!')
     }
     
     const gridCheckbox = document.getElementById('show-grid-checkbox')
@@ -1065,7 +1065,7 @@ export class UIManager {
       
       // Add event listener
       categoryOrderSelect.addEventListener('change', (e) => {
-        console.log('📊 Category order changed:', e.target.value)
+        // console.log('📊 Category order changed:', e.target.value)
         this.changeCategoryOrder(e)
       })
     }
@@ -1078,7 +1078,7 @@ export class UIManager {
       
       // Add event listener
       numericalOrderSelect.addEventListener('change', (e) => {
-        console.log('📊 Numerical order changed:', e.target.value)
+        // console.log('📊 Numerical order changed:', e.target.value)
         this.changeNumericalOrder(e)
       })
     }
@@ -1092,13 +1092,13 @@ export class UIManager {
       // Add event listener
       autoPreloadCheckbox.addEventListener('change', (e) => {
         this.controller.autoPreloadMetadata = e.target.checked
-        console.log('📊 Auto-preload metadata:', this.controller.autoPreloadMetadata)
+        // console.log('📊 Auto-preload metadata:', this.controller.autoPreloadMetadata)
         
         // If enabled, start preloading now
         if (this.controller.autoPreloadMetadata) {
-          console.log('🚀 Starting automatic preload after checkbox enable...')
+          // console.log('🚀 Starting automatic preload after checkbox enable...')
           this.controller.preloadAllMetadata().catch(error => {
-            console.log('Background metadata preload encountered an error:', error)
+            // console.log('Background metadata preload encountered an error:', error)
           })
         }
       })
@@ -1203,7 +1203,7 @@ export class UIManager {
     // Position tooltip near the mouse cursor
     const plotContainer = document.querySelector('.plot-container')
     if (!plotContainer) {
-      console.log('Plot container not found')
+      // console.log('Plot container not found')
       return
     }
     
@@ -1245,7 +1245,7 @@ export class UIManager {
       tooltipLeft = rect.right - tooltipWidth - 10
     }
     
-    console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
+    // console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
     
     this.controller.tooltip.style.left = `${tooltipLeft}px`
     this.controller.tooltip.style.top = `${tooltipTop}px`
@@ -1260,13 +1260,13 @@ export class UIManager {
     
     // Debug: Check if tooltip is actually visible
     const computedStyle = window.getComputedStyle(this.controller.tooltip)
-    console.log('🎯 [Tooltip] Computed style:', {
-      display: computedStyle.display,
-      visibility: computedStyle.visibility,
-      opacity: computedStyle.opacity,
-      position: computedStyle.position,
-      zIndex: computedStyle.zIndex
-    })
+    // console.log('🎯 [Tooltip] Computed style:', {
+      // display: computedStyle.display,
+      // visibility: computedStyle.visibility,
+      // opacity: computedStyle.opacity,
+      // position: computedStyle.position,
+      // zIndex: computedStyle.zIndex
+    // })
     
     // Force tooltip to be visible with maximum z-index
     this.controller.tooltip.style.zIndex = '999999'
@@ -1276,7 +1276,7 @@ export class UIManager {
     
     // For RegL mode, use proper positioning instead of fixed debug position
     if (this.controller.rendererType === 'regl') {
-      console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+      // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
       
       // Use the calculated position for RegL
       this.controller.tooltip.style.left = `${tooltipLeft}px`
@@ -1284,12 +1284,12 @@ export class UIManager {
       
       // Different styling for fixed vs dynamic tooltips
       if (this.controller.isTooltipFixed) {
-        console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+        // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
         this.controller.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
         this.controller.tooltip.style.border = '2px solid #00ff00'
         this.controller.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
       } else {
-        console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+        // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
         this.controller.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
         this.controller.tooltip.style.border = '1px solid #ccc'
         this.controller.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
@@ -1298,12 +1298,12 @@ export class UIManager {
       this.controller.tooltip.style.width = 'auto'
       this.controller.tooltip.style.height = 'auto'
       
-      console.log('🎯 [Tooltip] Final RegL tooltip position:', {
-        left: this.controller.tooltip.style.left,
-        top: this.controller.tooltip.style.top,
-        display: this.controller.tooltip.style.display,
-        backgroundColor: this.controller.tooltip.style.backgroundColor
-      })
+      // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+        // left: this.controller.tooltip.style.left,
+        // top: this.controller.tooltip.style.top,
+        // display: this.controller.tooltip.style.display,
+        // backgroundColor: this.controller.tooltip.style.backgroundColor
+      // })
       
       // TEMPORARY: Force tooltip to a visible position for debugging
       this.controller.tooltip.style.left = '100px'
@@ -1312,7 +1312,7 @@ export class UIManager {
       this.controller.tooltip.style.border = '3px solid yellow'
       this.controller.tooltip.style.width = '300px'
       this.controller.tooltip.style.height = '100px'
-      console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+      // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
     } else {
       // Keep debug positioning for PixiJS mode
       this.controller.tooltip.style.left = '50px'
@@ -1336,13 +1336,13 @@ export class UIManager {
   toggleAxes() {
     const checkbox = document.getElementById('show-axes-checkbox')
     if (!checkbox) {
-      console.log('Axes checkbox not found!')
+      // console.log('Axes checkbox not found!')
       return
     }
     
     if (this.controller.rendererType === 'regl') {
       // ReGL mode: redraw overlay (renderGrid clears and redraws everything)
-      console.log(`🔄 [ReGL] Toggling axes: ${checkbox.checked}`)
+      // console.log(`🔄 [ReGL] Toggling axes: ${checkbox.checked}`)
       this.controller.rendererManager.renderGrid()
     } else if (this.controller.axesContainer) {
       // PixiJS mode: axes are in a PixiJS container
@@ -1354,13 +1354,13 @@ export class UIManager {
   toggleGrid() {
     const checkbox = document.getElementById('show-grid-checkbox')
     if (!checkbox) {
-      console.log('Grid checkbox not found!')
+      // console.log('Grid checkbox not found!')
       return
     }
     
     if (this.controller.rendererType === 'regl') {
       // ReGL mode: grid is drawn on Canvas2D overlay
-      console.log(`🔄 [ReGL] Toggling grid: ${checkbox.checked}`)
+      // console.log(`🔄 [ReGL] Toggling grid: ${checkbox.checked}`)
       this.controller.rendererManager.renderGrid()
     } else if (this.controller.gridContainer) {
       // PixiJS mode: grid is in a PixiJS container
@@ -1372,25 +1372,25 @@ export class UIManager {
   toggleCategories() {
     const checkbox = document.getElementById('show-categories-checkbox')
     if (!checkbox) {
-      console.log('🏷️ toggleCategories: checkbox not found!')
+      // console.log('🏷️ toggleCategories: checkbox not found!')
       return
     }
     
-    console.log(`🏷️ Toggling categories: ${checkbox.checked}`)
-    console.log(`🏷️ Current metadata:`, this.controller.currentMetadataVector ? `${this.controller.currentMetadataVector.name} (${this.controller.currentMetadataVector.data_type})` : 'none')
+    // console.log(`🏷️ Toggling categories: ${checkbox.checked}`)
+    // console.log(`🏷️ Current metadata:`, this.controller.currentMetadataVector ? `${this.controller.currentMetadataVector.name} (${this.controller.currentMetadataVector.data_type})` : 'none')
     
     // Toggle category labels on the plot
     if (this.controller.rendererType === 'regl') {
       // ReGL mode: Labels are drawn on Canvas2D overlay
-      console.log('🏷️ [ReGL] Toggling category labels on Canvas2D overlay')
+      // console.log('🏷️ [ReGL] Toggling category labels on Canvas2D overlay')
       if (checkbox.checked) {
-        console.log('🏷️ [ReGL] Re-rendering category labels...')
+        // console.log('🏷️ [ReGL] Re-rendering category labels...')
         // Redraw overlay with labels
         this.controller.rendererManager.renderGrid()
         this.controller.rendererManager.renderAxes()
         this.controller.rendererManager.renderCategoryLabels()
       } else {
-        console.log('🏷️ [ReGL] Clearing category labels')
+        // console.log('🏷️ [ReGL] Clearing category labels')
         // Redraw overlay without labels (renderCategoryLabels will check checkbox and skip)
         this.controller.rendererManager.renderGrid()
         this.controller.rendererManager.renderAxes()
@@ -1399,35 +1399,35 @@ export class UIManager {
     } else if (this.controller.categoryLabelsContainer) {
       // PixiJS mode: Labels are in a PixiJS container
       this.controller.categoryLabelsContainer.visible = checkbox.checked
-      console.log(`🏷️ Category labels container visible: ${this.controller.categoryLabelsContainer.visible}`)
+      // console.log(`🏷️ Category labels container visible: ${this.controller.categoryLabelsContainer.visible}`)
       
       // If turning on, make sure labels are rendered
       if (checkbox.checked) {
-        console.log('🏷️ Re-rendering category labels...')
+        // console.log('🏷️ Re-rendering category labels...')
         this.controller.rendererManager.renderCategoryLabels()
       } else {
-        console.log('🏷️ Hiding category labels')
+        // console.log('🏷️ Hiding category labels')
       }
     } else {
-      console.log('🏷️ No categoryLabelsContainer available')
+      // console.log('🏷️ No categoryLabelsContainer available')
     }
     
     // Find the categories container in the right panel
     const categoriesContainer = document.querySelector('.metadata-categories')
     if (categoriesContainer) {
       categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
-      console.log(`🏷️ Metadata categories panel: ${checkbox.checked ? 'shown' : 'hidden'}`)
+      // console.log(`🏷️ Metadata categories panel: ${checkbox.checked ? 'shown' : 'hidden'}`)
     }
     
-    console.log('🏷️ Categories toggle complete!')
+    // console.log('🏷️ Categories toggle complete!')
   }
 
   changeCategoryOrder(event) {
     const newOrder = event.target.value
-    console.log(`📊 [CATEGORY ORDER] Changing from '${this.controller.categoryOrder}' to '${newOrder}'`)
+    // console.log(`📊 [CATEGORY ORDER] Changing from '${this.controller.categoryOrder}' to '${newOrder}'`)
     
     if (newOrder === this.controller.categoryOrder) {
-      console.log('📊 [CATEGORY ORDER] Order unchanged, skipping update')
+      // console.log('📊 [CATEGORY ORDER] Order unchanged, skipping update')
       return
     }
     
@@ -1441,7 +1441,7 @@ export class UIManager {
     
     // If we have discrete metadata currently displayed, re-render the plot
     if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE') {
-      console.log(`📊 [CATEGORY ORDER] ✅ Discrete metadata active - applying new order`)
+      // console.log(`📊 [CATEGORY ORDER] ✅ Discrete metadata active - applying new order`)
       
       // IMPORTANT: Don't recreate color map - keep existing color assignments!
       // The color map should remain stable regardless of sort order
@@ -1459,18 +1459,18 @@ export class UIManager {
         this.controller.rendererManager.renderCategoryLabels()
       }
       
-      console.log('📊 [CATEGORY ORDER] Complete!')
+      // console.log('📊 [CATEGORY ORDER] Complete!')
     } else {
-      console.log('📊 [CATEGORY ORDER] No discrete metadata active, order preference saved for next use')
+      // console.log('📊 [CATEGORY ORDER] No discrete metadata active, order preference saved for next use')
     }
   }
 
   changeNumericalOrder(event) {
     const newOrder = event.target.value
-    console.log(`📊 Changing numerical order from '${this.controller.numericalOrder}' to '${newOrder}'`)
+    // console.log(`📊 Changing numerical order from '${this.controller.numericalOrder}' to '${newOrder}'`)
     
     if (newOrder === this.controller.numericalOrder) {
-      console.log('📊 Numerical order unchanged, skipping update')
+      // console.log('📊 Numerical order unchanged, skipping update')
       return
     }
     
@@ -1481,14 +1481,14 @@ export class UIManager {
     
     // If we have continuous metadata currently displayed, re-render the plot
     if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'NUMERIC') {
-      console.log(`📊 ✅ Continuous metadata active - applying new order`)
+      // console.log(`📊 ✅ Continuous metadata active - applying new order`)
       
       // Re-render the plot with new order
       this.controller.renderPointsWithCurrentColoring()
       
-      console.log('📊 Numerical order change complete!')
+      // console.log('📊 Numerical order change complete!')
     } else {
-      console.log('📊 No continuous metadata active, order preference saved for next use')
+      // console.log('📊 No continuous metadata active, order preference saved for next use')
     }
   }
 
@@ -1498,7 +1498,7 @@ export class UIManager {
     const slider = document.getElementById('point-size-slider')
     const valueDisplay = document.getElementById('point-size-value')
     if (!slider || !valueDisplay) {
-      console.log('Slider or valueDisplay not found')
+      // console.log('Slider or valueDisplay not found')
       return
     }
     
@@ -1519,7 +1519,7 @@ export class UIManager {
   updateEmbeddings() {
     // Check if loom file select target exists (it's now manually found, not a Stimulus target)
     if (!this.controller.loomFileSelectTarget || !this.controller.hasEmbeddingSelectTarget || !this.controller.hasEmbeddingsByLoomValue) {
-      console.log('Required targets or values not available')
+      // console.log('Required targets or values not available')
       return
     }
     
@@ -1541,15 +1541,15 @@ export class UIManager {
   // Update metadata dropdown
   updateMetadata() {
     const perfStart = performance.now()
-    console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
+    // console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
     
     if (!this.controller.hasMetadataSelectTarget) {
-      console.log('Metadata select target not available')
+      // console.log('Metadata select target not available')
       return
     }
     
     const selectedMetadataId = this.controller.metadataSelectTarget.value
-    console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
+    // console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
     
     if (selectedMetadataId) {
       // Show loading spinner
@@ -1563,7 +1563,7 @@ export class UIManager {
         .finally(() => {
           this.hideMetadataDropdownSpinner()
           const perfEnd = performance.now()
-          console.log(`⏱️ [PERF] ====== EMBEDDING SWITCH COMPLETED in ${(perfEnd - perfStart).toFixed(2)}ms ======`)
+          // console.log(`⏱️ [PERF] ====== EMBEDDING SWITCH COMPLETED in ${(perfEnd - perfStart).toFixed(2)}ms ======`)
         })
     }
   }

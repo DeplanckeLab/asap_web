@@ -195,28 +195,28 @@ export class RendererManager {
   // Render continuous color legend using Canvas 2D (ReGL mode)
   renderContinuousColorLegendCanvas2D() {
     const startTime = performance.now()
-    console.log('🎨 [Canvas2D] Rendering continuous color legend START')
+    // console.log('🎨 [Canvas2D] Rendering continuous color legend START')
     
     if (!this.controller.overlayCtx || !this.controller.currentBounds || !this.controller.currentMetadataVector || !this.controller.currentCoordinates) {
-      console.log('🎨 [Canvas2D] Missing required components for continuous legend')
+      // console.log('🎨 [Canvas2D] Missing required components for continuous legend')
       return
     }
 
     // Only render legend for continuous metadata
     if (this.controller.currentMetadataVector.data_type !== 'NUMERIC') {
-      console.log('🎨 [Canvas2D] Not numeric metadata, skipping legend')
+      // console.log('🎨 [Canvas2D] Not numeric metadata, skipping legend')
       return
     }
 
     // During panning, don't update legend
     if (this.controller.isPanning) {
-      console.log('🎨 [Canvas2D] Skipping legend updates during panning')
+      // console.log('🎨 [Canvas2D] Skipping legend updates during panning')
       return
     }
 
     // Redraw the entire overlay (grid, axes, legend) to ensure the old legend is cleared
     // This is necessary when the color range is adapted
-    console.log('🎨 [Canvas2D] Redrawing full overlay (grid + axes + legend)')
+    // console.log('🎨 [Canvas2D] Redrawing full overlay (grid + axes + legend)')
     this.renderGrid() // Clears the canvas
     this.renderAxes() // Draw axes
 
@@ -229,7 +229,7 @@ export class RendererManager {
     const effectiveRange = this.controller.getEffectiveColorRange()
     const minVal = effectiveRange.min
     const maxVal = effectiveRange.max
-    console.log('🎨 [Canvas2D] Effective range:', { minVal, maxVal })
+    // console.log('🎨 [Canvas2D] Effective range:', { minVal, maxVal })
 
     // Legend dimensions
     const margins = this.getPlotMargins()
@@ -321,7 +321,7 @@ export class RendererManager {
     ctx.restore()
 
     const totalTime = performance.now() - startTime
-    console.log(`🎨 [Canvas2D] Continuous color legend rendered in ${totalTime.toFixed(2)}ms`)
+    // console.log(`🎨 [Canvas2D] Continuous color legend rendered in ${totalTime.toFixed(2)}ms`)
   }
 
   renderGridCanvas2D() {
@@ -332,16 +332,16 @@ export class RendererManager {
 
   // Category labels and legends
   renderCategoryLabels() {
-    console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
+    // console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
     
     if (!this.controller.overlayCtx || !this.controller.overlayCanvas || !this.controller.currentBounds || !this.controller.currentMetadataVector || !this.controller.currentCoordinates) {
-      console.log('🏷️ [Canvas2D] Missing required components')
+      // console.log('🏷️ [Canvas2D] Missing required components')
       return
     }
     
     // Only render labels for discrete metadata
     if (this.controller.currentMetadataVector.data_type !== 'DISCRETE') {
-      console.log('🏷️ [Canvas2D] Not discrete metadata, skipping (checkbox can still be toggled for when categorical metadata is selected)')
+      // console.log('🏷️ [Canvas2D] Not discrete metadata, skipping (checkbox can still be toggled for when categorical metadata is selected)')
       return
     }
     
@@ -349,10 +349,10 @@ export class RendererManager {
     const categoriesCheckbox = document.getElementById('show-categories-checkbox')
     const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
     
-    console.log(`🏷️ [Canvas2D] Category labels checkbox state: ${shouldShowLabels}`)
+    // console.log(`🏷️ [Canvas2D] Category labels checkbox state: ${shouldShowLabels}`)
     
     if (!shouldShowLabels) {
-      console.log('🏷️ [Canvas2D] Category labels hidden by user preference')
+      // console.log('🏷️ [Canvas2D] Category labels hidden by user preference')
       // Clear stored labels when hidden
       this.controller.canvas2DLabels = []
       return
@@ -377,14 +377,14 @@ export class RendererManager {
       categoryList = [...new Set(values)]
     }
     
-    console.log(`🏷️ [Canvas2D] Found ${categoryList.length} categories`)
-    console.log(`🏷️ [Canvas2D] Current bounds:`, this.controller.currentBounds)
-    console.log(`🏷️ [Canvas2D] Canvas dimensions: ${width}x${height}`)
+    // console.log(`🏷️ [Canvas2D] Found ${categoryList.length} categories`)
+    // console.log(`🏷️ [Canvas2D] Current bounds:`, this.controller.currentBounds)
+    // console.log(`🏷️ [Canvas2D] Canvas dimensions: ${width}x${height}`)
     
     // Calculate centroids
     const centroids = this.controller.dataManager.calculateCategoryCentroids(values, categoryList)
     
-    console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
+    // console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
     
     // Get category colors using the same logic as plot dots for consistency
     // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
@@ -416,19 +416,19 @@ export class RendererManager {
         const existingLabel = this.controller.canvas2DLabels.find(l => l.category === category)
         if (existingLabel && existingLabel.offsetX !== undefined && existingLabel.offsetY !== undefined) {
           // Apply the drag offset to the centroid position
-          console.log(`🏷️ [Canvas2D] Found existing label for "${category}" with offset (${existingLabel.offsetX}, ${existingLabel.offsetY})`)
+          // console.log(`🏷️ [Canvas2D] Found existing label for "${category}" with offset (${existingLabel.offsetX}, ${existingLabel.offsetY})`)
           screenX += existingLabel.offsetX
           screenY += existingLabel.offsetY
         }
         
-        console.log(`🏷️ [Canvas2D] Category "${category}": data coords (${centroid.x.toFixed(2)}, ${centroid.y.toFixed(2)}) -> screen coords (${screenX.toFixed(0)}, ${screenY.toFixed(0)})`)
+        // console.log(`🏷️ [Canvas2D] Category "${category}": data coords (${centroid.x.toFixed(2)}, ${centroid.y.toFixed(2)}) -> screen coords (${screenX.toFixed(0)}, ${screenY.toFixed(0)})`)
         
         // Skip if outside visible area
         const margins = this.getPlotMargins()
         const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
         const isOffScreen = screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin
         if (isOffScreen) {
-          console.log(`🏷️ [Canvas2D] Category "${category}" is off-screen (width: ${width}, height: ${height}, margin: ${margin})`)
+          // console.log(`🏷️ [Canvas2D] Category "${category}" is off-screen (width: ${width}, height: ${height}, margin: ${margin})`)
           labelsSkipped++
           return
         }
@@ -510,12 +510,12 @@ export class RendererManager {
     if (this.controller.draggingLabel) {
       const newDraggingLabel = newLabels.find(l => l.category === this.controller.draggingLabel.category)
       if (newDraggingLabel) {
-        console.log(`🏷️ [Canvas2D] Updated dragging label reference for "${this.controller.draggingLabel.category}"`)
+        // console.log(`🏷️ [Canvas2D] Updated dragging label reference for "${this.controller.draggingLabel.category}"`)
         this.controller.draggingLabel = newDraggingLabel
       }
     }
     
-    console.log(`🏷️ [Canvas2D] Drew ${labelsDrawn} category labels (${labelsSkipped} skipped as off-screen)`)
+    // console.log(`🏷️ [Canvas2D] Drew ${labelsDrawn} category labels (${labelsSkipped} skipped as off-screen)`)
   }
 
   renderContinuousColorLegend() {
@@ -646,7 +646,7 @@ export class RendererManager {
 
   // Point size management
   updateAllPointSizes(newSize) {
-    console.log(`⏱️ [PERF] Updating point size to ${newSize}`)
+    // console.log(`⏱️ [PERF] Updating point size to ${newSize}`)
     const updateStart = performance.now()
     
     // Update the current point size
@@ -659,7 +659,7 @@ export class RendererManager {
     
     const updateEnd = performance.now()
     const updateTime = updateEnd - updateStart
-    console.log(`⏱️ [PERF] Point size update completed in ${updateTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [PERF] Point size update completed in ${updateTime.toFixed(2)}ms`)
   }
 
   // Initialize scatter plot with coordinates
@@ -676,17 +676,17 @@ export class RendererManager {
                                    (this.controller.reglRenderer.positions ? this.controller.reglRenderer.positions.length / 2 : 0)
         
         if (hasState && rendererPointCount === coordinateCount) {
-          console.log(`⏱️ [PERF] Step 3: Reusing existing ${this.controller.rendererType.toUpperCase()} renderer (FAST PATH - renderer has state)`)
-          console.log(`⏱️ [PERF] Renderer instance: ${this.controller.reglRenderer.instanceId}, points: ${rendererPointCount}`)
+          // console.log(`⏱️ [PERF] Step 3: Reusing existing ${this.controller.rendererType.toUpperCase()} renderer (FAST PATH - renderer has state)`)
+          // console.log(`⏱️ [PERF] Renderer instance: ${this.controller.reglRenderer.instanceId}, points: ${rendererPointCount}`)
           // Renderer already exists with correct state - just render the coordinates
           await this.controller.renderScatterPlot(coordinates)
           return
         } else {
-          console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render or count mismatch)`)
-          console.log(`⏱️ [PERF] Existing renderer state: hasState=${hasState}, rendererPoints=${rendererPointCount}, newPoints=${coordinateCount}`)
+          // console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render or count mismatch)`)
+          // console.log(`⏱️ [PERF] Existing renderer state: hasState=${hasState}, rendererPoints=${rendererPointCount}, newPoints=${coordinateCount}`)
         }
       } else {
-        console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
+        // console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render)`)
       }
       
       // Clear existing renderers
@@ -697,11 +697,11 @@ export class RendererManager {
           hasPositions: !!this.controller.reglRenderer.positions,
           hasColors: !!this.controller.reglRenderer.colors
         }
-        console.log(`⏱️ [PERF] Destroying existing renderer: ${oldRendererId}`, oldRendererState)
-        console.trace(`⏱️ [PERF] Stack trace for renderer destruction`)
+        // console.log(`⏱️ [PERF] Destroying existing renderer: ${oldRendererId}`, oldRendererState)
+        //console.trace(`⏱️ [PERF] Stack trace for renderer destruction`)
         this.controller.reglRenderer.destroy()
         this.controller.reglRenderer = null
-        console.log(`⏱️ [PERF] Renderer destroyed and set to null`)
+        // console.log(`⏱️ [PERF] Renderer destroyed and set to null`)
       }
       
       // Reset canvas listeners flag so they get reattached to the new canvas
@@ -718,7 +718,7 @@ export class RendererManager {
       plotContainer.innerHTML = ''
       
         // ===== ReGL RENDERER =====
-        console.log('🎯 Initializing ReGL renderer for WebGL performance')
+        // console.log('🎯 Initializing ReGL renderer for WebGL performance')
         
         // Ensure container is positioned for absolute children
         plotContainer.style.position = 'relative'
@@ -735,22 +735,22 @@ export class RendererManager {
         canvas.style.zIndex = '1' // Bottom layer
         plotContainer.appendChild(canvas)
         
-        console.log('🔍 DEBUG: Canvas dimensions:', {
-          width: canvas.width,
-          height: canvas.height,
-          clientWidth: plotContainer.clientWidth,
-          clientHeight: plotContainer.clientHeight,
-          containerVisible: plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0
-        })
+        // console.log('🔍 DEBUG: Canvas dimensions:', {
+          // width: canvas.width,
+          // height: canvas.height,
+          // clientWidth: plotContainer.clientWidth,
+          // clientHeight: plotContainer.clientHeight,
+          // containerVisible: plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0
+        // })
         
         // Initialize ReGL renderer
-        console.log(`⏱️ [PERF] Creating new ReglRenderer in initializeScatterPlot`)
-        console.trace(`⏱️ [PERF] Stack trace for renderer creation in initializeScatterPlot`)
+        // console.log(`⏱️ [PERF] Creating new ReglRenderer in initializeScatterPlot`)
+        //console.trace(`⏱️ [PERF] Stack trace for renderer creation in initializeScatterPlot`)
         this.controller.reglRenderer = new ReglRenderer(canvas)
         this.controller.canvas = canvas
-        console.log(`⏱️ [PERF] New renderer created: ${this.controller.reglRenderer.instanceId}`)
+        // console.log(`⏱️ [PERF] New renderer created: ${this.controller.reglRenderer.instanceId}`)
         
-        console.log('ReGL canvas added to container:', canvas)
+        // console.log('ReGL canvas added to container:', canvas)
         
         // Setup interaction system now that canvas exists
         this.controller.interactionHandler.setupInteractionSystem()
@@ -776,13 +776,13 @@ export class RendererManager {
         this.controller.PIXI = PIXI
         this.controller.pixiApp = null // No PixiJS app in ReGL mode
         
-        console.log('✅ Canvas 2D overlay created for UI elements (axes/grid/labels)')
-        console.log('📊 Canvas 2D overlay details:', {
-          width: overlayCanvas.width,
-          height: overlayCanvas.height,
-          zIndex: overlayCanvas.style.zIndex,
-          pointerEvents: overlayCanvas.style.pointerEvents
-        })
+        // console.log('✅ Canvas 2D overlay created for UI elements (axes/grid/labels)')
+        // console.log('📊 Canvas 2D overlay details:', {
+          // width: overlayCanvas.width,
+          // height: overlayCanvas.height,
+          // zIndex: overlayCanvas.style.zIndex,
+          // pointerEvents: overlayCanvas.style.pointerEvents
+        // })
         
     
         // ReGL mode: No PixiJS containers needed, using Canvas 2D overlay
@@ -790,7 +790,7 @@ export class RendererManager {
         this.controller.gridContainer = null
         this.controller.categoryLabelsContainer = null
         this.controller.axesContainer = null
-        console.log(`✅ ReGL mode - using Canvas 2D overlay (no PixiJS containers)`)
+        // console.log(`✅ ReGL mode - using Canvas 2D overlay (no PixiJS containers)`)
       
 
       // Store current loom file

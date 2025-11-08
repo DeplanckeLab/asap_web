@@ -172,7 +172,7 @@ export class ColorManager {
       return
     }
     
-    console.log(`🎨 [CACHE] Calculating colors for ${coloringMetadataVector.values.length} points`)
+    // console.log(`🎨 [CACHE] Calculating colors for ${coloringMetadataVector.values.length} points`)
     const startTime = performance.now()
     
     this.controller.cachedColorsByCellIndex = new Map()
@@ -249,7 +249,7 @@ export class ColorManager {
     this.controller.lastColoringMetadataId = coloringMetadataVector.id
     
     const elapsed = performance.now() - startTime
-    console.log(`🎨 [CACHE] Cached colors for ${this.controller.cachedColorsByCellIndex.size} points in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎨 [CACHE] Cached colors for ${this.controller.cachedColorsByCellIndex.size} points in ${elapsed.toFixed(2)}ms`)
   }
 
   // Centralized function to get the color for a point at a given index
@@ -388,9 +388,9 @@ export class ColorManager {
 
   // Initialize default gradient based on value distribution
   initializeDefaultGradient() {
-    console.log('🎨 initializeDefaultGradient called')
-    console.log('🎨 currentMetadataVector:', this.controller.currentMetadataVector)
-    console.log('🎨 data_type:', this.controller.currentMetadataVector?.data_type)
+    // console.log('🎨 initializeDefaultGradient called')
+    // console.log('🎨 currentMetadataVector:', this.controller.currentMetadataVector)
+    // console.log('🎨 data_type:', this.controller.currentMetadataVector?.data_type)
     
     if (!this.controller.currentMetadataVector || this.controller.currentMetadataVector.data_type !== 'NUMERIC') {
       console.warn('🎨 ⚠️ Cannot initialize gradient - missing metadata vector or not NUMERIC type')
@@ -398,7 +398,7 @@ export class ColorManager {
     }
 
     const values = this.controller.currentMetadataVector.values
-    console.log('🎨 Values length:', values ? values.length : 0)
+    // console.log('🎨 Values length:', values ? values.length : 0)
     
     if (!values || values.length === 0) {
       console.warn('🎨 ⚠️ Cannot initialize gradient - no values in metadata vector')
@@ -406,10 +406,10 @@ export class ColorManager {
     }
     
     const controlPoints = this.determineGradientForValues(values)
-    console.log('🎨 Determined control points:', controlPoints)
+    // console.log('🎨 Determined control points:', controlPoints)
     
     this.controller.gradientControlPoints = controlPoints
-    console.log('🎨 Set gradientControlPoints:', this.controller.gradientControlPoints)
+    // console.log('🎨 Set gradientControlPoints:', this.controller.gradientControlPoints)
   }
   
   // Determine appropriate gradient based on value distribution
@@ -440,12 +440,12 @@ export class ColorManager {
     const allNegative = maxVal <= 0
     const allPositive = minVal >= 0
     
-    console.log('🎨 Determining gradient for values:', { minVal, maxVal, spansZero, allNegative, allPositive })
+    // console.log('🎨 Determining gradient for values:', { minVal, maxVal, spansZero, allNegative, allPositive })
     
     if (spansZero) {
       // Values span from negative to positive: use diverging gradient (dark blue -> light grey at 0 -> dark red)
       const zeroPosition = valueToPosition(0)
-      console.log('🎨 Diverging gradient: zero positioned at', zeroPosition)
+      // console.log('🎨 Diverging gradient: zero positioned at', zeroPosition)
       return [
         { position: 0, color: 0x1e3a8a },           // Dark blue (most negative)
         { position: zeroPosition, color: 0xe5e7eb }, // Light grey (at zero)
@@ -453,14 +453,14 @@ export class ColorManager {
       ]
     } else if (allNegative) {
       // All negative values: dark blue to light grey
-      console.log('🎨 All negative gradient: dark blue -> light grey')
+      // console.log('🎨 All negative gradient: dark blue -> light grey')
       return [
         { position: 0, color: 0x1e3a8a },   // Dark blue (most negative)
         { position: 1, color: 0xe5e7eb }    // Light grey (at zero/least negative)
       ]
     } else if (allPositive) {
       // All positive values: light grey to dark red
-      console.log('🎨 All positive gradient: light grey -> dark red')
+      // console.log('🎨 All positive gradient: light grey -> dark red')
       // If minimum is exactly 0, position light grey at 0, otherwise at minimum
       const startPosition = minVal === 0 ? 0 : valueToPosition(Math.max(0, minVal))
       return [

@@ -111,7 +111,7 @@ export class DownloadManager {
     // Write and download
     window.XLSX.writeFile(wb, filename)
     
-    console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
+    // console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
   }
   
   // Add filters sheet to workbook

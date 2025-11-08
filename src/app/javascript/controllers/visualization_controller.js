@@ -12,7 +12,7 @@ import { DownloadManager } from "visualization/download_manager"
 import { GeneManager } from "visualization/gene_manager"
 import { CustomPlotManager } from "visualization/custom_plot_manager"
 
-console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
+// console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
 export default class extends Controller {
   // Only metadataSelect is required, others are optional
@@ -48,8 +48,8 @@ export default class extends Controller {
   connect() {
     // Generate unique ID for this controller instance
     this.instanceId = Math.random().toString(36).substring(7)
-    console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
-    console.trace(`🚀 Visualization controller connect() call stack:`)
+    // console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
+    // console.trace(`🚀 Visualization controller connect() call stack:`)
     
     // Check if this is a reconnection (modules already initialized)
     const isReconnection = this.dataManager && this.geneManager && this.memoryManager
@@ -59,17 +59,17 @@ export default class extends Controller {
       const hasState = this.reglRenderer.numPoints > 0 || 
                        (this.reglRenderer.positions && this.reglRenderer.positions.length > 0) ||
                        (this.reglRenderer.colors && this.reglRenderer.colors.length > 0)
-      console.log(`🚀 [CONNECT] Renderer already exists:`, {
-        rendererInstanceId: this.reglRenderer.instanceId,
-        hasState: hasState,
-        numPoints: this.reglRenderer.numPoints,
-        hasPositions: !!this.reglRenderer.positions,
-        hasColors: !!this.reglRenderer.colors,
-        isReconnection: isReconnection
-      })
+      // console.log(`🚀 [CONNECT] Renderer already exists:`, {
+        // rendererInstanceId: this.reglRenderer.instanceId,
+        // hasState: hasState,
+        // numPoints: this.reglRenderer.numPoints,
+        // hasPositions: !!this.reglRenderer.positions,
+        // hasColors: !!this.reglRenderer.colors,
+        // isReconnection: isReconnection
+      // })
       
       if (hasState && isReconnection) {
-        console.log(`🚀 [CONNECT] Reconnection detected with renderer state - skipping initializeCanvas() to preserve state`)
+        // console.log(`🚀 [CONNECT] Reconnection detected with renderer state - skipping initializeCanvas() to preserve state`)
         // Don't call initializeCanvas() if renderer already has state and modules are initialized
         // This prevents destroying the renderer during Stimulus reconnection
         return // Skip the rest of connect() initialization that might recreate the renderer
@@ -79,14 +79,14 @@ export default class extends Controller {
     // DEBUG: Add direct event listener to measure Stimulus overhead
     setTimeout(() => {
       const metadataHeaders = document.querySelectorAll('[data-action*="toggleMetadata"]')
-      console.log(`🔍 [DEBUG] Found ${metadataHeaders.length} metadata headers with toggleMetadata action`)
+      // console.log(`🔍 [DEBUG] Found ${metadataHeaders.length} metadata headers with toggleMetadata action`)
       
       metadataHeaders.forEach((header, index) => {
         if (index === 0) { // Only instrument the first one for testing
           header.addEventListener('click', (e) => {
             const directCallTime = performance.now()
-            console.log(`⚡ [DIRECT] Direct listener called at: ${directCallTime.toFixed(2)}ms (event timestamp: ${e.timeStamp.toFixed(2)}ms)`)
-            console.log(`⚡ [DIRECT] Direct listener delay: ${(directCallTime - e.timeStamp).toFixed(2)}ms`)
+            // console.log(`⚡ [DIRECT] Direct listener called at: ${directCallTime.toFixed(2)}ms (event timestamp: ${e.timeStamp.toFixed(2)}ms)`)
+            // console.log(`⚡ [DIRECT] Direct listener delay: ${(directCallTime - e.timeStamp).toFixed(2)}ms`)
           }, { capture: true }) // Use capture to run BEFORE Stimulus
         }
       })
@@ -122,7 +122,7 @@ export default class extends Controller {
          (!this.reglRenderer.colors || this.reglRenderer.colors.length === 0))) {
     this.initializeCanvas()
     } else {
-      console.log(`🚀 [CONNECT] Skipping initializeCanvas() - renderer has state`)
+      // console.log(`🚀 [CONNECT] Skipping initializeCanvas() - renderer has state`)
     }
     
     // Initialize IndexedDB for storing metadata on disk instead of memory
@@ -224,17 +224,17 @@ export default class extends Controller {
     if (!existingController || !existingHasState || thisHasState) {
       // Only set if no existing controller, or existing has no state, or this one has state
       if (existingController && existingHasState && !thisHasState) {
-        console.log('🚀 [CONNECT] Preserving existing visualization controller with state in window.visualizationController')
-        console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
-        console.log('🚀 [CONNECT] This renderer ID:', this.reglRenderer?.instanceId || 'none')
+        // console.log('🚀 [CONNECT] Preserving existing visualization controller with state in window.visualizationController')
+        // console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
+        // console.log('🚀 [CONNECT] This renderer ID:', this.reglRenderer?.instanceId || 'none')
         // Don't overwrite - keep the existing one
       } else {
     window.visualizationController = this
-        console.log('🚀 [CONNECT] Set window.visualizationController to this instance')
+        // console.log('🚀 [CONNECT] Set window.visualizationController to this instance')
       }
     } else {
-      console.log('🚀 [CONNECT] Keeping existing visualization controller with state in window.visualizationController')
-      console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
+      // console.log('🚀 [CONNECT] Keeping existing visualization controller with state in window.visualizationController')
+      // console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
     }
     
     // Expose emergency diagnostic function
@@ -247,9 +247,9 @@ export default class extends Controller {
     // Expose cell count debugging function
     window.getCellCount = () => {
       const cellCount = this.getCellCountFromServerData()
-      console.log(`🔍 [DEBUG] Current cell count: ${cellCount.toLocaleString()}`)
-      console.log(`🔍 [DEBUG] Current buffer size: ${this.maxMetadataInMemory}`)
-      console.log(`🔍 [DEBUG] EmbeddingsByLoomValue:`, this.embeddingsByLoomValue)
+      // console.log(`🔍 [DEBUG] Current cell count: ${cellCount.toLocaleString()}`)
+      // console.log(`🔍 [DEBUG] Current buffer size: ${this.maxMetadataInMemory}`)
+      // console.log(`🔍 [DEBUG] EmbeddingsByLoomValue:`, this.embeddingsByLoomValue)
       return cellCount
     }
     
@@ -257,17 +257,17 @@ export default class extends Controller {
     
     // Simple test - remove this after debugging
     /*setTimeout(() => {
-      console.log('Controller test: Water drop buttons found:', document.querySelectorAll('[data-action*="waterDropClicked"]').length)
+      // console.log('Controller test: Water drop buttons found:', document.querySelectorAll('[data-action*="waterDropClicked"]').length)
     }, 1000)
-    console.log('Available targets:', {
-      hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
-      hasEmbeddingSelectTarget: this.hasEmbeddingSelectTarget
-    })
-    console.log('Available values:', {
-      hasDefaultLoomFileValue: this.hasDefaultLoomFileValue,
-      hasEmbeddingsByLoomValue: this.hasEmbeddingsByLoomValue,
-      defaultLoomFileValue: this.defaultLoomFileValue
-    })
+    // console.log('Available targets:', {
+      // hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
+      // hasEmbeddingSelectTarget: this.hasEmbeddingSelectTarget
+    // })
+    // console.log('Available values:', {
+      // hasDefaultLoomFileValue: this.hasDefaultLoomFileValue,
+      // hasEmbeddingsByLoomValue: this.hasEmbeddingsByLoomValue,
+      // defaultLoomFileValue: this.defaultLoomFileValue
+    // })
     */
     // Test color loading immediately
     //console.log('Controller connecting - testing global colors availability:')
@@ -299,19 +299,19 @@ export default class extends Controller {
     
     // Set the default loom file selection
     // Stimulus will automatically set this.loomFileSelectTarget
-    console.log('🔍 [DEBUG] Loom file select target found:', !!this.loomFileSelectTarget)
+    // console.log('🔍 [DEBUG] Loom file select target found:', !!this.loomFileSelectTarget)
     if (this.loomFileSelectTarget) {
-      console.log('🔍 [DEBUG] Loom file select target value:', this.loomFileSelectTarget.value)
+      // console.log('🔍 [DEBUG] Loom file select target value:', this.loomFileSelectTarget.value)
     }
     
-    console.log('🔍 [DEBUG] Loom file setup in connect:', {
-      hasDefaultLoomFileValue: this.hasDefaultLoomFileValue,
-      hasLoomFileSelectTarget: !!this.loomFileSelectTarget,
-      defaultLoomFileValue: this.defaultLoomFileValue,
-      loomFileSelectTarget: this.loomFileSelectTarget,
-      hasEmbeddingsByLoomValue: this.hasEmbeddingsByLoomValue,
-      embeddingsByLoomValue: this.embeddingsByLoomValue
-    })
+    // console.log('🔍 [DEBUG] Loom file setup in connect:', {
+      // hasDefaultLoomFileValue: this.hasDefaultLoomFileValue,
+      // hasLoomFileSelectTarget: !!this.loomFileSelectTarget,
+      // defaultLoomFileValue: this.defaultLoomFileValue,
+      // loomFileSelectTarget: this.loomFileSelectTarget,
+      // hasEmbeddingsByLoomValue: this.hasEmbeddingsByLoomValue,
+      // embeddingsByLoomValue: this.embeddingsByLoomValue
+    // })
     
     // Get the loom file from the form selection, not a hardcoded fallback
     let loomFileToUse = null
@@ -319,44 +319,44 @@ export default class extends Controller {
     // First, try to get from the form selection
     if (this.loomFileSelectTarget && this.loomFileSelectTarget.value) {
       loomFileToUse = this.loomFileSelectTarget.value
-      console.log('🔍 [DEBUG] Using loom file from form selection:', loomFileToUse)
+      // console.log('🔍 [DEBUG] Using loom file from form selection:', loomFileToUse)
     }
     // Then try the default value
     else if (this.defaultLoomFileValue) {
       loomFileToUse = this.defaultLoomFileValue
-      console.log('🔍 [DEBUG] Using loom file from default value:', loomFileToUse)
+      // console.log('🔍 [DEBUG] Using loom file from default value:', loomFileToUse)
     }
     // Only use fallback if nothing else is available
     else {
       loomFileToUse = 'parsing/output.loom'
-      console.log('🔍 [DEBUG] Using loom file fallback:', loomFileToUse)
+      // console.log('🔍 [DEBUG] Using loom file fallback:', loomFileToUse)
     }
     
     this.currentLoomFile = loomFileToUse
-    console.log('🔍 [DEBUG] Final loom file set:', this.currentLoomFile)
+    // console.log('🔍 [DEBUG] Final loom file set:', this.currentLoomFile)
     
     // Ensure embeddingsByLoomValue is not null
     if (!this.embeddingsByLoomValue) {
       this.embeddingsByLoomValue = {}
-      console.log('🔍 [DEBUG] Set empty embeddingsByLoomValue as fallback')
+      // console.log('🔍 [DEBUG] Set empty embeddingsByLoomValue as fallback')
     }
     
     // If we also have a target, set its value and add change listener
     if (this.loomFileSelectTarget) {
       this.loomFileSelectTarget.value = loomFileToUse
-      console.log('🔍 [DEBUG] Set loom file target value:', this.loomFileSelectTarget.value)
+      // console.log('🔍 [DEBUG] Set loom file target value:', this.loomFileSelectTarget.value)
       
       // Debug: Check what options are available
-      console.log('🔍 [DEBUG] Loom file select options:', Array.from(this.loomFileSelectTarget.options).map(opt => ({
-        value: opt.value,
-        text: opt.text,
-        selected: opt.selected
-      })))
+      // console.log('🔍 [DEBUG] Loom file select options:', Array.from(this.loomFileSelectTarget.options).map(opt => ({
+        // value: opt.value,
+        // text: opt.text,
+        // selected: opt.selected
+      // })))
       
       // Add change listener to update currentLoomFile when user changes selection
       this.loomFileSelectTarget.addEventListener('change', (event) => {
         this.currentLoomFile = event.target.value
-        console.log('🔍 [DEBUG] Loom file changed to:', this.currentLoomFile)
+        // console.log('🔍 [DEBUG] Loom file changed to:', this.currentLoomFile)
         this.uiManager.updateEmbeddings()
       })
       
@@ -367,14 +367,14 @@ export default class extends Controller {
         if (this.hasMetadataSelectTarget) {
           const firstOption = this.metadataSelectTarget.querySelector('option[value]:not([value=""])')
           if (firstOption) {
-            console.log('🚀 Auto-loading first embedding on page load:', firstOption.textContent)
+            // console.log('🚀 Auto-loading first embedding on page load:', firstOption.textContent)
             this.metadataSelectTarget.value = firstOption.value
             this.uiManager.updateMetadata()
           }
         }
       }, 100) // Small delay to ensure DOM is ready
     } else {
-      console.log('🔍 [DEBUG] No loom file select target available, but using fallback value')
+      // console.log('🔍 [DEBUG] No loom file select target available, but using fallback value')
     }
     
     // Add click outside listener to close dropdowns
@@ -391,8 +391,8 @@ export default class extends Controller {
     window.addEventListener('resize', this.resizeHandler)
     
     // Initialize metadata vectors storage
-    console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
-    console.trace('Call stack:')
+    // console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
+    // console.trace('Call stack:')
     this.loadedMetadataVectors = {}
     this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
@@ -455,14 +455,14 @@ export default class extends Controller {
     
     // Start automatic preloading if enabled
     if (this.autoPreloadMetadata) {
-      console.log('🚀 Starting automatic metadata preloading...')
-      console.log('🔍 [DEBUG] Loom file state before preloading:', {
-        currentLoomFile: this.currentLoomFile,
-        defaultLoomFileValue: this.defaultLoomFileValue,
-        hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
-        loomFileSelectValue: this.loomFileSelectTarget?.value,
-        embeddingsByLoomValue: !!this.embeddingsByLoomValue
-      })
+      // console.log('🚀 Starting automatic metadata preloading...')
+      // console.log('🔍 [DEBUG] Loom file state before preloading:', {
+        // currentLoomFile: this.currentLoomFile,
+        // defaultLoomFileValue: this.defaultLoomFileValue,
+        // hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
+        // loomFileSelectValue: this.loomFileSelectTarget?.value,
+        // embeddingsByLoomValue: !!this.embeddingsByLoomValue
+      // })
       
       // Add a small delay to ensure loom file is set, then check all metadata status before preloading
       setTimeout(async () => {
@@ -473,7 +473,7 @@ export default class extends Controller {
           // Then start preloading (wait for it to complete)
           await this.preloadAllMetadata()
         } catch (error) {
-          console.log('Background metadata preload encountered an error:', error)
+          // console.log('Background metadata preload encountered an error:', error)
         }
       }, 200) // Slightly longer delay to ensure UI is fully ready
     }
@@ -511,10 +511,10 @@ export default class extends Controller {
     try {
       // Check in-memory cache first!
       if (this.binaryDataCache.has(metadataId)) {
-        console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
+        // console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
         const cachedData = this.binaryDataCache.get(metadataId)
         const cacheTime = performance.now() - fetchStart
-        console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
+        // console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
         
         // Use cached binary data
         this.dataManager.storeBinaryMetadataData(cachedData)
@@ -522,11 +522,11 @@ export default class extends Controller {
       }
       
       // Check IndexedDB (disk storage) for embeddings - this is the key fix!
-      console.log(`⏱️ [PERF] Step 1a: Checking IndexedDB for coordinates ${metadataId}...`)
+      // console.log(`⏱️ [PERF] Step 1a: Checking IndexedDB for coordinates ${metadataId}...`)
       const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
       if (diskData) {
         const diskTime = performance.now() - fetchStart
-        console.log(`⏱️ [PERF] Step 1a: IndexedDB HIT for ${metadataId} - ${diskTime.toFixed(2)}ms (saved network fetch!)`)
+        // console.log(`⏱️ [PERF] Step 1a: IndexedDB HIT for ${metadataId} - ${diskTime.toFixed(2)}ms (saved network fetch!)`)
         
         // Store in memory cache for next time
         this.binaryDataCache.set(metadataId, diskData)
@@ -536,7 +536,7 @@ export default class extends Controller {
         return
       }
       
-      console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
+      // console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
       
       // Get the current loom file selection
       const loomFile = this.getCurrentLoomFileForRequest()
@@ -566,7 +566,7 @@ export default class extends Controller {
       })
       
       const fetchTime = performance.now() - fetchStart
-      console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
+      // console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -586,19 +586,19 @@ export default class extends Controller {
       const metadataName = response.headers.get('X-Metadata-Name')
       const cellCount = parseInt(response.headers.get('X-Cell-Count'))
       
-      console.log(`⏱️ [PERF] Received ${metadataName} with ${cellCount} cells`)
+      // console.log(`⏱️ [PERF] Received ${metadataName} with ${cellCount} cells`)
       
       // Get the binary data as ArrayBuffer
       const bufferStart = performance.now()
       const arrayBuffer = await response.arrayBuffer()
       const bufferTime = performance.now() - bufferStart
-      console.log(`⏱️ [PERF] ArrayBuffer conversion: ${bufferTime.toFixed(2)}ms (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
+      // console.log(`⏱️ [PERF] ArrayBuffer conversion: ${bufferTime.toFixed(2)}ms (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
       
-      /*console.log('ArrayBuffer details:', {
-        byteLength: arrayBuffer.byteLength,
-        expectedLength: cellCount * 4, // 4 bytes per coordinate pair
-        isValid: arrayBuffer.byteLength === cellCount * 4
-      })*/
+      // /*console.log('ArrayBuffer details:', {
+        // byteLength: arrayBuffer.byteLength,
+        // expectedLength: cellCount * 4, // 4 bytes per coordinate pair
+        // isValid: arrayBuffer.byteLength === cellCount * 4
+      // })*/
       
       // Log first few bytes for debugging
       const view = new Uint8Array(arrayBuffer)
@@ -615,13 +615,13 @@ export default class extends Controller {
       
       // Cache binary data in memory for instant retrieval next time
       this.binaryDataCache.set(metadataId, dataObject)
-      console.log(`⏱️ [PERF] Cached binary data in memory for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
+      // console.log(`⏱️ [PERF] Cached binary data in memory for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
       
       // Also store in IndexedDB (disk) for persistent cache across page reloads!
       this.memoryManager.storeCoordinatesInIndexedDB(metadataId, dataObject).catch(error => {
         console.warn('Failed to store coordinates in IndexedDB:', error)
       })
-      console.log(`⏱️ [PERF] Stored coordinates in IndexedDB for ${metadataName} (will survive page reload)`)
+      // console.log(`⏱️ [PERF] Stored coordinates in IndexedDB for ${metadataName} (will survive page reload)`)
       
       // Store the binary coordinate data
       this.dataManager.storeBinaryMetadataData(dataObject)
@@ -643,7 +643,7 @@ export default class extends Controller {
       // Check IndexedDB (disk storage) for embeddings
       const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
       if (diskData) {
-        console.log(`  ✅ Loaded from IndexedDB: ${metadataName}`)
+        // console.log(`  ✅ Loaded from IndexedDB: ${metadataName}`)
         // Store in memory cache for next time
         this.binaryDataCache.set(metadataId, diskData)
         return { success: true, cached: true }
@@ -726,7 +726,7 @@ export default class extends Controller {
     if (!this.reglRenderer) return
     
     const startTime = performance.now()
-    console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
+    // console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
     
     // Calculate bounds for normalization
     const originalBounds = this.dataManager.calculateBounds(coordinates)
@@ -734,7 +734,7 @@ export default class extends Controller {
     this.currentBounds = originalBounds
     // ALWAYS preserve currentCoordinates - this is critical for filtering
     this.currentCoordinates = coordinates
-    console.log(`🎯 [ReGL] Stored currentCoordinates: ${coordinates.length} points`)
+    // console.log(`🎯 [ReGL] Stored currentCoordinates: ${coordinates.length} points`)
     
     // Reset ordering flags so they'll be reapplied for this new embedding
     this._lastCategoryOrderApplied = null
@@ -762,7 +762,7 @@ export default class extends Controller {
     // Flag that display order was reset - color cache needs to rebuild colorMap from originalPointColors
     this._displayOrderWasReset = true
     
-    console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
+    // console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
     
     // Normalize coordinates to screen space (0 to canvas size)
     const canvas = this.canvas
@@ -774,13 +774,13 @@ export default class extends Controller {
       screenCoordinates[i * 2 + 1] = this.interactionHandler.normalizeY(y, originalBounds)
     }
     
-    console.log('🔍 DEBUG: Coordinate normalization:', {
-      numPoints: coordinates.length,
-      bounds: originalBounds,
-      canvasSize: { width: this.canvas.width, height: this.canvas.height },
-      firstFewCoords: coordinates.slice(0, 3),
-      firstFewScreenCoords: Array.from(screenCoordinates.slice(0, 6))
-    })
+    // console.log('🔍 DEBUG: Coordinate normalization:', {
+      // numPoints: coordinates.length,
+      // bounds: originalBounds,
+      // canvasSize: { width: this.canvas.width, height: this.canvas.height },
+      // firstFewCoords: coordinates.slice(0, 3),
+      // firstFewScreenCoords: Array.from(screenCoordinates.slice(0, 6))
+    // })
     
     // Set positions in ReGL renderer
     this.reglRenderer.setPositions(screenCoordinates)
@@ -797,12 +797,12 @@ export default class extends Controller {
     for (let i = 0; i < coordinates.length; i++) {
       this.originalPointColors.set(i, defaultColor)
     }
-    console.log(`🎯 [ReGL] Populated originalPointColors with ${coordinates.length} default colors`)
+    // console.log(`🎯 [ReGL] Populated originalPointColors with ${coordinates.length} default colors`)
     
     // Render first frame
-    console.log('🔍 DEBUG: About to render first frame')
+    // console.log('🔍 DEBUG: About to render first frame')
     this.reglRenderer.render()
-    console.log('🔍 DEBUG: First frame rendered')
+    // console.log('🔍 DEBUG: First frame rendered')
     
     // Render grid and axes using PixiJS overlay
     this.rendererManager.renderGrid()
@@ -820,7 +820,7 @@ export default class extends Controller {
     this.spritesRenderType = 'default'
     
     const elapsed = performance.now() - startTime
-    console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
   }
 
 
@@ -941,17 +941,17 @@ export default class extends Controller {
       // Special debugging for sex and age metadata
       const metadataName = this.dataManager.getMetadataNameById(metadataId)
       if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-        console.log(`🔍 [SEX/AGE DEBUG] About to request ${metadataName} (${metadataId})`)
-        console.log(`🔍 [SEX/AGE DEBUG] Loom file selector value: "${this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : 'N/A'}"`)
-        console.log(`🔍 [SEX/AGE DEBUG] Default loom file value: "${this.defaultLoomFileValue}"`)
-        console.log(`🔍 [SEX/AGE DEBUG] Final loom file: "${loomFile}"`)
+        // console.log(`🔍 [SEX/AGE DEBUG] About to request ${metadataName} (${metadataId})`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Loom file selector value: "${this.hasLoomFileSelectTarget ? this.loomFileSelectTarget.value : 'N/A'}"`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Default loom file value: "${this.defaultLoomFileValue}"`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Final loom file: "${loomFile}"`)
       }
       
       // Check if loom file is available
       if (!loomFile) {
         const errorMsg = `No loom file available for metadata ${metadataId}`
         if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-          console.log(`🔍 [SEX/AGE DEBUG] ${errorMsg}`)
+          // console.log(`🔍 [SEX/AGE DEBUG] ${errorMsg}`)
         }
         throw new Error(errorMsg)
       }
@@ -962,9 +962,9 @@ export default class extends Controller {
       
       // Additional debugging for sex and age metadata
       if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-        console.log(`🔍 [SEX/AGE DEBUG] Requesting ${metadataName} (${metadataId}) from URL: ${url}`)
-        console.log(`🔍 [SEX/AGE DEBUG] Current loom file: "${loomFile}"`)
-        console.log(`🔍 [SEX/AGE DEBUG] Project ID: ${projectId}`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Requesting ${metadataName} (${metadataId}) from URL: ${url}`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Current loom file: "${loomFile}"`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Project ID: ${projectId}`)
       }
       
       //console.log(`Fetching single metadata vector silently from URL: ${url}`)
@@ -997,16 +997,16 @@ export default class extends Controller {
       
       // Special debugging for sex and age metadata
       if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-        console.log(`🔍 [SEX/AGE DEBUG] Server response for ${metadataName} (${metadataId}):`, {
-          hasMetadataVectors: !!data.metadata_vectors,
-          metadataVectorsKeys: data.metadata_vectors ? Object.keys(data.metadata_vectors) : [],
-          requestedId: metadataId,
-          foundInResponse: !!data.metadata_vectors?.[metadataId],
-          totalLoaded: data.total_loaded,
-          availableLoomFiles: data.loom_files,
-          requestedLoomFile: loomFile,
-          fullResponse: data
-        })
+        // console.log(`🔍 [SEX/AGE DEBUG] Server response for ${metadataName} (${metadataId}):`, {
+          // hasMetadataVectors: !!data.metadata_vectors,
+          // metadataVectorsKeys: data.metadata_vectors ? Object.keys(data.metadata_vectors) : [],
+          // requestedId: metadataId,
+          // foundInResponse: !!data.metadata_vectors?.[metadataId],
+          // totalLoaded: data.total_loaded,
+          // availableLoomFiles: data.loom_files,
+          // requestedLoomFile: loomFile,
+          // fullResponse: data
+        // })
       }
       
       // Store the loaded metadata vector
@@ -1026,7 +1026,7 @@ export default class extends Controller {
         this.metadataVectorsLoomFile = data.loom_file
         
         // Update status icon to show it's in memory (green check)
-        console.log(`🔍 [MEMORY] Metadata ${metadataId} loaded to memory in loadSingleMetadataVector - setting to green`)
+        // console.log(`🔍 [MEMORY] Metadata ${metadataId} loaded to memory in loadSingleMetadataVector - setting to green`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         
         const info = vectorData.compression_info
@@ -1061,7 +1061,7 @@ export default class extends Controller {
 
   // Run comprehensive metadata diagnostic
   async runMetadataDiagnostic() {
-    console.log(`\n🔍 [DIAGNOSTIC] Starting comprehensive metadata analysis... (v2.0 - Fixed disk-first logic)`)
+    // console.log(`\n🔍 [DIAGNOSTIC] Starting comprehensive metadata analysis... (v2.0 - Fixed disk-first logic)`)
     
     // 1. Check UI metadata
     const allMetadataButtons = document.querySelectorAll('button[data-metadata-id]')
@@ -1074,11 +1074,11 @@ export default class extends Controller {
       hasWaterDropAction: btn.dataset.action?.includes('waterDropClicked')
     }))
     
-    console.log(`🔍 [DIAGNOSTIC] UI Metadata Analysis:`)
-    console.log(`  📊 Total metadata buttons found: ${allMetadataButtons.length}`)
-    console.log(`  📊 Valid metadata IDs: ${uiMetadataIds.length}`)
-    console.log(`  📊 First 10 UI metadata IDs:`, uiMetadataIds.slice(0, 10))
-    console.log(`  📊 Last 10 UI metadata IDs:`, uiMetadataIds.slice(-10))
+    // console.log(`🔍 [DIAGNOSTIC] UI Metadata Analysis:`)
+    // console.log(`  📊 Total metadata buttons found: ${allMetadataButtons.length}`)
+    // console.log(`  📊 Valid metadata IDs: ${uiMetadataIds.length}`)
+    // console.log(`  📊 First 10 UI metadata IDs:`, uiMetadataIds.slice(0, 10))
+    // console.log(`  📊 Last 10 UI metadata IDs:`, uiMetadataIds.slice(-10))
     
     // 2. Check IndexedDB storage
     let indexedDBMetadata = []
@@ -1103,18 +1103,18 @@ export default class extends Controller {
     }
     
     const storedIds = indexedDBMetadata.map(m => m.id)
-    console.log(`🔍 [DIAGNOSTIC] IndexedDB Analysis:`)
-    console.log(`  💾 Total metadata stored: ${indexedDBMetadata.length}`)
-    console.log(`  💾 First 10 stored metadata IDs:`, storedIds.slice(0, 10))
-    console.log(`  💾 Last 10 stored metadata IDs:`, storedIds.slice(-10))
+    // console.log(`🔍 [DIAGNOSTIC] IndexedDB Analysis:`)
+    // console.log(`  💾 Total metadata stored: ${indexedDBMetadata.length}`)
+    // console.log(`  💾 First 10 stored metadata IDs:`, storedIds.slice(0, 10))
+    // console.log(`  💾 Last 10 stored metadata IDs:`, storedIds.slice(-10))
     
     // 3. Check memory storage
     const memoryIds = Object.keys(this.loadedMetadataVectors)
-    console.log(`🔍 [DIAGNOSTIC] Memory Analysis:`)
-    console.log(`  🧠 Metadata in memory: ${memoryIds.length}`)
-    console.log(`  🧠 Memory metadata IDs:`, memoryIds)
-    console.log(`  🧠 Buffer size: ${this.maxMetadataInMemory}`)
-    console.log(`  🧠 Buffer utilization: ${((memoryIds.length / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
+    // console.log(`🔍 [DIAGNOSTIC] Memory Analysis:`)
+    // console.log(`  🧠 Metadata in memory: ${memoryIds.length}`)
+    // console.log(`  🧠 Memory metadata IDs:`, memoryIds)
+    // console.log(`  🧠 Buffer size: ${this.maxMetadataInMemory}`)
+    // console.log(`  🧠 Buffer utilization: ${((memoryIds.length / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
     
     // 4. Find mismatches (with disk-first approach understanding)
     // For disk-first approach: metadata can be in IndexedDB without being in memory
@@ -1123,77 +1123,77 @@ export default class extends Controller {
     const storedOnly = storedIds.filter(id => !uiMetadataIds.includes(id))
     const memoryOnly = memoryIds.filter(id => !storedIds.includes(id))
     
-    console.log(`🔍 [DIAGNOSTIC] Mismatch Analysis:`)
-    console.log(`  🔍 Debug: UI metadata count: ${uiMetadataIds.length}`)
-    console.log(`  🔍 Debug: IndexedDB metadata count: ${storedIds.length}`)
-    console.log(`  🔍 Debug: Memory metadata count: ${memoryIds.length}`)
-    console.log(`  🔍 Debug: Available metadata count: ${availableMetadata.length}`)
+    // console.log(`🔍 [DIAGNOSTIC] Mismatch Analysis:`)
+    // console.log(`  🔍 Debug: UI metadata count: ${uiMetadataIds.length}`)
+    // console.log(`  🔍 Debug: IndexedDB metadata count: ${storedIds.length}`)
+    // console.log(`  🔍 Debug: Memory metadata count: ${memoryIds.length}`)
+    // console.log(`  🔍 Debug: Available metadata count: ${availableMetadata.length}`)
     
     if (missingMetadata.length > 0) {
-      console.log(`  ⚠️ UI metadata not available anywhere:`, missingMetadata)
+      // console.log(`  ⚠️ UI metadata not available anywhere:`, missingMetadata)
     }
     if (storedOnly.length > 0) {
-      console.log(`  ⚠️ IndexedDB-only metadata (not in UI):`, storedOnly)
+      // console.log(`  ⚠️ IndexedDB-only metadata (not in UI):`, storedOnly)
     }
     if (memoryOnly.length > 0) {
-      console.log(`  ⚠️ Memory-only metadata (not in IndexedDB):`, memoryOnly)
+      // console.log(`  ⚠️ Memory-only metadata (not in IndexedDB):`, memoryOnly)
     }
     
-    console.log(`🔍 [DIAGNOSTIC] Availability Summary:`)
-    console.log(`  ✅ Available metadata (disk + memory): ${availableMetadata.length}`)
-    console.log(`  ❌ Missing metadata: ${missingMetadata.length}`)
+    // console.log(`🔍 [DIAGNOSTIC] Availability Summary:`)
+    // console.log(`  ✅ Available metadata (disk + memory): ${availableMetadata.length}`)
+    // console.log(`  ❌ Missing metadata: ${missingMetadata.length}`)
     const coverage = uiMetadataIds.length > 0 ? ((availableMetadata.length / uiMetadataIds.length) * 100).toFixed(1) : '0.0'
-    console.log(`  📊 Coverage: ${coverage}%`)
-    console.log(`  📊 Note: Coverage > 100% means IndexedDB has more metadata than UI (possible with old data)`)
+    // console.log(`  📊 Coverage: ${coverage}%`)
+    // console.log(`  📊 Note: Coverage > 100% means IndexedDB has more metadata than UI (possible with old data)`)
     
     // 5. Check specific problematic metadata
     const problematicId = '469981' // Changed to the one mentioned by user
-    console.log(`🔍 [DIAGNOSTIC] Problematic Metadata Analysis (ID: ${problematicId}):`)
-    console.log(`  🔍 In UI:`, uiMetadataIds.includes(problematicId))
-    console.log(`  🔍 In IndexedDB:`, storedIds.includes(problematicId))
-    console.log(`  🔍 In Memory:`, memoryIds.includes(problematicId))
-    console.log(`  🔍 In Available:`, availableMetadata.includes(problematicId))
-    console.log(`  🔍 In Missing:`, missingMetadata.includes(problematicId))
-    console.log(`  🔍 In StoredOnly:`, storedOnly.includes(problematicId))
+    // console.log(`🔍 [DIAGNOSTIC] Problematic Metadata Analysis (ID: ${problematicId}):`)
+    // console.log(`  🔍 In UI:`, uiMetadataIds.includes(problematicId))
+    // console.log(`  🔍 In IndexedDB:`, storedIds.includes(problematicId))
+    // console.log(`  🔍 In Memory:`, memoryIds.includes(problematicId))
+    // console.log(`  🔍 In Available:`, availableMetadata.includes(problematicId))
+    // console.log(`  🔍 In Missing:`, missingMetadata.includes(problematicId))
+    // console.log(`  🔍 In StoredOnly:`, storedOnly.includes(problematicId))
     
     if (uiMetadataIds.includes(problematicId)) {
       const uiInfo = uiMetadataInfo.find(m => m.id === problematicId)
-      console.log(`  🔍 UI Info:`, uiInfo)
+      // console.log(`  🔍 UI Info:`, uiInfo)
     }
     
     if (storedIds.includes(problematicId)) {
       const storedInfo = indexedDBMetadata.find(m => m.id === problematicId)
-      console.log(`  🔍 IndexedDB Info:`, {
-        id: storedInfo.id,
-        name: storedInfo.name,
-        data_type: storedInfo.data_type,
-        loomFile: storedInfo.loomFile,
-        hasValues: !!storedInfo.values,
-        hasCompressedData: !!storedInfo.compressed_data
-      })
+      // console.log(`  🔍 IndexedDB Info:`, {
+        // id: storedInfo.id,
+        // name: storedInfo.name,
+        // data_type: storedInfo.data_type,
+        // loomFile: storedInfo.loomFile,
+        // hasValues: !!storedInfo.values,
+        // hasCompressedData: !!storedInfo.compressed_data
+      // })
     }
     
     // 6. Recommendations
-    console.log(`🔍 [DIAGNOSTIC] Recommendations:`)
+    // console.log(`🔍 [DIAGNOSTIC] Recommendations:`)
     if (missingMetadata.length > 0) {
-      console.log(`  💡 Consider preloading missing UI metadata: ${missingMetadata.join(', ')}`)
+      // console.log(`  💡 Consider preloading missing UI metadata: ${missingMetadata.join(', ')}`)
     }
     if (storedOnly.length > 0) {
-      console.log(`  💡 Consider cleaning up orphaned IndexedDB metadata: ${storedOnly.join(', ')}`)
+      // console.log(`  💡 Consider cleaning up orphaned IndexedDB metadata: ${storedOnly.join(', ')}`)
     }
     
     // Additional recommendations based on disk-first approach
     if (availableMetadata.length === uiMetadataIds.length) {
-      console.log(`  ✅ All UI metadata are available (disk-first approach working correctly)`)
+      // console.log(`  ✅ All UI metadata are available (disk-first approach working correctly)`)
     }
     if (memoryIds.length > 0) {
-      console.log(`  💡 Memory contains ${memoryIds.length} metadata (LRU cache active)`)
+      // console.log(`  💡 Memory contains ${memoryIds.length} metadata (LRU cache active)`)
     }
     if (memoryOnly.length > 0) {
-      console.log(`  💡 Consider syncing memory-only metadata to IndexedDB`)
+      // console.log(`  💡 Consider syncing memory-only metadata to IndexedDB`)
     }
     
-    console.log(`🔍 [DIAGNOSTIC] Analysis complete! (Updated: ${new Date().toISOString()})`)
+    // console.log(`🔍 [DIAGNOSTIC] Analysis complete! (Updated: ${new Date().toISOString()})`)
     
     return {
       uiMetadata: uiMetadataInfo,
@@ -1214,18 +1214,18 @@ export default class extends Controller {
 
   // Preload metadata vector directly to disk (IndexedDB) without keeping in memory
   async preloadMetadataToDisk(metadataId) {
-    console.log(`💾 [DISK] Preloading metadata ${metadataId} directly to disk...`)
+    // console.log(`💾 [DISK] Preloading metadata ${metadataId} directly to disk...`)
     
     // Check if already stored on disk
     const existingData = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
     if (existingData) {
-      console.log(`💾 [DISK] Metadata ${metadataId} already exists on disk`)
+      // console.log(`💾 [DISK] Metadata ${metadataId} already exists on disk`)
       return { success: true, cached: true }
     }
     
     // Check if currently loading
     if (this.loadingMetadataVectors.has(metadataId)) {
-      console.log(`💾 [DISK] Metadata ${metadataId} is currently loading, waiting...`)
+      // console.log(`💾 [DISK] Metadata ${metadataId} is currently loading, waiting...`)
       while (this.loadingMetadataVectors.has(metadataId)) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
@@ -1236,26 +1236,26 @@ export default class extends Controller {
     this.loadingMetadataVectors.add(metadataId)
     
     try {
-      console.log(`🔍 [DEBUG] Starting preloadMetadataToDisk for metadata ${metadataId}`)
+      // console.log(`🔍 [DEBUG] Starting preloadMetadataToDisk for metadata ${metadataId}`)
       
       // Use the original logic from the working version
       const loomFile = this.getCurrentLoomFileForRequest()
       
-      console.log(`🔍 [DEBUG] Using original loom file logic: loomFile="${loomFile}"`)
+      // console.log(`🔍 [DEBUG] Using original loom file logic: loomFile="${loomFile}"`)
       
       if (!loomFile) {
         throw new Error(`No loom file available for metadata ${metadataId}`)
       }
       
-      console.log(`🔍 [DEBUG] Loom file detection for metadata ${metadataId}:`, {
-        currentLoomFile: this.currentLoomFile,
-        defaultLoomFileValue: this.defaultLoomFileValue,
-        loomFileSelectTarget: !!this.loomFileSelectTarget,
-        loomFileSelectValue: this.loomFileSelectTarget?.value,
-        embeddingsByLoomValue: !!this.embeddingsByLoomValue,
-        availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : [],
-        finalLoomFile: loomFile
-      })
+      // console.log(`🔍 [DEBUG] Loom file detection for metadata ${metadataId}:`, {
+        // currentLoomFile: this.currentLoomFile,
+        // defaultLoomFileValue: this.defaultLoomFileValue,
+        // loomFileSelectTarget: !!this.loomFileSelectTarget,
+        // loomFileSelectValue: this.loomFileSelectTarget?.value,
+        // embeddingsByLoomValue: !!this.embeddingsByLoomValue,
+        // availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : [],
+        // finalLoomFile: loomFile
+      // })
       
       if (!loomFile) {
         throw new Error(`No loom file available for metadata ${metadataId}. Available loom files: ${this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue).join(', ') : 'none'}. This should not happen with the fallback logic.`)
@@ -1306,12 +1306,12 @@ export default class extends Controller {
         
         if (storeSuccess) {
           const info = vectorData.compression_info
-          console.log(`💾 [DISK] Successfully stored metadata ${vectorData.name} to disk (${info.type}): ${info.binary_size} bytes`)
+          // console.log(`💾 [DISK] Successfully stored metadata ${vectorData.name} to disk (${info.type}): ${info.binary_size} bytes`)
           
           // Update status icon to show it's in database (orange check)
           const orangeTime = performance.now()
-          console.log(`🔍 [DISK] Setting ${metadataId} to in-db (orange) after disk storage at ${orangeTime.toFixed(2)}ms`)
-          console.log(`🔍 [DEBUG] Disk storage completed for metadata ${metadataId} (${vectorData.name})`)
+          // console.log(`🔍 [DISK] Setting ${metadataId} to in-db (orange) after disk storage at ${orangeTime.toFixed(2)}ms`)
+          // console.log(`🔍 [DEBUG] Disk storage completed for metadata ${metadataId} (${vectorData.name})`)
           this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
           
           // Show checkboxes for this metadata now that it's available on disk
@@ -1336,7 +1336,7 @@ export default class extends Controller {
 
   // Assess performance after preloading to identify optimization opportunities
   async assessPerformanceAfterPreload() {
-    console.log(`\n🔍 [PERF] Assessing performance after preloading...`)
+    // console.log(`\n🔍 [PERF] Assessing performance after preloading...`)
     
     // Memory usage analysis
     const memoryInfo = this.memoryManager.logMemoryUsage('Performance Assessment')
@@ -1345,10 +1345,10 @@ export default class extends Controller {
     const loadedMetadataCount = Object.keys(this.loadedMetadataVectors).length
     const loadingCount = this.loadingMetadataVectors.size
     
-    console.log(`📊 [PERF] Metadata vectors in memory: ${loadedMetadataCount}/${this.maxMetadataInMemory}`)
-    console.log(`📊 [PERF] Currently loading: ${loadingCount}`)
-    console.log(`💾 [PERF] Using disk-first preloading with LRU memory buffer`)
-    console.log(`🧠 [Memory] Buffer utilization: ${((loadedMetadataCount / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
+    // console.log(`📊 [PERF] Metadata vectors in memory: ${loadedMetadataCount}/${this.maxMetadataInMemory}`)
+    // console.log(`📊 [PERF] Currently loading: ${loadingCount}`)
+    // console.log(`💾 [PERF] Using disk-first preloading with LRU memory buffer`)
+    // console.log(`🧠 [Memory] Buffer utilization: ${((loadedMetadataCount / this.maxMetadataInMemory) * 100).toFixed(1)}%`)
     
     // Estimate memory usage per metadata vector (only what's actually in memory)
     let totalEstimatedMemory = 0
@@ -1367,9 +1367,9 @@ export default class extends Controller {
       }
     })
     
-    console.log(`📊 [PERF] Estimated metadata memory usage: ${(totalEstimatedMemory / 1024 / 1024).toFixed(2)} MB (only active metadata)`)
+    // console.log(`📊 [PERF] Estimated metadata memory usage: ${(totalEstimatedMemory / 1024 / 1024).toFixed(2)} MB (only active metadata)`)
     if (largestMetadata) {
-      console.log(`📊 [PERF] Largest metadata in memory: ${largestMetadata.name} (${(largestMetadata.size / 1024 / 1024).toFixed(2)} MB)`)
+      // console.log(`📊 [PERF] Largest metadata in memory: ${largestMetadata.name} (${(largestMetadata.size / 1024 / 1024).toFixed(2)} MB)`)
     }
     
     // Performance timing test
@@ -1391,8 +1391,8 @@ export default class extends Controller {
     }
     const jsTime = performance.now() - jsStartTime
     
-    console.log(`⏱️ [PERF] DOM responsiveness: ${domTime.toFixed(2)}ms`)
-    console.log(`⏱️ [PERF] JavaScript responsiveness: ${jsTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [PERF] DOM responsiveness: ${domTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [PERF] JavaScript responsiveness: ${jsTime.toFixed(2)}ms`)
     
     // Performance recommendations
     const recommendations = []
@@ -1418,17 +1418,17 @@ export default class extends Controller {
     }
     
     if (recommendations.length > 0) {
-      console.log(`💡 [PERF] Performance recommendations:`)
+      // console.log(`💡 [PERF] Performance recommendations:`)
       recommendations.forEach((rec, index) => {
-        console.log(`  ${index + 1}. ${rec}`)
+        // console.log(`  ${index + 1}. ${rec}`)
       })
     } else {
-      console.log(`✅ [PERF] Performance looks good!`)
+      // console.log(`✅ [PERF] Performance looks good!`)
     }
     
     // Suggest memory optimization if needed (with LRU system, this should rarely be needed)
     if (loadedMetadataCount > this.maxMetadataInMemory || totalEstimatedMemory > 50) {
-      console.log(`\n🔧 [PERF] Suggesting memory optimization...`)
+      // console.log(`\n🔧 [PERF] Suggesting memory optimization...`)
       this.optimizeMemoryUsage()
     }
     
@@ -1443,21 +1443,21 @@ export default class extends Controller {
 
   // Optimize memory usage by implementing LRU-based memory management
   optimizeMemoryUsage() {
-    console.log(`🔧 [PERF] Starting LRU-based memory optimization...`)
+    // console.log(`🔧 [PERF] Starting LRU-based memory optimization...`)
     
     const loadedCount = Object.keys(this.loadedMetadataVectors).length
     if (loadedCount <= this.maxMetadataInMemory) {
-      console.log(`🔧 [PERF] Memory usage is optimal (${loadedCount}/${this.maxMetadataInMemory} metadata vectors) - LRU buffer working well`)
+      // console.log(`🔧 [PERF] Memory usage is optimal (${loadedCount}/${this.maxMetadataInMemory} metadata vectors) - LRU buffer working well`)
       return
     }
     
     // Use the LRU cleanup system
     this.memoryManager.cleanupUnusedMetadata()
     
-    console.log(`🔧 [PERF] LRU-based memory optimization complete`)
-    console.log(`  📊 Buffer size: ${this.maxMetadataInMemory} metadata vectors`)
-    console.log(`  💾 All metadata is available on disk via IndexedDB`)
-    console.log(`  🧠 LRU system automatically manages memory usage`)
+    // console.log(`🔧 [PERF] LRU-based memory optimization complete`)
+    // console.log(`  📊 Buffer size: ${this.maxMetadataInMemory} metadata vectors`)
+    // console.log(`  💾 All metadata is available on disk via IndexedDB`)
+    // console.log(`  🧠 LRU system automatically manages memory usage`)
     
     // Log memory usage after optimization
     setTimeout(() => {
@@ -1510,7 +1510,7 @@ export default class extends Controller {
         // Get the first embedding to check its cell count
         const firstEmbedding = loomData[0]
         if (firstEmbedding && firstEmbedding.cellCount) {
-          console.log(`🧠 [Memory] Found cell count from embeddingsByLoomValue: ${firstEmbedding.cellCount.toLocaleString()}`)
+          // console.log(`🧠 [Memory] Found cell count from embeddingsByLoomValue: ${firstEmbedding.cellCount.toLocaleString()}`)
           return firstEmbedding.cellCount
         }
       }
@@ -1518,17 +1518,17 @@ export default class extends Controller {
     
     // Fallback: try to get from any loaded metadata
     if (this.currentCoordinates && this.currentCoordinates.length > 0) {
-      console.log(`🧠 [Memory] Using cell count from current coordinates: ${this.currentCoordinates.length.toLocaleString()}`)
+      // console.log(`🧠 [Memory] Using cell count from current coordinates: ${this.currentCoordinates.length.toLocaleString()}`)
       return this.currentCoordinates.length
     }
     
     // Fallback: try to get from metadataData
     if (this.metadataData && this.metadataData.cellCount) {
-      console.log(`🧠 [Memory] Using cell count from metadataData: ${this.metadataData.cellCount.toLocaleString()}`)
+      // console.log(`🧠 [Memory] Using cell count from metadataData: ${this.metadataData.cellCount.toLocaleString()}`)
       return this.metadataData.cellCount
     }
     
-    console.log(`🧠 [Memory] No cell count available from server data`)
+    // console.log(`🧠 [Memory] No cell count available from server data`)
     return 0
   }
 
@@ -1573,7 +1573,7 @@ export default class extends Controller {
 
   // Check status of all metadata before preloading starts
   async checkAllMetadataStatusBeforePreload() {
-    console.log('🔍 [STATUS] Checking status of all metadata before preloading...')
+    // console.log('🔍 [STATUS] Checking status of all metadata before preloading...')
     
     try {
       // Get all metadata buttons from the UI
@@ -1581,17 +1581,17 @@ export default class extends Controller {
       
       // If no buttons found, wait a bit and try again (UI might not be ready yet)
       if (metadataButtons.length === 0) {
-        console.log('🔍 [STATUS] No metadata buttons found yet, waiting 500ms and retrying...')
+        // console.log('🔍 [STATUS] No metadata buttons found yet, waiting 500ms and retrying...')
         await new Promise(resolve => setTimeout(resolve, 500))
         metadataButtons = document.querySelectorAll('button[data-metadata-id]')
         
         if (metadataButtons.length === 0) {
-          console.log('🔍 [STATUS] Still no metadata buttons found, skipping status check')
+          // console.log('🔍 [STATUS] Still no metadata buttons found, skipping status check')
           return
         }
       }
 
-      console.log(`🔍 [STATUS] Checking status for ${metadataButtons.length} metadata items before preloading...`)
+      // console.log(`🔍 [STATUS] Checking status for ${metadataButtons.length} metadata items before preloading...`)
       
       // Process all metadata status checks in parallel since DB checks are now instant
       const startTime = performance.now()
@@ -1599,9 +1599,9 @@ export default class extends Controller {
       await Promise.all(allPromises)
       const endTime = performance.now()
       
-      console.log(`🔍 [STATUS] Completed status check for all ${metadataButtons.length} metadata items in ${(endTime - startTime).toFixed(2)}ms`)
+      // console.log(`🔍 [STATUS] Completed status check for all ${metadataButtons.length} metadata items in ${(endTime - startTime).toFixed(2)}ms`)
       
-      console.log('🔍 [STATUS] Completed status check for all metadata before preloading')
+      // console.log('🔍 [STATUS] Completed status check for all metadata before preloading')
     } catch (error) {
       console.error('Error in metadata status checking before preload:', error)
     }
@@ -1616,7 +1616,7 @@ export default class extends Controller {
       // Check if metadata is in memory first (fastest check)
       const isInMemory = this.dataManager.getMetadataVectorById(metadataId)
       if (isInMemory) {
-        console.log(`🔍 [STATUS] Metadata ${metadataId} found in memory - setting to green`)
+        // console.log(`🔍 [STATUS] Metadata ${metadataId} found in memory - setting to green`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         return
       }
@@ -1627,7 +1627,7 @@ export default class extends Controller {
       const dbCheckTime = performance.now() - dbCheckStart
       
       if (isInDatabase) {
-        console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
+        // console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
         return
       }
@@ -1650,26 +1650,26 @@ export default class extends Controller {
 
   // Preload all metadata (embeddings + metadata vectors) for instant switching
   async preloadAllMetadata() {
-    console.log('🚀 [PERF] Starting background preload of all metadata...')
+    // console.log('🚀 [PERF] Starting background preload of all metadata...')
     
     // Debug loom file state at start of preloading
-    console.log('🔍 [DEBUG] Loom file state at preload start:', {
-      currentLoomFile: this.currentLoomFile,
-      defaultLoomFileValue: this.defaultLoomFileValue,
-      hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
-      loomFileSelectValue: this.loomFileSelectTarget?.value,
-      embeddingsByLoomValue: !!this.embeddingsByLoomValue,
-      availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : []
-    })
+    // console.log('🔍 [DEBUG] Loom file state at preload start:', {
+      // currentLoomFile: this.currentLoomFile,
+      // defaultLoomFileValue: this.defaultLoomFileValue,
+      // hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
+      // loomFileSelectValue: this.loomFileSelectTarget?.value,
+      // embeddingsByLoomValue: !!this.embeddingsByLoomValue,
+      // availableLoomFiles: this.embeddingsByLoomValue ? Object.keys(this.embeddingsByLoomValue) : []
+    // })
     
     // Get cell count from server-side data for accurate buffer size calculation
     const cellCount = this.getCellCountFromServerData()
     
     // Calculate and set optimal buffer size based on dataset characteristics
     this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCount)
-    console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
+    // console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
     if (cellCount > 0) {
-      console.log(`🧠 [Memory] Used cell count from server data: ${cellCount.toLocaleString()}`)
+      // console.log(`🧠 [Memory] Used cell count from server data: ${cellCount.toLocaleString()}`)
     }
     
     // Separate metadata by type for ordered preloading
@@ -1679,27 +1679,27 @@ export default class extends Controller {
     
     // 1. Get visualization embeddings from dropdown (2D/3D coordinate data)
     const embeddingDropdown = document.getElementById('metadata-select-dropdown')
-    console.log(`🔍 [DEBUG] Embedding dropdown found:`, !!embeddingDropdown)
+    // console.log(`🔍 [DEBUG] Embedding dropdown found:`, !!embeddingDropdown)
     
     if (embeddingDropdown) {
       const options = embeddingDropdown.querySelectorAll('option[value]:not([value=""])')
-      console.log(`🔍 [DEBUG] Found ${options.length} embedding options in dropdown`)
+      // console.log(`🔍 [DEBUG] Found ${options.length} embedding options in dropdown`)
       
       options.forEach((option, index) => {
         const embeddingId = option.value
         const embeddingName = option.textContent.trim() // Remove extra whitespace
-        console.log(`🔍 [DEBUG] Option ${index + 1}: ID="${embeddingId}", Name="${embeddingName}"`)
+        // console.log(`🔍 [DEBUG] Option ${index + 1}: ID="${embeddingId}", Name="${embeddingName}"`)
         
         // Only add valid embeddings (non-empty ID and name, and not just whitespace)
         // Also check if ID is a valid number (embeddings should have numeric IDs)
         if (embeddingId && embeddingId.trim() && embeddingName && embeddingName.trim() && !isNaN(parseInt(embeddingId.trim()))) {
           visualizationEmbeddings.push({ id: embeddingId.trim(), name: embeddingName })
         } else {
-          console.log(`🔍 [DEBUG] Skipping invalid embedding: ID="${embeddingId}", Name="${embeddingName}" (ID is not a valid number)`)
+          // console.log(`🔍 [DEBUG] Skipping invalid embedding: ID="${embeddingId}", Name="${embeddingName}" (ID is not a valid number)`)
         }
       })
     } else {
-      console.log(`🔍 [DEBUG] No embedding dropdown found with ID 'metadata-select-dropdown'`)
+      // console.log(`🔍 [DEBUG] No embedding dropdown found with ID 'metadata-select-dropdown'`)
     }
     
     // Use Sets to avoid duplicates (multiple elements might have same metadata-id)
@@ -1709,24 +1709,24 @@ export default class extends Controller {
     
     // 2. Get categorical and continuous metadata from the palette buttons
     const metadataButtons = document.querySelectorAll('[data-metadata-item] button[data-action*="waterDropClicked"][data-metadata-id][data-metadata-type]')
-    console.log(`🔍 [Preload Debug] Found ${metadataButtons.length} metadata palette buttons in left panel`)
+    // console.log(`🔍 [Preload Debug] Found ${metadataButtons.length} metadata palette buttons in left panel`)
     
     // Debug: Let's also check for all buttons with metadata attributes
     const allMetadataButtons = document.querySelectorAll('button[data-metadata-id]')
-    console.log(`🔍 [Preload Debug] Found ${allMetadataButtons.length} total buttons with data-metadata-id`)
+    // console.log(`🔍 [Preload Debug] Found ${allMetadataButtons.length} total buttons with data-metadata-id`)
     
     // Debug: Check for sex and age buttons specifically
     allMetadataButtons.forEach(btn => {
       const name = btn.dataset.metadataName
       if (name && (name.toLowerCase().includes('sex') || name.toLowerCase().includes('age'))) {
-        console.log(`🔍 [SEX/AGE DEBUG] Found button for ${name}:`, {
-          hasMetadataItem: !!btn.closest('[data-metadata-item]'),
-          hasWaterDropAction: btn.dataset.action?.includes('waterDropClicked'),
-          hasMetadataId: !!btn.dataset.metadataId,
-          hasMetadataType: !!btn.dataset.metadataType,
-          metadataType: btn.dataset.metadataType,
-          element: btn
-        })
+        // console.log(`🔍 [SEX/AGE DEBUG] Found button for ${name}:`, {
+          // hasMetadataItem: !!btn.closest('[data-metadata-item]'),
+          // hasWaterDropAction: btn.dataset.action?.includes('waterDropClicked'),
+          // hasMetadataId: !!btn.dataset.metadataId,
+          // hasMetadataType: !!btn.dataset.metadataType,
+          // metadataType: btn.dataset.metadataType,
+          // element: btn
+        // })
       }
     })
     
@@ -1739,9 +1739,9 @@ export default class extends Controller {
       
       // Special logging for sex and age metadata
       if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-        console.log(`🔍 [SEX/AGE DEBUG] Found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
-        console.log(`🔍 [SEX/AGE DEBUG] Button element:`, btn)
-        console.log(`🔍 [SEX/AGE DEBUG] Button dataset:`, btn.dataset)
+        // console.log(`🔍 [SEX/AGE DEBUG] Found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
+        // console.log(`🔍 [SEX/AGE DEBUG] Button element:`, btn)
+        // console.log(`🔍 [SEX/AGE DEBUG] Button dataset:`, btn.dataset)
       }
       
       if (!metadataId) return
@@ -1750,29 +1750,29 @@ export default class extends Controller {
       if (metadataType === 'DISCRETE' || metadataType === 'STRING') {
         if (!categoricalSet.has(metadataId)) {
           categoricalSet.add(metadataId)
-          console.log(`  ✅ Categorical: ${metadataName} (${metadataId})`)
+          // console.log(`  ✅ Categorical: ${metadataName} (${metadataId})`)
           
           // Special logging for sex and age
           if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-            console.log(`🔍 [SEX/AGE DEBUG] Added to categorical set: ${metadataName}`)
+            // console.log(`🔍 [SEX/AGE DEBUG] Added to categorical set: ${metadataName}`)
           }
         }
       } else if (metadataType === 'NUMERIC') {
         // Skip if it's an embedding (will be preloaded separately)
         if (embeddingSet.has(metadataId)) {
-          console.log(`  📊 Embedding: ${metadataName} (${metadataId}) - will preload with embeddings`)
+          // console.log(`  📊 Embedding: ${metadataName} (${metadataId}) - will preload with embeddings`)
           
           // Special logging for sex and age
           if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-            console.log(`🔍 [SEX/AGE DEBUG] Skipped as embedding: ${metadataName}`)
+            // console.log(`🔍 [SEX/AGE DEBUG] Skipped as embedding: ${metadataName}`)
           }
         } else if (!continuousSet.has(metadataId)) {
           continuousSet.add(metadataId)
-          console.log(`  ✅ Continuous: ${metadataName} (${metadataId})`)
+          // console.log(`  ✅ Continuous: ${metadataName} (${metadataId})`)
           
           // Special logging for sex and age
           if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-            console.log(`🔍 [SEX/AGE DEBUG] Added to continuous set: ${metadataName}`)
+            // console.log(`🔍 [SEX/AGE DEBUG] Added to continuous set: ${metadataName}`)
           }
         }
       } else {
@@ -1780,7 +1780,7 @@ export default class extends Controller {
         
         // Special logging for sex and age
         if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-          console.log(`🔍 [SEX/AGE DEBUG] Unknown type for: ${metadataName} - Type: ${metadataType}`)
+          // console.log(`🔍 [SEX/AGE DEBUG] Unknown type for: ${metadataName} - Type: ${metadataType}`)
         }
       }
     })
@@ -1791,11 +1791,11 @@ export default class extends Controller {
     
     // Fallback: If we didn't find any metadata buttons with the strict selector, try a more lenient approach
     if (metadataButtons.length === 0) {
-      console.log(`🔍 [Preload Debug] No buttons found with strict selector, trying fallback...`)
+      // console.log(`🔍 [Preload Debug] No buttons found with strict selector, trying fallback...`)
       
       // Try to find buttons with just the basic attributes
       const fallbackButtons = document.querySelectorAll('button[data-metadata-id][data-metadata-type]')
-      console.log(`🔍 [Preload Debug] Found ${fallbackButtons.length} buttons with fallback selector`)
+      // console.log(`🔍 [Preload Debug] Found ${fallbackButtons.length} buttons with fallback selector`)
       
       fallbackButtons.forEach(btn => {
         const metadataId = btn.dataset.metadataId
@@ -1804,7 +1804,7 @@ export default class extends Controller {
         
         // Special logging for sex and age metadata
         if (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age')) {
-          console.log(`🔍 [SEX/AGE DEBUG] Fallback found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
+          // console.log(`🔍 [SEX/AGE DEBUG] Fallback found metadata: ${metadataName} (${metadataId}) - Type: ${metadataType}`)
         }
         
         if (!metadataId) return
@@ -1813,15 +1813,15 @@ export default class extends Controller {
         if (metadataType === 'DISCRETE' || metadataType === 'STRING') {
           if (!categoricalSet.has(metadataId)) {
             categoricalSet.add(metadataId)
-            console.log(`  ✅ Categorical (fallback): ${metadataName} (${metadataId})`)
+            // console.log(`  ✅ Categorical (fallback): ${metadataName} (${metadataId})`)
           }
         } else if (metadataType === 'NUMERIC') {
           // Skip if it's an embedding (will be preloaded separately)
           if (embeddingSet.has(metadataId)) {
-            console.log(`  📊 Embedding (fallback): ${metadataName} (${metadataId}) - will preload with embeddings`)
+            // console.log(`  📊 Embedding (fallback): ${metadataName} (${metadataId}) - will preload with embeddings`)
           } else if (!continuousSet.has(metadataId)) {
             continuousSet.add(metadataId)
-            console.log(`  ✅ Continuous (fallback): ${metadataName} (${metadataId})`)
+            // console.log(`  ✅ Continuous (fallback): ${metadataName} (${metadataId})`)
           }
         }
       })
@@ -1835,18 +1835,18 @@ export default class extends Controller {
     
     const totalMetadataCount = categoricalMetadata.length + continuousMetadata.length
     
-    console.log(`🚀 [PERF] Found metadata to preload:`)
-    console.log(`  - ${visualizationEmbeddings.length} visualization embeddings:`, visualizationEmbeddings.slice(0, 3).map(e => e.name))
-    console.log(`  - ${categoricalMetadata.length} categorical metadata`)
-    console.log(`  - ${continuousMetadata.length} continuous metadata`)
-    console.log(`  - Total metadata: ${totalMetadataCount}, Buffer size: ${this.maxMetadataInMemory}`)
+    // console.log(`🚀 [PERF] Found metadata to preload:`)
+    // console.log(`  - ${visualizationEmbeddings.length} visualization embeddings:`, visualizationEmbeddings.slice(0, 3).map(e => e.name))
+    // console.log(`  - ${categoricalMetadata.length} categorical metadata`)
+    // console.log(`  - ${continuousMetadata.length} continuous metadata`)
+    // console.log(`  - Total metadata: ${totalMetadataCount}, Buffer size: ${this.maxMetadataInMemory}`)
     
     // If total metadata count is less than buffer size, preload ALL metadata
     const shouldPreloadAllMetadata = totalMetadataCount <= this.maxMetadataInMemory
     if (shouldPreloadAllMetadata) {
-      console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) ≤ buffer size (${this.maxMetadataInMemory}) → Preloading ALL metadata!`)
+      // console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) ≤ buffer size (${this.maxMetadataInMemory}) → Preloading ALL metadata!`)
     } else {
-      console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) > buffer size (${this.maxMetadataInMemory}) → Selective preloading (LRU will manage)`)
+      // console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) > buffer size (${this.maxMetadataInMemory}) → Selective preloading (LRU will manage)`)
     }
     
     // Special logging for sex and age in final lists
@@ -1857,9 +1857,9 @@ export default class extends Controller {
     })
     
     if (sexAgeMetadata.length > 0) {
-      console.log(`🔍 [SEX/AGE DEBUG] Sex/Age metadata found in preload list:`, sexAgeMetadata.map(id => this.dataManager.getMetadataNameById(id)))
+      // console.log(`🔍 [SEX/AGE DEBUG] Sex/Age metadata found in preload list:`, sexAgeMetadata.map(id => this.dataManager.getMetadataNameById(id)))
     } else {
-      console.log(`🔍 [SEX/AGE DEBUG] No sex/age metadata found in preload list!`)
+      // console.log(`🔍 [SEX/AGE DEBUG] No sex/age metadata found in preload list!`)
     }
     
     let embeddingCount = 0
@@ -1869,26 +1869,26 @@ export default class extends Controller {
     
     // PHASE 1: Preload visualization embeddings (coordinate data)
     // These are cached silently in binaryDataCache without displaying
-    console.log(`\n📊 [Phase 1] Preloading ${visualizationEmbeddings.length} embeddings...`)
-    console.log(`🔍 [DEBUG] Embedding list:`, visualizationEmbeddings.map(e => ({ id: e.id, name: e.name, trimmedName: e.name.trim() })))
+    // console.log(`\n📊 [Phase 1] Preloading ${visualizationEmbeddings.length} embeddings...`)
+    // console.log(`🔍 [DEBUG] Embedding list:`, visualizationEmbeddings.map(e => ({ id: e.id, name: e.name, trimmedName: e.name.trim() })))
     
     // Don't filter out embeddings - they were working before
     // The issue is likely with loom file detection, not the embeddings themselves
     const validEmbeddings = visualizationEmbeddings
     
-    console.log(`🔍 [DEBUG] Valid embeddings after filtering: ${validEmbeddings.length}/${visualizationEmbeddings.length}`)
-    console.log(`🔍 [DEBUG] Valid embedding list:`, validEmbeddings.map(e => ({ id: e.id, name: e.name.trim() })))
+    // console.log(`🔍 [DEBUG] Valid embeddings after filtering: ${validEmbeddings.length}/${visualizationEmbeddings.length}`)
+    // console.log(`🔍 [DEBUG] Valid embedding list:`, validEmbeddings.map(e => ({ id: e.id, name: e.name.trim() })))
     
     for (const embedding of validEmbeddings) {
       try {
-        console.log(`  📥 Loading: ${embedding.name} (ID: ${embedding.id})`)
+        // console.log(`  📥 Loading: ${embedding.name} (ID: ${embedding.id})`)
         
         // Process all embeddings - they were working before
         
         // Check if embedding is already cached before trying to load
         const isAlreadyCached = this.binaryDataCache.has(embedding.id)
         if (isAlreadyCached) {
-          console.log(`  ⏭️  Already cached: ${embedding.name}`)
+          // console.log(`  ⏭️  Already cached: ${embedding.name}`)
           embeddingCount++
           continue
         }
@@ -1898,17 +1898,17 @@ export default class extends Controller {
         if (result.success) {
           embeddingCount++
           if (result.cached) {
-            console.log(`  ⏭️  Already cached: ${embedding.name}`)
+            // console.log(`  ⏭️  Already cached: ${embedding.name}`)
           } else {
-            console.log(`  ✅ Cached: ${embedding.name} (${result.size}) - ${embeddingCount}/${validEmbeddings.length}`)
+            // console.log(`  ✅ Cached: ${embedding.name} (${result.size}) - ${embeddingCount}/${validEmbeddings.length}`)
           }
         } else {
-          console.log(`  ❌ Failed: ${embedding.name} - ${result.error}`)
-          console.log(`  🔍 [DEBUG] Failed embedding details:`, { id: embedding.id, name: embedding.name, error: result.error })
+          // console.log(`  ❌ Failed: ${embedding.name} - ${result.error}`)
+          // console.log(`  🔍 [DEBUG] Failed embedding details:`, { id: embedding.id, name: embedding.name, error: result.error })
         }
       } catch (error) {
-        console.log(`  ❌ Failed: ${embedding.name} - ${error.message}`)
-        console.log(`  🔍 [DEBUG] Failed embedding details:`, { id: embedding.id, name: embedding.name, error: error.message, stack: error.stack })
+        // console.log(`  ❌ Failed: ${embedding.name} - ${error.message}`)
+        // console.log(`  🔍 [DEBUG] Failed embedding details:`, { id: embedding.id, name: embedding.name, error: error.message, stack: error.stack })
       }
       
       // Small delay between embeddings (they're large files)
@@ -1925,7 +1925,7 @@ export default class extends Controller {
     // If we should preload all to memory, first get list of what's already in database
     let metadataInDatabase = new Set()
     if (shouldPreloadAllMetadata && this.db) {
-      console.log(`\n🔍 [MEMORY] Checking which metadata are already in database...`)
+      // console.log(`\n🔍 [MEMORY] Checking which metadata are already in database...`)
       try {
         const transaction = this.db.transaction(['metadata'], 'readonly')
         const objectStore = transaction.objectStore('metadata')
@@ -1944,7 +1944,7 @@ export default class extends Controller {
               }
             })
             
-            console.log(`🔍 [MEMORY] Found ${metadataInDatabase.size} metadata in database for loom: ${currentLoom}`)
+            // console.log(`🔍 [MEMORY] Found ${metadataInDatabase.size} metadata in database for loom: ${currentLoom}`)
             resolve()
           }
           getAllRequest.onerror = () => {
@@ -1958,12 +1958,12 @@ export default class extends Controller {
     }
     
     if (orderedMetadata.length > 0) {
-      console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors...`)
+      // console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors...`)
       if (shouldPreloadAllMetadata) {
-        console.log(`💾 [PERF] Preloading to MEMORY + DISK (all ${totalMetadataCount} metadata fit in buffer)`)
-        console.log(`💾 [PERF] ${metadataInDatabase.size}/${totalMetadataCount} already in database, will load to memory`)
+        // console.log(`💾 [PERF] Preloading to MEMORY + DISK (all ${totalMetadataCount} metadata fit in buffer)`)
+        // console.log(`💾 [PERF] ${metadataInDatabase.size}/${totalMetadataCount} already in database, will load to memory`)
       } else {
-        console.log(`💾 [PERF] Preloading to DISK only (${totalMetadataCount} metadata > ${this.maxMetadataInMemory} buffer limit)`)
+        // console.log(`💾 [PERF] Preloading to DISK only (${totalMetadataCount} metadata > ${this.maxMetadataInMemory} buffer limit)`)
       }
       
       // Reduce batch size to prevent server overload and add retry logic
@@ -1977,13 +1977,13 @@ export default class extends Controller {
         for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
           const metadataId = batch[batchIndex]
           const metadataStartTime = performance.now()
-          console.log(`🔍 [TIMING] Starting processing metadata ${metadataId} at ${metadataStartTime.toFixed(2)}ms`)
+          // console.log(`🔍 [TIMING] Starting processing metadata ${metadataId} at ${metadataStartTime.toFixed(2)}ms`)
           // Skip if already loaded in memory or currently loading
           if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
             // Special logging for sex and age
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
             if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-              console.log(`🔍 [SEX/AGE DEBUG] Skipping ${metadataName} (${metadataId}) - already loaded/loading`)
+              // console.log(`🔍 [SEX/AGE DEBUG] Skipping ${metadataName} (${metadataId}) - already loaded/loading`)
             }
             continue
           }
@@ -1999,32 +1999,32 @@ export default class extends Controller {
               
               // Silently load from disk to memory (only log every 10th)
               const memoryLoadStart = performance.now()
-              console.log(`🔍 [MEMORY] Starting memory load for existing metadata ${metadataId} at ${memoryLoadStart.toFixed(2)}ms`)
-              console.log(`🔍 [DEBUG] About to call loadSingleMetadataVector for existing metadata ${metadataId}`)
+              // console.log(`🔍 [MEMORY] Starting memory load for existing metadata ${metadataId} at ${memoryLoadStart.toFixed(2)}ms`)
+              // console.log(`🔍 [DEBUG] About to call loadSingleMetadataVector for existing metadata ${metadataId}`)
               try {
                 const metadata = await this.dataManager.loadSingleMetadataVector(metadataId)
                 const memoryLoadEnd = performance.now()
                 const memoryLoadDuration = (memoryLoadEnd - memoryLoadStart).toFixed(2)
-                console.log(`🔍 [MEMORY] Completed memory load for existing metadata ${metadataId} in ${memoryLoadDuration}ms`)
-                console.log(`🔍 [DEBUG] loadSingleMetadataVector returned for existing metadata ${metadataId}:`, metadata ? 'success' : 'failed')
+                // console.log(`🔍 [MEMORY] Completed memory load for existing metadata ${metadataId} in ${memoryLoadDuration}ms`)
+                // console.log(`🔍 [DEBUG] loadSingleMetadataVector returned for existing metadata ${metadataId}:`, metadata ? 'success' : 'failed')
                 if (metadata) {
                   const globalIndex = i + batchIndex
                   if (globalIndex < categoricalMetadata.length) {
                     categoricalCount++
                     // Log progress every 10 items
                     if (categoricalCount % 10 === 0 || categoricalCount === categoricalMetadata.length) {
-                      console.log(`  💾→🧠 Loaded ${categoricalCount}/${categoricalMetadata.length} categorical metadata to memory`)
+                      // console.log(`  💾→🧠 Loaded ${categoricalCount}/${categoricalMetadata.length} categorical metadata to memory`)
                     }
                   } else {
                     continuousCount++
                     // Log progress every 5 items
                     if (continuousCount % 5 === 0 || continuousCount === continuousMetadata.length) {
-                      console.log(`  💾→🧠 Loaded ${continuousCount}/${continuousMetadata.length} continuous metadata to memory`)
+                      // console.log(`  💾→🧠 Loaded ${continuousCount}/${continuousMetadata.length} continuous metadata to memory`)
                     }
                   }
                   
                   // Update status icon to show it's in memory (green check) - this is new data loaded during preloading
-                  console.log(`🔍 [PRELOAD] Setting ${metadataId} to in-memory (green) during preloading`)
+                  // console.log(`🔍 [PRELOAD] Setting ${metadataId} to in-memory (green) during preloading`)
                   this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
                   
                   // Show checkboxes for loaded metadata
@@ -2033,7 +2033,7 @@ export default class extends Controller {
                 
                 const metadataEndTime = performance.now()
                 const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
-                console.log(`🔍 [TIMING] Completed processing existing metadata ${metadataId} in ${metadataDuration}ms`)
+                // console.log(`🔍 [TIMING] Completed processing existing metadata ${metadataId} in ${metadataDuration}ms`)
               } catch (error) {
                 console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
               }
@@ -2044,22 +2044,22 @@ export default class extends Controller {
           }
           
           // For disk-only preload, check if already in database first
-          console.log(`🔍 [DEBUG] About to check if metadata ${metadataId} is in database...`)
+          // console.log(`🔍 [DEBUG] About to check if metadata ${metadataId} is in database...`)
           const isInDatabase = await this.checkMetadataInDatabase(metadataId)
-          console.log(`🔍 [DEBUG] checkMetadataInDatabase result for ${metadataId}:`, isInDatabase)
+          // console.log(`🔍 [DEBUG] checkMetadataInDatabase result for ${metadataId}:`, isInDatabase)
           if (isInDatabase) {
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
-            console.log(`  ⏭️  Already in database: ${metadataName || metadataId} - skipping preload`)
+            // console.log(`  ⏭️  Already in database: ${metadataName || metadataId} - skipping preload`)
             
             // Status icon already updated during initial status check - no need to update again
             
             // Still show checkboxes for metadata that's already in database
-            console.log(`🔍 [DEBUG] Showing checkboxes for already-cached metadata ${metadataId}`)
+            // console.log(`🔍 [DEBUG] Showing checkboxes for already-cached metadata ${metadataId}`)
             this.uiManager.showCheckboxesForMetadata(metadataId)
             
             const metadataEndTime = performance.now()
             const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
-            console.log(`🔍 [TIMING] Completed processing skipped metadata ${metadataId} in ${metadataDuration}ms`)
+            // console.log(`🔍 [TIMING] Completed processing skipped metadata ${metadataId} in ${metadataDuration}ms`)
             
             skippedCount++
             continue
@@ -2068,7 +2068,7 @@ export default class extends Controller {
           // Special logging for sex and age before loading
           const metadataName = this.dataManager.getMetadataNameById(metadataId)
           if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-            console.log(`🔍 [SEX/AGE DEBUG] Starting to preload ${metadataName} (${metadataId})`)
+            // console.log(`🔍 [SEX/AGE DEBUG] Starting to preload ${metadataName} (${metadataId})`)
           }
           
           // Retry logic for failed requests
@@ -2080,7 +2080,7 @@ export default class extends Controller {
               if (retry > 0) {
                 // Exponential backoff: wait longer between retries
                 const delay = Math.pow(2, retry) * 1000 // 2s, 4s, 8s...
-                console.log(`  🔄 Retry ${retry}/${maxRetries} for metadata ${metadataId} after ${delay}ms delay`)
+                // console.log(`  🔄 Retry ${retry}/${maxRetries} for metadata ${metadataId} after ${delay}ms delay`)
                 await new Promise(resolve => setTimeout(resolve, delay))
               }
               
@@ -2110,70 +2110,70 @@ export default class extends Controller {
                 // Log progress for each type
                 if (globalIndex < categoricalMetadata.length) {
                   categoricalCount++
-                  console.log(`  ✅ Categorical ${categoricalCount}/${categoricalMetadata.length}${result.cached ? ' (cached)' : ''}`)
+                  // console.log(`  ✅ Categorical ${categoricalCount}/${categoricalMetadata.length}${result.cached ? ' (cached)' : ''}`)
                 } else {
                   continuousCount++
-                  console.log(`  ✅ Continuous ${continuousCount}/${continuousMetadata.length}${result.cached ? ' (cached)' : ''}`)
+                  // console.log(`  ✅ Continuous ${continuousCount}/${continuousMetadata.length}${result.cached ? ' (cached)' : ''}`)
                 }
                 
                 // Special logging for sex and age after successful loading
                 if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-                  console.log(`🔍 [SEX/AGE DEBUG] Successfully preloaded ${metadataName} (${metadataId}) to disk${retry > 0 ? ` on retry ${retry}` : ''}`)
+                  // console.log(`🔍 [SEX/AGE DEBUG] Successfully preloaded ${metadataName} (${metadataId}) to disk${retry > 0 ? ` on retry ${retry}` : ''}`)
                 }
                 
                 // Try to load the newly stored metadata to memory if there's space
-                console.log(`🔍 [MEMORY] Attempting to load metadata ${metadataId} to memory after disk storage`)
+                // console.log(`🔍 [MEMORY] Attempting to load metadata ${metadataId} to memory after disk storage`)
                 const newMetadataLoadStart = performance.now()
-                console.log(`🔍 [MEMORY] Starting memory load for new metadata ${metadataId} at ${newMetadataLoadStart.toFixed(2)}ms`)
+                // console.log(`🔍 [MEMORY] Starting memory load for new metadata ${metadataId} at ${newMetadataLoadStart.toFixed(2)}ms`)
                 try {
                   const memoryMetadata = await this.dataManager.loadSingleMetadataVector(metadataId)
                   const newMetadataLoadEnd = performance.now()
                   const newMetadataLoadDuration = (newMetadataLoadEnd - newMetadataLoadStart).toFixed(2)
-                  console.log(`🔍 [MEMORY] Completed memory load for new metadata ${metadataId} in ${newMetadataLoadDuration}ms`)
-                  console.log(`🔍 [MEMORY] loadSingleMetadataVector result for ${metadataId}:`, memoryMetadata ? 'success' : 'failed')
+                  // console.log(`🔍 [MEMORY] Completed memory load for new metadata ${metadataId} in ${newMetadataLoadDuration}ms`)
+                  // console.log(`🔍 [MEMORY] loadSingleMetadataVector result for ${metadataId}:`, memoryMetadata ? 'success' : 'failed')
                   if (memoryMetadata) {
                     const greenTime = performance.now()
                     const orangeDuration = result.orangeTime ? (greenTime - result.orangeTime).toFixed(2) : 'unknown'
-                    console.log(`🔍 [MEMORY] Loaded newly stored metadata ${metadataId} to memory`)
+                    // console.log(`🔍 [MEMORY] Loaded newly stored metadata ${metadataId} to memory`)
                     // Update status icon to show it's in memory (green check)
-                    console.log(`🔍 [MEMORY] Setting ${metadataId} to in-memory (green) after memory loading at ${greenTime.toFixed(2)}ms`)
-                    console.log(`🔍 [DEBUG] Memory loading completed for metadata ${metadataId}`)
-                    console.log(`⏱️ [TIMER] Orange status duration for ${metadataId}: ${orangeDuration}ms`)
+                    // console.log(`🔍 [MEMORY] Setting ${metadataId} to in-memory (green) after memory loading at ${greenTime.toFixed(2)}ms`)
+                    // console.log(`🔍 [DEBUG] Memory loading completed for metadata ${metadataId}`)
+                    // console.log(`⏱️ [TIMER] Orange status duration for ${metadataId}: ${orangeDuration}ms`)
                     this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
                     
                     // Show checkboxes for newly loaded metadata
                     this.uiManager.showCheckboxesForMetadata(metadataId)
                   } else {
-                    console.log(`🔍 [MEMORY] loadSingleMetadataVector returned null/undefined for ${metadataId}`)
+                    // console.log(`🔍 [MEMORY] loadSingleMetadataVector returned null/undefined for ${metadataId}`)
                   }
                 } catch (error) {
-                  console.log(`🔍 [MEMORY] Could not load metadata ${metadataId} to memory (buffer full or error):`, error.message)
-                  console.log(`🔍 [MEMORY] Error details:`, error)
+                  // console.log(`🔍 [MEMORY] Could not load metadata ${metadataId} to memory (buffer full or error):`, error.message)
+                  // console.log(`🔍 [MEMORY] Error details:`, error)
                 }
                 
                 success = true
                 const metadataEndTime = performance.now()
                 const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
-                console.log(`🔍 [TIMING] Completed processing metadata ${metadataId} in ${metadataDuration}ms`)
+                // console.log(`🔍 [TIMING] Completed processing metadata ${metadataId} in ${metadataDuration}ms`)
                 break
               } else {
                 // Loading failed
                 lastError = new Error(result.error || 'Unknown error')
-                console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${result.error}`)
+                // console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${result.error}`)
               }
             } catch (error) {
               lastError = error
-              console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${error.message}`)
+              // console.log(`  ❌ Failed metadata ${metadataId} (attempt ${retry + 1}): ${error.message}`)
             }
           }
           
           // If all retries failed, log the final error
           if (!success) {
-            console.log(`  ❌ Final failure for metadata ${metadataId} after ${maxRetries + 1} attempts`)
+            // console.log(`  ❌ Final failure for metadata ${metadataId} after ${maxRetries + 1} attempts`)
             
             // Special logging for sex and age on final failure
             if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
-              console.log(`🔍 [SEX/AGE DEBUG] Final failure for ${metadataName} (${metadataId}): ${lastError?.message || 'Unknown error'}`)
+              // console.log(`🔍 [SEX/AGE DEBUG] Final failure for ${metadataName} (${metadataId}): ${lastError?.message || 'Unknown error'}`)
             }
           }
           
@@ -2190,11 +2190,11 @@ export default class extends Controller {
       }
     }
     
-    console.log(`\n🚀 [PERF] ✅ Preload complete!`)
-    console.log(`  📊 ${embeddingCount}/${visualizationEmbeddings.length} Embeddings`)
-    console.log(`  🏷️ ${categoricalCount}/${categoricalMetadata.length} Categorical`)
-    console.log(`  📈 ${continuousCount}/${continuousMetadata.length} Continuous`)
-    console.log(`  ⏭️  ${skippedCount} items skipped (already in database)`)
+    // console.log(`\n🚀 [PERF] ✅ Preload complete!`)
+    // console.log(`  📊 ${embeddingCount}/${visualizationEmbeddings.length} Embeddings`)
+    // console.log(`  🏷️ ${categoricalCount}/${categoricalMetadata.length} Categorical`)
+    // console.log(`  📈 ${continuousCount}/${continuousMetadata.length} Continuous`)
+    // console.log(`  ⏭️  ${skippedCount} items skipped (already in database)`)
     this.memoryManager.logMemoryUsage('After preloading all metadata')
     
     // Performance assessment after preloading
@@ -2210,7 +2210,7 @@ export default class extends Controller {
     const hasRenderer = !!this.reglRenderer
     
     if (!this.currentMetadataVector || !hasRenderer) {
-      console.log('Cannot update visualization - missing data or renderer')
+      // console.log('Cannot update visualization - missing data or renderer')
       return
     }
     
@@ -2221,14 +2221,14 @@ export default class extends Controller {
     // Get existing coordinates for coloring
     // CRITICAL: If coordinates are missing but renderer has state, try to restore them
     if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
-      console.log('⚠️ No coordinates available for coloring - attempting to restore from renderer state')
+      // console.log('⚠️ No coordinates available for coloring - attempting to restore from renderer state')
       
       // Try to restore from renderer if it has positions
       if (this.reglRenderer && this.reglRenderer.positions && this.reglRenderer.positions.length > 0) {
         // positions is Float32Array: [x1, y1, x2, y2, ...]
         // We need to convert back to [[x, y], [x, y], ...] format
         const numPoints = this.reglRenderer.positions.length / 2
-        console.log(`🔄 Restoring ${numPoints} coordinates from renderer positions`)
+        // console.log(`🔄 Restoring ${numPoints} coordinates from renderer positions`)
         
         // Get bounds from currentBounds if available, or calculate from renderer
         let bounds = this.currentBounds
@@ -2265,7 +2265,7 @@ export default class extends Controller {
           }
         }
         
-        console.log(`✅ Restored ${numPoints} coordinates from renderer state`)
+        // console.log(`✅ Restored ${numPoints} coordinates from renderer state`)
       } else {
         console.error('❌ No coordinates available for coloring and cannot restore from renderer')
       return
@@ -2280,7 +2280,7 @@ export default class extends Controller {
     
     // Smart re-render: Sprites can ALWAYS be reused, just update colors and z-order!
     // No need to recreate sprites when switching metadata
-    console.log(`🔄 Switching to ${data_type} metadata, will reuse sprites and update colors/z-order`)
+    // console.log(`🔄 Switching to ${data_type} metadata, will reuse sprites and update colors/z-order`)
     
     // Store for next comparison
     this.lastMetadataVector = this.currentMetadataVector
@@ -2296,25 +2296,25 @@ export default class extends Controller {
 
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
-    console.log('🎨 [RENDER] renderPointsWithCurrentColoring() called')
-    console.log('🎨 [RENDER] State check:', {
-      hasReglRenderer: !!this.reglRenderer,
-      hasCurrentCoordinates: !!this.currentCoordinates,
-      currentCoordinatesLength: this.currentCoordinates?.length || 0,
-      currentMetadataVector: this.currentMetadataVector?.id || 'none',
-      currentMetadataId: this.currentMetadataId || 'none'
-    })
+    // console.log('🎨 [RENDER] renderPointsWithCurrentColoring() called')
+    // console.log('🎨 [RENDER] State check:', {
+      // hasReglRenderer: !!this.reglRenderer,
+      // hasCurrentCoordinates: !!this.currentCoordinates,
+      // currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      // currentMetadataVector: this.currentMetadataVector?.id || 'none',
+      // currentMetadataId: this.currentMetadataId || 'none'
+    // })
 
     // Performance optimization: check if color state has changed
     const currentColorHash = this.dataManager.getColorStateHash()
     if (this.lastColorUpdateHash === currentColorHash && this.colorUpdateCache.has('lastColorMap')) {
-      console.log('🎨 [RENDER] Using cached color update (no color state change)')
+      // console.log('🎨 [RENDER] Using cached color update (no color state change)')
       const cachedColorMap = this.colorUpdateCache.get('lastColorMap')
       
       // IMPORTANT: If display order was reset (e.g., after embedding switch),
       // we need to rebuild the colorMap from originalPointColors using the new display order
       if (this._displayOrderWasReset) {
-        console.log('🎨 [ReGL] Display order was reset, rebuilding colorMap from originalPointColors')
+        // console.log('🎨 [ReGL] Display order was reset, rebuilding colorMap from originalPointColors')
         const colorMap = new Map()
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
@@ -2346,7 +2346,7 @@ export default class extends Controller {
     const startTime = performance.now()
     
     if (!this.reglRenderer || !this.currentCoordinates) {
-      console.log('⚠️ [ReGL] Cannot update colors - missing renderer or coordinates')
+      // console.log('⚠️ [ReGL] Cannot update colors - missing renderer or coordinates')
       return
     }
     
@@ -2355,21 +2355,21 @@ export default class extends Controller {
     // Get current filtered indices to hide invisible points
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
     const visibleSet = filteredIndices ? new Set(filteredIndices) : null
-    console.log(`🎨 [ReGL] Filtered indices:`, filteredIndices ? `${filteredIndices.length} visible cells` : 'all visible')
+    // console.log(`🎨 [ReGL] Filtered indices:`, filteredIndices ? `${filteredIndices.length} visible cells` : 'all visible')
     
     // Check if we have metadata coloring active
     // FIXED: Use getColoringMetadataVector() to get the correct metadata for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
-    console.log('🎨 [RENDER] Checking for coloring metadata vector:', {
-      hasColoringMetadataVector: !!coloringMetadataVector,
-      coloringMetadataVectorId: coloringMetadataVector?.id || 'none',
-      coloringMetadataVectorName: coloringMetadataVector?.name || 'none',
-      currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
-      currentMetadataId: this.currentMetadataId || 'none'
-    })
+    // console.log('🎨 [RENDER] Checking for coloring metadata vector:', {
+      // hasColoringMetadataVector: !!coloringMetadataVector,
+      // coloringMetadataVectorId: coloringMetadataVector?.id || 'none',
+      // coloringMetadataVectorName: coloringMetadataVector?.name || 'none',
+      // currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
+      // currentMetadataId: this.currentMetadataId || 'none'
+    // })
     
     if (coloringMetadataVector) {
-      console.log(`🎨 [RENDER] Applying ${coloringMetadataVector.data_type} metadata colors for: ${coloringMetadataVector.name}`)
+      // console.log(`🎨 [RENDER] Applying ${coloringMetadataVector.data_type} metadata colors for: ${coloringMetadataVector.name}`)
       
       if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Discrete metadata coloring with category ordering
@@ -2395,7 +2395,7 @@ export default class extends Controller {
           categoryToIndex[cat] = idx
         })
         
-        console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
+        // console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
         
         // Assign colors using displayOrder, hiding filtered-out cells
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
@@ -2432,8 +2432,8 @@ export default class extends Controller {
         const needsReordering = !this._lastCategoryOrderApplied || this._lastCategoryOrderApplied !== this.categoryOrder
         
         if (needsReordering) {
-          console.log('📊 [ReGL] Applying category display order (first time or order changed)...')
-          console.log(`📊 [ReGL] originalPointColors size: ${this.originalPointColors.size}, displayOrder length: ${this.displayOrder.length}`)
+          // console.log('📊 [ReGL] Applying category display order (first time or order changed)...')
+          // console.log(`📊 [ReGL] originalPointColors size: ${this.originalPointColors.size}, displayOrder length: ${this.displayOrder.length}`)
           this._lastCategoryOrderApplied = this.categoryOrder
           
           // Reorder points in buffer (this will re-render and redraw overlay)
@@ -2441,7 +2441,7 @@ export default class extends Controller {
           
           // Redraw overlay is handled by reorderPointsForCategoryDisplay
           const elapsed = performance.now() - startTime
-          console.log(`🎨 [ReGL] Color update with reordering completed in ${elapsed.toFixed(2)}ms`)
+          // console.log(`🎨 [ReGL] Color update with reordering completed in ${elapsed.toFixed(2)}ms`)
           
           // Refresh 2D plot if open
           this.customPlotManager.refresh2DPlotIfOpen()
@@ -2453,7 +2453,7 @@ export default class extends Controller {
         const values = coloringMetadataVector.values
         const compressionInfo = coloringMetadataVector.compression_info
         
-        console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
+        // console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
         
         // Get effective color range (respects user-set range slider)
         const effectiveRange = this.getEffectiveColorRange()
@@ -2462,11 +2462,11 @@ export default class extends Controller {
         if (effectiveRange) {
           minVal = effectiveRange.min
           maxVal = effectiveRange.max
-          console.log(`🎨 [ReGL] Using user-defined range: [${minVal}, ${maxVal}]`)
+          // console.log(`🎨 [ReGL] Using user-defined range: [${minVal}, ${maxVal}]`)
         } else if (compressionInfo) {
           minVal = compressionInfo.min_val
           maxVal = compressionInfo.max_val
-          console.log(`🎨 [ReGL] Using compression info range: [${minVal}, ${maxVal}]`)
+          // console.log(`🎨 [ReGL] Using compression info range: [${minVal}, ${maxVal}]`)
         } else {
           // Fallback: calculate range from values (avoid spreading large arrays)
           minVal = values[0]
@@ -2475,7 +2475,7 @@ export default class extends Controller {
             if (values[i] < minVal) minVal = values[i]
             if (values[i] > maxVal) maxVal = values[i]
           }
-          console.log(`🎨 [ReGL] Calculated range from values: [${minVal}, ${maxVal}]`)
+          // console.log(`🎨 [ReGL] Calculated range from values: [${minVal}, ${maxVal}]`)
         }
         
         const range = maxVal - minVal
@@ -2513,7 +2513,7 @@ export default class extends Controller {
         // Cache colors for fast visibility updates
         this.colorManager.calculateAndCacheColors(coloringMetadataVector)
         
-        console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
+        // console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
         
         // Update colors in ReGL (but don't render yet, we'll reorder first)
         this.reglRenderer.updateColors(colorMap)
@@ -2528,8 +2528,8 @@ export default class extends Controller {
         const needsReordering = orderChanged || metadataChanged
         
         if (needsReordering) {
-          console.log('📊 [ReGL] Applying numeric display order (first time, order changed, or metadata changed)...')
-          console.log('📊 [ReGL] Order changed:', orderChanged, 'Metadata changed:', metadataChanged)
+          // console.log('📊 [ReGL] Applying numeric display order (first time, order changed, or metadata changed)...')
+          // console.log('📊 [ReGL] Order changed:', orderChanged, 'Metadata changed:', metadataChanged)
           this._lastNumericOrderApplied = this.numericalOrder
           this._lastNumericMetadataId = coloringMetadataVector.id
           
@@ -2539,7 +2539,7 @@ export default class extends Controller {
           
           // Redraw overlay and legend is handled by reorderPointsForNumericDisplay
           const elapsed = performance.now() - startTime
-          console.log(`🎨 [ReGL] Color update with numeric reordering completed in ${elapsed.toFixed(2)}ms`)
+          // console.log(`🎨 [ReGL] Color update with numeric reordering completed in ${elapsed.toFixed(2)}ms`)
           
           // Refresh 2D plot if open
           this.customPlotManager.refresh2DPlotIfOpen()
@@ -2557,12 +2557,12 @@ export default class extends Controller {
       }
     } else {
       // Default blue coloring
-      console.log('🎨 [RENDER] Applying default blue colors (no coloring metadata vector)')
-      console.log('🎨 [RENDER] Default blue coloring details:', {
-        displayOrderLength: this.displayOrder?.length || 0,
-        visibleSetSize: visibleSet?.size || 'all',
-        defaultColor: '0x3b82f6'
-      })
+      // console.log('🎨 [RENDER] Applying default blue colors (no coloring metadata vector)')
+      // console.log('🎨 [RENDER] Default blue coloring details:', {
+        // displayOrderLength: this.displayOrder?.length || 0,
+        // visibleSetSize: visibleSet?.size || 'all',
+        // defaultColor: '0x3b82f6'
+      // })
       const defaultColor = 0x3b82f6
       let visibleCount = 0
       let hiddenCount = 0
@@ -2583,18 +2583,18 @@ export default class extends Controller {
         }
       }
       
-      console.log('🎨 [RENDER] Default blue coloring applied:', {
-        totalPoints: this.displayOrder.length,
-        visiblePoints: visibleCount,
-        hiddenPoints: hiddenCount,
-        colorMapSize: colorMap.size
-      })
+      // console.log('🎨 [RENDER] Default blue coloring applied:', {
+        // totalPoints: this.displayOrder.length,
+        // visiblePoints: visibleCount,
+        // hiddenPoints: hiddenCount,
+        // colorMapSize: colorMap.size
+      // })
       
       // Update colors in ReGL
-      console.log('🎨 [RENDER] Updating ReGL renderer with default blue colors...')
+      // console.log('🎨 [RENDER] Updating ReGL renderer with default blue colors...')
       this.reglRenderer.updateColors(colorMap)
       this.reglRenderer.render()
-      console.log('🎨 [RENDER] ReGL renderer updated and rendered')
+      // console.log('🎨 [RENDER] ReGL renderer updated and rendered')
       
       // Refresh 2D plot if open
       this.customPlotManager.refresh2DPlotIfOpen()
@@ -2618,7 +2618,7 @@ export default class extends Controller {
     
     const elapsed = performance.now() - startTime
     this.recordPerformanceMetrics('ColorUpdate', elapsed)
-    console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
     
     // Refresh 2D plot if open
     this.customPlotManager.refresh2DPlotIfOpen()
@@ -2630,10 +2630,10 @@ export default class extends Controller {
 
   // Color points for continuous metadata
   colorPointsContinuous(values, compressionInfo) {
-    /*console.log('Coloring points for continuous metadata:', {
-      range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
-      actualRange: `${this.dataManager.safeMin(values).toFixed(3)} to ${this.dataManager.safeMax(values).toFixed(3)}`
-    })*/
+    // /*console.log('Coloring points for continuous metadata:', {
+      // range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
+      // actualRange: `${this.dataManager.safeMin(values).toFixed(3)} to ${this.dataManager.safeMax(values).toFixed(3)}`
+    // })*/
     
     const minVal = compressionInfo.min_val
     const maxVal = compressionInfo.max_val
@@ -2946,7 +2946,7 @@ export default class extends Controller {
       this.renderContinuousColorLegend()
     }
     
-    console.log('🎨 Color range set to:', { min, max })
+    // console.log('🎨 Color range set to:', { min, max })
   }
 
   // Reset color range to auto (use data min/max)
@@ -2959,21 +2959,21 @@ export default class extends Controller {
       this.renderContinuousColorLegend()
     }
     
-    console.log('🎨 Color range reset to auto')
+    // console.log('🎨 Color range reset to auto')
   }
 
   // Update color range for a specific metadata (used by inline range slider)
   updateColorRange(metadataId, min, max, shouldAdaptColorRange = false) {
-    console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max }, 'adapt:', shouldAdaptColorRange)
+    // console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max }, 'adapt:', shouldAdaptColorRange)
     
     if (shouldAdaptColorRange) {
       // Set the custom color range to adapt to the selected range
       this.customColorRange = { min, max }
-      console.log('🎨 Color range adapted to selected range:', { min, max })
+      // console.log('🎨 Color range adapted to selected range:', { min, max })
     } else {
       // Clear the custom color range to use the full data range
       this.customColorRange = null
-      console.log('🎨 Color range reset to full data range')
+      // console.log('🎨 Color range reset to full data range')
     }
     
     // Update category distribution bar plots to reflect the new color range
@@ -2985,7 +2985,7 @@ export default class extends Controller {
 
   // Redraw the entire visualization (used by inline range slider)
   /*redrawVisualization() {
-    console.log('🎨 Redrawing visualization...')
+    // console.log('🎨 Redrawing visualization...')
     
     if (this.currentMetadataVector) {
       //this.forceReRenderPoints()
@@ -3007,18 +3007,18 @@ export default class extends Controller {
     
     // Check renderer state BEFORE initialization (for debugging)
     if (isGene) {
-      console.log(`${logPrefix} Renderer state BEFORE initializeInlineRangeSlider (gene):`, {
-        hasReglRenderer: !!this.reglRenderer,
-        rendererInstanceId: this.reglRenderer?.instanceId || 'none',
-        numPoints: this.reglRenderer?.numPoints || 0,
-        hasPositions: !!this.reglRenderer?.positions,
-        positionsLength: this.reglRenderer?.positions?.length || 0,
-        hasCurrentCoordinates: !!this.currentCoordinates,
-        currentCoordinatesLength: this.currentCoordinates?.length || 0
-      })
+      // console.log(`${logPrefix} Renderer state BEFORE initializeInlineRangeSlider (gene):`, {
+        // hasReglRenderer: !!this.reglRenderer,
+        // rendererInstanceId: this.reglRenderer?.instanceId || 'none',
+        // numPoints: this.reglRenderer?.numPoints || 0,
+        // hasPositions: !!this.reglRenderer?.positions,
+        // positionsLength: this.reglRenderer?.positions?.length || 0,
+        // hasCurrentCoordinates: !!this.currentCoordinates,
+        // currentCoordinatesLength: this.currentCoordinates?.length || 0
+      // })
     }
     
-    console.log(`${logPrefix} Initializing inline range slider for metadata:`, metadataId)
+    // console.log(`${logPrefix} Initializing inline range slider for metadata:`, metadataId)
     
     if (!values || !Array.isArray(values)) {
       console.error(`❌ ${logPrefix} Invalid values provided to initializeInlineRangeSlider:`, values)
@@ -3028,7 +3028,7 @@ export default class extends Controller {
     const minVal = this.dataManager.safeMin(values)
     const maxVal = this.dataManager.safeMax(values)
     
-    console.log(`${logPrefix} Calculated min/max values:`, { minVal, maxVal, valuesLength: values.length })
+    // console.log(`${logPrefix} Calculated min/max values:`, { minVal, maxVal, valuesLength: values.length })
     
     // Check if there's an existing selected range for this metadata - preserve it!
     const existingRange = this.selectedRanges?.[metadataId]
@@ -3036,13 +3036,13 @@ export default class extends Controller {
     const currentMax = existingRange?.max ?? maxVal
     
     if (existingRange) {
-      console.log(`${logPrefix} Preserving existing range for slider:`, existingRange)
+      // console.log(`${logPrefix} Preserving existing range for slider:`, existingRange)
     }
     
     // Store the data with preserved range if it exists
     if (!this.inlineRangeSliderData) {
       this.inlineRangeSliderData = {}
-      console.log(`${logPrefix} Created inlineRangeSliderData object`)
+      // console.log(`${logPrefix} Created inlineRangeSliderData object`)
     }
     
     this.inlineRangeSliderData[metadataId] = {
@@ -3053,20 +3053,20 @@ export default class extends Controller {
       values: values
     }
     
-    console.log(`${logPrefix} Stored in inlineRangeSliderData:`, {
-      metadataId,
-      min: minVal,
-      max: maxVal,
-      currentMin,
-      currentMax,
-      valuesLength: values.length,
-      allKeys: Object.keys(this.inlineRangeSliderData)
-    })
+    // console.log(`${logPrefix} Stored in inlineRangeSliderData:`, {
+      // metadataId,
+      // min: minVal,
+      // max: maxVal,
+      // currentMin,
+      // currentMax,
+      // valuesLength: values.length,
+      // allKeys: Object.keys(this.inlineRangeSliderData)
+    // })
     
     // Verify loadedMetadataVectors has this metadata (critical for filtering)
     if (isGene) {
       const hasInLoadedVectors = !!this.loadedMetadataVectors?.[metadataId]
-      console.log(`${logPrefix} Verification - loadedMetadataVectors has ${metadataId}:`, hasInLoadedVectors)
+      // console.log(`${logPrefix} Verification - loadedMetadataVectors has ${metadataId}:`, hasInLoadedVectors)
       if (!hasInLoadedVectors) {
         console.error(`❌ ${logPrefix} CRITICAL: ${metadataId} NOT in loadedMetadataVectors!`)
         console.error(`❌ ${logPrefix} loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
@@ -3075,11 +3075,11 @@ export default class extends Controller {
     
     // Find the range slider controller and update its values
     const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${metadataId}"]`)
-    console.log(`${logPrefix} Looking for range slider element:`, rangeSliderElement)
+    // console.log(`${logPrefix} Looking for range slider element:`, rangeSliderElement)
     
     if (rangeSliderElement) {
       const controller = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
-      console.log('🎚️ Found range slider controller:', controller)
+      // console.log('🎚️ Found range slider controller:', controller)
       
       if (controller) {
         // CRITICAL: Ensure the range slider controller has the correct visualization controller reference
@@ -3087,14 +3087,14 @@ export default class extends Controller {
         controller.visualizationController = this
         controller.dataManager = this.dataManager
         controller.rendererManager = this.rendererManager
-        console.log('🎚️ Updated range slider controller with visualization controller instance:', this.instanceId)
+        // console.log('🎚️ Updated range slider controller with visualization controller instance:', this.instanceId)
         
         controller.minValue = minVal
         controller.maxValue = maxVal
         controller.currentMinValue = currentMin  // Use preserved value
         controller.currentMaxValue = currentMax  // Use preserved value
         controller.initializeSlider()
-        console.log('🎚️ Range slider controller initialized successfully with range:', { currentMin, currentMax })
+        // console.log('🎚️ Range slider controller initialized successfully with range:', { currentMin, currentMax })
         
         // Update button appearance to show/hide based on coloring state
         controller.updateButtonAppearance()
@@ -3129,63 +3129,63 @@ export default class extends Controller {
 
   // Debug function to help identify DOM structure issues
   debugMetadataContainerStructure(button) {
-    console.log('🔍 Debugging metadata container structure...')
-    console.log('Button element:', button)
-    console.log('Button tagName:', button.tagName)
-    console.log('Button className:', button.className)
-    console.log('Button dataset:', button.dataset)
-    console.log('Button parentElement:', button.parentElement)
-    console.log('Button parentElement tagName:', button.parentElement?.tagName)
-    console.log('Button parentElement className:', button.parentElement?.className)
-    console.log('Button parentElement dataset:', button.parentElement?.dataset)
+    // console.log('🔍 Debugging metadata container structure...')
+    // console.log('Button element:', button)
+    // console.log('Button tagName:', button.tagName)
+    // console.log('Button className:', button.className)
+    // console.log('Button dataset:', button.dataset)
+    // console.log('Button parentElement:', button.parentElement)
+    // console.log('Button parentElement tagName:', button.parentElement?.tagName)
+    // console.log('Button parentElement className:', button.parentElement?.className)
+    // console.log('Button parentElement dataset:', button.parentElement?.dataset)
     
     // Check all parent elements
     let current = button.parentElement
     let level = 1
     while (current && level <= 5) {
-      console.log(`Parent level ${level}:`, {
-        tagName: current.tagName,
-        className: current.className,
-        dataset: current.dataset,
-        id: current.id
-      })
+      // console.log(`Parent level ${level}:`, {
+        // tagName: current.tagName,
+        // className: current.className,
+        // dataset: current.dataset,
+        // id: current.id
+      // })
       current = current.parentElement
       level++
     }
     
     // Check for any metadata-related elements in the document
     const metadataElements = document.querySelectorAll('[data-metadata-item], .metadata-item, [data-metadata-id], .metadata')
-    console.log('All metadata-related elements found:', metadataElements.length)
+    // console.log('All metadata-related elements found:', metadataElements.length)
     metadataElements.forEach((el, index) => {
-      console.log(`Metadata element ${index}:`, {
-        tagName: el.tagName,
-        className: el.className,
-        dataset: el.dataset,
-        id: el.id
-      })
+      // console.log(`Metadata element ${index}:`, {
+        // tagName: el.tagName,
+        // className: el.className,
+        // dataset: el.dataset,
+        // id: el.id
+      // })
     })
   }
 
   
   // Clear metadata coloring and return to default blue points
   clearMetadataColoring() {
-    console.log('🎨 [CLEAR COLORING] clearMetadataColoring() called')
-    console.log('🎨 [CLEAR COLORING] Current filter state:', {
-      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      hasFilter: !!this.currentVisibleCells
-    })
-    console.log('🎨 [CLEAR COLORING] Checking prerequisites:', {
-      rendererType: this.rendererType,
-      reglRenderer: !!this.reglRenderer,
-      pixiRendererId: this.reglRenderer?.instanceId || 'none',
-      pixiApp: !!this.pixiApp,
-      scatterContainer: !!this.scatterContainer,
-      currentCoordinates: !!this.currentCoordinates,
-      currentCoordinatesLength: this.currentCoordinates?.length || 0,
-      currentBounds: !!this.currentBounds,
-      currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
-      currentMetadataId: this.currentMetadataId || 'none'
-    })
+    // console.log('🎨 [CLEAR COLORING] clearMetadataColoring() called')
+    // console.log('🎨 [CLEAR COLORING] Current filter state:', {
+      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      // hasFilter: !!this.currentVisibleCells
+    // })
+    // console.log('🎨 [CLEAR COLORING] Checking prerequisites:', {
+      // rendererType: this.rendererType,
+      // reglRenderer: !!this.reglRenderer,
+      // pixiRendererId: this.reglRenderer?.instanceId || 'none',
+      // pixiApp: !!this.pixiApp,
+      // scatterContainer: !!this.scatterContainer,
+      // currentCoordinates: !!this.currentCoordinates,
+      // currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      // currentBounds: !!this.currentBounds,
+      // currentMetadataVectorId: this.currentMetadataVector?.id || 'none',
+      // currentMetadataId: this.currentMetadataId || 'none'
+    // })
     
     // Check for renderer availability (either ReGL or PixiJS)
     const hasRenderer = !!this.reglRenderer
@@ -3199,49 +3199,49 @@ export default class extends Controller {
       return
     }
     
-    console.log('🎨 [CLEAR COLORING] All prerequisites met, proceeding to clear coloring')
-    console.log('🎨 [CLEAR COLORING] Clearing metadata coloring, returning to default blue')
-    console.log('🎨 [CLEAR COLORING] Before clearing - currentMetadataVector:', {
-      id: this.currentMetadataVector?.id || 'none',
-      name: this.currentMetadataVector?.name || 'none',
-      dataType: this.currentMetadataVector?.data_type || 'none'
-    })
-    console.trace('🎨 [CLEAR COLORING] Call stack:')
+    // console.log('🎨 [CLEAR COLORING] All prerequisites met, proceeding to clear coloring')
+    // console.log('🎨 [CLEAR COLORING] Clearing metadata coloring, returning to default blue')
+    // console.log('🎨 [CLEAR COLORING] Before clearing - currentMetadataVector:', {
+      // id: this.currentMetadataVector?.id || 'none',
+      // name: this.currentMetadataVector?.name || 'none',
+      // dataType: this.currentMetadataVector?.data_type || 'none'
+    // })
+    // console.trace('🎨 [CLEAR COLORING] Call stack:')
     
     // Clear current metadata vector
     const oldMetadataId = this.currentMetadataVector?.id || this.currentMetadataId || 'none'
     this.currentMetadataVector = null
     this.currentMetadataId = null
-    console.log('🎨 [CLEAR COLORING] Cleared currentMetadataVector and currentMetadataId (was:', oldMetadataId, ')')
+    // console.log('🎨 [CLEAR COLORING] Cleared currentMetadataVector and currentMetadataId (was:', oldMetadataId, ')')
     
     // Clear custom color range
     const oldCustomColorRange = this.customColorRange
     this.customColorRange = null
-    console.log('🎨 [CLEAR COLORING] Cleared customColorRange (was:', oldCustomColorRange, ')')
+    // console.log('🎨 [CLEAR COLORING] Cleared customColorRange (was:', oldCustomColorRange, ')')
     
     // Update adapt color range button visibility for all range sliders
-    console.log('🎨 [CLEAR COLORING] Updating range slider button appearances...')
+    // console.log('🎨 [CLEAR COLORING] Updating range slider button appearances...')
     this.updateAllRangeSliderButtonAppearances()
-    console.log('🎨 [CLEAR COLORING] Range slider button appearances updated')
+    // console.log('🎨 [CLEAR COLORING] Range slider button appearances updated')
     
     // Clear the cached color map since we're clearing metadata
-    console.log('🎨 [CLEAR COLORING] Clearing color map cache...')
+    // console.log('🎨 [CLEAR COLORING] Clearing color map cache...')
     this.colorManager.clearColorMapCache()
-    console.log('🎨 [CLEAR COLORING] Color map cache cleared')
+    // console.log('🎨 [CLEAR COLORING] Color map cache cleared')
     
     // Render points with default blue coloring based on renderer type
-    console.log('🎨 [CLEAR COLORING] Calling renderPointsWithCurrentColoring() to render default blue...')
-    console.log('🎨 [CLEAR COLORING] Filter state before renderPointsWithCurrentColoring:', {
-      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      hasFilter: !!this.currentVisibleCells
-    })
+    // console.log('🎨 [CLEAR COLORING] Calling renderPointsWithCurrentColoring() to render default blue...')
+    // console.log('🎨 [CLEAR COLORING] Filter state before renderPointsWithCurrentColoring:', {
+      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      // hasFilter: !!this.currentVisibleCells
+    // })
     try {
     this.renderPointsWithCurrentColoring()
-      console.log('🎨 [CLEAR COLORING] renderPointsWithCurrentColoring() completed successfully')
-      console.log('🎨 [CLEAR COLORING] Filter state after renderPointsWithCurrentColoring:', {
-        currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-        hasFilter: !!this.currentVisibleCells
-      })
+      // console.log('🎨 [CLEAR COLORING] renderPointsWithCurrentColoring() completed successfully')
+      // console.log('🎨 [CLEAR COLORING] Filter state after renderPointsWithCurrentColoring:', {
+        // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+        // hasFilter: !!this.currentVisibleCells
+      // })
     } catch (error) {
       console.error('🎨 [CLEAR COLORING] ❌ Error in renderPointsWithCurrentColoring():', error)
       console.error('🎨 [CLEAR COLORING] Error stack:', error.stack)
@@ -3260,7 +3260,7 @@ export default class extends Controller {
       canvas.style.display = 'none'
     })
     
-    console.log('🎨 Successfully cleared metadata coloring')
+    // console.log('🎨 Successfully cleared metadata coloring')
   }
   /*
   // Clear all loaded metadata vectors cache (use when switching projects or clearing all data)
@@ -3293,7 +3293,7 @@ export default class extends Controller {
     )
     
     if (significantChange) {
-      console.log('Embedding method changed - animation will be triggered')
+      // console.log('Embedding method changed - animation will be triggered')
     }
     
     return significantChange
@@ -3405,9 +3405,9 @@ export default class extends Controller {
     const callTime = performance.now()
     const delay = callTime - eventTime
     
-    console.log(`⏱️ [TOGGLE] Event fired at: ${eventTime.toFixed(2)}ms`)
-    console.log(`⏱️ [TOGGLE] Function called at: ${callTime.toFixed(2)}ms`)
-    console.log(`⏱️ [TOGGLE] ⚠️ DELAY between event and function call: ${delay.toFixed(2)}ms`)
+    // console.log(`⏱️ [TOGGLE] Event fired at: ${eventTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [TOGGLE] Function called at: ${callTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [TOGGLE] ⚠️ DELAY between event and function call: ${delay.toFixed(2)}ms`)
     
     if (delay > 100) {
       console.error(`❌ [TOGGLE] CRITICAL: ${delay.toFixed(2)}ms delay! Something is severely blocking the main thread!`)
@@ -3443,7 +3443,7 @@ export default class extends Controller {
     }
     
     const perfStart = performance.now()
-    console.log('⏱️ [TOGGLE] Starting metadata fold/unfold...')
+    // console.log('⏱️ [TOGGLE] Starting metadata fold/unfold...')
     
     const headerElement = event.currentTarget
     const chevron = headerElement.querySelector('.fa-chevron-right')
@@ -3463,12 +3463,12 @@ export default class extends Controller {
     // Toggle the chevron rotation
     const isExpanding = chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)'
     
-    console.log(`⏱️ [TOGGLE] Type: ${isContinuousMetadata ? 'Continuous' : 'Categorical'}, Action: ${isExpanding ? 'Expanding' : 'Collapsing'}`)
+    // console.log(`⏱️ [TOGGLE] Type: ${isContinuousMetadata ? 'Continuous' : 'Categorical'}, Action: ${isExpanding ? 'Expanding' : 'Collapsing'}`)
     
     if (isExpanding) {
       const chevronTime = performance.now()
       chevron.style.transform = 'rotate(90deg)'
-      console.log(`⏱️ [TOGGLE] Chevron rotation: ${(performance.now() - chevronTime).toFixed(2)}ms`)
+      // console.log(`⏱️ [TOGGLE] Chevron rotation: ${(performance.now() - chevronTime).toFixed(2)}ms`)
       
       if (isContinuousMetadata) {
         // Handle continuous metadata - show range section with smooth transition
@@ -3485,7 +3485,7 @@ export default class extends Controller {
         // Expand with animation
         rangeSection.style.maxHeight = '500px'
         rangeSection.style.opacity = '1'
-        console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
+        // console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Get metadata info and initialize the range slider
         const metadataItem = headerElement.closest('[data-metadata-item]')
@@ -3493,25 +3493,25 @@ export default class extends Controller {
           const metadataId = metadataItem.dataset.metadataItem
           const metadataName = headerElement.querySelector('[data-metadata-name]')?.dataset.metadataName || 'Unknown'
           
-          console.log('🎚️ Expanding continuous metadata:', metadataId, metadataName)
+          // console.log('🎚️ Expanding continuous metadata:', metadataId, metadataName)
           
           // Initialize the inline range slider
           const sliderTime = performance.now()
           this.toggleInlineRangeSlider(metadataId, metadataName)
-          console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
+          // console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
           
           // Preload metadata for continuous metadata (for future coloring)
           const memCheckTime = performance.now()
           const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
           const isInMemory = !!metadataVector
-          console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
+          // console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
           
           if (!isInMemory) {
             // Not in memory - load it silently
             const loadTime = performance.now()
-            console.log(`⏱️ [TOGGLE] Preloading continuous metadata from disk/network...`)
+            // console.log(`⏱️ [TOGGLE] Preloading continuous metadata from disk/network...`)
             this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-              console.log(`Failed to preload continuous metadata vector ${metadataId}:`, error.message)
+              // console.log(`Failed to preload continuous metadata vector ${metadataId}:`, error.message)
             })
           }
         }
@@ -3530,7 +3530,7 @@ export default class extends Controller {
         // Expand with animation
         categoriesDiv.style.maxHeight = '2000px' // Larger for categories list
         categoriesDiv.style.opacity = '1'
-        console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
+        // console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Load metadata vector when expanding categories (for future coloring)
         const metadataItem = headerElement.closest('[data-metadata-item]')
@@ -3541,13 +3541,13 @@ export default class extends Controller {
           const memCheckTime = performance.now()
           const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
           const isInMemory = !!metadataVector
-          console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
+          // console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
           
           if (isInMemory) {
             // Already in memory - just initialize checkboxes (no loading needed)
             const checkboxTime = performance.now()
             this.initializeCheckboxesForMetadata(metadataId).then(() => {
-              console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
+              // console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
               
               // Draw category distribution bar plots
               this.drawCategoryDistributions(metadataId)
@@ -3556,23 +3556,23 @@ export default class extends Controller {
               if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
                 const filterTime = performance.now()
                 this.dataManager.updateCellFiltering()
-                console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
+                // console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
               } else {
-                console.log(`⏱️ [TOGGLE] Skipped filtering (no active selections)`)
+                // console.log(`⏱️ [TOGGLE] Skipped filtering (no active selections)`)
               }
               
-              console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
+              // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
           } else {
             // Not in memory - load it first (immediate loading for click)
             const loadTime = performance.now()
-            console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
+            // console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
             this.loadSingleMetadataVectorSilently(metadataId).then(() => {
-              console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
+              // console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
               
               const checkboxTime = performance.now()
               this.initializeCheckboxesForMetadata(metadataId).then(() => {
-                console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
+                // console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
                 
                 // Draw category distribution bar plots
                 this.drawCategoryDistributions(metadataId)
@@ -3580,14 +3580,14 @@ export default class extends Controller {
                 if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
                   const filterTime = performance.now()
                   this.dataManager.updateCellFiltering()
-                  console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
+                  // console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
                 }
                 
-                console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
+                // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
               })
             }).catch(error => {
-              console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
-              console.log(`⏱️ [TOGGLE] ❌ Failed after: ${(performance.now() - perfStart).toFixed(2)}ms`)
+              // console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
+              // console.log(`⏱️ [TOGGLE] ❌ Failed after: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
           }
         }
@@ -3616,8 +3616,8 @@ export default class extends Controller {
         }, 300) // Match transition duration
       }
       
-      console.log(`⏱️ [TOGGLE] ✅ Collapse time: ${(performance.now() - collapseTime).toFixed(2)}ms`)
-      console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
+      // console.log(`⏱️ [TOGGLE] ✅ Collapse time: ${(performance.now() - collapseTime).toFixed(2)}ms`)
+      // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
     }
     
     // Don't automatically select or color - just expand/collapse the panel
@@ -3625,7 +3625,7 @@ export default class extends Controller {
     
     // Check if browser repaint is the bottleneck
     requestAnimationFrame(() => {
-      console.log(`⏱️ [TOGGLE] ✅ After browser repaint: ${(performance.now() - perfStart).toFixed(2)}ms`)
+      // console.log(`⏱️ [TOGGLE] ✅ After browser repaint: ${(performance.now() - perfStart).toFixed(2)}ms`)
     })
   }
 
@@ -3657,7 +3657,7 @@ export default class extends Controller {
     const minPanelHeight = 100
     
     const startDrag = (e) => {
-      console.log('Start drag triggered')
+      // console.log('Start drag triggered')
       isDragging = true
       startY = e.clientY
       startHeight = discretePanel.offsetHeight
@@ -3733,12 +3733,12 @@ export default class extends Controller {
       return
     }
     
-    console.log('Right panel divider initialization - elements found:', {
-      divider: !!divider,
-      geneExpressionPanel: !!geneExpressionPanel,
-      selectionsPanel: !!selectionsPanel,
-      container: !!container
-    })
+    // console.log('Right panel divider initialization - elements found:', {
+      // divider: !!divider,
+      // geneExpressionPanel: !!geneExpressionPanel,
+      // selectionsPanel: !!selectionsPanel,
+      // container: !!container
+    // })
     
     let isDragging = false
     let startY = 0
@@ -3748,12 +3748,12 @@ export default class extends Controller {
     const minPanelHeight = 100
     
     const startDrag = (e) => {
-      console.log('Right panel divider: startDrag triggered', e)
+      // console.log('Right panel divider: startDrag triggered', e)
       isDragging = true
       startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0)
       startHeight = geneExpressionPanel.offsetHeight
       
-      console.log('Right panel divider: Start drag', { startY, startHeight, panelHeight: geneExpressionPanel.offsetHeight })
+      // console.log('Right panel divider: Start drag', { startY, startHeight, panelHeight: geneExpressionPanel.offsetHeight })
       
       // Disable transition during drag for smoother movement
       divider.style.transition = 'none'
@@ -3810,20 +3810,20 @@ export default class extends Controller {
       divider.style.backgroundColor = ''
       document.body.style.userSelect = ''
       
-      console.log('Right panel divider: Stop drag')
+      // console.log('Right panel divider: Stop drag')
     }
     
     // Event listeners - use capture phase to ensure we catch the event
     // Test if divider is clickable
     divider.addEventListener('click', (e) => {
-      console.log('Right panel divider: Click detected', e)
+      // console.log('Right panel divider: Click detected', e)
     })
     
     divider.addEventListener('mousedown', startDrag, true)
     
     // Also try without capture as fallback
     divider.addEventListener('mousedown', (e) => {
-      console.log('Right panel divider: mousedown (non-capture) detected', e)
+      // console.log('Right panel divider: mousedown (non-capture) detected', e)
     }, false)
     document.addEventListener('mousemove', doDrag)
     document.addEventListener('mouseup', stopDrag)
@@ -3849,7 +3849,7 @@ export default class extends Controller {
     document.addEventListener('touchend', handleTouchEnd)
     document.addEventListener('touchcancel', handleTouchEnd)
     
-    console.log('Right panel draggable divider initialized with event listeners')
+    // console.log('Right panel draggable divider initialized with event listeners')
   }
 
   // Handle water drop button clicks
@@ -3863,12 +3863,12 @@ export default class extends Controller {
     const isCurrentlyActive = button.dataset.active === 'true'
     
     // Debug: Check what attributes the button actually has
-    console.log('🔍 Button debugging:')
-    console.log('Button element:', button)
-    console.log('Button dataset:', button.dataset)
-    console.log('Button attributes:', Array.from(button.attributes).map(attr => `${attr.name}="${attr.value}"`))
-    console.log('metadataId from dataset:', metadataId)
-    console.log('metadataName from dataset:', metadataName)
+    // console.log('🔍 Button debugging:')
+    // console.log('Button element:', button)
+    // console.log('Button dataset:', button.dataset)
+    // console.log('Button attributes:', Array.from(button.attributes).map(attr => `${attr.name}="${attr.value}"`))
+    // console.log('metadataId from dataset:', metadataId)
+    // console.log('metadataName from dataset:', metadataName)
     
     // Check if metadataId is undefined and try alternative ways to get it
     if (!metadataId) {
@@ -3883,15 +3883,15 @@ export default class extends Controller {
                            button.getAttribute('data-metadata_id') ||
                            button.getAttribute('data-metadataitem')
       
-      console.log('Alternative metadataId found:', altMetadataId)
+      // console.log('Alternative metadataId found:', altMetadataId)
       
       if (altMetadataId) {
         // Use the alternative metadataId
         metadataId = altMetadataId
-        console.log('Using alternative metadataId:', metadataId)
+        // console.log('Using alternative metadataId:', metadataId)
       } else {
         // Try to get metadataId from parent containers
-        console.log('Trying to find metadataId in parent containers...')
+        // console.log('Trying to find metadataId in parent containers...')
         let parent = button.parentElement
         let attempts = 0
         while (parent && attempts < 5) {
@@ -3905,7 +3905,7 @@ export default class extends Controller {
           
           if (parentMetadataId) {
             metadataId = parentMetadataId
-            console.log('Found metadataId in parent container:', metadataId)
+            // console.log('Found metadataId in parent container:', metadataId)
             break
           }
           
@@ -3930,22 +3930,22 @@ export default class extends Controller {
       return
     }
     
-    console.log('✅ Valid metadataId found:', metadataId)
-    console.log('Metadata name:', metadataName)
-    console.log('Is currently active:', isCurrentlyActive)
-    console.log('Button dataset.active:', button.dataset.active)
-    console.log('Current metadata ID:', this.currentMetadataId)
+    // console.log('✅ Valid metadataId found:', metadataId)
+    // console.log('Metadata name:', metadataName)
+    // console.log('Is currently active:', isCurrentlyActive)
+    // console.log('Button dataset.active:', button.dataset.active)
+    // console.log('Current metadata ID:', this.currentMetadataId)
     
     if (isCurrentlyActive) {
       // Button is already active - deselect it
-      console.log('🎨 Button is already active - deselecting...')
-      console.log('🎨 Step 1: Resetting water drop buttons...')
+      // console.log('🎨 Button is already active - deselecting...')
+      // console.log('🎨 Step 1: Resetting water drop buttons...')
       this.resetAllWaterDropButtons()
-      console.log('🎨 Step 2: Removing category colors...')
+      // console.log('🎨 Step 2: Removing category colors...')
       this.removeAllCategoryColors()
-      console.log('🎨 Step 3: Clearing metadata coloring...')
+      // console.log('🎨 Step 3: Clearing metadata coloring...')
       this.clearMetadataColoring()
-      console.log('🎨 === DESELECTION COMPLETE ===')
+      // console.log('🎨 === DESELECTION COMPLETE ===')
       return
     }
     
@@ -3967,9 +3967,9 @@ export default class extends Controller {
     this.setWaterDropButtonActive(button)
     
     // 4. Find the metadata item container and add colored categories (optional for continuous metadata)
-    console.log('Step 4: Finding metadata container...')
-    console.log('Button element:', button)
-    console.log('Button parent elements:', button.parentElement, button.parentElement?.parentElement)
+    // console.log('Step 4: Finding metadata container...')
+    // console.log('Button element:', button)
+    // console.log('Button parent elements:', button.parentElement, button.parentElement?.parentElement)
     
     // Try multiple selectors to find the metadata container
     let metadataContainer = button.closest('[data-metadata-item]')
@@ -3985,8 +3985,8 @@ export default class extends Controller {
       }
     }
     
-    console.log('Metadata container found:', metadataContainer)
-    console.log('Available data attributes on button:', Object.keys(button.dataset))
+    // console.log('Metadata container found:', metadataContainer)
+    // console.log('Available data attributes on button:', Object.keys(button.dataset))
     
     if (metadataContainer) {
       // Check if this is continuous metadata - if so, skip category colors
@@ -3994,12 +3994,12 @@ export default class extends Controller {
                                    metadataContainer.dataset.metadataType === 'NUMERIC'
       
       if (isContinuousMetadata) {
-        console.log('Step 5: Continuous metadata detected - expanding panel')
+        // console.log('Step 5: Continuous metadata detected - expanding panel')
         // Expand the continuous metadata panel to show histogram
         this.expandContinuousMetadataPanel(metadataId, metadataName)
         // Continue to load and visualize below
       } else {
-        console.log('Step 5: Adding category colors for discrete metadata...')
+        // console.log('Step 5: Adding category colors for discrete metadata...')
         this.addCategoryColors(metadataContainer, metadataId)
       }
     } else {
@@ -4009,26 +4009,26 @@ export default class extends Controller {
       this.debugMetadataContainerStructure(button)
       
       // This is not necessarily an error - we can still load the metadata vector
-      console.log('Proceeding with metadata vector loading without container...')
+      // console.log('Proceeding with metadata vector loading without container...')
     }
     
     // Always try to load and visualize the metadata vector (this is the main goal)
-    console.log('Step 6: Loading metadata vector for visualization...')
+    // console.log('Step 6: Loading metadata vector for visualization...')
     
     // Show loading spinner immediately
     this.uiManager.showMetadataDropdownSpinner()
     
     // For continuous metadata, set the color range before visualizing
     if (button.dataset.metadataType === 'NUMERIC') {
-      console.log('🎚️ Handling NUMERIC metadata for coloring')
+      // console.log('🎚️ Handling NUMERIC metadata for coloring')
       // Load the metadata first to get the range
       this.dataManager.loadSingleMetadataVector(metadataId).then(vectorData => {
-        console.log('🎚️ Metadata loaded:', vectorData)
+        // console.log('🎚️ Metadata loaded:', vectorData)
         if (vectorData) {
           // Decompress if needed
           let values = vectorData.values
           if (!values && vectorData.compressed_data) {
-            console.log('🎚️ Decompressing numeric metadata...')
+            // console.log('🎚️ Decompressing numeric metadata...')
             values = this.decompressMetadataVector(vectorData)
           }
           
@@ -4038,18 +4038,18 @@ export default class extends Controller {
             
             if (existingRange) {
               // Preserve the existing range
-              console.log('🎚️ Preserving existing range for continuous metadata:', existingRange)
+              // console.log('🎚️ Preserving existing range for continuous metadata:', existingRange)
               this.setColorRange(existingRange.min, existingRange.max)
             } else {
               // No existing range - use full range
               const minVal = this.dataManager.safeMin(values)
               const maxVal = this.dataManager.safeMax(values)
-              console.log('🎚️ Setting full color range for continuous metadata:', minVal, maxVal)
+              // console.log('🎚️ Setting full color range for continuous metadata:', minVal, maxVal)
               this.setColorRange(minVal, maxVal)
             }
             
             // Now load and visualize
-            console.log('🎚️ Calling loadAndVisualizeMetadataVector for metadataId:', metadataId)
+            // console.log('🎚️ Calling loadAndVisualizeMetadataVector for metadataId:', metadataId)
             return this.dataManager.loadAndVisualizeMetadataVector(metadataId)
           } else {
             console.error('❌ No values available after decompression')
@@ -4062,12 +4062,12 @@ export default class extends Controller {
         console.error('❌ Error loading/visualizing metadata:', error)
       })
       .finally(() => {
-        console.log('🎚️ Hiding spinner after continuous metadata processing')
+        // console.log('🎚️ Hiding spinner after continuous metadata processing')
         this.uiManager.hideMetadataDropdownSpinner()
       })
     } else {
       // For discrete metadata, just load and visualize directly
-      console.log('📋 Calling loadAndVisualizeMetadataVector for discrete metadataId:', metadataId)
+      // console.log('📋 Calling loadAndVisualizeMetadataVector for discrete metadataId:', metadataId)
       this.dataManager.loadAndVisualizeMetadataVector(metadataId)
         .catch(error => {
           console.error('❌ Error loading metadata:', error)
@@ -4091,11 +4091,11 @@ export default class extends Controller {
     const geneMetadataId = `gene_${geneId}`
     const isCurrentlyActive = button.dataset.active === 'true'
     
-    console.log('🧬 Gene water drop clicked:', { geneId, geneName, geneMetadataId, isCurrentlyActive })
+    // console.log('🧬 Gene water drop clicked:', { geneId, geneName, geneMetadataId, isCurrentlyActive })
     
     if (isCurrentlyActive) {
       // Button is already active - deselect it
-      console.log('🧬 Gene button is already active - deselecting...')
+      // console.log('🧬 Gene button is already active - deselecting...')
       this.resetAllWaterDropButtons()
       this.removeAllCategoryColors()
       this.clearMetadataColoring()
@@ -4123,7 +4123,7 @@ export default class extends Controller {
     
     // If data not found in memory, try IndexedDB first (fast disk access)
     if (!expressionData && this.memoryManager) {
-      console.log('🧬 Expression data not in memory, checking IndexedDB...')
+      // console.log('🧬 Expression data not in memory, checking IndexedDB...')
       const dbData = await this.memoryManager.loadGeneExpressionFromIndexedDB(geneIdStr)
       if (dbData && dbData.values && dbData.values.length > 0) {
         // Found in database - load into memory immediately
@@ -4167,13 +4167,13 @@ export default class extends Controller {
         }
         
         expressionData = geneManager.geneExpressionData[stableIdKey]
-        console.log('🧬 Loaded gene expression from IndexedDB into memory')
+        // console.log('🧬 Loaded gene expression from IndexedDB into memory')
       }
     }
     
     // If still not found, try to load from server
     if (!expressionData) {
-      console.log('🧬 Expression data not found in memory or IndexedDB, attempting to load from server...')
+      // console.log('🧬 Expression data not found in memory or IndexedDB, attempting to load from server...')
       
       // First, try to find the gene in the DOM to extract gene information
       const geneDiv = document.querySelector(`[data-gene-item="${geneId}"], [data-gene-item="${geneIdNum}"]`)
@@ -4210,7 +4210,7 @@ export default class extends Controller {
         }
         
         if (gene) {
-          console.log('🧬 Found gene, loading expression data from server...', gene)
+          // console.log('🧬 Found gene, loading expression data from server...', gene)
           const resultsContainer = document.getElementById('gene-expression-results')
           if (resultsContainer) {
             // Load the data from server
@@ -4285,10 +4285,10 @@ export default class extends Controller {
     const existingRange = this.selectedRanges?.[geneMetadataId]
     
     if (existingRange) {
-      console.log('🧬 Preserving existing range for gene:', existingRange)
+      // console.log('🧬 Preserving existing range for gene:', existingRange)
       this.setColorRange(existingRange.min, existingRange.max)
     } else {
-      console.log('🧬 Setting full color range for gene:', minVal, maxVal)
+      // console.log('🧬 Setting full color range for gene:', minVal, maxVal)
       this.setColorRange(minVal, maxVal)
     }
     
@@ -4348,7 +4348,7 @@ export default class extends Controller {
       this.uiManager.hideMetadataDropdownSpinner()
     }
     
-    console.log('🧬 Gene expression coloring applied successfully', wasLoading ? '(after loading)' : '(instant from memory)')
+    // console.log('🧬 Gene expression coloring applied successfully', wasLoading ? '(after loading)' : '(instant from memory)')
   }
   
   // Reset all water drop buttons to grey (including gene buttons)
@@ -4558,7 +4558,7 @@ export default class extends Controller {
       //console.log('Categories container found:', !!categoriesContainer)
       
       if (!categoriesContainer || categoriesContainer.style.display === 'none') {
-        console.log('Categories container not found or hidden')
+        // console.log('Categories container not found or hidden')
         return
       }
       
@@ -4568,14 +4568,14 @@ export default class extends Controller {
       //console.log('Categories data:', categories)
       
       if (!categories || categories.length === 0) {
-        console.log('No categories found')
+        // console.log('No categories found')
         return
       }
       
       // Get metadata vector to calculate stable sorted categories for color assignment
       const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
       if (!metadataVector || !metadataVector.values) {
-        console.log('No metadata vector found for stable color assignment')
+        // console.log('No metadata vector found for stable color assignment')
         return
       }
       
@@ -4717,7 +4717,7 @@ export default class extends Controller {
     ]
     
     const fallbackColor = defaultColors[index % defaultColors.length]
-    console.log(`Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
+    // console.log(`Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
     return fallbackColor
   }
   
@@ -5023,7 +5023,7 @@ export default class extends Controller {
           this.rendererManager.renderCategoryLabels()
         }
       } else {
-        console.log('Color saved but not re-rendering plot (different metadata active)')
+        // console.log('Color saved but not re-rendering plot (different metadata active)')
       }
       
       // Add reset button if it doesn't exist (first customization)
@@ -5106,7 +5106,7 @@ export default class extends Controller {
   initializeCanvas() {
     const plotContainer = document.querySelector('.plot-container')
     if (!plotContainer) {
-      console.log('🔄 [CANVAS] Plot container not found, skipping canvas initialization')
+      // console.log('🔄 [CANVAS] Plot container not found, skipping canvas initialization')
       return
     }
     
@@ -5118,12 +5118,12 @@ export default class extends Controller {
                        (this.reglRenderer.colors && this.reglRenderer.colors.length > 0)
       
       if (hasState) {
-        console.log('🔄 [CANVAS] Renderer already exists with state, skipping initialization:', {
-          rendererInstanceId: this.reglRenderer.instanceId,
-          numPoints: this.reglRenderer.numPoints,
-          hasPositions: !!this.reglRenderer.positions,
-          hasColors: !!this.reglRenderer.colors
-        })
+        // console.log('🔄 [CANVAS] Renderer already exists with state, skipping initialization:', {
+          // rendererInstanceId: this.reglRenderer.instanceId,
+          // numPoints: this.reglRenderer.numPoints,
+          // hasPositions: !!this.reglRenderer.positions,
+          // hasColors: !!this.reglRenderer.colors
+        // })
         return
       } else {
         // Renderer exists but has no state - check if plot is visible
@@ -5137,39 +5137,39 @@ export default class extends Controller {
           console.error('🔄 [CANVAS] This suggests the renderer reference is wrong or state was lost.')
           console.error('🔄 [CANVAS] Renderer instance:', this.reglRenderer.instanceId)
           console.error('🔄 [CANVAS] Plot visible:', plotVisible, 'Canvas in DOM:', hasCanvasInDOM)
-          console.trace('🔄 [CANVAS] Stack trace for initializeCanvas call')
+          // console.trace('🔄 [CANVAS] Stack trace for initializeCanvas call')
           // Don't recreate - preserve the renderer reference even if it seems wrong
           // The actual rendering might be working with a different renderer instance
           return
         } else {
-          console.log('🔄 [CANVAS] Renderer exists but has no state, and plot is not visible, will recreate:', {
-            rendererInstanceId: this.reglRenderer.instanceId
-          })
+          // console.log('🔄 [CANVAS] Renderer exists but has no state, and plot is not visible, will recreate:', {
+            // rendererInstanceId: this.reglRenderer.instanceId
+          // })
         }
       }
     }
     
     // Check if canvas already exists and is valid
     if (this.canvas && this.canvas.parentElement === plotContainer) {
-      console.log('🔄 [CANVAS] Canvas already exists, reusing it')
+      // console.log('🔄 [CANVAS] Canvas already exists, reusing it')
       // Canvas already exists, just ensure renderer is set up
       if (!this.reglRenderer) {
-        console.log('🔄 [CANVAS] Creating renderer for existing canvas')
-        console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas')
+        // console.log('🔄 [CANVAS] Creating renderer for existing canvas')
+        // console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas')
         this.reglRenderer = new ReglRenderer(this.canvas)
-        console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
+        // console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
       } else {
-        console.log('🔄 [CANVAS] Renderer already exists, preserving:', {
-          rendererInstanceId: this.reglRenderer.instanceId,
-          numPoints: this.reglRenderer.numPoints,
-          hasPositions: !!this.reglRenderer.positions,
-          hasColors: !!this.reglRenderer.colors
-        })
+        // console.log('🔄 [CANVAS] Renderer already exists, preserving:', {
+          // rendererInstanceId: this.reglRenderer.instanceId,
+          // numPoints: this.reglRenderer.numPoints,
+          // hasPositions: !!this.reglRenderer.positions,
+          // hasColors: !!this.reglRenderer.colors
+        // })
       }
       return
     }
     
-    console.log('🔄 [CANVAS] Initializing canvas and ReGL renderer...')
+    // console.log('🔄 [CANVAS] Initializing canvas and ReGL renderer...')
     
     // Create ReGL canvas for points (layer 1)
     const canvas = document.createElement('canvas')
@@ -5187,10 +5187,10 @@ export default class extends Controller {
     this.canvas = canvas
     
     // Initialize ReGL renderer
-    console.log('🔄 [CANVAS] Initializing ReGL renderer...')
-    console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas (new canvas)')
+    // console.log('🔄 [CANVAS] Initializing ReGL renderer...')
+    // console.trace('🔄 [CANVAS] Stack trace for renderer creation in initializeCanvas (new canvas)')
     this.reglRenderer = new ReglRenderer(canvas)
-    console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
+    // console.log(`🔄 [CANVAS] New renderer created: ${this.reglRenderer.instanceId}`)
     
     // Create HTML Canvas 2D overlay for axes/grid/labels
     const overlayCanvas = document.createElement('canvas')
@@ -5208,10 +5208,10 @@ export default class extends Controller {
     this.overlayCanvas = overlayCanvas
     this.overlayCtx = overlayCanvas.getContext('2d')
     
-    console.log('🔄 [CANVAS] Canvas initialization completed:', {
-      canvas: { width: canvas.width, height: canvas.height },
-      overlayCanvas: { width: overlayCanvas.width, height: overlayCanvas.height }
-    })
+    // console.log('🔄 [CANVAS] Canvas initialization completed:', {
+      // canvas: { width: canvas.width, height: canvas.height },
+      // overlayCanvas: { width: overlayCanvas.width, height: overlayCanvas.height }
+    // })
   } // End of initializeCanvas
 
   // Handle window resize with debouncing
@@ -5223,17 +5223,17 @@ export default class extends Controller {
     
     // Use a longer debounce to prevent flickering during drag
     this.resizeTimeout = setTimeout(() => {
-      console.log('🔄 [RESIZE] Window resized, redrawing plot...')
+      // console.log('🔄 [RESIZE] Window resized, redrawing plot...')
       
       // Check if canvas and renderer are ready
       if (!this.canvas || !this.reglRenderer) {
-        console.log('🔄 [RESIZE] Canvas or renderer not ready, skipping resize')
+        // console.log('🔄 [RESIZE] Canvas or renderer not ready, skipping resize')
         return
       }
       
       // Prevent resize during active mouse interactions (panning, lasso, etc.)
       if (this.isPanning || this.isDrawingLasso || this.isZooming) {
-        console.log('🔄 [RESIZE] Mouse interaction in progress, skipping resize')
+        // console.log('🔄 [RESIZE] Mouse interaction in progress, skipping resize')
         return
       }
       
@@ -5244,17 +5244,17 @@ export default class extends Controller {
   
   // Redraw the plot after resize
   async redrawPlot() {
-    console.log('🔄 [RESIZE] Starting redrawPlot - forcing complete reinitialization...')
+    // console.log('🔄 [RESIZE] Starting redrawPlot - forcing complete reinitialization...')
     
     // Check if we have coordinates
     if (!this.currentCoordinates) {
-      console.log('🔄 [RESIZE] Cannot redraw - missing coordinates')
+      // console.log('🔄 [RESIZE] Cannot redraw - missing coordinates')
       return
     }
     
     const plotContainer = document.querySelector('.plot-container')
     if (!plotContainer) {
-      console.log('🔄 [RESIZE] Plot container not found')
+      // console.log('🔄 [RESIZE] Plot container not found')
       return
     }
     
@@ -5262,10 +5262,10 @@ export default class extends Controller {
     const newWidth = plotContainer.clientWidth
     const newHeight = plotContainer.clientHeight
     
-    console.log('🔄 [RESIZE] Resizing to', newWidth, 'x', newHeight)
+    // console.log('🔄 [RESIZE] Resizing to', newWidth, 'x', newHeight)
     
     if (newWidth <= 0 || newHeight <= 0) {
-      console.log('🔄 [RESIZE] Invalid dimensions, skipping resize')
+      // console.log('🔄 [RESIZE] Invalid dimensions, skipping resize')
       return
     }
     
@@ -5284,16 +5284,16 @@ export default class extends Controller {
     }
     const preservedSelectedRanges = this.selectedRanges && Object.keys(this.selectedRanges).length > 0 ? { ...this.selectedRanges } : null
     
-    console.log('🔄 [RESIZE] Preserved bounds:', preservedBounds)
-    console.log('🔄 [RESIZE] Preserved displayOrder length:', preservedDisplayOrder ? preservedDisplayOrder.length : null)
-    console.log('🔄 [RESIZE] Preserved filtering state:', {
-      selectedCategories: preservedSelectedCategories ? Object.keys(preservedSelectedCategories).length : 0,
-      selectedRanges: preservedSelectedRanges ? Object.keys(preservedSelectedRanges).length : 0
-    })
+    // console.log('🔄 [RESIZE] Preserved bounds:', preservedBounds)
+    // console.log('🔄 [RESIZE] Preserved displayOrder length:', preservedDisplayOrder ? preservedDisplayOrder.length : null)
+    // console.log('🔄 [RESIZE] Preserved filtering state:', {
+      // selectedCategories: preservedSelectedCategories ? Object.keys(preservedSelectedCategories).length : 0,
+      // selectedRanges: preservedSelectedRanges ? Object.keys(preservedSelectedRanges).length : 0
+    // })
     
     // Force destroy existing renderer to ensure complete reinitialization
     if (this.reglRenderer) {
-      console.log('🔄 [RESIZE] Destroying existing renderer for complete reinitialization')
+      // console.log('🔄 [RESIZE] Destroying existing renderer for complete reinitialization')
       this.reglRenderer.destroy()
       this.reglRenderer = null
     }
@@ -5321,24 +5321,24 @@ export default class extends Controller {
         for (const [metadataId, categorySet] of Object.entries(preservedSelectedCategories)) {
           this.selectedCategories[metadataId] = new Set(categorySet)
         }
-        console.log('🔄 [RESIZE] Restored selectedCategories for', Object.keys(this.selectedCategories).length, 'metadata')
+        // console.log('🔄 [RESIZE] Restored selectedCategories for', Object.keys(this.selectedCategories).length, 'metadata')
       }
       
       // Restore selectedRanges
       if (preservedSelectedRanges) {
         this.selectedRanges = { ...preservedSelectedRanges }
-        console.log('🔄 [RESIZE] Restored selectedRanges for', Object.keys(this.selectedRanges).length, 'metadata')
+        // console.log('🔄 [RESIZE] Restored selectedRanges for', Object.keys(this.selectedRanges).length, 'metadata')
       }
     }
     
     // Reinitialize the scatter plot from scratch - this will create new canvas/renderer with correct size
-    console.log('🔄 [RESIZE] Reinitializing scatter plot from scratch with', this.currentCoordinates.length, 'coordinates...')
+    // console.log('🔄 [RESIZE] Reinitializing scatter plot from scratch with', this.currentCoordinates.length, 'coordinates...')
     await this.rendererManager.initializeScatterPlot(this.currentCoordinates)
     
     // Add white overlay AFTER initialization to cover canvas during resize (container might be cleared during init)
     let resizeOverlay = null
     if (hasActiveFiltering) {
-      console.log('🔄 [RESIZE] Adding white overlay to prevent glitch during resize...')
+      // console.log('🔄 [RESIZE] Adding white overlay to prevent glitch during resize...')
       const plotContainer = document.querySelector('.plot-container')
       if (plotContainer) {
         // Remove any existing overlay first
@@ -5356,13 +5356,13 @@ export default class extends Controller {
         }
         resizeOverlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; background-color: white; z-index: 99999; pointer-events: none;'
         plotContainer.appendChild(resizeOverlay)
-        console.log('🔄 [RESIZE] White overlay added, plotContainer:', {
-          container: plotContainer,
-          containerPosition: getComputedStyle(plotContainer).position,
-          overlay: resizeOverlay,
-          overlayStyle: resizeOverlay.style.cssText,
-          containerChildren: plotContainer.children.length
-        })
+        // console.log('🔄 [RESIZE] White overlay added, plotContainer:', {
+          // container: plotContainer,
+          // containerPosition: getComputedStyle(plotContainer).position,
+          // overlay: resizeOverlay,
+          // overlayStyle: resizeOverlay.style.cssText,
+          // containerChildren: plotContainer.children.length
+        // })
       } else {
         console.warn('🔄 [RESIZE] Plot container not found!')
       }
@@ -5370,13 +5370,13 @@ export default class extends Controller {
     
     // Restore preserved bounds and reapply them
     if (preservedBounds) {
-      console.log('🔄 [RESIZE] Restoring preserved bounds and re-normalizing positions...')
+      // console.log('🔄 [RESIZE] Restoring preserved bounds and re-normalizing positions...')
       this.currentBounds = preservedBounds
       
       // Restore display order if it was preserved
       if (preservedDisplayOrder && preservedDisplayOrder.length === this.currentCoordinates.length) {
         this.displayOrder = preservedDisplayOrder
-        console.log('🔄 [RESIZE] Restored displayOrder with', preservedDisplayOrder.length, 'entries')
+        // console.log('🔄 [RESIZE] Restored displayOrder with', preservedDisplayOrder.length, 'entries')
       }
       
       // Re-normalize all positions with preserved bounds for the new canvas size
@@ -5416,7 +5416,7 @@ export default class extends Controller {
           }
         }
         
-        console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
+        // console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
       }
     }
     
@@ -5430,7 +5430,7 @@ export default class extends Controller {
     if (hasActiveFiltering) {
       // Reapply filtering - this will update visibility based on preserved filters
       if (this.dataManager) {
-        console.log('🔄 [RESIZE] Reapplying filtering after bounds restoration...')
+        // console.log('🔄 [RESIZE] Reapplying filtering after bounds restoration...')
         // Trigger filtering update (this uses requestAnimationFrame internally)
         this.dataManager.updateCellFiltering()
         
@@ -5440,7 +5440,7 @@ export default class extends Controller {
           requestAnimationFrame(() => {
             // After filtering is applied, restore coloring if needed
             if (preservedMetadataVector && preservedMetadataId && this.reglRenderer) {
-              console.log('🔄 [RESIZE] Reapplying coloring after filtering...')
+              // console.log('🔄 [RESIZE] Reapplying coloring after filtering...')
               this.renderPointsWithCurrentColoring()
             }
             
@@ -5449,7 +5449,7 @@ export default class extends Controller {
             requestAnimationFrame(() => {
               if (resizeOverlay && resizeOverlay.parentNode) {
                 resizeOverlay.remove()
-                console.log('🔄 [RESIZE] White overlay removed after filtering and coloring applied')
+                // console.log('🔄 [RESIZE] White overlay removed after filtering and coloring applied')
               }
             })
           })
@@ -5458,30 +5458,30 @@ export default class extends Controller {
     } else {
       // No filtering - restore coloring
       if (preservedMetadataVector && preservedMetadataId) {
-        console.log('🔄 [RESIZE] Restoring coloring state (no filtering)...')
+        // console.log('🔄 [RESIZE] Restoring coloring state (no filtering)...')
         if (this.reglRenderer) {
-          console.log('🔄 [RESIZE] Reapplying coloring...')
+          // console.log('🔄 [RESIZE] Reapplying coloring...')
           this.renderPointsWithCurrentColoring()
         }
       }
     }
     
-    console.log('🔄 [RESIZE] Redraw completed')
+    // console.log('🔄 [RESIZE] Redraw completed')
   }
   
   /*  async redrawPlot() {
-    console.log('🔄 [RESIZE] Starting simple redrawPlot...')
+    // console.log('🔄 [RESIZE] Starting simple redrawPlot...')
     
     // Check if we have the necessary components
     if (!this.reglRenderer || !this.currentCoordinates) {
-      console.log('🔄 [RESIZE] Cannot redraw - missing renderer or coordinates')
+      // console.log('🔄 [RESIZE] Cannot redraw - missing renderer or coordinates')
       return
     }
     
     // Get current canvas dimensions
     const canvas = this.canvas
     if (!canvas) {
-      console.log('🔄 [RESIZE] No canvas found')
+      // console.log('🔄 [RESIZE] No canvas found')
       return
     }
     
@@ -5489,11 +5489,11 @@ export default class extends Controller {
     const newWidth = Math.round(rect.width)
     const newHeight = Math.round(rect.height)
     
-    console.log('🔄 [RESIZE] Resizing canvas from', this.canvas.width, 'x', this.canvas.height, 'to', newWidth, 'x', newHeight)
+    // console.log('🔄 [RESIZE] Resizing canvas from', this.canvas.width, 'x', this.canvas.height, 'to', newWidth, 'x', newHeight)
     
     // Check if canvas dimensions are valid
     if (newWidth <= 0 || newHeight <= 0) {
-      console.log('🔄 [RESIZE] Invalid canvas dimensions, skipping resize')
+      // console.log('🔄 [RESIZE] Invalid canvas dimensions, skipping resize')
       return
     }
     
@@ -5516,7 +5516,7 @@ export default class extends Controller {
     // If renderer exists and has state, resize it and re-normalize positions to new dimensions
     // This prevents shift by recalculating positions with the new canvas dimensions
     if (this.reglRenderer && this.reglRenderer.numPoints > 0 && this.currentCoordinates && this.currentBounds) {
-      console.log('🔄 [RESIZE] Resizing existing renderer and re-normalizing positions...')
+      // console.log('🔄 [RESIZE] Resizing existing renderer and re-normalizing positions...')
       
       const oldWidth = this.canvas.width
       const oldHeight = this.canvas.height
@@ -5551,16 +5551,16 @@ export default class extends Controller {
           this.renderContinuousColorLegend()
         }
       }
-      console.log('🔄 [RESIZE] Renderer resized and positions re-normalized from', oldWidth, 'x', oldHeight, 'to', newWidth, 'x', newHeight)
+      // console.log('🔄 [RESIZE] Renderer resized and positions re-normalized from', oldWidth, 'x', oldHeight, 'to', newWidth, 'x', newHeight)
       return
     }
     
     // Call the same method as when switching visualization metadata
     // This will properly reinitialize the scatter plot with the new canvas dimensions
-    console.log('🔄 [RESIZE] Calling updateMetadata like metadata switch...')
+    // console.log('🔄 [RESIZE] Calling updateMetadata like metadata switch...')
     this.updateMetadata()
     
-    console.log('🔄 [RESIZE] Simple redraw completed')
+    // console.log('🔄 [RESIZE] Simple redraw completed')
   }
 */
   // Set interaction mode (internal method)
@@ -5635,21 +5635,21 @@ export default class extends Controller {
   addInteractionEventListeners() {
     const canvas = this.canvas
     if (!canvas) {
-      console.log('⚠️ No canvas available for interaction listeners')
-      console.log('🔍 [DEBUG] Canvas state:', {
-        canvas: !!this.canvas,
-        reglRenderer: !!this.reglRenderer,
-        interactionMode: this.interactionMode
-      })
+      // console.log('⚠️ No canvas available for interaction listeners')
+      // console.log('🔍 [DEBUG] Canvas state:', {
+        // canvas: !!this.canvas,
+        // reglRenderer: !!this.reglRenderer,
+        // interactionMode: this.interactionMode
+      // })
       return
     }
     
-    console.log('✅ [DEBUG] Adding interaction event listeners to canvas:', {
-      canvas: !!canvas,
-      width: canvas.width,
-      height: canvas.height,
-      interactionMode: this.interactionMode
-    })
+    // console.log('✅ [DEBUG] Adding interaction event listeners to canvas:', {
+      // canvas: !!canvas,
+      // width: canvas.width,
+      // height: canvas.height,
+      // interactionMode: this.interactionMode
+    // })
     
     //console.log('Adding interaction event listeners to canvas')
     
@@ -5663,8 +5663,8 @@ export default class extends Controller {
     this.boundDoubleClick = this.onInteractionDoubleClick.bind(this)
     
     // WORKAROUND: Attach to document with capture to intercept before PIXI gets them!
-    console.log('Adding event listeners to canvas AND document:', canvas)
-    console.log('Canvas element:', canvas.tagName, canvas.width, canvas.height)
+    // console.log('Adding event listeners to canvas AND document:', canvas)
+    // console.log('Canvas element:', canvas.tagName, canvas.width, canvas.height)
     
     canvas.addEventListener('pointerdown', this.boundMouseDown)
     canvas.addEventListener('pointerup', this.boundMouseUp)
@@ -5675,7 +5675,7 @@ export default class extends Controller {
     canvas.addEventListener('pointermove', this.boundMouseMove)
     this.canvasMoveListenerAdded = true
     
-    console.log('✅ Event listeners registered - pointermove on CANVAS only (not document)')
+    // console.log('✅ Event listeners registered - pointermove on CANVAS only (not document)')
     
     // Store reference to plot container for cleanup (but don't add wheel listener)
     if (plotContainer) {
@@ -5690,13 +5690,13 @@ export default class extends Controller {
     // document.body.style.overflow = 'hidden'  // REMOVED - blocks left panel scroll
     // document.documentElement.style.overflow = 'hidden'  // REMOVED - blocks left panel scroll
     
-    /*console.log('Event listeners added:', {
-      mousedown: !!this.boundMouseDown,
-      mousemove: !!this.boundMouseMove,
-      mouseup: !!this.boundMouseUp,
-      wheel: !!this.boundWheel,
-      dblclick: !!this.boundDoubleClick
-    })*/
+    // /*console.log('Event listeners added:', {
+      // mousedown: !!this.boundMouseDown,
+      // mousemove: !!this.boundMouseMove,
+      // mouseup: !!this.boundMouseUp,
+      // wheel: !!this.boundWheel,
+      // dblclick: !!this.boundDoubleClick
+    // })*/
     
     // Set initial cursor
     if (this.interactionMode === 'pan') {
@@ -5737,13 +5737,13 @@ export default class extends Controller {
   }
 
   onInteractionMouseDown(event) {
-    console.log('🎯 [Interaction] onInteractionMouseDown called, mode:', this.interactionMode, 'rendererType:', this.rendererType)
-    console.log('🔍 [DEBUG] Interaction mouse down:', {
-      eventType: event.type,
-      interactionMode: this.interactionMode,
-      canvas: !!this.canvas,
-      target: event.target?.tagName
-    })
+    // console.log('🎯 [Interaction] onInteractionMouseDown called, mode:', this.interactionMode, 'rendererType:', this.rendererType)
+    // console.log('🔍 [DEBUG] Interaction mouse down:', {
+      // eventType: event.type,
+      // interactionMode: this.interactionMode,
+      // canvas: !!this.canvas,
+      // target: event.target?.tagName
+    // })
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
@@ -5759,7 +5759,7 @@ export default class extends Controller {
     this.mouseMoveCount++
     
     if (this.mouseMoveCount % 100 === 0) {
-      console.log(`⚠️ [PERF] onInteractionMouseMove called ${this.mouseMoveCount} times - this might be blocking the main thread!`)
+      // console.log(`⚠️ [PERF] onInteractionMouseMove called ${this.mouseMoveCount} times - this might be blocking the main thread!`)
     }
     
     // Handle label dragging in pick mode (ReGL)
@@ -5777,7 +5777,7 @@ export default class extends Controller {
       this.draggingLabel.offsetX = this.labelStartOffsetX + deltaX
       this.draggingLabel.offsetY = this.labelStartOffsetY + deltaY
       
-      console.log(`🏷️ [Drag] Moving label "${this.draggingLabel.category}" - offset: (${this.draggingLabel.offsetX}, ${this.draggingLabel.offsetY})`)
+      // console.log(`🏷️ [Drag] Moving label "${this.draggingLabel.category}" - offset: (${this.draggingLabel.offsetX}, ${this.draggingLabel.offsetY})`)
       
       // Redraw the overlay (grid, axes, labels)
       this.rendererManager.renderGrid()
@@ -5802,7 +5802,7 @@ export default class extends Controller {
     if (this.isDrawingLasso) {
       this.interactionMoveCount = (this.interactionMoveCount || 0) + 1
       if (this.interactionMoveCount % 20 === 0) {
-        console.log(`⏱️ [DEBUG] onInteractionMouseMove called ${this.interactionMoveCount} times (lasso mode)`)
+        // console.log(`⏱️ [DEBUG] onInteractionMouseMove called ${this.interactionMoveCount} times (lasso mode)`)
       }
     }
     
@@ -5818,7 +5818,7 @@ export default class extends Controller {
   onInteractionMouseUp(event) {
     // Handle label drag end in pick mode (ReGL)
     if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
-      console.log(`🏷️ Finished dragging label: ${this.draggingLabel.category}`)
+      // console.log(`🏷️ Finished dragging label: ${this.draggingLabel.category}`)
       this.draggingLabel = null
       this.clickingOnLabel = false
       return
@@ -5832,7 +5832,7 @@ export default class extends Controller {
   }
 
   onInteractionDoubleClick(event) {
-    console.log('Double-click event:', this.interactionMode)
+    // console.log('Double-click event:', this.interactionMode)
     if (this.interactionMode === 'lasso') {
       this.onLassoDoubleClick(event)
     } else if (this.interactionMode === 'pan') {
@@ -5936,14 +5936,14 @@ export default class extends Controller {
   }
   // Lasso mode handlers
   onLassoMouseDown(event) {
-    console.log('========================================')
-    console.log('⏱️ [LASSO] Starting lasso selection')
-    console.log('🔍 [DEBUG] Lasso mouse down called:', {
-      eventType: event.type,
-      interactionMode: this.interactionMode,
-      isDrawingLasso: this.isDrawingLasso,
-      canvas: !!this.canvas
-    })
+    // console.log('========================================')
+    // console.log('⏱️ [LASSO] Starting lasso selection')
+    // console.log('🔍 [DEBUG] Lasso mouse down called:', {
+      // eventType: event.type,
+      // interactionMode: this.interactionMode,
+      // isDrawingLasso: this.isDrawingLasso,
+      // canvas: !!this.canvas
+    // })
     
     // Detect browser and store it
     //this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
@@ -6062,7 +6062,7 @@ export default class extends Controller {
     if (pointsAdded > 0) {
       // Log progress
       if (this.lassoPoints.length % 50 === 0) {
-        console.log(`⏱️ [LASSO] ${this.lassoPoints.length} points from ${this.mouseMoveCount} callbacks`)
+        // console.log(`⏱️ [LASSO] ${this.lassoPoints.length} points from ${this.mouseMoveCount} callbacks`)
       }
       
       // Update graphics once per callback
@@ -6111,7 +6111,7 @@ export default class extends Controller {
       this.selectPointsInLasso()
       
       const completionTime = performance.now() - completionStart
-      console.log(`⏱️ [LASSO] Total completion: ${completionTime.toFixed(2)}ms`)
+      // console.log(`⏱️ [LASSO] Total completion: ${completionTime.toFixed(2)}ms`)
     }
     
     // Clear lasso after a short delay
@@ -6204,18 +6204,18 @@ export default class extends Controller {
     const newWidth = newBounds.maxX - newBounds.minX
     const newHeight = newBounds.maxY - newBounds.minY
     
-    /*console.log('Pan Debug:', {
-      deltaX: deltaX,
-      deltaY: deltaY,
-      dataDeltaX: dataDeltaX,
-      dataDeltaY: dataDeltaY,
-      startBounds: this.panStartBounds,
-      newBounds: newBounds,
-      sizeChange: {
-        width: { start: startWidth, new: newWidth, diff: newWidth - startWidth },
-        height: { start: startHeight, new: newHeight, diff: newHeight - startHeight }
-      }
-    })*/
+    // /*console.log('Pan Debug:', {
+      // deltaX: deltaX,
+      // deltaY: deltaY,
+      // dataDeltaX: dataDeltaX,
+      // dataDeltaY: dataDeltaY,
+      // startBounds: this.panStartBounds,
+      // newBounds: newBounds,
+      // sizeChange: {
+        // width: { start: startWidth, new: newWidth, diff: newWidth - startWidth },
+        // height: { start: startHeight, new: newHeight, diff: newHeight - startHeight }
+      // }
+    // })*/
     
     // Update bounds in real-time during panning
     this.currentBounds = newBounds
@@ -6278,30 +6278,30 @@ export default class extends Controller {
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox && categoriesCheckbox.checked) {
         setTimeout(() => {
-          console.log(`🏷️ Refreshing labels after panning`)
+          // console.log(`🏷️ Refreshing labels after panning`)
           this.rendererManager.renderCategoryLabels()
         }, 50)
       }
     } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
       // Refresh continuous color legend after panning
       setTimeout(() => {
-        console.log(`🎨 Refreshing legend after panning`)
+        // console.log(`🎨 Refreshing legend after panning`)
         this.renderContinuousColorLegend()
       }, 50)
     }
     
     // Update point positions to match the new bounds after panning
-    /*console.log('Pan Stop Debug:', {
-      finalBounds: finalBounds,
-      panStartBounds: debugPanStartBounds,
-      panOriginalBounds: debugPanOriginalBounds,
-      boundsDifference: finalBounds && debugPanStartBounds ? {
-        minX: finalBounds.minX - debugPanStartBounds.minX,
-        maxX: finalBounds.maxX - debugPanStartBounds.maxX,
-        minY: finalBounds.minY - debugPanStartBounds.minY,
-        maxY: finalBounds.maxY - debugPanStartBounds.maxY
-      } : 'Cannot calculate - missing bounds'
-    })*/
+    // /*console.log('Pan Stop Debug:', {
+      // finalBounds: finalBounds,
+      // panStartBounds: debugPanStartBounds,
+      // panOriginalBounds: debugPanOriginalBounds,
+      // boundsDifference: finalBounds && debugPanStartBounds ? {
+        // minX: finalBounds.minX - debugPanStartBounds.minX,
+        // maxX: finalBounds.maxX - debugPanStartBounds.maxX,
+        // minY: finalBounds.minY - debugPanStartBounds.minY,
+        // maxY: finalBounds.maxY - debugPanStartBounds.maxY
+      // } : 'Cannot calculate - missing bounds'
+    // })*/
     
     if (this.currentCoordinates && this.scatterContainer && this.currentBounds) {
       this.updatePointPositions()
@@ -6330,11 +6330,11 @@ export default class extends Controller {
   // Reset zoom and pan to original view
   resetZoomAndPan() {
     if (!this.currentCoordinates) {
-      console.log('No data available for reset')
+      // console.log('No data available for reset')
       return
     }
 
-    console.log('🔄 Resetting zoom and pan to original view')
+    // console.log('🔄 Resetting zoom and pan to original view')
     
     // Reset to original bounds
     const originalBounds = this.dataManager.calculateBounds(this.currentCoordinates)
@@ -6343,7 +6343,7 @@ export default class extends Controller {
     
     // ReGL PATH: Re-normalize all coordinates with original bounds
     
-      console.log('🔄 [ReGL] Resetting view - re-normalizing all coordinates')
+      // console.log('🔄 [ReGL] Resetting view - re-normalizing all coordinates')
       
       if (this.reglRenderer) {
         const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
@@ -6369,7 +6369,7 @@ export default class extends Controller {
           this.rendererManager.renderCategoryLabels()
         }
         
-        console.log('🔄 [ReGL] View reset complete')
+        // console.log('🔄 [ReGL] View reset complete')
       }
       return
     
@@ -6395,7 +6395,7 @@ export default class extends Controller {
     // ===== ReGL PATH: Re-normalize all positions with current bounds =====
    
       if (!this.currentCoordinates || !this.currentBounds || !this.reglRenderer) {
-        console.log('Cannot update positions - missing data (ReGL)')
+        // console.log('Cannot update positions - missing data (ReGL)')
         return
       }
       
@@ -6479,17 +6479,17 @@ export default class extends Controller {
     // ===== ReGL PATH: Re-normalize all positions with new bounds =====
    
       if (!this.currentCoordinates || !this.reglRenderer) {
-        console.log('⚠️ [ZOOM] Missing coordinates or bounds')
+        // console.log('⚠️ [ZOOM] Missing coordinates or bounds')
         return
       }
       
-      console.log('🔍 [ZOOM] translatePointsForZoom called', {
-        hasCoordinates: !!this.currentCoordinates,
-        coordinatesLength: this.currentCoordinates.length,
-        hasRenderer: !!this.reglRenderer,
-        oldBounds,
-        newBounds
-      })
+      // console.log('🔍 [ZOOM] translatePointsForZoom called', {
+        // hasCoordinates: !!this.currentCoordinates,
+        // coordinatesLength: this.currentCoordinates.length,
+        // hasRenderer: !!this.reglRenderer,
+        // oldBounds,
+        // newBounds
+      // })
       
       // Re-normalize all coordinates to screen space with new bounds
       // Use displayOrder to maintain proper draw order
@@ -6505,7 +6505,7 @@ export default class extends Controller {
       this.reglRenderer.updatePositions(screenCoordinates)
       this.reglRenderer.render()
       
-      console.log('✅ [ZOOM] ReGL zoom complete')
+      // console.log('✅ [ZOOM] ReGL zoom complete')
       return
     
   }
@@ -6514,7 +6514,7 @@ export default class extends Controller {
   // Render points with current coloring in a specific container (preserves nested structure)
   renderPointsWithCurrentColoringInContainer(container) {
     if (!this.currentCoordinates || !container) {
-      console.log('Cannot render points - missing coordinates or container')
+      // console.log('Cannot render points - missing coordinates or container')
       return
     }
 
@@ -6732,12 +6732,12 @@ export default class extends Controller {
   
   // Update color of selected control point
   updateControlPointColor(event) {
-    console.log('🎨 updateControlPointColor CALLED')
-    console.log('🎨 updateControlPointColor: this controller instance', this)
-    console.log('🎨 updateControlPointColor: selectedControlPointIndex', this.selectedControlPointIndex)
-    console.log('🎨 updateControlPointColor: customGradientControlPoints', this.customGradientControlPoints)
-    console.log('🎨 updateControlPointColor: gradientControlPoints', this.gradientControlPoints)
-    console.log('🎨 updateControlPointColor: has gradientManager', !!this.gradientManager)
+    // console.log('🎨 updateControlPointColor CALLED')
+    // console.log('🎨 updateControlPointColor: this controller instance', this)
+    // console.log('🎨 updateControlPointColor: selectedControlPointIndex', this.selectedControlPointIndex)
+    // console.log('🎨 updateControlPointColor: customGradientControlPoints', this.customGradientControlPoints)
+    // console.log('🎨 updateControlPointColor: gradientControlPoints', this.gradientControlPoints)
+    // console.log('🎨 updateControlPointColor: has gradientManager', !!this.gradientManager)
     
     // Try to find the main controller instance that has the gradient state
     let mainController = this
@@ -6746,7 +6746,7 @@ export default class extends Controller {
       try {
         const mainControllerInstance = this.application.getControllerForElementAndIdentifier(mainVisualizationDiv, 'visualization')
         if (mainControllerInstance && mainControllerInstance !== this) {
-          console.log('🎨 updateControlPointColor: Found main controller instance, using it')
+          // console.log('🎨 updateControlPointColor: Found main controller instance, using it')
           mainController = mainControllerInstance
         }
       } catch (e) {
@@ -6756,15 +6756,15 @@ export default class extends Controller {
     
     // Use main controller's state
     if (mainController !== this) {
-      console.log('🎨 updateControlPointColor: Switching to main controller instance')
-      console.log('🎨 updateControlPointColor: mainController.selectedControlPointIndex', mainController.selectedControlPointIndex)
-      console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints', mainController.customGradientControlPoints)
-      console.log('🎨 updateControlPointColor: mainController.gradientControlPoints', mainController.gradientControlPoints)
+      // console.log('🎨 updateControlPointColor: Switching to main controller instance')
+      // console.log('🎨 updateControlPointColor: mainController.selectedControlPointIndex', mainController.selectedControlPointIndex)
+      // console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints', mainController.customGradientControlPoints)
+      // console.log('🎨 updateControlPointColor: mainController.gradientControlPoints', mainController.gradientControlPoints)
     }
     
     const hexColor = event.target.value
     const color = parseInt(hexColor.substring(1), 16)
-    console.log('🎨 updateControlPointColor: new color', hexColor, '(', color, ')')
+    // console.log('🎨 updateControlPointColor: new color', hexColor, '(', color, ')')
     
     // Initialize targetIndex from selectedControlPointIndex
     let targetIndex = mainController.selectedControlPointIndex
@@ -6775,16 +6775,16 @@ export default class extends Controller {
       
       // Try to access through gradientManager which might have the state
       if (mainController.gradientManager) {
-        console.log('🎨 updateControlPointColor: gradientManager exists, checking its controller state')
+        // console.log('🎨 updateControlPointColor: gradientManager exists, checking its controller state')
         // The gradientManager's controller should be the same instance
         if (mainController.gradientManager.controller) {
           if (mainController.gradientManager.controller.customGradientControlPoints) {
             mainController.customGradientControlPoints = JSON.parse(JSON.stringify(mainController.gradientManager.controller.customGradientControlPoints))
-            console.log('🎨 updateControlPointColor: Recovered customGradientControlPoints from gradientManager', mainController.customGradientControlPoints)
+            // console.log('🎨 updateControlPointColor: Recovered customGradientControlPoints from gradientManager', mainController.customGradientControlPoints)
           }
           if (mainController.gradientManager.controller.gradientControlPoints && !mainController.gradientControlPoints) {
             mainController.gradientControlPoints = JSON.parse(JSON.stringify(mainController.gradientManager.controller.gradientControlPoints))
-            console.log('🎨 updateControlPointColor: Recovered gradientControlPoints from gradientManager', mainController.gradientControlPoints)
+            // console.log('🎨 updateControlPointColor: Recovered gradientControlPoints from gradientManager', mainController.gradientControlPoints)
           }
         }
       }
@@ -6794,7 +6794,7 @@ export default class extends Controller {
         console.warn('🎨 ⚠️ updateControlPointColor: Still undefined, trying to reinitialize...')
         if (this.currentMetadataVector?.data_type === 'NUMERIC') {
           this.colorManager.initializeDefaultGradient()
-          console.log('🎨 updateControlPointColor: After reinit, gradientControlPoints', this.gradientControlPoints)
+          // console.log('🎨 updateControlPointColor: After reinit, gradientControlPoints', this.gradientControlPoints)
         } else {
           console.error('🎨 ❌ updateControlPointColor: Cannot initialize - currentMetadataVector:', this.currentMetadataVector)
           // Try one more thing - get the controller from the modal element
@@ -6803,14 +6803,14 @@ export default class extends Controller {
             try {
               const modalController = this.application.getControllerForElementAndIdentifier(modal, 'visualization')
               if (modalController && modalController !== this) {
-                console.log('🎨 updateControlPointColor: Found different controller instance, using its state')
+                // console.log('🎨 updateControlPointColor: Found different controller instance, using its state')
                 if (modalController.customGradientControlPoints) {
                   this.customGradientControlPoints = JSON.parse(JSON.stringify(modalController.customGradientControlPoints))
-                  console.log('🎨 updateControlPointColor: Copied customGradientControlPoints from modal controller')
+                  // console.log('🎨 updateControlPointColor: Copied customGradientControlPoints from modal controller')
                 }
                 if (modalController.gradientControlPoints && !this.gradientControlPoints) {
                   this.gradientControlPoints = JSON.parse(JSON.stringify(modalController.gradientControlPoints))
-                  console.log('🎨 updateControlPointColor: Copied gradientControlPoints from modal controller')
+                  // console.log('🎨 updateControlPointColor: Copied gradientControlPoints from modal controller')
                 }
                 if (modalController.selectedControlPointIndex !== undefined) {
                   const recoveredIndex = modalController.selectedControlPointIndex
@@ -6818,12 +6818,12 @@ export default class extends Controller {
                     targetIndex = recoveredIndex
                   }
                   this.selectedControlPointIndex = recoveredIndex
-                  console.log('🎨 updateControlPointColor: Copied selectedControlPointIndex from modal controller', recoveredIndex)
+                  // console.log('🎨 updateControlPointColor: Copied selectedControlPointIndex from modal controller', recoveredIndex)
                 }
                 // Also copy currentMetadataVector if we don't have it
                 if (!this.currentMetadataVector && modalController.currentMetadataVector) {
                   this.currentMetadataVector = modalController.currentMetadataVector
-                  console.log('🎨 updateControlPointColor: Copied currentMetadataVector from modal controller')
+                  // console.log('🎨 updateControlPointColor: Copied currentMetadataVector from modal controller')
                 }
               }
             } catch (e) {
@@ -6840,14 +6840,14 @@ export default class extends Controller {
     
     // Ensure we have a custom gradient array - create a deep copy if needed
     if (!this.customGradientControlPoints) {
-      console.log('🎨 updateControlPointColor: creating custom gradient from', this.gradientControlPoints)
+      // console.log('🎨 updateControlPointColor: creating custom gradient from', this.gradientControlPoints)
       if (this.gradientControlPoints && this.gradientControlPoints.length > 0) {
         // Create deep copy of control points
         this.customGradientControlPoints = this.gradientControlPoints.map(p => ({
           position: p.position,
           color: p.color
         }))
-        console.log('🎨 updateControlPointColor: Created custom gradient', this.customGradientControlPoints)
+        // console.log('🎨 updateControlPointColor: Created custom gradient', this.customGradientControlPoints)
       } else {
         console.error('🎨 ❌ updateControlPointColor: no gradientControlPoints to copy after reinit!')
         return
@@ -6863,14 +6863,14 @@ export default class extends Controller {
       const colorInput = event.target
       if (colorInput && colorInput.dataset.controlPointIndex !== undefined) {
         targetIndex = parseInt(colorInput.dataset.controlPointIndex, 10)
-        console.log('🎨 updateControlPointColor: Recovered index from color input data attribute', targetIndex)
+        // console.log('🎨 updateControlPointColor: Recovered index from color input data attribute', targetIndex)
         mainController.selectedControlPointIndex = targetIndex
       } else {
         // Try to get from editor data attribute
         const editor = document.getElementById('gradient-control-point-editor')
         if (editor && editor.dataset.selectedControlPointIndex !== undefined) {
           targetIndex = parseInt(editor.dataset.selectedControlPointIndex, 10)
-          console.log('🎨 updateControlPointColor: Recovered index from editor data attribute', targetIndex)
+          // console.log('🎨 updateControlPointColor: Recovered index from editor data attribute', targetIndex)
           mainController.selectedControlPointIndex = targetIndex
         } else {
           // Fallback: try to find by reading the position input value
@@ -6879,7 +6879,7 @@ export default class extends Controller {
             const actualValue = parseFloat(positionInput.value)
             if (!isNaN(actualValue)) {
               const position = mainController.actualValueToPosition(actualValue)
-              console.log('🎨 updateControlPointColor: Found position from input', position)
+              // console.log('🎨 updateControlPointColor: Found position from input', position)
               
               // Find control point closest to this position
               const sorted = [...mainController.customGradientControlPoints].sort((a, b) => a.position - b.position)
@@ -6889,7 +6889,7 @@ export default class extends Controller {
                   targetIndex = mainController.customGradientControlPoints.findIndex(p => 
                     p.position === sorted[i].position && p.color === sorted[i].color
                   )
-                  console.log('🎨 updateControlPointColor: Found matching control point at index', targetIndex)
+                  // console.log('🎨 updateControlPointColor: Found matching control point at index', targetIndex)
                   mainController.selectedControlPointIndex = targetIndex
                   break
                 }
@@ -6905,11 +6905,11 @@ export default class extends Controller {
       return
     }
     
-    console.log('🎨 updateControlPointColor: updating index', targetIndex, 'to color', hexColor, '(', color, ')')
+    // console.log('🎨 updateControlPointColor: updating index', targetIndex, 'to color', hexColor, '(', color, ')')
     
     const controlPoints = mainController.customGradientControlPoints
-    console.log('🎨 updateControlPointColor: controlPoints before update', JSON.parse(JSON.stringify(controlPoints)))
-    console.log('🎨 updateControlPointColor: targetIndex', targetIndex, 'length', controlPoints ? controlPoints.length : 0)
+    // console.log('🎨 updateControlPointColor: controlPoints before update', JSON.parse(JSON.stringify(controlPoints)))
+    // console.log('🎨 updateControlPointColor: targetIndex', targetIndex, 'length', controlPoints ? controlPoints.length : 0)
     
     if (!controlPoints || controlPoints.length === 0) {
       console.warn('🎨 ⚠️ updateControlPointColor: controlPoints is empty or null')
@@ -6926,9 +6926,9 @@ export default class extends Controller {
     
     // Update the color on main controller
     controlPoints[targetIndex].color = color
-    console.log('🎨 updateControlPointColor: controlPoints after update', JSON.parse(JSON.stringify(controlPoints)))
-    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints reference check', mainController.customGradientControlPoints === controlPoints)
-    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after update', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
+    // console.log('🎨 updateControlPointColor: controlPoints after update', JSON.parse(JSON.stringify(controlPoints)))
+    // console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints reference check', mainController.customGradientControlPoints === controlPoints)
+    // console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after update', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
     
     // Verify the update persisted before rendering
     if (mainController.customGradientControlPoints[targetIndex].color !== color) {
@@ -6941,7 +6941,7 @@ export default class extends Controller {
     
     // Update display using main controller
     mainController.gradientManager.updateGradientDisplay()
-    console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after updateGradientDisplay', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
+    // console.log('🎨 updateControlPointColor: mainController.customGradientControlPoints after updateGradientDisplay', JSON.parse(JSON.stringify(mainController.customGradientControlPoints)))
   }
   
   // Remove selected control point
@@ -6969,7 +6969,7 @@ export default class extends Controller {
   
   // Reset gradient to default
   resetGradient() {
-    console.log('🎨 Resetting gradient to default')
+    // console.log('🎨 Resetting gradient to default')
     this.customGradientControlPoints = null
     this.selectedControlPointIndex = undefined
     
@@ -6988,9 +6988,9 @@ export default class extends Controller {
   
   // Reapply colors with new gradient
   reapplyColorsWithNewGradient() {
-    console.log('🎨 Reapplying colors with new gradient')
-    console.log('🎨 Custom gradient points:', this.customGradientControlPoints)
-    console.log('🎨 Auto gradient points:', this.gradientControlPoints)
+    // console.log('🎨 Reapplying colors with new gradient')
+    // console.log('🎨 Custom gradient points:', this.customGradientControlPoints)
+    // console.log('🎨 Auto gradient points:', this.gradientControlPoints)
     
     // Preserve custom gradient points - they should not be reset by this function
     const preservedCustomPoints = this.customGradientControlPoints ? 
@@ -6998,28 +6998,28 @@ export default class extends Controller {
     
     // CRITICAL: Invalidate color cache to force recalculation with new gradient
     // The cache is based on a hash that might not include gradient changes
-    console.log('🎨 Invalidating color cache to force recalculation with new gradient')
+    // console.log('🎨 Invalidating color cache to force recalculation with new gradient')
     this.lastColorUpdateHash = null
     this.colorUpdateCache.clear()
     
     // Update the legend in the plot
     if (this.currentMetadataVector?.data_type === 'NUMERIC') {
-      console.log('🎨 Updating legend, scatter plot, and bar plots with new gradient')
+      // console.log('🎨 Updating legend, scatter plot, and bar plots with new gradient')
       
       // Update the continuous color legend
       this.renderContinuousColorLegend()
       
       // Recolor all scatter plot points based on the new gradient
       // renderPointsWithCurrentColoring() handles both ReGL and PixiJS renderers internally
-      console.log('🎨 Recoloring scatter plot points (renderer type:', this.rendererType, ')')
+      // console.log('🎨 Recoloring scatter plot points (renderer type:', this.rendererType, ')')
       this.renderPointsWithCurrentColoring()
       
       // Redraw category distribution bar plots to reflect new gradient
-      console.log('🎨 Updating all category distribution bar plots')
+      // console.log('🎨 Updating all category distribution bar plots')
       this.dataManager.updateAllCategoryDistributions()
      
     } else {
-      console.log('⚠️ Cannot reapply colors: no numeric metadata vector')
+      // console.log('⚠️ Cannot reapply colors: no numeric metadata vector')
     }
     
     // Restore custom gradient points if they got lost
@@ -7133,13 +7133,13 @@ export default class extends Controller {
   selectPointsInLasso() {
     if (!this.currentCoordinates || this.lassoPoints.length < 3) return
     
-    console.log('[LASSO] selectPointsInLasso called')
-    console.log('[LASSO] Current filter state:', {
-      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      hasFilter: !!this.currentVisibleCells
-    })
+    // console.log('[LASSO] selectPointsInLasso called')
+    // console.log('[LASSO] Current filter state:', {
+      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      // hasFilter: !!this.currentVisibleCells
+    // })
     
-    console.log(`⏱️ [LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
+    // console.log(`⏱️ [LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
     const selectionStart = performance.now()
     
     const selectedIndices = []
@@ -7153,11 +7153,11 @@ export default class extends Controller {
       if (p.y > maxY) maxY = p.y
     }
     
-    console.log(`⏱️ [LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}]`)
+    // console.log(`⏱️ [LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}]`)
     
     // ReGL PATH: Check normalized coordinates against lasso polygon
     if (this.rendererType === 'regl' && this.currentBounds) {
-      console.log('⏱️ [LASSO] Using ReGL path - checking normalized coordinates')
+      // console.log('⏱️ [LASSO] Using ReGL path - checking normalized coordinates')
       
       let bboxRejected = 0
       let polygonChecked = 0
@@ -7182,7 +7182,7 @@ export default class extends Controller {
         }
       }
       
-      console.log(`⚡ [ReGL LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+      // console.log(`⚡ [ReGL LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
       
     } else if (this.pointSprites && this.pointSprites.length > 0) {
       // OPTIMIZED: Use pointSprites array directly (much faster!)
@@ -7209,10 +7209,10 @@ export default class extends Controller {
         }
       }
       
-      console.log(`⏱️ [LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+      // console.log(`⏱️ [LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
     } else {
       // Fallback to container iteration if sprites not available
-      console.log('⚠️ Using fallback container iteration (slower)')
+      // console.log('⚠️ Using fallback container iteration (slower)')
       this.scatterContainer.children.forEach((child) => {
         if (child.isPoint && child.cellId !== undefined) {
           if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
@@ -7233,7 +7233,7 @@ export default class extends Controller {
     }
     
     const selectionTime = performance.now() - selectionStart
-    console.log(`⏱️ [LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
     
     this.applySelectionFromIndices(selectedIndices, {
       source: 'main-lasso',
@@ -7244,7 +7244,7 @@ export default class extends Controller {
 
   applySelectionFromIndices(selectedIndices, options = {}) {
     if (!Array.isArray(selectedIndices) || selectedIndices.length === 0) {
-      console.log('[SELECTION] No indices provided for applySelectionFromIndices')
+      // console.log('[SELECTION] No indices provided for applySelectionFromIndices')
       return
     }
 
@@ -7254,7 +7254,7 @@ export default class extends Controller {
       updateCustomPlot = true
     } = options
 
-    console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}`)
+    // console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}`)
 
     if (!this.selectedCells) {
       this.selectedCells = new Set()
@@ -7274,10 +7274,10 @@ export default class extends Controller {
     
     // Store current filter state before clearing coloring
     const filterStateBeforeClear = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
-    console.log('[SELECTION] Storing filter state before clearMetadataColoring:', {
-      hasFilter: !!filterStateBeforeClear,
-      filterSize: filterStateBeforeClear ? filterStateBeforeClear.size : 'null'
-    })
+    // console.log('[SELECTION] Storing filter state before clearMetadataColoring:', {
+      // hasFilter: !!filterStateBeforeClear,
+      // filterSize: filterStateBeforeClear ? filterStateBeforeClear.size : 'null'
+    // })
     
     // Deactivate the coloring button (turn blue palette button to grey)
     this.resetAllWaterDropButtons()
@@ -7285,14 +7285,14 @@ export default class extends Controller {
     this.clearMetadataColoring()
     
     // Verify filter state after clearMetadataColoring
-    console.log('[SELECTION] Filter state after clearMetadataColoring:', {
-      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      hasFilter: !!this.currentVisibleCells,
-      filterPreserved: filterStateBeforeClear ? 
-        (this.currentVisibleCells ? 
-          (this.currentVisibleCells.length === filterStateBeforeClear.size) : false) : 
-        (!this.currentVisibleCells)
-    })
+    // console.log('[SELECTION] Filter state after clearMetadataColoring:', {
+      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      // hasFilter: !!this.currentVisibleCells,
+      // filterPreserved: filterStateBeforeClear ? 
+        // (this.currentVisibleCells ? 
+          // (this.currentVisibleCells.length === filterStateBeforeClear.size) : false) : 
+        // (!this.currentVisibleCells)
+    // })
     
     // Update selection count display
     this.updateSelectionCount()
@@ -7314,7 +7314,7 @@ export default class extends Controller {
       return
     }
     
-    console.log(`📊 [SELECTION] Reordering displayOrder to put ${this.selectedCells.size} selected cells on top`)
+    // console.log(`📊 [SELECTION] Reordering displayOrder to put ${this.selectedCells.size} selected cells on top`)
     const startTime = performance.now()
     
     // Separate selected and unselected cells
@@ -7351,29 +7351,29 @@ export default class extends Controller {
     this.reglRenderer.updatePositions(screenCoordinates)
     
     const elapsed = performance.now() - startTime
-    console.log(`📊 [SELECTION] Reordered displayOrder in ${elapsed.toFixed(2)}ms (${unselected.length} unselected, ${selected.length} selected)`)
+    // console.log(`📊 [SELECTION] Reordered displayOrder in ${elapsed.toFixed(2)}ms (${unselected.length} unselected, ${selected.length} selected)`)
   }
 
   // Update colors of selected points without re-rendering (preserves pan/zoom state)
   updateSelectedPointColors() {
     const numPoints = this.rendererType === 'regl' ? this.numPoints : (this.pointSprites?.length || 0)
-    console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${numPoints} total`)
+    // console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${numPoints} total`)
     
     // Get current filter state
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
     const visibleSet = filteredIndices ? new Set(filteredIndices) : null
-    console.log('[UPDATE COLORS] Filter state in updateSelectedPointColors:', {
-      filteredIndices: filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)',
-      currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      hasFilter: !!visibleSet
-    })
+    // console.log('[UPDATE COLORS] Filter state in updateSelectedPointColors:', {
+      // filteredIndices: filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)',
+      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
+      // hasFilter: !!visibleSet
+    // })
     
     const updateStart = performance.now()
     
     // ReGL PATH: Update color buffer
     if (this.rendererType === 'regl') {
       if (!this.reglRenderer || !this.numPoints) {
-        console.log('⚠️ No ReGL renderer or points available for color update')
+        // console.log('⚠️ No ReGL renderer or points available for color update')
         return
       }
       
@@ -7390,7 +7390,7 @@ export default class extends Controller {
       const colorMap = new Map()
       
       if (hasSelections) {
-        console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
+        // console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
         // Set selected cells to red, unselected to faded original color
         // Use displayOrder to correctly map draw positions to cell indices
         // IMPORTANT: Respect current filter - hide filtered-out cells
@@ -7416,7 +7416,7 @@ export default class extends Controller {
           }
         }
       } else {
-        console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
+        // console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
         // Restore original colors
         // Use displayOrder to correctly map draw positions to cell indices
         // IMPORTANT: Respect current filter - hide filtered-out cells
@@ -7443,13 +7443,13 @@ export default class extends Controller {
       this.previouslySelectedCells = new Set(this.selectedCells)
       this.colorUpdateCache.set('lastColorMap', colorMap)
       const updateTime = performance.now() - updateStart
-      console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
+      // console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
       return
     }
     
     // PixiJS PATH (original)
     /*if (!this.pointSprites || this.pointSprites.length === 0) {
-      console.log('⚠️ No sprites available for color update')
+      // console.log('⚠️ No sprites available for color update')
       return
     }*/
     
@@ -7457,11 +7457,11 @@ export default class extends Controller {
     const wasEmpty = !this.previouslySelectedCells || this.previouslySelectedCells.size === 0
     const isFirstSelection = wasEmpty && hasSelections
     
-    console.log(`⏱️ [PERF] isFirstSelection=${isFirstSelection}, hasSelections=${hasSelections}`)
+    // console.log(`⏱️ [PERF] isFirstSelection=${isFirstSelection}, hasSelections=${hasSelections}`)
     
     if (isFirstSelection) {
       // First selection: need to update ALL sprites (fade unselected + highlight selected)
-      console.log(`⏱️ [PERF] First selection - updating all ${this.pointSprites.length} sprites`)
+      // console.log(`⏱️ [PERF] First selection - updating all ${this.pointSprites.length} sprites`)
       const allUpdateStart = performance.now()
       
       if (!this.cachedColorsByCellIndex) {
@@ -7484,10 +7484,10 @@ export default class extends Controller {
       }
       
       const allUpdateTime = performance.now() - allUpdateStart
-      console.log(`  Updated all sprites in ${allUpdateTime.toFixed(2)}ms (${Math.round(this.pointSprites.length / allUpdateTime * 1000).toLocaleString()} sprites/sec)`)
+      // console.log(`  Updated all sprites in ${allUpdateTime.toFixed(2)}ms (${Math.round(this.pointSprites.length / allUpdateTime * 1000).toLocaleString()} sprites/sec)`)
     } else if (hasSelections) {
       // Adding to existing selection: only update newly selected cells
-      console.log(`⏱️ [PERF] Incremental selection - updating only ${this.selectedCells.size} selected cells`)
+      // console.log(`⏱️ [PERF] Incremental selection - updating only ${this.selectedCells.size} selected cells`)
       const incrementalStart = performance.now()
       
       for (const cellId of this.selectedCells) {
@@ -7502,10 +7502,10 @@ export default class extends Controller {
       }
       
       const incrementalTime = performance.now() - incrementalStart
-      console.log(`  Updated ${this.selectedCells.size} sprites in ${incrementalTime.toFixed(2)}ms`)
+      // console.log(`  Updated ${this.selectedCells.size} sprites in ${incrementalTime.toFixed(2)}ms`)
     } else {
       // Clearing selection: restore all to normal
-      console.log(`⏱️ [PERF] Clearing selection - restoring all sprites`)
+      // console.log(`⏱️ [PERF] Clearing selection - restoring all sprites`)
       const clearStart = performance.now()
       
       for (let i = 0; i < this.pointSprites.length; i++) {
@@ -7521,14 +7521,14 @@ export default class extends Controller {
       }
       
       const clearTime = performance.now() - clearStart
-      console.log(`  Restored all sprites in ${clearTime.toFixed(2)}ms`)
+      // console.log(`  Restored all sprites in ${clearTime.toFixed(2)}ms`)
     }
     
     // Store current selection for next comparison
     this.previouslySelectedCells = new Set(this.selectedCells)
     
     const updateTime = performance.now() - updateStart
-    console.log(`⏱️ [PERF] Color update completed in ${updateTime.toFixed(2)}ms`)
+    // console.log(`⏱️ [PERF] Color update completed in ${updateTime.toFixed(2)}ms`)
   }
 
   isPointInPolygon(x, y, polygon) {
@@ -7615,7 +7615,7 @@ export default class extends Controller {
     const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
     
     if (visibleCells.length === 0) {
-      console.log('No visible cells to select')
+      // console.log('No visible cells to select')
       return
     }
     
@@ -7678,11 +7678,11 @@ export default class extends Controller {
   // Uses displayOrder array - does NOT modify original data
   reorderPointsForCategoryDisplay() {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
-      console.log('⚠️ [ReGL] Cannot reorder - missing data')
+      // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
     }
     
-    console.log('📊 [ReGL] Reordering display order for category...')
+    // console.log('📊 [ReGL] Reordering display order for category...')
     const startTime = performance.now()
     
     const values = this.currentMetadataVector.values
@@ -7707,8 +7707,8 @@ export default class extends Controller {
       }
     })
     
-    console.log(`📊 [ReGL] Category order (${this.categoryOrder}):`, 
-                sortedCategories.map(c => `${c}(${categoryFrequencies[c]})`).join(', '))
+    // console.log(`📊 [ReGL] Category order (${this.categoryOrder}):`, 
+                // sortedCategories.map(c => `${c}(${categoryFrequencies[c]})`).join(', '))
     
     // Create category -> draw order mapping
     const categoryDrawOrder = {}
@@ -7723,7 +7723,7 @@ export default class extends Controller {
       return categoryDrawOrder[catA] - categoryDrawOrder[catB]
     })
     
-    console.log(`📊 [ReGL] Reordered displayOrder array (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
+    // console.log(`📊 [ReGL] Reordered displayOrder array (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
     
     // Rebuild buffer using new display order
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
@@ -7754,17 +7754,17 @@ export default class extends Controller {
     this.rendererManager.renderCategoryLabels()
     
     const elapsed = performance.now() - startTime
-    console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} points in ${elapsed.toFixed(2)}ms`)
+    // console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} points in ${elapsed.toFixed(2)}ms`)
   }
   // Reorder display order based on numeric values (painter's algorithm)
   // Uses displayOrder array - does NOT modify original data
   reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet = null) {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
-      console.log('⚠️ [ReGL] Cannot reorder - missing data')
+      // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
     }
     
-    console.log(`📊 [ReGL] Reordering display order for numeric: ${this.numericalOrder}`)
+    // console.log(`📊 [ReGL] Reordering display order for numeric: ${this.numericalOrder}`)
     const startTime = performance.now()
     
     // Compute z-indices for all cells based on their original cell indices
@@ -7806,7 +7806,7 @@ export default class extends Controller {
       this.displayOrder[i] = zIndices[i].cellIndex
     }
     
-    console.log(`📊 [ReGL] Reordered displayOrder by numeric values (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
+    // console.log(`📊 [ReGL] Reordered displayOrder by numeric values (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
     
     // Rebuild buffer using new display order
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
@@ -7844,12 +7844,12 @@ export default class extends Controller {
     this.renderContinuousColorLegend()
     
     const elapsed = performance.now() - startTime
-    console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} numeric points in ${elapsed.toFixed(2)}ms`)
+    // console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} numeric points in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update category display order in ALL unfolded metadata panels
   updateAllCategoryDisplayOrders() {
-    console.log('📊 Updating category order in all unfolded metadata panels...')
+    // console.log('📊 Updating category order in all unfolded metadata panels...')
     
     // Find all metadata containers with visible categories
     const metadataContainers = document.querySelectorAll('[data-metadata-item]')
@@ -7897,7 +7897,7 @@ export default class extends Controller {
       }
     })
     
-    console.log(`📊 Updated category order in ${updatedCount} metadata panel(s)`)
+    // console.log(`📊 Updated category order in ${updatedCount} metadata panel(s)`)
   }
 
 
@@ -7987,7 +7987,7 @@ export default class extends Controller {
       }
     })
     
-    console.log('📊 Updated left panel category order')
+    // console.log('📊 Updated left panel category order')
   }
 
   // Save selection method
@@ -8015,7 +8015,7 @@ export default class extends Controller {
       
       // If no metadata was restored, just update colors to default
       if (!wasRestored) {
-        console.log('No metadata to restore after save, updating colors to default')
+        // console.log('No metadata to restore after save, updating colors to default')
         this.updateSelectedPointColors()
       }
       
@@ -8035,7 +8035,7 @@ export default class extends Controller {
 
   // Save plot as SVG method
   saveAsSVG() {
-    console.log('💾 Saving plot as SVG')
+    // console.log('💾 Saving plot as SVG')
     
     // Check for renderer availability
     const hasRenderer = !!this.reglRenderer
@@ -8052,7 +8052,7 @@ export default class extends Controller {
       // Create and download the SVG file
       this.downloadSVG(svgContent, 'plot.svg')
       
-      console.log('💾 SVG saved successfully')
+      // console.log('💾 SVG saved successfully')
     } catch (error) {
       console.error('Error saving SVG:', error)
       alert('Error saving SVG file')
@@ -8061,7 +8061,7 @@ export default class extends Controller {
 
   // Generate SVG content from the current plot
   generateSVGFromPlot() {
-    console.log('💾 Generating SVG from plot...')
+    // console.log('💾 Generating SVG from plot...')
     
     // Dispatch to appropriate implementation
     if (this.rendererType === 'regl') {
@@ -8073,7 +8073,7 @@ export default class extends Controller {
   
   // ReGL version of SVG generation
   generateSVGFromPlotReGL() {
-    console.log('💾 [ReGL] Generating SVG from ReGL plot')
+    // console.log('💾 [ReGL] Generating SVG from ReGL plot')
     
     const width = this.canvas.width
     const height = this.canvas.height
@@ -8096,7 +8096,7 @@ export default class extends Controller {
     
     // Add points from currentCoordinates
     if (this.currentCoordinates && this.originalPointColors) {
-      console.log(`💾 [ReGL] Exporting ${this.currentCoordinates.length} points to SVG`)
+      // console.log(`💾 [ReGL] Exporting ${this.currentCoordinates.length} points to SVG`)
       
       const pointSize = this.currentPointSize || 4
       
@@ -8124,7 +8124,7 @@ export default class extends Controller {
     }
     
     svg += `</svg>`
-    console.log('💾 [ReGL] SVG generation complete')
+    // console.log('💾 [ReGL] SVG generation complete')
     return svg
   }
 
@@ -8300,7 +8300,7 @@ export default class extends Controller {
   storeMetadataStateBeforeSelection() {
     // Only store if we haven't already stored (for multiple selections)
     if (this.lastActiveMetadata) {
-      console.log('📦 Metadata state already stored, keeping original:', this.lastActiveMetadata)
+      // console.log('📦 Metadata state already stored, keeping original:', this.lastActiveMetadata)
       return
     }
     
@@ -8312,19 +8312,19 @@ export default class extends Controller {
       // Find the currently active water drop button
       activeButton: document.querySelector('[data-action*="waterDropClicked"][data-active="true"]')
     }
-    console.log('📦 Stored metadata state before selection:', this.lastActiveMetadata)
+    // console.log('📦 Stored metadata state before selection:', this.lastActiveMetadata)
   }
   // Restore metadata state after cancel/save selection
   restoreMetadataStateAfterSelection() {
     if (!this.lastActiveMetadata) {
-      console.log('No previous metadata state to restore')
+      // console.log('No previous metadata state to restore')
       return false
     }
     
     const { metadataId, metadataVector, customColorRange, activeButton } = this.lastActiveMetadata
     
     if (metadataId && metadataVector) {
-      console.log('🔄 Restoring metadata coloring:', metadataVector.name)
+      // console.log('🔄 Restoring metadata coloring:', metadataVector.name)
       
       // Restore the metadata state
       this.currentMetadataId = metadataId
@@ -8351,7 +8351,7 @@ export default class extends Controller {
       }
       
       // Update sprite colors using existing rendering logic (no sprite recreation)
-      console.log('🎨 Updating sprite colors with restored metadata')
+      // console.log('🎨 Updating sprite colors with restored metadata')
       this.renderPointsWithCurrentColoring()
       
       // Re-render category labels or color legend
@@ -8364,13 +8364,13 @@ export default class extends Controller {
         this.renderContinuousColorLegend()
       }
       
-      console.log('✅ Metadata coloring restored successfully')
+      // console.log('✅ Metadata coloring restored successfully')
       
       // Clear the stored state
       this.lastActiveMetadata = null
       return true
     } else {
-      console.log('No metadata was active before selection')
+      // console.log('No metadata was active before selection')
       // Clear the stored state
       this.lastActiveMetadata = null
       return false
@@ -8378,7 +8378,7 @@ export default class extends Controller {
   }
 
   cancelSelection() {
-    console.log('🔄 Canceling selection, reverting to previous coloring scheme')
+    // console.log('🔄 Canceling selection, reverting to previous coloring scheme')
     
     // Clear the selected cells
     this.selectedCells.clear()
@@ -8388,7 +8388,7 @@ export default class extends Controller {
     
     // If no metadata was restored, just update colors to remove selection highlighting
     if (!wasRestored) {
-      console.log('No metadata to restore, updating colors to default')
+      // console.log('No metadata to restore, updating colors to default')
       this.updateSelectedPointColors()
     }
     
@@ -8459,7 +8459,7 @@ export default class extends Controller {
     // Position tooltip near the mouse cursor
     const plotContainer = document.querySelector('.plot-container')
     if (!plotContainer) {
-      console.log('Plot container not found')
+      // console.log('Plot container not found')
       return
     }
     
@@ -8501,7 +8501,7 @@ export default class extends Controller {
       tooltipLeft = rect.right - tooltipWidth - 10
     }
     
-    console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
+    // console.log('🎯 [Tooltip] Positioning tooltip at:', { tooltipLeft, tooltipTop, pointX, pointY })
     
     this.tooltip.style.left = `${tooltipLeft}px`
     this.tooltip.style.top = `${tooltipTop}px`
@@ -8516,13 +8516,13 @@ export default class extends Controller {
     
     // Debug: Check if tooltip is actually visible
     const computedStyle = window.getComputedStyle(this.tooltip)
-    console.log('🎯 [Tooltip] Computed style:', {
-      display: computedStyle.display,
-      visibility: computedStyle.visibility,
-      opacity: computedStyle.opacity,
-      position: computedStyle.position,
-      zIndex: computedStyle.zIndex
-    })
+    // console.log('🎯 [Tooltip] Computed style:', {
+      // display: computedStyle.display,
+      // visibility: computedStyle.visibility,
+      // opacity: computedStyle.opacity,
+      // position: computedStyle.position,
+      // zIndex: computedStyle.zIndex
+    // })
     
     // Force tooltip to be visible with maximum z-index
     this.tooltip.style.zIndex = '999999'
@@ -8532,7 +8532,7 @@ export default class extends Controller {
     
     // For RegL mode, use proper positioning instead of fixed debug position
     if (this.rendererType === 'regl') {
-      console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+      // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
       
       // Use the calculated position for RegL
       this.tooltip.style.left = `${tooltipLeft}px`
@@ -8540,12 +8540,12 @@ export default class extends Controller {
       
       // Different styling for fixed vs dynamic tooltips
       if (this.isTooltipFixed) {
-        console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+        // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
         this.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
         this.tooltip.style.border = '2px solid #00ff00'
         this.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
       } else {
-        console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+        // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
         this.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
         this.tooltip.style.border = '1px solid #ccc'
         this.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
@@ -8554,12 +8554,12 @@ export default class extends Controller {
       this.tooltip.style.width = 'auto'
       this.tooltip.style.height = 'auto'
       
-      console.log('🎯 [Tooltip] Final RegL tooltip position:', {
-        left: this.tooltip.style.left,
-        top: this.tooltip.style.top,
-        display: this.tooltip.style.display,
-        backgroundColor: this.tooltip.style.backgroundColor
-      })
+      // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+        // left: this.tooltip.style.left,
+        // top: this.tooltip.style.top,
+        // display: this.tooltip.style.display,
+        // backgroundColor: this.tooltip.style.backgroundColor
+      // })
       
       // TEMPORARY: Force tooltip to a visible position for debugging
       this.tooltip.style.left = '100px'
@@ -8568,7 +8568,7 @@ export default class extends Controller {
       this.tooltip.style.border = '3px solid yellow'
       this.tooltip.style.width = '300px'
       this.tooltip.style.height = '100px'
-      console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+      // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
     } else {
       // Keep debug positioning for PixiJS mode
       this.tooltip.style.left = '50px'
@@ -8597,7 +8597,7 @@ export default class extends Controller {
     this.isTooltipFixed = false
     this.fixedTooltipCellId = null
     this.hideSimpleTooltip()
-    console.log('🎯 [RegL] Unfixed tooltip')
+    // console.log('🎯 [RegL] Unfixed tooltip')
   }
 
   // Hide simple tooltip
@@ -8691,7 +8691,7 @@ export default class extends Controller {
       tooltip.remove()
       this.isTooltipFixed = false
       this.fixedTooltipCellId = null
-      console.log('Tooltip closed by user - hover detection re-enabled')
+      // console.log('Tooltip closed by user - hover detection re-enabled')
     }
     
     // Create header with title, drag handle, and lock icon
@@ -8843,7 +8843,7 @@ export default class extends Controller {
             
             // If invalid, remove it to force reload (will happen on next check)
             if (hasInvalidCompression) {
-              console.log(`🔧 [Tooltip] CellID metadata has invalid compression, will reload on next access`)
+              // console.log(`🔧 [Tooltip] CellID metadata has invalid compression, will reload on next access`)
               delete this.loadedMetadataVectors[metadataId]
               continue
             }
@@ -8875,7 +8875,7 @@ export default class extends Controller {
               
               // If invalid, remove it to force reload
               if (hasInvalidCompression) {
-                console.log(`🔧 [Tooltip] CellID metadata has invalid compression, forcing reload`)
+                // console.log(`🔧 [Tooltip] CellID metadata has invalid compression, forcing reload`)
                 delete this.loadedMetadataVectors[metadataId]
                 // Also try to remove from IndexedDB cache if memoryManager exists
                 if (this.memoryManager) {
@@ -8894,14 +8894,14 @@ export default class extends Controller {
               
               // If still no values and we have metadata ID, try loading from server
               if ((!cellIdVector || !cellIdVector.values) && metadataId) {
-                console.log(`🔧 [Tooltip] CellID not in memory, attempting to load from server`)
+                // console.log(`🔧 [Tooltip] CellID not in memory, attempting to load from server`)
                 isLoading = true
                 // Load asynchronously and update tooltip when ready
                 this.loadSingleMetadataVectorSilently(metadataId).then(() => {
                   // Reload the tooltip with updated data
                   this.hideSimpleTooltip()
                   this.showSimpleTooltip(cellName, categoryInfo, point, cellId, isFixed)
-                  console.log(`🔧 [Tooltip] CellID metadata loaded successfully, tooltip refreshed`)
+                  // console.log(`🔧 [Tooltip] CellID metadata loaded successfully, tooltip refreshed`)
                 }).catch(err => {
                   console.error(`🔧 [Tooltip] Failed to load CellID metadata:`, err)
                 })
@@ -9005,7 +9005,7 @@ export default class extends Controller {
 
   // Pick mode methods
   onPickMouseDown(event) {
-    console.log('🎯 [Pick] onPickMouseDown called, rendererType:', this.rendererType)
+    // console.log('🎯 [Pick] onPickMouseDown called, rendererType:', this.rendererType)
     
     // In ReGL mode, check for label clicks first
     if (this.rendererType === 'regl' && this.canvas2DLabels && this.canvas2DLabels.length > 0) {
@@ -9014,14 +9014,14 @@ export default class extends Controller {
       const mouseX = event.clientX - rect.left
       const mouseY = event.clientY - rect.top
       
-      console.log(`🏷️ [Drag] Mouse down at (${mouseX}, ${mouseY}), checking ${this.canvas2DLabels.length} labels`)
+      // console.log(`🏷️ [Drag] Mouse down at (${mouseX}, ${mouseY}), checking ${this.canvas2DLabels.length} labels`)
       
       // Check if clicking on a label
       for (let i = this.canvas2DLabels.length - 1; i >= 0; i--) {
         const label = this.canvas2DLabels[i]
         const bounds = label.bounds
         
-        console.log(`🏷️ [Drag] Label "${label.category}" bounds: x=${bounds.x}, y=${bounds.y}, w=${bounds.width}, h=${bounds.height}`)
+        // console.log(`🏷️ [Drag] Label "${label.category}" bounds: x=${bounds.x}, y=${bounds.y}, w=${bounds.width}, h=${bounds.height}`)
         
         if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
             mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
@@ -9032,12 +9032,12 @@ export default class extends Controller {
           this.labelStartOffsetX = label.offsetX
           this.labelStartOffsetY = label.offsetY
           this.clickingOnLabel = true
-          console.log(`🏷️ Started dragging label: ${label.category}`)
+          // console.log(`🏷️ Started dragging label: ${label.category}`)
           return
         }
       }
       
-      console.log(`🏷️ [Drag] No label hit at (${mouseX}, ${mouseY})`)
+      // console.log(`🏷️ [Drag] No label hit at (${mouseX}, ${mouseY})`)
     }
     
     // In pick mode, use fallback detection to find clicked points
@@ -9048,7 +9048,7 @@ export default class extends Controller {
     
       // Check if RegL renderer and coordinates are available
       if (!this.reglRenderer || !this.currentCoordinates) {
-        console.log('🎯 [RegL] RegL renderer or coordinates not available, skipping point detection')
+        // console.log('🎯 [RegL] RegL renderer or coordinates not available, skipping point detection')
         return
       }
       this.detectRegLPointClick(event)
@@ -9070,21 +9070,21 @@ export default class extends Controller {
 
   // RegL-specific point detection method
   detectRegLPointClick(event) {
-    console.log('🎯 [RegL] detectRegLPointClick called')
+    // console.log('🎯 [RegL] detectRegLPointClick called')
     
     if (this.interactionMode !== 'pick') {
-      console.log('🎯 [RegL] Not in pick mode, current mode:', this.interactionMode)
+      // console.log('🎯 [RegL] Not in pick mode, current mode:', this.interactionMode)
       return
     }
 
     const canvas = this.canvas
     if (!canvas || !this.reglRenderer || !this.currentCoordinates) {
-      console.log('🎯 [RegL] Missing requirements:', {
-        canvas: !!canvas,
-        reglRenderer: !!this.reglRenderer,
-        currentCoordinates: !!this.currentCoordinates,
-        coordinatesLength: this.currentCoordinates?.length
-      })
+      // console.log('🎯 [RegL] Missing requirements:', {
+        // canvas: !!canvas,
+        // reglRenderer: !!this.reglRenderer,
+        // currentCoordinates: !!this.currentCoordinates,
+        // coordinatesLength: this.currentCoordinates?.length
+      // })
       return
     }
 
@@ -9092,19 +9092,19 @@ export default class extends Controller {
     const clickX = event.clientX - rect.left
     const clickY = event.clientY - rect.top
 
-    console.log('🎯 [RegL] Click coordinates:', { clickX, clickY, canvasWidth: canvas.width, canvasHeight: canvas.height })
+    // console.log('🎯 [RegL] Click coordinates:', { clickX, clickY, canvasWidth: canvas.width, canvasHeight: canvas.height })
 
     // Use current bounds (which include pan/zoom state) instead of calculating from coordinates
     const bounds = this.currentBounds || this.dataManager.calculateBounds(this.currentCoordinates)
     const margins = this.rendererManager.getPlotMargins()
     
-    console.log('🎯 [RegL] Current bounds and margins:', { bounds, margins })
+    // console.log('🎯 [RegL] Current bounds and margins:', { bounds, margins })
     
     // Convert screen coordinates back to data coordinates using current bounds
     const dataX = bounds.minX + ((clickX - margins.left) / (canvas.width - margins.left - margins.right)) * (bounds.maxX - bounds.minX)
     const dataY = bounds.minY + ((canvas.height - margins.top - margins.bottom - (clickY - margins.top)) / (canvas.height - margins.top - margins.bottom)) * (bounds.maxY - bounds.minY)
     
-    console.log('🎯 [RegL] Data coordinates (with pan/zoom):', { dataX, dataY })
+    // console.log('🎯 [RegL] Data coordinates (with pan/zoom):', { dataX, dataY })
 
     // Calculate tolerance in screen pixels, accounting for point size
     const pointSize = this.currentPointSize || 4
@@ -9117,21 +9117,21 @@ export default class extends Controller {
     const dataToleranceY = (screenTolerance / screenHeight) * (bounds.maxY - bounds.minY)
     const maxDistance = Math.max(dataToleranceX, dataToleranceY) // Use the larger tolerance
     
-    console.log('🎯 [RegL] Screen-based tolerance:', { 
-      pointSize: pointSize,
-      screenTolerance: screenTolerance,
-      dataToleranceX: dataToleranceX.toFixed(6),
-      dataToleranceY: dataToleranceY.toFixed(6),
-      maxDistance: maxDistance.toFixed(6),
-      screenWidth: screenWidth,
-      screenHeight: screenHeight
-    })
+    // console.log('🎯 [RegL] Screen-based tolerance:', { 
+      // pointSize: pointSize,
+      // screenTolerance: screenTolerance,
+      // dataToleranceX: dataToleranceX.toFixed(6),
+      // dataToleranceY: dataToleranceY.toFixed(6),
+      // maxDistance: maxDistance.toFixed(6),
+      // screenWidth: screenWidth,
+      // screenHeight: screenHeight
+    // })
 
     // Find closest point
     let closestPointIndex = -1
     let closestDistance = Infinity
 
-    console.log('🎯 [RegL] Searching through', this.currentCoordinates.length, 'points with maxDistance:', maxDistance)
+    // console.log('🎯 [RegL] Searching through', this.currentCoordinates.length, 'points with maxDistance:', maxDistance)
 
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
@@ -9139,26 +9139,26 @@ export default class extends Controller {
       const distance = Math.sqrt(Math.pow(x - dataX, 2) + Math.pow(y - dataY, 2))
       
       if (drawPos < 5) { // Debug first 5 points
-        console.log(`🎯 [RegL] DrawPos ${drawPos} -> Cell ${cellIndex}: (${x}, ${y}), distance: ${distance.toFixed(6)}`)
+        // console.log(`🎯 [RegL] DrawPos ${drawPos} -> Cell ${cellIndex}: (${x}, ${y}), distance: ${distance.toFixed(6)}`)
       }
       
       // Track the closest point
       if (distance < closestDistance) {
         closestDistance = distance
         closestPointIndex = cellIndex // Use the original cell index, not draw position
-        console.log(`🎯 [RegL] New closest point: DrawPos ${drawPos} -> Cell ${cellIndex}, distance: ${distance.toFixed(6)}`)
+        // console.log(`🎯 [RegL] New closest point: DrawPos ${drawPos} -> Cell ${cellIndex}, distance: ${distance.toFixed(6)}`)
       }
     }
 
-    console.log('🎯 [RegL] Final result:', { closestPointIndex, closestDistance: closestDistance.toFixed(6), maxDistance: maxDistance.toFixed(6) })
+    // console.log('🎯 [RegL] Final result:', { closestPointIndex, closestDistance: closestDistance.toFixed(6), maxDistance: maxDistance.toFixed(6) })
 
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
       // Point found within tolerance - fix tooltip to this cell
-      console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
+      // console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
       this.fixTooltipToCell(closestPointIndex, clickX, clickY)
     } else {
       // No point found within tolerance - hide any existing tooltip
-      console.log('🎯 [RegL] No point found within tolerance - hiding tooltip')
+      // console.log('🎯 [RegL] No point found within tolerance - hiding tooltip')
       if (this.isTooltipFixed) {
         this.unfixTooltip()
       } else {
@@ -9169,7 +9169,7 @@ export default class extends Controller {
 
   // Fix tooltip to a specific cell (clicked cell)
   fixTooltipToCell(cellId, screenX, screenY) {
-    console.log('🎯 [RegL] fixTooltipToCell called with:', { cellId, screenX, screenY })
+    // console.log('🎯 [RegL] fixTooltipToCell called with:', { cellId, screenX, screenY })
     
     this.fixedTooltipCellId = cellId
     this.isTooltipFixed = true
@@ -9183,7 +9183,7 @@ export default class extends Controller {
     // Tooltip will read current metadata directly, and isFixed=true will show lock icon
     this.showSimpleTooltip(cellName, null, mockPoint, cellId, true)
     
-    console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
+    // console.log(`🎯 [RegL] Fixed tooltip to cell ${cellId + 1}`)
   }
 
   // Check if color picker popup or gradient editor is currently open
@@ -9275,7 +9275,7 @@ export default class extends Controller {
 
   // Checkbox functionality for cell selection
   async toggleMetadataSelection(event) {
-    console.log('🔍 [CHECKBOX] toggleMetadataSelection called!')
+    // console.log('🔍 [CHECKBOX] toggleMetadataSelection called!')
     event.preventDefault()
     event.stopPropagation()
     
@@ -9283,12 +9283,12 @@ export default class extends Controller {
     const checkbox = event.currentTarget
     const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
     
-    console.log('🔍 [CHECKBOX] metadataId:', metadataId, 'isSelected:', isSelected)
+    // console.log('🔍 [CHECKBOX] metadataId:', metadataId, 'isSelected:', isSelected)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector) {
-      console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
+      // console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
       try {
         metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
         if (!metadataVector) {
@@ -9308,7 +9308,7 @@ export default class extends Controller {
     
     // Check if this is categorical or continuous metadata
     const isContinuous = metadataVector?.data_type === 'NUMERIC'
-    console.log('🔍 [CHECKBOX] isContinuous:', isContinuous)
+    // console.log('🔍 [CHECKBOX] isContinuous:', isContinuous)
     
     // Toggle the checkbox state
     // Note: Also check for orange (#f59e0b) which indicates a subrange selection
@@ -9345,18 +9345,18 @@ export default class extends Controller {
                 fullMin: rangeSliderController.minValue,
                 fullMax: rangeSliderController.maxValue
               }
-              console.log('🔍 [CHECKBOX] Saved range for restoration:', this.savedRanges[metadataId])
+              // console.log('🔍 [CHECKBOX] Saved range for restoration:', this.savedRanges[metadataId])
             } else {
               // Slider exists but wasn't initialized with real data yet
               this.savedRanges[metadataId] = null // null means "use full range when restoring"
-              console.log('🔍 [CHECKBOX] Slider not initialized with real data - will use full range on restore')
+              // console.log('🔍 [CHECKBOX] Slider not initialized with real data - will use full range on restore')
             }
           }
         } else {
           // Slider doesn't exist yet (metadata was never unfolded)
           // Mark that we need to use full range when checking later
           this.savedRanges[metadataId] = null // null means "use full range when restoring"
-          console.log('🔍 [CHECKBOX] No slider found - will use full range on restore')
+          // console.log('🔍 [CHECKBOX] No slider found - will use full range on restore')
         }
         
         // For continuous metadata: disable range selection (clear the range)
@@ -9372,11 +9372,11 @@ export default class extends Controller {
         // Save the current category selections for restoration
         if (this.selectedCategories && this.selectedCategories[metadataId]) {
           this.savedCategorySelections[metadataId] = new Set(this.selectedCategories[metadataId])
-          console.log('🔍 [CHECKBOX] Saved category selections:', Array.from(this.savedCategorySelections[metadataId]))
+          // console.log('🔍 [CHECKBOX] Saved category selections:', Array.from(this.savedCategorySelections[metadataId]))
           
           // Clear the selections to disable filtering
           this.selectedCategories[metadataId].clear()
-          console.log('🔍 [CHECKBOX] Cleared selectedCategories to disable filtering')
+          // console.log('🔍 [CHECKBOX] Cleared selectedCategories to disable filtering')
         }
         
         // Disable the category checkboxes visually
@@ -9387,7 +9387,7 @@ export default class extends Controller {
       checkbox.querySelector('i').style.display = 'block'
       
       if (isContinuous) {
-        console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
+        // console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
         
         // Remove from unchecked tracking set FIRST
         if (this.uncheckedMetadata) {
@@ -9403,15 +9403,15 @@ export default class extends Controller {
         
         // Read the current values directly from the range slider fields
         const rangeSection = document.querySelector(`[data-metadata-item="${metadataId}"] .metadata-range-section`)
-        console.log('🔍 [CHECKBOX] Range section found:', !!rangeSection)
+        // console.log('🔍 [CHECKBOX] Range section found:', !!rangeSection)
         if (rangeSection) {
           // Find the actual range slider controller element (child of range section)
           const rangeSliderElement = rangeSection.querySelector('[data-controller="range-slider"]')
-          console.log('🔍 [CHECKBOX] Range slider element found:', !!rangeSliderElement)
+          // console.log('🔍 [CHECKBOX] Range slider element found:', !!rangeSliderElement)
           
           if (rangeSliderElement) {
             const rangeSliderController = this.application.getControllerForElementAndIdentifier(rangeSliderElement, 'range-slider')
-            console.log('🔍 [CHECKBOX] Range slider controller found:', !!rangeSliderController)
+            // console.log('🔍 [CHECKBOX] Range slider controller found:', !!rangeSliderController)
             
             if (rangeSliderController) {
               // Check if we have a saved range (from previous uncheck)
@@ -9424,7 +9424,7 @@ export default class extends Controller {
                   if (rangeSliderController.minValue !== undefined && rangeSliderController.maxValue !== undefined) {
                     currentMin = rangeSliderController.minValue
                     currentMax = rangeSliderController.maxValue
-                    console.log('🔍 [CHECKBOX] Using full range (was unchecked before unfold):', currentMin, currentMax)
+                    // console.log('🔍 [CHECKBOX] Using full range (was unchecked before unfold):', currentMin, currentMax)
                     
                     // Update the slider to show the full range
                     rangeSliderController.currentMinValue = currentMin
@@ -9434,13 +9434,13 @@ export default class extends Controller {
                     // Slider not fully initialized yet, use current values as fallback
                     currentMin = rangeSliderController.currentMinValue
                     currentMax = rangeSliderController.currentMaxValue
-                    console.log('🔍 [CHECKBOX] Slider not fully initialized, using current values:', currentMin, currentMax)
+                    // console.log('🔍 [CHECKBOX] Slider not fully initialized, using current values:', currentMin, currentMax)
                   }
                 } else {
                   // Restore the saved range
                   currentMin = this.savedRanges[metadataId].min
                   currentMax = this.savedRanges[metadataId].max
-                  console.log('🔍 [CHECKBOX] Restoring saved range:', currentMin, currentMax)
+                  // console.log('🔍 [CHECKBOX] Restoring saved range:', currentMin, currentMax)
                   
                   // Update the slider to show the restored range
                   rangeSliderController.currentMinValue = currentMin
@@ -9451,14 +9451,14 @@ export default class extends Controller {
                 // No saved range, use current slider values (full range by default)
                 currentMin = rangeSliderController.currentMinValue
                 currentMax = rangeSliderController.currentMaxValue
-                console.log('🔍 [CHECKBOX] Using current slider values:', currentMin, currentMax)
+                // console.log('🔍 [CHECKBOX] Using current slider values:', currentMin, currentMax)
               }
               
               this.selectedRanges[metadataId] = {
                 min: currentMin,
                 max: currentMax
               }
-              console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
+              // console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
               
               // Update checkbox color based on whether it's a subrange
               // This will change it to orange if it's a subrange, or keep it green if full range
@@ -9466,17 +9466,17 @@ export default class extends Controller {
               
               // Update the selected cells count
               rangeSliderController.updateSelectedCellsCount()
-              console.log('🔍 [CHECKBOX] Updated selected cells count')
+              // console.log('🔍 [CHECKBOX] Updated selected cells count')
             } else {
-              console.log('🔍 [CHECKBOX] No range slider controller found!')
+              // console.log('🔍 [CHECKBOX] No range slider controller found!')
               // Already set to green above
             }
           } else {
-            console.log('🔍 [CHECKBOX] No range slider element found!')
+            // console.log('🔍 [CHECKBOX] No range slider element found!')
             // Already set to green above
           }
         } else {
-          console.log('🔍 [CHECKBOX] No range section found!')
+          // console.log('🔍 [CHECKBOX] No range section found!')
           // Already set to green above
         }
       } else {
@@ -9493,7 +9493,7 @@ export default class extends Controller {
           this.savedCategorySelections[metadataId].forEach(category => {
             this.selectedCategories[metadataId].add(category)
           })
-          console.log('🔍 [CHECKBOX] Restored category selections:', Array.from(this.selectedCategories[metadataId]))
+          // console.log('🔍 [CHECKBOX] Restored category selections:', Array.from(this.selectedCategories[metadataId]))
         }
         
         // Re-enable the category checkboxes
@@ -9508,11 +9508,11 @@ export default class extends Controller {
           if (selectedCount === totalCategories) {
             // All categories selected - green
             checkbox.style.backgroundColor = '#10b981'
-            console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - green`)
+            // console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - green`)
           } else if (selectedCount > 0) {
             // Some categories selected - orange
             checkbox.style.backgroundColor = '#f59e0b'
-            console.log(`🔍 [CHECKBOX] ${selectedCount}/${totalCategories} categories selected - orange`)
+            // console.log(`🔍 [CHECKBOX] ${selectedCount}/${totalCategories} categories selected - orange`)
           } else {
             // No categories selected - should not happen, but default to green
             checkbox.style.backgroundColor = '#10b981'
@@ -9525,10 +9525,10 @@ export default class extends Controller {
     }
     
     // Update cell filtering
-    console.log('🔍 [CHECKBOX] About to call updateCellFiltering')
-    console.log('🔍 [CHECKBOX] Current selectedRanges:', this.selectedRanges)
+    // console.log('🔍 [CHECKBOX] About to call updateCellFiltering')
+    // console.log('🔍 [CHECKBOX] Current selectedRanges:', this.selectedRanges)
     this.dataManager.updateCellFiltering()
-    console.log('🔍 [CHECKBOX] updateCellFiltering called')
+    // console.log('🔍 [CHECKBOX] updateCellFiltering called')
   }
 
   async toggleSelectAllCategories(event) {
@@ -9543,7 +9543,7 @@ export default class extends Controller {
     const isFilterEnabled = filterSwitch && filterSwitch.dataset.filterEnabled === 'true'
     
     if (!isFilterEnabled) {
-      console.log(`🔄 Select all/none blocked - filtering is disabled`)
+      // console.log(`🔄 Select all/none blocked - filtering is disabled`)
       return
     }
     
@@ -9551,7 +9551,7 @@ export default class extends Controller {
     const icon = checkbox.querySelector('i')
     const hasCheckmark = icon && icon.style.display !== 'none'
     
-    console.log(`🔄 Toggle select all categories for metadata ${metadataId}, current state: ${hasCheckmark ? 'checked' : 'unchecked'}`)
+    // console.log(`🔄 Toggle select all categories for metadata ${metadataId}, current state: ${hasCheckmark ? 'checked' : 'unchecked'}`)
     
     if (hasCheckmark) {
       // Deselect all categories
@@ -9581,7 +9581,7 @@ export default class extends Controller {
     const filterSwitch = event.currentTarget
     const isEnabled = filterSwitch.dataset.filterEnabled === 'true'
     
-    console.log(`🔄 Toggle metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
+    // console.log(`🔄 Toggle metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
     
     const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
     const switchToggle = filterSwitch.querySelector('div')
@@ -9649,7 +9649,7 @@ export default class extends Controller {
     const filterSwitch = event.currentTarget
     const isEnabled = filterSwitch.dataset.filterEnabled === 'true'
     
-    console.log(`🔄 Toggle continuous metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
+    // console.log(`🔄 Toggle continuous metadata filter for ${metadataId}, current state: ${isEnabled ? 'ON' : 'OFF'}`)
     
     const switchToggle = filterSwitch.querySelector('div')
     
@@ -9850,7 +9850,7 @@ export default class extends Controller {
     const isFilterEnabled = filterSwitch && filterSwitch.dataset.filterEnabled === 'true'
     
     if (!isFilterEnabled) {
-      console.log(`🔄 Category selection blocked - filtering is disabled`)
+      // console.log(`🔄 Category selection blocked - filtering is disabled`)
       return
     }
     
@@ -9858,7 +9858,7 @@ export default class extends Controller {
     const icon = checkbox.querySelector('i')
     const isSelected = icon && icon.style.display !== 'none' && icon.style.color === 'rgb(16, 185, 129)' // #10b981
     
-    console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
+    // console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
@@ -9887,14 +9887,14 @@ export default class extends Controller {
     // Toggle the checkbox state
     if (isSelected) {
       // Deselect this category
-      console.log(`🔄 About to deselect category: ${category}`)
+      // console.log(`🔄 About to deselect category: ${category}`)
       checkbox.style.backgroundColor = 'white'
       const icon = checkbox.querySelector('i')
       icon.style.display = 'none'
       this.deselectCategory(metadataId, category)
     } else {
       // Select this category
-      console.log(`🔄 About to select category: ${category}`)
+      // console.log(`🔄 About to select category: ${category}`)
       checkbox.style.backgroundColor = 'white'
       const icon = checkbox.querySelector('i')
       icon.style.display = 'block'
@@ -9909,33 +9909,33 @@ export default class extends Controller {
     this.uiManager.updateFilterSwitchVisibility(metadataId)
     
     // Update cell filtering
-    console.log(`🔄 About to call updateCellFiltering`)
+    // console.log(`🔄 About to call updateCellFiltering`)
     this.dataManager.updateCellFiltering()
-    console.log(`🔄 updateCellFiltering completed`)
+    // console.log(`🔄 updateCellFiltering completed`)
     
     // Note: Category label re-rendering is handled by updateCellFiltering() in ReGL mode
     // (it redraws the entire overlay including labels with new centroids)
     
-    console.log(`🔄 toggleCategorySelection function completed`)
+    // console.log(`🔄 toggleCategorySelection function completed`)
   }
 
   async selectAllCategoriesForMetadata(metadataId) {
-    console.log(`🔍 [SELECT ALL] Selecting all categories for metadata ${metadataId}`)
+    // console.log(`🔍 [SELECT ALL] Selecting all categories for metadata ${metadataId}`)
     
     // Debug: Check what's in memory
-    console.log(`🔍 [SELECT ALL] currentMetadataId:`, this.currentMetadataId)
-    console.log(`🔍 [SELECT ALL] currentMetadataVector exists:`, !!this.currentMetadataVector)
-    console.log(`🔍 [SELECT ALL] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
-    console.log(`🔍 [SELECT ALL] loadedMetadataVectors[${metadataId}] exists:`, !!this.loadedMetadataVectors?.[metadataId])
+    // console.log(`🔍 [SELECT ALL] currentMetadataId:`, this.currentMetadataId)
+    // console.log(`🔍 [SELECT ALL] currentMetadataVector exists:`, !!this.currentMetadataVector)
+    // console.log(`🔍 [SELECT ALL] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
+    // console.log(`🔍 [SELECT ALL] loadedMetadataVectors[${metadataId}] exists:`, !!this.loadedMetadataVectors?.[metadataId])
     
     // Get the metadata vector to access ALL categories
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
-    console.log(`🔍 [SELECT ALL] getMetadataVectorById returned:`, !!metadataVector)
-    console.log(`🔍 [SELECT ALL] metadataVector.values exists:`, !!metadataVector?.values)
+    // console.log(`🔍 [SELECT ALL] getMetadataVectorById returned:`, !!metadataVector)
+    // console.log(`🔍 [SELECT ALL] metadataVector.values exists:`, !!metadataVector?.values)
     
     // If metadata exists but values are not decompressed, decompress it manually
     if (metadataVector && !metadataVector.values && metadataVector.compression_info) {
-      console.log(`🔍 [SELECT ALL] Metadata exists but not decompressed, decompressing...`)
+      // console.log(`🔍 [SELECT ALL] Metadata exists but not decompressed, decompressing...`)
       const compressionInfo = metadataVector.compression_info
       
       // Handle single_category compression (all cells have the same value)
@@ -9943,7 +9943,7 @@ export default class extends Controller {
         const category = compressionInfo.categories[compressionInfo.category_index]
         const length = compressionInfo.length
         metadataVector.values = new Array(length).fill(category)
-        console.log(`🔍 [SELECT ALL] Decompressed single_category: ${category} (${length} cells)`)
+        // console.log(`🔍 [SELECT ALL] Decompressed single_category: ${category} (${length} cells)`)
       } else {
         console.error(`🔍 [SELECT ALL] Unknown compression format:`, compressionInfo)
         return
@@ -9952,7 +9952,7 @@ export default class extends Controller {
     
     // If not in memory at all, load it first
     if (!metadataVector) {
-      console.log(`🔍 [SELECT ALL] Metadata not in memory, loading...`)
+      // console.log(`🔍 [SELECT ALL] Metadata not in memory, loading...`)
       try {
         metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
         if (!metadataVector) {
@@ -9986,7 +9986,7 @@ export default class extends Controller {
       this.selectedCategories[metadataId].add(category)
     })
     
-    console.log(`🔍 [SELECT ALL] Selected ${this.selectedCategories[metadataId].size} categories`)
+    // console.log(`🔍 [SELECT ALL] Selected ${this.selectedCategories[metadataId].size} categories`)
     
     // Update the visual state of category checkboxes in the HTML
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
@@ -10005,12 +10005,12 @@ export default class extends Controller {
   }
 
   deselectAllCategoriesForMetadata(metadataId) {
-    console.log(`🔍 [DESELECT ALL] Deselecting all categories for metadata ${metadataId}`)
+    // console.log(`🔍 [DESELECT ALL] Deselecting all categories for metadata ${metadataId}`)
     
     // Clear ALL categories from the Set (not just the ones in HTML)
     if (this.selectedCategories && this.selectedCategories[metadataId]) {
       this.selectedCategories[metadataId].clear()
-      console.log(`🔍 [DESELECT ALL] Cleared all categories from selectedCategories`)
+      // console.log(`🔍 [DESELECT ALL] Cleared all categories from selectedCategories`)
     }
     
     // Update the visual state of category checkboxes in the HTML
@@ -10020,7 +10020,7 @@ export default class extends Controller {
       checkbox.querySelector('i').style.display = 'none'
     })
     
-    console.log(`🔍 [DESELECT ALL] Updated ${categoryCheckboxes.length} visible checkboxes`)
+    // console.log(`🔍 [DESELECT ALL] Updated ${categoryCheckboxes.length} visible checkboxes`)
     
     // Update filter switch visibility (show when not all selected)
     this.uiManager.updateFilterSwitchVisibility(metadataId)
@@ -10041,20 +10041,20 @@ export default class extends Controller {
   }
 
   deselectCategory(metadataId, category) {
-    console.log(`🔄 Deselecting category: "${category}" for metadata: ${metadataId}`)
-    console.log(`🔄 Category type:`, typeof category, `Length:`, category.length)
-    console.log(`🔄 Before deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
-    console.log(`🔄 Set size before:`, this.selectedCategories[metadataId]?.size)
+    // console.log(`🔄 Deselecting category: "${category}" for metadata: ${metadataId}`)
+    // console.log(`🔄 Category type:`, typeof category, `Length:`, category.length)
+    // console.log(`🔄 Before deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
+    // console.log(`🔄 Set size before:`, this.selectedCategories[metadataId]?.size)
     
     if (this.selectedCategories && this.selectedCategories[metadataId]) {
       const hadCategory = this.selectedCategories[metadataId].has(category)
-      console.log(`🔄 Did the Set contain "${category}"?`, hadCategory)
+      // console.log(`🔄 Did the Set contain "${category}"?`, hadCategory)
       
       this.selectedCategories[metadataId].delete(category)
-      console.log(`🔄 After deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
-      console.log(`🔄 Set size after:`, this.selectedCategories[metadataId]?.size)
+      // console.log(`🔄 After deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
+      // console.log(`🔄 Set size after:`, this.selectedCategories[metadataId]?.size)
     } else {
-      console.log(`🔄 No selectedCategories found for metadata: ${metadataId}`)
+      // console.log(`🔄 No selectedCategories found for metadata: ${metadataId}`)
     }
   }
 
@@ -10084,12 +10084,12 @@ export default class extends Controller {
 
 
   async initializeCheckboxesForMetadata(metadataId) {
-    console.log(`🔍 [INIT] Initializing checkboxes for metadata: ${metadataId}`)
+    // console.log(`🔍 [INIT] Initializing checkboxes for metadata: ${metadataId}`)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector) {
-      console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
+      // console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
       metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
       if (!metadataVector) {
         console.error(`💾 [DISK] Failed to load metadata ${metadataId} from disk`)
@@ -10099,13 +10099,13 @@ export default class extends Controller {
     
     // Only initialize for discrete metadata
     if (!metadataVector || (metadataVector.data_type !== 'DISCRETE' && metadataVector.data_type !== 'STRING')) {
-      console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
+      // console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
       return
     }
     
     // Only initialize if not already initialized
     if (this.selectedCategories[metadataId]) {
-      console.log(`🔍 [INIT] Checkboxes already initialized for metadata ${metadataId}, skipping`)
+      // console.log(`🔍 [INIT] Checkboxes already initialized for metadata ${metadataId}, skipping`)
       return
     }
     
@@ -10119,7 +10119,7 @@ export default class extends Controller {
       allCategories.forEach(category => {
         this.selectedCategories[metadataId].add(category)
       })
-      console.log(`🔍 [INIT] Initialized ${this.selectedCategories[metadataId].size} categories from metadata vector for ${metadataId}`)
+      // console.log(`🔍 [INIT] Initialized ${this.selectedCategories[metadataId].size} categories from metadata vector for ${metadataId}`)
     } else {
       console.error(`🔍 [INIT] No values found in metadata vector for ${metadataId}`)
     }
@@ -10136,26 +10136,26 @@ export default class extends Controller {
 
   // Optimized method to show/hide points without re-rendering
   async updatePointVisibility(filteredIndices) {
-    console.log('🎨 [VISIBILITY] updatePointVisibility called:', {
-      rendererType: this.rendererType,
-      filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null',
-      hasScatterContainer: !!this.scatterContainer,
-      scatterContainerChildren: this.scatterContainer?.children?.length
-    })
+    // console.log('🎨 [VISIBILITY] updatePointVisibility called:', {
+      // rendererType: this.rendererType,
+      // filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null',
+      // hasScatterContainer: !!this.scatterContainer,
+      // scatterContainerChildren: this.scatterContainer?.children?.length
+    // })
     
     // ReGL path: update point visibility by modifying alpha channel
     if (this.rendererType === 'regl') {
-      console.log('🎨 [VISIBILITY] Using ReGL path')
+      // console.log('🎨 [VISIBILITY] Using ReGL path')
       return this.updatePointVisibilityReGL(filteredIndices)
     }
     
     // PixiJS path
     if (!this.scatterContainer || !this.scatterContainer.children) {
-      console.log('🎨 [VISIBILITY] No scatter container or children - cannot update visibility')
+      // console.log('🎨 [VISIBILITY] No scatter container or children - cannot update visibility')
       return
     }
     
-    console.log('🎨 [VISIBILITY] Using PixiJS path')
+    // console.log('🎨 [VISIBILITY] Using PixiJS path')
 
     const startTime = performance.now()
     let visibleCount = 0
@@ -10208,32 +10208,32 @@ export default class extends Controller {
   // Update point visibility in ReGL mode by hiding filtered-out points
   // OPTIMIZED: Uses cached colors and only recalculates when coloring metadata changes
   async updatePointVisibilityReGL(filteredIndices) {
-    console.log('🎨 [ReGL] updatePointVisibilityReGL called:', {
-      hasReglRenderer: !!this.reglRenderer,
-      hasCurrentCoordinates: !!this.currentCoordinates,
-      currentCoordinatesLength: this.currentCoordinates?.length || 0,
-      hasDisplayOrder: !!this.displayOrder,
-      displayOrderLength: this.displayOrder?.length || 0,
-      filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null'
-    })
+    // console.log('🎨 [ReGL] updatePointVisibilityReGL called:', {
+      // hasReglRenderer: !!this.reglRenderer,
+      // hasCurrentCoordinates: !!this.currentCoordinates,
+      // currentCoordinatesLength: this.currentCoordinates?.length || 0,
+      // hasDisplayOrder: !!this.displayOrder,
+      // displayOrderLength: this.displayOrder?.length || 0,
+      // filteredIndicesCount: filteredIndices ? filteredIndices.length : 'null'
+    // })
     
     // Check if renderer is ready: must have renderer
     if (!this.reglRenderer) {
-      console.log('🎨 [ReGL] Cannot update visibility - missing renderer')
+      // console.log('🎨 [ReGL] Cannot update visibility - missing renderer')
       return
     }
     
     // Log renderer state for debugging
-    console.log('🎨 [ReGL] Renderer direct state check:', {
-      numPoints: this.reglRenderer.numPoints,
-      hasPositions: !!this.reglRenderer.positions,
-      positionsLength: this.reglRenderer.positions?.length,
-      hasColors: !!this.reglRenderer.colors,
-      colorsLength: this.reglRenderer.colors?.length,
-      hasPositionBuffer: !!this.reglRenderer.positionBuffer,
-      hasColorBuffer: !!this.reglRenderer.colorBuffer,
-      hasRegl: !!this.reglRenderer.regl
-    })
+    // console.log('🎨 [ReGL] Renderer direct state check:', {
+      // numPoints: this.reglRenderer.numPoints,
+      // hasPositions: !!this.reglRenderer.positions,
+      // positionsLength: this.reglRenderer.positions?.length,
+      // hasColors: !!this.reglRenderer.colors,
+      // colorsLength: this.reglRenderer.colors?.length,
+      // hasPositionBuffer: !!this.reglRenderer.positionBuffer,
+      // hasColorBuffer: !!this.reglRenderer.colorBuffer,
+      // hasRegl: !!this.reglRenderer.regl
+    // })
     
     // Verify renderer is connected to the canvas
     if (this.canvas && this.reglRenderer.canvas !== this.canvas) {
@@ -10253,87 +10253,87 @@ export default class extends Controller {
       // First check renderer's direct properties (most reliable)
       if (this.reglRenderer.numPoints && this.reglRenderer.numPoints > 0) {
         numPoints = this.reglRenderer.numPoints
-        console.log('🎨 [ReGL] Using renderer.numPoints:', numPoints)
+        // console.log('🎨 [ReGL] Using renderer.numPoints:', numPoints)
       } else if (this.reglRenderer.positions && this.reglRenderer.positions.length > 0) {
         // positions is a Float32Array: [x1, y1, x2, y2, ...], so numPoints = length / 2
         numPoints = this.reglRenderer.positions.length / 2
-        console.log('🎨 [ReGL] Inferring numPoints from positions array length:', numPoints, '(positions length:', this.reglRenderer.positions.length, ')')
+        // console.log('🎨 [ReGL] Inferring numPoints from positions array length:', numPoints, '(positions length:', this.reglRenderer.positions.length, ')')
         // Update numPoints in renderer for consistency
         this.reglRenderer.numPoints = numPoints
       } else if (this.currentCoordinates && this.currentCoordinates.length > 0) {
         // Fallback: use currentCoordinates if available
         numPoints = this.currentCoordinates.length
-        console.log('🎨 [ReGL] Using currentCoordinates length for numPoints:', numPoints)
+        // console.log('🎨 [ReGL] Using currentCoordinates length for numPoints:', numPoints)
       } else if (this.numPoints && this.numPoints > 0) {
         // Fallback: use controller's stored numPoints (set in renderScatterPlot)
         numPoints = this.numPoints
-        console.log('🎨 [ReGL] Using controller numPoints:', numPoints)
+        // console.log('🎨 [ReGL] Using controller numPoints:', numPoints)
       } else if (this.reglRenderer.colors && this.reglRenderer.colors.length > 0) {
         // Fallback: infer from colors array length (colors is RGBA, so numPoints = length / 4)
         numPoints = this.reglRenderer.colors.length / 4
-        console.log('🎨 [ReGL] Inferring numPoints from colors array length:', numPoints, '(colors length:', this.reglRenderer.colors.length, ')')
+        // console.log('🎨 [ReGL] Inferring numPoints from colors array length:', numPoints, '(colors length:', this.reglRenderer.colors.length, ')')
         // Update numPoints in renderer for consistency
         this.reglRenderer.numPoints = numPoints
       } else if (this.decompressedCoordinatesCache) {
         // Try to get coordinates from cache
-        console.log('🎨 [ReGL] Checking decompressedCoordinatesCache:', {
-          cacheExists: !!this.decompressedCoordinatesCache,
-          cacheSize: this.decompressedCoordinatesCache.size,
-          cacheKeys: Array.from(this.decompressedCoordinatesCache.keys())
-        })
+        // console.log('🎨 [ReGL] Checking decompressedCoordinatesCache:', {
+          // cacheExists: !!this.decompressedCoordinatesCache,
+          // cacheSize: this.decompressedCoordinatesCache.size,
+          // cacheKeys: Array.from(this.decompressedCoordinatesCache.keys())
+        // })
         
         // If metadataData is not available, use the first (or only) entry in the cache
         let cachedCoords = null
         if (this.metadataData && this.metadataData.name) {
           const embeddingId = this.metadataData.name
-          console.log('🎨 [ReGL] Looking for embeddingId in cache:', embeddingId)
+          // console.log('🎨 [ReGL] Looking for embeddingId in cache:', embeddingId)
           cachedCoords = this.decompressedCoordinatesCache.get(embeddingId)
           if (cachedCoords) {
-            console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', cachedCoords.length)
+            // console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', cachedCoords.length)
           } else {
-            console.log('🎨 [ReGL] No coordinates found in cache for embeddingId:', embeddingId)
+            // console.log('🎨 [ReGL] No coordinates found in cache for embeddingId:', embeddingId)
           }
         } else {
           // No metadataData, but cache exists - use first entry
-          console.log('🎨 [ReGL] metadataData not available, trying first cache entry')
+          // console.log('🎨 [ReGL] metadataData not available, trying first cache entry')
           const firstCacheKey = this.decompressedCoordinatesCache.keys().next().value
           if (firstCacheKey) {
-            console.log('🎨 [ReGL] Using first cache entry:', firstCacheKey)
+            // console.log('🎨 [ReGL] Using first cache entry:', firstCacheKey)
             cachedCoords = this.decompressedCoordinatesCache.get(firstCacheKey)
             if (cachedCoords) {
-              console.log('🎨 [ReGL] Found coordinates in first cache entry, length:', cachedCoords.length)
+              // console.log('🎨 [ReGL] Found coordinates in first cache entry, length:', cachedCoords.length)
             } else {
-              console.log('🎨 [ReGL] First cache entry exists but coordinates are null/undefined')
+              // console.log('🎨 [ReGL] First cache entry exists but coordinates are null/undefined')
             }
           } else {
-            console.log('🎨 [ReGL] Cache exists but has no keys')
+            // console.log('🎨 [ReGL] Cache exists but has no keys')
           }
         }
         if (cachedCoords && cachedCoords.length > 0) {
           numPoints = cachedCoords.length
-          console.log('🎨 [ReGL] Using cached decompressed coordinates length for numPoints:', numPoints)
+          // console.log('🎨 [ReGL] Using cached decompressed coordinates length for numPoints:', numPoints)
         } else {
-          console.log('🎨 [ReGL] Could not get coordinates from cache')
+          // console.log('🎨 [ReGL] Could not get coordinates from cache')
         }
       }
       
       if (numPoints === 0) {
         // Renderer has no positions and no coordinates available
         // This means the plot hasn't been rendered yet, or renderer state is lost
-        console.log('🎨 [ReGL] Cannot determine number of points - renderer not initialized')
-        console.log('🎨 [ReGL] Renderer state:', {
-          hasNumPoints: !!this.reglRenderer.numPoints,
-          numPoints: this.reglRenderer.numPoints,
-          hasPositions: !!this.reglRenderer.positions,
-          positionsLength: this.reglRenderer.positions?.length,
-          hasPositionBuffer: !!this.reglRenderer.positionBuffer,
-          hasColorBuffer: !!this.reglRenderer.colorBuffer,
-          hasCurrentCoordinates: !!this.currentCoordinates,
-          currentCoordinatesLength: this.currentCoordinates?.length,
-          hasMetadataData: !!this.metadataData,
-          hasDecompressedCache: !!this.decompressedCoordinatesCache,
-          cacheSize: this.decompressedCoordinatesCache?.size || 0
-        })
+        // console.log('🎨 [ReGL] Cannot determine number of points - renderer not initialized')
+        // console.log('🎨 [ReGL] Renderer state:', {
+          // hasNumPoints: !!this.reglRenderer.numPoints,
+          // numPoints: this.reglRenderer.numPoints,
+          // hasPositions: !!this.reglRenderer.positions,
+          // positionsLength: this.reglRenderer.positions?.length,
+          // hasPositionBuffer: !!this.reglRenderer.positionBuffer,
+          // hasColorBuffer: !!this.reglRenderer.colorBuffer,
+          // hasCurrentCoordinates: !!this.currentCoordinates,
+          // currentCoordinatesLength: this.currentCoordinates?.length,
+          // hasMetadataData: !!this.metadataData,
+          // hasDecompressedCache: !!this.decompressedCoordinatesCache,
+          // cacheSize: this.decompressedCoordinatesCache?.size || 0
+        // })
         
         // If plot is visible (canvas exists and has been drawn), try to restore state
         // Try multiple sources for coordinates:
@@ -10344,12 +10344,12 @@ export default class extends Controller {
         
         if (this.currentCoordinates && this.currentCoordinates.length > 0) {
           coordinatesToUse = this.currentCoordinates
-          console.log('🎨 [ReGL] Found coordinates in currentCoordinates:', coordinatesToUse.length)
+          // console.log('🎨 [ReGL] Found coordinates in currentCoordinates:', coordinatesToUse.length)
         } else if (this.metadataData && this.metadataData.name && this.decompressedCoordinatesCache) {
           const embeddingId = this.metadataData.name
           coordinatesToUse = this.decompressedCoordinatesCache.get(embeddingId)
           if (coordinatesToUse) {
-            console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', coordinatesToUse.length)
+            // console.log('🎨 [ReGL] Found coordinates in cache for embeddingId:', embeddingId, 'length:', coordinatesToUse.length)
           }
         } else if (this.decompressedCoordinatesCache && this.decompressedCoordinatesCache.size > 0) {
           // Try any available coordinates in cache
@@ -10357,40 +10357,40 @@ export default class extends Controller {
           if (firstKey) {
             coordinatesToUse = this.decompressedCoordinatesCache.get(firstKey)
             if (coordinatesToUse) {
-              console.log('🎨 [ReGL] Found coordinates in cache (first available):', firstKey, 'length:', coordinatesToUse.length)
+              // console.log('🎨 [ReGL] Found coordinates in cache (first available):', firstKey, 'length:', coordinatesToUse.length)
             }
           }
         }
         
         if (this.canvas && coordinatesToUse && coordinatesToUse.length > 0) {
-          console.log('🎨 [ReGL] Plot is visible but renderer state missing - attempting to restore state by re-rendering')
-          console.log('🎨 [ReGL] Re-rendering with', coordinatesToUse.length, 'coordinates')
+          // console.log('🎨 [ReGL] Plot is visible but renderer state missing - attempting to restore state by re-rendering')
+          // console.log('🎨 [ReGL] Re-rendering with', coordinatesToUse.length, 'coordinates')
           // Store coordinates for next time
           this.currentCoordinates = coordinatesToUse
           // Re-render to restore renderer state
           await this.renderScatterPlot(coordinatesToUse)
           // After re-rendering, numPoints should be available
           numPoints = coordinatesToUse.length
-          console.log('🎨 [ReGL] State restored, numPoints:', numPoints)
+          // console.log('🎨 [ReGL] State restored, numPoints:', numPoints)
         } else {
-          console.log('🎨 [ReGL] Cannot restore state - missing coordinates or canvas')
-          console.log('🎨 [ReGL] Available sources:', {
-            hasCanvas: !!this.canvas,
-            hasCurrentCoordinates: !!this.currentCoordinates,
-            currentCoordinatesLength: this.currentCoordinates?.length || 0,
-            hasMetadataData: !!this.metadataData,
-            metadataDataName: this.metadataData?.name,
-            hasDecompressedCache: !!this.decompressedCoordinatesCache,
-            cacheSize: this.decompressedCoordinatesCache?.size || 0,
-            cacheKeys: this.decompressedCoordinatesCache ? Array.from(this.decompressedCoordinatesCache.keys()) : []
-          })
+          // console.log('🎨 [ReGL] Cannot restore state - missing coordinates or canvas')
+          // console.log('🎨 [ReGL] Available sources:', {
+            // hasCanvas: !!this.canvas,
+            // hasCurrentCoordinates: !!this.currentCoordinates,
+            // currentCoordinatesLength: this.currentCoordinates?.length || 0,
+            // hasMetadataData: !!this.metadataData,
+            // metadataDataName: this.metadataData?.name,
+            // hasDecompressedCache: !!this.decompressedCoordinatesCache,
+            // cacheSize: this.decompressedCoordinatesCache?.size || 0,
+            // cacheKeys: this.decompressedCoordinatesCache ? Array.from(this.decompressedCoordinatesCache.keys()) : []
+          // })
           // Skip update - plot will update when renderScatterPlot is called
           return
         }
       }
       
       if (numPoints > 0) {
-        console.log('🎨 [ReGL] Creating identity displayOrder for', numPoints, 'points')
+        // console.log('🎨 [ReGL] Creating identity displayOrder for', numPoints, 'points')
         this.displayOrder = new Array(numPoints)
         for (let i = 0; i < numPoints; i++) {
           this.displayOrder[i] = i
@@ -10401,9 +10401,9 @@ export default class extends Controller {
         if (!this.reglRenderer.colorBuffer) {
           if (this.reglRenderer.colors && this.reglRenderer.colors.length > 0) {
             // Colors array exists but buffer is missing - create it
-            console.log('🎨 [ReGL] Colors array exists but colorBuffer missing, creating buffer...')
+            // console.log('🎨 [ReGL] Colors array exists but colorBuffer missing, creating buffer...')
             this.reglRenderer.colorBuffer = this.reglRenderer.regl.buffer(this.reglRenderer.colors)
-            console.log('🎨 [ReGL] Color buffer created')
+            // console.log('🎨 [ReGL] Color buffer created')
           } else {
             console.warn('🎨 [ReGL] WARNING: Renderer has no colorBuffer and no colors array')
             console.warn('🎨 [ReGL] Renderer buffer state:', {
@@ -10430,57 +10430,57 @@ export default class extends Controller {
           console.warn('🎨 [ReGL] WARNING: Position buffer missing, but proceeding with color update')
         }
       } else {
-        console.log('🎨 [ReGL] Cannot update visibility - numPoints is 0')
+        // console.log('🎨 [ReGL] Cannot update visibility - numPoints is 0')
         return
       }
     }
     
     const startTime = performance.now()
-    console.log('🎨 [ReGL] Updating point visibility based on filters')
-    console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
+    // console.log('🎨 [ReGL] Updating point visibility based on filters')
+    // console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
     if (filteredIndices && filteredIndices.length > 0) {
-      console.log('🎨 [ReGL] First 10 filtered indices:', filteredIndices.slice(0, 10))
-      console.log('🎨 [ReGL] Last 10 filtered indices:', filteredIndices.slice(-10))
+      // console.log('🎨 [ReGL] First 10 filtered indices:', filteredIndices.slice(0, 10))
+      // console.log('🎨 [ReGL] Last 10 filtered indices:', filteredIndices.slice(-10))
     }
-    console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
+    // console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
     
     // Convert filteredIndices to Set for O(1) lookup
     // filteredIndices contains ORIGINAL cell indices
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
-    console.log('🎨 [ReGL] filteredSet created:', filteredSet ? `Set with ${filteredSet.size} indices` : 'null (all visible)')
+    // console.log('🎨 [ReGL] filteredSet created:', filteredSet ? `Set with ${filteredSet.size} indices` : 'null (all visible)')
     if (filteredSet && filteredSet.size > 0) {
       const sampleIndices = Array.from(filteredSet).slice(0, 5)
-      console.log('🎨 [ReGL] Sample indices in filteredSet:', sampleIndices)
+      // console.log('🎨 [ReGL] Sample indices in filteredSet:', sampleIndices)
     }
     
     // Get the metadata vector that is actually being used for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
-    console.log('🎨 [ReGL] Coloring metadata:', coloringMetadataVector ? coloringMetadataVector.id : 'none')
+    // console.log('🎨 [ReGL] Coloring metadata:', coloringMetadataVector ? coloringMetadataVector.id : 'none')
     
     // Check if we need to recalculate colors (only when coloring metadata changes)
     const needsColorRecalculation = this.colorManager.shouldRecalculateColors(coloringMetadataVector)
     
     // Also check if cache is empty - if so, populate it
     const cacheEmpty = !this.cachedColorsByCellIndex || this.cachedColorsByCellIndex.size === 0
-    console.log('🎨 [ReGL] Color cache state:', {
-      exists: !!this.cachedColorsByCellIndex,
-      size: this.cachedColorsByCellIndex?.size || 0,
-      isEmpty: cacheEmpty,
-      needsRecalculation: needsColorRecalculation
-    })
+    // console.log('🎨 [ReGL] Color cache state:', {
+      // exists: !!this.cachedColorsByCellIndex,
+      // size: this.cachedColorsByCellIndex?.size || 0,
+      // isEmpty: cacheEmpty,
+      // needsRecalculation: needsColorRecalculation
+    // })
     
     if (needsColorRecalculation || cacheEmpty) {
       if (cacheEmpty) {
-        console.log('🎨 [ReGL] Color cache is empty, populating with default or calculated colors')
+        // console.log('🎨 [ReGL] Color cache is empty, populating with default or calculated colors')
       } else {
-      console.log('🎨 [ReGL] Recalculating colors due to coloring metadata change')
+      // console.log('🎨 [ReGL] Recalculating colors due to coloring metadata change')
       }
       this.colorManager.calculateAndCacheColors(coloringMetadataVector)
-      console.log('🎨 [ReGL] Color cache after population:', {
-        size: this.cachedColorsByCellIndex?.size || 0,
-        hasSample: this.cachedColorsByCellIndex?.has(0) || false,
-        sampleColor: this.cachedColorsByCellIndex?.get(0)?.toString(16) || 'none'
-      })
+      // console.log('🎨 [ReGL] Color cache after population:', {
+        // size: this.cachedColorsByCellIndex?.size || 0,
+        // hasSample: this.cachedColorsByCellIndex?.has(0) || false,
+        // sampleColor: this.cachedColorsByCellIndex?.get(0)?.toString(16) || 'none'
+      // })
     }
     
     // Create color map to hide/show points based on filtering
@@ -10489,7 +10489,7 @@ export default class extends Controller {
     let visibleCount = 0
     let hiddenCount = 0
     
-    console.log(`🎨 [ReGL] Building color map for ${this.displayOrder.length} points, filteredSet size: ${filteredSet ? filteredSet.size : 'null (all visible)'}`)
+    // console.log(`🎨 [ReGL] Building color map for ${this.displayOrder.length} points, filteredSet size: ${filteredSet ? filteredSet.size : 'null (all visible)'}`)
     
     // Sample a few points to debug visibility logic
     const samplePositions = [0, 100, 1000, 5000, 10000]
@@ -10506,7 +10506,7 @@ export default class extends Controller {
         visibleCount++
         
         if (samplePositions.includes(drawPos)) {
-          console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE, color=0x${cachedColor.toString(16)}`)
+          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE, color=0x${cachedColor.toString(16)}`)
         }
       } else {
         // Hide point by making it fully transparent
@@ -10514,33 +10514,33 @@ export default class extends Controller {
         hiddenCount++
         
         if (samplePositions.includes(drawPos)) {
-          console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, HIDDEN (not in filteredSet), color=0x00000000`)
+          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, HIDDEN (not in filteredSet), color=0x00000000`)
         }
       }
     }
     
-    console.log(`🎨 [ReGL] Color map built: ${visibleCount} visible, ${hiddenCount} hidden, total: ${colorMap.size}`)
-    console.log('🎨 [ReGL] Sample color map entries:', {
-      first5: Array.from(colorMap.entries()).slice(0, 5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`),
-      last5: Array.from(colorMap.entries()).slice(-5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`)
-    })
-    console.log(`🎨 [ReGL] About to call updateColors with ${colorMap.size} color updates`)
+    // console.log(`🎨 [ReGL] Color map built: ${visibleCount} visible, ${hiddenCount} hidden, total: ${colorMap.size}`)
+    // console.log('🎨 [ReGL] Sample color map entries:', {
+      // first5: Array.from(colorMap.entries()).slice(0, 5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`),
+      // last5: Array.from(colorMap.entries()).slice(-5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`)
+    // })
+    // console.log(`🎨 [ReGL] About to call updateColors with ${colorMap.size} color updates`)
     
     // Update colors (which includes alpha channel)
     const updateColorsStart = performance.now()
     this.reglRenderer.updateColors(colorMap)
     const updateColorsTime = performance.now() - updateColorsStart
-    console.log(`🎨 [ReGL] updateColors completed in ${updateColorsTime.toFixed(2)}ms`)
+    // console.log(`🎨 [ReGL] updateColors completed in ${updateColorsTime.toFixed(2)}ms`)
     
     const renderStart = performance.now()
     this.reglRenderer.render()
     const renderTime = performance.now() - renderStart
-    console.log(`🎨 [ReGL] render() completed in ${renderTime.toFixed(2)}ms`)
+    // console.log(`🎨 [ReGL] render() completed in ${renderTime.toFixed(2)}ms`)
     
-    console.log(`🎨 [ReGL] Visibility update completed`)
+    // console.log(`🎨 [ReGL] Visibility update completed`)
     
     const elapsed = performance.now() - startTime
-    console.log(`🎨 [ReGL] Total visibility update time: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎨 [ReGL] Total visibility update time: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update the point count display with detailed filtering information
@@ -10562,7 +10562,7 @@ export default class extends Controller {
     if (duration > 50) { // More than 50ms
       console.warn(`⚠️ [PERF] ${operationName} took ${duration.toFixed(2)}ms (slow)`)
     } else if (duration > 16) { // More than 16ms (60fps threshold)
-      console.log(`📊 [PERF] ${operationName} took ${duration.toFixed(2)}ms`)
+      // console.log(`📊 [PERF] ${operationName} took ${duration.toFixed(2)}ms`)
     }
   }
 
@@ -10580,7 +10580,7 @@ export default class extends Controller {
       this.updateBatchTimer = null
     }
     
-    console.log('🧹 Performance caches cleared')
+    // console.log('🧹 Performance caches cleared')
   }
 
 
@@ -10605,7 +10605,7 @@ export default class extends Controller {
     if (this.pendingUpdates.size === 0) return
     
     const startTime = performance.now()
-    console.log('🔄 Executing batched updates:', Array.from(this.pendingUpdates))
+    // console.log('🔄 Executing batched updates:', Array.from(this.pendingUpdates))
     
     // Clear pending updates
     this.pendingUpdates.clear()
@@ -10643,21 +10643,21 @@ export default class extends Controller {
 
   // Get cell indices that belong to the specified categories for a given metadata
   getCellsForMetadataCategories(metadataId, selectedCategories) {
-    console.log(`🔍 getCellsForMetadataCategories called for metadata ${metadataId}`)
-    console.log(`🔍 Selected categories:`, selectedCategories)
-    console.log(`🔍 Selected categories type:`, typeof selectedCategories)
-    console.log(`🔍 Selected categories size:`, selectedCategories?.size)
+    // console.log(`🔍 getCellsForMetadataCategories called for metadata ${metadataId}`)
+    // console.log(`🔍 Selected categories:`, selectedCategories)
+    // console.log(`🔍 Selected categories type:`, typeof selectedCategories)
+    // console.log(`🔍 Selected categories size:`, selectedCategories?.size)
     
     // Find the metadata vector for this metadata ID
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector || !metadataVector.values) {
       console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
-      console.log(`💾 Metadata ${metadataId} not in memory - selections will be ignored for now`)
-      console.log(`💡 Tip: Load this metadata to apply the filtering`)
+      // console.log(`💾 Metadata ${metadataId} not in memory - selections will be ignored for now`)
+      // console.log(`💡 Tip: Load this metadata to apply the filtering`)
       return []
     }
     
-    console.log(`🔍 Metadata vector found, values length:`, metadataVector.values.length)
+    // console.log(`🔍 Metadata vector found, values length:`, metadataVector.values.length)
 
     const startTime = performance.now()
     const cellIndices = []
@@ -10671,7 +10671,7 @@ export default class extends Controller {
     }
 
     const endTime = performance.now()
-    console.log(`Found ${cellIndices.length} cells for discrete metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
+    // console.log(`Found ${cellIndices.length} cells for discrete metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
     return cellIndices
   }
 
@@ -10679,10 +10679,10 @@ export default class extends Controller {
   getCellsForMetadataRange(metadataId, range) {
     // Debug logging for gene filtering
     if (metadataId && metadataId.startsWith('gene_')) {
-      console.log(`🔍 [GENE FILTER] getCellsForMetadataRange called for gene: ${metadataId}`)
-      console.log(`🔍 [GENE FILTER] Range:`, range)
-      console.log(`🔍 [GENE FILTER] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
-      console.log(`🔍 [GENE FILTER] Has gene in loadedMetadataVectors:`, !!this.loadedMetadataVectors?.[metadataId])
+      // console.log(`🔍 [GENE FILTER] getCellsForMetadataRange called for gene: ${metadataId}`)
+      // console.log(`🔍 [GENE FILTER] Range:`, range)
+      // console.log(`🔍 [GENE FILTER] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
+      // console.log(`🔍 [GENE FILTER] Has gene in loadedMetadataVectors:`, !!this.loadedMetadataVectors?.[metadataId])
     }
     
     // Find the metadata vector for this metadata ID
@@ -10697,11 +10697,11 @@ export default class extends Controller {
       return []
     }
 
-    console.log(`🔍 getCellsForMetadataRange called for metadata ${metadataId}:`, {
-      range,
-      valuesLength: metadataVector.values.length,
-      firstFewValues: metadataVector.values.slice(0, 10)
-    })
+    // console.log(`🔍 getCellsForMetadataRange called for metadata ${metadataId}:`, {
+      // range,
+      // valuesLength: metadataVector.values.length,
+      // firstFewValues: metadataVector.values.slice(0, 10)
+    // })
 
     const startTime = performance.now()
     const cellIndices = []
@@ -10716,8 +10716,8 @@ export default class extends Controller {
     }
 
     const endTime = performance.now()
-    console.log(`🔍 Found ${cellIndices.length} cells for continuous metadata ${metadataId} in range [${range.min}, ${range.max}] in ${(endTime - startTime).toFixed(2)}ms`)
-    console.log(`🔍 First 10 filtered indices:`, cellIndices.slice(0, 10))
+    // console.log(`🔍 Found ${cellIndices.length} cells for continuous metadata ${metadataId} in range [${range.min}, ${range.max}] in ${(endTime - startTime).toFixed(2)}ms`)
+    // console.log(`🔍 First 10 filtered indices:`, cellIndices.slice(0, 10))
     return cellIndices
   }
 
@@ -10747,13 +10747,13 @@ export default class extends Controller {
     const hasActiveFilterCriteria = (this.selectedCategories && Object.keys(this.selectedCategories).length > 0) ||
                                     (this.selectedRanges && Object.keys(this.selectedRanges).length > 0)
     
-    console.log('[CLEAR STATE] clearIncrementalState called', {
-      hadFilter: hadFilter,
-      filterSize: filterSize,
-      hasActiveFilterCriteria: hasActiveFilterCriteria,
-      selectedCategories: this.selectedCategories ? Object.keys(this.selectedCategories).length : 0,
-      selectedRanges: this.selectedRanges ? Object.keys(this.selectedRanges).length : 0
-    })
+    // console.log('[CLEAR STATE] clearIncrementalState called', {
+      // hadFilter: hadFilter,
+      // filterSize: filterSize,
+      // hasActiveFilterCriteria: hasActiveFilterCriteria,
+      // selectedCategories: this.selectedCategories ? Object.keys(this.selectedCategories).length : 0,
+      // selectedRanges: this.selectedRanges ? Object.keys(this.selectedRanges).length : 0
+    // })
     
     // Clear cache and state (needed for recalculation)
     this.lastFilterState = null
@@ -10771,11 +10771,11 @@ export default class extends Controller {
     if (!hasActiveFilterCriteria) {
       // No active filters - safe to clear
       this.currentVisibleCells = null
-      console.log('[CLEAR STATE] Cleared currentVisibleCells (no active filter criteria)')
+      // console.log('[CLEAR STATE] Cleared currentVisibleCells (no active filter criteria)')
     } else {
       // Active filter criteria exist - keep currentVisibleCells but mark cache as invalid
       // The filter will be recalculated on next updateCellFiltering() call
-      console.log('[CLEAR STATE] Preserved currentVisibleCells (active filter criteria exist, will be recalculated)')
+      // console.log('[CLEAR STATE] Preserved currentVisibleCells (active filter criteria exist, will be recalculated)')
       // Note: currentVisibleCells is kept, but lastFilterState is cleared so it will be recalculated
     }
   }
@@ -10808,7 +10808,7 @@ export default class extends Controller {
       }
     })
     
-    console.log('🔄 Cleared all selections (categories and ranges)')
+    // console.log('🔄 Cleared all selections (categories and ranges)')
   }
 
   // Helper method to get metadata vector by ID
@@ -10893,11 +10893,11 @@ export default class extends Controller {
     }
     
     this.loadingCallCount.set(metadataId, currentCount + 1)
-    console.log(`💾 [DISK] loadMetadataVectorFromDisk called for ${metadataId} (call #${currentCount + 1})`)
+    // console.log(`💾 [DISK] loadMetadataVectorFromDisk called for ${metadataId} (call #${currentCount + 1})`)
     
     // Check if already loading to prevent duplicate requests
     if (this.loadingMetadataVectors.has(metadataId)) {
-      console.log(`💾 [DISK] Metadata ${metadataId} already loading, waiting...`)
+      // console.log(`💾 [DISK] Metadata ${metadataId} already loading, waiting...`)
       while (this.loadingMetadataVectors.has(metadataId)) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
@@ -10918,13 +10918,13 @@ export default class extends Controller {
       
       if (!vectorData) {
         console.warn(`💾 [DISK] Metadata vector not found on disk for ID: ${metadataId}`)
-        console.log(`💾 [DISK] Attempting to load metadata ${metadataId} from server as fallback...`)
+        // console.log(`💾 [DISK] Attempting to load metadata ${metadataId} from server as fallback...`)
         
         // Fallback: Try to load from server directly
         try {
           const fallbackData = await this.loadSingleMetadataVectorSilently(metadataId)
           if (fallbackData) {
-            console.log(`💾 [DISK] Loaded metadata ${metadataId} from server`)
+            // console.log(`💾 [DISK] Loaded metadata ${metadataId} from server`)
             return fallbackData
           }
         } catch (error) {
@@ -10934,7 +10934,7 @@ export default class extends Controller {
         return null
       }
       
-      console.log(`💾 [DISK] Loaded metadata ${metadataId} from disk`)
+      // console.log(`💾 [DISK] Loaded metadata ${metadataId} from disk`)
       
       // Decompress the data if needed
       if (!vectorData.values) {
@@ -10968,7 +10968,7 @@ export default class extends Controller {
         // Trigger cleanup if we have too many metadata in memory
         this.memoryManager.cleanupUnusedMetadata()
         
-        console.log(`💾 [DISK] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
+        // console.log(`💾 [DISK] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
         return decompressedVector
       }
       
@@ -11024,7 +11024,7 @@ export default class extends Controller {
   // Toggle inline range slider for numeric metadata
   // Expand continuous metadata panel and show histogram (no coloring)
   expandContinuousMetadataPanel(metadataId, metadataName) {
-    console.log('🎚️ Expanding continuous metadata panel for:', metadataId, metadataName)
+    // console.log('🎚️ Expanding continuous metadata panel for:', metadataId, metadataName)
     
     const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataCard) {
@@ -11051,12 +11051,12 @@ export default class extends Controller {
   }
 
   toggleInlineRangeSlider(metadataId, metadataName) {
-    console.log('🎚️ Initializing inline range slider for metadata:', metadataId, metadataName)
+    // console.log('🎚️ Initializing inline range slider for metadata:', metadataId, metadataName)
     
     // Load and initialize the range slider data
-      console.log('🎚️ Loading metadata for inline range slider...')
+      // console.log('🎚️ Loading metadata for inline range slider...')
       this.dataManager.loadSingleMetadataVector(metadataId).then(vectorData => {
-        console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
+        // console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
         if (!vectorData) {
           console.error('❌ No vector data loaded for inline range slider')
           return
@@ -11064,7 +11064,7 @@ export default class extends Controller {
         
         let values = vectorData.values
         if (!values && vectorData.compressed_data) {
-          console.log('🎚️ Decompressing metadata for inline range slider...')
+          // console.log('🎚️ Decompressing metadata for inline range slider...')
           values = this.decompressMetadataVector(vectorData)
         }
         
@@ -11073,13 +11073,13 @@ export default class extends Controller {
           return
         }
         
-        console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
+        // console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
         
       // Initialize the inline range slider with the loaded values (just the histogram, no coloring)
         this.initializeInlineRangeSlider(metadataId, values)
         
       // Check renderer state after initialization (for debugging - compare with gene initialization)
-      console.log('🎚️ [CONTINUOUS INIT] Checking renderer state after initialization...')
+      // console.log('🎚️ [CONTINUOUS INIT] Checking renderer state after initialization...')
       const continuousRendererState = {
         hasReglRenderer: !!this.reglRenderer,
         rendererInstanceId: this.reglRenderer?.instanceId || 'none',
@@ -11091,9 +11091,9 @@ export default class extends Controller {
         hasDisplayOrder: !!this.displayOrder,
         displayOrderLength: this.displayOrder?.length || 0
       }
-      console.log('🎚️ [CONTINUOUS INIT] Renderer state:', continuousRendererState)
+      // console.log('🎚️ [CONTINUOUS INIT] Renderer state:', continuousRendererState)
         
-      console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
+      // console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
       }).catch(error => {
         console.error('❌ Error loading metadata for inline range slider:', error)
       })
@@ -11130,20 +11130,20 @@ export default class extends Controller {
   }
   // Show range slider modal for numeric metadata
   showRangeSlider(metadataId, metadataName) {
-    console.log('🎚️ Showing range slider for metadata:', metadataId, metadataName)
+    // console.log('🎚️ Showing range slider for metadata:', metadataId, metadataName)
     
     // Store current metadata info
     this.currentRangeSliderMetadataId = metadataId
     this.currentRangeSliderMetadataName = metadataName
     
-    console.log('🎚️ Stored metadata info:', {
-      currentRangeSliderMetadataId: this.currentRangeSliderMetadataId,
-      currentRangeSliderMetadataName: this.currentRangeSliderMetadataName
-    })
+    // console.log('🎚️ Stored metadata info:', {
+      // currentRangeSliderMetadataId: this.currentRangeSliderMetadataId,
+      // currentRangeSliderMetadataName: this.currentRangeSliderMetadataName
+    // })
     
     // Load metadata vector first to get the data range
     this.dataManager.loadSingleMetadataVector(metadataId).then(vectorData => {
-      console.log('🎚️ Loaded vector data for range slider:', vectorData)
+      // console.log('🎚️ Loaded vector data for range slider:', vectorData)
       
       if (!vectorData) {
         console.error('❌ Failed to load metadata vector for range slider - vectorData is null')
@@ -11154,14 +11154,14 @@ export default class extends Controller {
       // Check if we need to decompress the data
       let values = vectorData.values
       if (!values && vectorData.compressed_data) {
-        console.log('🎚️ Decompressing metadata vector data...')
+        // console.log('🎚️ Decompressing metadata vector data...')
         values = this.decompressMetadataVector(vectorData)
         if (!values) {
           console.error('❌ Failed to decompress metadata vector')
           alert('Failed to decompress metadata values. Please try again.')
           return
         }
-        console.log('🎚️ Successfully decompressed', values.length, 'values')
+        // console.log('🎚️ Successfully decompressed', values.length, 'values')
       }
       
       if (!values) {
@@ -11193,13 +11193,13 @@ export default class extends Controller {
         
         // Check computed styles
         const computedStyle = window.getComputedStyle(modal)
-        /*console.log('🎚️ Modal computed styles:', {
-          display: computedStyle.display,
-          visibility: computedStyle.visibility,
-          opacity: computedStyle.opacity,
-          zIndex: computedStyle.zIndex,
-          position: computedStyle.position
-        })*/
+        // /*console.log('🎚️ Modal computed styles:', {
+          // display: computedStyle.display,
+          // visibility: computedStyle.visibility,
+          // opacity: computedStyle.opacity,
+          // zIndex: computedStyle.zIndex,
+          // position: computedStyle.position
+        // })*/
         
         // Check if modal is actually visible
         //console.log('🎚️ Modal offsetParent:', modal.offsetParent)
@@ -11309,7 +11309,7 @@ export default class extends Controller {
   
   // Setup event listeners for range slider
   setupRangeSliderEventListeners() {
-    console.log('🎚️ Setting up range slider event listeners...')
+    // console.log('🎚️ Setting up range slider event listeners...')
     
     // Close button
     const closeBtn = document.getElementById('close-range-slider')
@@ -11317,7 +11317,7 @@ export default class extends Controller {
       closeBtn.onclick = () => {
         this.hideRangeSlider()
       }
-      console.log('🎚️ Close button event listener set')
+      // console.log('🎚️ Close button event listener set')
     } else {
       console.error('❌ Close button not found')
     }
@@ -11644,23 +11644,23 @@ export default class extends Controller {
   // Update plot when range changes
   updatePlot() {
     const startTime = performance.now()
-    console.log('🚀 [PERF] updatePlot started')
+    // console.log('🚀 [PERF] updatePlot started')
     
     const activeBtn = document.querySelector('.plot-type-btn.active')
     if (activeBtn.id === 'density-plot-btn') {
       const densityStart = performance.now()
       this.drawDensityPlot(this.rangeSliderData.values)
       const densityTime = performance.now() - densityStart
-      console.log(`🚀 [PERF] drawDensityPlot took ${densityTime.toFixed(2)}ms`)
+      // console.log(`🚀 [PERF] drawDensityPlot took ${densityTime.toFixed(2)}ms`)
     } else {
       const violinStart = performance.now()
       this.drawViolinPlot(this.rangeSliderData.values)
       const violinTime = performance.now() - violinStart
-      console.log(`🚀 [PERF] drawViolinPlot took ${violinTime.toFixed(2)}ms`)
+      // console.log(`🚀 [PERF] drawViolinPlot took ${violinTime.toFixed(2)}ms`)
     }
     
     const totalTime = performance.now() - startTime
-    console.log(`🚀 [PERF] updatePlot completed in ${totalTime.toFixed(2)}ms`)
+    // console.log(`🚀 [PERF] updatePlot completed in ${totalTime.toFixed(2)}ms`)
   }
   
   // Reset range slider to full range
@@ -11713,13 +11713,13 @@ export default class extends Controller {
   
   // Start dragging a range slider handle
   startRangeSliderDrag(event) {
-    console.log('🎚️ startRangeSliderDrag called!', event)
+    // console.log('🎚️ startRangeSliderDrag called!', event)
     event.preventDefault()
     event.stopPropagation()
     
     const handleType = event.currentTarget.dataset.handleType
-    console.log('🎚️ Starting drag for handle:', handleType)
-    console.log('🎚️ rangeSliderData exists:', !!this.rangeSliderData)
+    // console.log('🎚️ Starting drag for handle:', handleType)
+    // console.log('🎚️ rangeSliderData exists:', !!this.rangeSliderData)
     
     if (!this.rangeSliderData) {
       console.error('❌ No rangeSliderData available for dragging')
@@ -11733,7 +11733,7 @@ export default class extends Controller {
       startValue: handleType === 'min' ? this.rangeSliderData.currentMin : this.rangeSliderData.currentMax
     }
     
-    console.log('🎚️ Drag state initialized:', this.rangeSliderDragState)
+    // console.log('🎚️ Drag state initialized:', this.rangeSliderDragState)
     
     // Bind the event handlers to preserve 'this' context
     this.boundHandleDrag = this.handleRangeSliderDrag.bind(this)
@@ -11745,7 +11745,7 @@ export default class extends Controller {
     document.addEventListener('touchmove', this.boundHandleDrag)
     document.addEventListener('touchend', this.boundStopDrag)
     
-    console.log('🎚️ Event listeners added')
+    // console.log('🎚️ Event listeners added')
     
     // Change cursor
     document.body.style.cursor = 'grabbing'
@@ -11787,25 +11787,25 @@ export default class extends Controller {
     const handleUpdateStart = performance.now()
     this.updateRangeSliderHandles()
     const handleUpdateTime = performance.now() - handleUpdateStart
-    console.log(`🚀 [PERF] updateRangeSliderHandles took ${handleUpdateTime.toFixed(2)}ms`)
+    // console.log(`🚀 [PERF] updateRangeSliderHandles took ${handleUpdateTime.toFixed(2)}ms`)
     
     // Throttle plot updates during dragging for better performance
     if (!this.rangeSliderUpdateScheduled) {
       this.rangeSliderUpdateScheduled = true
       requestAnimationFrame(() => {
         this.rangeSliderUpdateScheduled = false
-        console.log('🚀 [PERF] Scheduled modal range slider plot update')
+        // console.log('🚀 [PERF] Scheduled modal range slider plot update')
         const plotUpdateStart = performance.now()
         this.updatePlot()
         const plotUpdateTime = performance.now() - plotUpdateStart
-        console.log(`🚀 [PERF] Modal range slider updatePlot took ${plotUpdateTime.toFixed(2)}ms`)
+        // console.log(`🚀 [PERF] Modal range slider updatePlot took ${plotUpdateTime.toFixed(2)}ms`)
       })
     } else {
-      console.log('🚀 [PERF] Throttled modal range slider plot update (already scheduled)')
+      // console.log('🚀 [PERF] Throttled modal range slider plot update (already scheduled)')
     }
     
     const totalDragTime = performance.now() - dragStartTime
-    console.log(`🚀 [PERF] Modal range slider handleRangeSliderDrag completed in ${totalDragTime.toFixed(2)}ms`)
+    // console.log(`🚀 [PERF] Modal range slider handleRangeSliderDrag completed in ${totalDragTime.toFixed(2)}ms`)
   }
   
   // Stop range slider drag
@@ -12046,8 +12046,8 @@ export default class extends Controller {
 
   // Draw continuous distribution (histogram-like bar showing value distribution)
   drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector) {
-    console.log('🎨 [BAR PLOTS] drawContinuousDistributions called for metadata:', metadataId)
-    console.log('🎨 [BAR PLOTS] Current gradient points:', this.customGradientControlPoints || this.gradientControlPoints)
+    // console.log('🎨 [BAR PLOTS] drawContinuousDistributions called for metadata:', metadataId)
+    // console.log('🎨 [BAR PLOTS] Current gradient points:', this.customGradientControlPoints || this.gradientControlPoints)
     
     // Get filtered cell indices (if any filters are active)
     const filteredIndices = this.dataManager.getFilteredCellIndices()
@@ -12316,7 +12316,7 @@ export default class extends Controller {
     const geneId = button.dataset.geneId
     const geneMetadataId = button.dataset.metadataId || `gene_${geneId}`
     
-    console.log('🧬 Download gene expression:', { geneId, geneMetadataId })
+    // console.log('🧬 Download gene expression:', { geneId, geneMetadataId })
     
     // Get gene expression data from GeneManager
     const geneManager = this.geneManager
@@ -12385,7 +12385,7 @@ export default class extends Controller {
     link.click()
     document.body.removeChild(link)
     
-    console.log('🧬 Gene expression data downloaded')
+    // console.log('🧬 Gene expression data downloaded')
   }
 
   // Old implementation moved to DownloadManager
@@ -12494,7 +12494,7 @@ export default class extends Controller {
     // Write and download
     window.XLSX.writeFile(wb, filename)
     
-    console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
+    // console.log(`Downloaded global distribution for ${displayedMetadataVector.name}`)
   }
   
   // Add filters sheet to workbook

@@ -14,13 +14,13 @@ export default class extends Controller {
   }
 
   connect() {
-    console.log('🎚️ Range slider controller connected for metadata:', this.metadataIdValue)
-    console.log('🎚️ Initial values:', {
-      min: this.minValue,
-      max: this.maxValue,
-      currentMin: this.currentMinValue,
-      currentMax: this.currentMaxValue
-    })
+    // console.log('🎚️ Range slider controller connected for metadata:', this.metadataIdValue)
+    // console.log('🎚️ Initial values:', {
+      // min: this.minValue,
+      // max: this.maxValue,
+      // currentMin: this.currentMinValue,
+      // currentMax: this.currentMaxValue
+    // })
     
     // Initialize drag state
     this.isDragging = false
@@ -47,7 +47,7 @@ export default class extends Controller {
     if (visualizationElement) {
       visualizationController = this.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
       if (visualizationController) {
-        console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', visualizationController.instanceId)
+        // console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', visualizationController.instanceId)
         // Update window reference to keep it in sync
         window.visualizationController = visualizationController
       } else {
@@ -62,11 +62,11 @@ export default class extends Controller {
     this.visualizationController = visualizationController
     this.dataManager = this.visualizationController?.dataManager
     this.rendererManager = this.visualizationController?.rendererManager
-    console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
-    console.log('🎚️ Range slider controller connected, controller instance ID:', this.visualizationController?.instanceId || 'none')
-    console.log('🎚️ Range slider controller connected, renderer instance ID:', this.visualizationController?.reglRenderer?.instanceId || 'none')
-    console.log('🎚️ Range slider controller connected, dataManager:', !!this.dataManager)
-    console.log('🎚️ Range slider controller connected, rendererManager:', !!this.rendererManager)
+    // console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
+    // console.log('🎚️ Range slider controller connected, controller instance ID:', this.visualizationController?.instanceId || 'none')
+    // console.log('🎚️ Range slider controller connected, renderer instance ID:', this.visualizationController?.reglRenderer?.instanceId || 'none')
+    // console.log('🎚️ Range slider controller connected, dataManager:', !!this.dataManager)
+    // console.log('🎚️ Range slider controller connected, rendererManager:', !!this.rendererManager)
     
     // Initialize button appearance
     this.updateButtonAppearance()
@@ -75,7 +75,7 @@ export default class extends Controller {
     if (this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]) {
       const sliderData = this.visualizationController.inlineRangeSliderData[this.metadataIdValue]
       if (sliderData.values && sliderData.min !== undefined && sliderData.max !== undefined) {
-        console.log('🎚️ Data already available, initializing slider immediately')
+        // console.log('🎚️ Data already available, initializing slider immediately')
         this.minValue = sliderData.min
         this.maxValue = sliderData.max
         this.currentMinValue = sliderData.currentMin ?? sliderData.min
@@ -86,7 +86,7 @@ export default class extends Controller {
     }
     
     // Don't initialize immediately - wait for values to be set by the main controller
-    console.log('🎚️ Range slider controller ready, waiting for initialization')
+    // console.log('🎚️ Range slider controller ready, waiting for initialization')
   }
 
   disconnect() {
@@ -120,12 +120,12 @@ export default class extends Controller {
 
   // Initialize the slider with data
   initializeSlider() {
-    console.log('🎚️ Initializing range slider with values:', {
-      min: this.minValue,
-      max: this.maxValue,
-      currentMin: this.currentMinValue,
-      currentMax: this.currentMaxValue
-    })
+    // console.log('🎚️ Initializing range slider with values:', {
+      // min: this.minValue,
+      // max: this.maxValue,
+      // currentMin: this.currentMinValue,
+      // currentMax: this.currentMaxValue
+    // })
     
     if (this.minValue === undefined || this.maxValue === undefined) {
       console.error('❌ Range slider values not properly set:', {
@@ -145,7 +145,7 @@ export default class extends Controller {
       if (visualizationElement) {
         const domController = this.application.getControllerForElementAndIdentifier(visualizationElement, 'visualization')
         if (domController) {
-          console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', domController.instanceId)
+          // console.log('🎚️ [RANGE SLIDER] Got visualization controller from DOM element, instance ID:', domController.instanceId)
           this.visualizationController = domController
           this.dataManager = domController.dataManager
           this.rendererManager = domController.rendererManager
@@ -158,13 +158,13 @@ export default class extends Controller {
       const hasInlineRangeSliderData = !!this.visualizationController.inlineRangeSliderData
       const inlineRangeSliderDataKeys = this.visualizationController.inlineRangeSliderData ? Object.keys(this.visualizationController.inlineRangeSliderData) : []
       
-      console.log('🎚️ [RANGE SLIDER] Checking current controller for data:', {
-        controllerId: this.visualizationController.instanceId,
-        hasInlineRangeSliderData,
-        inlineRangeSliderDataKeys,
-        hasDataForThisMetadata: hasData,
-        metadataId: this.metadataIdValue
-      })
+      // console.log('🎚️ [RANGE SLIDER] Checking current controller for data:', {
+        // controllerId: this.visualizationController.instanceId,
+        // hasInlineRangeSliderData,
+        // inlineRangeSliderDataKeys,
+        // hasDataForThisMetadata: hasData,
+        // metadataId: this.metadataIdValue
+      // })
       
       if (!hasData) {
         // Try to get a different instance that might have the data
@@ -177,42 +177,42 @@ export default class extends Controller {
             const domHasInlineRangeSliderData = !!domController.inlineRangeSliderData
             const domInlineRangeSliderDataKeys = domController.inlineRangeSliderData ? Object.keys(domController.inlineRangeSliderData) : []
             
-            console.log('🎚️ [RANGE SLIDER] Checking DOM controller for data:', {
-              controllerId: domController.instanceId,
-              hasInlineRangeSliderData: domHasInlineRangeSliderData,
-              inlineRangeSliderDataKeys: domInlineRangeSliderDataKeys,
-              hasDataForThisMetadata: domHasData,
-              metadataId: this.metadataIdValue
-            })
+            // console.log('🎚️ [RANGE SLIDER] Checking DOM controller for data:', {
+              // controllerId: domController.instanceId,
+              // hasInlineRangeSliderData: domHasInlineRangeSliderData,
+              // inlineRangeSliderDataKeys: domInlineRangeSliderDataKeys,
+              // hasDataForThisMetadata: domHasData,
+              // metadataId: this.metadataIdValue
+            // })
             
             if (domHasData) {
-              console.log('🎚️ [RANGE SLIDER] Current controller missing data, switching to DOM controller with data')
-              console.log('🎚️ [RANGE SLIDER] Old controller ID:', this.visualizationController?.instanceId || 'none')
-              console.log('🎚️ [RANGE SLIDER] New controller ID:', domController.instanceId)
+              // console.log('🎚️ [RANGE SLIDER] Current controller missing data, switching to DOM controller with data')
+              // console.log('🎚️ [RANGE SLIDER] Old controller ID:', this.visualizationController?.instanceId || 'none')
+              // console.log('🎚️ [RANGE SLIDER] New controller ID:', domController.instanceId)
               this.visualizationController = domController
               this.dataManager = domController.dataManager
               this.rendererManager = domController.rendererManager
               window.visualizationController = domController
             } else {
-              console.log('🎚️ [RANGE SLIDER] Neither controller has data, keeping current reference (was explicitly set)')
+              // console.log('🎚️ [RANGE SLIDER] Neither controller has data, keeping current reference (was explicitly set)')
             }
           }
         }
       } else {
-        console.log('🎚️ [RANGE SLIDER] Current controller has data, keeping reference')
+        // console.log('🎚️ [RANGE SLIDER] Current controller has data, keeping reference')
       }
     }
     
     // Check if visualization controller and data are available
-    console.log('🎚️ Checking data availability:', {
-      hasVisualizationController: !!this.visualizationController,
-      controllerInstanceId: this.visualizationController?.instanceId || 'none',
-      rendererInstanceId: this.visualizationController?.reglRenderer?.instanceId || 'none',
-      hasInlineRangeSliderData: !!this.visualizationController?.inlineRangeSliderData,
-      inlineRangeSliderDataKeys: this.visualizationController?.inlineRangeSliderData ? Object.keys(this.visualizationController.inlineRangeSliderData) : [],
-      hasMetadataData: !!this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue],
-      metadataId: this.metadataIdValue
-    })
+    // console.log('🎚️ Checking data availability:', {
+      // hasVisualizationController: !!this.visualizationController,
+      // controllerInstanceId: this.visualizationController?.instanceId || 'none',
+      // rendererInstanceId: this.visualizationController?.reglRenderer?.instanceId || 'none',
+      // hasInlineRangeSliderData: !!this.visualizationController?.inlineRangeSliderData,
+      // inlineRangeSliderDataKeys: this.visualizationController?.inlineRangeSliderData ? Object.keys(this.visualizationController.inlineRangeSliderData) : [],
+      // hasMetadataData: !!this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue],
+      // metadataId: this.metadataIdValue
+    // })
     
     this.updateSliderUI()
     this.updateSelectedCellsCount()
@@ -228,7 +228,7 @@ export default class extends Controller {
   startDrag(event) {
     // Get the handle type from the event target's data attribute
     const handleType = event.target.dataset.rangeSliderHandleParam
-    console.log('🎚️ Starting drag for handle:', handleType)
+    // console.log('🎚️ Starting drag for handle:', handleType)
     
     event.preventDefault()
     event.stopPropagation()
@@ -285,23 +285,23 @@ export default class extends Controller {
     this.updateSliderUI()
     this.updateSelectedCellsCount()
     const uiTime = performance.now() - uiStartTime
-    console.log(`🚀 [PERF] UI update took ${uiTime.toFixed(2)}ms`)
+    // console.log(`🚀 [PERF] UI update took ${uiTime.toFixed(2)}ms`)
     
     // Throttle expensive operations during dragging
     if (!this.dragUpdateScheduled) {
       this.dragUpdateScheduled = true
       requestAnimationFrame(() => {
         this.dragUpdateScheduled = false
-        console.log('🚀 [PERF] Scheduled expensive operations for metadata:', this.metadataIdValue)
+        // console.log('🚀 [PERF] Scheduled expensive operations for metadata:', this.metadataIdValue)
         this.updateMainPlot()
         this.drawDensityPlot()
       })
     } else {
-      console.log('🚀 [PERF] Throttled expensive operations (already scheduled)')
+      // console.log('🚀 [PERF] Throttled expensive operations (already scheduled)')
     }
     
     const totalDragTime = performance.now() - dragStartTime
-    console.log(`🚀 [PERF] handleDrag completed in ${totalDragTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
+    // console.log(`🚀 [PERF] handleDrag completed in ${totalDragTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
 
   // Stop dragging
@@ -321,23 +321,23 @@ export default class extends Controller {
     this.updateMainPlot()
     this.drawDensityPlot()
     
-    console.log('🎚️ Drag stopped')
+    // console.log('🎚️ Drag stopped')
   }
 
   // Update the slider UI elements
   updateSliderUI() {
-    console.log('🎚️ Updating slider UI with values:', {
-      min: this.minValue,
-      max: this.maxValue,
-      currentMin: this.currentMinValue,
-      currentMax: this.currentMaxValue
-    })
+    // console.log('🎚️ Updating slider UI with values:', {
+      // min: this.minValue,
+      // max: this.maxValue,
+      // currentMin: this.currentMinValue,
+      // currentMax: this.currentMaxValue
+    // })
     
     const range = this.maxValue - this.minValue
     const minPercent = ((this.currentMinValue - this.minValue) / range) * 100
     const maxPercent = ((this.currentMaxValue - this.minValue) / range) * 100
     
-    console.log('🎚️ Calculated percentages:', { minPercent, maxPercent })
+    // console.log('🎚️ Calculated percentages:', { minPercent, maxPercent })
     
     // Update handle positions
     this.minHandleTarget.style.left = `${minPercent}%`
@@ -429,7 +429,7 @@ export default class extends Controller {
     
     // If the metadata was explicitly unchecked by the user, don't change the color
     if (visualizationController?.uncheckedMetadata?.has(this.metadataIdValue)) {
-      console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is in uncheckedMetadata set - keeping it unchecked`)
+      // console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is in uncheckedMetadata set - keeping it unchecked`)
       return
     }
     
@@ -438,7 +438,7 @@ export default class extends Controller {
     const isCurrentlyUnchecked = currentBgColor === 'rgb(243, 244, 246)' || currentBgColor === '#f3f4f6'
     
     if (isCurrentlyUnchecked) {
-      console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is currently unchecked - not changing color`)
+      // console.log(`🔍 [CHECKBOX COLOR] Metadata ${this.metadataIdValue} is currently unchecked - not changing color`)
       return
     }
     
@@ -497,14 +497,14 @@ export default class extends Controller {
       selectedByAllFiltersCount = selectedByRangeCount
     }
     
-    console.log('🎚️ Updating selected count:', {
-      selectedByRangeCount,
-      selectedByAllFiltersCount,
-      currentMin: this.currentMinValue,
-      currentMax: this.currentMaxValue,
-      totalValues: sliderData.values.length,
-      hasOtherFilters: selectedByRangeCount !== selectedByAllFiltersCount
-    })
+    // console.log('🎚️ Updating selected count:', {
+      // selectedByRangeCount,
+      // selectedByAllFiltersCount,
+      // currentMin: this.currentMinValue,
+      // currentMax: this.currentMaxValue,
+      // totalValues: sliderData.values.length,
+      // hasOtherFilters: selectedByRangeCount !== selectedByAllFiltersCount
+    // })
     
     // Show count with visual indicator if other filters are active
     if (selectedByRangeCount > selectedByAllFiltersCount) {
@@ -543,21 +543,21 @@ export default class extends Controller {
           this.plotUpdateScheduled = true
           requestAnimationFrame(() => {
             this.plotUpdateScheduled = false
-            console.log('🚀 [PERF] Scheduled plot update for metadata:', this.metadataIdValue)
+            // console.log('🚀 [PERF] Scheduled plot update for metadata:', this.metadataIdValue)
             this.performPlotUpdate()
           })
         }
-        console.log('🚀 [PERF] Throttled plot update (too soon), metadata:', this.metadataIdValue)
+        // console.log('🚀 [PERF] Throttled plot update (too soon), metadata:', this.metadataIdValue)
         return
       }
     }
     
-    console.log('🚀 [PERF] Starting plot update for metadata:', this.metadataIdValue)
+    // console.log('🚀 [PERF] Starting plot update for metadata:', this.metadataIdValue)
     this.performPlotUpdate()
     this.lastPlotUpdate = now
     
     const endTime = performance.now()
-    console.log(`🚀 [PERF] updateMainPlot completed in ${(endTime - startTime).toFixed(2)}ms for metadata:`, this.metadataIdValue)
+    // console.log(`🚀 [PERF] updateMainPlot completed in ${(endTime - startTime).toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
   
   // Perform the actual plot update (separated for throttling)
@@ -568,7 +568,7 @@ export default class extends Controller {
     const logPrefix = isGene ? '🧬 [SLIDER UPDATE]' : '🚀 [PERF]'
     
     const startTime = performance.now()
-    console.log(`${logPrefix} performPlotUpdate started for metadata:`, this.metadataIdValue)
+    // console.log(`${logPrefix} performPlotUpdate started for metadata:`, this.metadataIdValue)
     
     // Update the color range in the main visualization
     const colorRangeStart = performance.now()
@@ -578,7 +578,7 @@ export default class extends Controller {
       
       if (shouldAdaptColorRange) {
         // Full color range adaptation - use the full rendering approach
-        console.log('🎨 Adapting color range to selected range')
+        // console.log('🎨 Adapting color range to selected range')
         this.visualizationController.visibilityOnlyUpdate = false // Force full render
       } else {
         // Fast path - just visibility updates
@@ -595,7 +595,7 @@ export default class extends Controller {
       )
     }
     const colorRangeTime = performance.now() - colorRangeStart
-    console.log(`${logPrefix} updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
+    // console.log(`${logPrefix} updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
     
     // Check if we're showing the full range (no filtering needed)
     const isFullRange = this.currentMinValue <= this.minValue && this.currentMaxValue >= this.maxValue
@@ -606,7 +606,7 @@ export default class extends Controller {
         delete this.visualizationController.selectedRanges[this.metadataIdValue]
       }
       if (isGene) {
-        console.log(`${logPrefix} Full range selected - removing from selectedRanges`)
+        // console.log(`${logPrefix} Full range selected - removing from selectedRanges`)
       }
     } else {
       // Store the range in selectedRanges for unified filtering
@@ -618,11 +618,11 @@ export default class extends Controller {
         max: this.currentMaxValue
       }
       if (isGene) {
-        console.log(`${logPrefix} Stored range in selectedRanges:`, {
-          metadataId: this.metadataIdValue,
-          range: this.visualizationController.selectedRanges[this.metadataIdValue],
-          allRanges: Object.keys(this.visualizationController.selectedRanges)
-        })
+        // console.log(`${logPrefix} Stored range in selectedRanges:`, {
+          // metadataId: this.metadataIdValue,
+          // range: this.visualizationController.selectedRanges[this.metadataIdValue],
+          // allRanges: Object.keys(this.visualizationController.selectedRanges)
+        // })
       }
     }
     
@@ -632,7 +632,7 @@ export default class extends Controller {
       this.visualizationController.filterCache.clear()
     }
     const cacheClearTime = performance.now() - cacheClearStart
-    console.log(`${logPrefix} filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
+    // console.log(`${logPrefix} filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
     // Update filter switch visibility based on whether there's a selection
     if (this.visualizationController.uiManager) {
@@ -648,7 +648,7 @@ export default class extends Controller {
     // Verify loadedMetadataVectors has the gene before filtering (critical check)
     if (isGene) {
       const hasInLoadedVectors = !!this.visualizationController.loadedMetadataVectors?.[this.metadataIdValue]
-      console.log(`${logPrefix} BEFORE updateCellFiltering - loadedMetadataVectors has ${this.metadataIdValue}:`, hasInLoadedVectors)
+      // console.log(`${logPrefix} BEFORE updateCellFiltering - loadedMetadataVectors has ${this.metadataIdValue}:`, hasInLoadedVectors)
       if (!hasInLoadedVectors) {
         console.error(`❌ ${logPrefix} CRITICAL: ${this.metadataIdValue} NOT in loadedMetadataVectors before filtering!`)
         console.error(`❌ ${logPrefix} loadedMetadataVectors keys:`, Object.keys(this.visualizationController.loadedMetadataVectors || {}))
@@ -657,7 +657,7 @@ export default class extends Controller {
         // The metadata might be in a different controller instance
         const sliderData = this.visualizationController.inlineRangeSliderData?.[this.metadataIdValue]
         if (sliderData && sliderData.values) {
-          console.log(`${logPrefix} Attempting to restore gene metadata from inlineRangeSliderData`)
+          // console.log(`${logPrefix} Attempting to restore gene metadata from inlineRangeSliderData`)
           
           // Create the metadata vector structure
           const minVal = this.visualizationController.dataManager?.safeMin(sliderData.values) ?? Math.min(...sliderData.values)
@@ -685,23 +685,23 @@ export default class extends Controller {
             nber_cols: sliderData.values.length
           }
           
-          console.log(`${logPrefix} Restored gene metadata in loadedMetadataVectors: ${this.metadataIdValue}`)
-          console.log(`${logPrefix} loadedMetadataVectors keys after restore:`, Object.keys(this.visualizationController.loadedMetadataVectors))
+          // console.log(`${logPrefix} Restored gene metadata in loadedMetadataVectors: ${this.metadataIdValue}`)
+          // console.log(`${logPrefix} loadedMetadataVectors keys after restore:`, Object.keys(this.visualizationController.loadedMetadataVectors))
         } else {
           console.error(`❌ ${logPrefix} Cannot restore - inlineRangeSliderData also missing ${this.metadataIdValue}`)
         }
       }
       
       // Check renderer state before filtering (for debugging)
-      console.log(`${logPrefix} Renderer state BEFORE updateCellFiltering (gene filtering):`, {
-        hasReglRenderer: !!this.visualizationController.reglRenderer,
-        rendererInstanceId: this.visualizationController.reglRenderer?.instanceId || 'none',
-        numPoints: this.visualizationController.reglRenderer?.numPoints || 0,
-        hasPositions: !!this.visualizationController.reglRenderer?.positions,
-        positionsLength: this.visualizationController.reglRenderer?.positions?.length || 0,
-        hasCurrentCoordinates: !!this.visualizationController.currentCoordinates,
-        currentCoordinatesLength: this.visualizationController.currentCoordinates?.length || 0
-      })
+      // console.log(`${logPrefix} Renderer state BEFORE updateCellFiltering (gene filtering):`, {
+        // hasReglRenderer: !!this.visualizationController.reglRenderer,
+        // rendererInstanceId: this.visualizationController.reglRenderer?.instanceId || 'none',
+        // numPoints: this.visualizationController.reglRenderer?.numPoints || 0,
+        // hasPositions: !!this.visualizationController.reglRenderer?.positions,
+        // positionsLength: this.visualizationController.reglRenderer?.positions?.length || 0,
+        // hasCurrentCoordinates: !!this.visualizationController.currentCoordinates,
+        // currentCoordinatesLength: this.visualizationController.currentCoordinates?.length || 0
+      // })
     }
     
     // Trigger unified filtering (which will update ALL counts and render)
@@ -709,13 +709,13 @@ export default class extends Controller {
     if (this.dataManager.updateCellFiltering) {
       // Pass shouldUpdateColors=true if we're adapting the color range
       const shouldUpdateColors = this.adaptColorRangeEnabled
-      console.log(`${logPrefix} Calling updateCellFiltering with shouldUpdateColors:`, shouldUpdateColors)
+      // console.log(`${logPrefix} Calling updateCellFiltering with shouldUpdateColors:`, shouldUpdateColors)
       this.dataManager.updateCellFiltering(shouldUpdateColors)
     } else {
       console.error(`❌ ${logPrefix} dataManager.updateCellFiltering is not available!`)
     }
     const filterTime = performance.now() - filterStart
-    console.log(`${logPrefix} updateCellFiltering took ${filterTime.toFixed(2)}ms`)
+    // console.log(`${logPrefix} updateCellFiltering took ${filterTime.toFixed(2)}ms`)
     
     // Only update the color legend if we're adapting the color range
     // (otherwise the legend doesn't change, so no need to redraw)
@@ -725,13 +725,13 @@ export default class extends Controller {
         this.rendererManager.renderContinuousColorLegendCanvas2D()
       }
       const legendTime = performance.now() - legendStart
-      console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
+      // console.log(`🚀 [PERF] renderContinuousColorLegend took ${legendTime.toFixed(2)}ms`)
     } else {
-      console.log(`🚀 [PERF] Skipping legend update (adapt range not enabled)`)
+      // console.log(`🚀 [PERF] Skipping legend update (adapt range not enabled)`)
     }
     
     const totalTime = performance.now() - startTime
-    console.log(`🚀 [PERF] performPlotUpdate completed in ${totalTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
+    // console.log(`🚀 [PERF] performPlotUpdate completed in ${totalTime.toFixed(2)}ms for metadata:`, this.metadataIdValue)
   }
 
   isPlotVisible() {
@@ -1081,13 +1081,13 @@ export default class extends Controller {
 
   // Apply the current range (called by Apply button)
   applyRange() {
-    console.log('🎚️ Applying range:', { min: this.currentMinValue, max: this.currentMaxValue })
+    // console.log('🎚️ Applying range:', { min: this.currentMinValue, max: this.currentMaxValue })
     this.updateMainPlot()
   }
 
   // Reset to full range (called by Reset button)
   resetRange() {
-    console.log('🎚️ Resetting range to full range')
+    // console.log('🎚️ Resetting range to full range')
     this.currentMinValue = this.minValue
     this.currentMaxValue = this.maxValue
     this.updateSliderUI()
@@ -1098,8 +1098,8 @@ export default class extends Controller {
 
   // Handle color range adaptation button click
   adaptColorRangeChanged() {
-    console.log('🎨 adaptColorRangeChanged method called!')
-    console.log('🎨 Has button target:', this.hasAdaptColorRangeButtonTarget)
+    // console.log('🎨 adaptColorRangeChanged method called!')
+    // console.log('🎨 Has button target:', this.hasAdaptColorRangeButtonTarget)
     
     if (!this.hasAdaptColorRangeButtonTarget) {
       console.error('🎨 Button target not found!')
@@ -1108,24 +1108,24 @@ export default class extends Controller {
     
     // Toggle the state
     this.adaptColorRangeEnabled = !this.adaptColorRangeEnabled
-    console.log('🎨 Color range adaptation changed:', this.adaptColorRangeEnabled ? 'enabled' : 'disabled')
-    console.log('🎨 Current range:', { min: this.currentMinValue, max: this.currentMaxValue })
+    // console.log('🎨 Color range adaptation changed:', this.adaptColorRangeEnabled ? 'enabled' : 'disabled')
+    // console.log('🎨 Current range:', { min: this.currentMinValue, max: this.currentMaxValue })
     
     // Update button appearance
     this.updateButtonAppearance()
     
-    console.log('🎨 After updateButtonAppearance, checking visualization controller...')
+    // console.log('🎨 After updateButtonAppearance, checking visualization controller...')
     
     if (!this.visualizationController) {
       console.error('🎨 Visualization controller not found!')
       return
     }
     
-    console.log('🎨 Visualization controller found, proceeding with re-render')
+    // console.log('🎨 Visualization controller found, proceeding with re-render')
     
     // Force a full re-render to update colors and legend
     this.visualizationController.visibilityOnlyUpdate = false
-    console.log('🎨 Set visibilityOnlyUpdate to false')
+    // console.log('🎨 Set visibilityOnlyUpdate to false')
     
     // Calculate the effective range based on visible cells when adapt is enabled
     let effectiveMin = this.currentMinValue
@@ -1154,7 +1154,7 @@ export default class extends Controller {
           if (minVal !== Infinity && maxVal !== -Infinity) {
             effectiveMin = minVal
             effectiveMax = maxVal
-            console.log('🎨 Adapted color range to visible cells:', { min: effectiveMin, max: effectiveMax })
+            // console.log('🎨 Adapted color range to visible cells:', { min: effectiveMin, max: effectiveMax })
             
             // Update the slider to show the new range
             this.currentMinValue = effectiveMin
@@ -1163,7 +1163,7 @@ export default class extends Controller {
             this.updateSelectedCellsCount()
           }
         } else {
-          console.log('🎨 No filtering applied, using full data range')
+          // console.log('🎨 No filtering applied, using full data range')
           // Use the full data range when no filtering is applied
           effectiveMin = this.minValue
           effectiveMax = this.maxValue
@@ -1178,27 +1178,27 @@ export default class extends Controller {
     }
     
     // Update the color range with the new setting
-    console.log('🎨 Calling updateColorRange with:', {
-      metadataId: this.metadataIdValue,
-      min: effectiveMin,
-      max: effectiveMax,
-      adapt: this.adaptColorRangeEnabled
-    })
+    // console.log('🎨 Calling updateColorRange with:', {
+      // metadataId: this.metadataIdValue,
+      // min: effectiveMin,
+      // max: effectiveMax,
+      // adapt: this.adaptColorRangeEnabled
+    // })
     this.visualizationController.updateColorRange(
       this.metadataIdValue, 
       effectiveMin, 
       effectiveMax,
       this.adaptColorRangeEnabled
     )
-    console.log('🎨 updateColorRange completed')
+    // console.log('🎨 updateColorRange completed')
     
     // Trigger a full re-render of the plot and legend
-    console.log('🎨 About to trigger re-render, method exists?', !!this.visualizationController.renderPointsWithCurrentColoring)
+    // console.log('🎨 About to trigger re-render, method exists?', !!this.visualizationController.renderPointsWithCurrentColoring)
     if (this.visualizationController.renderPointsWithCurrentColoring) {
-      console.log('🎨 Triggering full plot re-render...')
+      // console.log('🎨 Triggering full plot re-render...')
       try {
         this.visualizationController.renderPointsWithCurrentColoring()
-        console.log('🎨 Plot re-render completed')
+        // console.log('🎨 Plot re-render completed')
       } catch (error) {
         console.error('🎨 ERROR during plot re-render:', error)
         console.error('🎨 Error stack:', error.stack)
@@ -1207,11 +1207,11 @@ export default class extends Controller {
       console.error('🎨 renderPointsWithCurrentColoring method not found!')
     }
     
-    console.log('🎨 About to trigger legend re-render, method exists?', !!this.rendererManager.renderContinuousColorLegendCanvas2D)
+    // console.log('🎨 About to trigger legend re-render, method exists?', !!this.rendererManager.renderContinuousColorLegendCanvas2D)
     if (this.rendererManager.renderContinuousColorLegendCanvas2D) {
-      console.log('🎨 Triggering legend re-render...')
+      // console.log('🎨 Triggering legend re-render...')
       this.rendererManager.renderContinuousColorLegendCanvas2D()
-      console.log('🎨 Legend re-render completed')
+      // console.log('🎨 Legend re-render completed')
     } else {
       console.error('🎨 renderContinuousColorLegend method not found!')
     }
@@ -1221,20 +1221,20 @@ export default class extends Controller {
     
     // Update all bar plots to reflect the new gradient
     if (this.visualizationController.dataManager && this.visualizationController.dataManager.updateAllCategoryDistributions) {
-      console.log('🎨 Updating all category distributions...')
+      // console.log('🎨 Updating all category distributions...')
       this.visualizationController.dataManager.updateAllCategoryDistributions()
-      console.log('🎨 Category distributions updated')
+      // console.log('🎨 Category distributions updated')
     } else {
       console.warn('🎨 updateAllCategoryDistributions not found!')
     }
     
-    console.log('🎨 Button click handling completed!')
+    // console.log('🎨 Button click handling completed!')
   }
 
   // Update button appearance based on state
   updateButtonAppearance() {
     if (!this.hasAdaptColorRangeButtonTarget) {
-      console.log('🎨 Button target not found for appearance update')
+      // console.log('🎨 Button target not found for appearance update')
       return
     }
     
@@ -1243,12 +1243,12 @@ export default class extends Controller {
     // Check if this metadata/gene is currently being used for coloring
     const isColoringActive = this.visualizationController?.currentMetadataVector?.id === this.metadataIdValue
     
-    console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled, 'coloring active:', isColoringActive)
+    // console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled, 'coloring active:', isColoringActive)
     
     // Hide button if coloring is not active
     if (!isColoringActive) {
       button.style.display = 'none'
-      console.log('🎨 Hiding adapt color range button - coloring not active for this metadata')
+      // console.log('🎨 Hiding adapt color range button - coloring not active for this metadata')
       return
     }
     
@@ -1257,24 +1257,24 @@ export default class extends Controller {
     
     if (this.adaptColorRangeEnabled) {
       // Active state - green colors
-      console.log('🎨 Setting green colors for active state')
+      // console.log('🎨 Setting green colors for active state')
       button.style.backgroundColor = '#f0fdf4'
       button.style.borderColor = '#86efac'
       button.style.color = '#16a34a'
       button.title = 'Color range adapted to selected range - Click to use full data range'
     } else {
       // Inactive state - grey colors
-      console.log('🎨 Setting grey colors for inactive state')
+      // console.log('🎨 Setting grey colors for inactive state')
       button.style.backgroundColor = '#f9fafb'
       button.style.borderColor = '#d1d5db'
       button.style.color = '#6b7280'
       button.title = 'Adapt color range to selected range - When enabled, the color legend will adjust to show the full range of selected values'
     }
     
-    console.log('🎨 Button appearance updated:', {
-      backgroundColor: button.style.backgroundColor,
-      borderColor: button.style.borderColor,
-      color: button.style.color
-    })
+    // console.log('🎨 Button appearance updated:', {
+      // backgroundColor: button.style.backgroundColor,
+      // borderColor: button.style.borderColor,
+      // color: button.style.color
+    // })
   }
 }

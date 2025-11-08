@@ -185,12 +185,11 @@ export class DownloadManager {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
     
-    // Create distribution data
-    const distributionData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (count)`), ...sortedColoringCategories.map(cat => `${cat} (%)`)]]
+    // Create distribution data for counts and percentages separately
+    const distributionCountsData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (# cells)`)]]
+    const distributionPercentagesData = [['Category', ...sortedColoringCategories.map(cat => `${cat} (% cells)`)]]
     
     sortedCategories.forEach(displayedCategory => {
-      const row = [displayedCategory]
-      
       // Find cells in this category (filtered only)
       const cellsInCategory = []
       for (let i = 0; i < displayedMetadataVector.values.length; i++) {
@@ -207,22 +206,27 @@ export class DownloadManager {
       })
       
       // Add counts
+      const countsRow = [displayedCategory]
       sortedColoringCategories.forEach(coloringCat => {
-        row.push(distribution[coloringCat] || 0)
+        countsRow.push(distribution[coloringCat] || 0)
       })
+      distributionCountsData.push(countsRow)
       
       // Add percentages
+      const percentagesRow = [displayedCategory]
       sortedColoringCategories.forEach(coloringCat => {
         const count = distribution[coloringCat] || 0
         const percentage = cellsInCategory.length > 0 ? parseFloat(((count / cellsInCategory.length) * 100).toFixed(2)) : 0
-        row.push(percentage)
+        percentagesRow.push(percentage)
       })
-      
-      distributionData.push(row)
+      distributionPercentagesData.push(percentagesRow)
     })
     
-    const ws = window.XLSX.utils.aoa_to_sheet(distributionData)
-    window.XLSX.utils.book_append_sheet(wb, ws, 'Distribution')
+    const countsSheet = window.XLSX.utils.aoa_to_sheet(distributionCountsData)
+    window.XLSX.utils.book_append_sheet(wb, countsSheet, 'Distribution (# cells)')
+    
+    const percentagesSheet = window.XLSX.utils.aoa_to_sheet(distributionPercentagesData)
+    window.XLSX.utils.book_append_sheet(wb, percentagesSheet, 'Distribution (% cells)')
   }
   
   // Add continuous distribution sheet to workbook

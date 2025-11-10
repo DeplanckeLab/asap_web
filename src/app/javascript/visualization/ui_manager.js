@@ -808,6 +808,254 @@ export class UIManager {
     this.showPlotInfoPanel()
   }
 
+  // Update the global filter summary frame in the main menu
+  updateGlobalFilterSummary() {
+    const container = document.getElementById('global-filter-summary')
+    if (!container) return
+    
+    const countElement = document.getElementById('active-filter-count')
+    const switchElement = document.getElementById('global-filter-switch')
+    const iconElement = container.querySelector('i')
+    
+    const filtersEnabled = this.controller.globalFiltersEnabled !== false
+    const hasDataManager = !!this.controller.dataManager
+    const summary = hasDataManager && this.controller.dataManager.getFilterConstraintSummary
+      ? this.controller.dataManager.getFilterConstraintSummary()
+      : { discrete: [], continuous: [], total: 0 }
+    
+    const definedCount = summary?.total || 0
+    const activeCount = filtersEnabled ? definedCount : 0
+    
+    if (countElement) {
+      countElement.textContent = `${definedCount}`
+      countElement.style.color = '#111827'
+      countElement.style.opacity = hasDataManager && definedCount > 0 ? '1' : '0.6'
+    }
+
+    const switchInteractive = definedCount > 0
+    if (switchElement) {
+      switchElement.dataset.filtersEnabled = filtersEnabled ? 'true' : 'false'
+      if (!filtersEnabled && switchInteractive) {
+        switchElement.style.backgroundColor = '#f87171'
+      } else if (filtersEnabled && switchInteractive) {
+        switchElement.style.backgroundColor = '#10b981'
+      } else {
+        switchElement.style.backgroundColor = '#d1d5db'
+      }
+      switchElement.style.cursor = switchInteractive ? 'pointer' : 'not-allowed'
+      switchElement.style.opacity = switchInteractive ? '1' : '0.5'
+      const toggle = switchElement.querySelector('div')
+      if (toggle) {
+        toggle.style.transform = filtersEnabled && switchInteractive ? 'translateX(18px)' : 'translateX(0px)'
+      }
+    }
+    
+    container.dataset.activeFilters = activeCount
+    container.dataset.definedFilters = definedCount
+    
+    const hasFilters = definedCount > 0
+    container.style.pointerEvents = hasFilters ? 'auto' : 'none'
+    container.style.cursor = hasFilters ? 'pointer' : 'default'
+    container.style.backgroundColor = hasFilters ? '#ffffff' : '#f3f4f6'
+    container.style.borderColor = '#d1d5db'
+    container.style.boxShadow = 'none'
+    
+    if (iconElement) {
+      iconElement.style.color = '#6b7280'
+      iconElement.style.transition = 'color 0.2s'
+    }
+    
+    if (hasFilters) {
+      container.onmouseenter = () => {
+        container.style.backgroundColor = '#eff6ff'
+        container.style.borderColor = '#2563eb'
+        container.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.15)'
+        if (iconElement) {
+          iconElement.style.color = '#2563eb'
+        }
+      }
+      container.onmouseleave = () => {
+        container.style.backgroundColor = '#ffffff'
+        container.style.borderColor = '#d1d5db'
+        container.style.boxShadow = 'none'
+        if (iconElement) {
+          iconElement.style.color = '#6b7280'
+        }
+      }
+    } else {
+      container.onmouseenter = null
+      container.onmouseleave = null
+      container.style.boxShadow = 'none'
+    }
+    
+    // Build tooltip with a concise summary
+    container.removeAttribute('title')
+    
+    if (container.dataset.panelOpen === 'true') {
+      this.updateGlobalFilterPanelContent()
+    }
+  }
+
+  showGlobalFilterPanel() {
+    const panel = document.getElementById('global-filter-panel')
+    const container = document.getElementById('global-filter-summary')
+    if (!panel || !container) return
+    
+    this.updateGlobalFilterPanelContent()
+    
+    if (!panel.dataset.stopClickPropagation) {
+      panel.addEventListener('click', event => {
+        event.stopPropagation()
+      })
+      panel.dataset.stopClickPropagation = 'true'
+    }
+    
+    panel.style.display = 'block'
+    panel.style.opacity = '0'
+    panel.style.transform = 'translateY(-4px)'
+    panel.style.transition = 'opacity 0.15s ease, transform 0.15s ease'
+    container.dataset.panelOpen = 'true'
+    
+    requestAnimationFrame(() => {
+      panel.style.opacity = '1'
+      panel.style.transform = 'translateY(0)'
+    })
+  }
+  
+  hideGlobalFilterPanel() {
+    const panel = document.getElementById('global-filter-panel')
+    const container = document.getElementById('global-filter-summary')
+    if (!panel) return
+    
+    panel.style.display = 'none'
+    panel.style.opacity = ''
+    panel.style.transform = ''
+    panel.style.transition = ''
+    if (container) {
+      delete container.dataset.panelOpen
+    }
+  }
+  
+  updateGlobalFilterPanelContent() {
+    const panel = document.getElementById('global-filter-panel')
+    if (!panel) return
+    
+    const filtersEnabled = this.controller.globalFiltersEnabled !== false
+    const dataManager = this.controller.dataManager
+    const details = dataManager && dataManager.getFilterDetails ? dataManager.getFilterDetails() : []
+    const definedCount = dataManager && dataManager.getDefinedFilterCount ? dataManager.getDefinedFilterCount() : 0
+    const activeCount = dataManager && dataManager.getActiveFilterCount ? dataManager.getActiveFilterCount() : 0
+    
+    panel.innerHTML = ''
+    
+    const heading = document.createElement('div')
+    heading.style.display = 'flex'
+    heading.style.flexDirection = 'column'
+    heading.style.gap = '2px'
+    heading.style.marginBottom = '8px'
+    
+    const statusLine = document.createElement('div')
+    statusLine.style.fontSize = '13px'
+    statusLine.style.fontWeight = '600'
+    statusLine.style.color = filtersEnabled ? '#2563eb' : '#6b7280'
+    statusLine.textContent = filtersEnabled ? 'Global filters enabled' : 'Global filters disabled'
+    heading.appendChild(statusLine)
+    
+    if (!filtersEnabled && definedCount > 0) {
+      const infoLine = document.createElement('div')
+      infoLine.style.fontSize = '12px'
+      infoLine.style.color = '#6b7280'
+      infoLine.textContent = 'Toggle the switch to reapply these filters.'
+      heading.appendChild(infoLine)
+    }
+    
+    panel.appendChild(heading)
+    
+    if (!details || details.length === 0) {
+      const emptyState = document.createElement('div')
+      emptyState.style.fontSize = '13px'
+      emptyState.style.color = '#6b7280'
+      emptyState.textContent = 'No filters defined.'
+      panel.appendChild(emptyState)
+      return
+    }
+    
+    details.forEach((filter, index) => {
+      const item = document.createElement('div')
+      item.style.display = 'flex'
+      item.style.flexDirection = 'column'
+      item.style.gap = '4px'
+      item.style.padding = '8px 0'
+      if (index !== 0) {
+        item.style.borderTop = '1px solid #e5e7eb'
+      }
+      
+      const headerRow = document.createElement('div')
+      headerRow.style.display = 'flex'
+      headerRow.style.justifyContent = 'space-between'
+      headerRow.style.alignItems = 'flex-start'
+      item.appendChild(headerRow)
+      
+      const nameEl = document.createElement('div')
+      nameEl.style.fontSize = '13px'
+      nameEl.style.fontWeight = '600'
+      nameEl.style.color = filtersEnabled ? '#111827' : '#4b5563'
+      nameEl.textContent = filter.name
+      headerRow.appendChild(nameEl)
+      
+      const typeBadge = document.createElement('span')
+      typeBadge.style.fontSize = '11px'
+      typeBadge.style.color = '#6b7280'
+      typeBadge.style.backgroundColor = '#f3f4f6'
+      typeBadge.style.borderRadius = '9999px'
+      typeBadge.style.padding = '2px 8px'
+      typeBadge.textContent = filter.type === 'categorical' ? 'Categorical' : 'Continuous'
+      headerRow.appendChild(typeBadge)
+      
+      if (filter.type === 'categorical') {
+        const detailLine = document.createElement('div')
+        detailLine.style.fontSize = '12px'
+        detailLine.style.color = filtersEnabled ? '#374151' : '#6b7280'
+        if (filter.isEmptySelection) {
+          detailLine.textContent = 'No categories selected (showing none).'
+        } else if (filter.summaryMode === 'selected') {
+          detailLine.textContent = `Selected ${filter.summaryCount}${filter.totalCount !== null ? ` of ${filter.totalCount}` : ''} categories.`
+        } else {
+          detailLine.textContent = `Unselected ${filter.summaryCount}${filter.totalCount !== null ? ` of ${filter.totalCount}` : ''} categories.`
+        }
+        item.appendChild(detailLine)
+        
+        if (filter.summaryValues && filter.summaryValues.length > 0) {
+          const previewLine = document.createElement('div')
+          previewLine.style.fontSize = '12px'
+          previewLine.style.color = '#6b7280'
+          let label = filter.summaryValues.join(', ')
+          if (filter.hiddenValueCount > 0) {
+            label += ` +${filter.hiddenValueCount} more`
+          }
+          previewLine.textContent = label
+          item.appendChild(previewLine)
+        }
+      } else if (filter.type === 'continuous') {
+        const rangeLine = document.createElement('div')
+        rangeLine.style.fontSize = '12px'
+        rangeLine.style.color = filtersEnabled ? '#374151' : '#6b7280'
+        rangeLine.textContent = `Range: ${filter.range.formattedMin} – ${filter.range.formattedMax}`
+        item.appendChild(rangeLine)
+        
+        if (filter.fullRange && filter.fullRange.formattedMin !== null && filter.fullRange.formattedMax !== null) {
+          const fullLine = document.createElement('div')
+          fullLine.style.fontSize = '12px'
+          fullLine.style.color = '#6b7280'
+          fullLine.textContent = `Full range: ${filter.fullRange.formattedMin} – ${filter.fullRange.formattedMax}`
+          item.appendChild(fullLine)
+        }
+      }
+      
+      panel.appendChild(item)
+    })
+  }
+
   // Show the plot info panel
   showPlotInfoPanel() {
     const plotInfo = document.getElementById('plot-info')

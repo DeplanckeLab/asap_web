@@ -19,7 +19,9 @@ export default class extends Controller {
   static targets = ["metadataSelect"]
   static values = { 
     embeddingsByLoom: Object,
-    defaultLoomFile: String
+    defaultLoomFile: String,
+    defaultEmbeddingId: String,
+    geneCount: Number
   }
   
   // Optional targets - manually check with querySelector
@@ -131,6 +133,10 @@ export default class extends Controller {
     // Initialize selected categories tracking
     this.selectedCategories = {}
     this.selectedRanges = {} // Store continuous metadata ranges for filtering
+    this.globalFiltersEnabled = true // Track global filtering toggle state
+    this.globalFilterPanelVisible = false
+    this._globalFilterOutsideHandler = null
+    this.uiManager.updateGlobalFilterSummary()
     this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
     this.currentVisibleCells = null // Track currently visible cells (null = all visible)
     this.lastFilterState = null // Track last filter state for incremental updates
@@ -357,25 +363,13 @@ export default class extends Controller {
       this.loomFileSelectTarget.addEventListener('change', (event) => {
         this.currentLoomFile = event.target.value
         // console.log('🔍 [DEBUG] Loom file changed to:', this.currentLoomFile)
-        this.uiManager.updateEmbeddings()
+        this.populateMetadataSelectForLoom(this.currentLoomFile)
       })
-      
-      this.uiManager.updateEmbeddings()
-      
-      // Auto-load the first available embedding on page load
-      setTimeout(() => {
-        if (this.hasMetadataSelectTarget) {
-          const firstOption = this.metadataSelectTarget.querySelector('option[value]:not([value=""])')
-          if (firstOption) {
-            // console.log('🚀 Auto-loading first embedding on page load:', firstOption.textContent)
-            this.metadataSelectTarget.value = firstOption.value
-            this.uiManager.updateMetadata()
-          }
-        }
-      }, 100) // Small delay to ensure DOM is ready
     } else {
       // console.log('🔍 [DEBUG] No loom file select target available, but using fallback value')
     }
+    
+    this.initializeEmbeddingSelectionUI()
     
     // Add click outside listener to close dropdowns
     this.boundCloseDropdowns = this.closeAllDropdowns.bind(this)
@@ -503,6 +497,356 @@ export default class extends Controller {
   // Delegates to ui_manager to avoid duplication
   updateMetadata() {
     this.uiManager.updateMetadata()
+  }
+
+  initializeEmbeddingSelectionUI() {
+    if (this._embeddingSelectionInitialized) {
+      return
+    }
+    this._embeddingSelectionInitialized = true
+
+    if (this.currentLoomFile) {
+      this.populateMetadataSelectForLoom(this.currentLoomFile)
+    }
+
+    const defaultInfo = this.determineDefaultEmbedding()
+    if (!defaultInfo) {
+      this.updateEmbeddingSelectionLink(null, this.currentLoomFile || this.defaultLoomFileValue || '')
+      return
+    }
+
+    setTimeout(() => {
+      this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
+    }, 100)
+  }
+
+  determineDefaultEmbedding() {
+    if (!this.embeddingsByLoomValue || Object.keys(this.embeddingsByLoomValue).length === 0) {
+      return null
+    }
+
+    if (this.hasDefaultEmbeddingIdValue && this.defaultEmbeddingIdValue) {
+      const info = this.findEmbeddingById(this.defaultEmbeddingIdValue)
+      if (info) {
+        return info
+      }
+    }
+
+    const preferredLoom = this.currentLoomFile || this.defaultLoomFileValue
+    if (preferredLoom && Array.isArray(this.embeddingsByLoomValue[preferredLoom]) && this.embeddingsByLoomValue[preferredLoom].length > 0) {
+      return {
+        embedding: this.embeddingsByLoomValue[preferredLoom][0],
+        loomFile: preferredLoom
+      }
+    }
+
+    const firstEntry = Object.entries(this.embeddingsByLoomValue).find(([, embeddings]) => Array.isArray(embeddings) && embeddings.length > 0)
+    if (firstEntry) {
+      return {
+        embedding: firstEntry[1][0],
+        loomFile: firstEntry[0]
+      }
+    }
+
+    return null
+  }
+
+  populateMetadataSelectForLoom(loomFile) {
+    if (!this.hasMetadataSelectTarget) {
+      return
+    }
+
+    const select = this.metadataSelectTarget
+    const embeddings = (loomFile && this.embeddingsByLoomValue) ? (this.embeddingsByLoomValue[loomFile] || []) : []
+
+    select.innerHTML = ''
+
+    const placeholder = document.createElement('option')
+    placeholder.value = ''
+    placeholder.textContent = 'Select embedding...'
+    select.appendChild(placeholder)
+
+    embeddings.forEach((embedding) => {
+      const option = document.createElement('option')
+      option.value = String(embedding.id)
+      option.textContent = this.getEmbeddingLabel(embedding)
+      select.appendChild(option)
+    })
+  }
+
+  formatNumber(value) {
+    if (value === undefined || value === null || value === '') {
+      return null
+    }
+
+    const num = Number(value)
+    if (Number.isNaN(num)) {
+      return null
+    }
+
+    return num.toLocaleString()
+  }
+
+  getLoomDisplayLabel(loomFile) {
+    if (!loomFile || typeof loomFile !== 'string') {
+      return ''
+    }
+
+    const parts = loomFile.split('/')
+    const base = parts.length > 0 ? parts[0] : loomFile
+    if (!base) {
+      return loomFile
+    }
+
+    return base.charAt(0).toUpperCase() + base.slice(1)
+  }
+
+  sanitizeEmbeddingName(value) {
+    if (!value || typeof value !== 'string') {
+      return null
+    }
+
+    const trimmed = value.trim()
+    if (trimmed.length === 0) {
+      return null
+    }
+
+    const segments = trimmed.split('/')
+    const lastSegment = segments[segments.length - 1]
+    const candidate = lastSegment && lastSegment.trim().length > 0 ? lastSegment.trim() : trimmed
+    return candidate.length > 0 ? candidate : null
+  }
+
+  getEmbeddingName(embedding) {
+    if (!embedding) {
+      return null
+    }
+
+    const candidates = [embedding.display_name, embedding.label, embedding.name]
+    for (const candidate of candidates) {
+      const sanitized = this.sanitizeEmbeddingName(candidate)
+      if (sanitized) {
+        return sanitized
+      }
+    }
+
+    return embedding.id ? `Embedding ${embedding.id}` : null
+  }
+
+  getEmbeddingDimensionLabel(embedding) {
+    if (!embedding) {
+      return null
+    }
+
+    const formattedCells = this.formatNumber(embedding.nber_cols)
+    const geneCount = this.hasGeneCountValue ? this.formatNumber(this.geneCountValue) : null
+
+    if (formattedCells && geneCount) {
+      return `${formattedCells} cells x ${geneCount} genes`
+    }
+    if (formattedCells) {
+      return `${formattedCells} cells`
+    }
+    if (geneCount) {
+      return `${geneCount} genes`
+    }
+    return null
+  }
+
+  getEmbeddingDisplayInfo(embedding, loomFile) {
+    const origin = this.getLoomDisplayLabel(loomFile)
+
+    if (!embedding) {
+      return {
+        origin,
+        name: 'Select embedding...',
+        dimension: null
+      }
+    }
+
+    return {
+      origin,
+      name: this.getEmbeddingName(embedding) || 'Select embedding...',
+      dimension: this.getEmbeddingDimensionLabel(embedding)
+    }
+  }
+
+  getEmbeddingLabel(embedding) {
+    if (!embedding) {
+      return 'Select embedding...'
+    }
+
+    const name = this.getEmbeddingName(embedding) || `Embedding ${embedding.id}`
+    const dimension = this.getEmbeddingDimensionLabel(embedding)
+    if (dimension) {
+      return `${name} (${dimension})`
+    }
+
+    return name
+  }
+
+  findEmbeddingById(embeddingId, preferredLoomFile = null) {
+    if (!this.embeddingsByLoomValue) {
+      return null
+    }
+
+    const targetId = String(embeddingId)
+
+    if (preferredLoomFile && this.embeddingsByLoomValue[preferredLoomFile]) {
+      const matchInPreferred = this.embeddingsByLoomValue[preferredLoomFile].find(embedding => String(embedding.id) === targetId)
+      if (matchInPreferred) {
+        return { embedding: matchInPreferred, loomFile: preferredLoomFile }
+      }
+    }
+
+    for (const [loomFileKey, embeddings] of Object.entries(this.embeddingsByLoomValue)) {
+      if (!Array.isArray(embeddings)) {
+        continue
+      }
+      const match = embeddings.find(embedding => String(embedding.id) === targetId)
+      if (match) {
+        return { embedding: match, loomFile: loomFileKey }
+      }
+    }
+
+    return null
+  }
+
+  applyEmbeddingSelection(embeddingId, loomFile, options = {}) {
+    const { skipLoad = false } = options
+    const info = this.findEmbeddingById(embeddingId, loomFile)
+
+    if (!info) {
+      console.warn('[Embedding] Could not find embedding with id', embeddingId)
+      return
+    }
+
+    const targetId = String(info.embedding.id)
+    const targetLoom = info.loomFile
+
+    this.currentLoomFile = targetLoom
+    if (this.loomFileSelectTarget) {
+      this.loomFileSelectTarget.value = targetLoom
+    }
+
+    this.populateMetadataSelectForLoom(targetLoom)
+
+    if (this.hasMetadataSelectTarget) {
+      this.metadataSelectTarget.value = targetId
+    }
+
+    this.updateEmbeddingSelectionLink(info.embedding, targetLoom)
+    this.highlightSelectedEmbedding(targetId, targetLoom)
+
+    if (!skipLoad) {
+      this.updateMetadata()
+    }
+  }
+
+  updateEmbeddingSelectionLink(embedding, loomFile) {
+    const link = document.getElementById('embedding-selection-link')
+    if (!link) {
+      return
+    }
+
+    const info = this.getEmbeddingDisplayInfo(embedding, loomFile)
+
+    link.dataset.selectedEmbeddingId = embedding ? String(embedding.id) : ''
+    link.dataset.currentLoomFile = loomFile || ''
+    link.dataset.originLabel = info.origin || ''
+    link.dataset.dimensionLabel = info.dimension || ''
+
+    link.innerHTML = ''
+
+    const wrapper = document.createElement('div')
+    wrapper.className = 'embedding-link-content'
+
+    if (info.origin) {
+      const originSpan = document.createElement('span')
+      originSpan.className = 'embedding-link-origin'
+      originSpan.textContent = info.origin
+      wrapper.appendChild(originSpan)
+    }
+
+    const nameSpan = document.createElement('span')
+    nameSpan.className = 'embedding-link-name'
+    nameSpan.textContent = info.name || 'Select embedding...'
+    wrapper.appendChild(nameSpan)
+
+    if (info.dimension) {
+      const dimensionSpan = document.createElement('span')
+      dimensionSpan.className = 'embedding-link-dimension'
+      dimensionSpan.textContent = info.dimension
+      wrapper.appendChild(dimensionSpan)
+    }
+
+    link.appendChild(wrapper)
+  }
+
+  highlightSelectedEmbedding(embeddingId, loomFile) {
+    const targetId = String(embeddingId)
+    const items = document.querySelectorAll('.embedding-menu-item')
+
+    items.forEach((item) => {
+      const isMatch = item.dataset.embeddingId === targetId && (!loomFile || item.dataset.loomFile === loomFile)
+      item.classList.toggle('selected', isMatch)
+      item.dataset.selected = isMatch ? 'true' : 'false'
+    })
+  }
+
+  toggleEmbeddingMenu(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const menu = document.getElementById('embedding-selection-menu')
+    if (!menu) {
+      return
+    }
+
+    const wasVisible = menu.style.display === 'block'
+    this.closeAllDropdowns()
+    menu.style.display = wasVisible ? 'none' : 'block'
+  }
+
+  preventEmbeddingMenuClose(event) {
+    event.stopPropagation()
+  }
+
+  toggleEmbeddingGroup(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const header = event.currentTarget
+    const card = header.closest('.embedding-menu-card')
+    if (!card) {
+      return
+    }
+
+    const body = card.querySelector('.embedding-menu-body')
+    const toggle = header.querySelector('.embedding-menu-toggle')
+
+    if (!body || !toggle) {
+      return
+    }
+
+    const isOpen = header.dataset.open === 'true'
+    const shouldOpen = !isOpen
+
+    header.dataset.open = shouldOpen ? 'true' : 'false'
+    body.style.display = shouldOpen ? 'block' : 'none'
+    toggle.textContent = shouldOpen ? '[-]' : '[+]'
+  }
+
+  selectEmbedding(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const item = event.currentTarget
+    const embeddingId = item.dataset.embeddingId
+    const loomFile = item.dataset.loomFile
+
+    this.applyEmbeddingSelection(embeddingId, loomFile)
+    this.closeAllDropdowns()
   }
 
   async loadMetadataCoordinates(metadataId) {
@@ -3396,6 +3740,11 @@ export default class extends Controller {
     document.querySelectorAll('.metadata-dropdown-menu').forEach(menu => {
       menu.classList.add('hidden')
     })
+
+    const embeddingMenu = document.getElementById('embedding-selection-menu')
+    if (embeddingMenu) {
+      embeddingMenu.style.display = 'none'
+    }
   }
 
   // Toggle metadata categories (moved from inline JS)
@@ -9597,6 +9946,118 @@ export default class extends Controller {
     }
   }
 
+  toggleGlobalFilterPanel(event) {
+    if (event) {
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault()
+      }
+      if (typeof event.stopPropagation === 'function') {
+        event.stopPropagation()
+      }
+    }
+    
+    this.setGlobalFilterPanelVisible(!this.globalFilterPanelVisible)
+  }
+  
+  setGlobalFilterPanelVisible(visible) {
+    const normalized = !!visible
+    
+    if (this.globalFilterPanelVisible === normalized) {
+      if (normalized) {
+        this.uiManager.updateGlobalFilterPanelContent()
+      }
+      return
+    }
+    
+    this.globalFilterPanelVisible = normalized
+    
+    if (normalized) {
+      this.uiManager.showGlobalFilterPanel()
+      if (!this._globalFilterOutsideHandler) {
+        const handler = event => this.handleGlobalFilterOutsideClick(event)
+        this._globalFilterOutsideHandler = handler
+        // Delay registration to avoid immediately catching the opening click
+        setTimeout(() => {
+          if (this._globalFilterOutsideHandler === handler) {
+            document.addEventListener('click', handler, true)
+          }
+        }, 0)
+      }
+    } else {
+      this.uiManager.hideGlobalFilterPanel()
+      if (this._globalFilterOutsideHandler) {
+        document.removeEventListener('click', this._globalFilterOutsideHandler, true)
+        this._globalFilterOutsideHandler = null
+      }
+    }
+  }
+  
+  handleGlobalFilterOutsideClick(event) {
+    const summaryContainer = document.getElementById('global-filter-summary')
+    const panel = document.getElementById('global-filter-panel')
+    
+    if (!summaryContainer || !panel) {
+      this.setGlobalFilterPanelVisible(false)
+      return
+    }
+    
+    const clickInsideSummary = summaryContainer.contains(event.target)
+    const clickInsidePanel = panel.contains(event.target)
+    
+    if (!clickInsideSummary && !clickInsidePanel) {
+      this.setGlobalFilterPanelVisible(false)
+    }
+  }
+  
+  toggleGlobalFilters(event) {
+    if (event) {
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault()
+      }
+      if (typeof event.stopPropagation === 'function') {
+        event.stopPropagation()
+      }
+    }
+    
+    const currentlyEnabled = this.globalFiltersEnabled !== false
+    this.setGlobalFiltersEnabled(!currentlyEnabled)
+  }
+  
+  setGlobalFiltersEnabled(enabled) {
+    const normalized = enabled === false ? false : true
+    
+    if (this.globalFiltersEnabled === normalized) {
+      this.uiManager.updateGlobalFilterSummary()
+      return
+    }
+    
+    this.globalFiltersEnabled = normalized
+    
+    // Clear cached filter state so we recompute with the new setting
+    if (this.filterCache) {
+      this.filterCache.clear()
+    }
+    this.lastFilterState = null
+    this.lastFilterStateHash = null
+    this.lastFilteredIndices = null
+    
+    // Ensure queued filtering updates reflect the new state
+    if (this.pendingUpdates && this.pendingUpdates.has('filtering')) {
+      this.pendingUpdates.delete('filtering')
+    }
+    
+    // Update UI immediately
+    this.uiManager.updateGlobalFilterSummary()
+    if (this.globalFilterPanelVisible) {
+      this.uiManager.updateGlobalFilterPanelContent()
+    }
+    
+    // Re-run filtering with the new global state (will also refresh plot)
+    if (this.dataManager) {
+      this.dataManager.updateCellFiltering()
+    }
+  }
+  
   async toggleMetadataFilter(event) {
     event.preventDefault()
     event.stopPropagation()
@@ -10748,6 +11209,8 @@ export default class extends Controller {
   // Create a cache key from current selections
   createFilterCacheKey() {
     const keyParts = []
+    
+    keyParts.push(`g:${this.globalFiltersEnabled !== false ? 'on' : 'off'}`)
     
     // Add discrete metadata selections
     Object.keys(this.selectedCategories).sort().forEach(metadataId => {

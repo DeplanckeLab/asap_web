@@ -887,6 +887,9 @@ export class DataManager {
     // Update button state after filtering
     this.controller.uiManager.updateAddAllVisibleButtonState()
     
+    // Update global filter summary (count and switch state)
+    this.controller.uiManager.updateGlobalFilterSummary()
+    
     // Update category distribution bar plots to reflect filtered cells
     this.updateAllCategoryDistributions()
     
@@ -1282,6 +1285,10 @@ export class DataManager {
 
   // Incremental filtering - much faster for small changes
   getIncrementalFilteredIndices() {
+    if (this.controller.globalFiltersEnabled === false) {
+      return null
+    }
+    
     const hasDiscreteSelections = this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0
     const hasContinuousSelections = this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0
     
@@ -1432,6 +1439,12 @@ export class DataManager {
 
   // Get the intersection of selected cells across all metadata (full calculation)
   getFilteredCellIndices() {
+    if (this.controller.globalFiltersEnabled === false) {
+      this.controller.lastFilteredIndices = null
+      this.controller.lastFilterStateHash = null
+      return null
+    }
+    
     // Performance optimization: check if filter state has changed
     const currentFilterHash = this.getFilterStateHash()
     // console.log('🔍 Filter state check:', {
@@ -1621,6 +1634,232 @@ export class DataManager {
     }
   }
 
+  // Calculate which metadata currently contribute active filtering constraints
+  collectFilterConstraints() {
+    const result = {
+      discrete: [],
+      continuous: []
+    }
+    
+    if (this.controller.selectedCategories) {
+      Object.keys(this.controller.selectedCategories).forEach(metadataId => {
+        const selections = this.controller.selectedCategories[metadataId]
+        if (!selections) {
+          return
+        }
+        
+        // Empty set means "show nothing" - treat as active constraint
+        if (selections.size === 0) {
+          result.discrete.push(metadataId)
+          return
+        }
+        
+        const metadataVector = this.controller.loadedMetadataVectors ? this.controller.loadedMetadataVectors[metadataId] : null
+        if (!metadataVector) {
+          // Metadata not loaded yet - assume constraint is active
+          result.discrete.push(metadataId)
+          return
+        }
+        
+        let totalCategories = null
+        if (metadataVector.values) {
+          totalCategories = new Set(metadataVector.values).size
+        } else if (metadataVector.compression_info?.single_category) {
+          totalCategories = 1
+        } else if (metadataVector.compression_info?.categories) {
+          totalCategories = metadataVector.compression_info.categories.length
+        }
+        
+        if (totalCategories === null) {
+          result.discrete.push(metadataId)
+          return
+        }
+        
+        if (selections.size < totalCategories) {
+          result.discrete.push(metadataId)
+        }
+      })
+    }
+    
+    if (this.controller.selectedRanges) {
+      Object.keys(this.controller.selectedRanges).forEach(metadataId => {
+        const range = this.controller.selectedRanges[metadataId]
+        if (!range || range.min === undefined || range.max === undefined) {
+          return
+        }
+        
+        const metadataVector = this.controller.loadedMetadataVectors ? this.controller.loadedMetadataVectors[metadataId] : null
+        if (!metadataVector || !metadataVector.values) {
+          // If values aren't available yet, assume the range represents an active constraint
+          result.continuous.push(metadataId)
+          return
+        }
+        
+        const minVal = this.safeMin(metadataVector.values)
+        const maxVal = this.safeMax(metadataVector.values)
+        const isFullRange = range.min <= minVal && range.max >= maxVal
+        
+        if (!isFullRange) {
+          result.continuous.push(metadataId)
+        }
+      })
+    }
+    
+    return result
+  }
+
+  // Count how many metadata have filtering constraints, regardless of global toggle state
+  getDefinedFilterCount() {
+    const { discrete, continuous } = this.collectFilterConstraints()
+    return discrete.length + continuous.length
+  }
+  
+  // Count active filters taking the global toggle into account
+  getActiveFilterCount() {
+    if (this.controller.globalFiltersEnabled === false) {
+      return 0
+    }
+    
+    return this.getDefinedFilterCount()
+  }
+  
+  // Provide a lightweight summary of active filters for tooltips or diagnostics
+  getFilterConstraintSummary() {
+    const { discrete, continuous } = this.collectFilterConstraints()
+    
+    return {
+      discrete,
+      continuous,
+      total: discrete.length + continuous.length
+    }
+  }
+
+  getFilterDetails() {
+    const details = []
+    const { discrete, continuous } = this.collectFilterConstraints()
+    const filtersEnabled = this.controller.globalFiltersEnabled !== false
+    
+    const formatNumber = value => {
+      if (value === undefined || value === null || Number.isNaN(value)) {
+        return '—'
+      }
+      
+      if (Math.abs(value) >= 1000 || Math.abs(value) < 0.01) {
+        return Number(value).toExponential(2)
+      }
+      
+      return Number(value).toFixed(3).replace(/\.?0+$/, '')
+    }
+    
+    const resolveName = metadataId => {
+      return this.getMetadataNameById(metadataId) ||
+             this.controller.loadedMetadataVectors?.[metadataId]?.name ||
+             `Metadata ${metadataId}`
+    }
+    
+    discrete.forEach(metadataId => {
+      const selections = this.controller.selectedCategories?.[metadataId]
+      const selectedValues = selections ? Array.from(selections) : []
+      const metadataVector = this.controller.loadedMetadataVectors?.[metadataId]
+      
+      let totalCategories = null
+      let allCategories = null
+      if (metadataVector) {
+        if (metadataVector.values) {
+          allCategories = Array.from(new Set(metadataVector.values))
+          totalCategories = allCategories.length
+        } else if (metadataVector.compression_info?.single_category) {
+          totalCategories = 1
+          allCategories = metadataVector.compression_info.categories
+        } else if (metadataVector.compression_info?.categories) {
+          allCategories = metadataVector.compression_info.categories
+          totalCategories = allCategories.length
+        }
+      }
+      
+      // Attempt to derive total categories from DOM attributes if metadata vector unavailable
+      if (totalCategories === null) {
+        const metadataElement = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+        const categoriesAttr = metadataElement ? metadataElement.getAttribute('data-categories-count') : null
+        if (categoriesAttr) {
+          const parsed = parseInt(categoriesAttr, 10)
+          if (!Number.isNaN(parsed)) {
+            totalCategories = parsed
+          }
+        }
+      }
+      
+      let summaryMode = 'selected'
+      let summaryCount = selectedValues.length
+      let summaryList = selectedValues
+      
+      if (totalCategories !== null) {
+        const unselectedCount = totalCategories - selectedValues.length
+        if (unselectedCount < selectedValues.length) {
+          summaryMode = 'unselected'
+          summaryCount = unselectedCount
+          if (allCategories) {
+            const selectedSet = new Set(selectedValues)
+            summaryList = allCategories.filter(cat => !selectedSet.has(cat))
+          } else {
+            summaryList = []
+          }
+        }
+      }
+
+      const item = {
+        metadataId,
+        type: 'categorical',
+        name: resolveName(metadataId),
+        selectedCount: selectedValues.length,
+        totalCount: totalCategories,
+        summaryMode,
+        summaryCount,
+        summaryValues: summaryList ? summaryList.slice(0, 6) : [],
+        hiddenValueCount: summaryList ? Math.max(summaryList.length - 6, 0) : 0,
+        isEmptySelection: selectedValues.length === 0,
+        active: filtersEnabled
+      }
+      
+      details.push(item)
+    })
+    
+    continuous.forEach(metadataId => {
+      const range = this.controller.selectedRanges?.[metadataId]
+      if (!range) return
+      
+      const metadataVector = this.controller.loadedMetadataVectors?.[metadataId]
+      let minVal = null
+      let maxVal = null
+      
+      if (metadataVector && metadataVector.values) {
+        minVal = this.safeMin(metadataVector.values)
+        maxVal = this.safeMax(metadataVector.values)
+      }
+      
+      details.push({
+        metadataId,
+        type: 'continuous',
+        name: resolveName(metadataId),
+        range: {
+          min: range.min,
+          max: range.max,
+          formattedMin: formatNumber(range.min),
+          formattedMax: formatNumber(range.max)
+        },
+        fullRange: {
+          min: minVal,
+          max: maxVal,
+          formattedMin: minVal !== null ? formatNumber(minVal) : null,
+          formattedMax: maxVal !== null ? formatNumber(maxVal) : null
+        },
+        active: filtersEnabled
+      })
+    })
+    
+    return details
+  }
+
   // Get a summary of current filtering constraints
   getFilteringSummary() {
     if (!this.controller.selectedCategories || Object.keys(this.controller.selectedCategories).length === 0) {
@@ -1662,7 +1901,8 @@ export class DataManager {
       selectedRanges: this.controller.selectedRanges,
       currentMetadataId: this.controller.currentMetadataId,
       discreteCount,
-      continuousCount
+      continuousCount,
+      globalFiltersEnabled: this.controller.globalFiltersEnabled !== false
     })
   }
 

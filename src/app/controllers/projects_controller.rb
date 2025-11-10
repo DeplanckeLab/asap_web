@@ -74,17 +74,29 @@ class ProjectsController < ApplicationController
       @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) } # limit to 2D for now
     end
     
-    # Get all embeddings for all loom files
-    @all_embeddings_by_loom = {}
-    @available_loom_files.each do |filepath|
-      @all_embeddings_by_loom[filepath] = Annot.available_embeddings_for_loom(@project.id, filepath)
-    end
-    
     # Get default loom file - use the first loom file with visualizations
     Rails.logger.debug "🔍 [DEBUG] Available loom files: #{@available_loom_files.inspect}"
     Rails.logger.debug "🔍 [DEBUG] All loom files: #{all_loom_files.inspect}"
     @default_loom_file = @available_loom_files.first || all_loom_files.first || 'parsing/output.loom'
     Rails.logger.debug "🔍 [DEBUG] Default loom file set to: #{@default_loom_file}"
+
+    # Build embedding metadata (2D/3D coordinate sets) grouped by loom file
+    @all_embeddings_by_loom = {}
+    @available_loom_files.each do |filepath|
+      numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
+      @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
+        metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+      end
+    end
+    @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+    @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+    unless @default_embedding
+      fallback_entry = @all_embeddings_by_loom.find { |_path, embeddings| embeddings.present? }
+      if fallback_entry
+        @default_embedding_loom_file = fallback_entry[0]
+        @default_embedding = fallback_entry[1].first
+      end
+    end
 
     # Preload expression matrices (dim = 3) grouped by loom file
     @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)

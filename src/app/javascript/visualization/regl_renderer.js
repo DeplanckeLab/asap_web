@@ -387,6 +387,54 @@ export class ReglRenderer {
     }
     return this
   }
+
+  /**
+   * Capture the current frame as a data URL
+   */
+  captureToDataURL(type = 'image/png') {
+    if (!this.regl || !this.regl._gl) {
+      console.warn('⚠️ [ReGL] Cannot capture image - WebGL context unavailable')
+      return null
+    }
+
+    // Ensure the latest frame is rendered before capture
+    this.render()
+
+    const gl = this.regl._gl
+    const width = this.canvas.width
+    const height = this.canvas.height
+
+    if (!width || !height) {
+      console.warn('⚠️ [ReGL] Cannot capture image - canvas has zero dimensions')
+      return null
+    }
+
+    if (typeof gl.finish === 'function') {
+      gl.finish()
+    }
+
+    const pixels = new Uint8Array(width * height * 4)
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+
+    // Create a 2D canvas to convert pixel data into an image
+    const outputCanvas = document.createElement('canvas')
+    outputCanvas.width = width
+    outputCanvas.height = height
+    const ctx = outputCanvas.getContext('2d')
+
+    const imageData = ctx.createImageData(width, height)
+    const rowSize = width * 4
+
+    // Flip rows vertically (WebGL origin is bottom-left)
+    for (let row = 0; row < height; row++) {
+      const sourceStart = row * rowSize
+      const destStart = (height - row - 1) * rowSize
+      imageData.data.set(pixels.subarray(sourceStart, sourceStart + rowSize), destStart)
+    }
+
+    ctx.putImageData(imageData, 0, 0)
+    return outputCanvas.toDataURL(type)
+  }
   
   /**
    * Render the current frame

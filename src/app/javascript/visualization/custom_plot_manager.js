@@ -21,6 +21,7 @@ export class CustomPlotManager {
     this.lassoOverlayCtx = null
     this.isDrawingLasso = false
     this.customLassoPoints = []
+    this.lastPlotExportData = null
   }
 
   resolveGeneMetadataIdentifiers(buttonInfo) {
@@ -64,6 +65,366 @@ export class CustomPlotManager {
       this.open2DPlotModal()
     }
   }
+
+  isPlotVisible() {
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal) {
+      return false
+    }
+
+    const style = window.getComputedStyle(modal)
+    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+      return false
+    }
+
+    const canvas = document.getElementById('2d-plot-canvas')
+    return !!canvas
+  }
+
+  getActivePlotCanvas() {
+    if (!this.isPlotVisible()) {
+      return null
+    }
+    const canvas = document.getElementById('2d-plot-canvas')
+    if (!canvas || canvas.width === 0 || canvas.height === 0) {
+      return null
+    }
+    return canvas
+  }
+
+  savePlotAsPNG() {
+    const canvas = this.getActivePlotCanvas()
+    if (!canvas) {
+      alert('No custom plot available to save')
+      return false
+    }
+
+    try {
+      const dataUrl = canvas.toDataURL('image/png')
+      this.controller.downloadDataUrl(dataUrl, 'custom-plot.png')
+      return true
+    } catch (error) {
+      console.error('Error saving custom plot PNG:', error)
+      alert('Error saving custom plot PNG')
+      return false
+    }
+  }
+
+  savePlotAsSVG() {
+    const canvas = this.getActivePlotCanvas()
+    if (!canvas) {
+      alert('No custom plot available to save')
+      return false
+    }
+
+    const exportData = this.lastPlotExportData
+
+    if (!exportData) {
+      console.warn('No vector export data available for custom plot, using raster fallback.')
+      return this.savePlotAsSVGRasterFallback(canvas)
+    }
+
+    try {
+      let svgContent
+      if (exportData.type === 'scatter') {
+        svgContent = this.generateScatterPlotSVG(exportData)
+      } else if (exportData.type === 'violin') {
+        svgContent = this.generateViolinPlotSVG(exportData)
+      } else {
+        console.warn(`Unknown custom plot export type "${exportData.type}", using raster fallback.`)
+        return this.savePlotAsSVGRasterFallback(canvas)
+      }
+
+      this.controller.downloadSVG(svgContent, 'custom-plot.svg')
+      return true
+    } catch (error) {
+      console.error('Error saving custom plot SVG:', error)
+      alert('Error saving custom plot SVG')
+      return this.savePlotAsSVGRasterFallback(canvas)
+    }
+  }
+
+  savePlotAsSVGRasterFallback(canvas) {
+    try {
+      const rect = canvas.getBoundingClientRect()
+      const width = canvas.width || rect.width || 800
+      const height = canvas.height || rect.height || 600
+      const pngDataUrl = canvas.toDataURL('image/png')
+      const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${pngDataUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/></svg>`
+      this.controller.downloadSVG(svgContent, 'custom-plot.svg')
+      return true
+    } catch (error) {
+      console.error('Error generating raster SVG fallback for custom plot:', error)
+      return false
+    }
+  }
+
+  generateScatterPlotSVG(data) {
+    const width = data.width || 800
+    const height = data.height || 600
+    const background = data.background || '#ffffff'
+    const parts = []
+    const format = (value) => (Number.isFinite(value) ? Number(value).toFixed(2) : '0')
+
+    parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`)
+    parts.push(`<rect width="${width}" height="${height}" fill="${background}"/>`)
+
+    const vertical = data.grid?.vertical
+    if (vertical?.positions?.length) {
+      const top = Number.isFinite(vertical.top) ? vertical.top : 0
+      const bottom = Number.isFinite(vertical.bottom) ? vertical.bottom : height
+      const color = vertical.color || 'rgba(204, 204, 204, 0.3)'
+      vertical.positions.forEach((x) => {
+        parts.push(`<line x1="${format(x)}" y1="${format(top)}" x2="${format(x)}" y2="${format(bottom)}" stroke="${color}" stroke-width="1" stroke-dasharray="2,2"/>`)
+      })
+    }
+
+    const horizontal = data.grid?.horizontal
+    if (horizontal?.positions?.length) {
+      const left = Number.isFinite(horizontal.left) ? horizontal.left : 0
+      const right = Number.isFinite(horizontal.right) ? horizontal.right : width
+      const color = horizontal.color || 'rgba(204, 204, 204, 0.3)'
+      horizontal.positions.forEach((y) => {
+        parts.push(`<line x1="${format(left)}" y1="${format(y)}" x2="${format(right)}" y2="${format(y)}" stroke="${color}" stroke-width="1" stroke-dasharray="2,2"/>`)
+      })
+    }
+
+    const axes = data.axes || {}
+    const axisColor = axes.color || '#d1d5db'
+    const axisX = axes.x
+    if (axisX?.line) {
+      const y = Number.isFinite(axisX.line.y) ? axisX.line.y : height
+      const x1 = Number.isFinite(axisX.line.x1) ? axisX.line.x1 : 0
+      const x2 = Number.isFinite(axisX.line.x2) ? axisX.line.x2 : width
+      parts.push(`<line x1="${format(x1)}" y1="${format(y)}" x2="${format(x2)}" y2="${format(y)}" stroke="${axisColor}" stroke-width="1"/>`)
+    }
+
+    const axisY = axes.y
+    if (axisY?.line) {
+      const x = Number.isFinite(axisY.line.x1) ? axisY.line.x1 : axisY.axisX || 0
+      const y1 = Number.isFinite(axisY.line.y1) ? axisY.line.y1 : 0
+      const y2 = Number.isFinite(axisY.line.y2) ? axisY.line.y2 : height
+      parts.push(`<line x1="${format(x)}" y1="${format(y1)}" x2="${format(x)}" y2="${format(y2)}" stroke="${axisColor}" stroke-width="1"/>`)
+    }
+
+    if (axisX?.ticks?.length) {
+      const axisYPos = Number.isFinite(axisX.axisY) ? axisX.axisY : height
+      const tickLength = axisX.tickLength || 5
+      const labelOffset = axisX.tickLabelOffset || 8
+      const fontSize = axisX.tickFontSize || 11
+      axisX.ticks.forEach((tick) => {
+        const x = Number.isFinite(tick.x) ? tick.x : null
+        if (x === null) return
+        parts.push(`<line x1="${format(x)}" y1="${format(axisYPos)}" x2="${format(x)}" y2="${format(axisYPos + tickLength)}" stroke="${axisColor}" stroke-width="1"/>`)
+        const label = this.escapeXML(tick.label ?? tick.value)
+        parts.push(`<text x="${format(x)}" y="${format(axisYPos + labelOffset)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="middle" dominant-baseline="hanging" alignment-baseline="hanging">${label}</text>`)
+      })
+    }
+
+    if (axisY?.ticks?.length) {
+      const axisXPos = Number.isFinite(axisY.axisX) ? axisY.axisX : 0
+      const tickLength = axisY.tickLength || 5
+      const labelOffset = axisY.tickLabelOffset || 8
+      const fontSize = axisY.tickFontSize || 11
+      axisY.ticks.forEach((tick) => {
+        const y = Number.isFinite(tick.y) ? tick.y : null
+        if (y === null) return
+        parts.push(`<line x1="${format(axisXPos)}" y1="${format(y)}" x2="${format(axisXPos - tickLength)}" y2="${format(y)}" stroke="${axisColor}" stroke-width="1"/>`)
+        const label = this.escapeXML(tick.label ?? tick.value)
+        parts.push(`<text x="${format(axisXPos - labelOffset)}" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="end" dominant-baseline="central" alignment-baseline="central">${label}</text>`)
+      })
+    }
+
+    if (axisX?.label?.lines?.length) {
+      const baseY = Number.isFinite(axisX.label.baseY) ? axisX.label.baseY : height + 20
+      const lineSpacing = axisX.label.lineSpacing || 16
+      const fontSize = axisX.label.fontSize || 13
+      const xCenter = Number.isFinite(axisX.label.x) ? axisX.label.x : width / 2
+      axisX.label.lines.forEach((line, index) => {
+        const label = this.escapeXML(line)
+        const y = baseY + index * lineSpacing
+        parts.push(`<text x="${format(xCenter)}" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="middle" dominant-baseline="hanging" alignment-baseline="hanging">${label}</text>`)
+      })
+    }
+
+    if (axisY?.label?.lines?.length) {
+      const translateX = Number.isFinite(axisY.label.translateX) ? axisY.label.translateX : 15
+      const translateY = Number.isFinite(axisY.label.translateY) ? axisY.label.translateY : height / 2
+      const lineSpacing = axisY.label.lineSpacing || 16
+      const fontSize = axisY.label.fontSize || 13
+      parts.push(`<g transform="translate(${format(translateX)}, ${format(translateY)}) rotate(-90)">`)
+      axisY.label.lines.forEach((line, index) => {
+        const label = this.escapeXML(line)
+        const y = index * lineSpacing
+        parts.push(`<text x="0" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="middle">${label}</text>`)
+      })
+      parts.push(`</g>`)
+    }
+
+    if (Array.isArray(data.points)) {
+      data.points.forEach((point) => {
+        const x = Number.isFinite(point.x) ? point.x : null
+        const y = Number.isFinite(point.y) ? point.y : null
+        if (x === null || y === null) return
+        const radius = Number.isFinite(point.radius) ? point.radius : 2
+        const color = point.color || '#3b82f6'
+        parts.push(`<circle cx="${format(x)}" cy="${format(y)}" r="${format(radius)}" fill="${color}"/>`)
+      })
+    }
+
+    parts.push(`</svg>`)
+    return parts.join('')
+  }
+
+  generateViolinPlotSVG(data) {
+    const width = data.width || 800
+    const height = data.height || 600
+    const background = data.background || '#ffffff'
+    const parts = []
+    const format = (value) => (Number.isFinite(value) ? Number(value).toFixed(2) : '0')
+
+    const yScale = data.yScale || {}
+    const yMin = Number.isFinite(yScale.min) ? yScale.min : 0
+    const yMax = Number.isFinite(yScale.max) ? yScale.max : 1
+    const topPadding = Number.isFinite(yScale.topPadding) ? yScale.topPadding : 60
+    const bottomPadding = Number.isFinite(yScale.bottomPadding) ? yScale.bottomPadding : 60
+    const range = yMax - yMin || (yScale.range || 1)
+    const scaleY = (value) => {
+      const safeRange = range === 0 ? 1 : range
+      return height - bottomPadding - ((value - yMin) / safeRange) * (height - topPadding - bottomPadding)
+    }
+
+    parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`)
+    parts.push(`<rect width="${width}" height="${height}" fill="${background}"/>`)
+
+    const horizontal = data.grid?.horizontal
+    if (horizontal?.positions?.length) {
+      const left = Number.isFinite(horizontal.left) ? horizontal.left : 0
+      const right = Number.isFinite(horizontal.right) ? horizontal.right : width
+      const color = horizontal.color || 'rgba(204, 204, 204, 0.3)'
+      horizontal.positions.forEach((y) => {
+        parts.push(`<line x1="${format(left)}" y1="${format(y)}" x2="${format(right)}" y2="${format(y)}" stroke="${color}" stroke-width="1" stroke-dasharray="2,2"/>`)
+      })
+    }
+
+    const axes = data.axes || {}
+    const axisColor = axes.color || '#d1d5db'
+    const axisX = axes.x
+    if (axisX?.line) {
+      const y = Number.isFinite(axisX.line.y) ? axisX.line.y : height - bottomPadding
+      const x1 = Number.isFinite(axisX.line.x1) ? axisX.line.x1 : 0
+      const x2 = Number.isFinite(axisX.line.x2) ? axisX.line.x2 : width
+      parts.push(`<line x1="${format(x1)}" y1="${format(y)}" x2="${format(x2)}" y2="${format(y)}" stroke="${axisColor}" stroke-width="1"/>`)
+    }
+
+    const axisY = axes.y
+    const axisXPos = Number.isFinite(axisY?.axisX) ? axisY.axisX : 0
+    if (axisY?.line) {
+      const y1 = Number.isFinite(axisY.line.y1) ? axisY.line.y1 : topPadding
+      const y2 = Number.isFinite(axisY.line.y2) ? axisY.line.y2 : height - bottomPadding
+      parts.push(`<line x1="${format(axisXPos)}" y1="${format(y1)}" x2="${format(axisXPos)}" y2="${format(y2)}" stroke="${axisColor}" stroke-width="1"/>`)
+    }
+
+    if (axisY?.ticks?.length) {
+      const tickLength = axisY.tickLength || 5
+      const labelOffset = axisY.tickLabelOffset || 8
+      const fontSize = axisY.tickFontSize || 11
+      axisY.ticks.forEach((tick) => {
+        const y = Number.isFinite(tick.y) ? tick.y : null
+        if (y === null) return
+        parts.push(`<line x1="${format(axisXPos)}" y1="${format(y)}" x2="${format(axisXPos - tickLength)}" y2="${format(y)}" stroke="${axisColor}" stroke-width="1"/>`)
+        const label = this.escapeXML(tick.label ?? tick.value)
+        parts.push(`<text x="${format(axisXPos - labelOffset)}" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="end" dominant-baseline="central" alignment-baseline="central">${label}</text>`)
+      })
+    }
+
+    if (axisX?.label?.lines?.length) {
+      const baseY = Number.isFinite(axisX.label.baseY) ? axisX.label.baseY : height - bottomPadding + 20
+      const lineSpacing = axisX.label.lineSpacing || 16
+      const fontSize = axisX.label.fontSize || 13
+      const xCenter = Number.isFinite(axisX.label.x) ? axisX.label.x : width / 2
+      axisX.label.lines.forEach((line, index) => {
+        const label = this.escapeXML(line)
+        const y = baseY + index * lineSpacing
+        parts.push(`<text x="${format(xCenter)}" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="middle" dominant-baseline="hanging" alignment-baseline="hanging">${label}</text>`)
+      })
+    }
+
+    if (axisY?.label?.lines?.length) {
+      const translateX = Number.isFinite(axisY.label.translateX) ? axisY.label.translateX : 15
+      const translateY = Number.isFinite(axisY.label.translateY) ? axisY.label.translateY : height / 2
+      const lineSpacing = axisY.label.lineSpacing || 16
+      const fontSize = axisY.label.fontSize || 13
+      parts.push(`<g transform="translate(${format(translateX)}, ${format(translateY)}) rotate(-90)">`)
+      axisY.label.lines.forEach((line, index) => {
+        const label = this.escapeXML(line)
+        const y = index * lineSpacing
+        parts.push(`<text x="0" y="${format(y)}" font-family="Arial, sans-serif" font-size="${fontSize}" fill="#374151" text-anchor="middle">${label}</text>`)
+      })
+      parts.push(`</g>`)
+    }
+
+    const categories = Array.isArray(data.categories) ? data.categories : []
+    categories.forEach((category) => {
+      const centerX = Number.isFinite(category.centerX) ? category.centerX : null
+      const violinWidth = Number.isFinite(category.violinWidth) ? category.violinWidth : data.layout?.violinWidth || 0
+      const maxDensity = Number.isFinite(category.maxDensity) && category.maxDensity > 0 ? category.maxDensity : 1
+      const density = Array.isArray(category.density) ? category.density : []
+      if (centerX !== null && violinWidth && density.length > 0) {
+        const pathParts = []
+        density.forEach((point, index) => {
+          const offset = (Number(point.density) / maxDensity) * (violinWidth / 2)
+          const x = centerX + offset
+          const y = scaleY(point.value)
+          pathParts.push(`${index === 0 ? 'M' : 'L'}${format(x)} ${format(y)}`)
+        })
+        for (let i = density.length - 1; i >= 0; i--) {
+          const point = density[i]
+          const offset = (Number(point.density) / maxDensity) * (violinWidth / 2)
+          const x = centerX - offset
+          const y = scaleY(point.value)
+          pathParts.push(`L${format(x)} ${format(y)}`)
+        }
+        pathParts.push('Z')
+        const outlineColor = category.outlineColor || '#3b82f6'
+        parts.push(`<path d="${pathParts.join(' ')}" fill="none" stroke="${outlineColor}" stroke-width="2"/>`)
+      }
+
+      if (Array.isArray(category.points)) {
+        category.points.forEach((point) => {
+          const x = Number.isFinite(point.x) ? point.x : null
+          const y = Number.isFinite(point.y) ? point.y : null
+          if (x === null || y === null) {
+            return
+          }
+          const radius = Number.isFinite(point.radius) ? point.radius : data.layout?.pointRadius || 1
+          const color = point.color || '#3b82f6'
+          parts.push(`<circle cx="${format(x)}" cy="${format(y)}" r="${format(radius)}" fill="${color}"/>`)
+        })
+      }
+
+      if (category.label && Number.isFinite(category.label.endX) && Number.isFinite(category.label.endY)) {
+        const angle = Number.isFinite(category.label.angleDegrees) ? category.label.angleDegrees : -45
+        const labelText = this.escapeXML(category.name || '')
+        parts.push(`<text transform="translate(${format(category.label.endX)}, ${format(category.label.endY)}) rotate(${format(angle)})" font-family="Arial, sans-serif" font-size="11" fill="#374151" text-anchor="end">${labelText}</text>`)
+      }
+    })
+
+    parts.push(`</svg>`)
+    return parts.join('')
+  }
+
+  escapeXML(value) {
+    if (value === undefined || value === null) {
+      return ''
+    }
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
   
   // Close 2D plot modal
   close2DPlotModal(event) {
@@ -76,6 +437,9 @@ export class CustomPlotManager {
       modal.style.display = 'none'
     }
     this.detachCanvasInteractions()
+    if (this.controller && typeof this.controller.updateCustomPlotSettingsContext === 'function') {
+      this.controller.updateCustomPlotSettingsContext({ visible: false })
+    }
   }
   
   // Make 2D plot modal draggable
@@ -1168,6 +1532,13 @@ export class CustomPlotManager {
         canvas.style.height = canvasHeight + 'px'
       }
       
+      if (this.controller && typeof this.controller.updateCustomPlotSettingsContext === 'function') {
+        this.controller.updateCustomPlotSettingsContext({
+          visible: true,
+          xAxisType: xVector.data_type
+        })
+      }
+      
       if (isXCategorical) {
         // Render violin plot
         await this.renderViolinPlot2D(canvas, xVector, yVector, filteredIndices)
@@ -1397,6 +1768,13 @@ export class CustomPlotManager {
       // Determine plot type and render
       const isXCategorical = xVector.data_type === 'DISCRETE' || xVector.data_type === 'STRING'
       
+      if (this.controller && typeof this.controller.updateCustomPlotSettingsContext === 'function') {
+        this.controller.updateCustomPlotSettingsContext({
+          visible: true,
+          xAxisType: xVector.data_type
+        })
+      }
+      
       if (isXCategorical) {
         // Render violin plot
         await this.renderViolinPlot2D(canvas, xVector, yVector, filteredIndices)
@@ -1417,6 +1795,7 @@ export class CustomPlotManager {
     const width = canvas.width
     const height = canvas.height
     this.currentCanvasContext = ctx
+    this.lastPlotExportData = null
     
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
@@ -1432,45 +1811,94 @@ export class CustomPlotManager {
       return
     }
     
+    // Axis scale definitions
+    const xScaleType = this.controller.customPlotXAxisScale || 'normal'
+    const yScaleType = this.controller.customPlotYAxisScale || 'normal'
+    const xScaleDef = this.getScaleDefinition(xScaleType)
+    const yScaleDef = this.getScaleDefinition(yScaleType)
+    
     // Apply filtering
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     const dataPoints = []
-    let xMin = Infinity
-    let xMax = -Infinity
-    let yMin = Infinity
-    let yMax = -Infinity
+    let xDomainMin = Infinity
+    let xDomainMax = -Infinity
+    let yDomainMin = Infinity
+    let yDomainMax = -Infinity
+    let xDisplayMin = Infinity
+    let xDisplayMax = -Infinity
+    let yDisplayMin = Infinity
+    let yDisplayMax = -Infinity
+    let skippedDueToScale = 0
+    
     for (let i = 0; i < xValues.length; i++) {
-      if (!filteredSet || filteredSet.has(i)) {
-        const x = xValues[i]
-        const y = yValues[i]
-        dataPoints.push({
-          x,
-          y,
-          cellIndex: i
-        })
-        if (x < xMin) xMin = x
-        if (x > xMax) xMax = x
-        if (y < yMin) yMin = y
-        if (y > yMax) yMax = y
+      if (filteredSet && !filteredSet.has(i)) {
+        continue
       }
+      
+      const x = xValues[i]
+      const y = yValues[i]
+      const displayX = this.transformValueForScale(x, xScaleDef)
+      const displayY = this.transformValueForScale(y, yScaleDef)
+      
+      if (!Number.isFinite(displayX) || !Number.isFinite(displayY)) {
+        skippedDueToScale++
+        continue
+      }
+      
+      dataPoints.push({
+        x,
+        y,
+        displayX,
+        displayY,
+        cellIndex: i
+      })
+      
+      if (x < xDomainMin) xDomainMin = x
+      if (x > xDomainMax) xDomainMax = x
+      if (y < yDomainMin) yDomainMin = y
+      if (y > yDomainMax) yDomainMax = y
+      if (displayX < xDisplayMin) xDisplayMin = displayX
+      if (displayX > xDisplayMax) xDisplayMax = displayX
+      if (displayY < yDisplayMin) yDisplayMin = displayY
+      if (displayY > yDisplayMax) yDisplayMax = displayY
     }
     
     if (dataPoints.length === 0) {
       ctx.fillStyle = '#6b7280'
       ctx.font = '16px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('No data points to display', width / 2, height / 2)
+      ctx.fillText('No data points to display for the selected axis scales', width / 2, height / 2)
       return
     }
     
-    // Calculate bounds (ensure finite defaults)
-    if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
-      console.error('Unable to determine bounds for scatter plot', { xMin, xMax, yMin, yMax })
+    if (skippedDueToScale > 0) {
+      console.warn(`Skipped ${skippedDueToScale.toLocaleString()} points that are incompatible with the selected axis scales.`)
+    }
+    
+    if (!Number.isFinite(xDomainMin) || !Number.isFinite(xDomainMax) || !Number.isFinite(yDomainMin) || !Number.isFinite(yDomainMax)) {
+      console.error('Unable to determine domain bounds for scatter plot', { xDomainMin, xDomainMax, yDomainMin, yDomainMax })
       return
     }
     
-    const xRange = xMax - xMin || 1
-    const yRange = yMax - yMin || 1
+    if (!Number.isFinite(xDisplayMin) || !Number.isFinite(xDisplayMax) || !Number.isFinite(yDisplayMin) || !Number.isFinite(yDisplayMax)) {
+      console.error('Unable to determine display bounds for scatter plot', { xDisplayMin, xDisplayMax, yDisplayMin, yDisplayMax })
+      return
+    }
+    
+    if (Math.abs(xDisplayMax - xDisplayMin) < 1e-9) {
+      const adjust = Math.abs(xDisplayMin) > 0 ? Math.abs(xDisplayMin) * 0.1 : 1
+      xDisplayMin -= adjust
+      xDisplayMax += adjust
+    }
+    
+    if (Math.abs(yDisplayMax - yDisplayMin) < 1e-9) {
+      const adjust = Math.abs(yDisplayMin) > 0 ? Math.abs(yDisplayMin) * 0.1 : 1
+      yDisplayMin -= adjust
+      yDisplayMax += adjust
+    }
+    
+    const xDisplayRange = xDisplayMax - xDisplayMin || 1
+    const yDisplayRange = yDisplayMax - yDisplayMin || 1
     
     // Padding for axes (left, right, top, bottom)
     const leftPadding = 70
@@ -1478,49 +1906,57 @@ export class CustomPlotManager {
     const topPadding = 20
     const bottomPadding = 70
     
-    // Scale functions
-    const scaleX = (x) => leftPadding + ((x - xMin) / xRange) * (width - leftPadding - rightPadding)
-    const scaleY = (y) => height - bottomPadding - ((y - yMin) / yRange) * (height - topPadding - bottomPadding)
+    const plotWidth = width - leftPadding - rightPadding
+    const plotHeight = height - topPadding - bottomPadding
     
-    // Calculate tick spacing
-    const xTickSpacing = this.calculateTickSpacing(xRange)
-    const yTickSpacing = this.calculateTickSpacing(yRange)
+    // Scale functions (operate on transformed display values)
+    const scaleDisplayX = (displayValue) => leftPadding + ((displayValue - xDisplayMin) / xDisplayRange) * plotWidth
+    const scaleDisplayY = (displayValue) => height - bottomPadding - ((displayValue - yDisplayMin) / yDisplayRange) * plotHeight
+    
+    // Tick generation
+    const xTickValues = this.generateAxisTicks(xScaleDef, xDomainMin, xDomainMax)
+    const yTickValues = this.generateAxisTicks(yScaleDef, yDomainMin, yDomainMax)
+    
+    const verticalGridLines = []
+    const horizontalGridLines = []
+    const xTicks = []
+    const yTicks = []
+    const gridStroke = 'rgba(204, 204, 204, 0.3)'
+    const axisStroke = '#d1d5db'
     
     // Draw grid lines first (behind everything)
-    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.strokeStyle = gridStroke
     ctx.lineWidth = 1
     ctx.setLineDash([2, 2])
     
-    // Vertical grid lines (aligned with X-axis ticks)
-    const xStart = Math.ceil(xMin / xTickSpacing) * xTickSpacing
-    const xEnd = Math.floor(xMax / xTickSpacing) * xTickSpacing
-    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
-      const x = scaleX(value)
-      if (x >= leftPadding && x <= width - rightPadding) {
-        ctx.beginPath()
-        ctx.moveTo(x, topPadding)
-        ctx.lineTo(x, height - bottomPadding)
-        ctx.stroke()
-      }
+    for (const tickValue of xTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, xScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const x = scaleDisplayX(displayValue)
+      if (x < leftPadding || x > width - rightPadding) continue
+      ctx.beginPath()
+      ctx.moveTo(x, topPadding)
+      ctx.lineTo(x, height - bottomPadding)
+      ctx.stroke()
+      verticalGridLines.push(x)
     }
     
-    // Horizontal grid lines (aligned with Y-axis ticks)
-    const yStart = Math.ceil(yMin / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(yMax / yTickSpacing) * yTickSpacing
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const y = scaleY(value)
-      if (y >= topPadding && y <= height - bottomPadding) {
-        ctx.beginPath()
-        ctx.moveTo(leftPadding, y)
-        ctx.lineTo(width - rightPadding, y)
-        ctx.stroke()
-      }
+    for (const tickValue of yTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, yScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const y = scaleDisplayY(displayValue)
+      if (y < topPadding || y > height - bottomPadding) continue
+      ctx.beginPath()
+      ctx.moveTo(leftPadding, y)
+      ctx.lineTo(width - rightPadding, y)
+      ctx.stroke()
+      horizontalGridLines.push(y)
     }
     
     ctx.setLineDash([])
     
     // Draw axes
-    ctx.strokeStyle = '#d1d5db'
+    ctx.strokeStyle = axisStroke
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(leftPadding, height - bottomPadding)
@@ -1535,36 +1971,42 @@ export class CustomPlotManager {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     
-    // X-axis ticks and labels
-    for (let value = xStart; value <= xEnd; value += xTickSpacing) {
-      const x = scaleX(value)
-      if (x >= leftPadding && x <= width - rightPadding) {
-        // Tick mark
-        ctx.beginPath()
-        ctx.moveTo(x, height - bottomPadding)
-        ctx.lineTo(x, height - bottomPadding + 5)
-        ctx.stroke()
-        
-        // Label
-        ctx.fillText(this.formatTickValue(value), x, height - bottomPadding + 8)
-      }
+    for (const tickValue of xTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, xScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const x = scaleDisplayX(displayValue)
+      if (x < leftPadding || x > width - rightPadding) continue
+      ctx.beginPath()
+      ctx.moveTo(x, height - bottomPadding)
+      ctx.lineTo(x, height - bottomPadding + 5)
+      ctx.stroke()
+      const label = this.formatTickValue(tickValue)
+      ctx.fillText(label, x, height - bottomPadding + 8)
+      xTicks.push({
+        value: tickValue,
+        label,
+        x
+      })
     }
     
-    // Y-axis ticks and labels
     ctx.textAlign = 'right'
     ctx.textBaseline = 'middle'
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const y = scaleY(value)
-      if (y >= topPadding && y <= height - bottomPadding) {
-        // Tick mark
-        ctx.beginPath()
-        ctx.moveTo(leftPadding, y)
-        ctx.lineTo(leftPadding - 5, y)
-        ctx.stroke()
-        
-        // Label
-        ctx.fillText(this.formatTickValue(value), leftPadding - 8, y)
-      }
+    for (const tickValue of yTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, yScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const y = scaleDisplayY(displayValue)
+      if (y < topPadding || y > height - bottomPadding) continue
+      ctx.beginPath()
+      ctx.moveTo(leftPadding, y)
+      ctx.lineTo(leftPadding - 5, y)
+      ctx.stroke()
+      const label = this.formatTickValue(tickValue)
+      ctx.fillText(label, leftPadding - 8, y)
+      yTicks.push({
+        value: tickValue,
+        label,
+        y
+      })
     }
     
     // Draw axis titles
@@ -1595,8 +2037,8 @@ export class CustomPlotManager {
     const pointSize = 2
     const plotPoints = []
     for (const point of dataPoints) {
-      const canvasX = scaleX(point.x)
-      const canvasY = scaleY(point.y)
+      const canvasX = scaleDisplayX(point.displayX)
+      const canvasY = scaleDisplayY(point.displayY)
       
       // Get color for this point
       let color = '#3b82f6' // Default blue
@@ -1610,7 +2052,7 @@ export class CustomPlotManager {
       ctx.beginPath()
       ctx.arc(canvasX, canvasY, pointSize, 0, Math.PI * 2)
       ctx.fill()
-      plotPoints.push({ cellIndex: point.cellIndex, canvasX, canvasY, radius: pointSize })
+      plotPoints.push({ cellIndex: point.cellIndex, canvasX, canvasY, radius: pointSize, color })
     }
     
     if (plotPoints.length > 0) {
@@ -1623,6 +2065,83 @@ export class CustomPlotManager {
     this.setupCanvasInteractions(canvas)
     this.drawSelectionHighlights()
     
+    const axisY = height - bottomPadding
+    const axisX = leftPadding
+    this.lastPlotExportData = {
+      type: 'scatter',
+      width,
+      height,
+      background: '#ffffff',
+      axisScales: {
+        x: xScaleType,
+        y: yScaleType
+      },
+      skippedDueToScale,
+      grid: {
+        vertical: {
+          positions: verticalGridLines,
+          top: topPadding,
+          bottom: height - bottomPadding,
+          color: gridStroke
+        },
+        horizontal: {
+          positions: horizontalGridLines,
+          left: leftPadding,
+          right: width - rightPadding,
+          color: gridStroke
+        }
+      },
+      axes: {
+        color: axisStroke,
+        x: {
+          scale: xScaleType,
+          domainMin: xDomainMin,
+          domainMax: xDomainMax,
+          displayMin: xDisplayMin,
+          displayMax: xDisplayMax,
+          axisY,
+          line: { x1: leftPadding, x2: width - rightPadding },
+          ticks: xTicks,
+          tickLength: 5,
+          tickLabelOffset: 8,
+          tickFontSize: 11,
+          label: {
+            lines: xLines,
+            baseY: axisY + 28,
+            lineSpacing: 16,
+            fontSize: 13,
+            x: width / 2
+          }
+        },
+        y: {
+          scale: yScaleType,
+          domainMin: yDomainMin,
+          domainMax: yDomainMax,
+          displayMin: yDisplayMin,
+          displayMax: yDisplayMax,
+          axisX,
+          line: { y1: topPadding, y2: height - bottomPadding },
+          ticks: yTicks,
+          tickLength: 5,
+          tickLabelOffset: 8,
+          tickFontSize: 11,
+          label: {
+            lines: yLines,
+            translateX: 15,
+            translateY: height / 2,
+            lineSpacing: 16,
+            fontSize: 13
+          }
+        }
+      },
+      points: plotPoints.map(({ canvasX, canvasY, radius, color }) => ({
+        x: canvasX,
+        y: canvasY,
+        radius,
+        color
+      }))
+    }
+    
     // console.log('Scatter plot rendered with', dataPoints.length, 'points')
   }
   
@@ -1634,6 +2153,7 @@ export class CustomPlotManager {
     const width = canvas.width
     const height = canvas.height
     this.currentCanvasContext = ctx
+    this.lastPlotExportData = null
     
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
@@ -1649,23 +2169,47 @@ export class CustomPlotManager {
       return
     }
     
+    const yScaleType = this.controller.customPlotYAxisScale || 'normal'
+    const yScaleDef = this.getScaleDefinition(yScaleType)
+    
     // Apply filtering
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     const dataByCategory = {}
+    let yDomainMin = Infinity
+    let yDomainMax = -Infinity
+    let yDisplayMin = Infinity
+    let yDisplayMax = -Infinity
+    let skippedDueToScale = 0
     for (let i = 0; i < xValues.length; i++) {
-      if (!filteredSet || filteredSet.has(i)) {
-        const category = xValues[i]
-        if (!dataByCategory[category]) {
-          dataByCategory[category] = []
-        }
-        dataByCategory[category].push({
-          y: yValues[i],
-          cellIndex: i
-        })
+      if (filteredSet && !filteredSet.has(i)) {
+        continue
       }
+      const category = xValues[i]
+      const y = yValues[i]
+      const displayY = this.transformValueForScale(y, yScaleDef)
+      if (!Number.isFinite(displayY)) {
+        skippedDueToScale++
+        continue
+      }
+      if (!dataByCategory[category]) {
+        dataByCategory[category] = []
+      }
+      dataByCategory[category].push({
+        y,
+        displayY,
+        cellIndex: i
+      })
+      if (y < yDomainMin) yDomainMin = y
+      if (y > yDomainMax) yDomainMax = y
+      if (displayY < yDisplayMin) yDisplayMin = displayY
+      if (displayY > yDisplayMax) yDisplayMax = displayY
     }
     
     const categories = Object.keys(dataByCategory).sort()
+    
+    if (skippedDueToScale > 0) {
+      console.warn(`Skipped ${skippedDueToScale.toLocaleString()} points that are incompatible with the selected Y-axis scale.`)
+    }
     if (categories.length === 0) {
       ctx.fillStyle = '#6b7280'
       ctx.font = '16px sans-serif'
@@ -1709,44 +2253,62 @@ export class CustomPlotManager {
     const violinWidth = categoryWidth * 0.6
     const plotHeight = height - topPadding - bottomPadding
     
-    // Calculate y bounds
-    let yMin = Infinity
-    let yMax = -Infinity
-    for (const category of categories) {
-      for (const point of dataByCategory[category]) {
-        yMin = Math.min(yMin, point.y)
-        yMax = Math.max(yMax, point.y)
-      }
+    if (!Number.isFinite(yDomainMin) || !Number.isFinite(yDomainMax)) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('No data points to display', width / 2, height / 2)
+      return
     }
+    
+    if (!Number.isFinite(yDisplayMin) || !Number.isFinite(yDisplayMax)) {
+      console.error('Unable to determine Y-axis display bounds for violin plot', { yDisplayMin, yDisplayMax })
+      return
+    }
+    
+    if (Math.abs(yDisplayMax - yDisplayMin) < 1e-9) {
+      const adjust = Math.abs(yDisplayMin) > 0 ? Math.abs(yDisplayMin) * 0.1 : 1
+      yDisplayMin -= adjust
+      yDisplayMax += adjust
+    }
+    
+    const yDisplayRange = yDisplayMax - yDisplayMin || 1
+    const scaleDisplayY = (displayValue) => height - bottomPadding - ((displayValue - yDisplayMin) / yDisplayRange) * plotHeight
+    const yMin = yDomainMin
+    const yMax = yDomainMax
     const yRange = yMax - yMin || 1
     
-    const scaleY = (y) => height - bottomPadding - ((y - yMin) / yRange) * plotHeight
-    
-    // Calculate tick spacing for Y-axis
-    const yTickSpacing = this.calculateTickSpacing(yRange)
+    const yTickValues = this.generateAxisTicks(yScaleDef, yMin, yMax)
+    const horizontalGridLines = []
+    const yTicks = []
+    const categoriesExport = []
+    const categoryExportMap = new Map()
+    const gridStroke = 'rgba(204, 204, 204, 0.3)'
+    const axisStroke = '#d1d5db'
     
     // Draw grid lines first (behind everything)
-    ctx.strokeStyle = 'rgba(204, 204, 204, 0.3)'
+    ctx.strokeStyle = gridStroke
     ctx.lineWidth = 1
     ctx.setLineDash([2, 2])
     
     // Horizontal grid lines (aligned with Y-axis ticks)
-    const yStart = Math.ceil(yMin / yTickSpacing) * yTickSpacing
-    const yEnd = Math.floor(yMax / yTickSpacing) * yTickSpacing
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const y = scaleY(value)
+    for (const tickValue of yTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, yScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const y = scaleDisplayY(displayValue)
       if (y >= topPadding && y <= height - bottomPadding) {
         ctx.beginPath()
         ctx.moveTo(sidePadding, y)
         ctx.lineTo(width - sidePadding, y)
         ctx.stroke()
+        horizontalGridLines.push(y)
       }
     }
     
     ctx.setLineDash([])
     
     // Draw axes
-    ctx.strokeStyle = '#d1d5db'
+    ctx.strokeStyle = axisStroke
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(sidePadding, height - bottomPadding)
@@ -1760,8 +2322,10 @@ export class CustomPlotManager {
     ctx.font = '11px sans-serif'
     ctx.textAlign = 'right'
     ctx.textBaseline = 'middle'
-    for (let value = yStart; value <= yEnd; value += yTickSpacing) {
-      const y = scaleY(value)
+    for (const tickValue of yTickValues) {
+      const displayValue = this.transformValueForScale(tickValue, yScaleDef)
+      if (!Number.isFinite(displayValue)) continue
+      const y = scaleDisplayY(displayValue)
       if (y >= topPadding && y <= height - bottomPadding) {
         // Tick mark
         ctx.beginPath()
@@ -1770,7 +2334,13 @@ export class CustomPlotManager {
         ctx.stroke()
         
         // Label
-        ctx.fillText(this.formatTickValue(value), sidePadding - 8, y)
+        const label = this.formatTickValue(tickValue)
+        ctx.fillText(label, sidePadding - 8, y)
+        yTicks.push({
+          value: tickValue,
+          label,
+          y
+        })
       }
     }
     
@@ -1827,6 +2397,14 @@ export class CustomPlotManager {
     categories.forEach((category, catIndex) => {
       const categoryData = dataByCategory[category]
       const centerX = sidePadding + (catIndex + 0.5) * categoryWidth
+      const categoryExport = {
+        name: category,
+        centerX,
+        violinWidth,
+        outlineColor: categoryColorMap[category] || '#3b82f6',
+        points: []
+      }
+      categoryExportMap.set(category, categoryExport)
       
       // Draw points with cached positions
       for (const point of categoryData) {
@@ -1847,7 +2425,7 @@ export class CustomPlotManager {
         
         // Apply offset to current centerX and pointAreaWidth
         const pointX = centerX + relativeOffset * pointAreaWidth
-        const y = scaleY(point.y)
+        const y = scaleDisplayY(point.displayY)
         
         // Get color for this point from current coloring
         let color = '#3b82f6' // Default blue
@@ -1861,8 +2439,11 @@ export class CustomPlotManager {
         ctx.beginPath()
         ctx.arc(pointX, y, pointSize, 0, Math.PI * 2)
         ctx.fill()
-        plotPoints.push({ cellIndex: point.cellIndex, canvasX: pointX, canvasY: y, radius: pointSize })
+        const pointInfo = { cellIndex: point.cellIndex, canvasX: pointX, canvasY: y, radius: pointSize, color }
+        plotPoints.push(pointInfo)
+        categoryExport.points.push({ x: pointX, y, radius: pointSize, color })
       }
+      categoriesExport.push(categoryExport)
     })
     if (plotPoints.length > 0) {
       this.currentPlotPoints = plotPoints
@@ -1878,13 +2459,24 @@ export class CustomPlotManager {
     categories.forEach((category, catIndex) => {
       const categoryData = dataByCategory[category]
       const centerX = sidePadding + (catIndex + 0.5) * categoryWidth
+      const categoryExport = categoryExportMap.get(category)
+      if (!categoryExport) {
+        return
+      }
       
       // Calculate kernel density estimate for violin shape
-      const density = this.calculateDensity(categoryData.map(p => p.y), yMin, yMax, 50)
+      const densityValues = categoryData.map(p => p.displayY)
+      const density = this.calculateDensity(densityValues, yDisplayMin, yDisplayMax, 50)
       const maxDensity = Math.max(...density.map(d => d.density))
+      categoryExport.density = density.map(d => ({
+        value: this.inverseTransformValueForScale(d.value, yScaleDef),
+        displayValue: d.value,
+        density: d.density
+      }))
+      categoryExport.maxDensity = maxDensity || 1
       
       // Draw violin outline
-      const outlineColor = categoryColorMap[category] || '#3b82f6'
+      const outlineColor = categoryExport.outlineColor
       ctx.strokeStyle = outlineColor
       ctx.lineWidth = 2
       ctx.beginPath()
@@ -1892,7 +2484,7 @@ export class CustomPlotManager {
       // Right side of violin
       for (let i = 0; i < density.length; i++) {
         const x = centerX + (density[i].density / maxDensity) * (violinWidth / 2)
-        const y = scaleY(density[i].value)
+        const y = scaleDisplayY(density[i].value)
         if (i === 0) {
           ctx.moveTo(x, y)
         } else {
@@ -1903,7 +2495,7 @@ export class CustomPlotManager {
       // Left side of violin
       for (let i = density.length - 1; i >= 0; i--) {
         const x = centerX - (density[i].density / maxDensity) * (violinWidth / 2)
-        const y = scaleY(density[i].value)
+        const y = scaleDisplayY(density[i].value)
         ctx.lineTo(x, y)
       }
       
@@ -1926,7 +2518,85 @@ export class CustomPlotManager {
       // With right alignment, text ends at (0,0) in rotated coordinates
       ctx.fillText(category, 0, 0)
       ctx.restore()
+      categoryExport.label = {
+        angleDegrees: angle * (180 / Math.PI),
+        endX: textEndX,
+        endY: textEndY
+      }
     })
+    
+    this.lastPlotExportData = {
+      type: 'violin',
+      width,
+      height,
+      background: '#ffffff',
+      axisScales: {
+        x: 'categorical',
+        y: yScaleType
+      },
+      skippedDueToScale,
+      yScale: {
+        min: yMin,
+        max: yMax,
+        range: yRange,
+        scale: yScaleType,
+        displayMin: yDisplayMin,
+        displayMax: yDisplayMax,
+        topPadding,
+        bottomPadding,
+        height
+      },
+      grid: {
+        horizontal: {
+          positions: horizontalGridLines,
+          left: sidePadding,
+          right: width - sidePadding,
+          color: gridStroke
+        }
+      },
+      axes: {
+        color: axisStroke,
+        x: {
+          line: { x1: sidePadding, x2: width - sidePadding, y: height - bottomPadding },
+          label: {
+            lines: xLines,
+            baseY: height - bottomPadding + maxTextHeight + 15,
+            lineSpacing: 16,
+            fontSize: 13,
+            x: width / 2
+          }
+        },
+        y: {
+          axisX: sidePadding,
+          line: { y1: topPadding, y2: height - bottomPadding },
+          ticks: yTicks,
+          tickLength: 5,
+          tickLabelOffset: 8,
+          tickFontSize: 11,
+          scale: yScaleType,
+          domainMin: yMin,
+          domainMax: yMax,
+          displayMin: yDisplayMin,
+          displayMax: yDisplayMax,
+          label: {
+            lines: yLines,
+            translateX: 15,
+            translateY: height / 2,
+            lineSpacing: 16,
+            fontSize: 13
+          }
+        }
+      },
+      categories: categoriesExport,
+      layout: {
+        pointRadius: pointSize,
+        sidePadding,
+        topPadding,
+        bottomPadding,
+        violinWidth,
+        pointAreaWidth
+      }
+    }
     
     // console.log('Violin plot rendered with', categories.length, 'categories')
   }
@@ -2035,6 +2705,150 @@ export class CustomPlotManager {
     }
     
     return niceSpacing * magnitude
+  }
+
+  getScaleDefinition(scale) {
+    if (scale === 'log2') {
+      return { type: 'log', base: 2 }
+    }
+    if (scale === 'log10') {
+      return { type: 'log', base: 10 }
+    }
+    return { type: 'linear', base: Math.E }
+  }
+
+  transformValueForScale(value, scaleDef) {
+    if (!Number.isFinite(value)) {
+      return null
+    }
+    if (!scaleDef || scaleDef.type === 'linear') {
+      return value
+    }
+    if (scaleDef.type === 'log') {
+      if (value <= 0) {
+        return null
+      }
+      return Math.log(value) / Math.log(scaleDef.base)
+    }
+    return value
+  }
+
+  inverseTransformValueForScale(value, scaleDef) {
+    if (!Number.isFinite(value)) {
+      return null
+    }
+    if (!scaleDef || scaleDef.type === 'linear') {
+      return value
+    }
+    if (scaleDef.type === 'log') {
+      return Math.pow(scaleDef.base, value)
+    }
+    return value
+  }
+
+  generateAxisTicks(scaleDef, domainMin, domainMax) {
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      return []
+    }
+    if (scaleDef && scaleDef.type === 'log') {
+      const safeMin = Math.max(domainMin, Number.MIN_VALUE)
+      return this.generateLogTicks(safeMin, domainMax, scaleDef.base)
+    }
+    return this.generateLinearTicks(domainMin, domainMax)
+  }
+
+  generateLinearTicks(min, max) {
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return []
+    }
+    if (min === max) {
+      return [min]
+    }
+    const range = max - min || 1
+    const spacing = this.calculateTickSpacing(range)
+    if (!Number.isFinite(spacing) || spacing <= 0) {
+      return this.uniqueSortedTicks([min, max])
+    }
+    const ticks = []
+    const start = Math.ceil(min / spacing) * spacing
+    const maxIterations = 60
+    let value = start
+    let iterations = 0
+    while (value <= max + spacing * 0.5 && iterations < maxIterations) {
+      ticks.push(Number(value.toFixed(12)))
+      value += spacing
+      iterations++
+    }
+    ticks.push(min)
+    ticks.push(max)
+    const unique = this.uniqueSortedTicks(ticks)
+    return this.limitTicksCount(unique)
+  }
+
+  generateLogTicks(min, max, base) {
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0) {
+      return []
+    }
+    if (min === max) {
+      return [min]
+    }
+    const logMin = Math.log(min) / Math.log(base)
+    const logMax = Math.log(max) / Math.log(base)
+    const startPower = Math.floor(logMin)
+    const endPower = Math.ceil(logMax)
+    const ticks = []
+
+    for (let power = startPower; power <= endPower; power++) {
+      const tick = Math.pow(base, power)
+      if (tick >= min && tick <= max) {
+        ticks.push(tick)
+      }
+    }
+
+    ticks.push(min)
+    ticks.push(max)
+    const unique = this.uniqueSortedTicks(ticks)
+    return this.limitTicksCount(unique)
+  }
+
+  uniqueSortedTicks(values) {
+    if (!Array.isArray(values)) {
+      return []
+    }
+    const sorted = values
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)
+
+    const unique = []
+    const epsilon = 1e-9
+    for (const value of sorted) {
+      if (unique.length === 0 || Math.abs(value - unique[unique.length - 1]) > epsilon) {
+        unique.push(value)
+      }
+    }
+    return unique
+  }
+
+  limitTicksCount(ticks, maxCount = 12) {
+    if (!Array.isArray(ticks) || ticks.length === 0) {
+      return []
+    }
+    if (ticks.length <= maxCount) {
+      return ticks
+    }
+    if (maxCount <= 2) {
+      return [ticks[0], ticks[ticks.length - 1]]
+    }
+
+    const result = []
+    const step = (ticks.length - 1) / (maxCount - 1)
+
+    for (let i = 0; i < maxCount; i++) {
+      const index = Math.round(i * step)
+      result.push(ticks[Math.min(index, ticks.length - 1)])
+    }
+
+    return this.uniqueSortedTicks(result)
   }
 
   // Format tick value for display

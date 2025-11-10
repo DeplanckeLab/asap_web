@@ -124,12 +124,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   <div class="metadata-select-all-checkbox" 
                        data-metadata-id="<%= metadata.id %>"
                        data-action="click->visualization#toggleSelectAllCategories"
-                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: #10b981; transition: all 0.2s;"
+                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: white; transition: all 0.2s;"
                        onmouseover="this.style.borderColor='#059669'"
                        onmouseout="this.style.borderColor='#d1d5db'"
                        title="Select/Deselect all categories"
                        onclick="event.stopPropagation()">
-                    <i class="fas fa-check" style="color: white; font-size: 12px; display: block;"></i>
+                    <i class="fas fa-check" style="color: #10b981; font-size: 12px; display: block;"></i>
                   </div>
                   
                   <!-- Content -->
@@ -229,7 +229,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             <canvas class="category-distribution-canvas" 
                                     data-metadata-id="<%= metadata.id %>"
                                     data-category="<%= category %>"
-                                    style="width: 100%; height: 8px; border-radius: 2px;"></canvas>
+                                    style="display: none; width: 100%; height: 8px; border-radius: 2px;"></canvas>
                           </div>
                         <% end %>
                       <% elsif categories.is_a?(Array) %>
@@ -257,10 +257,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
-                            <canvas class="category-distribution-canvas" 
+                          <canvas class="category-distribution-canvas" 
                                     data-metadata-id="<%= metadata.id %>"
                                     data-category="<%= category %>"
-                                    style="width: 100%; height: 8px; border-radius: 2px;"></canvas>
+                                  style="display: none; width: 100%; height: 8px; border-radius: 2px;"></canvas>
                           </div>
                         <% end %>
                       <% end %>
@@ -799,6 +799,51 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             background-color: #eff6ff;
             box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
           }
+          .save-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            min-width: 200px;
+            padding: 12px;
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+            display: none;
+            z-index: 12000;
+          }
+          .save-dropdown-section + .save-dropdown-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e5e7eb;
+          }
+          .save-dropdown-header {
+            font-size: 13px;
+            color: #1f2937;
+            font-weight: 600;
+            margin-bottom: 8px;
+          }
+          .save-dropdown-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .save-dropdown-item {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            background-color: white;
+            cursor: pointer;
+            font-size: 13px;
+            color: #1f2937;
+            text-align: left;
+            transition: background-color 0.2s, border-color 0.2s;
+          }
+          .save-dropdown-item:hover {
+            background-color: #f3f4f6;
+            border-color: #d1d5db;
+          }
         </style>
       </div>
 
@@ -853,14 +898,66 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           </div>
         </div>
         
-        <!-- Save Button (Icon Only) -->
-        <button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
-                title="Save as SVG"
-                data-action="click->visualization#saveAsSVG"
-                onmouseover="this.style.backgroundColor='#e5e7eb'" 
-                onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-save" style="font-size: 14px;"></i>
-        </button>
+        <!-- Save Dropdown -->
+        <div id="save-dropdown-container"
+             style="position: relative; display: inline-block;">
+          <button id="save-menu-button"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
+                  title="Save visualization"
+                  data-action="click->visualization#toggleSaveMenu"
+                  onmouseover="this.style.backgroundColor='#e5e7eb'"
+                  onmouseout="this.style.backgroundColor='#f3f4f6'">
+            <i class="fas fa-save" style="font-size: 14px;"></i>
+          </button>
+          <div id="save-menu"
+               class="save-dropdown-menu"
+               data-action="click->visualization#preventSaveMenuClose">
+            <div class="save-dropdown-section">
+              <div class="save-dropdown-header">
+                Main plot
+              </div>
+              <div class="save-dropdown-list">
+                <button type="button"
+                        class="save-dropdown-item"
+                        data-save-type="svg"
+                        data-plot-target="main"
+                        data-action="click->visualization#handleSaveOption">
+                  Save as SVG
+                </button>
+                <button type="button"
+                        class="save-dropdown-item"
+                        data-save-type="png"
+                        data-plot-target="main"
+                        data-action="click->visualization#handleSaveOption">
+                  Save as PNG
+                </button>
+              </div>
+            </div>
+            <div id="save-menu-custom-section"
+                 class="save-dropdown-section"
+                 style="display: none;">
+              <div class="save-dropdown-header">
+                Custom plot
+              </div>
+              <div class="save-dropdown-list">
+                <button type="button"
+                        class="save-dropdown-item"
+                        data-save-type="svg"
+                        data-plot-target="custom"
+                        data-action="click->visualization#handleSaveOption">
+                  Save as SVG
+                </button>
+                <button type="button"
+                        class="save-dropdown-item"
+                        data-save-type="png"
+                        data-plot-target="custom"
+                        data-action="click->visualization#handleSaveOption">
+                  Save as PNG
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
         
         <!-- Memory Diagnostic Button -->
         <button type="button" 
@@ -1276,99 +1373,138 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   
   <!-- Window Content -->
   <div style="padding: 16px;">
-    
-    <!-- Point Size Slider -->
-    <div style="margin-bottom: 20px;">
-      <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
-        Point Size
-      </label>
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <input type="range" 
-               id="point-size-slider" 
-               min="1" 
-               max="8" 
-               step="0.5" 
-               value="1" 
-               style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px; outline: none; cursor: pointer;"
-               data-action="input->visualization#updatePointSize change->visualization#updatePointSize">
-        <span id="point-size-value" 
-              style="font-size: 12px; color: #6b7280; min-width: 30px; text-align: right;">1.0</span>
-      </div>
-    </div>
-    
-    <!-- Toggle Options -->
-    <div style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; flex-direction: column; gap: 24px;">
       
-      <!-- Show Axes -->
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
-          Show Axes
-        </label>
-        <input type="checkbox" 
-               id="show-axes-checkbox" 
-               checked 
-               style="width: 16px; height: 16px; cursor: pointer;"
-               data-action="change->visualization#toggleAxes">
-      </div>
-      
-      <!-- Show Grid -->
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
-          Show Grid
-        </label>
-        <input type="checkbox" 
-               id="show-grid-checkbox" 
-               checked 
-               style="width: 16px; height: 16px; cursor: pointer;"
-               data-action="change->visualization#toggleGrid">
-      </div>
-      
-      <!-- Show Categories -->
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
-          Show Categories
-        </label>
-        <input type="checkbox" 
-               id="show-categories-checkbox"
-               style="width: 16px; height: 16px; cursor: pointer;"
-               data-action="change->visualization#toggleCategories">
-      </div>
-      
-      <!-- Category Order -->
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151;">
-          Category order
-        </label>
-        <select id="category-order-select"
-                style="width: 140px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
-          <option value="largest-first">Large to small</option>
-          <option value="smallest-first">Small to large</option>
-        </select>
+      <!-- General Settings -->
+      <div>
+        <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
+          General settings
+        </div>
+        
+        <!-- Dot Size Slider -->
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            Dot Size
+          </label>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <input type="range" 
+                   id="point-size-slider" 
+                   min="1" 
+                   max="8" 
+                   step="0.5" 
+                   value="1" 
+                   style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px; outline: none; cursor: pointer;"
+                   data-action="input->visualization#updatePointSize change->visualization#updatePointSize">
+            <span id="point-size-value" 
+                  style="font-size: 12px; color: #6b7280; min-width: 30px; text-align: right;">1.0</span>
+          </div>
+        </div>
+        
+        <!-- Point Order Options -->
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          
+          <!-- Category Order -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151;">
+              Category order
+            </label>
+            <select id="category-order-select"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="largest-first">Large to small</option>
+              <option value="smallest-first">Small to large</option>
+            </select>
+          </div>
+          
+          <!-- Numerical Order -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151;">
+              Numerical order
+            </label>
+            <select id="numerical-order-select"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="negative-to-positive">Negative to positive</option>
+              <option value="positive-to-negative">Positive to negative</option>
+              <option value="abs-min-to-max">Absolute min to max</option>
+              <option value="abs-max-to-min">Absolute max to min</option>
+            </select>
+          </div>
+        </div>
       </div>
       
-      <!-- Numerical Order -->
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151;">
-          Numerical order
-        </label>
-        <select id="numerical-order-select"
-                style="width: 140px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
-          <option value="negative-to-positive">Negative to positive</option>
-          <option value="positive-to-negative">Positive to negative</option>
-          <option value="abs-min-to-max">Absolute min to max</option>
-          <option value="abs-max-to-min">Absolute max to min</option>
-        </select>
+      <!-- Main Plot Settings -->
+      <div>
+        <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
+          Main plot settings
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          
+          <!-- Show Grid -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Show Grid
+            </label>
+            <input type="checkbox" 
+                   id="show-grid-checkbox" 
+                   checked 
+                   style="width: 16px; height: 16px; cursor: pointer;"
+                   data-action="change->visualization#toggleGrid">
+          </div>
+          
+          <!-- Show Axes -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Show Scale
+            </label>
+            <input type="checkbox" 
+                   id="show-axes-checkbox" 
+                   checked 
+                   style="width: 16px; height: 16px; cursor: pointer;"
+                   data-action="change->visualization#toggleAxes">
+          </div>
+          
+          <!-- Show Categories -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Show Category Labels
+            </label>
+            <input type="checkbox" 
+                   id="show-categories-checkbox"
+                   style="width: 16px; height: 16px; cursor: pointer;"
+                   data-action="change->visualization#toggleCategories">
+          </div>
+        </div>
       </div>
-      <!-- Auto Preload Metadata -->
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
-        <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
-          Auto preload metadata
-        </label>
-        <input type="checkbox" 
-               id="auto-preload-checkbox" 
-               style="width: 16px; height: 16px; cursor: pointer;">
+
+      <!-- Custom Plot Settings -->
+      <div id="custom-plot-settings-section" style="display: none;">
+        <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
+          Custom plot settings
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label for="custom-plot-x-scale" style="font-size: 13px; font-weight: 500; color: #374151;">
+              X-axis scale
+            </label>
+            <select id="custom-plot-x-scale"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="normal">Normal</option>
+              <option value="log2">Log2</option>
+              <option value="log10">Log10</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label for="custom-plot-y-scale" style="font-size: 13px; font-weight: 500; color: #374151;">
+              Y-axis scale
+            </label>
+            <select id="custom-plot-y-scale"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="normal">Normal</option>
+              <option value="log2">Log2</option>
+              <option value="log10">Log10</option>
+            </select>
+          </div>
+        </div>
       </div>
-      
     </div>
   </div>
 </div>

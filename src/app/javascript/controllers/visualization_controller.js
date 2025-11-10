@@ -185,6 +185,14 @@ export default class extends Controller {
     // Initialize numerical display order preference for continuous metadata
     this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
     
+    // Initialize custom plot axis scale preferences
+    this.customPlotXAxisScale = 'normal'
+    this.customPlotYAxisScale = 'normal'
+    this.customPlotSettingsContext = {
+      visible: false,
+      xAxisIsCategorical: false
+    }
+    
     // Initialize auto-preload preference (enabled by default for better UX)
     this.autoPreloadMetadata = true
     
@@ -847,6 +855,69 @@ export default class extends Controller {
 
     this.applyEmbeddingSelection(embeddingId, loomFile)
     this.closeAllDropdowns()
+  }
+
+  toggleSaveMenu(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const menu = document.getElementById('save-menu')
+    if (!menu) {
+      return
+    }
+
+    const wasVisible = menu.style.display === 'block'
+    const shouldShow = !wasVisible
+    this.closeAllDropdowns()
+    if (shouldShow) {
+      menu.style.display = 'block'
+      this.updateSaveMenuState()
+    } else {
+      menu.style.display = 'none'
+    }
+  }
+
+  preventSaveMenuClose(event) {
+    event.stopPropagation()
+  }
+
+  async handleSaveOption(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const button = event.currentTarget
+    const saveType = button?.dataset?.saveType
+    const plotTarget = button?.dataset?.plotTarget || 'main'
+
+    this.closeAllDropdowns()
+
+    if (plotTarget === 'custom') {
+      if (saveType === 'svg') {
+        this.saveCustomPlotAsSVG()
+      } else if (saveType === 'png') {
+        this.saveCustomPlotAsPNG()
+      }
+      return
+    }
+
+    if (saveType === 'svg') {
+      this.saveAsSVG()
+    } else if (saveType === 'png') {
+      await this.saveAsPNG()
+    }
+  }
+
+  updateSaveMenuState() {
+    const customSection = document.getElementById('save-menu-custom-section')
+    if (!customSection) {
+      return
+    }
+
+    const hasCustomPlot = this.customPlotManager &&
+      typeof this.customPlotManager.isPlotVisible === 'function' &&
+      this.customPlotManager.isPlotVisible()
+
+    customSection.style.display = hasCustomPlot ? 'block' : 'none'
   }
 
   async loadMetadataCoordinates(metadataId) {
@@ -3744,6 +3815,11 @@ export default class extends Controller {
     const embeddingMenu = document.getElementById('embedding-selection-menu')
     if (embeddingMenu) {
       embeddingMenu.style.display = 'none'
+    }
+
+    const saveMenu = document.getElementById('save-menu')
+    if (saveMenu) {
+      saveMenu.style.display = 'none'
     }
   }
 
@@ -8024,6 +8100,81 @@ export default class extends Controller {
     this.uiManager.toggleCategories()
   }
 
+  setCustomPlotAxisScale(axis, scale) {
+    const allowedScales = new Set(['normal', 'log2', 'log10'])
+    const normalizedScale = allowedScales.has(scale) ? scale : 'normal'
+
+    if (axis === 'x') {
+      if (this.customPlotSettingsContext?.xAxisIsCategorical) {
+        if (this.customPlotXAxisScale !== 'normal') {
+          this.customPlotXAxisScale = 'normal'
+          if (this.uiManager && typeof this.uiManager.updateCustomPlotSettingsSection === 'function') {
+            this.uiManager.updateCustomPlotSettingsSection()
+          }
+        }
+        return
+      }
+
+      if (this.customPlotXAxisScale === normalizedScale) {
+        return
+      }
+      this.customPlotXAxisScale = normalizedScale
+    } else if (axis === 'y') {
+      if (this.customPlotYAxisScale === normalizedScale) {
+        return
+      }
+      this.customPlotYAxisScale = normalizedScale
+    } else {
+      return
+    }
+
+    if (this.uiManager && typeof this.uiManager.updateCustomPlotSettingsSection === 'function') {
+      this.uiManager.updateCustomPlotSettingsSection()
+    }
+
+    if (this.customPlotManager && typeof this.customPlotManager.refresh2DPlotIfOpen === 'function') {
+      this.customPlotManager.refresh2DPlotIfOpen()
+    }
+  }
+
+  updateCustomPlotSettingsContext(context = {}) {
+    const previousState = this.customPlotSettingsContext || { visible: false, xAxisIsCategorical: false }
+    const nextState = {
+      ...previousState,
+      ...context
+    }
+
+    if (Object.prototype.hasOwnProperty.call(context, 'visible') && !context.visible) {
+      nextState.visible = false
+      nextState.xAxisIsCategorical = false
+    }
+
+    if (Object.prototype.hasOwnProperty.call(context, 'xAxisType')) {
+      const axisType = context.xAxisType
+      const isCategorical = axisType === 'DISCRETE' || axisType === 'STRING'
+      nextState.xAxisIsCategorical = isCategorical
+
+      if (isCategorical && this.customPlotXAxisScale !== 'normal') {
+        this.customPlotXAxisScale = 'normal'
+      }
+    }
+
+    this.customPlotSettingsContext = nextState
+
+    if (this.uiManager && typeof this.uiManager.setCustomPlotSettingsState === 'function') {
+      this.uiManager.setCustomPlotSettingsState({
+        visible: nextState.visible,
+        xAxisIsCategorical: nextState.xAxisIsCategorical
+      })
+    }
+
+    if (previousState.xAxisIsCategorical !== nextState.xAxisIsCategorical && nextState.xAxisIsCategorical) {
+      if (this.customPlotManager && typeof this.customPlotManager.refresh2DPlotIfOpen === 'function') {
+        this.customPlotManager.refresh2DPlotIfOpen()
+      }
+    }
+  }
+
   // Preload metadata vector - delegate to DataManager
   preloadMetadataVector(event) {
     // Pass the event directly to DataManager which expects event.currentTarget
@@ -8432,6 +8583,109 @@ export default class extends Controller {
     }
   }
 
+  async saveAsPNG() {
+    const hasRenderer = !!this.reglRenderer
+    const canvas = this.canvas
+
+    if (!hasRenderer || !canvas) {
+      alert('No plot available to save')
+      return
+    }
+
+    try {
+      const dataUrl = this.reglRenderer.captureToDataURL('image/png')
+      if (!dataUrl) {
+        alert('Error capturing PNG image')
+        return
+      }
+      const finalDataUrl = await this.composeMainPlotImage(dataUrl)
+      this.downloadDataUrl(finalDataUrl, 'plot.png')
+    } catch (error) {
+      console.error('Error saving PNG:', error)
+      alert('Error saving PNG file')
+    }
+  }
+
+  async composeMainPlotImage(baseDataUrl) {
+    const canvas = this.canvas
+    if (!canvas) {
+      return baseDataUrl
+    }
+
+    const width = canvas.width
+    const height = canvas.height
+    if (!width || !height) {
+      return baseDataUrl
+    }
+
+    const overlayCanvas = this.overlayCanvas
+    const needsOverlay = overlayCanvas && overlayCanvas.width && overlayCanvas.height
+
+    if (!needsOverlay) {
+      return baseDataUrl
+    }
+
+    const compositeCanvas = document.createElement('canvas')
+    compositeCanvas.width = width
+    compositeCanvas.height = height
+    const ctx = compositeCanvas.getContext('2d')
+
+    try {
+      await this.drawDataUrlOnContext(ctx, baseDataUrl, width, height)
+    } catch (error) {
+      console.warn('Failed to draw base image for PNG export, falling back to original image.', error)
+      return baseDataUrl
+    }
+
+    try {
+      ctx.drawImage(overlayCanvas, 0, 0, width, height)
+    } catch (error) {
+      console.warn('Failed to draw overlay canvas for PNG export. Continuing without overlay.', error)
+    }
+
+    return compositeCanvas.toDataURL('image/png')
+  }
+
+  drawDataUrlOnContext(ctx, dataUrl, width, height) {
+    return new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => {
+        try {
+          ctx.drawImage(image, 0, 0, width, height)
+          resolve()
+        } catch (error) {
+          reject(error)
+        }
+      }
+      image.onerror = (error) => reject(error)
+      image.src = dataUrl
+    })
+  }
+
+  saveCustomPlotAsPNG() {
+    if (!this.customPlotManager || typeof this.customPlotManager.savePlotAsPNG !== 'function') {
+      alert('No custom plot available to save')
+      return
+    }
+
+    const saved = this.customPlotManager.savePlotAsPNG()
+    if (!saved) {
+      console.warn('Custom plot PNG save did not complete')
+    }
+  }
+
+  saveCustomPlotAsSVG() {
+    if (!this.customPlotManager || typeof this.customPlotManager.savePlotAsSVG !== 'function') {
+      alert('No custom plot available to save')
+      return
+    }
+
+    const saved = this.customPlotManager.savePlotAsSVG()
+    if (!saved) {
+      console.warn('Custom plot SVG save did not complete')
+    }
+  }
+
   // Generate SVG content from the current plot
   generateSVGFromPlot() {
     // console.log('💾 Generating SVG from plot...')
@@ -8471,7 +8725,8 @@ export default class extends Controller {
     if (this.currentCoordinates && this.originalPointColors) {
       // console.log(`💾 [ReGL] Exporting ${this.currentCoordinates.length} points to SVG`)
       
-      const pointSize = this.currentPointSize || 4
+      const pointDiameter = this.currentPointSize || 4
+      const pointRadius = pointDiameter / 2
       
       for (let i = 0; i < this.currentCoordinates.length; i++) {
         const [dataX, dataY] = this.currentCoordinates[i]
@@ -8486,7 +8741,7 @@ export default class extends Controller {
         const colorHex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
         
         // Add circle for each point
-        svg += `<circle cx="${screenX.toFixed(2)}" cy="${screenY.toFixed(2)}" r="${pointSize}" fill="${colorHex}"/>`
+        svg += `<circle cx="${screenX.toFixed(2)}" cy="${screenY.toFixed(2)}" r="${pointRadius}" fill="${colorHex}"/>`
       }
     }
     
@@ -8666,6 +8921,19 @@ export default class extends Controller {
     
     // Clean up the URL object
     URL.revokeObjectURL(url)
+  }
+
+  downloadDataUrl(dataUrl, filename) {
+    if (!dataUrl) {
+      throw new Error('Missing data URL for download')
+    }
+
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   // Cancel selection method - resets points to original colors
@@ -9654,9 +9922,13 @@ export default class extends Controller {
     
     const metadataId = event.currentTarget.dataset.metadataId
     const checkbox = event.currentTarget
-    const isSelected = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981
+    const icon = checkbox.querySelector('i')
+    const backgroundColor = (checkbox.style.backgroundColor || '').toLowerCase()
+    const isGreenBackground = backgroundColor === '#10b981' || backgroundColor === 'rgb(16, 185, 129)'
+    const isOrangeBackground = backgroundColor === '#f59e0b' || backgroundColor === 'rgb(245, 158, 11)'
+    const hasVisibleIcon = !!(icon && icon.style.display !== 'none')
     
-    // console.log('🔍 [CHECKBOX] metadataId:', metadataId, 'isSelected:', isSelected)
+    // console.log('🔍 [CHECKBOX] metadataId:', metadataId, 'hasVisibleIcon:', hasVisibleIcon)
     
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
@@ -9684,15 +9956,15 @@ export default class extends Controller {
     // console.log('🔍 [CHECKBOX] isContinuous:', isContinuous)
     
     // Toggle the checkbox state
-    // Note: Also check for orange (#f59e0b) which indicates a subrange selection
-    const isSelectedGreen = checkbox.style.backgroundColor === 'rgb(16, 185, 129)' // #10b981 green
-    const isSelectedOrange = checkbox.style.backgroundColor === 'rgb(245, 158, 11)' // #f59e0b orange
-    const isAnySelected = isSelectedGreen || isSelectedOrange
+    // Note: The checkbox is considered selected if it has a visible checkmark or retains a green/orange background
+    const isAnySelected = hasVisibleIcon || isGreenBackground || isOrangeBackground
     
     if (isAnySelected) {
       // Deselect - store the current range for later restoration
       checkbox.style.backgroundColor = '#f3f4f6'
-      checkbox.querySelector('i').style.display = 'none'
+      if (icon) {
+        icon.style.display = 'none'
+      }
       
       if (isContinuous) {
         // Track that this metadata was explicitly unchecked
@@ -9757,7 +10029,9 @@ export default class extends Controller {
       }
     } else {
       // Select - restore previous range if it was a subrange, otherwise use full range
-      checkbox.querySelector('i').style.display = 'block'
+      if (icon) {
+        icon.style.display = 'block'
+      }
       
       if (isContinuous) {
         // console.log('🔍 [CHECKBOX] Re-checking continuous metadata')
@@ -9880,19 +10154,35 @@ export default class extends Controller {
           
           if (selectedCount === totalCategories) {
             // All categories selected - green
-            checkbox.style.backgroundColor = '#10b981'
-            // console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - green`)
+            checkbox.style.backgroundColor = 'white'
+            if (icon) {
+              icon.style.display = 'block'
+              icon.style.color = '#10b981'
+            }
+            // console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - white with green check`)
           } else if (selectedCount > 0) {
             // Some categories selected - orange
             checkbox.style.backgroundColor = '#f59e0b'
+            if (icon) {
+              icon.style.display = 'block'
+              icon.style.color = 'white'
+            }
             // console.log(`🔍 [CHECKBOX] ${selectedCount}/${totalCategories} categories selected - orange`)
           } else {
             // No categories selected - should not happen, but default to green
             checkbox.style.backgroundColor = '#10b981'
+            if (icon) {
+              icon.style.display = 'block'
+              icon.style.color = 'white'
+            }
           }
         } else {
           // No categories selected or not initialized - default to green
           checkbox.style.backgroundColor = '#10b981'
+          if (icon) {
+            icon.style.display = 'block'
+            icon.style.color = 'white'
+          }
         }
       }
     }
@@ -10341,7 +10631,9 @@ export default class extends Controller {
     
     // Check if selected by looking at the checkmark visibility and color
     const icon = checkbox.querySelector('i')
-    const isSelected = icon && icon.style.display !== 'none' && icon.style.color === 'rgb(16, 185, 129)' // #10b981
+    const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
+    const iconColor = icon ? (icon.style.color || window.getComputedStyle(icon).color) : ''
+    const isSelected = iconDisplay !== 'none' && (iconColor === '#10b981' || iconColor === 'rgb(16, 185, 129)') // #10b981
     
     // console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
@@ -10546,24 +10838,38 @@ export default class extends Controller {
 
   updateMetadataCheckboxState(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    const selectedCount = Array.from(categoryCheckboxes).filter(cb => 
-      cb.style.backgroundColor === 'rgb(16, 185, 129)'
-    ).length
+    const selectedCount = Array.from(categoryCheckboxes).filter(cb => {
+      const icon = cb.querySelector('i')
+      return icon && icon.style.display !== 'none'
+    }).length
     
     const metadataCheckbox = document.querySelector(`.metadata-checkbox[data-metadata-id="${metadataId}"]`)
+    if (!metadataCheckbox) {
+      return
+    }
+    
+    const icon = metadataCheckbox.querySelector('i')
     
     if (selectedCount === 0) {
       // No categories selected
       metadataCheckbox.style.backgroundColor = '#f3f4f6'
-      metadataCheckbox.querySelector('i').style.display = 'none'
+      if (icon) {
+        icon.style.display = 'none'
+      }
     } else if (selectedCount === categoryCheckboxes.length) {
       // All categories selected
-      metadataCheckbox.style.backgroundColor = '#10b981'
-      metadataCheckbox.querySelector('i').style.display = 'block'
+      metadataCheckbox.style.backgroundColor = 'white'
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = '#10b981'
+      }
     } else {
       // Some categories selected (indeterminate state)
       metadataCheckbox.style.backgroundColor = '#f59e0b'
-      metadataCheckbox.querySelector('i').style.display = 'block'
+      if (icon) {
+        icon.style.display = 'block'
+        icon.style.color = 'white'
+      }
     }
   }
 
@@ -11278,10 +11584,29 @@ export default class extends Controller {
     // Reset all checkbox visual states
     const metadataCheckboxes = document.querySelectorAll('.metadata-checkbox')
     metadataCheckboxes.forEach(checkbox => {
-      checkbox.style.backgroundColor = '#10b981' // Green (selected)
       const icon = checkbox.querySelector('i')
-      if (icon) {
-        icon.style.display = 'block'
+      const parentItem = checkbox.closest('[data-metadata-item]')
+      const typeHint = (
+        checkbox.dataset?.metadataType ||
+        checkbox.getAttribute('data-metadata-type') ||
+        parentItem?.dataset?.metadataType ||
+        ''
+      ).toUpperCase()
+      const hasSelectAllCheckbox = !!(parentItem && parentItem.querySelector('.metadata-select-all-checkbox'))
+      const isCategorical = typeHint === 'DISCRETE' || typeHint === 'STRING' || hasSelectAllCheckbox
+      
+      if (isCategorical) {
+        checkbox.style.backgroundColor = 'white'
+        if (icon) {
+          icon.style.display = 'block'
+          icon.style.color = '#10b981'
+        }
+      } else {
+        checkbox.style.backgroundColor = '#10b981' // Green (selected) for continuous metadata
+        if (icon) {
+          icon.style.display = 'block'
+          icon.style.color = 'white'
+        }
       }
     })
     

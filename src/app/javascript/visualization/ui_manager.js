@@ -6,6 +6,10 @@
 export class UIManager {
   constructor(controller) {
     this.controller = controller
+    this.customPlotSettingsState = {
+      visible: false,
+      xAxisIsCategorical: false
+    }
   }
 
   // Tooltip management
@@ -1330,33 +1334,69 @@ export class UIManager {
         this.changeNumericalOrder(e)
       })
     }
-    
-    // Add event listener for auto-preload checkbox
-    const autoPreloadCheckbox = document.getElementById('auto-preload-checkbox')
-    if (autoPreloadCheckbox) {
-      // Set checkbox based on current preference
-      autoPreloadCheckbox.checked = this.controller.autoPreloadMetadata
-      
-      // Add event listener
-      autoPreloadCheckbox.addEventListener('change', (e) => {
-        this.controller.autoPreloadMetadata = e.target.checked
-        // console.log('📊 Auto-preload metadata:', this.controller.autoPreloadMetadata)
-        
-        // If enabled, start preloading now
-        if (this.controller.autoPreloadMetadata) {
-          // console.log('🚀 Starting automatic preload after checkbox enable...')
-          this.controller.preloadAllMetadata().catch(error => {
-            // console.log('Background metadata preload encountered an error:', error)
-          })
-        }
-      })
+
+    const xScaleSelect = document.getElementById('custom-plot-x-scale')
+    if (xScaleSelect) {
+      xScaleSelect.onchange = (event) => {
+        this.controller.setCustomPlotAxisScale('x', event.target.value)
+      }
     }
+
+    const yScaleSelect = document.getElementById('custom-plot-y-scale')
+    if (yScaleSelect) {
+      yScaleSelect.onchange = (event) => {
+        this.controller.setCustomPlotAxisScale('y', event.target.value)
+      }
+    }
+
+    this.updateCustomPlotSettingsSection()
     
     // Update categories checkbox state based on current metadata
     this.updateCategoriesCheckboxState()
     
     // Make window draggable
     this.makeSettingsWindowDraggable()
+  }
+
+  setCustomPlotSettingsState(state = {}) {
+    this.customPlotSettingsState = {
+      ...this.customPlotSettingsState,
+      ...state
+    }
+    this.updateCustomPlotSettingsSection()
+  }
+
+  updateCustomPlotSettingsSection() {
+    const section = document.getElementById('custom-plot-settings-section')
+    if (!section) return
+
+    const isVisible = !!(this.customPlotSettingsState && this.customPlotSettingsState.visible)
+    section.style.display = isVisible ? 'block' : 'none'
+
+    if (!isVisible) {
+      return
+    }
+
+    const xScaleSelect = document.getElementById('custom-plot-x-scale')
+    const yScaleSelect = document.getElementById('custom-plot-y-scale')
+    const xScaleDisabled = !!(this.customPlotSettingsState && this.customPlotSettingsState.xAxisIsCategorical)
+
+    if (xScaleSelect) {
+      xScaleSelect.disabled = xScaleDisabled
+      if (xScaleDisabled) {
+        xScaleSelect.value = 'normal'
+        xScaleSelect.title = 'X-axis scale is disabled when the X-axis is categorical.'
+      } else {
+        xScaleSelect.value = this.controller.customPlotXAxisScale || 'normal'
+        xScaleSelect.title = ''
+      }
+    }
+
+    if (yScaleSelect) {
+      yScaleSelect.disabled = false
+      yScaleSelect.value = this.controller.customPlotYAxisScale || 'normal'
+      yScaleSelect.title = ''
+    }
   }
 
   makeSettingsWindowDraggable() {

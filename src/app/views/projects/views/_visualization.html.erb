@@ -516,7 +516,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   <!-- Main Content: UMAP Plot -->
   <div id="main-panel" style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
     <!-- Menu Bar -->
-    <div style="display: flex; align-items: center; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+    <div style="display: flex; align-items: flex-start; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
       <div style="display: flex; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 6px; position: relative;">
@@ -803,11 +803,11 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       </div>
 
       <!-- Right side: Actions -->
-      <div style="display: flex; align-items: center; gap: 8px; ml-1">
+      <div style="display: flex; align-items: flex-start; gap: 8px; ml-1">
         <!-- Global Filter Summary -->
         <div id="global-filter-summary"
              data-action="click->visualization#toggleGlobalFilterPanel"
-             style="position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; height: 32px; background-color: #f3f4f6; cursor: pointer; transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; box-shadow: none;">
+             style="position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; height: 35px; background-color: #f3f4f6; cursor: pointer; transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; box-shadow: none;">
           <i class="fas fa-filter" style="font-size: 14px; color: #6b7280; transition: color 0.2s;"></i>
           <span id="active-filter-count" style="font-size: 14px; color: #374151;">0 filters</span>
           <div id="global-filter-switch"

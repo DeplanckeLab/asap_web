@@ -9511,6 +9511,36 @@ export default class extends Controller {
       tooltipTop = rect.top - margins.top - 20
     }
     
+    // Ensure tooltip doesn't go below the viewport bottom
+    // Estimate tooltip height (header + table rows + padding)
+    // Conservative estimate: ~150px for typical tooltip with 3-4 rows
+    const estimatedTooltipHeight = 150
+    const estimatedTooltipWidth = 250 // Conservative estimate for max-width
+    const viewportBottom = window.innerHeight
+    const viewportRight = window.innerWidth
+    
+    // Check if tooltip would go below viewport bottom
+    if (tooltipTop + estimatedTooltipHeight > viewportBottom) {
+      // Position tooltip above the bottom of the screen with some margin
+      tooltipTop = viewportBottom - estimatedTooltipHeight - 10
+    }
+    
+    // Also ensure tooltip doesn't go above the viewport top
+    if (tooltipTop < 0) {
+      tooltipTop = 10
+    }
+    
+    // Check if tooltip would go off the right edge of the screen
+    if (tooltipLeft + estimatedTooltipWidth > viewportRight) {
+      // Position tooltip to the left of the right edge with some margin
+      tooltipLeft = viewportRight - estimatedTooltipWidth - 10
+    }
+    
+    // Also ensure tooltip doesn't go off the left edge of the screen
+    if (tooltipLeft < 0) {
+      tooltipLeft = 10
+    }
+    
     // Create tooltip container
     const tooltip = document.createElement('div')
     tooltip.id = 'simple-tooltip'
@@ -9658,6 +9688,32 @@ export default class extends Controller {
         e.preventDefault()
         currentX = e.clientX - initialX
         currentY = e.clientY - initialY
+        
+        // Ensure tooltip doesn't go below viewport bottom
+        const tooltipRect = tooltip.getBoundingClientRect()
+        const tooltipHeight = tooltipRect.height
+        const viewportBottom = window.innerHeight
+        
+        // Check if tooltip would go below viewport bottom
+        if (currentY + tooltipHeight > viewportBottom) {
+          currentY = viewportBottom - tooltipHeight - 10
+        }
+        
+        // Ensure tooltip doesn't go above viewport top
+        if (currentY < 0) {
+          currentY = 10
+        }
+        
+        // Ensure tooltip doesn't go off the left edge
+        if (currentX < 0) {
+          currentX = 10
+        }
+        
+        // Ensure tooltip doesn't go off the right edge
+        const tooltipWidth = tooltipRect.width
+        if (currentX + tooltipWidth > window.innerWidth) {
+          currentX = window.innerWidth - tooltipWidth - 10
+        }
         
         tooltip.style.left = currentX + 'px'
         tooltip.style.top = currentY + 'px'
@@ -9838,6 +9894,45 @@ export default class extends Controller {
     tooltip.appendChild(content)
     tooltip.appendChild(closeButton)
     document.body.appendChild(tooltip)
+    
+    // Measure actual tooltip dimensions and adjust position if it goes outside viewport
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const actualTooltipHeight = tooltipRect.height
+    const actualTooltipWidth = tooltipRect.width
+    const viewportBottomActual = window.innerHeight
+    const viewportRightActual = window.innerWidth
+    const currentTop = parseFloat(tooltip.style.top) || tooltipTop
+    const currentLeft = parseFloat(tooltip.style.left) || tooltipLeft
+    
+    // Check if tooltip goes below viewport bottom
+    if (currentTop + actualTooltipHeight > viewportBottomActual) {
+      // Adjust position to keep tooltip above viewport bottom with some margin
+      const adjustedTop = viewportBottomActual - actualTooltipHeight - 10
+      tooltip.style.top = `${Math.max(10, adjustedTop)}px`
+      // Update stored position if it exists
+      if (this.lastTooltipPosition) {
+        this.lastTooltipPosition.top = parseFloat(tooltip.style.top)
+      }
+    }
+    
+    // Check if tooltip goes off the right edge of the screen
+    if (currentLeft + actualTooltipWidth > viewportRightActual) {
+      // Adjust position to keep tooltip within viewport right edge with some margin
+      const adjustedLeft = viewportRightActual - actualTooltipWidth - 10
+      tooltip.style.left = `${Math.max(10, adjustedLeft)}px`
+      // Update stored position if it exists
+      if (this.lastTooltipPosition) {
+        this.lastTooltipPosition.left = parseFloat(tooltip.style.left)
+      }
+    }
+    
+    // Also ensure tooltip doesn't go off the left edge
+    if (currentLeft < 0) {
+      tooltip.style.left = '10px'
+      if (this.lastTooltipPosition) {
+        this.lastTooltipPosition.left = 10
+      }
+    }
     
     // Store initial position for tooltips (if not already stored)
     if (!this.lastTooltipPosition) {

@@ -9328,13 +9328,30 @@ export default class extends Controller {
     const plotContainer = document.querySelector('.plot-container')
     const rect = plotContainer ? plotContainer.getBoundingClientRect() : { left: 0, top: 0, width: 600, height: 400 }
     
-    // Position tooltip - use last position if available (for both fixed and hover), otherwise calculate default position
+    // Position tooltip based on whether it's fixed or hovering
     let tooltipLeft, tooltipTop
-    if (this.lastTooltipPosition) {
+    if (isFixed && this.lastTooltipPosition) {
+      // For fixed tooltips, use saved position if available (from manual drag)
       tooltipLeft = this.lastTooltipPosition.left
       tooltipTop = this.lastTooltipPosition.top
+    } else if (isFixed && point && typeof point.x !== 'undefined' && typeof point.y !== 'undefined') {
+      // For fixed tooltips without saved position, use click position
+      tooltipLeft = point.x + 12
+      tooltipTop = point.y + 12
+    } else if (!isFixed) {
+      // For hover tooltips, position near the mouse cursor (following the point position)
+      // The point coordinates should be in screen coordinates (event.clientX/Y)
+      if (point && typeof point.x !== 'undefined' && typeof point.y !== 'undefined') {
+        // Point coordinates are in screen coordinates, add offset
+        tooltipLeft = point.x + 12
+        tooltipTop = point.y + 12
+      } else {
+        // Fallback: use default position if point coordinates not available
+        tooltipLeft = rect.left - 20
+        tooltipTop = rect.top - 40
+      }
     } else {
-      // Default position: above the plot, centered horizontally
+      // Default position for fixed tooltips (if no saved position and no point): above the plot, centered horizontally
       const margins = this.rendererManager.getPlotMargins()
       tooltipLeft = rect.left + (rect.width / 2) - 100
       tooltipTop = rect.top - margins.top - 20
@@ -9861,7 +9878,8 @@ export default class extends Controller {
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
       // Point found within tolerance - fix tooltip to this cell
       // console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
-      this.fixTooltipToCell(closestPointIndex, clickX, clickY)
+      // Pass screen coordinates (event.clientX/Y) for tooltip positioning
+      this.fixTooltipToCell(closestPointIndex, event.clientX, event.clientY)
     } else {
       // No point found within tolerance - hide any existing tooltip
       // console.log('🎯 [RegL] No point found within tolerance - hiding tooltip')
@@ -9884,6 +9902,8 @@ export default class extends Controller {
     const cellName = cellId.toString()
     
     // Create a mock point object for positioning
+    // showSimpleTooltip will use lastTooltipPosition if available (from dragging), 
+    // otherwise it will position at the click location
     const mockPoint = { x: screenX, y: screenY }
     
     // Tooltip will read current metadata directly, and isFixed=true will show lock icon
@@ -9967,7 +9987,8 @@ export default class extends Controller {
       if (!this.isTooltipFixed) {
         const cellName = closestPointIndex.toString()
         
-        const mockPoint = { x: mouseX, y: mouseY }
+        // Convert canvas coordinates to screen coordinates for tooltip positioning
+        const mockPoint = { x: event.clientX, y: event.clientY }
         // Tooltip will read current metadata directly, isFixed=false so no lock icon
         this.showSimpleTooltip(cellName, null, mockPoint, closestPointIndex, false)
       }

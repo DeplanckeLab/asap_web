@@ -824,17 +824,21 @@ export class CustomPlotManager {
     }
     event.preventDefault()
     event.stopPropagation()
+    // Use saved position if available (from dragging), otherwise use click position
+    // Don't override lastTooltipPosition - it should only be set when dragging the tooltip
     const tooltipLeft = event.clientX + 12
     const tooltipTop = event.clientY + 12
-    this.controller.lastTooltipPosition = { left: tooltipLeft, top: tooltipTop }
     if (typeof this.controller.fixTooltipToCell === 'function') {
-      this.controller.fixTooltipToCell(closest.point.cellIndex, mouseX, mouseY)
+      // Pass screen coordinates for consistent positioning
+      this.controller.fixTooltipToCell(closest.point.cellIndex, event.clientX, event.clientY)
     } else if (typeof this.controller.showSimpleTooltip === 'function') {
       const cellId = closest.point.cellIndex
       const cellName = cellId.toString()
       this.controller.isTooltipFixed = true
       this.controller.fixedTooltipCellId = cellId
-      this.controller.showSimpleTooltip(cellName, null, { x: tooltipLeft, y: tooltipTop }, cellId, true)
+      // showSimpleTooltip will use lastTooltipPosition if available (from dragging),
+      // otherwise it will use the click position passed here
+      this.controller.showSimpleTooltip(cellName, null, { x: event.clientX, y: event.clientY }, cellId, true)
     }
     this.lastHoverCellId = closest.point.cellIndex
   }

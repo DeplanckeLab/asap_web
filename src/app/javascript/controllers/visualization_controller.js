@@ -2779,7 +2779,6 @@ export default class extends Controller {
       this.reglRenderer.render()
       
       // Refresh 2D plot if open
-      this.renderPointsWithCurrentColoring()
       this.customPlotManager.refresh2DPlotIfOpen()
       return
     }
@@ -6450,14 +6449,14 @@ export default class extends Controller {
   }
   // Lasso mode handlers
   onLassoMouseDown(event) {
-    // console.log('========================================')
-    // console.log('⏱️ [LASSO] Starting lasso selection')
-    // console.log('🔍 [DEBUG] Lasso mouse down called:', {
-      // eventType: event.type,
-      // interactionMode: this.interactionMode,
-      // isDrawingLasso: this.isDrawingLasso,
-      // canvas: !!this.canvas
-    // })
+    const lassoStartTime = performance.now()
+    const lassoId = `lasso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    this.currentLassoId = lassoId
+    
+    console.log('[LASSO] ========================================')
+    console.log(`[LASSO] Starting lasso selection (ID: ${lassoId})`)
+    console.log(`[LASSO] Current selection size: ${this.selectedCells ? this.selectedCells.size : 0} cells`)
+    console.log(`[LASSO] Current coordinates count: ${this.currentCoordinates ? this.currentCoordinates.length : 0}`)
     
     // Detect browser and store it
     //this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
@@ -6466,6 +6465,7 @@ export default class extends Controller {
     
     // Create HTML canvas overlay for lasso drawing
     const plotContainer = document.querySelector('.plot-container')
+    const canvasCreationStart = performance.now()
     if (plotContainer && !this.lassoCanvas) {
       const canvas = this.canvas
       
@@ -6489,6 +6489,7 @@ export default class extends Controller {
     this.mouseMoveCount = 0
     this.interactionMoveCount = 0
     this.lastMouseMoveTime = performance.now()
+    this.lassoStartTime = lassoStartTime
     
     // Get mouse position relative to canvas
     const canvas = this.canvas 
@@ -6541,6 +6542,7 @@ export default class extends Controller {
   onLassoMouseMove(event) {
     if (!this.isDrawingLasso) return
     
+    const moveStartTime = performance.now()
     this.mouseMoveCount = (this.mouseMoveCount || 0) + 1
     
     // Firefox uses polling, so skip event-based processing
@@ -6559,6 +6561,7 @@ export default class extends Controller {
     
     // Process EVERY coalesced event for maximum smoothness!
     let pointsAdded = 0
+    const pointProcessingStart = performance.now()
     for (const evt of coalescedEvents) {
       const x = evt.clientX - rect.left
       const y = evt.clientY - rect.top
@@ -6572,28 +6575,46 @@ export default class extends Controller {
         pointsAdded++
       }
     }
+    const pointProcessingTime = performance.now() - pointProcessingStart
     
     if (pointsAdded > 0) {
       // Log progress
-      if (this.lassoPoints.length % 50 === 0) {
-        // console.log(`⏱️ [LASSO] ${this.lassoPoints.length} points from ${this.mouseMoveCount} callbacks`)
+      if (this.lassoPoints.length % 50 === 0 || this.mouseMoveCount % 100 === 0) {
+        console.log(`[LASSO] Move #${this.mouseMoveCount}: ${this.lassoPoints.length} total points, ${pointsAdded} added, processing: ${pointProcessingTime.toFixed(2)}ms`)
       }
       
       // Update graphics once per callback
+      const graphicsStartTime = performance.now()
       this.updateLassoGraphics()
+      const graphicsTime = performance.now() - graphicsStartTime
+      
+      const totalMoveTime = performance.now() - moveStartTime
+      if (totalMoveTime > 5 || graphicsTime > 3) {
+        console.log(`[LASSO] Slow move detected: total=${totalMoveTime.toFixed(2)}ms, graphics=${graphicsTime.toFixed(2)}ms, points=${this.lassoPoints.length}`)
+      }
     }
   }
 
   onLassoMouseUp(event) {
     if (!this.isDrawingLasso) return
     const completionStart = performance.now()
+    const lassoId = this.currentLassoId || 'unknown'
+    
+    console.log(`[LASSO] Mouse up (ID: ${lassoId})`)
+    console.log(`[LASSO] Total points collected: ${this.lassoPoints.length}`)
+    console.log(`[LASSO] Total mouse move events: ${this.mouseMoveCount}`)
     
     this.isDrawingLasso = false
     this.cachedCanvasRect = null
     
     // Clear the HTML canvas overlay
+    const clearStart = performance.now()
     if (this.lassoCanvasCtx) {
       this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
+    }
+    const clearTime = performance.now() - clearStart
+    if (clearTime > 1) {
+      console.log(`[LASSO] Canvas clear took ${clearTime.toFixed(2)}ms`)
     }
     
     
@@ -6610,6 +6631,7 @@ export default class extends Controller {
     
     // Only proceed if we have coordinates to work with
     if (!this.currentCoordinates) {
+      console.log(`[LASSO] No coordinates available, clearing lasso`)
       this.clearLasso()
       return
     }
@@ -6619,13 +6641,24 @@ export default class extends Controller {
       this.lassoPoints.push(this.lassoPoints[0]) // Close the loop
       
       // Force final graphics update
+      const graphicsStart = performance.now()
       this.updateLassoGraphics()
+      const graphicsTime = performance.now() - graphicsStart
+      console.log(`[LASSO] Final graphics update: ${graphicsTime.toFixed(2)}ms`)
       
       // Find points inside the lasso
+      const selectionStart = performance.now()
       this.selectPointsInLasso()
+      const selectionTime = performance.now() - selectionStart
       
       const completionTime = performance.now() - completionStart
-      // console.log(`⏱️ [LASSO] Total completion: ${completionTime.toFixed(2)}ms`)
+      const totalLassoTime = this.lassoStartTime ? performance.now() - this.lassoStartTime : 0
+      console.log(`[LASSO] Selection took: ${selectionTime.toFixed(2)}ms`)
+      console.log(`[LASSO] Total completion: ${completionTime.toFixed(2)}ms`)
+      console.log(`[LASSO] Total lasso operation: ${totalLassoTime.toFixed(2)}ms`)
+      console.log(`[LASSO] Selection size after: ${this.selectedCells ? this.selectedCells.size : 0} cells`)
+    } else {
+      console.log(`[LASSO] Not enough points (${this.lassoPoints.length}), skipping selection`)
     }
     
     // Clear lasso after a short delay
@@ -7624,13 +7657,18 @@ export default class extends Controller {
   updateLassoGraphics() {
     if (!this.lassoCanvasCtx || this.lassoPoints.length < 2) return
     
+    const graphicsStart = performance.now()
+    
     // Draw on HTML canvas overlay
     const ctx = this.lassoCanvasCtx
     
     // Clear canvas
+    const clearStart = performance.now()
     ctx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
+    const clearTime = performance.now() - clearStart
     
     // Draw lasso path
+    const drawStart = performance.now()
     ctx.strokeStyle = '#3b82f6'
     ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
     ctx.lineWidth = 2
@@ -7642,23 +7680,26 @@ export default class extends Controller {
     }
     ctx.stroke()
     ctx.fill()
+    const drawTime = performance.now() - drawStart
+    
+    const totalTime = performance.now() - graphicsStart
+    if (totalTime > 5 || this.lassoPoints.length > 500) {
+      console.log(`[LASSO] Slow graphics update: total=${totalTime.toFixed(2)}ms, clear=${clearTime.toFixed(2)}ms, draw=${drawTime.toFixed(2)}ms, points=${this.lassoPoints.length}`)
+    }
   }
 
   selectPointsInLasso() {
     if (!this.currentCoordinates || this.lassoPoints.length < 3) return
     
-    // console.log('[LASSO] selectPointsInLasso called')
-    // console.log('[LASSO] Current filter state:', {
-      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      // hasFilter: !!this.currentVisibleCells
-    // })
-    
-    // console.log(`⏱️ [LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
     const selectionStart = performance.now()
+    console.log(`[LASSO] Starting point selection`)
+    console.log(`[LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
+    console.log(`[LASSO] Lasso polygon has ${this.lassoPoints.length} vertices`)
     
     const selectedIndices = []
     
     // OPTIMIZED: Calculate lasso bounding box for fast rejection
+    const bboxStart = performance.now()
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     for (const p of this.lassoPoints) {
       if (p.x < minX) minX = p.x
@@ -7666,15 +7707,16 @@ export default class extends Controller {
       if (p.y < minY) minY = p.y
       if (p.y > maxY) maxY = p.y
     }
-    
-    // console.log(`⏱️ [LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}]`)
+    const bboxTime = performance.now() - bboxStart
+    console.log(`[LASSO] Bounding box: [${minX.toFixed(0)}, ${maxX.toFixed(0)}] x [${minY.toFixed(0)}, ${maxY.toFixed(0)}] (calculated in ${bboxTime.toFixed(2)}ms)`)
     
     // ReGL PATH: Check normalized coordinates against lasso polygon
     if (this.rendererType === 'regl' && this.currentBounds) {
-      // console.log('⏱️ [LASSO] Using ReGL path - checking normalized coordinates')
+      console.log('[LASSO] Using ReGL path - checking normalized coordinates')
       
       let bboxRejected = 0
       let polygonChecked = 0
+      const pointCheckStart = performance.now()
       
       for (let i = 0; i < this.currentCoordinates.length; i++) {
         const [dataX, dataY] = this.currentCoordinates[i]
@@ -7696,12 +7738,16 @@ export default class extends Controller {
         }
       }
       
-      // console.log(`⚡ [ReGL LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+      const pointCheckTime = performance.now() - pointCheckStart
+      console.log(`[LASSO] ReGL: BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${pointCheckTime.toFixed(2)}ms`)
       
     } else if (this.pointSprites && this.pointSprites.length > 0) {
+      console.log(`[LASSO] Using pointSprites array (${this.pointSprites.length} sprites)`)
+      
       // OPTIMIZED: Use pointSprites array directly (much faster!)
       let bboxRejected = 0
       let polygonChecked = 0
+      const spriteCheckStart = performance.now()
       
       for (let i = 0; i < this.pointSprites.length; i++) {
         const sprite = this.pointSprites[i]
@@ -7723,10 +7769,12 @@ export default class extends Controller {
         }
       }
       
-      // console.log(`⏱️ [LASSO] BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}`)
+      const spriteCheckTime = performance.now() - spriteCheckStart
+      console.log(`[LASSO] Sprites: BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${spriteCheckTime.toFixed(2)}ms`)
     } else {
-      // Fallback to container iteration if sprites not available
-      // console.log('⚠️ Using fallback container iteration (slower)')
+      console.log('[LASSO] Using fallback container iteration (slower)')
+      const containerCheckStart = performance.now()
+      
       this.scatterContainer.children.forEach((child) => {
         if (child.isPoint && child.cellId !== undefined) {
           if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
@@ -7744,16 +7792,22 @@ export default class extends Controller {
         }
       })
       }
+      
+      const containerCheckTime = performance.now() - containerCheckStart
+      console.log(`[LASSO] Container check time: ${containerCheckTime.toFixed(2)}ms`)
     }
     
     const selectionTime = performance.now() - selectionStart
-    // console.log(`⏱️ [LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
+    console.log(`[LASSO] Selected ${selectedIndices.length.toLocaleString()} cells in ${selectionTime.toFixed(2)}ms`)
     
+    const applyStart = performance.now()
     this.applySelectionFromIndices(selectedIndices, {
       source: 'main-lasso',
       replaceExisting: false,
       updateCustomPlot: true
     })
+    const applyTime = performance.now() - applyStart
+    console.log(`[LASSO] applySelectionFromIndices took: ${applyTime.toFixed(2)}ms`)
   }
 
   applySelectionFromIndices(selectedIndices, options = {}) {
@@ -7762,13 +7816,15 @@ export default class extends Controller {
       return
     }
 
+    const applyStartTime = performance.now()
     const {
       replaceExisting = false,
       source = 'unknown',
       updateCustomPlot = true
     } = options
 
-    // console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}`)
+    const selectionSizeBefore = this.selectedCells ? this.selectedCells.size : 0
+    console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}, current size: ${selectionSizeBefore}`)
 
     if (!this.selectedCells) {
       this.selectedCells = new Set()
@@ -7779,12 +7835,22 @@ export default class extends Controller {
     }
 
     // Add to selected cells set
+    const addStartTime = performance.now()
     selectedIndices.forEach(index => {
       this.selectedCells.add(index)
     })
+    const addTime = performance.now() - addStartTime
+    if (addTime > 10) {
+      console.log(`[SELECTION] Adding ${selectedIndices.length} indices took ${addTime.toFixed(2)}ms`)
+    }
     
     // Store the current metadata state before deactivating (for restore on cancel/save)
+    const storeMetadataStart = performance.now()
     this.storeMetadataStateBeforeSelection()
+    const storeMetadataTime = performance.now() - storeMetadataStart
+    if (storeMetadataTime > 10) {
+      console.log(`[SELECTION] storeMetadataStateBeforeSelection took ${storeMetadataTime.toFixed(2)}ms`)
+    }
     
     // Store current filter state before clearing coloring
     const filterStateBeforeClear = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
@@ -7794,9 +7860,26 @@ export default class extends Controller {
     // })
     
     // Deactivate the coloring button (turn blue palette button to grey)
+    const resetButtonsStart = performance.now()
     this.resetAllWaterDropButtons()
+    const resetButtonsTime = performance.now() - resetButtonsStart
+    if (resetButtonsTime > 10) {
+      console.log(`[SELECTION] resetAllWaterDropButtons took ${resetButtonsTime.toFixed(2)}ms`)
+    }
+    
+    const removeColorsStart = performance.now()
     this.removeAllCategoryColors()
+    const removeColorsTime = performance.now() - removeColorsStart
+    if (removeColorsTime > 10) {
+      console.log(`[SELECTION] removeAllCategoryColors took ${removeColorsTime.toFixed(2)}ms`)
+    }
+    
+    const clearMetadataStart = performance.now()
     this.clearMetadataColoring()
+    const clearMetadataTime = performance.now() - clearMetadataStart
+    if (clearMetadataTime > 10) {
+      console.log(`[SELECTION] clearMetadataColoring took ${clearMetadataTime.toFixed(2)}ms`)
+    }
     
     // Verify filter state after clearMetadataColoring
     // console.log('[SELECTION] Filter state after clearMetadataColoring:', {
@@ -7809,17 +7892,42 @@ export default class extends Controller {
     // })
     
     // Update selection count display
+    const updateCountStart = performance.now()
     this.updateSelectionCount()
+    const updateCountTime = performance.now() - updateCountStart
+    if (updateCountTime > 10) {
+      console.log(`[SELECTION] updateSelectionCount took ${updateCountTime.toFixed(2)}ms`)
+    }
+    
+    const uiManagerCountStart = performance.now()
     if (this.uiManager && typeof this.uiManager.updateSelectedCellsCount === 'function') {
       this.uiManager.updateSelectedCellsCount()
     }
+    const uiManagerCountTime = performance.now() - uiManagerCountStart
+    if (uiManagerCountTime > 10) {
+      console.log(`[SELECTION] uiManager.updateSelectedCellsCount took ${uiManagerCountTime.toFixed(2)}ms`)
+    }
     
     // Update colors of selected points without re-rendering (preserves pan/zoom state)
+    const updateColorsStart = performance.now()
     this.updateSelectedPointColors()
+    const updateColorsTime = performance.now() - updateColorsStart
+    if (updateColorsTime > 10) {
+      console.log(`[SELECTION] updateSelectedPointColors took ${updateColorsTime.toFixed(2)}ms`)
+    }
 
+    const customPlotStart = performance.now()
     if (updateCustomPlot && this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
       this.customPlotManager.onSelectionUpdated()
     }
+    const customPlotTime = performance.now() - customPlotStart
+    if (customPlotTime > 10) {
+      console.log(`[SELECTION] customPlotManager.onSelectionUpdated took ${customPlotTime.toFixed(2)}ms`)
+    }
+    
+    const totalApplyTime = performance.now() - applyStartTime
+    const selectionSizeAfter = this.selectedCells ? this.selectedCells.size : 0
+    console.log(`[SELECTION] Total applySelectionFromIndices: ${totalApplyTime.toFixed(2)}ms, size before: ${selectionSizeBefore}, after: ${selectionSizeAfter}`)
   }
 
   // Reorder displayOrder to put selected cells at the end (drawn last, appear on top)
@@ -8057,11 +8165,16 @@ export default class extends Controller {
   }
 
   clearLasso() {
+    const clearStart = performance.now()
+    const lassoId = this.currentLassoId || 'unknown'
+    console.log(`[LASSO] Clearing lasso (ID: ${lassoId})`)
+    
     // Clear HTML canvas overlay
     if (this.lassoCanvasCtx) {
       this.lassoCanvasCtx.clearRect(0, 0, this.lassoCanvas.width, this.lassoCanvas.height)
     }
     
+    const pointsCount = this.lassoPoints ? this.lassoPoints.length : 0
     this.lassoPoints = []
     this.isDrawingLasso = false
     
@@ -8075,6 +8188,11 @@ export default class extends Controller {
       document.removeEventListener('pointermove', this.firefoxMouseHandler, { capture: true })
       this.firefoxMouseHandler = null
     }
+    
+    const clearTime = performance.now() - clearStart
+    console.log(`[LASSO] Clear completed in ${clearTime.toFixed(2)}ms, cleared ${pointsCount} points`)
+    this.currentLassoId = null
+    this.lassoStartTime = null
   }
 
   // Helper method to calculate distance between two points

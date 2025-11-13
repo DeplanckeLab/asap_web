@@ -4,14 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ASAP - Authentication</title>
+  <%= csrf_meta_tags %>
+  <%= csp_meta_tag %>
+  <link rel="icon" href="/icon.png" type="image/png">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.png">
+  <%= stylesheet_link_tag "tailwind", "inter-font", "data-turbo-track": "reload" %>
+  <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+  <%= javascript_importmap_tags %>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body class="bg-gray-50 min-h-screen flex items-center justify-center">
   <div class="max-w-md w-full space-y-8">
     <!-- Header -->
     <div class="text-center">
-      <%= image_tag "ASAP_sansTagline_White.svg", 
-          class: 'h-12 w-48 object-contain mx-auto mb-4', 
+      <%= image_tag "ASAP_sansTagline_Colors.svg",
+          class: 'h-12 w-48 object-contain mx-auto mb-4',
           alt: 'ASAP Logo' %>
       <h2 class="text-3xl font-bold text-gray-900">
         <% if controller_name == 'sessions' %>

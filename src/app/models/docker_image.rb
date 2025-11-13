@@ -1,0 +1,3 @@
+class DockerImage < ApplicationRecord
+end
+

@@ -1129,6 +1129,14 @@ export class UIManager {
     
     // Convert currentVisibleCells to Set once for O(1) lookups
     const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
+    const debugSummary = new Map()
+    const missingMetadata = new Set()
+    const logPrefix = '[FILTER COUNTS]'
+    console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
+      totalCheckboxes: allCategoryCheckboxes.length,
+      visibleCheckboxes: visibleCheckboxes.length,
+      currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
+    })
     
     visibleCheckboxes.forEach(checkbox => {
       const metadataId = checkbox.dataset.metadataId
@@ -1136,14 +1144,16 @@ export class UIManager {
       
       // Get the metadata vector for this metadata ID (only if already loaded in memory)
       const metadataVector = this.controller.loadedMetadataVectors[metadataId]
-      if (!metadataVector || !metadataVector.values) return
+      if (!metadataVector || !metadataVector.values) {
+        missingMetadata.add(metadataId)
+        return
+      }
       
       // Find the count span - it's the second span in the parent container
-      const parentContainer = checkbox.parentElement.parentElement
-      const spans = parentContainer.querySelectorAll('span')
-      const countSpan = spans[spans.length - 1] // Last span is the count
+      const parentContainer = checkbox.closest('.metadata-category-row')
+      const countElement = parentContainer ? parentContainer.querySelector('.metadata-category-count') : null
       
-      if (countSpan) {
+      if (countElement) {
         // Count total and visible cells for this category
         let totalCount = 0
         let visibleCount = 0
@@ -1159,25 +1169,92 @@ export class UIManager {
         }
         
         // Update the count display
-        countSpan.textContent = visibleCount.toLocaleString()
+        countElement.textContent = visibleCount.toLocaleString()
         
         // Add visual indicators
+        const debugEntry = debugSummary.get(metadataId) || {
+          metadataId,
+          categoriesProcessed: 0,
+          categoriesReduced: 0,
+          reducedSamples: [],
+          unchangedSamples: [],
+          totalCountSum: 0,
+          visibleCountSum: 0,
+          zeroVisibleCategories: 0,
+          zeroTotalCategories: 0
+        }
+        debugEntry.categoriesProcessed += 1
+        debugEntry.totalCountSum += totalCount
+        debugEntry.visibleCountSum += visibleCount
+        if (visibleCount === 0 && totalCount > 0) {
+          debugEntry.zeroVisibleCategories += 1
+        }
+        if (totalCount === 0) {
+          debugEntry.zeroTotalCategories += 1
+        }
+
         if (totalCount > visibleCount) {
           // Some cells are filtered out - show in red
-          countSpan.style.color = '#dc2626'
-          countSpan.style.fontWeight = '600'
+          countElement.style.color = '#dc2626'
+          countElement.style.fontWeight = '600'
           
           // Add hover tooltip
           const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
-          countSpan.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% visible after filtering)`
+          countElement.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% visible after filtering)`
+          debugEntry.categoriesReduced += 1
+          if (debugEntry.reducedSamples.length < 3) {
+            debugEntry.reducedSamples.push({
+              category,
+              totalCount,
+              visibleCount
+            })
+          }
         } else {
           // No filtering - normal appearance
-          countSpan.style.color = '#6b7280'
-          countSpan.style.fontWeight = '500'
-          countSpan.title = `${totalCount.toLocaleString()} cells (100% visible)`
+          countElement.style.color = '#6b7280'
+          countElement.style.fontWeight = '500'
+          countElement.title = `${totalCount.toLocaleString()} cells (100% visible)`
+          if (debugEntry.unchangedSamples.length < 3 && totalCount > 0) {
+            debugEntry.unchangedSamples.push({
+              category,
+              totalCount,
+              visibleCount
+            })
+          }
         }
+
+        debugSummary.set(metadataId, debugEntry)
+      } else {
+        console.warn(`${logPrefix} Missing count element for category`, {
+          metadataId,
+          category,
+          parentFound: !!parentContainer
+        })
       }
     })
+
+    if (debugSummary.size > 0 || missingMetadata.size > 0) {
+      const metadataSummaries = []
+      debugSummary.forEach((value) => {
+        metadataSummaries.push({
+          metadataId: value.metadataId,
+          categoriesProcessed: value.categoriesProcessed,
+          categoriesReduced: value.categoriesReduced,
+          totalCountSum: value.totalCountSum,
+          visibleCountSum: value.visibleCountSum,
+          zeroVisibleCategories: value.zeroVisibleCategories,
+          zeroTotalCategories: value.zeroTotalCategories,
+          reducedSamples: value.reducedSamples,
+          unchangedSamples: value.unchangedSamples
+        })
+      })
+
+      console.log(`${logPrefix} updateSidebarCategoryCounts summary`, {
+        metadataSummaries,
+        missingMetadata: missingMetadata.size > 0 ? Array.from(missingMetadata) : [],
+        currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
+      })
+    }
     
     const perfTime = performance.now() - perfStart
     // console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)

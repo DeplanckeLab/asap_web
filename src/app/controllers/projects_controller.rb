@@ -103,6 +103,15 @@ class ProjectsController < ApplicationController
                                         .order(id: :asc)
                                         .group_by(&:filepath)
     
+    # Precompute best CLA annotation metadata per categorical metadata category
+    categorical_metadata = []
+    @h_metadata.each_value do |dimension_hash|
+      next unless dimension_hash
+      discrete = dimension_hash.dig('cell', 'DISCRETE')
+      categorical_metadata.concat(discrete) if discrete.present?
+    end
+    build_best_cla_category_map(categorical_metadata)
+    
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 
     # Variables for summary view
@@ -780,6 +789,199 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def build_best_cla_category_map(categorical_metadata)
+      @best_clas_by_metadata_category = {}
+      return if categorical_metadata.blank?
+
+      metadata_by_id = categorical_metadata.index_by(&:id)
+      annot_ids = metadata_by_id.keys
+
+      annot_cell_sets = AnnotCellSet
+                          .includes(:cell_set)
+                          .where(project_id: @project.id, annot_id: annot_ids)
+
+      cell_set_ids = annot_cell_sets.filter_map { |annot_cell_set| annot_cell_set.cell_set_id }.uniq
+      cla_by_cell_set_id =
+        if cell_set_ids.empty?
+          {}
+        else
+          Cla.active.where(cell_set_id: cell_set_ids).group_by(&:cell_set_id)
+        end
+
+      annot_cell_sets.each do |annot_cell_set|
+          metadata = metadata_by_id[annot_cell_set.annot_id]
+          next unless metadata
+
+          cell_set = annot_cell_set.cell_set
+          next unless cell_set
+
+        cla_candidates = cla_by_cell_set_id[cell_set.id]
+        next if cla_candidates.blank?
+
+        best_cla = cla_candidates.max_by(&:score)
+          next unless best_cla
+
+          category_label = category_label_for(metadata, annot_cell_set.cat_idx, cell_set)
+          next unless category_label.present?
+
+          entry = build_best_cla_entry(best_cla).merge(category_label: category_label)
+          store_best_cla_entry(metadata.id, category_label, entry)
+        end
+    end
+
+    def store_best_cla_entry(metadata_id, category_label, entry)
+      normalized_key = normalize_category_key(category_label)
+      @best_clas_by_metadata_category[metadata_id] ||= {}
+      existing_entry = @best_clas_by_metadata_category[metadata_id][category_label] ||
+                       @best_clas_by_metadata_category[metadata_id][normalized_key]
+      return if existing_entry && existing_entry[:score] >= entry[:score]
+
+      @best_clas_by_metadata_category[metadata_id][category_label] = entry
+      @best_clas_by_metadata_category[metadata_id][normalized_key] = entry
+    end
+
+    def normalize_category_key(value)
+      value.to_s.strip.downcase
+    end
+
+    def category_label_for(metadata, cat_idx, cell_set)
+      label =
+        category_label_from_cat_info(metadata, cat_idx) ||
+        category_label_from_list_cat(metadata, cat_idx) ||
+        category_label_from_categories_json(metadata, cat_idx) ||
+        category_label_from_aliases(metadata, cat_idx) ||
+        cell_set&.key
+
+      label.present? ? label.to_s : nil
+    end
+
+    def category_label_from_cat_info(metadata, cat_idx)
+      info = parse_json_field(metadata.cat_info_json)
+      return unless info.is_a?(Array)
+
+      cat_idx_int = cat_idx.to_i
+      candidate = info.find do |item|
+        next unless item.is_a?(Hash)
+        idx_value = item['cat_idx'] || item['idx'] || item['index'] || item['i']
+        idx_value.to_i == cat_idx_int
+      end
+      extract_category_label(candidate)
+    end
+
+    def category_label_from_list_cat(metadata, cat_idx)
+      list = parse_json_field(metadata.list_cat_json)
+      return unless list.is_a?(Array)
+
+      value = list[cat_idx.to_i]
+      extract_value_from_list_entry(value)
+    end
+
+    def category_label_from_categories_json(metadata, cat_idx)
+      data = parse_json_field(metadata.categories_json)
+      return if data.blank?
+
+      if data.is_a?(Array)
+        extract_value_from_list_entry(data[cat_idx.to_i])
+      elsif data.is_a?(Hash)
+        # cat_idx may be stored as key
+        value = data[cat_idx.to_s] || data[cat_idx.to_i] || data[cat_idx.to_s.to_sym]
+        if value.is_a?(Hash)
+          extract_category_label(value)
+        elsif value.present?
+          value.to_s
+        else
+          # Fallback: if keys are category names, try index
+          keys = data.keys
+          extract_value_from_list_entry(keys[cat_idx.to_i])
+        end
+      end
+    end
+
+    def category_label_from_aliases(metadata, cat_idx)
+      aliases = parse_json_field(metadata.cat_aliases_json)
+      return if aliases.blank?
+
+      if aliases.is_a?(Array)
+        extract_value_from_list_entry(aliases[cat_idx.to_i])
+      elsif aliases.is_a?(Hash)
+        value = aliases[cat_idx.to_s] || aliases[cat_idx.to_i] || aliases[cat_idx.to_s.to_sym]
+        value.present? ? value.to_s : nil
+      end
+    end
+
+    def extract_category_label(hash)
+      return unless hash.is_a?(Hash)
+      %w[name label value cat category display text].each do |key|
+        value = hash[key] || hash[key.to_sym]
+        return value.to_s if value.present?
+      end
+      nil
+    end
+
+    def extract_value_from_list_entry(value)
+      case value
+      when Array
+        value.first.to_s
+      when Hash
+        extract_category_label(value)
+      else
+        value.present? ? value.to_s : nil
+      end
+    end
+
+    def parse_json_field(raw_value)
+      return nil if raw_value.blank?
+      JSON.parse(raw_value)
+    rescue JSON::ParserError
+      nil
+    end
+
+    def build_best_cla_entry(cla)
+      {
+        score: cla.score,
+        name: cla.name.presence || "Unnamed annotation",
+        cell_ontology_term_ids: format_cla_list(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids),
+        sorted_up_gene_ids: format_cla_list(cla.sorted_up_gene_ids),
+        sorted_down_gene_ids: format_cla_list(cla.sorted_down_gene_ids)
+      }
+    end
+
+    def format_cla_list(raw_value, limit: 5)
+      list = parse_cla_field(raw_value)
+      return nil if list.empty?
+
+      display = list.first(limit)
+      text = display.join(", ")
+      text += "…" if list.length > limit
+      text
+    end
+
+    def parse_cla_field(value)
+      return [] if value.blank?
+
+      text = value.to_s.strip
+      return [] if text.blank?
+
+      candidates = []
+
+      begin
+        parsed = JSON.parse(text)
+        case parsed
+        when Array
+          candidates = parsed
+        when Hash
+          candidates = parsed.values
+        else
+          candidates = [parsed]
+        end
+      rescue JSON::ParserError
+        normalized = text.tr("[]{}", "")
+        candidates = normalized.split(/[\s,;|]+/)
+      end
+
+      candidates.map { |item| item.to_s.strip }.reject(&:blank?)
+    end
+
     # Use callbacks to share common setup or constraints between actions.
     def set_project
       identifier = params.expect(:id)

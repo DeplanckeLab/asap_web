@@ -1,0 +1,55 @@
+<%= form_with(model: docker_image, class: "space-y-6") do |form| %>
+  <% if docker_image.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p class="font-semibold"><%= pluralize(docker_image.errors.count, "error") %> prohibited this docker image from being saved:</p>
+      <ul class="mt-2 list-disc pl-5">
+        <% docker_image.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_field :name, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :tag, class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_field :tag, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :description, class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_area :description, rows: 3, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :tool_versions_json, "Tool versions (JSON)", class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_area :tool_versions_json, rows: 6, class: "w-full font-mono text-xs rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+    </div>
+    <p class="mt-1 text-xs text-gray-500">Example: { "scanpy": "1.9.3", "seurat": "4.3.0" }</p>
+  </div>
+
+  <div>
+    <%= form.label :metadata_json, "Metadata (JSON)", class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_area :metadata_json, rows: 6, class: "w-full font-mono text-xs rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+    </div>
+    <p class="mt-1 text-xs text-gray-500">Optional additional metadata (e.g. tool_groups, description, links).</p>
+  </div>
+
+  <div class="flex items-center justify-end gap-2">
+    <%= link_to 'Cancel', docker_images_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+    <%= form.submit class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+  </div>
+<% end %>
+

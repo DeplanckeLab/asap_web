@@ -197,11 +197,20 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   <% if metadata.categories_json.present? %>
                     <% begin %>
                       <% categories = JSON.parse(metadata.categories_json) %>
+                      <% best_category_map = (@best_clas_by_metadata_category || {})[metadata.id] || {} %>
                       <% if categories.is_a?(Hash) %>
                         <% 
                           # Sort categories by count (largest to smallest) to match plot ordering
                           sorted_categories = categories.sort_by { |category, count| -count }
                         %>
+                        <% if sorted_categories.present? %>
+                          <div class="metadata-category-header">
+                            <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
+                            <span class="metadata-category-header-cell metadata-category-header-ontology">Cell ontology term IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-genes">Sorted up gene IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                          </div>
+                        <% end %>
                         <% sorted_categories.each_with_index do |(category, count), index| %>
                           <% 
                             # Use the same color palette as the JavaScript plot
@@ -209,8 +218,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             category_color = category_colors[index % category_colors.length]
                           %>
                           <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                              <div style="display: flex; align-items: center; gap: 6px;">
+                            <% normalized_category_key = category.to_s.downcase.strip %>
+                            <% best_cla = best_category_map[category] || best_category_map[normalized_category_key] %>
+                            <div class="metadata-category-row">
+                              <div class="metadata-category-main">
                                 <!-- Category Checkbox -->
                                 <div class="category-checkbox" 
                                      data-metadata-id="<%= metadata.id %>"
@@ -221,9 +232,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
                                 </div>
-                                <span style="color: #374151;"><%= category %></span>
+                                <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
-                              <span style="color: #6b7280; font-weight: 500;"><%= count %></span>
+                              <% if best_cla.present? %>
+                                <% ontology_value = best_cla[:cell_ontology_term_ids].presence %>
+                                <% up_genes_value = best_cla[:sorted_up_gene_ids].presence %>
+                                <div class="metadata-category-cla metadata-category-cla--ontology">
+                                  <span class="metadata-category-cla-meta" title="<%= ontology_value %>"><%= ontology_value || '-' %></span>
+                                </div>
+                                <div class="metadata-category-cla metadata-category-cla--genes">
+                                  <span class="metadata-category-cla-meta" title="<%= up_genes_value %>"><%= up_genes_value || '-' %></span>
+                                </div>
+                              <% end %>
+                              <div class="metadata-category-count"><%= count %></div>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
                             <canvas class="category-distribution-canvas" 
@@ -233,6 +254,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           </div>
                         <% end %>
                       <% elsif categories.is_a?(Array) %>
+                        <% if categories.present? %>
+                          <div class="metadata-category-header">
+                            <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
+                            <span class="metadata-category-header-cell metadata-category-header-ontology">Cell ontology term IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-genes">Sorted up gene IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                          </div>
+                        <% end %>
                         <% categories.each_with_index do |category, index| %>
                           <% 
                             # Use the same color palette as the JavaScript plot
@@ -240,8 +269,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             category_color = category_colors[category_index % category_colors.length]
                           %>
                           <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                              <div style="display: flex; align-items: center; gap: 6px;">
+                            <% normalized_category_key = category.to_s.downcase.strip %>
+                            <% best_cla = best_category_map[category] || best_category_map[normalized_category_key] %>
+                            <div class="metadata-category-row">
+                              <div class="metadata-category-main">
                                 <!-- Category Checkbox -->
                                 <div class="category-checkbox" 
                                      data-metadata-id="<%= metadata.id %>"
@@ -252,9 +283,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
                                 </div>
-                                <span style="color: #374151;"><%= category %></span>
+                                <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
-                              <span style="color: #6b7280; font-weight: 500;">Category <%= index + 1 %></span>
+                              <% if best_cla.present? %>
+                                <% ontology_value = best_cla[:cell_ontology_term_ids].presence %>
+                                <% up_genes_value = best_cla[:sorted_up_gene_ids].presence %>
+                                <div class="metadata-category-cla metadata-category-cla--ontology">
+                                  <span class="metadata-category-cla-meta" title="<%= ontology_value %>"><%= ontology_value || '-' %></span>
+                                </div>
+                                <div class="metadata-category-cla metadata-category-cla--genes">
+                                  <span class="metadata-category-cla-meta" title="<%= up_genes_value %>"><%= up_genes_value || '-' %></span>
+                                </div>
+                              <% end %>
+                              <div class="metadata-category-count">Category <%= index + 1 %></div>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
                           <canvas class="category-distribution-canvas" 
@@ -516,7 +557,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   <!-- Main Content: UMAP Plot -->
   <div id="main-panel" style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
     <!-- Menu Bar -->
-    <div style="display: flex; align-items: flex-start; gap: 16px;justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+    <div style="display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
       <div style="display: flex; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 6px; position: relative;">
@@ -579,7 +620,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                         <span class="embedding-menu-count-inline"
                               title="<%= "#{dataset_count} #{dataset_count == 1 ? 'dataset' : 'datasets'}" %>"><%= dataset_count %></span>
                       </div>
-                      <% if group_dimension_text %>
+                      <% if group_dimension_text.present? %>
                         <span class="embedding-menu-dimension"><%= group_dimension_text %></span>
                       <% end %>
                     </div>
@@ -763,6 +804,79 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             color: #6b7280;
             padding: 12px;
             text-align: left;
+          }
+          .metadata-category-row {
+            display: grid;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 2px 0;
+            grid-template-columns: minmax(0, 1fr) max-content;
+          }
+          .metadata-category-row--wide {
+            grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr) max-content;
+          }
+          .metadata-category-header {
+            display: none;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #4b5563;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+          }
+          .metadata-category-header--wide {
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr) max-content;
+            gap: 12px;
+            margin-bottom: 4px;
+          }
+          .metadata-category-header-cell {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .metadata-category-main {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            flex: 1 1 auto;
+          }
+          .metadata-category-name {
+            color: #374151;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .metadata-category-count {
+            font-size: 12px;
+            color: #6b7280;
+            font-weight: 500;
+            white-space: nowrap;
+            align-self: center;
+            justify-self: end;
+          }
+          .metadata-category-cla {
+            display: none;
+          }
+          .metadata-category-row--wide .metadata-category-cla {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 11px;
+            color: #4b5563;
+            min-width: 0;
+            word-break: break-word;
+            align-self: center;
+            overflow: hidden;
+          }
+          .metadata-category-cla-meta {
+            color: #6b7280;
+            word-break: break-word;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
           }
           .embedding-link-content {
             display: flex;

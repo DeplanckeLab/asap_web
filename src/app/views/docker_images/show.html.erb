@@ -1,0 +1,57 @@
+<div class="max-w-4xl mx-auto space-y-6">
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900"><%= @docker_image.name %></h1>
+      <p class="text-sm text-gray-500">Tag: <%= @docker_image.tag.presence || 'N/A' %></p>
+    </div>
+    <div class="flex items-center gap-2">
+      <%= link_to 'Back to list', docker_images_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% if admin? %>
+        <%= link_to 'Edit', edit_docker_image_path(@docker_image), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <dl class="divide-y divide-gray-100 text-sm text-gray-700">
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Description</dt>
+        <dd class="w-3/4 text-gray-600"><%= @docker_image.description.presence || '—' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Tools</dt>
+        <dd class="w-3/4">
+          <% tools = docker_image_tool_versions(@docker_image) %>
+          <% if tools.present? %>
+            <ul class="space-y-1">
+              <% tools.each do |tool_name, version| %>
+                <li class="flex items-center gap-2">
+                  <span class="font-medium text-gray-800"><%= tool_name %></span>
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                    <%= version %>
+                  </span>
+                </li>
+              <% end %>
+            </ul>
+          <% else %>
+            <span class="text-gray-500 italic">No tools recorded.</span>
+          <% end %>
+        </dd>
+      </div>
+      <% metadata = docker_image_metadata(@docker_image) %>
+      <% if metadata.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Metadata</dt>
+          <dd>
+            <pre class="max-h-64 overflow-x-auto whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-xs text-gray-600"><%= JSON.pretty_generate(metadata) %></pre>
+          </dd>
+        </div>
+      <% end %>
+    </dl>
+  </div>
+</div>
+

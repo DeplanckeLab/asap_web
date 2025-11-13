@@ -383,14 +383,34 @@ export default class extends Controller {
     this.boundCloseDropdowns = this.closeAllDropdowns.bind(this)
     document.addEventListener('click', this.boundCloseDropdowns)
     
+    // Ensure CLA columns reflect current panel width
+    this.updateMetadataClaColumns()
+    
     // Initialize draggable dividers
     setTimeout(() => {
       this.initializeDraggableDivider() // Metadata divider
       this.initializeRightPanelDivider() // Gene Expression / Selections divider
+      this.updateMetadataClaColumns()
     }, 500)
     
     // Add window resize listener
     window.addEventListener('resize', this.resizeHandler)
+    
+    // Observe left panel width changes
+    const leftPanel = document.getElementById('left-panel')
+    if (leftPanel && window.ResizeObserver) {
+      this.leftPanelResizeObserver = new ResizeObserver(() => {
+        // eslint-disable-next-line no-console
+        console.debug('[Visualization] Left panel resized via ResizeObserver')
+        this.updateMetadataClaColumns()
+      })
+      this.leftPanelResizeObserver.observe(leftPanel)
+      // eslint-disable-next-line no-console
+      console.debug('[Visualization] Started observing left panel size changes')
+    } else {
+      // eslint-disable-next-line no-console
+      console.debug('[Visualization] ResizeObserver not available or left panel missing; relying on window resize')
+    }
     
     // Initialize metadata vectors storage
     // console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
@@ -490,6 +510,13 @@ export default class extends Controller {
     // Remove window resize listener
     if (this.resizeHandler) {
       window.removeEventListener('resize', this.resizeHandler)
+    }
+
+    if (this.leftPanelResizeObserver) {
+      this.leftPanelResizeObserver.disconnect()
+      this.leftPanelResizeObserver = null
+      // eslint-disable-next-line no-console
+      console.debug('[Visualization] Stopped observing left panel size changes')
     }
     
     // Remove interaction event listeners
@@ -3956,6 +3983,7 @@ export default class extends Controller {
         const targetHeight = categoriesDiv.scrollHeight
         categoriesDiv.style.maxHeight = `${targetHeight}px`
         categoriesDiv.style.opacity = '1'
+        this.updateMetadataClaColumns()
         
         const handleExpandTransitionEnd = (event) => {
           if (event.propertyName === 'max-height') {
@@ -4062,6 +4090,7 @@ export default class extends Controller {
           categoriesDiv.style.opacity = ''
           categoriesDiv.style.transition = ''
           categoriesDiv.style.overflow = ''
+          this.updateMetadataClaColumns()
         }, 300) // Match transition duration
       }
       
@@ -5665,6 +5694,8 @@ export default class extends Controller {
 
   // Handle window resize with debouncing
   async handleWindowResize() {
+    this.updateMetadataClaColumns()
+
     // Debounce resize events to avoid excessive redraws during drag
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout)
@@ -5672,6 +5703,7 @@ export default class extends Controller {
     
     // Use a longer debounce to prevent flickering during drag
     this.resizeTimeout = setTimeout(() => {
+      this.updateMetadataClaColumns()
       // console.log('🔄 [RESIZE] Window resized, redrawing plot...')
       
       // Check if canvas and renderer are ready
@@ -6079,6 +6111,39 @@ export default class extends Controller {
         lassoBtn.style.color = 'white'
       }
     }
+  }
+
+  updateMetadataClaColumns() {
+    const leftPanel = document.getElementById('left-panel')
+    if (!leftPanel) {
+      // eslint-disable-next-line no-console
+      console.debug('[Visualization] Left panel not found; skipping CLA column update')
+      return
+    }
+
+    const panelWidth = leftPanel.offsetWidth
+    // eslint-disable-next-line no-console
+    console.debug('[Visualization] Left panel width:', panelWidth)
+
+    const isWide = panelWidth > 400
+    // eslint-disable-next-line no-console
+    console.debug('[Visualization] Applying CLA column layout:', isWide ? 'wide' : 'compact')
+
+    document.querySelectorAll('.metadata-category-row').forEach(row => {
+      if (isWide) {
+        row.classList.add('metadata-category-row--wide')
+      } else {
+        row.classList.remove('metadata-category-row--wide')
+      }
+    })
+
+    document.querySelectorAll('.metadata-category-header').forEach(header => {
+      if (isWide) {
+        header.classList.add('metadata-category-header--wide')
+      } else {
+        header.classList.remove('metadata-category-header--wide')
+      }
+    })
   }
 
   addInteractionEventListeners() {

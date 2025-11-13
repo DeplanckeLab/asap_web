@@ -23,6 +23,9 @@ Rails.application.configure do
   # Enable server timing.
   config.server_timing = true
 
+  # Allow HTTPS requests coming through proxies where Origin/Base URL may differ.
+  config.action_controller.forgery_protection_origin_check = false
+
   # Configure action mailer for Devise
   config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }
 

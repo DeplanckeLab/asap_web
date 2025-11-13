@@ -31,6 +31,16 @@ Rails.application.routes.draw do
   
   resources :runs
   resources :reqs
+  resources :docker_images
+  
+  resources :versions do
+    collection do
+      get :last_version
+    end
+    member do
+      get :run_stats
+    end
+  end
   
   resources :home do
     collection do

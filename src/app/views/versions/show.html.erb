@@ -1,0 +1,138 @@
+<div class="max-w-4xl mx-auto space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold text-gray-900">Release <%= @version.id %></h1>
+    <div class="flex items-center gap-2">
+      <%= link_to 'Back to releases', versions_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% if admin? %>
+        <%= link_to 'Edit', edit_version_path(@version), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div class="flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3">
+      <span class="text-sm font-medium text-gray-500">Released</span>
+      <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
+        <%= format_version_release_date(@version) %>
+      </span>
+      <% if @version.activated? %>
+        <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+          Activated
+        </span>
+      <% end %>
+      <% if @version.beta? %>
+        <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+          Beta
+        </span>
+      <% end %>
+    </div>
+    <div class="px-4 py-5 space-y-6 text-sm text-gray-700">
+      <% if @version.description.present? %>
+        <div>
+          <h2 class="text-sm font-semibold text-gray-800 mb-1">Description</h2>
+          <p class="whitespace-pre-line"><%= @version.description %></p>
+        </div>
+      <% end %>
+
+      <% tool_versions = tool_versions_from(@env_data) %>
+      <% docker_images = docker_images_from(@env_data) %>
+
+      <% if tool_versions.present? %>
+        <div>
+          <h2 class="text-sm font-semibold text-gray-800 mb-2">Tool Versions</h2>
+          <div class="overflow-x-auto rounded-lg border border-gray-200">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                <tr>
+                  <th scope="col" class="px-3 py-2 text-left">Tool</th>
+                  <th scope="col" class="px-3 py-2 text-left">Version</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 text-sm text-gray-700">
+                <% tool_versions.each do |name, version| %>
+                  <tr>
+                    <td class="px-3 py-2"><%= name %></td>
+                    <td class="px-3 py-2 text-gray-500"><%= version %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      <% end %>
+
+      <% if docker_images.present? %>
+        <div>
+          <h2 class="text-sm font-semibold text-gray-800 mb-3">Docker Images</h2>
+          <div class="space-y-4">
+            <% docker_images.each do |name, metadata| %>
+              <% record = docker_image_record_for(name, metadata) %>
+              <% metadata_hash = docker_image_metadata_hash(metadata, record) %>
+              <% tools = docker_image_tools(metadata_hash, record) %>
+              <% grouped_tools = grouped_tools_by_language(tools, metadata_hash, record: record) { |tool_name| tool_metadata_for(tool_name) } %>
+              <details class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-xs text-gray-600">
+                <summary class="cursor-pointer text-gray-500 select-none">Raw metadata</summary>
+                <pre class="mt-2 max-h-48 overflow-x-auto whitespace-pre-wrap"><%= JSON.pretty_generate(metadata_hash) %></pre>
+              </details>
+              <div class="rounded-md border border-gray-200 overflow-hidden">
+                <div class="flex items-center justify-between bg-gray-50 px-4 py-2">
+                  <div>
+                    <p class="text-sm font-semibold text-gray-800"><%= docker_image_label(name, metadata_hash, record) %></p>
+                    <% description = metadata_hash['description'] || record&.description %>
+                    <% if description.present? %>
+                      <p class="text-xs text-gray-500"><%= description %></p>
+                    <% end %>
+                  </div>
+                  <% tag = metadata_hash['tag'] || record&.tag %>
+                  <% if tag.present? %>
+                    <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      Tag: <%= tag %>
+                    </span>
+                  <% end %>
+                </div>
+                <% if grouped_tools.present? %>
+                  <div class="divide-y divide-gray-100 text-sm">
+                    <% grouped_tools.each do |language, tool_list| %>
+                      <div class="px-4 py-3">
+                        <div class="mb-2 text-sm font-semibold text-gray-600 uppercase tracking-wide"><%= language %></div>
+                        <div class="flex flex-wrap gap-2">
+                          <% tool_list.each do |tool| %>
+                            <div class="inline-flex items-center gap-2 rounded-md border border-gray-200 px-3 py-1.5 bg-white shadow-sm">
+                              <span class="font-medium text-gray-700"><%= tool[:package] %></span>
+                              <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                <%= tool[:version] || 'NA' %>
+                              </span>
+                              <% if tool[:url].present? %>
+                                <%= link_to raw("<i class='fas fa-link text-gray-400 text-xs'></i>"), tool[:url], target: "_blank", rel: "noopener", class: "text-gray-400 hover:text-gray-600 transition" %>
+                              <% end %>
+                            </div>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <div class="px-4 py-3 text-sm text-gray-500 italic">No tool versions listed for this image.</div>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <% if @version.env_json.present? %>
+        <details class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          <summary class="cursor-pointer font-medium text-gray-700">Raw environment JSON</summary>
+          <pre class="mt-2 max-h-64 overflow-x-auto whitespace-pre-wrap text-xs text-gray-600"><%= @version.env_json %></pre>
+        </details>
+      <% end %>
+    </div>
+  </div>
+
+  <% if admin? %>
+    <div class="flex items-center justify-end gap-3 text-sm">
+      <%= link_to 'Delete release', version_path(@version), method: :delete, data: { confirm: 'Are you sure?' }, class: 'text-red-600 hover:text-red-700' %>
+    </div>
+  <% end %>
+</div>
+

@@ -5,6 +5,8 @@ class Annot < ApplicationRecord
   belongs_to :data_type, optional: true
   belongs_to :user, optional: true
   belongs_to :original_run, class_name: 'Run', foreign_key: 'ori_run_id', optional: true
+  has_many :annot_cell_sets, dependent: :destroy
+  has_many :cell_sets, through: :annot_cell_sets
   
   # Scopes for different types of annotations
   scope :embeddings, -> { where(data_type_id: DataType.where(name: ['umap', 'tsne', 'pca']).pluck(:id)) }

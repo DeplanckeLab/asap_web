@@ -2,16 +2,18 @@
 <header class="flex flex-wrap md:justify-start md:flex-nowrap fixed left-0 top-0 z-50 w-full bg-black border-b border-gray-200 dark:bg-black dark:border-neutral-700">
   <nav class="relative max-w-[85rem] w-full mx-auto flex items-center justify-between gap-3 py-2 px-4 sm:px-6 lg:px-8">
 
-    <a class="flex-none inline-block w-32 h-8 font-semibold text-xl text-white focus:outline-hidden focus:opacity-80 dark:text-white" 
-      href="<%= root_path %>" 
-      aria-label="Brand"
-      data-controller="nav-item"
-      data-action="click->nav-item#navigate">
-      <%= image_tag "ASAP_sansTagline_White.svg", 
-      class: 'h-full w-full object-contain', 
-        style: '', 
-        alt: 'ASAP Logo' %> 
-    </a>
+    <div class="flex items-center gap-3">
+      <a class="flex-none inline-block w-32 h-8 font-semibold text-xl text-white focus:outline-hidden focus:opacity-80 dark:text-white" 
+        href="<%= root_path %>" 
+        aria-label="Brand"
+        data-controller="nav-item"
+        data-action="click->nav-item#navigate">
+        <%= image_tag "ASAP_sansTagline_White.svg", 
+        class: 'h-full w-full object-contain', 
+          style: '', 
+          alt: 'ASAP Logo' %> 
+      </a>
+    </div>
 
     <div class="md:order-3 flex justify-end items-center gap-x-1">
       <!-- Collapse Button -->
@@ -24,6 +26,14 @@
       <div class="hidden md:inline-block md:me-2">
         <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
       </div>
+
+      <% if admin? %>
+        <button id="admin-tools-button"
+                class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
+                title="Admin tools">
+          Admin Tools
+        </button>
+      <% end %>
 
       <!-- Offcanvas Toggle -->
       <button type="button" class="relative size-9 flex justify-center items-center text-sm font-semibold rounded-lg border border-transparent text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-transparent dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base-offcanvas" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base-offcanvas">

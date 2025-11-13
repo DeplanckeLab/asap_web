@@ -26,9 +26,15 @@
           </div>
           
           <!-- Project Info -->
-          <div class="flex items-center space-x-4">
+        <% version_label = @project.version_id.presence || '2.0.0' %>
+        <div class="flex items-center space-x-4">
             <div>
-              <h1 class="text-lg font-semibold text-white"><%= @project.display_name %></h1>
+            <h1 class="text-lg font-semibold text-white flex items-center gap-2">
+              <span><%= @project.display_name %></span>
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-gray-100 bg-gray-700 rounded-full border border-gray-600">
+                v<%= version_label %>
+              </span>
+            </h1>
               <div class="flex items-center space-x-4 text-sm text-gray-300">
                 <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> cells</span>
                 <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= @project.organism_display %></span>
@@ -39,7 +45,7 @@
         
         <!-- Center: ASAP Version -->
         <div class="flex-1 flex justify-center">
-          <span class="text-sm text-gray-300">ASAP v<%= @project.version_id || '2.0.0' %></span>
+          <!--<span class="text-sm text-gray-300">ASAP v<%= @project.version_id || '2.0.0' %></span>-->
         </div>
         
         <!-- Right side: Navigation Icons -->
@@ -74,6 +80,36 @@
             <i class="fas fa-cog text-lg"></i>
           <% end %>
           
+          <% if admin? %>
+            <div class="relative ml-4" id="admin-tools-dropdown">
+              <button id="admin-tools-button"
+                      class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
+                      title="Admin tools"
+                      data-admin-tools-toggle>
+                <i class="fas fa-tools text-lg"></i>
+                <span class="hidden sm:inline text-sm">Admin</span>
+                <i class="fas fa-chevron-down text-xs"></i>
+              </button>
+              <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50"
+                   data-admin-tools-menu>
+                <div class="py-2 text-sm">
+                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-sliders-h text-xs text-gray-500"></i>
+                    <span>Project settings</span>
+                  <% end %>
+                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-user-shield text-xs text-gray-500"></i>
+                    <span>Manage permissions</span>
+                  <% end %>
+                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-download text-xs text-gray-500"></i>
+                    <span>Download logs</span>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+          
           <!-- Back to Projects -->
           <%= link_to projects_path, 
               class: "ml-4 p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
@@ -103,5 +139,47 @@
   </div>
   
   <%= javascript_include_tag "application", "data-turbo-track": "reload", defer: true %>
+  <script>
+    function setupAdminToolsDropdown() {
+      const container = document.getElementById('admin-tools-dropdown')
+      if (!container) return
+
+      const toggleButton = container.querySelector('[data-admin-tools-toggle]')
+      const menu = container.querySelector('[data-admin-tools-menu]')
+      if (!toggleButton || !menu) return
+
+      const openClass = 'hidden'
+
+      function closeMenu() {
+        if (!menu.classList.contains(openClass)) {
+          menu.classList.add(openClass)
+          toggleButton.setAttribute('aria-expanded', 'false')
+        }
+      }
+
+      function toggleMenu(event) {
+        event.preventDefault()
+        event.stopPropagation()
+        const isHidden = menu.classList.contains(openClass)
+        if (isHidden) {
+          menu.classList.remove(openClass)
+          toggleButton.setAttribute('aria-expanded', 'true')
+        } else {
+          closeMenu()
+        }
+      }
+
+      toggleButton.addEventListener('click', toggleMenu)
+
+      document.addEventListener('click', (event) => {
+        if (!container.contains(event.target)) {
+          closeMenu()
+        }
+      })
+    }
+
+    document.addEventListener('DOMContentLoaded', setupAdminToolsDropdown)
+    document.addEventListener('turbo:load', setupAdminToolsDropdown)
+  </script>
 </body>
 </html>

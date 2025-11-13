@@ -7699,6 +7699,11 @@ export default class extends Controller {
     console.log(`[LASSO] Checking ${this.currentCoordinates.length.toLocaleString()} points`)
     console.log(`[LASSO] Lasso polygon has ${this.lassoPoints.length} vertices`)
     
+    // Create Set from currentVisibleCells for fast lookup (null means all cells are visible)
+    const visibleCellsSet = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
+    const visibleCount = visibleCellsSet ? visibleCellsSet.size : this.currentCoordinates.length
+    console.log(`[LASSO] Visible cells: ${visibleCount.toLocaleString()} (${visibleCellsSet ? 'filtered' : 'all'})`)
+    
     const selectedIndices = []
     
     // OPTIMIZED: Calculate lasso bounding box for fast rejection
@@ -7718,10 +7723,17 @@ export default class extends Controller {
       console.log('[LASSO] Using ReGL path - checking normalized coordinates')
       
       let bboxRejected = 0
+      let visibilityRejected = 0
       let polygonChecked = 0
       const pointCheckStart = performance.now()
       
       for (let i = 0; i < this.currentCoordinates.length; i++) {
+        // Check if cell is visible (skip if not in visible set)
+        if (visibleCellsSet && !visibleCellsSet.has(i)) {
+          visibilityRejected++
+          continue
+        }
+        
         const [dataX, dataY] = this.currentCoordinates[i]
         
         // Convert data coordinates to screen coordinates
@@ -7742,19 +7754,26 @@ export default class extends Controller {
       }
       
       const pointCheckTime = performance.now() - pointCheckStart
-      console.log(`[LASSO] ReGL: BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${pointCheckTime.toFixed(2)}ms`)
+      console.log(`[LASSO] ReGL: Visibility rejected: ${visibilityRejected.toLocaleString()}, BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${pointCheckTime.toFixed(2)}ms`)
       
     } else if (this.pointSprites && this.pointSprites.length > 0) {
       console.log(`[LASSO] Using pointSprites array (${this.pointSprites.length} sprites)`)
       
       // OPTIMIZED: Use pointSprites array directly (much faster!)
       let bboxRejected = 0
+      let visibilityRejected = 0
       let polygonChecked = 0
       const spriteCheckStart = performance.now()
       
       for (let i = 0; i < this.pointSprites.length; i++) {
         const sprite = this.pointSprites[i]
         if (!sprite || sprite.destroyed || !sprite.visible) continue
+        
+        // Check if cell is visible (skip if not in visible set)
+        if (visibleCellsSet && !visibleCellsSet.has(i)) {
+          visibilityRejected++
+          continue
+        }
         
         const x = sprite.x
         const y = sprite.y
@@ -7773,13 +7792,18 @@ export default class extends Controller {
       }
       
       const spriteCheckTime = performance.now() - spriteCheckStart
-      console.log(`[LASSO] Sprites: BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${spriteCheckTime.toFixed(2)}ms`)
+      console.log(`[LASSO] Sprites: Visibility rejected: ${visibilityRejected.toLocaleString()}, BBox rejected: ${bboxRejected.toLocaleString()}, Polygon tested: ${polygonChecked.toLocaleString()}, check time: ${spriteCheckTime.toFixed(2)}ms`)
     } else {
       console.log('[LASSO] Using fallback container iteration (slower)')
       const containerCheckStart = performance.now()
       
       this.scatterContainer.children.forEach((child) => {
         if (child.isPoint && child.cellId !== undefined) {
+          // Check if cell is visible (skip if not in visible set)
+          if (visibleCellsSet && !visibleCellsSet.has(child.cellId)) {
+            return
+          }
+          
           if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
           selectedIndices.push(child.cellId)
         }
@@ -7789,6 +7813,11 @@ export default class extends Controller {
       if (this.animatedContainer) {
         this.animatedContainer.children.forEach((child) => {
         if (child.isPoint && child.cellId !== undefined) {
+            // Check if cell is visible (skip if not in visible set)
+            if (visibleCellsSet && !visibleCellsSet.has(child.cellId)) {
+              return
+            }
+            
             if (this.isPointInPolygon(child.x, child.y, this.lassoPoints)) {
             selectedIndices.push(child.cellId)
           }

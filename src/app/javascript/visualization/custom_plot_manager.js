@@ -930,6 +930,11 @@ export class CustomPlotManager {
       return
     }
 
+    // Create Set from currentVisibleCells for fast lookup (null means all cells are visible)
+    const visibleCellsSet = this.controller && this.controller.currentVisibleCells 
+      ? new Set(this.controller.currentVisibleCells) 
+      : null
+
     let minX = Infinity
     let maxX = -Infinity
     let minY = Infinity
@@ -943,6 +948,11 @@ export class CustomPlotManager {
 
     const selectedIndices = []
     for (const point of this.currentPlotPoints) {
+      // Check if cell is visible (skip if not in visible set)
+      if (visibleCellsSet && !visibleCellsSet.has(point.cellIndex)) {
+        continue
+      }
+      
       if (point.canvasX < minX || point.canvasX > maxX || point.canvasY < minY || point.canvasY > maxY) {
         continue
       }

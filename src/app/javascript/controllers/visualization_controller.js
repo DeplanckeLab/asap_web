@@ -9997,7 +9997,18 @@ export default class extends Controller {
     // console.log('🎯 [RegL] Final result:', { closestPointIndex, closestDistance: closestDistance.toFixed(6), maxDistance: maxDistance.toFixed(6) })
 
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
-      // Point found within tolerance - fix tooltip to this cell
+      // Check if the cell is visible (not hidden by filters)
+      if (!this.isCellVisible(closestPointIndex)) {
+        // Cell is hidden - don't fix tooltip, hide it instead
+        if (this.isTooltipFixed) {
+          this.unfixTooltip()
+        } else {
+          this.hideSimpleTooltip()
+        }
+        return
+      }
+      
+      // Point found within tolerance and is visible - fix tooltip to this cell
       // console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
       // Pass screen coordinates (event.clientX/Y) for tooltip positioning
       this.fixTooltipToCell(closestPointIndex, event.clientX, event.clientY)
@@ -10055,6 +10066,16 @@ export default class extends Controller {
     return colorPickerOpen || gradientEditorOpen || controlPointEditorOpen
   }
 
+  // Helper method to check if a cell is visible (not hidden by filters)
+  isCellVisible(cellIndex) {
+    // If no filters are applied, all cells are visible
+    if (!this.currentVisibleCells) {
+      return true
+    }
+    // Check if the cell is in the visible cells array
+    return this.currentVisibleCells.includes(cellIndex)
+  }
+
   // Detect point hovering for RegL (dynamic tooltip)
   detectRegLPointHover(event) {
     if (this.interactionMode !== 'pick') return
@@ -10104,7 +10125,16 @@ export default class extends Controller {
     }
 
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
-      // Point found within tolerance - show dynamic tooltip only if not fixed
+      // Check if the cell is visible (not hidden by filters)
+      if (!this.isCellVisible(closestPointIndex)) {
+        // Cell is hidden - hide tooltip only if not fixed
+        if (!this.isTooltipFixed) {
+          this.hideSimpleTooltip()
+        }
+        return
+      }
+      
+      // Point found within tolerance and is visible - show dynamic tooltip only if not fixed
       if (!this.isTooltipFixed) {
         const cellName = closestPointIndex.toString()
         

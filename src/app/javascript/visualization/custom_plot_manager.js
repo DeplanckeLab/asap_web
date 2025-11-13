@@ -783,6 +783,17 @@ export class CustomPlotManager {
       this.lastHoverCellId = null
       return
     }
+    // Check if the cell is visible (not hidden by filters)
+    const cellId = closest.point.cellIndex
+    if (this.controller.currentVisibleCells && !this.controller.currentVisibleCells.includes(cellId)) {
+      // Cell is hidden - hide tooltip only if not fixed
+      if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      return
+    }
+    
     const tooltipLeft = event.clientX + 12
     const tooltipTop = event.clientY + 12
     const hasMoved = !this.controller.lastTooltipPosition ||
@@ -790,7 +801,6 @@ export class CustomPlotManager {
       Math.abs(this.controller.lastTooltipPosition.top - tooltipTop) > 2
     if (this.lastHoverCellId !== closest.point.cellIndex || hasMoved) {
       this.controller.lastTooltipPosition = { left: tooltipLeft, top: tooltipTop }
-      const cellId = closest.point.cellIndex
       const cellName = cellId.toString()
       if (typeof this.controller.showSimpleTooltip === 'function') {
         this.controller.showSimpleTooltip(cellName, null, { x: tooltipLeft, y: tooltipTop }, cellId, false)
@@ -822,6 +832,19 @@ export class CustomPlotManager {
       this.lastHoverCellId = null
       return
     }
+    // Check if the cell is visible (not hidden by filters)
+    const cellId = closest.point.cellIndex
+    if (this.controller.currentVisibleCells && !this.controller.currentVisibleCells.includes(cellId)) {
+      // Cell is hidden - don't fix tooltip, hide it instead
+      if (this.controller.isTooltipFixed && typeof this.controller.unfixTooltip === 'function') {
+        this.controller.unfixTooltip()
+      } else if (typeof this.controller.hideSimpleTooltip === 'function') {
+        this.controller.hideSimpleTooltip()
+      }
+      this.lastHoverCellId = null
+      return
+    }
+    
     event.preventDefault()
     event.stopPropagation()
     // Use saved position if available (from dragging), otherwise use click position
@@ -830,9 +853,8 @@ export class CustomPlotManager {
     const tooltipTop = event.clientY + 12
     if (typeof this.controller.fixTooltipToCell === 'function') {
       // Pass screen coordinates for consistent positioning
-      this.controller.fixTooltipToCell(closest.point.cellIndex, event.clientX, event.clientY)
+      this.controller.fixTooltipToCell(cellId, event.clientX, event.clientY)
     } else if (typeof this.controller.showSimpleTooltip === 'function') {
-      const cellId = closest.point.cellIndex
       const cellName = cellId.toString()
       this.controller.isTooltipFixed = true
       this.controller.fixedTooltipCellId = cellId
@@ -840,7 +862,7 @@ export class CustomPlotManager {
       // otherwise it will use the click position passed here
       this.controller.showSimpleTooltip(cellName, null, { x: event.clientX, y: event.clientY }, cellId, true)
     }
-    this.lastHoverCellId = closest.point.cellIndex
+    this.lastHoverCellId = cellId
   }
   
   handleCanvasMouseLeave() {

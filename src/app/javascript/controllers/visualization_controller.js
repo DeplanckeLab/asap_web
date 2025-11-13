@@ -4805,6 +4805,9 @@ export default class extends Controller {
     // Initialize gradient for gene expression (synchronous - just loads from storage)
     this.gradientManager.loadGradientForMetadata(geneMetadataId)
     
+    // Initialize gradient legend listeners for gene expression (same as continuous metadata)
+    this.gradientManager.initializeGradientLegendListeners()
+    
     // Force reordering of points
     this._lastNumericOrderApplied = null
     

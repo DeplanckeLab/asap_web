@@ -839,6 +839,9 @@ export class DataManager {
     if (this.controller.currentMetadataVector?.data_type === 'NUMERIC') {
       this.controller.gradientManager.initializeGradientLegendListeners()
     } else {
+      // Remove gradient legend listeners when switching to categorical metadata
+      this.controller.gradientManager.removeGradientLegendListeners()
+      
       // Disable pointer events on overlay for discrete metadata
       // This allows interactions with the plot below
       if (this.controller.overlayCanvas) {

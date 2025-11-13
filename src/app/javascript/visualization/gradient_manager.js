@@ -639,6 +639,42 @@ export class GradientManager {
     return (r << 16) | (g << 8) | b
   }
 
+  // Remove gradient legend listeners (when switching to categorical metadata)
+  removeGradientLegendListeners() {
+    if (!this.controller.overlayCanvas) {
+      return
+    }
+
+    // Get the parent container where listeners were attached
+    const canvasContainer = this.controller.overlayCanvas.parentElement
+    if (!canvasContainer) {
+      return
+    }
+
+    // Remove event listeners if they exist
+    if (this.controller.gradientLegendClickListener) {
+      canvasContainer.removeEventListener('click', this.controller.gradientLegendClickListener)
+      this.controller.gradientLegendClickListener = null
+    }
+    if (this.controller.gradientLegendMouseMoveListener) {
+      canvasContainer.removeEventListener('mousemove', this.controller.gradientLegendMouseMoveListener)
+      this.controller.gradientLegendMouseMoveListener = null
+    }
+    if (this.controller.gradientLegendMouseLeaveListener) {
+      canvasContainer.removeEventListener('mouseleave', this.controller.gradientLegendMouseLeaveListener)
+      this.controller.gradientLegendMouseLeaveListener = null
+    }
+
+    // Clear gradient legend bounds to prevent click detection
+    this.controller.gradientLegendBounds = null
+
+    // Reset hover state
+    this.controller.isHoveringGradientLegend = false
+    if (this.controller.overlayCanvas) {
+      this.controller.overlayCanvas.style.cursor = 'default'
+    }
+  }
+
   // Initialize gradient legend listeners
   initializeGradientLegendListeners() {
     if (!this.controller.overlayCanvas) {

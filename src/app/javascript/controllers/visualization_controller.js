@@ -4569,7 +4569,11 @@ export default class extends Controller {
     const button = event.currentTarget
     const geneId = button.dataset.geneId
     const geneName = button.dataset.geneName
-    const geneMetadataId = `gene_${geneId}`
+    // Use the same getGeneMetadataId function as the range slider to ensure IDs match
+    // This is critical for the adapt color range button to work correctly
+    const geneMetadataId = this.geneManager?.getGeneMetadataId 
+      ? this.geneManager.getGeneMetadataId(geneId, this.geneManager.currentMatrixAnnotId)
+      : `gene_${geneId}`
     const isCurrentlyActive = button.dataset.active === 'true'
     
     // console.log('🧬 Gene water drop clicked:', { geneId, geneName, geneMetadataId, isCurrentlyActive })

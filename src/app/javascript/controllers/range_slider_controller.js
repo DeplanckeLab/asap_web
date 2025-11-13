@@ -680,6 +680,9 @@ export default class extends Controller {
     const cacheClearTime = performance.now() - cacheClearStart
     // console.log(`${logPrefix} filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     
+    // Update button appearance when range changes (after selectedRanges is updated)
+    this.updateButtonAppearance()
+    
     // Update filter switch visibility based on whether there's a selection
     if (this.visualizationController.uiManager) {
       this.visualizationController.uiManager.updateFilterSwitchVisibility(this.metadataIdValue)
@@ -1174,54 +1177,24 @@ export default class extends Controller {
     this.visualizationController.visibilityOnlyUpdate = false
     // console.log('🎨 Set visibilityOnlyUpdate to false')
     
-    // Calculate the effective range based on visible cells when adapt is enabled
+    // Calculate the effective range for color adaptation
+    // When adapt is enabled, use the selected range (currentMinValue/currentMaxValue)
+    // When adapt is disabled, use the full data range (minValue/maxValue)
+    // IMPORTANT: Do NOT modify the slider values - only use them for color range calculation
     let effectiveMin = this.currentMinValue
     let effectiveMax = this.currentMaxValue
     
     if (this.adaptColorRangeEnabled) {
-      // Get the metadata vector and calculate range from visible cells only
-      const metadataVector = this.visualizationController.getMetadataVectorById(this.metadataIdValue)
-      if (metadataVector && metadataVector.values) {
-        const visibleCells = this.visualizationController.currentVisibleCells
-        
-        if (visibleCells && visibleCells.length > 0) {
-          // Calculate min/max from visible cells only
-          let minVal = Infinity
-          let maxVal = -Infinity
-          
-          for (let i = 0; i < visibleCells.length; i++) {
-            const cellIndex = visibleCells[i]
-            const value = metadataVector.values[cellIndex]
-            if (!isNaN(value)) {
-              if (value < minVal) minVal = value
-              if (value > maxVal) maxVal = value
-            }
-          }
-          
-          if (minVal !== Infinity && maxVal !== -Infinity) {
-            effectiveMin = minVal
-            effectiveMax = maxVal
-            // console.log('🎨 Adapted color range to visible cells:', { min: effectiveMin, max: effectiveMax })
-            
-            // Update the slider to show the new range
-            this.currentMinValue = effectiveMin
-            this.currentMaxValue = effectiveMax
-            this.updateSliderUI()
-            this.updateSelectedCellsCount()
-          }
-        } else {
-          // console.log('🎨 No filtering applied, using full data range')
-          // Use the full data range when no filtering is applied
-          effectiveMin = this.minValue
-          effectiveMax = this.maxValue
-          
-          // Update the slider to show the full range
-          this.currentMinValue = effectiveMin
-          this.currentMaxValue = effectiveMax
-          this.updateSliderUI()
-          this.updateSelectedCellsCount()
-        }
-      }
+      // Use the selected range for color adaptation
+      // This adapts the color legend to show the full range of selected values
+      effectiveMin = this.currentMinValue
+      effectiveMax = this.currentMaxValue
+      // console.log('🎨 Adapting color range to selected range:', { min: effectiveMin, max: effectiveMax })
+    } else {
+      // Use the full data range
+      effectiveMin = this.minValue
+      effectiveMax = this.maxValue
+      // console.log('🎨 Using full data range for colors:', { min: effectiveMin, max: effectiveMax })
     }
     
     // Update the color range with the new setting
@@ -1290,17 +1263,42 @@ export default class extends Controller {
     // Check if this metadata/gene is currently being used for coloring
     const isColoringActive = this.visualizationController?.currentMetadataVector?.id === this.metadataIdValue
     
-    // console.log('🎨 Updating button appearance, enabled:', this.adaptColorRangeEnabled, 'coloring active:', isColoringActive)
+    // Check if there's a restricted selection range (filter applied)
+    // A range is restricted if it's not the full range
+    let isRangeRestricted = false
+    const tolerance = 0.0001
     
-    // Hide button if coloring is not active
-    if (!isColoringActive) {
-      button.style.display = 'none'
-      // console.log('🎨 Hiding adapt color range button - coloring not active for this metadata')
+    // Check if selectedRanges contains this metadataId (indicates a filter is applied)
+    const hasSelectedRange = this.visualizationController?.selectedRanges?.[this.metadataIdValue] !== undefined
+    if (hasSelectedRange && this.minValue !== undefined && this.maxValue !== undefined) {
+      const selectedRange = this.visualizationController.selectedRanges[this.metadataIdValue]
+      // Range is restricted if it's not the full range
+      isRangeRestricted = !(Math.abs(selectedRange.min - this.minValue) < tolerance && 
+                           Math.abs(selectedRange.max - this.maxValue) < tolerance)
+    }
+    
+    // Also check slider's current values as fallback (in case selectedRanges hasn't been updated yet)
+    if (!isRangeRestricted && this.minValue !== undefined && this.maxValue !== undefined && 
+        this.currentMinValue !== undefined && this.currentMaxValue !== undefined) {
+      // Range is restricted if current range is different from full range
+      isRangeRestricted = !(Math.abs(this.currentMinValue - this.minValue) < tolerance && 
+                           Math.abs(this.currentMaxValue - this.maxValue) < tolerance)
+    }
+    
+    // Show button only if coloring is active AND there's a restricted range
+    const shouldShowButton = isColoringActive && isRangeRestricted
+    
+    // Use visibility instead of display to maintain layout space and prevent slider from resizing
+    if (!shouldShowButton) {
+      button.style.visibility = 'hidden'
+      button.style.pointerEvents = 'none'
+      // console.log('🎨 Hiding adapt color range button - coloring not active or range not restricted')
       return
     }
     
-    // Show button if coloring is active
-    button.style.display = 'flex'
+    // Show button only if both conditions are met
+    button.style.visibility = 'visible'
+    button.style.pointerEvents = 'auto'
     
     if (this.adaptColorRangeEnabled) {
       // Active state - green colors

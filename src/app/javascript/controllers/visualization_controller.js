@@ -9971,50 +9971,35 @@ export default class extends Controller {
       // screenHeight: screenHeight
     // })
 
-    // Find closest point
+    // Find closest VISIBLE point only
+    // Filter out hidden cells during the search, not after
     let closestPointIndex = -1
     let closestDistance = Infinity
 
-    // console.log('🎯 [RegL] Searching through', this.currentCoordinates.length, 'points with maxDistance:', maxDistance)
-
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
+      
+      // Skip hidden cells - only consider visible ones
+      if (this.currentVisibleCells && !this.currentVisibleCells.includes(cellIndex)) {
+        continue
+      }
+      
       const [x, y] = this.currentCoordinates[cellIndex]
       const distance = Math.sqrt(Math.pow(x - dataX, 2) + Math.pow(y - dataY, 2))
       
-      if (drawPos < 5) { // Debug first 5 points
-        // console.log(`🎯 [RegL] DrawPos ${drawPos} -> Cell ${cellIndex}: (${x}, ${y}), distance: ${distance.toFixed(6)}`)
-      }
-      
-      // Track the closest point
+      // Track the closest visible point
       if (distance < closestDistance) {
         closestDistance = distance
         closestPointIndex = cellIndex // Use the original cell index, not draw position
-        // console.log(`🎯 [RegL] New closest point: DrawPos ${drawPos} -> Cell ${cellIndex}, distance: ${distance.toFixed(6)}`)
       }
     }
 
-    // console.log('🎯 [RegL] Final result:', { closestPointIndex, closestDistance: closestDistance.toFixed(6), maxDistance: maxDistance.toFixed(6) })
-
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
-      // Check if the cell is visible (not hidden by filters)
-      if (!this.isCellVisible(closestPointIndex)) {
-        // Cell is hidden - don't fix tooltip, hide it instead
-        if (this.isTooltipFixed) {
-          this.unfixTooltip()
-        } else {
-          this.hideSimpleTooltip()
-        }
-        return
-      }
-      
-      // Point found within tolerance and is visible - fix tooltip to this cell
-      // console.log('🎯 [RegL] Point found within tolerance! Fixing tooltip to cell', closestPointIndex, 'distance:', closestDistance.toFixed(6))
+      // Point found within tolerance - fix tooltip to this cell
       // Pass screen coordinates (event.clientX/Y) for tooltip positioning
       this.fixTooltipToCell(closestPointIndex, event.clientX, event.clientY)
     } else {
       // No point found within tolerance - hide any existing tooltip
-      // console.log('🎯 [RegL] No point found within tolerance - hiding tooltip')
       if (this.isTooltipFixed) {
         this.unfixTooltip()
       } else {
@@ -10066,16 +10051,6 @@ export default class extends Controller {
     return colorPickerOpen || gradientEditorOpen || controlPointEditorOpen
   }
 
-  // Helper method to check if a cell is visible (not hidden by filters)
-  isCellVisible(cellIndex) {
-    // If no filters are applied, all cells are visible
-    if (!this.currentVisibleCells) {
-      return true
-    }
-    // Check if the cell is in the visible cells array
-    return this.currentVisibleCells.includes(cellIndex)
-  }
-
   // Detect point hovering for RegL (dynamic tooltip)
   detectRegLPointHover(event) {
     if (this.interactionMode !== 'pick') return
@@ -10109,12 +10084,19 @@ export default class extends Controller {
     const dataToleranceY = (screenTolerance / screenHeight) * (bounds.maxY - bounds.minY)
     const maxDistance = Math.max(dataToleranceX, dataToleranceY) // Use the larger tolerance
 
-    // Find closest point
+    // Find closest VISIBLE point only
+    // Filter out hidden cells during the search, not after
     let closestPointIndex = -1
     let closestDistance = Infinity
 
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
+      
+      // Skip hidden cells - only consider visible ones
+      if (this.currentVisibleCells && !this.currentVisibleCells.includes(cellIndex)) {
+        continue
+      }
+      
       const [x, y] = this.currentCoordinates[cellIndex]
       const distance = Math.sqrt(Math.pow(x - dataX, 2) + Math.pow(y - dataY, 2))
       
@@ -10125,16 +10107,7 @@ export default class extends Controller {
     }
 
     if (closestPointIndex !== -1 && closestDistance <= maxDistance) {
-      // Check if the cell is visible (not hidden by filters)
-      if (!this.isCellVisible(closestPointIndex)) {
-        // Cell is hidden - hide tooltip only if not fixed
-        if (!this.isTooltipFixed) {
-          this.hideSimpleTooltip()
-        }
-        return
-      }
-      
-      // Point found within tolerance and is visible - show dynamic tooltip only if not fixed
+      // Point found within tolerance - show dynamic tooltip only if not fixed
       if (!this.isTooltipFixed) {
         const cellName = closestPointIndex.toString()
         

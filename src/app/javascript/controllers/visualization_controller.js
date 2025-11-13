@@ -3695,6 +3695,10 @@ export default class extends Controller {
       this.categoryLabelsContainer.visible = false
     }
     
+    // Remove gradient legend listeners when uncoloring continuous metadata
+    // This prevents handlers from working when the gradient editor is not visible
+    this.gradientManager.removeGradientLegendListeners()
+    
     // Hide all category distribution bar plots when coloring is cleared
     const allCanvases = document.querySelectorAll('.category-distribution-canvas')
     allCanvases.forEach(canvas => {

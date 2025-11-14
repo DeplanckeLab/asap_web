@@ -1,0 +1,85 @@
+<div class="max-w-4xl mx-auto space-y-6">
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900"><%= @tool.name %></h1>
+      <% if @tool.url.present? %>
+        <%= link_to @tool.url, target: "_blank", rel: "noopener", class: "text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mt-1" do %>
+          <i class="fas fa-link text-xs"></i>
+          <%= @tool.url %>
+        <% end %>
+      <% end %>
+    </div>
+    <div class="flex items-center gap-2">
+      <%= link_to 'Back to list', tools_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% if admin? %>
+        <%= link_to 'Edit', edit_tool_path(@tool), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <dl class="divide-y divide-gray-100 text-sm text-gray-700">
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Label</dt>
+        <dd class="w-3/4 text-gray-600"><%= @tool.label.presence || '—' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Package</dt>
+        <dd class="w-3/4 text-gray-600"><%= @tool.package.presence || '—' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Tool Type</dt>
+        <dd class="w-3/4 text-gray-600">
+          <% if @tool.tool_type %>
+            <%= link_to @tool.tool_type.name, tool_type_path(@tool.tool_type), class: 'text-gray-600 hover:text-gray-800' %>
+          <% else %>
+            —
+          <% end %>
+        </dd>
+      </div>
+      <% if @tool.title.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Title</dt>
+          <dd class="w-3/4 text-gray-600"><%= @tool.title %></dd>
+        </div>
+      <% end %>
+      <% if @tool.description.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Description</dt>
+          <dd class="text-gray-600 whitespace-pre-line"><%= @tool.description %></dd>
+        </div>
+      <% end %>
+      <% if @tool.step_ids.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Steps</dt>
+          <dd class="w-3/4 text-gray-600">
+            <% step_ids = @tool.step_ids.split(',').map(&:strip) %>
+            <% steps = Step.where(id: step_ids).order(:label) %>
+            <% if steps.any? %>
+              <div class="flex flex-wrap gap-2">
+                <% steps.each do |step| %>
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                    <%= step.label %>
+                  </span>
+                <% end %>
+              </div>
+            <% else %>
+              <%= @tool.step_ids %>
+            <% end %>
+          </dd>
+        </div>
+      <% end %>
+      <% if @tool.tag.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Tag</dt>
+          <dd class="w-3/4 text-gray-600"><%= @tool.tag %></dd>
+        </div>
+      <% end %>
+    </dl>
+  </div>
+</div>
+

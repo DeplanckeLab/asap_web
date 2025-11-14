@@ -42,6 +42,7 @@
     <% end %>
 
     <% if tool_versions.present? %>
+    
       <div>
         <h2 class="text-sm font-semibold text-gray-800 mb-2">Tool Versions</h2>
         <div class="overflow-x-auto rounded-lg border border-gray-200">
@@ -69,10 +70,27 @@
       <div>
         <h2 class="text-sm font-semibold text-gray-800 mb-3">Docker Images</h2>
         <div class="space-y-4">
-          <% docker_images.each do |name, metadata| %>
-            <% record = docker_image_record_for(name, metadata) %>
+          <% docker_images.each do |key, metadata| %>
+            <%# 
+              Structure: docker_images = {
+                "asap_run" => {
+                  "name" => "fabdavid/asap_run",
+                  "tag" => "v8",
+                  "version" => 8
+                }
+              }
+              We use metadata["name"] and metadata["tag"] to find the DockerImage record
+            %>
+            <% image_name = metadata.is_a?(Hash) ? metadata["name"] : key %>
+            <% record = docker_image_record_for(image_name, metadata, version.id) %>
             <% metadata_hash = docker_image_metadata_hash(metadata, record) %>
-            <% tools = docker_image_tools(metadata_hash, record) %>
+            <%# Extract tools directly from DockerImage record's tools_json %>
+            <% tools = {} %>
+            <% if record&.tools_json.present? %>
+              <% tools = Basic.safe_parse_json(record.tools_json, {}) %>
+            <% elsif metadata_hash['tool_versions'].present? %>
+              <% tools = metadata_hash['tool_versions'].is_a?(Hash) ? metadata_hash['tool_versions'] : Basic.safe_parse_json(metadata_hash['tool_versions'], {}) %>
+            <% end %>
             <% grouped_tools = grouped_tools_by_language(tools, metadata_hash, record: record) { |tool_name| tool_metadata_for(tool_name) } %>
             <details class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-xs text-gray-600">
               <summary class="cursor-pointer text-gray-500 select-none">Raw metadata</summary>
@@ -87,8 +105,8 @@
             <div class="rounded-md border border-gray-200 overflow-hidden">
               <div class="flex items-center justify-between bg-gray-50 px-4 py-2">
                 <div>
-                  <p class="text-sm font-semibold text-gray-800"><%= docker_image_label(name, metadata_hash, record) %></p>
-                  <% description = metadata_hash['description'] || record&.description %>
+                  <p class="text-sm font-semibold text-gray-800"><%= docker_image_label(image_name, metadata_hash, record) %></p>
+                  <% description = metadata_hash['description'] %>
                   <% if description.present? %>
                     <p class="text-xs text-gray-500"><%= description %></p>
                   <% end %>
@@ -100,27 +118,72 @@
                   </span>
                 <% end %>
               </div>
-              <% if grouped_tools.present? %>
-                <div class="divide-y divide-gray-100 text-sm">
-                  <% grouped_tools.each do |language, tool_list| %>
-                    <div class="px-4 py-3">
-                      <div class="mb-2 text-sm font-semibold text-gray-600 uppercase tracking-wide"><%= language %></div>
-                      <div class="flex flex-wrap gap-2">
-                        <% tool_list.each do |tool| %>
-                          <div class="inline-flex items-center gap-2 rounded-md border border-gray-200 px-3 py-1.5 bg-white shadow-sm">
-                            <span class="font-medium text-gray-700"><%= tool[:package] %></span>
-                            <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                              <%= tool[:version] || 'NA' %>
-                            </span>
-                            <% if tool[:url].present? %>
-                              <%= link_to raw("<i class='fas fa-link text-gray-400 text-xs'></i>"), tool[:url], target: "_blank", rel: "noopener", class: "text-gray-400 hover:text-gray-600 transition" %>
-                            <% end %>
-                          </div>
-                        <% end %>
+              <% if tools.present? %>
+                <% if grouped_tools.present? %>
+                  <div class="divide-y divide-gray-100">
+                    <% grouped_tools.each do |language, tool_list| %>
+                      <div class="px-4 py-3">
+                        <div class="mb-3 text-sm font-semibold text-gray-800"><%= language %></div>
+                        <div class="flex flex-wrap gap-2">
+                          <% tool_list.each do |tool| %>
+                            <div class="inline-flex items-center gap-1.5">
+                              <% tool_link = tool[:tool_id] ? tool_path(tool[:tool_id]) : (tool[:url].present? ? tool[:url] : nil) %>
+                              <% if tool_link.present? %>
+                                <%= link_to tool_link, target: (tool[:url].present? ? "_blank" : nil), rel: (tool[:url].present? ? "noopener" : nil), class: "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 transition" do %>
+                                  <%= tool[:package] %>
+                                  <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                    <%= tool[:version] || 'NA' %>
+                                  </span>
+                                  <% if tool[:url].present? %>
+                                    <i class="fas fa-link text-gray-400 text-xs"></i>
+                                  <% end %>
+                                <% end %>
+                              <% else %>
+                                <button type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500">
+                                  <%= tool[:package] %>
+                                  <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                    <%= tool[:version] || 'NA' %>
+                                  </span>
+                                </button>
+                              <% end %>
+                            </div>
+                          <% end %>
+                        </div>
                       </div>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <%# Fallback: display tools even if not grouped by language %>
+                  <div class="px-4 py-3">
+                    <div class="mb-3 text-sm font-semibold text-gray-800">Tools</div>
+                    <div class="flex flex-wrap gap-2">
+                      <% tools.each do |tool_name, version| %>
+                        <% tool_metadata = tool_metadata_for(tool_name) %>
+                        <% tool_link = tool_metadata[:id] ? tool_path(tool_metadata[:id]) : (tool_metadata[:url].present? ? tool_metadata[:url] : nil) %>
+                        <div class="inline-flex items-center gap-1.5">
+                          <% if tool_link.present? %>
+                            <%= link_to tool_link, target: (tool_metadata[:url].present? ? "_blank" : nil), rel: (tool_metadata[:url].present? ? "noopener" : nil), class: "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 transition" do %>
+                              <%= tool_name %>
+                              <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                <%= version || 'NA' %>
+                              </span>
+                              <% if tool_metadata[:url].present? %>
+                                <i class="fas fa-link text-gray-400 text-xs"></i>
+                              <% end %>
+                            <% end %>
+                          <% else %>
+                            <button type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500">
+                              <%= tool_name %>
+                              <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                <%= version || 'NA' %>
+                              </span>
+                            </button>
+                          <% end %>
+                        </div>
+                      <% end %>
                     </div>
-                  <% end %>
-                </div>
+                  </div>
+                <% end %>
               <% else %>
                 <div class="px-4 py-3 text-sm text-gray-500 italic">No tool versions listed for this image.</div>
               <% end %>

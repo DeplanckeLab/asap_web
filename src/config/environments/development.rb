@@ -25,9 +25,16 @@ Rails.application.configure do
 
   # Allow HTTPS requests coming through proxies where Origin/Base URL may differ.
   config.action_controller.forgery_protection_origin_check = false
+  
+  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
+  # This makes Rails trust X-Forwarded-Proto header and generate HTTPS URLs.
+  config.assume_ssl = true
 
   # Configure action mailer for Devise
   config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }
+  
+  # Ensure URLs are generated with HTTPS protocol when behind a proxy
+  config.action_controller.default_url_options = { protocol: 'https' }
 
 #  config.action_cable.allowed_request_origins = [ "https://asap-test.epfl.ch" ]
   

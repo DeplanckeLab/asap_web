@@ -1,7 +1,7 @@
-<%= form_with(model: version, class: "space-y-6") do |form| %>
+<%= form_with(model: version, class: "space-y-6", local: true) do |form| %>
   <% if version.errors.any? %>
     <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-      <p class="font-semibold"><%= pluralize(version.errors.count, "error") %> prohibited this version from being saved:</p>
+      <p class="font-semibold"><%= pluralize(version.errors.count, "error") %> prohibited this release from being saved:</p>
       <ul class="mt-2 list-disc pl-5">
         <% version.errors.full_messages.each do |message| %>
           <li><%= message %></li>
@@ -66,7 +66,7 @@
 
   <div class="flex items-center justify-end gap-2">
     <%= link_to 'Cancel', versions_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
-    <%= form.submit class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+    <%= form.submit (version.persisted? ? 'Update Release' : 'Create Release'), class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
   </div>
 <% end %>
 

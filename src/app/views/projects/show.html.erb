@@ -97,6 +97,18 @@
                     <i class="fas fa-code-branch text-xs text-gray-500"></i>
                     <span>Versions</span>
                   <% end %>
+                  <%= link_to tools_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-wrench text-xs text-gray-500"></i>
+                    <span>Tools</span>
+                  <% end %>
+                  <%= link_to tool_types_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-tags text-xs text-gray-500"></i>
+                    <span>Tool Types</span>
+                  <% end %>
+                  <%= link_to docker_images_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-cube text-xs text-gray-500"></i>
+                    <span>Docker Images</span>
+                  <% end %>
                   <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
                     <i class="fas fa-sliders-h text-xs text-gray-500"></i>
                     <span>Project settings</span>

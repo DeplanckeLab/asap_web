@@ -2,7 +2,7 @@
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold text-gray-900">ASAP Releases</h1>
     <% if admin? %>
-      <%= link_to 'New Version', new_version_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+      <%= link_to 'New Release', new_version_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
     <% end %>
   </div>
 
@@ -21,7 +21,7 @@
 
   <% if @versions.empty? %>
     <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
-      No versions have been recorded yet.
+      No releases have been recorded yet.
     </div>
   <% end %>
 </div>

@@ -76,7 +76,8 @@ module VersionsHelper
         end
       end
 
-      grouped[language] << { package:, version:, url: }
+      tool_id = tool_metadata[:id] || (tool_metadata[:tool] ? tool_metadata[:tool].id : nil)
+      grouped[language] << { package:, version:, url:, tool_id: tool_id }
     end
 
     grouped.transform_values do |list|

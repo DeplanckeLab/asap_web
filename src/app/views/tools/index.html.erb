@@ -1,0 +1,66 @@
+<div class="max-w-5xl mx-auto space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold text-gray-900">Tools</h1>
+    <% if admin? %>
+      <%= link_to 'New Tool', new_tool_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+    <% end %>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Name</th>
+          <th scope="col" class="px-3 py-2 text-left">Label</th>
+          <th scope="col" class="px-3 py-2 text-left">Package</th>
+          <th scope="col" class="px-3 py-2 text-left">Tool Type</th>
+          <th scope="col" class="px-3 py-2 text-left">Title</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-sm text-gray-700">
+        <% @tools.each do |tool| %>
+          <tr>
+            <td class="px-3 py-2">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-900"><%= tool.name %></span>
+                <% if tool.url.present? %>
+                  <%= link_to tool.url, target: "_blank", rel: "noopener", class: "text-gray-400 hover:text-gray-600" do %>
+                    <i class="fas fa-link text-xs"></i>
+                  <% end %>
+                <% end %>
+              </div>
+            </td>
+            <td class="px-3 py-2 text-gray-700"><%= tool.label.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= tool.package.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= tool.tool_type&.name || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= tool.title.presence || '—' %></td>
+            <td class="px-3 py-2 text-right">
+              <%= link_to 'Show', tool_path(tool), class: 'text-gray-600 hover:text-gray-800' %>
+              <% if admin? %>
+                <span class="mx-2 text-gray-300">|</span>
+                <%= link_to 'Edit', edit_tool_path(tool), class: 'text-gray-600 hover:text-gray-800' %>
+                <span class="mx-2 text-gray-300">|</span>
+                <%= link_to 'Destroy', tool_path(tool),
+                            method: :delete,
+                            data: { confirm: 'Are you sure?' },
+                            class: 'text-red-600 hover:text-red-700' %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @tools.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
+      No tools have been recorded yet.
+    </div>
+  <% end %>
+</div>
+

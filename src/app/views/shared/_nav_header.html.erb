@@ -55,6 +55,27 @@
                data-action="click->nav-item#navigate">
               Versions
             </a>
+            <!-- Tools -->
+            <a class="<%= tw_menu_item(:dropdown_item) %>"
+               href="<%= tools_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Tools
+            </a>
+            <!-- Tool Types -->
+            <a class="<%= tw_menu_item(:dropdown_item) %>"
+               href="<%= tool_types_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Tool Types
+            </a>
+            <!-- Docker Images -->
+            <a class="<%= tw_menu_item(:dropdown_item) %>"
+               href="<%= docker_images_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Docker Images
+            </a>
           </div>
         </div>
         <!-- End Admin Dropdown -->

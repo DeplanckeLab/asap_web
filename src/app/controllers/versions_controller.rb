@@ -13,6 +13,24 @@ class VersionsController < ApplicationController
 
   def show
     @env_data = parse_env_json(@version)
+    respond_to do |format|
+      format.html
+      format.json do
+        render json: {
+          id: @version.id,
+          release_date: @version.release_date,
+          description: @version.description,
+          activated: @version.activated,
+          beta: @version.beta,
+          activated_at: @version.activated_at,
+          created_at: @version.created_at,
+          updated_at: @version.updated_at,
+          env_json: @env_data,
+          tools_json: Basic.safe_parse_json(@version.tools_json, {}),
+          docker_json: Basic.safe_parse_json(@version.docker_json, {})
+        }
+      end
+    end
   end
 
   def new
@@ -93,29 +111,59 @@ class VersionsController < ApplicationController
     @tool_by_name = Tool.all.index_by(&:name)
     @tool_type_by_id = ToolType.all.index_by(&:id)
     @docker_image_lookup = {}
+    @docker_image_lookup_by_version = {}
     DockerImage.find_each do |image|
       @docker_image_lookup[[image.name, image.tag]] = image
       @docker_image_lookup[[image.name, nil]] ||= image
+      # Also index by name and version for lookup
+      if image.version.present?
+        @docker_image_lookup_by_version[[image.name, image.version]] = image
+      end
     end
   end
 
   def tool_metadata_for(tool_name)
     tool = @tool_by_name[tool_name]
-    return { label: tool_name, package: tool_name, language: 'Other', url: nil } unless tool
+    return { label: tool_name, package: tool_name, language: 'Other', url: nil, id: nil, tool: nil } unless tool
 
     {
       label: tool.label.presence || tool.name,
       package: tool.package.presence || tool.name,
       language: @tool_type_by_id[tool.tool_type_id]&.name || tool.language || 'Other',
-      url: tool.url
+      url: tool.url,
+      id: tool.id,
+      tool: tool
     }
   end
 
-  def docker_image_record_for(name, metadata = {})
+  def docker_image_record_for(name, metadata = {}, release_version = nil)
     return nil unless name
 
-    tag = metadata.is_a?(Hash) ? metadata['tag'] : nil
-    @docker_image_lookup[[name, tag]] || @docker_image_lookup[[name, nil]]
+    metadata = metadata.is_a?(Hash) ? metadata : {}
+    tag = metadata['tag']
+    version = metadata['version']
+    
+    # Priority 1: Try lookup by name and release version first (most reliable)
+    # This ensures version 8 uses the DockerImage with version 8, not what's in env_json
+    if release_version.present?
+      record = @docker_image_lookup_by_version[[name, release_version]]
+      return record if record
+    end
+    
+    # Priority 2: Try lookup by name and tag from metadata
+    if tag.present?
+      record = @docker_image_lookup[[name, tag]]
+      return record if record
+    end
+    
+    # Priority 3: Try lookup by name and version from metadata
+    if version.present?
+      record = @docker_image_lookup_by_version[[name, version]]
+      return record if record
+    end
+    
+    # Fallback to name only
+    @docker_image_lookup[[name, nil]]
   end
 end
 

@@ -32,6 +32,8 @@ Rails.application.routes.draw do
   resources :runs
   resources :reqs
   resources :docker_images
+  resources :tools
+  resources :tool_types
   
   resources :versions do
     collection do

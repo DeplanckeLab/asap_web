@@ -1,0 +1,84 @@
+<%= form_with(model: tool, class: "space-y-6") do |form| %>
+  <% if tool.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p class="font-semibold"><%= pluralize(tool.errors.count, "error") %> prohibited this tool from being saved:</p>
+      <ul class="mt-2 list-disc pl-5">
+        <% tool.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm p-6 space-y-6">
+    <div>
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :name, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :label, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :label, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :package, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :package, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :tool_type_id, "Tool Type", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.collection_select :tool_type_id, ToolType.order(:name), :id, :name, { prompt: "Select a tool type..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :step_ids, "Step IDs (comma-separated)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :step_ids, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">Enter step IDs separated by commas (e.g., 1, 2, 3)</p>
+    </div>
+
+    <div>
+      <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :title, rows: 2, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :description, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :description, rows: 10, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :url, "URL", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :url, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :tag, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :tag, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex items-center justify-end gap-2">
+    <%= link_to 'Cancel', tools_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+    <%= form.submit class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+  </div>
+<% end %>
+

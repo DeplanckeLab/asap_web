@@ -11,8 +11,20 @@ export default class extends Controller {
     const isDropdownItem = this.element.classList.contains('menu-item-dropdown')
     const isMenuItem = this.element.classList.contains('menu-item')
 
-    console.log(isDropdownItem, this.element.innerHTML)
-    // Reset state
+    // Only modify classes for menu items, not for other elements like buttons or logo
+    if (!isMenuItem && !isDropdownItem) {
+      // For non-menu items, only set aria-current if path matches
+      this.element.removeAttribute("aria-current")
+      if (itemPath && (
+        itemPath === currentPath || 
+        (currentPath === "/" && itemPath === "/")
+      )) {
+        this.element.setAttribute("aria-current", "page")
+      }
+      return
+    }
+    
+    // Reset state - only for menu items
     this.element.classList.remove("bg-gray-100", "text-gray-800", "dark:bg-neutral-700", "dark:text-white")
     
     // Different default styling for dropdown items vs regular nav items

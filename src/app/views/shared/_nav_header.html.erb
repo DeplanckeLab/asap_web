@@ -28,11 +28,36 @@
       </div>
 
       <% if admin? %>
-        <button id="admin-tools-button"
-                class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
-                title="Admin tools">
-          Admin Tools
-        </button>
+        <!-- Admin Dropdown -->
+        <div class="relative inline-block text-left"
+             id="admin-nav-dropdown">
+          <button type="button" 
+                  id="admin-nav-button"
+                  class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
+                  title="Admin tools"
+                  aria-expanded="false"
+                  data-admin-nav-toggle>
+            Admin
+            <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 9 6 6 6-6"/>
+            </svg>
+          </button>
+
+          <!-- Dropdown Menu -->
+          <div class="hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 
+                      dark:bg-gray-800 dark:border dark:border-gray-700
+                      z-[1000] top-full"
+               data-admin-nav-menu>
+            <!-- Versions -->
+            <a class="<%= tw_menu_item(:dropdown_item) %>"
+               href="<%= versions_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Versions
+            </a>
+          </div>
+        </div>
+        <!-- End Admin Dropdown -->
       <% end %>
 
       <!-- Offcanvas Toggle -->
@@ -182,3 +207,49 @@
   </nav>
 </header>
 <!-- ========== END HEADER ========== -->
+
+<script>
+  (function () {
+    function setupAdminNavDropdown() {
+      const container = document.getElementById('admin-nav-dropdown')
+      if (!container || container.dataset.dropdownInitialized === 'true') return
+
+      const toggleButton = container.querySelector('[data-admin-nav-toggle]')
+      const menu = container.querySelector('[data-admin-nav-menu]')
+      if (!toggleButton || !menu) return
+
+      container.dataset.dropdownInitialized = 'true'
+      const openClass = 'hidden'
+
+      function closeMenu() {
+        if (!menu.classList.contains(openClass)) {
+          menu.classList.add(openClass)
+          toggleButton.setAttribute('aria-expanded', 'false')
+        }
+      }
+
+      function toggleMenu(event) {
+        event.preventDefault()
+        event.stopPropagation()
+        const isHidden = menu.classList.contains(openClass)
+        if (isHidden) {
+          menu.classList.remove(openClass)
+          toggleButton.setAttribute('aria-expanded', 'true')
+        } else {
+          closeMenu()
+        }
+      }
+
+      toggleButton.addEventListener('click', toggleMenu)
+
+      document.addEventListener('click', (event) => {
+        if (!container.contains(event.target)) {
+          closeMenu()
+        }
+      })
+    }
+
+    document.addEventListener('DOMContentLoaded', setupAdminNavDropdown)
+    document.addEventListener('turbo:load', setupAdminNavDropdown)
+  })()
+</script>

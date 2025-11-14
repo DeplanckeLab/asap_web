@@ -93,6 +93,10 @@
               <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50"
                    data-admin-tools-menu>
                 <div class="py-2 text-sm">
+                  <%= link_to versions_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                    <i class="fas fa-code-branch text-xs text-gray-500"></i>
+                    <span>Versions</span>
+                  <% end %>
                   <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
                     <i class="fas fa-sliders-h text-xs text-gray-500"></i>
                     <span>Project settings</span>
@@ -140,46 +144,66 @@
   
   <%= javascript_include_tag "application", "data-turbo-track": "reload", defer: true %>
   <script>
-    function setupAdminToolsDropdown() {
-      const container = document.getElementById('admin-tools-dropdown')
-      if (!container) return
+    (function() {
+      function setupAdminToolsDropdown() {
+        const container = document.getElementById('admin-tools-dropdown')
+        if (!container) return
 
-      const toggleButton = container.querySelector('[data-admin-tools-toggle]')
-      const menu = container.querySelector('[data-admin-tools-menu]')
-      if (!toggleButton || !menu) return
+        const toggleButton = container.querySelector('[data-admin-tools-toggle]')
+        const menu = container.querySelector('[data-admin-tools-menu]')
+        if (!toggleButton || !menu) return
 
-      const openClass = 'hidden'
+        // Remove previous listeners if they exist
+        if (container._adminToggleHandler) {
+          toggleButton.removeEventListener('click', container._adminToggleHandler)
+        }
+        if (container._adminOutsideHandler) {
+          document.removeEventListener('click', container._adminOutsideHandler)
+        }
 
-      function closeMenu() {
-        if (!menu.classList.contains(openClass)) {
+        const openClass = 'hidden'
+
+        function closeMenu() {
           menu.classList.add(openClass)
           toggleButton.setAttribute('aria-expanded', 'false')
         }
+
+        const toggleHandler = function(event) {
+          event.preventDefault()
+          event.stopPropagation()
+          const isHidden = menu.classList.contains(openClass)
+          if (isHidden) {
+            menu.classList.remove(openClass)
+            toggleButton.setAttribute('aria-expanded', 'true')
+          } else {
+            closeMenu()
+          }
+        }
+
+        const outsideHandler = function(event) {
+          if (!container.contains(event.target)) {
+            closeMenu()
+          }
+        }
+
+        toggleButton.addEventListener('click', toggleHandler)
+        document.addEventListener('click', outsideHandler)
+
+        container._adminToggleHandler = toggleHandler
+        container._adminOutsideHandler = outsideHandler
       }
 
-      function toggleMenu(event) {
-        event.preventDefault()
-        event.stopPropagation()
-        const isHidden = menu.classList.contains(openClass)
-        if (isHidden) {
-          menu.classList.remove(openClass)
-          toggleButton.setAttribute('aria-expanded', 'true')
+      function init() {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setupAdminToolsDropdown, { once: true })
         } else {
-          closeMenu()
+          setupAdminToolsDropdown()
         }
       }
 
-      toggleButton.addEventListener('click', toggleMenu)
-
-      document.addEventListener('click', (event) => {
-        if (!container.contains(event.target)) {
-          closeMenu()
-        }
-      })
-    }
-
-    document.addEventListener('DOMContentLoaded', setupAdminToolsDropdown)
-    document.addEventListener('turbo:load', setupAdminToolsDropdown)
+      init()
+      document.addEventListener('turbo:load', setupAdminToolsDropdown)
+    })()
   </script>
 </body>
 </html>

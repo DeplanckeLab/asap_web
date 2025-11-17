@@ -62,6 +62,28 @@ module ProjectAuthorization
     false
   end
 
+  # Check if user can clone/duplicate a project
+  def clonable?(project)
+    return false unless project
+
+    return true if admin?
+    return true if ip_restricted_access?(project)
+
+    if project.sandbox? && session[:sandbox] == project.key
+      return true
+    end
+
+    return true if project.public?
+    return true if current_user && project.user_id == current_user.id
+
+    if current_user
+      share = project.shares.find_by(user_id: current_user.id)
+      return true if share&.clone_perm?
+    end
+
+    false
+  end
+
   # Check if user can export a specific item (run, etc.)
   def exportable_item?(project, item)
     return false unless project && item

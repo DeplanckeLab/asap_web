@@ -14,7 +14,7 @@ class ApplicationController < ActionController::Base
   before_action :init_session
 
   # Make authorization methods available to views
-  helper_method :admin?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :read_only?
+  helper_method :admin?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :read_only?, :clonable?
 
   protected
 

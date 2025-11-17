@@ -61,6 +61,36 @@ module ApplicationHelper
     end
     color_map
   end
+
+  def display_timestamp(record, key)
+    value = record_value(record, key)
+
+    return "—" unless value.present?
+
+    time = value.respond_to?(:to_time) ? value.to_time : Time.zone.parse(value.to_s)
+    time.strftime("%Y-%m-%d %H:%M")
+  rescue StandardError
+    value.to_s
+  end
+
+  def record_value(record, key)
+    attr = key.to_s
+    if record.respond_to?(attr)
+      record.public_send(attr)
+    elsif record.respond_to?(:[])
+      record[attr] || record[attr.to_sym]
+    end
+  end
+
+  def admin_menu_links
+    [
+      { label: "Versions", path: versions_path, icon: "fas fa-code-branch" },
+      { label: "Tools", path: tools_path, icon: "fas fa-wrench" },
+      { label: "Tool Types", path: tool_types_path, icon: "fas fa-tags" },
+      { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
+      { label: "Organisms", path: organisms_path, icon: "fas fa-dna" }
+    ]
+  end
 end
 
 # Basic utility class for JSON parsing

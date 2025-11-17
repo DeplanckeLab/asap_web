@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><%= @project.display_name %> - ASAP</title>
   <%= csrf_meta_tags %>
+  <%= csp_meta_tag %>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://cdn.tailwindcss.com"></script>
   <%= stylesheet_link_tag "tailwind", "inter-font", "data-turbo-track": "reload" %>
@@ -14,7 +15,7 @@
 <body class="bg-gray-50">
   <!-- Top Bar -->
   <div class="bg-black shadow-sm border-b border-gray-200">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="px-4 sm:px-6 lg:px-8 w-full">
       <div class="flex items-center justify-between h-16">
         <!-- Left side: Logo and Project Info -->
         <div class="flex items-center space-x-6">
@@ -27,17 +28,95 @@
           
           <!-- Project Info -->
         <% version_label = @project.version_id.presence || '2.0.0' %>
+        <% owner_user = @project.user %>
+        <% organism = @project.organism %>
+        <% owned_by_current_user = user_signed_in? && owner_user&.id == current_user.id %>
+        <% share_record = user_signed_in? && !owned_by_current_user ? @project.shares.find_by(user_id: current_user.id) : nil %>
+        <% owner_name = owner_user&.displayed_name.presence || owner_user&.email || 'Unknown owner' %>
+        <% project_status_label =
+            if owned_by_current_user
+              'Owned by you'
+            elsif share_record.present?
+              'Shared with you'
+            elsif @project.public?
+              'Public project'
+            elsif @project.sandbox?
+              'Sandbox session'
+            else
+              'Read only access'
+            end %>
+        <% project_status_detail =
+            if share_record.present? || (!owned_by_current_user && owner_user)
+              "Owner: #{owner_name}"
+            elsif @project.sandbox?
+              "Sandbox key #{session[:sandbox]}"
+            end %>
+        <% rights_summary = {
+             'Edit' => editable?(@project),
+             'Clone' => clonable?(@project),
+             'Export' => exportable?(@project)
+           } %>
+        <% account_status = if user_signed_in?
+                              "Logged in as #{current_user.displayed_name.presence || current_user.email}"
+                            else
+                              'Browsing as guest'
+                            end %>
         <div class="flex items-center space-x-4">
             <div>
-            <h1 class="text-lg font-semibold text-white flex items-center gap-2">
-              <span><%= @project.display_name %></span>
+            <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+              <span class="truncate max-w-[14rem] sm:max-w-sm lg:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>
               <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-gray-100 bg-gray-700 rounded-full border border-gray-600">
                 v<%= version_label %>
               </span>
+              <% if @project.public? %>
+                <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-emerald-200 bg-emerald-600/30 rounded-full border border-emerald-400/40">
+                  Public
+                </span>
+              <% end %>
             </h1>
               <div class="flex items-center space-x-4 text-sm text-gray-300">
                 <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> cells</span>
-                <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= @project.organism_display %></span>
+                <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= formatted_organism_name(@project) %></span>
+              </div>
+              <% if organism.present? %>
+                <div class="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                  <% [:short_name, :tag, :go_short_name, :genrep_key].each do |field| %>
+                    <% value = organism.send(field) %>
+                    <% next unless value.present? %>
+                    <span><%= field.to_s.humanize %>: <%= value %></span>
+                  <% end %>
+                  <% if organism.tax_id.present? %>
+                    <span>Tax ID: <%= organism.tax_id %></span>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+            <div class="hidden lg:flex items-stretch space-x-6 border-l border-gray-700 pl-6 text-sm text-gray-300">
+              <div class="flex flex-col justify-center">
+                <span class="text-xs uppercase tracking-wide text-gray-400">Status</span>
+                <span class="text-white font-semibold"><%= project_status_label %></span>
+                <% if project_status_detail.present? %>
+                  <span class="text-xs text-gray-400"><%= project_status_detail %></span>
+                <% end %>
+              </div>
+              <div class="w-px h-10 bg-gray-700 self-center"></div>
+              <div class="flex flex-col justify-center min-w-[160px]">
+                <span class="text-xs uppercase tracking-wide text-gray-400">Rights</span>
+                <div class="flex flex-wrap items-center text-xs font-semibold text-white mt-1 gap-y-0.5">
+                  <% rights_summary.each_with_index do |(label, allowed), index| %>
+                    <span class="<%= allowed ? 'text-emerald-300' : 'text-gray-400' %>">
+                      <%= allowed ? label : "#{label} ✕" %>
+                    </span>
+                    <% if index < rights_summary.length - 1 %>
+                      <span class="text-gray-500 mx-2">|</span>
+                    <% end %>
+                  <% end %>
+                </div>
+              </div>
+              <div class="w-px h-10 bg-gray-700 self-center"></div>
+              <div class="flex flex-col justify-center">
+                <span class="text-xs uppercase tracking-wide text-gray-400">Session</span>
+                <span class="text-white font-semibold"><%= account_status %></span>
               </div>
             </div>
           </div>
@@ -92,24 +171,8 @@
               </button>
               <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50"
                    data-admin-tools-menu>
-                <div class="py-2 text-sm">
-                  <%= link_to versions_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-code-branch text-xs text-gray-500"></i>
-                    <span>Versions</span>
-                  <% end %>
-                  <%= link_to tools_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-wrench text-xs text-gray-500"></i>
-                    <span>Tools</span>
-                  <% end %>
-                  <%= link_to tool_types_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-tags text-xs text-gray-500"></i>
-                    <span>Tool Types</span>
-                  <% end %>
-                  <%= link_to docker_images_path, class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-cube text-xs text-gray-500"></i>
-                    <span>Docker Images</span>
-                  <% end %>
-                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
+                <%= render "shared/admin_menu" %>
+                <!--  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
                     <i class="fas fa-sliders-h text-xs text-gray-500"></i>
                     <span>Project settings</span>
                   <% end %>
@@ -120,7 +183,7 @@
                   <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
                     <i class="fas fa-download text-xs text-gray-500"></i>
                     <span>Download logs</span>
-                  <% end %>
+                  <% end %>-->
                 </div>
               </div>
             </div>

@@ -22,6 +22,15 @@ default: &default
   password: <%= ENV["POSTGRES_PASSWORD"] %>
   host: postgres
 
+asap2_remote: &asap2_remote
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  username: <%= ENV.fetch("ASAP2_REMOTE_USER") { ENV["POSTGRES_USER"] } %>
+  password: <%= ENV.fetch("ASAP2_REMOTE_PASSWORD") { ENV["POSTGRES_PASSWORD"] } %>
+  host: <%= ENV.fetch("ASAP2_REMOTE_HOST", "host.docker.internal") %>
+  port: <%= ENV.fetch("ASAP2_REMOTE_PORT", 5433) %>
+
 sqlite: &sqlite
   adapter: sqlite3
   pool: 5
@@ -66,6 +75,18 @@ development:
     <<: *sqlite
     database: solid/cable_development.sqlite3
     migrations_paths: db/cable_migrate
+  asap2_data:
+    <<: *asap2_remote
+    database: <%= ENV.fetch("ASAP2_REMOTE_DB", "asap2_data_v8") %>
+
+<%
+  asap2_data_versions = ENV.fetch("ASAP2_DATA_VERSIONS", "asap2_data_v4,asap2_data_v5,asap2_data_v6,asap2_data_v8").split(",").map(&:strip).reject(&:empty?)
+%>
+<% asap2_data_versions.each do |db_name| %>
+<%= db_name %>:
+  <<: *asap2_remote
+  database: <%= db_name %>
+<% end %>
 
 # Warning: The database defined as "test" will be erased and
 # re-generated from your development database when you run "rake".

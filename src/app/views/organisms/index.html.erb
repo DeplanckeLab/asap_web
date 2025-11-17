@@ -1,0 +1,102 @@
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      Organisms directory
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Browse organisms from the local copy, or switch to a specific <code>asap2_data_vX</code> database if you have admin access.
+    </p>
+  </div>
+
+  <% if admin? %>
+    <div class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <%= form_with url: organisms_path, method: :get, local: true, class: "flex flex-col gap-4 md:flex-row md:items-end" do |form| %>
+        <div class="flex-1">
+          <label for="db_version" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Data source
+          </label>
+          <select name="db_version" id="db_version"
+                  class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  data-controller="nav-item"
+                  data-action="change->nav-item#navigate">
+            <option value="" <%= @selected_source == :local ? "selected" : "" %>>Local database</option>
+            <% @remote_versions.each do |version| %>
+              <option value="<%= version %>" <%= @selected_source == version ? "selected" : "" %>>
+                <%= version %>
+              </option>
+            <% end %>
+          </select>
+        </div>
+        <div>
+          <%= form.submit "Load", class: "inline-flex items-center justify-center rounded-lg border border-transparent bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 dark:bg-gray-100 dark:text-black dark:hover:bg-gray-200" %>
+        </div>
+      <% end %>
+    </div>
+  <% elsif @remote_versions.present? %>
+    <div class="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-400/50 dark:bg-blue-950/40 dark:text-blue-100">
+      Admins can switch to remote ASAP databases. Contact an administrator if you need access.
+    </div>
+  <% end %>
+
+  <div class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div class="border-b border-gray-100 px-6 py-4 dark:border-gray-800">
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">
+        Source
+      </p>
+      <p class="text-lg font-semibold text-gray-900 dark:text-white">
+        <%= @source_label %>
+      </p>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        <%= pluralize(@organisms.size, "organism") %>
+      </p>
+    </div>
+
+    <% if @error.present? %>
+      <div class="px-6 py-4">
+        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-400/50 dark:bg-red-950/30 dark:text-red-100">
+          Unable to load organisms: <%= @error %>
+        </div>
+      </div>
+    <% elsif @organisms.blank? %>
+      <div class="px-6 py-4 text-gray-500 dark:text-gray-300">
+        No organisms found for this source.
+      </div>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+          <thead>
+            <tr class="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:bg-gray-950 dark:text-gray-400">
+              <th scope="col" class="px-6 py-3">ID</th>
+              <th scope="col" class="px-6 py-3">Name</th>
+              <th scope="col" class="px-6 py-3">Short name</th>
+              <th scope="col" class="px-6 py-3">Created</th>
+              <th scope="col" class="px-6 py-3">Updated</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 bg-white text-sm text-gray-900 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-100">
+            <% @organisms.each do |organism| %>
+              <tr>
+                <td class="whitespace-nowrap px-6 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
+                  <%= record_value(organism, :id) %>
+                </td>
+                <td class="px-6 py-3 font-medium text-gray-900 dark:text-white">
+                  <%= record_value(organism, :name) %>
+                </td>
+                <td class="px-6 py-3 text-gray-600 dark:text-gray-300">
+                  <%= record_value(organism, :short_name).presence || "—" %>
+                </td>
+                <td class="whitespace-nowrap px-6 py-3 text-xs text-gray-500 dark:text-gray-400">
+                  <%= display_timestamp(organism, "created_at") %>
+                </td>
+                <td class="whitespace-nowrap px-6 py-3 text-xs text-gray-500 dark:text-gray-400">
+                  <%= display_timestamp(organism, "updated_at") %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  </div>
+</div>
+

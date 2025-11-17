@@ -44,39 +44,9 @@
           </button>
 
           <!-- Dropdown Menu -->
-          <div class="hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 
-                      dark:bg-gray-800 dark:border dark:border-gray-700
-                      z-[1000] top-full"
-               data-admin-nav-menu>
-            <!-- Versions -->
-            <a class="<%= tw_menu_item(:dropdown_item) %>"
-               href="<%= versions_path %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              Versions
-            </a>
-            <!-- Tools -->
-            <a class="<%= tw_menu_item(:dropdown_item) %>"
-               href="<%= tools_path %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              Tools
-            </a>
-            <!-- Tool Types -->
-            <a class="<%= tw_menu_item(:dropdown_item) %>"
-               href="<%= tool_types_path %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              Tool Types
-            </a>
-            <!-- Docker Images -->
-            <a class="<%= tw_menu_item(:dropdown_item) %>"
-               href="<%= docker_images_path %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              Docker Images
-            </a>
-          </div>
+          <%= render "shared/admin_menu",
+                    wrapper_classes: "hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
+                    data_attributes: { admin_nav_menu: true } %>
         </div>
         <!-- End Admin Dropdown -->
       <% end %>

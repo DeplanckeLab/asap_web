@@ -1,0 +1,48 @@
+<% content_for :title, "Cross References - ASAP" %>
+<div class="max-w-3xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      Cross-references
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Quick access to the external resources most frequently referenced in ASAP projects.
+      Select a catalog to jump to its detailed definition inside the admin reference list.
+    </p>
+  </div>
+
+  <% missing_types = [] %>
+  <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <ul class="space-y-3 text-lg text-indigo-700 dark:text-indigo-300">
+      <% @featured_identifier_names.each do |type_name| %>
+        <% identifier_type = @identifier_types_by_name[type_name] %>
+        <% if identifier_type.present? %>
+          <% label = identifier_type.pluralizable? ? identifier_type.name.pluralize : "#{identifier_type.name} items" %>
+          <li>
+            <%= link_to label,
+                        identifier_type_path(identifier_type),
+                        class: "hover:underline" %>
+          </li>
+        <% else %>
+          <% missing_types << type_name %>
+        <% end %>
+      <% end %>
+    </ul>
+
+    <% if missing_types.any? %>
+      <div class="mt-4 rounded-md bg-yellow-50 p-4 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
+        <p>
+          The following identifier types are not yet configured in this environment:
+          <%= missing_types.join(", ") %>.
+        </p>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="text-sm text-gray-600 dark:text-gray-300">
+    Need details for every identifier type?
+    <%= link_to "Open the full reference list",
+                cross_references_admin_home_index_path,
+                class: "font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200" %>.
+  </div>
+</div>
+

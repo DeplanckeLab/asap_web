@@ -1,0 +1,83 @@
+<% content_for :title, "Cross References - ASAP" %>
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-8">
+  <div class="mb-4">
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      Cross-references
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Identifier types supported by ASAP and the external resources they link to.
+    </p>
+    <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">
+      Each identifier type can be associated with experiments, datasets, or metadata entries.
+      Use the link pattern to generate outbound URLs for a given identifier.
+    </p>
+  </div>
+
+  <% if @identifier_types.any? %>
+    <div class="space-y-6">
+      <% @identifier_types.each do |identifier_type| %>
+        <% example_identifier = identifier_type.prefix.presence || "IDENTIFIER" %>
+        <% link_template = identifier_type.url_mask %>
+        <% example_link = link_template.present? ? link_template.gsub(/\#\{id\}/, example_identifier) : nil %>
+
+        <div id="<%= dom_id(identifier_type, :cross_reference) %>"
+             class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                <%= identifier_type.display_name %>
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Prefix:
+                <span class="font-mono text-gray-900 dark:text-gray-100">
+                  <%= identifier_type.prefix.presence || "—" %>
+                </span>
+              </p>
+            </div>
+            <div class="text-sm text-gray-600 dark:text-gray-300">
+              Pluralizable?
+              <span class="ml-2 font-semibold">
+                <%= identifier_type.pluralizable? ? "Yes" : "No" %>
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-4 space-y-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              External link pattern
+            </p>
+            <p class="font-mono text-sm text-gray-900 break-all dark:text-gray-100">
+              <%= link_template.presence || "No external link defined" %>
+            </p>
+            <% if example_link.present? %>
+              <%= link_to "Open example link",
+                          example_link,
+                          target: "_blank",
+                          rel: "noopener",
+                          class: "inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200" %>
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                Replace <code><%= example_identifier %></code> with the actual identifier value.
+              </p>
+            <% else %>
+              <p class="text-sm text-gray-600 dark:text-gray-300">
+                This identifier type is stored internally only; no external URL is available.
+              </p>
+            <% end %>
+            <div class="pt-2">
+              <%= link_to "View linked identifiers",
+                          identifier_type_path(identifier_type),
+                          class: "inline-flex items-center text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-white" %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center dark:border-gray-700 dark:bg-gray-900">
+      <p class="text-gray-600 dark:text-gray-300">
+        No identifier types are configured yet. Add records through the admin interface to populate this list.
+      </p>
+    </div>
+  <% end %>
+</div>
+

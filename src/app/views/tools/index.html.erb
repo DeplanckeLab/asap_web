@@ -1,6 +1,12 @@
-<div class="max-w-5xl mx-auto space-y-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold text-gray-900">Tools</h1>
+<% content_for :title, "Tools - ASAP" %>
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Tools</h1>
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Manage analysis tools available in ASAP.
+      </p>
+    </div>
     <% if admin? %>
       <%= link_to 'New Tool', new_tool_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
     <% end %>

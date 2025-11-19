@@ -4,6 +4,7 @@ class ExpEntry < ApplicationRecord
   has_many :projects, through: :exp_entries_projects
   has_many :exp_entries_sample_identifiers, dependent: :destroy
   has_many :sample_identifiers, through: :exp_entries_sample_identifiers
+  has_many :exp_entry_identifiers, dependent: :destroy
   
   # Scopes
   scope :by_identifier, ->(identifier) { where("identifier ILIKE ?", "%#{identifier}%") if identifier.present? }

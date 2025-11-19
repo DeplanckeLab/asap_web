@@ -3,6 +3,11 @@ class ExpEntriesController < ApplicationController
 
   # GET /exp_entries/1
   def show
+    @h_identifier_types = {}
+    IdentifierType.all.each do |it|
+      @h_identifier_types[it.id] = it
+    end
+    
     respond_to do |format|
       format.html
       format.json { render json: @exp_entry }

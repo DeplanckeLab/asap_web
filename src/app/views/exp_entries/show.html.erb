@@ -1,0 +1,94 @@
+<% content_for :title, "#{@exp_entry.display_identifier} - ASAP" %>
+<div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+  <div class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div class="border-b border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
+      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">
+        <%= link_to @exp_entry.identifier, 
+                    projects_path(q: @exp_entry.identifier), 
+                    class: "text-indigo-600 dark:text-indigo-300 hover:underline" %>
+        <span class="ml-2 text-gray-600 dark:text-gray-300">
+          <%= @exp_entry.title %>
+        </span>
+      </h1>
+    </div>
+
+    <div class="p-6 space-y-6">
+      <% if @exp_entry.exp_entry_identifiers.any? %>
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            Identifiers
+          </h2>
+          <div class="space-y-2">
+            <% @exp_entry.exp_entry_identifiers.each do |eeid| %>
+              <% identifier_type = @h_identifier_types[eeid.identifier_type_id] %>
+              <% if identifier_type %>
+                <div class="flex items-center gap-3 flex-wrap">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300 min-w-[120px]">
+                    <%= identifier_type.name %>:
+                  </span>
+                  <%= link_to eeid.identifier, 
+                              projects_path(q: eeid.identifier), 
+                              class: "inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600" %>
+                  <% if identifier_type.url_mask.present? %>
+                    <% external_url = identifier_type.url_mask.gsub(/\#\{id\}/, eeid.identifier) %>
+                    <%= link_to external_url, 
+                                target: "_blank", 
+                                rel: "noopener",
+                                class: "text-indigo-600 dark:text-indigo-300 hover:text-indigo-500",
+                                title: "Open external link" do %>
+                      <i class="fas fa-external-link-alt text-xs"></i>
+                    <% end %>
+                  <% end %>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <% if @exp_entry.description.present? %>
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            Description
+          </h2>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+            <p class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+              <%= @exp_entry.description %>
+            </p>
+          </div>
+        </div>
+      <% end %>
+
+      <% if @exp_entry.sample_identifiers.any? %>
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            Sample identifiers
+          </h2>
+          <div class="flex flex-wrap gap-2">
+            <% @exp_entry.sample_identifiers.each do |sample_identifier| %>
+              <% identifier_type = @h_identifier_types[sample_identifier.identifier_type_id] %>
+              <% if identifier_type %>
+                <div class="inline-flex items-center gap-1">
+                  <%= link_to sample_identifier.identifier, 
+                              projects_path(q: sample_identifier.identifier), 
+                              class: "inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600" %>
+                  <% if identifier_type.url_mask.present? %>
+                    <% external_url = identifier_type.url_mask.gsub(/\#\{id\}/, sample_identifier.identifier) %>
+                    <%= link_to external_url, 
+                                target: "_blank", 
+                                rel: "noopener",
+                                class: "text-indigo-600 dark:text-indigo-300 hover:text-indigo-500 ml-1",
+                                title: "Open external link" do %>
+                      <i class="fas fa-external-link-alt text-xs"></i>
+                    <% end %>
+                  <% end %>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>
+

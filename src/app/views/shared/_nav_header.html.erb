@@ -27,16 +27,38 @@
         <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
       </div>
 
+      <!-- Info Dropdown -->
+      <div class="relative inline-block text-left"
+           id="info-nav-dropdown"
+           data-nav-dropdown>
+        <button type="button"
+                class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
+                title="Open access resources"
+                aria-expanded="false"
+                data-nav-dropdown-toggle>
+          Info
+          <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
+
+        <%= render "shared/info_menu",
+                  wrapper_classes: "hidden absolute right-0 mt-2 min-w-56 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
+                  data_attributes: { nav_menu: true } %>
+      </div>
+      <!-- End Info Dropdown -->
+
       <% if admin? %>
         <!-- Admin Dropdown -->
         <div class="relative inline-block text-left"
-             id="admin-nav-dropdown">
+             id="admin-nav-dropdown"
+             data-nav-dropdown>
           <button type="button" 
                   id="admin-nav-button"
                   class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
                   title="Admin tools"
                   aria-expanded="false"
-                  data-admin-nav-toggle>
+                  data-nav-dropdown-toggle>
             Admin
             <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m6 9 6 6 6-6"/>
@@ -46,7 +68,7 @@
           <!-- Dropdown Menu -->
           <%= render "shared/admin_menu",
                     wrapper_classes: "hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
-                    data_attributes: { admin_nav_menu: true } %>
+                    data_attributes: { nav_menu: true } %>
         </div>
         <!-- End Admin Dropdown -->
       <% end %>
@@ -101,6 +123,25 @@
                 <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
                 Tutorials
               </a>
+
+              <div class="md:hidden mt-2 w-full rounded-lg border border-white/10 p-2 text-white/80">
+                <p class="px-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  Info
+                </p>
+                <div class="mt-1 flex flex-col">
+                  <% info_menu_links.each do |link| %>
+                    <a class="<%= tw_menu_item %>"
+                       href="<%= link[:path] %>"
+                       data-controller="nav-item"
+                       data-action="click->nav-item#navigate">
+                      <span><%= link[:label] %></span>
+                      <% if link[:description].present? %>
+                        <span class="block text-xs text-gray-500 dark:text-gray-400"><%= link[:description] %></span>
+                      <% end %>
+                    </a>
+                  <% end %>
+                </div>
+              </div>
 
 
               <% if user_signed_in? %>
@@ -201,20 +242,19 @@
 
 <script>
   (function () {
-    function setupAdminNavDropdown() {
-      const container = document.getElementById('admin-nav-dropdown')
+    function setupNavDropdown(container) {
       if (!container || container.dataset.dropdownInitialized === 'true') return
 
-      const toggleButton = container.querySelector('[data-admin-nav-toggle]')
-      const menu = container.querySelector('[data-admin-nav-menu]')
+      const toggleButton = container.querySelector('[data-nav-dropdown-toggle]')
+      const menu = container.querySelector('[data-nav-menu]')
       if (!toggleButton || !menu) return
 
       container.dataset.dropdownInitialized = 'true'
-      const openClass = 'hidden'
+      const hiddenClass = 'hidden'
 
       function closeMenu() {
-        if (!menu.classList.contains(openClass)) {
-          menu.classList.add(openClass)
+        if (!menu.classList.contains(hiddenClass)) {
+          menu.classList.add(hiddenClass)
           toggleButton.setAttribute('aria-expanded', 'false')
         }
       }
@@ -222,9 +262,9 @@
       function toggleMenu(event) {
         event.preventDefault()
         event.stopPropagation()
-        const isHidden = menu.classList.contains(openClass)
+        const isHidden = menu.classList.contains(hiddenClass)
         if (isHidden) {
-          menu.classList.remove(openClass)
+          menu.classList.remove(hiddenClass)
           toggleButton.setAttribute('aria-expanded', 'true')
         } else {
           closeMenu()
@@ -240,7 +280,11 @@
       })
     }
 
-    document.addEventListener('DOMContentLoaded', setupAdminNavDropdown)
-    document.addEventListener('turbo:load', setupAdminNavDropdown)
+    function setupNavDropdowns() {
+      document.querySelectorAll('[data-nav-dropdown]').forEach(setupNavDropdown)
+    }
+
+    document.addEventListener('DOMContentLoaded', setupNavDropdowns)
+    document.addEventListener('turbo:load', setupNavDropdowns)
   })()
 </script>

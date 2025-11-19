@@ -1,160 +1,133 @@
-<div class='card m-4'>
-  <div class='card-header'>  
-    <div class='float-left'>
-	<%= raw display_file_format  @h_formats["LOOM"] %>
+<% content_for :title, "File Formats - ASAP" %>
+<div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8">
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      File Formats
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Supported input formats for ASAP.
+    </p>
+  </div>
+  <div class="space-y-6">
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["LOOM"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">LOOM format</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        ASAP accepts as input
+        <a href="https://portal.hdfgroup.org/display/HDF5/Introduction+to+HDF5" class="text-indigo-600 dark:text-indigo-300 hover:underline">HDF5</a>
+        files following the
+        <a href="http://loompy.org/" class="text-indigo-600 dark:text-indigo-300 hover:underline">LOOM format</a>,
+        developed by the <a href="http://linnarssonlab.org/" class="text-indigo-600 dark:text-indigo-300 hover:underline">Linnarsson lab</a>.
+        Note that ASAP complies with the
+        <a href="http://linnarssonlab.org/loompy/format/index.html" class="text-indigo-600 dark:text-indigo-300 hover:underline">3.0.0 specifications</a>.
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>LOOM format</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP accepts as input <a href='https://portal.hdfgroup.org/display/HDF5/Introduction+to+HDF5'>HDF5</a> files following the <a href='http://loompy.org/'>LOOM format</a>, developped by <a href='http://linnarssonlab.org/'>Linnarson lab</a>. Note that ASAP complies with <a href='http://linnarssonlab.org/loompy/format/index.html'>3.0.0 specifications</a>. 
-  </div>
-</div>
 
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-	<%= raw display_file_format  @h_formats["H5_10x"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["H5_10x"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">10x H5 format</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        ASAP accepts as input
+        <a href="https://portal.hdfgroup.org/display/HDF5/Introduction+to+HDF5" class="text-indigo-600 dark:text-indigo-300 hover:underline">HDF5</a>
+        files (.h5) from
+        <a href="https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger" class="text-indigo-600 dark:text-indigo-300 hover:underline">CellRanger</a>
+        developed by <a href="https://www.10xgenomics.com/" class="text-indigo-600 dark:text-indigo-300 hover:underline">10x Genomics</a>.
+        See the <a href="https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/advanced/h5_matrices" class="text-indigo-600 dark:text-indigo-300 hover:underline">official specifications</a>.
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>10x H5 format</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP accepts as input <a href='https://portal.hdfgroup.org/display/HDF5/Introduction+to+HDF5'>HDF5</a> files (.h5) from <a href='https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger'>CellRanger</a> developped by <a href='https://www.10xgenomics.com/'>10x Genomics</a> [<a href='https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/advanced/h5_matrices'>specifications</a>].
-  </div>
-</div>
 
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-        <%= raw display_file_format  @h_formats["RAW_TEXT"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["RAW_TEXT"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Plain-text format (compressed or not)</h3>
+      </div>
+      <div class="mt-4 space-y-3 text-gray-600 dark:text-gray-300">
+        <p>
+          ASAP accepts as input simple plain-text matrices, with column delimiters such as tabulation, comma, semi-colon, or space.
+          First or last column as gene names is optional; gene names are mapped to the Ensembl database.
+          First line as cell/sample names is optional too. The file can be compressed.
+        </p>
+        <div class="mt-4">
+          <%= image_tag "format_asap_small.png", class: "rounded-lg border border-gray-200 dark:border-gray-800" %>
+        </div>
+      </div>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>Plain-text format (compressed or not)</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP accepts as input simple Plain-text matrices, with as column delimiter tabulation, comma, semi-colon or space.
-    First or last column as gene names is optional. Gene names are then mapped to the Ensembl database.
-    First line as cell/sample names is optional too.
-    The file can be compressed.
-    <%= image_tag 'format_asap_small.png', { :class=>'mt-3'} %> 
-  </div>
-</div>
 
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-	<%= raw display_file_format  @h_formats["ARCHIVE"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["ARCHIVE"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Archive</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        ASAP supports archive files that contain several datasets in a plain-text format. You can select which dataset to take as input in the interface.
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>Archive</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP supports archive files that contain several datasets in a plain-text format. You can select which dataset to take as input in the interface.
-  </div>
-</div>
 
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-        <%= raw display_file_format  @h_formats["ARCHIVE_COMPRESSED"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["ARCHIVE_COMPRESSED"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Archive compressed</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        ASAP supports compressed archive files that contain several datasets in a plain-text format. You can select which dataset to take as input in the interface.
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>Archive compressed</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP supports compressed archive files that contain several datasets in a plain-text format. You can select which dataset to take as input in the interface.
-  </div>
-</div>
 
-
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-        <%= raw display_file_format  @h_formats["COMPRESSED"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["COMPRESSED"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Compressed</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        ASAP supports compressed files (zip or gzip).
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>Compressed</h3></div>
-  </div>
-  <div class='card-body'>
-    ASAP supports compressed files (zip or gzip).
-  </div>
-</div>
 
-
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-	<%= raw display_file_format(@h_formats["MEX"]) %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["MEX"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">MEX/MTX</h3>
+      </div>
+      <div class="mt-4 text-gray-600 dark:text-gray-300">
+        <p>
+          ASAP requires all three files to be archived/compressed in a single file (.tar, .tar.gz, .gz, .zip, .bz2, .tar.bz2). The files need to be named:
+        </p>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li>barcodes.tsv</li>
+          <li>genes.tsv or features.tsv</li>
+          <li>The main data matrix with extension .mtx. If several .mtx files are present, a file named <code>matrix.mtx</code> is required and only this one will be used.</li>
+        </ul>
+      </div>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>MEX/MTX</h3></div>
-  </div>
-  <div class='card-body'>
-<!--ASAP requires all three files to be located in a tar archive that can be compressed (format .gz or .bz2), or in a zipped directory (.zip format), or directly zipped together. -->
-ASAP requires all three files to be archived/compressed in a single file (.tar, .tar.gz, .gz, .zip, .bz2, .tar.bz2). The files need to be named:
-    <ul>
-    <li> barcodes.tsv</li>
-    <li>genes.tsv or features.tsv</li>
-    <li>the main data matrix in a file with extension .mtx. If several mtx files are present, a file named matrix.mtx is required and only this one will be used</li>
-    </ul>
-  </div>
-</div>
 
-<div class='card m-4'>
-  <div class='card-header'>
-    <div class='float-left'>
-        <%= raw display_file_format  @h_formats["RDS"] %>
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["RDS"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">RDS</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        From version 8, ASAP supports Seurat objects (.rds).
+      </p>
     </div>
-    <div class='float-left ml-3 mt-2'><h3>RDS</h3></div>
-  </div>
-  <div class='card-body'>
-    From version 8, ASAP supports Seurat objects (rds).
   </div>
 </div>
-
-
-<!--<ul id='list_formats'>
-<li>
-<div class='panel panel-default panel-formats'>
-<div class='panel-heading'>Input file format</div>
-<div class='panel_container'>
-<table><tr><td>
-<%= image_tag 'format_asap_small.png', { } %>
-</td><td>
-Example file:
-<pre>
-<%= `cut -f 1-10 /data/asap/input_without_quotes.tab | head` %>
-</pre>
-
-</td></tr></table>
-
-</div>
-</div>
-</li>
-
-<li>
-<a id="batch_file"></a>
-<div class='panel panel-default panel-formats'>
-<div class='panel-heading'>Batch file format</div>
-<div class='panel_container'>
-<table><tr><td>
-<%= image_tag 'format_batch_small.png', { } %>
-</td><td>
-Example file:
-<pre>
-<%= `cut -f 1-10 /data/asap/batch.txt | head` %>
-</pre>
-
-</td></tr></table>
-</div>
-</div>
-</li>
-
-<li>
-<a id="geneset_file"></a>
-<div class='panel panel-default panel-formats'>
-<div class='panel-heading'>Geneset file</div>
-<div class='panel_container'>
-<table><tr><td>
-<a href='http://software.broadinstitute.org/cancer/software/gsea/wiki/index.php/Data_formats#GMT:_Gene_Matrix_Transposed_file_format_.28.2A.gmt.29'>GMT format</a>
-</td></tr></table>
-</div>
-</div>
-</li>
-
-</ul>
--->

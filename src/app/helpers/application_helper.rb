@@ -84,12 +84,73 @@ module ApplicationHelper
 
   def admin_menu_links
     [
-      { label: "Versions", path: versions_path, icon: "fas fa-code-branch" },
+      {
+        label: "Cross-references",
+        description: "Manage identifier types & external links",
+        path: cross_references_admin_home_index_path,
+        icon: "fas fa-link"
+      },
       { label: "Tools", path: tools_path, icon: "fas fa-wrench" },
       { label: "Tool Types", path: tool_types_path, icon: "fas fa-tags" },
       { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
       { label: "Organisms", path: organisms_path, icon: "fas fa-dna" }
     ]
+  end
+
+  def info_menu_links
+    [
+      {
+        label: "Versions",
+        description: "Release notes & changelog",
+        path: versions_path,
+        icon: "fas fa-code-branch"
+      },
+      {
+        label: "Cell ontologies",
+        description: "Ontology catalogs mirrored from legacy ASAP",
+        path: cell_ontologies_path,
+        icon: "fas fa-network-wired"
+      },
+      {
+        label: "Ontology term types",
+        description: "Definitions and lineage rules used by ASAP",
+        path: ontology_term_types_path,
+        icon: "fas fa-diagram-project"
+      },
+      {
+        label: "Cross-references",
+        description: "Identifier types and external database links",
+        path: cross_references_home_index_path,
+        icon: "fas fa-link"
+      },
+      {
+        label: "Tutorials",
+        description: "Step-by-step guides for new users",
+        path: tutorial_home_index_path,
+        icon: "fas fa-chalkboard-teacher"
+      },
+      {
+        label: "File formats",
+        description: "Supported upload and export formats",
+        path: file_format_home_index_path,
+        icon: "fas fa-file-alt"
+      },
+      {
+        label: "FAQ",
+        description: "Frequently asked questions about ASAP",
+        path: faq_home_index_path,
+        icon: "fas fa-question-circle"
+      }
+    ]
+  end
+
+  def display_file_format(f)
+    return "" unless f
+
+    color = f.color.presence || 'grey'
+    label = f.label.presence || 'no label'
+    
+    raw "<i class='far fa-file fa-3x'><div style='position:relative;top:-26px;left:6px;width:38px;font-size:10px;font-weight:bold;text-align:center;font-family:Arial, Helvetica, sans-serif;background-color:#{color};color:white;padding:3px;border:2px solid white'>#{label}</div></i>"
   end
 end
 

@@ -1,4 +1,14 @@
-<ul id='tutorial_slide' class='nobullets my-8'>
+<% content_for :title, "Tutorials - ASAP" %>
+<div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      Tutorials
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Step-by-step guides to help you get started with ASAP.
+    </p>
+  </div>
+  <ul id='tutorial_slide' class='nobullets my-8'>
 <% @h_tutos.each_key do |tuto| %> 
   <li id='tuto-<%= tuto %>' class='alert alert-info mb-3 mx-8'>
     <%= link_to @h_tutos[tuto], tutorial_home_index_path(:t => tuto) %>
@@ -8,5 +18,6 @@
     <% end %>
   </li>
 <% end %>
-</ul>
+  </ul>
+</div>
 

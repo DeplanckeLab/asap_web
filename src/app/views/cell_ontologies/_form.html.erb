@@ -1,0 +1,56 @@
+<%= form_with model: cell_ontology, class: "space-y-6" do |form| %>
+  <% if cell_ontology.errors.any? %>
+    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-400/50 dark:bg-red-950/30 dark:text-red-100">
+      <p class="font-semibold"><%= pluralize(cell_ontology.errors.count, "error") %> prevented saving:</p>
+      <ul class="mt-2 list-disc space-y-1 pl-5">
+        <% cell_ontology.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <div>
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.text_field :name, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+    <div>
+      <%= form.label :tag, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.text_field :tag, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+  </div>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <div>
+      <%= form.label :format, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.text_field :format, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+    <div>
+      <%= form.label :latest_version, "Version", class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.text_field :latest_version, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+  </div>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <div>
+      <%= form.label :url, "Website URL", class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.url_field :url, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+    <div>
+      <%= form.label :file_url, "File URL", class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <%= form.url_field :file_url, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :tax_ids, "Applicable tax IDs (comma separated)", class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+    <%= form.text_field :tax_ids, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" %>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <%= form.submit class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 dark:bg-gray-100 dark:text-black dark:hover:bg-gray-200" %>
+    <%= link_to "Cancel", cell_ontologies_path, class: "text-sm text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100" %>
+  </div>
+<% end %>
+

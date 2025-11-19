@@ -34,6 +34,8 @@ Rails.application.routes.draw do
   resources :docker_images
   resources :tools
   resources :tool_types
+  resources :ontology_term_types
+  resources :cell_ontologies
   
   resources :versions do
     collection do
@@ -49,8 +51,13 @@ Rails.application.routes.draw do
       get :home
       get :tutorial
       get :file_format
+      get :cross_references
+      get :cross_references_admin
+      get :faq
     end
   end
+
+  resources :identifier_types, only: :show
 
   resources :organisms, only: :index
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

@@ -11,6 +11,22 @@ class HomeController < ApplicationController
     # than manually mapping and creating a hash
   end
 
+  def cross_references
+    @featured_identifier_names = [
+      "GEO Series",
+      "ArrayExpress Experiment",
+      "BioProject",
+      "SRA Study"
+    ]
+    @identifier_types_by_name = IdentifierType
+                                  .where(name: @featured_identifier_names)
+                                  .index_by(&:name)
+  end
+
+  def cross_references_admin
+    @identifier_types = IdentifierType.order(Arel.sql("LOWER(name) ASC"))
+  end
+
   def tutorial
     
     @h_tutos = {
@@ -35,6 +51,8 @@ class HomeController < ApplicationController
       render "tutorial_list"
     end
 
-  end 
-  
+  end
+
+  def faq
+  end
 end

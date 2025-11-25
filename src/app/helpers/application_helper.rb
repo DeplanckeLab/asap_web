@@ -103,7 +103,7 @@ module ApplicationHelper
   def info_menu_links
     [
       {
-        label: "Versions",
+        label: "Releases",
         description: "Release notes & changelog",
         path: versions_path,
         icon: "fas fa-code-branch"

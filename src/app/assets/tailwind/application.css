@@ -81,6 +81,12 @@
     .menu-item-default {
       @apply text-white bg-gray-800 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;
     }
+
+    @screen md {
+      .menu-item-default {
+        @apply bg-transparent text-white hover:bg-white/10 hover:text-white focus:bg-white/10 focus:text-white;
+      }
+    }
   
     .menu-item-dropdown {
       @apply gap-x-3.5 py-2 px-3 text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 dark:text-gray-200 dark:hover:bg-neutral-700 dark:hover:text-white dark:focus:bg-neutral-700;

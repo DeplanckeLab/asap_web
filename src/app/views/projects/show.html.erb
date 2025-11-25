@@ -21,9 +21,12 @@
         <div class="flex items-center space-x-6">
           <!-- ASAP Logo -->
           <div class="flex-shrink-0">
-            <%= image_tag "ASAP_sansTagline_White.svg", 
-                class: 'h-8 w-32 object-contain', 
-                alt: 'ASAP Logo' %>
+            <%= link_to projects_path,
+                  class: "inline-block rounded focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" do %>
+              <%= image_tag "ASAP_sansTagline_White.svg", 
+                  class: 'h-8 w-32 object-contain', 
+                  alt: 'ASAP Logo' %>
+            <% end %>
           </div>
           
           <!-- Project Info -->

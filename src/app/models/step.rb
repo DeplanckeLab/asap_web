@@ -1,6 +1,8 @@
 class Step < ApplicationRecord
   has_many :runs, dependent: :destroy
   has_many :annots, through: :runs
+  has_many :std_methods, dependent: :destroy
+  belongs_to :docker_image, optional: true
   
   # Scopes for different types of steps
   scope :dimension_reduction, -> { where(name: ['dim_reduction', 'pca', 'tsne', 'umap']) }

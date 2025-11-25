@@ -1,0 +1,130 @@
+<%= form_with(model: std_method, class: "space-y-6") do |form| %>
+  <% if std_method.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p class="font-semibold"><%= pluralize(std_method.errors.count, "error") %> prohibited this standard method from being saved:</p>
+      <ul class="mt-2 list-disc pl-5">
+        <% std_method.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm p-6 space-y-6">
+    <div>
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :name, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :label, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :label, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :short_label, "Short Label", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :short_label, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :step_id, "Step", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.collection_select :step_id, Step.order(:rank, :name), :id, :label, { prompt: "Select a step..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :description, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :description, rows: 6, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :program, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :program, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :link, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :link, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :speed_id, "Speed ID", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :speed_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :nber_cores, "Number of Cores", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :nber_cores, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :version_id, "Version ID", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :version_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :docker_image_id, "Docker Image ID", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :docker_image_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :command_json, "Command JSON", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :command_json, rows: 4, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :attrs_json, "Attributes (JSON)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :attrs_json, rows: 4, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :attr_layout_json, "Attribute Layout (JSON)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :attr_layout_json, rows: 4, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :obj_attrs_json, "Object Attributes (JSON)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :obj_attrs_json, rows: 4, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <%= form.check_box :obsolete, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.label :obsolete, "Obsolete", class: "text-sm font-medium text-gray-700" %>
+    </div>
+  </div>
+
+  <div class="flex items-center justify-end gap-2">
+    <%= link_to 'Cancel', std_methods_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+    <%= form.submit class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+  </div>
+<% end %>
+

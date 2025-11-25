@@ -1,0 +1,123 @@
+<% content_for :title, "#{@std_method.label || @std_method.name} - Standard Methods - ASAP" %>
+<div class="max-w-4xl mx-auto space-y-6">
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900"><%= @std_method.label || @std_method.name || "Standard Method ##{@std_method.id}" %></h1>
+      <% if @std_method.name.present? %>
+        <p class="text-sm text-gray-500 mt-1"><%= @std_method.name %></p>
+      <% end %>
+    </div>
+    <div class="flex items-center gap-2">
+      <%= link_to 'Back to list', std_methods_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% if admin? %>
+        <%= link_to 'Edit', edit_std_method_path(@std_method), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <dl class="divide-y divide-gray-100 text-sm text-gray-700">
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">ID</dt>
+        <dd class="w-3/4 text-gray-600"><%= @std_method.id %></dd>
+      </div>
+      <% if @std_method.step %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Step</dt>
+          <dd class="w-3/4 text-gray-600">
+            <%= link_to @std_method.step.label || @std_method.step.name, step_path(@std_method.step), class: 'text-gray-600 hover:text-gray-800' %>
+          </dd>
+        </div>
+      <% end %>
+      <% if @std_method.name.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Name</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.name %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.label.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Label</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.label %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.short_label.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Short Label</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.short_label %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.description.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Description</dt>
+          <dd class="text-gray-600 whitespace-pre-line"><%= raw @std_method.description %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.program.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Program</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.program %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.speed_id.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Speed ID</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.speed_id %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.link.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Link</dt>
+          <dd class="w-3/4 text-gray-600">
+            <%= link_to @std_method.link, @std_method.link, target: '_blank', rel: 'noopener', class: 'text-gray-600 hover:text-gray-800' %>
+          </dd>
+        </div>
+      <% end %>
+      <% if @std_method.nber_cores.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Number of Cores</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.nber_cores %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.version_id.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Version ID</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.version_id %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.docker_image_id.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Docker Image ID</dt>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.docker_image_id %></dd>
+        </div>
+      <% end %>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Obsolete</dt>
+        <dd class="w-3/4 text-gray-600">
+          <% if @std_method.obsolete == false %>
+            <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">No</span>
+          <% else %>
+            <span class="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Yes</span>
+          <% end %>
+        </dd>
+      </div>
+      <% if @std_method.command_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Command JSON</dt>
+          <dd class="text-gray-600 font-mono text-xs"><%= @std_method.command_json %></dd>
+        </div>
+      <% end %>
+      <% if @std_method.attrs_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Attributes (JSON)</dt>
+          <dd class="text-gray-600 font-mono text-xs"><%= @std_method.attrs_json %></dd>
+        </div>
+      <% end %>
+    </dl>
+  </div>
+</div>
+

@@ -1,0 +1,103 @@
+<% content_for :title, "#{@step.label || @step.name} - Steps - ASAP" %>
+<div class="max-w-4xl mx-auto space-y-6">
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900"><%= @step.label || @step.name || "Step ##{@step.id}" %></h1>
+      <% if @step.name.present? %>
+        <p class="text-sm text-gray-500 mt-1"><%= @step.name %></p>
+      <% end %>
+    </div>
+    <div class="flex items-center gap-2">
+      <%= link_to 'Back to list', steps_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% if admin? %>
+        <%= link_to 'Edit', edit_step_path(@step), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <dl class="divide-y divide-gray-100 text-sm text-gray-700">
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">ID</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.id %></dd>
+      </div>
+      <% if @step.rank.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Rank</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.rank %></dd>
+        </div>
+      <% end %>
+      <% if @step.obj_name.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Object Name</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.obj_name %></dd>
+        </div>
+      <% end %>
+      <% if @step.name.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Name</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.name %></dd>
+        </div>
+      <% end %>
+      <% if @step.label.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Label</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.label %></dd>
+        </div>
+      <% end %>
+      <% if @step.description.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Description</dt>
+          <dd class="text-gray-600 whitespace-pre-line"><%= raw @step.description %></dd>
+        </div>
+      <% end %>
+      <% if @step.group_name.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Group Name</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.group_name %></dd>
+        </div>
+      <% end %>
+      <% if @step.version_id.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Version ID</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.version_id %></dd>
+        </div>
+      <% end %>
+      <% if @step.docker_image_id.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Docker Image ID</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.docker_image_id %></dd>
+        </div>
+      <% end %>
+      <% if @step.tag.present? %>
+        <div class="px-4 py-3 flex items-start justify-between">
+          <dt class="font-medium text-gray-900">Tag</dt>
+          <dd class="w-3/4 text-gray-600"><%= @step.tag %></dd>
+        </div>
+      <% end %>
+      <% if @step.warnings.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Warnings</dt>
+          <dd class="text-gray-600 whitespace-pre-line"><%= @step.warnings %></dd>
+        </div>
+      <% end %>
+      <% if @step.attrs_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Optional Attributes</dt>
+          <dd class="text-gray-600 font-mono text-xs"><%= @step.attrs_json %></dd>
+        </div>
+      <% end %>
+      <% if @step.method_attrs_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Method Attributes</dt>
+          <dd class="text-gray-600 font-mono text-xs"><%= @step.method_attrs_json %></dd>
+        </div>
+      <% end %>
+    </dl>
+  </div>
+</div>
+

@@ -1,0 +1,101 @@
+<% content_for :title, "Standard Methods - ASAP" %>
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Standard Methods</h1>
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Manage standard methods available in ASAP.
+      </p>
+    </div>
+    <% if admin? %>
+      <%= link_to 'New Standard Method', new_std_method_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+    <% end %>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
+    <%= form_with url: std_methods_path, method: :get, local: true, class: "flex flex-col gap-4 sm:flex-row sm:items-end" do %>
+      <div class="w-full sm:w-72">
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="docker_image_id">Docker Image</label>
+        <%= select_tag :docker_image_id,
+                       options_for_select(
+                         @docker_images.map { |di| ["#{di.name}#{di.tag.present? ? " (#{di.tag})" : ""}", di.id] },
+                         @selected_docker_image_id
+                       ),
+                       class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+      <div class="flex gap-2">
+        <%= submit_tag "Filter", class: "inline-flex items-center px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+        <% if params[:docker_image_id].present? %>
+          <%= link_to "Clear", std_methods_path, class: "inline-flex items-center px-4 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50" %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">ID</th>
+          <th scope="col" class="px-3 py-2 text-left">Step</th>
+          <th scope="col" class="px-3 py-2 text-left">Name</th>
+          <th scope="col" class="px-3 py-2 text-left">Label</th>
+          <th scope="col" class="px-3 py-2 text-left">Program</th>
+          <th scope="col" class="px-3 py-2 text-left">Speed</th>
+          <th scope="col" class="px-3 py-2 text-left">Used</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-sm text-gray-700">
+        <% @std_methods.each do |std_method| %>
+          <tr>
+            <td class="px-3 py-2"><%= std_method.id %></td>
+            <td class="px-3 py-2">
+              <% if std_method.step %>
+                <%= link_to std_method.step.label || std_method.step.name, step_path(std_method.step), class: 'text-gray-600 hover:text-gray-800' %>
+              <% else %>
+                —
+              <% end %>
+            </td>
+            <td class="px-3 py-2">
+              <span class="font-medium text-gray-900"><%= std_method.name.presence || '—' %></span>
+            </td>
+            <td class="px-3 py-2 text-gray-700"><%= std_method.label.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= std_method.program.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= std_method.speed_id.presence || '—' %></td>
+            <td class="px-3 py-2">
+              <% if std_method.obsolete == false %>
+                <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">yes</span>
+              <% else %>
+                <span class="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">no</span>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 text-right">
+              <%= link_to 'Show', std_method_path(std_method), class: 'text-gray-600 hover:text-gray-800' %>
+              <% if admin? %>
+                <span class="mx-2 text-gray-300">|</span>
+                <%= link_to 'Edit', edit_std_method_path(std_method), class: 'text-gray-600 hover:text-gray-800' %>
+                <span class="mx-2 text-gray-300">|</span>
+                <%= link_to 'Destroy', std_method_path(std_method),
+                            method: :delete,
+                            data: { confirm: 'Are you sure?' },
+                            class: 'text-red-600 hover:text-red-700' %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @std_methods.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
+      No standard methods have been recorded yet.
+    </div>
+  <% end %>
+</div>
+

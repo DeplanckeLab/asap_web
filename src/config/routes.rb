@@ -36,6 +36,8 @@ Rails.application.routes.draw do
   resources :tool_types
   resources :ontology_term_types
   resources :cell_ontologies
+  resources :steps
+  resources :std_methods
   
   resources :versions do
     collection do

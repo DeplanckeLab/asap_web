@@ -93,7 +93,9 @@ module ApplicationHelper
       { label: "Tools", path: tools_path, icon: "fas fa-wrench" },
       { label: "Tool Types", path: tool_types_path, icon: "fas fa-tags" },
       { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
-      { label: "Organisms", path: organisms_path, icon: "fas fa-dna" }
+      { label: "Organisms", path: organisms_path, icon: "fas fa-dna" },
+      { label: "Steps", path: steps_path, icon: "fas fa-list-ol" },
+      { label: "Methods", path: std_methods_path, icon: "fas fa-cogs" }
     ]
   end
 

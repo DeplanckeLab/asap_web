@@ -1,8 +1,7 @@
 <%= form_with(model: project, class: "contents") do |form| %>
   <% if project.errors.any? %>
-    <div id="error_explanation" class="bg-red-50 text-red-500 px-3 py-2 font-medium rounded-md mt-3">
-      <h2><%= pluralize(project.errors.count, "error") %> prohibited this project from being saved:</h2>
-
+    <div id="error_explanation" class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md mb-6">
+      <h2 class="font-semibold mb-2"><%= pluralize(project.errors.count, "error") %> prohibited this project from being saved:</h2>
       <ul class="list-disc ml-6">
         <% project.errors.each do |error| %>
           <li><%= error.full_message %></li>
@@ -11,7 +10,133 @@
     </div>
   <% end %>
 
-  <div class="inline">
-    <%= form.submit class: "rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+    <!-- Project Information Section -->
+    <div class="mb-8">
+      <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Project Information</h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Project Name -->
+        <div class="md:col-span-2">
+          <%= form.label :name, "Project Name", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.text_field :name, 
+                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white #{'border-red-500' if project.errors[:name].any?}", 
+                placeholder: "Name of the project",
+                required: true %>
+          <% if project.errors[:name].any? %>
+            <p class="mt-1 text-sm text-red-600"><%= project.errors[:name].first %></p>
+          <% else %>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">This field is mandatory</p>
+          <% end %>
+        </div>
+
+        <!-- Project Type -->
+        <div>
+          <%= form.label :project_type_id, "Project Type", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.select :project_type_id,
+                options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
+                { prompt: "Select project type" },
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" } %>
+        </div>
+
+        <!-- ASAP Release -->
+        <div>
+          <%= form.label :version_id, "ASAP Release", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.select :version_id,
+                options_from_collection_for_select(@versions || [], :id, lambda { |v| v.respond_to?(:beta) && v.beta ? "#{v.id} (beta)" : v.id.to_s }, project.version_id),
+                { prompt: "Select ASAP release" },
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" } %>
+        </div>
+
+        <!-- Organism -->
+        <div class="md:col-span-2">
+          <%= form.label :organism_id, "Organism", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.select :organism_id,
+                options_from_collection_for_select(@organisms || [], :id, lambda { |o| o.display_name.presence || o.name }, project.organism_id || 1),
+                {},
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" } %>
+        </div>
+
+        <!-- Description -->
+        <div class="md:col-span-2">
+          <%= form.label :description, "Description", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.text_area :description,
+                rows: 3,
+                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
+                placeholder: "Optional description of the project" %>
+        </div>
+
+        <!-- Technology -->
+        <div>
+          <%= form.label :technology, "Technology", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.text_field :technology,
+                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
+                placeholder: "e.g., 10x, Smart-seq2" %>
+        </div>
+
+        <!-- Tissue -->
+        <div>
+          <%= form.label :tissue, "Tissue", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.text_field :tissue,
+                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
+                placeholder: "e.g., Brain, Liver" %>
+        </div>
+      </div>
+    </div>
+
+    <!-- File Upload Section -->
+    <div class="mb-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+      <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Upload Data File</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+        Upload count / normalized gene expression matrix. Supported formats: 10x (.h5 file), loom, text, zip, tar.gz, MEX/MTX formats.
+      </p>
+      
+      <div id="file-upload-container" data-controller="file-upload" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+        <div data-file-upload-target="dropzone" class="space-y-4">
+          <div id="upload-icon" class="mx-auto text-gray-400">
+            <svg class="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div>
+            <label for="file-input" class="cursor-pointer">
+              <span class="mt-2 block text-sm font-medium text-gray-900 dark:text-white">
+                Click to upload or drag and drop
+              </span>
+              <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Large files are uploaded in chunks and can be resumed if interrupted
+              </span>
+            </label>
+            <input id="file-input" data-file-upload-target="fileInput" type="file" class="hidden" accept=".txt,.loom,.h5,.h5ad,.zip,.tar,.gz,.tgz,.mtx,application/octet-stream" />
+          </div>
+        </div>
+        
+        <div data-file-upload-target="progress" class="hidden mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <span data-file-upload-target="filename" class="text-sm font-medium text-gray-900 dark:text-white"></span>
+            <span data-file-upload-target="percentage" class="text-sm text-gray-600 dark:text-gray-400">0%</span>
+          </div>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div data-file-upload-target="progressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+          <div data-file-upload-target="status" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
+        </div>
+      </div>
+      
+      <%= hidden_field_tag 'input_filename', '', id: 'input_filename', data: { file_upload_target: 'inputFilename' } %>
+      <%= hidden_field_tag 'nber_cols', 0 %>
+      <%= hidden_field_tag 'nber_rows', 0 %>
+    </div>
+
+    <!-- Hidden Fields -->
+    <%= form.hidden_field :key, value: project.key || '' %>
+    <%= form.hidden_field :step_id, value: project.step_id || 1 %>
+    <%= form.hidden_field :status_id, value: project.status_id || 1 %>
+
+    <!-- Actions -->
+    <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+      <%= link_to "Cancel", projects_path, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
+      <%= form.submit "Create project", id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed" %>
+    </div>
   </div>
 <% end %>

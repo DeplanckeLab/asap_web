@@ -17,6 +17,13 @@ Rails.application.routes.draw do
     end
   end
   
+  resources :fus do
+    collection do
+      post :upload_chunk
+      get :upload_status
+    end
+  end
+  
   resources :articles do
     member do
       get :summary

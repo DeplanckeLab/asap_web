@@ -202,6 +202,9 @@ class ProjectsController < ApplicationController
   # GET /projects/new
   def new
     @project = Project.new
+    @organisms = Organism.order(:name)
+    @project_types = ProjectType.order(:name)
+    @versions = available_versions
   end
 
   # GET /projects/1/edit
@@ -211,18 +214,80 @@ class ProjectsController < ApplicationController
   # POST /projects or /projects.json
   def create
     @project = Project.new(project_params)
+    @project.user_id = current_user.id if user_signed_in?
+    @project.step_id ||= 1
+    @project.status_id ||= 1
+    
+    # Generate unique project key if not provided
+    unless @project.key.present?
+      loop do
+        @project.key = SecureRandom.alphanumeric(10).downcase
+        break unless Project.exists?(key: @project.key)
+      end
+    end
+    
+    # Handle uploaded file if present
+    if session[:file_upload] && session[:file_upload][:complete]
+      @project.input_filename = session[:file_upload][:input_filename]
+    end
 
     respond_to do |format|
       if @project.save
+        # Move uploaded file from /data/asap2/fus/{fu_id}/ to project directory
+        if session[:file_upload] && session[:file_upload][:complete]
+          upload_info = session[:file_upload]
+          
+          if upload_info[:fu_id]
+            fu = Fu.find_by(id: upload_info[:fu_id], user_id: current_user.id)
+            
+            if fu && fu.file_path && File.exist?(fu.file_path)
+              # Create project directory
+              user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+              project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+              FileUtils.mkdir_p(project_dir)
+              
+              # Move file to project directory
+              final_path = project_dir + fu.upload_file_name
+              FileUtils.mv(fu.file_path.to_s, final_path)
+              
+              # Clean up the temporary upload directory
+              upload_dir = fu.file_path.dirname
+              begin
+                Dir.rmdir(upload_dir) if upload_dir.exist? && Dir.empty?(upload_dir)
+              rescue => e
+                Rails.logger.warn "Could not remove empty upload directory #{upload_dir}: #{e.message}"
+              end
+              
+              # Update Fu record with project info
+              fu.update!(
+                project_id: @project.id,
+                project_key: @project.key,
+                status: 'completed'
+              )
+              
+              Rails.logger.info "Moved uploaded file from #{fu.file_path} to #{final_path}"
+            else
+              Rails.logger.error "Uploaded file not found at #{fu&.file_path}"
+            end
+          end
+        end
+        
+        # Clean up session
+        session.delete(:file_upload)
+        
         format.html { redirect_to @project, notice: "Project was successfully created." }
         format.json { render :show, status: :created, location: @project }
       else
+        @organisms = Organism.order(:name)
+        @project_types = ProjectType.order(:name)
+        @versions = available_versions
         format.html { render :new, status: :unprocessable_entity }
         format.json { render json: @project.errors, status: :unprocessable_entity }
       end
     end
   end
 
+  # POST /projects/upload_file_chunk
   # PATCH/PUT /projects/1 or /projects/1.json
   def update
     respond_to do |format|
@@ -789,6 +854,17 @@ class ProjectsController < ApplicationController
   end
 
   private
+
+    def available_versions
+      # Show all versions (activated or not, including beta) if admin, otherwise only activated versions
+      # Matching original logic: admins see all versions, regular users see only activated
+      if admin?
+        Version.where("id > 3").order(id: :desc)
+      else
+        Version.where(activated: true).where("id > 3").order(id: :desc)
+      end
+    end
+
     def build_best_cla_category_map(categorical_metadata)
       @best_clas_by_metadata_category = {}
       return if categorical_metadata.blank?
@@ -1018,7 +1094,10 @@ class ProjectsController < ApplicationController
 
     # Only allow a list of trusted parameters through.
     def project_params
-      params.fetch(:project, {})
+      params.fetch(:project, {}).permit(
+        :name, :key, :description, :organism_id, :project_type_id, 
+        :version_id, :step_id, :status_id, :technology, :tissue, :extra_info, :input_filename
+      )
     end
     
     # Compress coordinate data to binary format for maximum efficiency

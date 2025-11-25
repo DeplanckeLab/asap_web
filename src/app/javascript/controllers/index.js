@@ -31,5 +31,9 @@ import NavDropdownController from "controllers/nav_dropdown_controller"
 application.register("nav-dropdown", NavDropdownController)
 console.log('Nav dropdown controller registered')
 
+import FileUploadController from "controllers/file_upload_controller"
+application.register("file-upload", FileUploadController)
+console.log('File upload controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier)) 

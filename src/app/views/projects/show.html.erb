@@ -159,34 +159,39 @@
             <i class="fas fa-cog text-lg"></i>
           <% end %>
           
-          <% if admin? %>
-            <div class="relative ml-4" id="admin-tools-dropdown">
-              <button id="admin-tools-button"
-                      class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
-                      title="Admin tools"
-                      data-admin-tools-toggle>
+          <!-- Info Dropdown -->
+          <div class="relative ml-4"
+               id="info-nav-dropdown"
+               data-controller="nav-dropdown">
+            <button type="button"
+                    class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
+                    title="Open access resources"
+                    data-nav-dropdown-toggle>
+              <i class="fas fa-info-circle text-lg"></i>
+              <span class="hidden sm:inline text-sm">Info</span>
+              <i class="fas fa-chevron-down text-xs"></i>
+            </button>
+            <%= render "shared/info_menu",
+                        wrapper_classes: "hidden absolute right-0 mt-2 min-w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
+                        data_attributes: { nav_menu: true } %>
+          </div>
+          
+        <% if admin? %>
+          <div class="relative ml-4"
+               id="admin-tools-dropdown"
+               data-controller="nav-dropdown">
+            <button id="admin-tools-button"
+                    class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
+                    title="Admin tools"
+                    data-nav-dropdown-toggle>
                 <i class="fas fa-tools text-lg"></i>
                 <span class="hidden sm:inline text-sm">Admin</span>
                 <i class="fas fa-chevron-down text-xs"></i>
               </button>
-              <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50"
-                   data-admin-tools-menu>
-                <%= render "shared/admin_menu" %>
-                <!--  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-sliders-h text-xs text-gray-500"></i>
-                    <span>Project settings</span>
-                  <% end %>
-                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-user-shield text-xs text-gray-500"></i>
-                    <span>Manage permissions</span>
-                  <% end %>
-                  <%= link_to '#', class: 'flex items-center gap-2 px-3 py-2 hover:bg-gray-100' do %>
-                    <i class="fas fa-download text-xs text-gray-500"></i>
-                    <span>Download logs</span>
-                  <% end %>-->
-                </div>
-              </div>
-            </div>
+            <%= render "shared/admin_menu",
+                        wrapper_classes: "hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
+                        data_attributes: { nav_menu: true } %>
+          </div>
           <% end %>
           
           <!-- Back to Projects -->
@@ -218,67 +223,5 @@
   </div>
   
   <%= javascript_include_tag "application", "data-turbo-track": "reload", defer: true %>
-  <script>
-    (function() {
-      function setupAdminToolsDropdown() {
-        const container = document.getElementById('admin-tools-dropdown')
-        if (!container) return
-
-        const toggleButton = container.querySelector('[data-admin-tools-toggle]')
-        const menu = container.querySelector('[data-admin-tools-menu]')
-        if (!toggleButton || !menu) return
-
-        // Remove previous listeners if they exist
-        if (container._adminToggleHandler) {
-          toggleButton.removeEventListener('click', container._adminToggleHandler)
-        }
-        if (container._adminOutsideHandler) {
-          document.removeEventListener('click', container._adminOutsideHandler)
-        }
-
-        const openClass = 'hidden'
-
-        function closeMenu() {
-          menu.classList.add(openClass)
-          toggleButton.setAttribute('aria-expanded', 'false')
-        }
-
-        const toggleHandler = function(event) {
-          event.preventDefault()
-          event.stopPropagation()
-          const isHidden = menu.classList.contains(openClass)
-          if (isHidden) {
-            menu.classList.remove(openClass)
-            toggleButton.setAttribute('aria-expanded', 'true')
-          } else {
-            closeMenu()
-          }
-        }
-
-        const outsideHandler = function(event) {
-          if (!container.contains(event.target)) {
-            closeMenu()
-          }
-        }
-
-        toggleButton.addEventListener('click', toggleHandler)
-        document.addEventListener('click', outsideHandler)
-
-        container._adminToggleHandler = toggleHandler
-        container._adminOutsideHandler = outsideHandler
-      }
-
-      function init() {
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', setupAdminToolsDropdown, { once: true })
-        } else {
-          setupAdminToolsDropdown()
-        }
-      }
-
-      init()
-      document.addEventListener('turbo:load', setupAdminToolsDropdown)
-    })()
-  </script>
 </body>
 </html>

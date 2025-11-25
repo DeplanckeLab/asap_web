@@ -8,6 +8,7 @@ docker-compose.test.yml
 .env.dev
 data
 postgres-data
+postgres-data_old
 startdb
 *.sql
 *.sql.gz

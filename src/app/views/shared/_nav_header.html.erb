@@ -30,6 +30,7 @@
       <!-- Info Dropdown -->
       <div class="relative inline-block text-left"
            id="info-nav-dropdown"
+           data-controller="nav-dropdown"
            data-nav-dropdown>
         <button type="button"
                 class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
@@ -52,6 +53,7 @@
         <!-- Admin Dropdown -->
         <div class="relative inline-block text-left"
              id="admin-nav-dropdown"
+             data-controller="nav-dropdown"
              data-nav-dropdown>
           <button type="button" 
                   id="admin-nav-button"
@@ -239,52 +241,3 @@
   </nav>
 </header>
 <!-- ========== END HEADER ========== -->
-
-<script>
-  (function () {
-    function setupNavDropdown(container) {
-      if (!container || container.dataset.dropdownInitialized === 'true') return
-
-      const toggleButton = container.querySelector('[data-nav-dropdown-toggle]')
-      const menu = container.querySelector('[data-nav-menu]')
-      if (!toggleButton || !menu) return
-
-      container.dataset.dropdownInitialized = 'true'
-      const hiddenClass = 'hidden'
-
-      function closeMenu() {
-        if (!menu.classList.contains(hiddenClass)) {
-          menu.classList.add(hiddenClass)
-          toggleButton.setAttribute('aria-expanded', 'false')
-        }
-      }
-
-      function toggleMenu(event) {
-        event.preventDefault()
-        event.stopPropagation()
-        const isHidden = menu.classList.contains(hiddenClass)
-        if (isHidden) {
-          menu.classList.remove(hiddenClass)
-          toggleButton.setAttribute('aria-expanded', 'true')
-        } else {
-          closeMenu()
-        }
-      }
-
-      toggleButton.addEventListener('click', toggleMenu)
-
-      document.addEventListener('click', (event) => {
-        if (!container.contains(event.target)) {
-          closeMenu()
-        }
-      })
-    }
-
-    function setupNavDropdowns() {
-      document.querySelectorAll('[data-nav-dropdown]').forEach(setupNavDropdown)
-    }
-
-    document.addEventListener('DOMContentLoaded', setupNavDropdowns)
-    document.addEventListener('turbo:load', setupNavDropdowns)
-  })()
-</script>

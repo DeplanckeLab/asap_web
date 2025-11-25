@@ -27,5 +27,9 @@ import RangeSliderController from "controllers/range_slider_controller"
 application.register("range-slider", RangeSliderController)
 console.log('Range slider controller registered')
 
+import NavDropdownController from "controllers/nav_dropdown_controller"
+application.register("nav-dropdown", NavDropdownController)
+console.log('Nav dropdown controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier)) 

@@ -9,10 +9,13 @@ class Project < ApplicationRecord
   belongs_to :step, optional: true
   belongs_to :project_type, optional: true
   belongs_to :project_cell_set, optional: true
+  belongs_to :version, optional: true
   belongs_to :archive_status, optional: true
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
   has_many :annots, dependent: :destroy
+  has_many :reqs, dependent: :destroy
   has_many :runs, dependent: :destroy
+  has_many :project_steps, dependent: :destroy
   has_many :shares, dependent: :destroy
   has_many :projects_provider_projects, dependent: :destroy
   has_many :provider_projects, through: :projects_provider_projects
@@ -191,6 +194,10 @@ class Project < ApplicationRecord
   # Instance methods
   def display_name
     name.presence || key.presence || "Project #{id}"
+  end
+
+  def broadcast(step_id)
+    ProjectBroadcastJob.perform_later(id, step_id)
   end
   
   def is_public?

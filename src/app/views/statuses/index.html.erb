@@ -1,0 +1,60 @@
+<% content_for :title, "Statuses - ASAP" %>
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Statuses</h1>
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Manage project statuses available in ASAP.
+      </p>
+    </div>
+    <%= link_to 'New Status', new_status_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">ID</th>
+          <th scope="col" class="px-3 py-2 text-left">Rank</th>
+          <th scope="col" class="px-3 py-2 text-left">Name</th>
+          <th scope="col" class="px-3 py-2 text-left">Label</th>
+          <th scope="col" class="px-3 py-2 text-left">Color</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-sm text-gray-700">
+        <% @statuses.each do |status| %>
+          <tr>
+            <td class="px-3 py-2"><%= status.id %></td>
+            <td class="px-3 py-2"><%= status.rank.presence || '—' %></td>
+            <td class="px-3 py-2">
+              <span class="font-medium text-gray-900"><%= status.name.presence || '—' %></span>
+            </td>
+            <td class="px-3 py-2 text-gray-700"><%= status.label.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= status.color.presence || '—' %></td>
+            <td class="px-3 py-2 text-right">
+              <%= link_to 'Show', status_path(status), class: 'text-gray-600 hover:text-gray-800' %>
+              <span class="mx-2 text-gray-300">|</span>
+              <%= link_to 'Edit', edit_status_path(status), class: 'text-gray-600 hover:text-gray-800' %>
+              <span class="mx-2 text-gray-300">|</span>
+              <%= link_to 'Destroy', status_path(status),
+                          method: :delete,
+                          data: { confirm: 'Are you sure?' },
+                          class: 'text-red-600 hover:text-red-700' %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @statuses.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
+      No statuses have been recorded yet.
+    </div>
+  <% end %>
+</div>

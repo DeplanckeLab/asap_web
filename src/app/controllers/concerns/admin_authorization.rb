@@ -5,8 +5,12 @@ module AdminAuthorization
     # Return false if no authentication system is in place
     return false unless current_user
     
-    # Check if current user's email is in admin emails list
-    admin_emails = ENV['ADMIN_EMAILS']&.split(',') || []
+    admin_emails =
+      if defined?(APP_CONFIG) && APP_CONFIG[:admin_emails]
+        Array(APP_CONFIG[:admin_emails])
+      else
+        ENV['ADMIN_EMAILS']&.split(',') || []
+      end
     admin_emails.include?(current_user.email)
   end
 

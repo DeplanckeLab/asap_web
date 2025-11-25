@@ -95,7 +95,8 @@ module ApplicationHelper
       { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
       { label: "Organisms", path: organisms_path, icon: "fas fa-dna" },
       { label: "Steps", path: steps_path, icon: "fas fa-list-ol" },
-      { label: "Methods", path: std_methods_path, icon: "fas fa-cogs" }
+      { label: "Methods", path: std_methods_path, icon: "fas fa-cogs" },
+      { label: "Run statuses", path: statuses_path, icon: "fas fa-check-circle" }
     ]
   end
 
@@ -153,13 +154,5 @@ module ApplicationHelper
     label = f.label.presence || 'no label'
     
     raw "<i class='far fa-file fa-3x'><div style='position:relative;top:-26px;left:6px;width:38px;font-size:10px;font-weight:bold;text-align:center;font-family:Arial, Helvetica, sans-serif;background-color:#{color};color:white;padding:3px;border:2px solid white'>#{label}</div></i>"
-  end
-end
-
-# Basic utility class for JSON parsing
-class Basic
-  def self.safe_parse_json(json_string, default = {})
-    return default unless json_string.present?
-    JSON.parse(json_string) rescue default
   end
 end

@@ -3,6 +3,7 @@ class Annot < ApplicationRecord
   belongs_to :step, optional: true
   belongs_to :run, optional: true
   belongs_to :data_type, optional: true
+  belongs_to :output_attr, optional: true
   belongs_to :user, optional: true
   belongs_to :original_run, class_name: 'Run', foreign_key: 'ori_run_id', optional: true
   has_many :annot_cell_sets, dependent: :destroy

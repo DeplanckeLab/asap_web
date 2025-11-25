@@ -133,6 +133,14 @@ module ProjectAuthorization
     false
   end
 
+  def owner_or_admin_obj?(object, project)
+    return true if admin?
+    return false unless object && project
+
+    return true if project.sandbox? && session[:sandbox] == project.key
+    current_user && object.respond_to?(:user_id) && object.user_id == current_user.id
+  end
+
   # Check if project is read-only for current user
   def read_only?(project)
     return true unless project

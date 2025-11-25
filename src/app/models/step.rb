@@ -1,5 +1,6 @@
 class Step < ApplicationRecord
   has_many :runs, dependent: :destroy
+  has_many :reqs, dependent: :destroy
   has_many :annots, through: :runs
   has_many :std_methods, dependent: :destroy
   belongs_to :docker_image, optional: true

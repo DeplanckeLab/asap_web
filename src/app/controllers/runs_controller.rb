@@ -24,7 +24,7 @@ class RunsController < ApplicationController
     @data = []
     @h_run_attrs = (@run.attrs_json) ? JSON.parse(@run.attrs_json) : {}
 
-    @project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + @project.user_id.to_s + @project.key
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     filename =  @project_dir + "ge" + @run.id.to_s + "output.json"
     h_output = Basic.safe_parse_json(File.read(filename), {})
     @fields = h_output["headers"]
@@ -74,7 +74,7 @@ class RunsController < ApplicationController
     }
     @h_run_attrs = (@run.attrs_json) ? JSON.parse(@run.attrs_json) : {}
     @data = []
-    @project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + @project.user_id.to_s + @project.key
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     list_filtered_rows = []
     if params[:from]== 'ge_form'
       filename = @project_dir + "tmp" + "#{(current_user) ? current_user.id : 1}_#{@run.id}_filtered.json"
@@ -189,7 +189,7 @@ class RunsController < ApplicationController
 
   def self.destroy_run project, step, run
 
-    project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
     step_dir = project_dir + step.name
     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
     
@@ -220,7 +220,7 @@ class RunsController < ApplicationController
         File.open(tmp_file, 'w') do |f|
           f.write tmp_data.to_json
         end
-        cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar -T RemoveMetaData -loom #{project_dir + filepath} -metaJSON '#{tmp_file}' 2>&1 > tmp/remove_metadata_output_#{now}.json"
+        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -loom #{project_dir + filepath} -metaJSON '#{tmp_file}' 2>&1 > tmp/remove_metadata_output_#{now}.json"
         File.open(project_dir + "tmp" + "toto.txt", "w") do |f|
           f.write("CMD: " + cmd)
           `#{cmd}`
@@ -235,7 +235,7 @@ class RunsController < ApplicationController
     #    end
     #    (annots1 | annots2).each do |annot|
     #      if File.exist? (project_dir + annot.filepath)
-    #        cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + annot.filepath} -meta '#{annot.name}' 2>&1 > tmp/bla.txt"
+    #        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + annot.filepath} -meta '#{annot.name}' 2>&1 > tmp/bla.txt"
     #        logger.debug("CMD: " + cmd)
     #        `#{cmd}`
     #      end
@@ -247,7 +247,7 @@ class RunsController < ApplicationController
     #          t = output_key.split(":")
     #          if t.size == 2 
     #            if File.exist? (project_dir + t[0])
-    #              cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + t[0]} -meta #{t[1]} 2>&1 > tmp/bla.txt"
+    #              cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + t[0]} -meta #{t[1]} 2>&1 > tmp/bla.txt"
     #              logger.debug("CMD: " + cmd)
     #              `#{cmd}`
     #            end
@@ -400,7 +400,7 @@ class RunsController < ApplicationController
       @h_env = Basic.safe_parse_json(@version.env_json, {})
       @list_docker_image_names = @h_env['docker_images'].keys.map{|k| @h_env['docker_images'][k]["name"] + ":" + @h_env['docker_images'][k]["tag"]}
       @docker_images = DockerImage.where("full_name in (#{@list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all
-      @asap_docker_image = @docker_images.select{|e| e.name == APP_CONFIG[:asap_docker_name]}.first
+      @asap_docker_image = @docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
 
       @step = @run.step
       @std_method = @run.std_method

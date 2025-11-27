@@ -28,7 +28,7 @@
       console.log('🎨 Layout script executing...');
       try {
         console.log('🎨 Attempting to load colors from server...');
-        var colors = <%= category_colors.to_json %>;
+        var colors = <%= raw(category_colors.to_json) %>;
         console.log('🎨 Raw colors from server:', colors);
         console.log('🎨 Colors type:', typeof colors);
         console.log('🎨 Colors length:', colors ? colors.length : 'null/undefined');

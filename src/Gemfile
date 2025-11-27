@@ -33,7 +33,7 @@ gem "turbo-rails", "~> 2.0", ">= 2.0.11"
 #gem "tailwindcss-ruby", "~> 3.4", ">= 3.4.14"
 
 gem 'tailwindcss-rails' #, '~> 4.2'
-#gem 'tailwindcss-ruby', '~> 4.0', ">= 4.0.12"
+#gem 'tailwindcss-ruby', '~> 4.1.16'
 
 gem "bootsnap", "~> 1.18", require: false
 gem "thruster", "~> 0.1.8", require: false
@@ -62,6 +62,7 @@ gem "tzinfo-data" #, platforms: %i[ windows jruby ]
 gem "solid_cache"
 gem "solid_queue"
 gem "solid_cable"
+gem "redis", "~> 5.2"
 
 # Reduces boot times through caching; required in config/boot.rb
 #gem "bootsnap", require: false

@@ -4,6 +4,7 @@ pin "application", preload: false
 pin "bootstrap", to: "bootstrap.min.js", preload: false
 pin "@hotwired/turbo-rails", to: "turbo.min.js", preload: false
 pin "@hotwired/stimulus", to: "stimulus.js", preload: false
+pin "@rails/actioncable", to: "actioncable.esm.js"
 # pin "@hotwired/stimulus-loading", to: "stimulus-loading.js", preload: true
 pin "@rails/request.js", to: "https://ga.jspm.io/npm:@rails/request.js@0.0.12/src/index.js"
 pin "@fortawesome/fontawesome-free", to: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/js/all.min.js", preload: true
@@ -15,5 +16,6 @@ pin "regl", to: "https://cdn.skypack.dev/regl@2.1.0"
 
 pin_all_from "app/javascript/controllers", under: "controllers"
 pin_all_from "app/javascript/visualization", under: "visualization"
+pin_all_from "app/javascript/channels", under: "channels"
 
 

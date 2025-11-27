@@ -36,7 +36,15 @@ Rails.application.configure do
   # Ensure URLs are generated with HTTPS protocol when behind a proxy
   config.action_controller.default_url_options = { protocol: 'https' }
 
-#  config.action_cable.allowed_request_origins = [ "https://asap-test.epfl.ch" ]
+  config.action_cable.url = ENV.fetch("ACTION_CABLE_URL", "/websocket")
+  config.action_cable.allowed_request_origins = [
+    /http:\/\/localhost:\d+/,
+    /https:\/\/localhost:\d+/,
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'https://asap-test.epfl.ch'
+  ]
+  config.action_cable.disable_request_forgery_protection = true
   
   # Enable/disable Action Controller caching. By default Action Controller caching is disabled.
   # Run rails dev:cache to toggle Action Controller caching.

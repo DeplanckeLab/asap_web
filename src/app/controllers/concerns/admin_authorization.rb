@@ -1,17 +1,13 @@
+require 'env_helpers'
+
 module AdminAuthorization
   extend ActiveSupport::Concern
 
   def admin?
-    # Return false if no authentication system is in place
-    return false unless current_user
-    
-    admin_emails =
-      if defined?(APP_CONFIG) && APP_CONFIG[:admin_emails]
-        Array(APP_CONFIG[:admin_emails])
-      else
-        ENV['ADMIN_EMAILS']&.split(',') || []
-      end
-    admin_emails.include?(current_user.email)
+    user = Array(current_user).compact.first
+    return false unless user.respond_to?(:email)
+
+    EnvHelpers.email_list('ADMIN_EMAILS').include?(user.email)
   end
 
   private

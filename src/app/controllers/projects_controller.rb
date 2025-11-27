@@ -205,6 +205,8 @@ class ProjectsController < ApplicationController
     @organisms = Organism.order(:name)
     @project_types = ProjectType.order(:name)
     @versions = available_versions
+    # Set default version to the latest available version
+    @project.version_id = @versions.first&.id if @versions.any?
   end
 
   # GET /projects/1/edit

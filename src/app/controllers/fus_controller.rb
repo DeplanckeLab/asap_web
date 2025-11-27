@@ -115,11 +115,17 @@ class FusController < ApplicationController
       current_size = File.size(upload_file_path)
       is_complete = (chunk_index + 1 == total_chunks) && (current_size == file_size)
       
+      previous_status = fu.status
+      status_can_change = !%w[preparsing preparsed].include?(previous_status)
+      update_attrs = { upload_file_size: file_size }
+      update_attrs[:status] = is_complete ? 'uploaded' : 'uploading' if status_can_change
+      
       # Update Fu record
-      fu.update!(
-        upload_file_size: file_size,
-        status: is_complete ? 'uploaded' : 'uploading'
-      )
+      fu.update!(update_attrs)
+      
+      # Get organism_id and version_id from params if provided (sent by JavaScript)
+      organism_id = safe_integer_param(:organism_id)
+      version_id = safe_integer_param(:version_id)
       
       # Store upload info in session for project creation
       session[:file_upload] = {
@@ -129,8 +135,17 @@ class FusController < ApplicationController
         path: upload_file_path.to_s,
         size: current_size,
         total_size: file_size,
-        complete: is_complete
+        complete: is_complete,
+        organism_id: organism_id,
+        version_id: version_id
       }
+      
+      if is_complete
+        Rails.logger.info("[FusController#upload_chunk] Upload complete, enqueueing preparsing job. organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
+        enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
+      else
+        Rails.logger.info("[FusController#upload_chunk] Not enqueueing preparsing job. is_complete: #{is_complete}")
+      end
       
       render json: {
         fu_id: fu.id,
@@ -194,5 +209,315 @@ class FusController < ApplicationController
       render json: { exists: false, size: 0, total_size: 0, complete: false }
     end
   end
-end
 
+  # POST /fus/download_from_url
+  def download_from_url
+    unless user_signed_in?
+      render json: { error: 'Authentication required' }, status: :unauthorized
+      return
+    end
+
+    # Parse JSON body
+    request_body = JSON.parse(request.body.read) rescue {}
+    url = request_body['url'] || params[:url]
+    
+    if url.blank?
+      render json: { error: 'URL is required' }, status: :bad_request
+      return
+    end
+
+    begin
+      require 'open-uri'
+      require 'uri'
+      
+      # Validate and parse URL
+      uri_obj = URI(url)
+      unless ['http', 'https'].include?(uri_obj.scheme)
+        render json: { error: 'URL must use HTTP or HTTPS protocol' }, status: :bad_request
+        return
+      end
+
+      # Extract filename from URL or use default
+      filename = uri_obj.path.split('/').last.presence || 'downloaded_file'
+      filename.gsub!(/[()\[\]#?$]/, '') # Clean filename
+      
+      # Extract file extension and create input filename
+      file_ext = File.extname(filename)
+      file_ext = '.txt' if file_ext.blank? # Default extension if none found
+      input_filename = "input_file#{file_ext}"
+
+      # Create Fu record
+      fu = Fu.new(
+        user_id: current_user.id,
+        project_key: nil,
+        upload_file_name: input_filename,
+        upload_file_size: 0, # Will be updated after download
+        status: 'downloading',
+        name: filename
+      )
+      fu.save!
+
+      # Create upload directory
+      upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                          ENV["UPLOAD_DATA_DIR"]
+                        elsif ENV["DATA_DIR"]
+                          Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                        else
+                          '/data/asap2/fus'
+                        end
+      
+      upload_base_dir = Pathname.new(upload_base_dir)
+      FileUtils.mkdir_p(upload_base_dir) unless upload_base_dir.exist?
+      
+      upload_dir = upload_base_dir.join(fu.id.to_s)
+      FileUtils.mkdir_p(upload_dir)
+      
+      upload_file_path = upload_dir.join(input_filename)
+
+      # Download file from URL using OpenURI (following Basic.safe_download pattern)
+      download_options = {
+        'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        read_timeout: 300, # 5 minutes timeout
+        open_timeout: 30
+      }
+      
+      # Download the file
+      downloaded_size = 0
+      File.open(upload_file_path, 'wb') do |file|
+        uri_obj.open(download_options) do |uri_io|
+          IO.copy_stream(uri_io, file)
+        end
+        downloaded_size = File.size(upload_file_path)
+      end
+
+      # Update Fu record with file size
+      fu.update!(
+        upload_file_size: downloaded_size,
+        status: 'uploaded'
+      )
+
+      # Get organism_id and version_id from request body (already parsed) or params
+      organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+      version_id = request_body['version_id'] || safe_integer_param(:version_id)
+      
+      # Store upload info in session for project creation
+      session[:file_upload] = {
+        fu_id: fu.id,
+        original_filename: filename,
+        input_filename: input_filename,
+        path: upload_file_path.to_s,
+        size: downloaded_size,
+        total_size: downloaded_size,
+        complete: true,
+        organism_id: organism_id,
+        version_id: version_id
+      }
+
+      # Trigger preparsing
+      enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
+
+      render json: {
+        success: true,
+        fu_id: fu.id,
+        filename: filename,
+        size: downloaded_size
+      }
+    rescue URI::InvalidURIError => e
+      Rails.logger.error "Invalid URL: #{url} - #{e.message}"
+      render json: { error: "Invalid URL: #{e.message}" }, status: :bad_request
+    rescue OpenURI::HTTPError => e
+      Rails.logger.error "HTTP error downloading from URL: #{url} - #{e.message}"
+      render json: { error: "Failed to download file: HTTP error - #{e.message}" }, status: :bad_request
+    rescue => e
+      Rails.logger.error "Error downloading from URL: #{url} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "Failed to download file: #{e.message}" }, status: :internal_server_error
+    end
+  end
+
+  # POST /fus/:id/rerun_preparsing
+  def rerun_preparsing
+    unless user_signed_in?
+      render json: { error: 'Authentication required' }, status: :unauthorized
+      return
+    end
+
+    fu = Fu.find_by(id: params[:id], user_id: current_user.id)
+    unless fu
+      render json: { error: 'Upload record not found' }, status: :not_found
+      return
+    end
+
+    # Parse JSON body
+    request_body = JSON.parse(request.body.read) rescue {}
+    
+    # Get dataset selection from request body (optional - can be blank for text file re-parsing)
+    sel = request_body['sel'] || request_body['dataset_name'] || params[:sel]
+    
+    # Get parsing parameters (for RAW_TEXT format files)
+    delimiter = request_body['delimiter']
+    gene_name_col = request_body['gene_name_col']
+    has_header = request_body['has_header']
+
+    # Validate that we have either a dataset selection or parsing parameters
+    has_dataset_selection = sel.present?
+    has_parsing_params = delimiter.present? || gene_name_col.present? || has_header.present?
+    
+    unless has_dataset_selection || has_parsing_params
+      render json: { error: 'Either dataset selection (sel) or parsing parameters (delimiter, gene_name_col, has_header) must be provided' }, status: :bad_request
+      return
+    end
+
+    # Get organism_id and version_id from request body or form params
+    organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+    version_id = request_body['version_id'] || safe_integer_param(:version_id)
+    
+    Rails.logger.info("[FusController#rerun_preparsing] After reading from request/params - organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
+    Rails.logger.info("[FusController#rerun_preparsing] Request body keys: #{request_body.keys.inspect}")
+    Rails.logger.info("[FusController#rerun_preparsing] Request body version_id: #{request_body['version_id'].inspect}")
+    
+    # Fallback to getting from session if not in request
+    if organism_id.blank? || version_id.blank?
+      # Try to get from session if available
+      session_organism_id = session[:file_upload]&.dig(:organism_id)
+      session_version_id = session[:file_upload]&.dig(:version_id)
+      organism_id ||= session_organism_id
+      version_id ||= session_version_id
+      Rails.logger.info("[FusController#rerun_preparsing] After session fallback - organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
+    end
+
+    # Build options hash for preparsing job
+    # Only include organism_id and version_id if they have values
+    options = {}
+    options[:organism_id] = organism_id if organism_id.present?
+    options[:version_id] = version_id if version_id.present?
+    
+    Rails.logger.info("[FusController#rerun_preparsing] Final options before adding other params: #{options.inspect}")
+    
+    # Add dataset selection if provided
+    options[:sel] = sel if sel.present?
+    
+    # Add parsing parameters if provided (for text files)
+    # Note: delimiter can be empty string (for tab), so we check for presence in the request
+    options[:delimiter] = delimiter if request_body.key?('delimiter')
+    options[:gene_name_col] = gene_name_col if gene_name_col.present?
+    options[:has_header] = has_header if has_header.present?
+
+    # Re-run preparsing with selected dataset or parsing parameters
+    fu.update!(status: 'preparsing')
+    FuPreparsingJob.perform_later(fu.id, options.compact)
+
+    message = if sel.present?
+                "Preparsing restarted for dataset: #{sel}"
+              else
+                "Preparsing restarted with new parameters"
+              end
+    
+    render json: { 
+      success: true, 
+      message: message,
+      fu_id: fu.id
+    }
+  rescue JSON::ParserError => e
+    render json: { error: 'Invalid JSON in request body' }, status: :bad_request
+  rescue => e
+    Rails.logger.error "Error re-running preparsing: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { error: "Failed to re-run preparsing: #{e.message}" }, status: :internal_server_error
+  end
+
+  # GET /fus/:id/preparsing_status
+  def preparsing_status
+    unless user_signed_in?
+      render json: { error: 'Authentication required' }, status: :unauthorized
+      return
+    end
+
+    fu = Fu.find_by(id: params[:id], user_id: current_user.id)
+    unless fu
+      render json: { error: 'Upload record not found' }, status: :not_found
+      return
+    end
+
+    # Return status and preparsing results if available
+    if fu.status == 'preparsed'
+      # Use the service to load preparsing results (reuses existing logic)
+      begin
+        service = FuPreparsingService.new(fu, {})
+        output = service.send(:load_output_json)
+        summary = service.send(:build_summary, output)
+        warnings = service.send(:collect_warnings, output)
+        prediction_debug = summary[:prediction_debug] || nil
+        
+        render json: {
+          status: 'preparsed',
+          summary: summary,
+          warnings: warnings,
+          raw_output: output,
+          prediction_debug: prediction_debug
+        }
+      rescue => e
+        Rails.logger.error "Error loading preparsing results: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { status: fu.status, error: "Failed to load preparsing results: #{e.message}" }, status: :internal_server_error
+      end
+    elsif fu.status == 'preparsing_failed'
+      render json: { status: 'preparsing_failed', error: 'Preparsing failed' }
+    else
+      render json: { status: fu.status }
+    end
+  rescue => e
+    Rails.logger.error "Error fetching preparsing status: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { error: "Failed to fetch preparsing status: #{e.message}" }, status: :internal_server_error
+  end
+
+  private
+
+  def enqueue_preparsing_job(fu, organism_id: nil, version_id: nil)
+    # Get organism_id and version_id from:
+    # 1. Method arguments (passed from upload_chunk/download_from_url)
+    # 2. Session (stored during upload)
+    # 3. Params (as fallback)
+    organism_id ||= safe_integer_param(:organism_id)
+    version_id ||= safe_integer_param(:version_id)
+    
+    if organism_id.blank? || version_id.blank?
+      session_data = session[:file_upload] || {}
+      organism_id ||= session_data[:organism_id]
+      version_id ||= session_data[:version_id]
+    end
+    
+    Rails.logger.info("[FusController#enqueue_preparsing_job] Enqueueing preparsing for Fu##{fu.id}")
+    Rails.logger.info("[FusController#enqueue_preparsing_job] organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
+    
+    options = {}
+    options[:organism_id] = organism_id if organism_id.present?
+    options[:version_id] = version_id if version_id.present?
+    
+    Rails.logger.info("[FusController#enqueue_preparsing_job] Options hash: #{options.inspect}")
+    
+    fu.update!(status: 'preparsing')
+    FuPreparsingJob.perform_later(fu.id, options)
+    
+    Rails.logger.info("[FusController#enqueue_preparsing_job] Job enqueued successfully")
+  end
+
+  def safe_integer_param_from_body(key)
+    value = params[key]
+    return if value.blank?
+
+    Integer(value)
+  rescue ArgumentError, TypeError
+    nil
+  end
+
+  def safe_integer_param(key)
+    value = params[key]
+    return if value.blank?
+
+    Integer(value)
+  rescue ArgumentError, TypeError
+    nil
+  end
+end

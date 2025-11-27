@@ -58,7 +58,7 @@ class ReqsController < ApplicationController
 
     t = Time.now
     
-    project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + @project.user.id.to_s + @project.key
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user.id.to_s + @project.key
     
     ## create runs
     # {"input_matrix":{"run_id":"13","output_attr_name":"output_matrix"},"fit_model":"log"}
@@ -295,7 +295,7 @@ class ReqsController < ApplicationController
   # POST /reqs.json
   def create
 
-    project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + @project.user.id.to_s + @project.key  
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user.id.to_s + @project.key  
     
     @req = Req.new(req_params)
     @req.project_id = @project.id

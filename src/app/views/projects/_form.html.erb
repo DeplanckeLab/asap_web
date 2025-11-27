@@ -10,7 +10,7 @@
     </div>
   <% end %>
 
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-controller="file-upload" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>">
     <!-- Project Information Section -->
     <div class="mb-8">
       <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Project Information</h2>
@@ -45,7 +45,7 @@
           <%= form.select :version_id,
                 options_from_collection_for_select(@versions || [], :id, lambda { |v| v.respond_to?(:beta) && v.beta ? "#{v.id} (beta)" : v.id.to_s }, project.version_id),
                 { prompt: "Select ASAP release" },
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" } %>
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton" } } %>
         </div>
 
         <!-- Organism -->
@@ -54,33 +54,9 @@
           <%= form.select :organism_id,
                 options_from_collection_for_select(@organisms || [], :id, lambda { |o| o.display_name.presence || o.name }, project.organism_id || 1),
                 {},
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" } %>
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton" } } %>
         </div>
 
-        <!-- Description -->
-        <div class="md:col-span-2">
-          <%= form.label :description, "Description", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <%= form.text_area :description,
-                rows: 3,
-                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
-                placeholder: "Optional description of the project" %>
-        </div>
-
-        <!-- Technology -->
-        <div>
-          <%= form.label :technology, "Technology", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <%= form.text_field :technology,
-                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
-                placeholder: "e.g., 10x, Smart-seq2" %>
-        </div>
-
-        <!-- Tissue -->
-        <div>
-          <%= form.label :tissue, "Tissue", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <%= form.text_field :tissue,
-                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white",
-                placeholder: "e.g., Brain, Liver" %>
-        </div>
       </div>
     </div>
 
@@ -91,7 +67,43 @@
         Upload count / normalized gene expression matrix. Supported formats: 10x (.h5 file), loom, text, zip, tar.gz, MEX/MTX formats.
       </p>
       
-      <div id="file-upload-container" data-controller="file-upload" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+      <!-- Toggle between file upload and URL -->
+      <div class="mb-4 flex gap-4">
+        <label class="inline-flex items-center">
+          <input type="radio" name="upload_method" value="file" checked data-file-upload-target="uploadMethod" data-action="change->file-upload#toggleUploadMethod" class="form-radio">
+          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Upload File</span>
+        </label>
+        <label class="inline-flex items-center">
+          <input type="radio" name="upload_method" value="url" data-file-upload-target="uploadMethod" data-action="change->file-upload#toggleUploadMethod" class="form-radio">
+          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Download from URL</span>
+        </label>
+      </div>
+      
+      <!-- URL Input (hidden by default) -->
+      <div data-file-upload-target="urlInputContainer" class="hidden mb-4">
+        <label for="file-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">File URL</label>
+        <div class="flex gap-2">
+          <input 
+            type="url" 
+            id="file-url" 
+            data-file-upload-target="urlInput" 
+            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" 
+            placeholder="https://example.com/data/file.loom"
+          />
+          <button 
+            type="button"
+            data-file-upload-target="downloadUrlButton"
+            data-action="click->file-upload#downloadFromUrl"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Download
+          </button>
+        </div>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Enter a URL to download the file. The download will happen server-side.</p>
+      </div>
+      
+      <!-- File Upload Container -->
+      <div id="file-upload-container" data-file-upload-target="fileUploadContainer" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
         <div data-file-upload-target="dropzone" class="space-y-4">
           <div id="upload-icon" class="mx-auto text-gray-400">
             <svg class="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
@@ -126,6 +138,16 @@
       <%= hidden_field_tag 'input_filename', '', id: 'input_filename', data: { file_upload_target: 'inputFilename' } %>
       <%= hidden_field_tag 'nber_cols', 0 %>
       <%= hidden_field_tag 'nber_rows', 0 %>
+
+      <div id="preparsing-panel" data-file-upload-target="preparsingPanel" class="mt-6 hidden">
+        <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-medium text-gray-900 dark:text-white">Preparsing status:</span>
+            <span data-file-upload-target="preparsingStatus" class="text-gray-700 dark:text-gray-300">Waiting for upload</span>
+          </div>
+          <div data-file-upload-target="preparsingResult" class="mt-4 space-y-4"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Hidden Fields -->
@@ -136,7 +158,14 @@
     <!-- Actions -->
     <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
       <%= link_to "Cancel", projects_path, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
-      <%= form.submit "Create project", id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed" %>
+      <button 
+        type="button"
+        data-action="click->file-upload#resetForm"
+        class="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors"
+      >
+        Reset
+      </button>
+      <%= form.submit "Create project", id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: true %>
     </div>
   </div>
 <% end %>

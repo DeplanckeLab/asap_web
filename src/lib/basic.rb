@@ -25,7 +25,7 @@ module Basic
       h_project_types = {}
       ProjectType.all.map{|e| h_project_types[e.id] = e}
       
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + p.user_id.to_s + p.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       
       h_env = h_envs[p.version_id]
       asap_data_db = "asap_data_v#{h_env['asap_data_db_version']}"
@@ -124,10 +124,10 @@ module Basic
         :key => p.key,
         :doi => p.doi,
         :asap_data_db => asap_data_db,
-        :asap_data_db_url => APP_CONFIG[:server_url] + "/dumps/#{asap_data_db}.sql.gz",
+        :asap_data_db_url => ENV.fetch('SERVER_URL') + "/dumps/#{asap_data_db}.sql.gz",
         :version => "v" + p.version_id.to_s,
-        :reproducibility_instructions_url => APP_CONFIG[:server_url] + "/projects/#{p.key}/instructions",
-        :reproducibility_script_url => APP_CONFIG[:server_url] + "/projects/#{p.key}/get_commands",
+        :reproducibility_instructions_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/instructions",
+        :reproducibility_script_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/get_commands",
         :nber_cols => p.nber_cols,
         :nber_rows => p.nber_rows,
         :reference => h_references[p.doi],
@@ -198,10 +198,10 @@ module Basic
 
     def upd_project_cell_set p
 
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + p.user_id.to_s + p.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       
       puts "get cells..."
-      cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar -T ExtractMetadata -loom #{project_dir + 'parsing' + 'output.loom'} -meta /col_attrs/CellID"
+      cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{project_dir + 'parsing' + 'output.loom'} -meta /col_attrs/CellID"
       output = `#{cmd}` 
       File.open(project_dir + 'parsing' + 'cell_ids', 'w') do |fout|
         fout.write(output)
@@ -294,19 +294,19 @@ module Basic
       h_env = JSON.parse(version.env_json)
       list_docker_image_names = h_env['docker_images'].keys.map{|k| h_env['docker_images'][k]["name"] + ":" + h_env['docker_images'][k]["tag"]}
       docker_images = DockerImage.where("full_name in (" + list_docker_image_names.map{|e| "'#{e}'"}.join(",") + ")").all
-      asap_docker_image = docker_images.select{|e| e.name == APP_CONFIG[:asap_docker_name]}.first
+      asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       return asap_docker_image
     end
     
     def find_marker_enrichment logger, project, meta, find_marker_run, user_id
       t = Time.now
-      project_dir =  Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir =  Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       version = project.version
       h_env = JSON.parse(version.env_json)
       
       #   list_docker_image_names = h_env['docker_images'].keys.map{|k| h_env['docker_images'][k]["name"] + ":" + h_env['docker_images'][k]["tag"]}
       #   docker_images = DockerImage.where("full_name in (#{list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all
-      #   asap_docker_image = docker_images.select{|e| e.name == APP_CONFIG[:asap_docker_name]}.first
+      #   asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       asap_docker_image = get_asap_docker(version)
       
 #      find_marker_step = Step.where(:version_id => project.version_id, :name => 'markers').first
@@ -420,12 +420,12 @@ module Basic
     def find_markers logger, project, meta, user_id
 
       t = Time.now
-      project_dir =  Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir =  Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       version = project.version
       h_env = JSON.parse(version.env_json)
       #      list_docker_image_names = h_env['docker_images'].keys.map{|k| h_env['docker_images'][k]["name"] + ":" + h_env['docker_images'][k]["tag"]}
       #      docker_images = DockerImage.where("full_name in (#{list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all
-      #      asap_docker_image = docker_images.select{|e| e.name == APP_CONFIG[:asap_docker_name]}.first
+      #      asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       asap_docker_image = get_asap_docker(version)
       #find_marker_step = Step.where(:version_id => project.version_id, :name => 'markers').first
       find_marker_step = Step.where(:docker_image_id => asap_docker_image.id, :name => 'markers').first 
@@ -519,7 +519,7 @@ module Basic
 #          # set command
 #
 #          host_name =  h_cmd_params['host_name'] || 'localhost'
-#          container_name = APP_CONFIG[:asap_instance_name] + "_" + run.id.to_s
+#          container_name = ENV.fetch('ASAP_INSTANCE_NAME') + "_" + run.id.to_s
 #          
 #          h_env_docker_image =h_env['docker_images'][docker_image]
 #          image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
@@ -774,7 +774,7 @@ module Basic
       end
       
       if File.exist? input_dir and File.exist? input_dir + 'matrix.mtx'     
-        cmd = "#{APP_CONFIG[:docker_call]} 'Rscript --vanilla /srv/mtx_to_h5.R #{input_dir} #{h5_file_path}'"
+        cmd = "#{ENV.fetch('DOCKER_CALL')} 'Rscript --vanilla /srv/mtx_to_h5.R #{input_dir} #{h5_file_path}'"
         logger.debug("CMD_CONVERT:" + cmd)
         f_out.write("CMD_CONVERT:" + cmd)
         `#{cmd}`
@@ -795,7 +795,7 @@ module Basic
           ##try to convert
           logger.debug("TRY RDS CONVERSION")
           loom_file_path = base_dir + 'input.loom'
-#          cmd = "#{APP_CONFIG[:docker_call]} \"Rscript -e \\\"rmarkdown::render('convert_seurat.Rmd', params = list(input=\'#{file_path.to_s}\', output=\'#{loom_file_path}\'))\\\"\""
+#          cmd = "#{ENV.fetch('DOCKER_CALL')} \"Rscript -e \\\"rmarkdown::render('convert_seurat.Rmd', params = list(input=\'#{file_path.to_s}\', output=\'#{loom_file_path}\'))\\\"\""
           docker_call_v7 = "docker run --network=asap2_asap_network -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2  -v /srv/asap_run/srv:/srv fabdavid/asap_run:v7 -c"
           cmd = "#{docker_call_v7} 'Rscript --vanilla /srv/convert_seurat.R #{file_path.to_s} #{loom_file_path}'"
           logger.debug("CMD RDS: #{cmd}")
@@ -910,7 +910,7 @@ module Basic
     
     def set_predict_params p, run, std_method, h_runs, h_steps
       
-      project_dir =  Pathname.new(APP_CONFIG[:user_data_dir]) + p.user_id.to_s + p.key
+      project_dir =  Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       
       h_predict_params = {}
       
@@ -1066,7 +1066,7 @@ module Basic
       if p
         p.update_attributes({:archive_status_id => 4})
         project_archive = p.key + '.tgz'
-        user_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + p.user_id.to_s
+        user_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s
         filepath = user_dir + project_archive
 
         ## get file from s3
@@ -1092,7 +1092,7 @@ module Basic
     end
     
     def relative_path project, path
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   #    puts project_dir + " -- " + path
   #    return path.relative_path_from(project_dir)
       return path.to_s.gsub(/^#{project_dir}\//, "")
@@ -1163,7 +1163,7 @@ module Basic
           fo.save
         end
         
-        project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
         filepath = project_dir + fo.filepath
         fo.update_attributes(:filesize => File.size(filepath))
       end
@@ -1363,7 +1363,7 @@ module Basic
       puts run.project.to_json
       puts "project => #{project.to_json}"
 
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
     
       puts "BLAAAA: " + meta.to_json
       
@@ -1404,7 +1404,7 @@ module Basic
         meta["type"]= 'DISCRETE'
       end
       values_opt = (meta["type"] == 'DISCRETE') ? '' : '-no-values' 
-      cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar #{values_opt} -T ExtractMetadata -loom #{loom_path} #{type_txt} -meta \"#{meta['name']}\""
+      cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar #{values_opt} -T ExtractMetadata -loom #{loom_path} #{type_txt} -meta \"#{meta['name']}\""
       puts cmd
       res_json =`#{cmd}`
       #   puts res_json
@@ -1552,7 +1552,7 @@ module Basic
         stable_ids_file = project_dir + (annot.filepath + ".stable_ids")
         if !File.exist? stable_ids_file #annot.store_run_id == annot.run_id and annot.dim == 3
           puts "get stable_ids for #{annot.filepath}..."
-          cmd = "java -jar #{APP_CONFIG[:local_asap_run_dir]}/ASAP.jar -T ExtractMetadata -loom #{project_dir + annot.filepath} -meta /col_attrs/_StableID"
+          cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{project_dir + annot.filepath} -meta /col_attrs/_StableID"
        #   res = Basic.safe_parse_json(`#{cmd}`, {})
        #   stable_ids = res['values']
           File.open(stable_ids_file, "w") do |fout|
@@ -1608,7 +1608,7 @@ module Basic
     end
 
     def upd_project_size project
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       if File.exist? project_dir
         project.update_attributes(:disk_size => `du -s #{project_dir}`.split(/\s+/).first.to_i * 1000)
       else
@@ -1685,7 +1685,7 @@ module Basic
 
 #      puts "Elapsed time 9a:" + (Time.now-h_p[:el_time]).to_s
 
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + h_p[:project].user_id.to_s + h_p[:project].key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + h_p[:project].user_id.to_s + h_p[:project].key
       run = h_p[:run] #list_of_runs[run_i][0]
       p = h_p[:p] #list_of_runs[run_i][1]
  #     h_step_attrs = JSON.parse(run.step.attrs_json)
@@ -1953,7 +1953,7 @@ module Basic
       end
       
       host_name =  h_p[:h_cmd_params]['host_name'] || 'localhost'
-      container_name = APP_CONFIG[:asap_instance_name] + "_" + run.id.to_s
+      container_name = ENV.fetch('ASAP_INSTANCE_NAME') + "_" + run.id.to_s
       
       #      logger.debug "ATTRS_json: " + h_p[:h_attrs].to_json
       #      logger.debug "H_VAR: " + h_var.to_json
@@ -2151,7 +2151,7 @@ module Basic
 
       ## define output_dir                                                                                                                                                          
 
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       step_dir = project_dir + step.name
       Dir.mkdir step_dir if !File.exist? step_dir
       output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
@@ -2195,7 +2195,7 @@ module Basic
       puts "toto!!!!"
 
       ## define output_dir                                                                                                                                                                   
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       step_dir = project_dir + step.name
       Dir.mkdir step_dir if !File.exist? step_dir
       output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
@@ -2338,7 +2338,7 @@ module Basic
 #      project.broadcast step.id
      
       ## define output_dir
-      project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key 
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key 
       step_dir = project_dir + step.name
       Dir.mkdir step_dir if !File.exist? step_dir
       output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
@@ -2806,7 +2806,7 @@ puts "TEST RUN"
  #     project_step = ProjectStep.where(:project_id => project.id, :step_id => step.id).first
 
  #     ## define output_dir        
- #     project_dir = Pathname.new(APP_CONFIG[:user_data_dir]) + project.user_id.to_s + project.key
+ #     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
  #     step_dir = project_dir + step.name
  #     Dir.mkdir step_dir if !File.exist? step_dir
  #     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir

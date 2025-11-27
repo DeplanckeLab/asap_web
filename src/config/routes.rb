@@ -21,6 +21,11 @@ Rails.application.routes.draw do
     collection do
       post :upload_chunk
       get :upload_status
+      post :download_from_url
+    end
+    member do
+      post :rerun_preparsing
+      get :preparsing_status
     end
   end
   
@@ -80,8 +85,7 @@ Rails.application.routes.draw do
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
 
-  #  mount ActionCable.server => '/websocket'
-#  mount SolidCable.server => '/websocket'
+  mount ActionCable.server => '/websocket'
   
   # Defines the root path route ("/")
   # root "posts#index"

@@ -24,7 +24,8 @@ export default class extends Controller {
     "parsingParamsContainer",
     "delimiterSelect",
     "geneNameColSelect",
-    "hasHeaderCheckbox"
+    "hasHeaderCheckbox",
+    "resetButton"
   ]
 
   static values = {
@@ -54,6 +55,7 @@ export default class extends Controller {
     }
     this.currentDetectedFormat = null  // Track current file format
     this.resetPreparsingState()
+    this.updateResetButtonState()
 
     // Set up global drag/drop prevention immediately
     this.setupGlobalDragDropPrevention()
@@ -252,6 +254,7 @@ export default class extends Controller {
     
     this.fuId = null
     this.currentUpload = { file, aborted: false }
+    this.updateResetButtonState()
     this.isPreparsingComplete = false
     this.hasMatrixData = false
     this.archiveFilesData = null
@@ -306,6 +309,7 @@ export default class extends Controller {
           this.statusTarget.classList.add('text-green-600')
         }
         this.isUploadComplete = true
+        this.updateResetButtonState()
         
         // Ensure fuId is set - if not, try to get it from upload status check
         if (!this.fuId) {
@@ -1612,6 +1616,17 @@ export default class extends Controller {
     this.submitButtonTarget.disabled = !shouldEnable
   }
 
+  updateResetButtonState() {
+    if (!this.hasResetButtonTarget) return
+
+    const shouldEnable = Boolean(this.currentUpload || this.isUploadComplete)
+    if (shouldEnable) {
+      this.resetButtonTarget.classList.remove('hidden')
+    } else {
+      this.resetButtonTarget.classList.add('hidden')
+    }
+  }
+
   handleFormSubmit(e) {
     // If a file was selected, wait for upload to complete
     if (this.fuId && !this.isUploadComplete && this.currentUpload && !this.currentUpload.aborted) {
@@ -1706,6 +1721,7 @@ export default class extends Controller {
 
       this.fuId = result.fu_id
       this.isUploadComplete = true
+      this.updateResetButtonState()
       
       // Extract filename from URL or use default
       try {
@@ -2021,6 +2037,7 @@ export default class extends Controller {
 
     // Update submit button state
     this.checkSubmitButton()
+    this.updateResetButtonState()
   }
 }
 

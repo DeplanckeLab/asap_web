@@ -230,6 +230,11 @@ class FusController < ApplicationController
       require 'open-uri'
       require 'uri'
       
+      # Auto-add protocol if missing
+      unless url.match?(/^https?:\/\//i)
+        url = 'https://' + url
+      end
+      
       # Validate and parse URL
       uri_obj = URI(url)
       unless ['http', 'https'].include?(uri_obj.scheme)
@@ -287,7 +292,17 @@ class FusController < ApplicationController
         uri_obj.open(download_options) do |uri_io|
           IO.copy_stream(uri_io, file)
         end
-        downloaded_size = File.size(upload_file_path)
+        # Ensure file is flushed to disk
+        file.flush
+        file.fsync if file.respond_to?(:fsync)
+      end
+      
+      # Get file size after download is complete
+      downloaded_size = File.size(upload_file_path)
+      
+      # Verify file exists and has content
+      unless File.exist?(upload_file_path) && downloaded_size > 0
+        raise "Downloaded file is missing or empty"
       end
 
       # Update Fu record with file size
@@ -295,6 +310,9 @@ class FusController < ApplicationController
         upload_file_size: downloaded_size,
         status: 'uploaded'
       )
+      
+      # Reload to ensure database state is fresh
+      fu.reload
 
       # Get organism_id and version_id from request body (already parsed) or params
       organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)

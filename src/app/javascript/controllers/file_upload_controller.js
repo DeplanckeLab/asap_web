@@ -23,7 +23,6 @@ export default class extends Controller {
     "fileUploadContainer",
     "uploadInfoFrame",
     "uploadInfoText",
-    "uploadInfoIcon",
     "parsingParamsContainer",
     "delimiterSelect",
     "geneNameColSelect",
@@ -1678,10 +1677,6 @@ export default class extends Controller {
     if (this.hasUploadInfoTextTarget) {
       this.uploadInfoTextTarget.textContent = ''
     }
-    if (this.hasUploadInfoIconTarget) {
-      this.uploadInfoIconTarget.innerHTML = ''
-      this.uploadInfoIconTarget.classList.add('hidden')
-    }
   }
 
   hideUploadInputs() {
@@ -1705,18 +1700,6 @@ export default class extends Controller {
         message += ` (${this.formatBytes(sizeNumber)})`
       }
       this.uploadInfoTextTarget.textContent = message
-    }
-
-    if (this.hasUploadInfoIconTarget) {
-      const formatKey = this.determineFormatKeyFromFilename(filename || '')
-      const formatConfig = this.fileFormatsMap[formatKey] || this.fileFormatsMap['UNKNOWN'] || {}
-      const formatLabel = formatConfig.label || formatKey
-      
-      this.uploadInfoIconTarget.innerHTML = `
-        ${this.getFileFormatIcon(formatKey)}
-        <span class="ml-2 font-medium">${this.escapeHtml(formatLabel)}</span>
-      `
-      this.uploadInfoIconTarget.classList.remove('hidden')
     }
 
     if (this.hasUploadInfoFrameTarget) {
@@ -1885,7 +1868,12 @@ export default class extends Controller {
       return
     }
 
-    const url = this.urlInputTarget.value.trim()
+    let url = this.urlInputTarget.value.trim()
+    
+    // Auto-add protocol if missing
+    if (url && !url.match(/^https?:\/\//i)) {
+      url = 'https://' + url
+    }
     
     // Basic URL validation
     try {

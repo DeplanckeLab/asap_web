@@ -163,7 +163,8 @@
         </button>
       </div>
       <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-        Upload count / normalized gene expression matrix. Supported formats: 10x (.h5 file), loom, text (.csv, .tsv, .txt), H5AD, RDS, archives (.zip, .tar, .tgz), MEX/MTX formats, and compressed variants (.zip, .gz, .bz2, .xz).
+        Supported formats: 10x (.h5), loom, text (.csv, .tsv, .txt), H5AD, RDS, archives (.zip, .tar, .tgz), MEX/MTX formats, and compressed variants (.zip, .gz, .bz2, .xz).
+      <%= link_to "Learn more about file formats", file_format_home_index_path, class: "text-blue-600 dark:text-blue-400 hover:underline" %>
       </p>
       
       <!-- File Upload Container -->
@@ -218,7 +219,7 @@
             Download
           </button>
         </div>
-        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Download the file directly from here.</p>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Download the file directly from our server (faster than uploading).</p>
       </div>
 
       <div data-file-upload-target="uploadInfoFrame" class="hidden mt-6 text-center">

@@ -96,7 +96,7 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] File exists before command? #{File.exist?(file_path)}")
 
     docker_tag = get_docker_image_tag
-    # Construct script name using the tag (e.g., 'v8' -> 'preparse.v8.py', 'v8.1' -> 'preparse.v8.1.py')
+    # Construct script name using the tag (e.g., 'v8' -> 'preparse.v8.py')
     # Ensure tag has 'v' prefix
     tag_with_v = docker_tag.start_with?('v') ? docker_tag : "v#{docker_tag}"
     python_script_name = "preparse.#{tag_with_v}.py"
@@ -112,10 +112,8 @@ class FuPreparsingService
       script_args << '--header' << header_value
     end
 
-    organism_id = safe_integer(@options[:organism_id]) || default_organism_id
-    raise "Organism ID is required for preparsing" unless organism_id
-
-    script_args << '--organism' << organism_id.to_s
+    # Note: organism_id is not passed to the preparsing script
+    # It's stored in options for use in predictions later
     script_args << '-f' << file_path.to_s
     script_args << '-o' << upload_dir_str
     script_cmd = Shellwords.join(script_args)
@@ -155,8 +153,8 @@ class FuPreparsingService
       end
     end
     
-    # Default to v8.1 (same as original application)
-    'v8.1'
+    # Default to v8
+    'v8'
   end
 
   def load_output_json
@@ -172,9 +170,9 @@ class FuPreparsingService
     @prediction_debug_data = []  # Store prediction debug info for each dataset
     
     datasets = Array(output['list_groups']).map do |group|
-      # Parse genes and cells strings (they come as Python list strings like "['gene1', 'gene2']")
-      genes = parse_python_list_string(group['genes'])
-      cells = parse_python_list_string(group['cells'])
+      # Parse genes and cells - they can be arrays (from JSON) or Python list strings like "['gene1', 'gene2']"
+      genes = parse_genes_or_cells(group['genes'])
+      cells = parse_genes_or_cells(group['cells'])
       
       nber_rows = group['nber_rows'] || group['nb_genes']
       nber_cols = group['nber_cols'] || group['nb_cells']
@@ -234,6 +232,24 @@ class FuPreparsingService
     summary[:prediction_debug] = @prediction_debug_data
     
     summary
+  end
+
+  def parse_genes_or_cells(value)
+    # If value is already an array, return it directly
+    if value.is_a?(Array)
+      @logger.debug("[FuPreparsingService] parse_genes_or_cells: value is already an array with #{value.length} items")
+      return value
+    end
+    
+    # If value is blank or nil, return empty array
+    if value.blank?
+      @logger.debug("[FuPreparsingService] parse_genes_or_cells: value is blank/nil, returning empty array")
+      return []
+    end
+    
+    # Otherwise, parse as Python list string
+    @logger.debug("[FuPreparsingService] parse_genes_or_cells: parsing as Python list string: #{value.inspect[0..100]}")
+    parse_python_list_string(value)
   end
 
   def parse_python_list_string(str)

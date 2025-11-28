@@ -77,41 +77,6 @@
         Upload count / normalized gene expression matrix. Supported formats: 10x (.h5 file), loom, text, zip, tar.gz, MEX/MTX formats.
       </p>
       
-      <!-- Toggle between file upload and URL -->
-      <div class="mb-4 flex gap-4">
-        <label class="inline-flex items-center">
-          <input type="radio" name="upload_method" value="file" checked data-file-upload-target="uploadMethod" data-action="change->file-upload#toggleUploadMethod" class="form-radio">
-          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Upload File</span>
-        </label>
-        <label class="inline-flex items-center">
-          <input type="radio" name="upload_method" value="url" data-file-upload-target="uploadMethod" data-action="change->file-upload#toggleUploadMethod" class="form-radio">
-          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Download from URL</span>
-        </label>
-      </div>
-      
-      <!-- URL Input (hidden by default) -->
-      <div data-file-upload-target="urlInputContainer" class="hidden mb-4">
-        <label for="file-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">File URL</label>
-        <div class="flex gap-2">
-          <input 
-            type="url" 
-            id="file-url" 
-            data-file-upload-target="urlInput" 
-            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" 
-            placeholder="https://example.com/data/file.loom"
-          />
-          <button 
-            type="button"
-            data-file-upload-target="downloadUrlButton"
-            data-action="click->file-upload#downloadFromUrl"
-            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Download
-          </button>
-        </div>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Enter a URL to download the file. The download will happen server-side.</p>
-      </div>
-      
       <!-- File Upload Container -->
       <div id="file-upload-container" data-file-upload-target="fileUploadContainer" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
         <div data-file-upload-target="dropzone" class="space-y-4">
@@ -126,10 +91,10 @@
                 Click to upload or drag and drop
               </span>
               <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                Large files are uploaded in chunks and can be resumed if interrupted
+                Uploads can be resumed if interrupted
               </span>
             </label>
-            <input id="file-input" data-file-upload-target="fileInput" type="file" class="hidden" accept=".txt,.loom,.h5,.h5ad,.zip,.tar,.gz,.tgz,.mtx,application/octet-stream" />
+            <input id="file-input" data-file-upload-target="fileInput" type="file" class="hidden" accept=".txt,.loom,.h5,.h5ad,.zip,.tar,.gz,.tgz,.xz,.mtx,application/octet-stream" />
           </div>
         </div>
         
@@ -143,6 +108,28 @@
           </div>
           <div data-file-upload-target="status" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
         </div>
+      </div>
+
+      <div class="mt-6 text-center">
+        <div class="text-sm uppercase tracking-wide text-gray-400 dark:text-gray-500">or</div>
+        <div class="mt-3 flex flex-col sm:flex-row gap-3 justify-center">
+          <input
+            type="url"
+            id="file-url"
+            data-file-upload-target="urlInput"
+            class="flex-1 sm:max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+            placeholder="Paste an URL"
+          />
+          <button
+            type="button"
+            data-file-upload-target="downloadUrlButton"
+            data-action="click->file-upload#downloadFromUrl"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Download
+          </button>
+        </div>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Download the file directly from here.</p>
       </div>
       
       <%= hidden_field_tag 'input_filename', '', id: 'input_filename', data: { file_upload_target: 'inputFilename' } %>

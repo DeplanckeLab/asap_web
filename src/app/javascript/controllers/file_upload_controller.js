@@ -16,8 +16,6 @@ export default class extends Controller {
     "preparsingPanel",
     "preparsingStatus",
     "preparsingResult",
-    "uploadMethod",
-    "urlInputContainer",
     "urlInput",
     "downloadUrlButton",
     "fileUploadContainer",
@@ -76,9 +74,6 @@ export default class extends Controller {
 
     // Initially disable submit button
     this.checkSubmitButton()
-    
-    // Initialize upload method toggle (default to file upload)
-    this.toggleUploadMethod()
   }
 
   disconnect() {
@@ -1110,12 +1105,18 @@ export default class extends Controller {
   }
 
   buildDatasetSelectionUI(datasets, detectedFormat) {
+    const archiveFormats = ['ARCHIVE', 'ARCHIVE_COMPRESSED']
+    const isArchiveFormat = archiveFormats.includes(detectedFormat)
+    const datasetMessage = isArchiveFormat
+      ? 'Multiple datasets found in this archive. Please select one to proceed:'
+      : 'Multiple datasets found in this file. Please select one to proceed:'
+
     let html = `
       <div class="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 mb-4">
         <div class="flex items-center gap-3 mb-2">
           ${this.getFileFormatIcon(detectedFormat)}
           <p class="text-sm font-medium text-blue-900 dark:text-blue-200">
-            Multiple datasets found in this archive. Please select one to proceed:
+            ${datasetMessage}
           </p>
         </div>
       </div>
@@ -1566,6 +1567,7 @@ export default class extends Controller {
       'COMPRESSED': { color: '#7C3AED', label: 'ZIP', iconClass: 'far fa-file-archive', showLabel: false },
       'H5AD': { color: '#EA580C', label: 'H5AD', iconClass: 'far fa-file' },
       'H5': { color: '#EA580C', label: 'H5', iconClass: 'far fa-file' },
+      'H5_10X': { color: '#2563EB', label: '10X', iconClass: 'far fa-file' },
       'RDS': { color: '#0284C7', label: 'RDS', iconClass: 'far fa-file' },
       'UNKNOWN': { color: '#6B7280', label: '?', iconClass: 'far fa-file' }
     }
@@ -1640,28 +1642,6 @@ export default class extends Controller {
     }
   }
 
-  toggleUploadMethod() {
-    const method = Array.from(this.uploadMethodTargets).find(radio => radio.checked)?.value || 'file'
-    
-    if (method === 'url') {
-      // Show URL input, hide file upload
-      if (this.hasUrlInputContainerTarget) {
-        this.urlInputContainerTarget.classList.remove('hidden')
-      }
-      if (this.hasFileUploadContainerTarget) {
-        this.fileUploadContainerTarget.classList.add('hidden')
-      }
-    } else {
-      // Show file upload, hide URL input
-      if (this.hasUrlInputContainerTarget) {
-        this.urlInputContainerTarget.classList.add('hidden')
-      }
-      if (this.hasFileUploadContainerTarget) {
-        this.fileUploadContainerTarget.classList.remove('hidden')
-      }
-    }
-  }
-
   async downloadFromUrl() {
     if (!this.hasUrlInputTarget || !this.urlInputTarget.value) {
       alert('Please enter a valid URL')
@@ -1680,7 +1660,15 @@ export default class extends Controller {
 
     if (this.hasDownloadUrlButtonTarget) {
       this.downloadUrlButtonTarget.disabled = true
-      this.downloadUrlButtonTarget.textContent = 'Downloading...'
+      this.downloadUrlButtonTarget.innerHTML = `
+        <span class="inline-flex items-center gap-2">
+          <svg class="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          Downloading...
+        </span>
+      `
     }
 
     if (this.hasStatusTarget) {
@@ -1947,15 +1935,6 @@ export default class extends Controller {
     
     if (this.hasUrlInputTarget) {
       this.urlInputTarget.value = ''
-    }
-
-    // Reset upload method to file upload
-    if (this.uploadMethodTargets && this.uploadMethodTargets.length > 0) {
-      const fileRadio = Array.from(this.uploadMethodTargets).find(radio => radio.value === 'file')
-      if (fileRadio) {
-        fileRadio.checked = true
-        this.toggleUploadMethod()
-      }
     }
 
     // Clear progress display

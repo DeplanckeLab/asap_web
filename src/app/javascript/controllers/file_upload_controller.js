@@ -15,16 +15,22 @@ export default class extends Controller {
     "submitButton",
     "preparsingPanel",
     "preparsingStatus",
+    "preparsingSpinner",
     "preparsingResult",
     "urlInput",
     "downloadUrlButton",
+    "downloadForm",
     "fileUploadContainer",
+    "uploadInfoFrame",
+    "uploadInfoText",
+    "uploadInfoIcon",
     "parsingParamsContainer",
     "delimiterSelect",
     "geneNameColSelect",
     "hasHeaderCheckbox",
     "resetButton",
-    "fileFormatsData"
+    "fileFormatsData",
+    "projectName"
   ]
 
   static values = {
@@ -53,9 +59,27 @@ export default class extends Controller {
       has_header: true
     }
     this.currentDetectedFormat = null  // Track current file format
-    this._fileFormatsMap = this.loadFileFormats()
+    this.projectNameTouched = false
+    this.projectNameInputHandler = null
+    this._fileFormatsMap = this.loadFileFormats()  // This will also build the extension map
     this.resetPreparsingState()
+    this.showUploadInputs()
     this.updateResetButtonState()
+
+    this.form = this.element.closest('form')
+    this.projectNameInputElement = this.hasProjectNameTarget
+      ? this.projectNameTarget
+      : (this.form?.querySelector('[name="project[name]"]') || null)
+
+    if (this.projectNameInputElement) {
+      this.projectNameInputHandler = () => {
+        this.projectNameTouched = true
+      }
+      this.projectNameInputElement.addEventListener('input', this.projectNameInputHandler)
+    }
+
+    // Ensure spinner animation CSS is available
+    this.ensureSpinnerAnimation()
 
     // Set up global drag/drop prevention immediately
     this.setupGlobalDragDropPrevention()
@@ -69,7 +93,6 @@ export default class extends Controller {
     }
 
     // Set up form submission handler
-    this.form = this.element.closest('form')
     if (this.form) {
       this.form.addEventListener('submit', this.handleFormSubmit.bind(this))
     }
@@ -91,6 +114,10 @@ export default class extends Controller {
     }
     
     this.teardownPreparsingSubscription()
+    if (this.projectNameInputHandler && this.projectNameInputElement) {
+      this.projectNameInputElement.removeEventListener('input', this.projectNameInputHandler)
+      this.projectNameInputHandler = null
+    }
   }
 
   setupGlobalDragDropPrevention() {
@@ -307,6 +334,7 @@ export default class extends Controller {
         }
         this.isUploadComplete = true
         this.updateResetButtonState()
+        this.displayUploadSuccess('uploaded', file.name, file.size)
         
         // Ensure fuId is set - if not, try to get it from upload status check
         if (!this.fuId) {
@@ -328,7 +356,7 @@ export default class extends Controller {
         }
         
         this.showPreparsingPanel()
-        this.setPreparsingStatus('Upload complete. Preparsing will start automatically.', 'info')
+        this.setPreparsingStatus('Upload complete. Preparsing will start automatically.', 'info', true)
         this.checkSubmitButton()
       }
     } catch (error) {
@@ -492,6 +520,9 @@ export default class extends Controller {
       this.preparsingStatusTarget.classList.remove('text-green-600', 'text-red-600', 'text-yellow-600')
       this.preparsingStatusTarget.classList.add('text-gray-700', 'dark:text-gray-300')
     }
+    if (this.hasPreparsingSpinnerTarget) {
+      this.preparsingSpinnerTarget.classList.add('hidden')
+    }
     if (this.hasPreparsingPanelTarget) {
       this.preparsingPanelTarget.classList.add('hidden')
     }
@@ -504,13 +535,28 @@ export default class extends Controller {
     this.cameFromArchive = false
   }
 
+  ensureSpinnerAnimation() {
+    // Add CSS for spinner animation if not already added
+    if (!document.getElementById('file-upload-spinner-animation-css')) {
+      const style = document.createElement('style')
+      style.id = 'file-upload-spinner-animation-css'
+      style.textContent = `
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `
+      document.head.appendChild(style)
+    }
+  }
+
   showPreparsingPanel() {
     if (this.hasPreparsingPanelTarget) {
       this.preparsingPanelTarget.classList.remove('hidden')
     }
   }
 
-  setPreparsingStatus(message, variant = 'info') {
+  setPreparsingStatus(message, variant = 'info', showSpinner = false) {
     if (!this.hasPreparsingStatusTarget) return
 
     const statusEl = this.preparsingStatusTarget
@@ -524,6 +570,14 @@ export default class extends Controller {
     statusEl.textContent = message
     statusEl.classList.remove('text-gray-700', 'dark:text-gray-300', 'text-green-600', 'text-red-600', 'text-yellow-600')
     statusEl.classList.add(...(variants[variant] || variants.info))
+
+    if (this.hasPreparsingSpinnerTarget) {
+      if (showSpinner) {
+        this.preparsingSpinnerTarget.classList.remove('hidden')
+      } else {
+        this.preparsingSpinnerTarget.classList.add('hidden')
+      }
+    }
   }
 
   subscribeToPreparsing(fuId) {
@@ -531,7 +585,7 @@ export default class extends Controller {
 
     this.teardownPreparsingSubscription()
     this.showPreparsingPanel()
-    this.setPreparsingStatus('Waiting for preparsing to start...', 'info')
+    this.setPreparsingStatus('Waiting for preparsing to start...', 'info', true)
     
     this.preparsingSubscription = consumer.subscriptions.create(
       { channel: "FuChannel", fu_id: fuId },
@@ -580,7 +634,7 @@ export default class extends Controller {
           this.handlePreparsingUpdate(websocketData)
         } else if (data.status === 'preparsing') {
           console.log('[FileUpload] Preparsing in progress, will poll for status...')
-          this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info')
+          this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info', true)
           // Start polling for status updates (in case websocket misses the message)
           this.startPreparsingStatusPoll(fuId)
         } else if (data.status === 'preparsing_failed') {
@@ -688,7 +742,7 @@ export default class extends Controller {
     switch (data.status) {
       case 'started':
         this.hasMatrixData = false  // Reset when new preparsing starts
-        this.setPreparsingStatus('Preparsing started. This can take a few minutes.', 'info')
+        this.setPreparsingStatus('Preparsing started. This can take a few minutes.', 'info', true)
         this.checkSubmitButton()
         break
       case 'completed':
@@ -1205,8 +1259,11 @@ export default class extends Controller {
     radioButtons.forEach(radio => {
       radio.addEventListener('change', (e) => {
         const index = parseInt(e.target.value)
+        const dataset = datasets[index]
         this.selectedDatasetIndex = index
-        this.selectedDatasetName = datasets[index]?.name || null
+        const datasetDisplayName = this.getDatasetDisplayName(dataset)
+        this.selectedDatasetName = datasetDisplayName || dataset?.name || dataset?.group || null
+        this.maybeSetProjectNameFromDataset(this.selectedDatasetName)
         
         // Update UI to highlight selected option
         const options = this.preparsingResultTarget.querySelectorAll('.dataset-option')
@@ -1271,8 +1328,9 @@ export default class extends Controller {
 
   async rerunPreparsingWithDataset(datasetName) {
     if (!this.fuId || !datasetName) return
-    
-    this.setPreparsingStatus(`Re-running preparsing for: ${this.escapeHtml(datasetName)}...`, 'info')
+
+    this.maybeSetProjectNameFromDataset(datasetName)
+    this.setPreparsingStatus(`Re-running preparsing for: ${this.escapeHtml(datasetName)}...`, 'info', true)
     
     // Disable the select button during processing (could be dataset or archive file button)
     const selectDatasetButton = this.preparsingResultTarget.querySelector('#select-dataset-btn')
@@ -1332,7 +1390,7 @@ export default class extends Controller {
       }
       
       // The websocket will handle the update when preparsing completes
-      this.setPreparsingStatus(`Preparsing for "${this.escapeHtml(datasetName)}" started. Please wait...`, 'info')
+      this.setPreparsingStatus(`Preparsing for "${this.escapeHtml(datasetName)}" started. Please wait...`, 'info', true)
     } catch (error) {
       console.error('Error re-running preparsing:', error)
       this.setPreparsingStatus(`Error: ${error.message}`, 'error')
@@ -1393,14 +1451,19 @@ export default class extends Controller {
   }
 
   buildDatasetCard(dataset, detectedFormat, index) {
+    const datasetName = this.getDatasetDisplayName(dataset)
+
     // Use original uploaded filename (without extension) if available, otherwise use dataset name
-    let label = this.originalFilename || dataset?.name || `Dataset ${index + 1}`
+    let label = this.originalFilename || datasetName || `Dataset ${index + 1}`
     
-    // If we still have a dataset name and no original filename, remove extension from dataset name
-    if (label && label !== `Dataset ${index + 1}` && !this.originalFilename) {
-      const lastDotIndex = label.lastIndexOf('.')
-      if (lastDotIndex > 0) {
-        label = label.substring(0, lastDotIndex)
+    // Always remove extension from label for display
+    // Skip if it's the default "Dataset X" label
+    if (label && label !== `Dataset ${index + 1}`) {
+      const hasSlash = label.includes('/')
+      const hasExtension = label.includes('.')
+      // Remove extension if it exists and there's no slash (path separator)
+      if (!hasSlash && hasExtension) {
+        label = label.replace(/\.[^.]+$/, '')
       }
     }
     const cells = this.formatNumber(dataset?.cell_count)
@@ -1488,6 +1551,10 @@ export default class extends Controller {
       `
     }
 
+    // Pass the display label (after extension removal) to project name setter
+    // so project name matches exactly what's displayed
+    this.maybeSetProjectNameFromDataset(label)
+
     return `
       <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1559,6 +1626,104 @@ export default class extends Controller {
     return Number.isFinite(number) ? number.toLocaleString() : this.escapeHtml(value)
   }
 
+  getDatasetDisplayName(dataset) {
+    if (!dataset) {
+      return this.selectedDatasetName || this.originalFilename || ''
+    }
+
+    // Prioritize name property (set from group['group'] in Ruby)
+    // Then fall back to other possible properties
+    const name = dataset?.name || 
+                 dataset?.group || 
+                 dataset?.label || 
+                 dataset?.display_name ||
+                 dataset?.filename ||
+                 dataset?.file_name ||
+                 this.selectedDatasetName ||
+                 this.originalFilename ||
+                 ''
+
+    return name
+  }
+
+  maybeSetProjectNameFromDataset(datasetName) {
+    if (this.projectNameTouched) return
+
+    const inputEl = this.projectNameInputElement ||
+      this.projectNameTarget ||
+      this.form?.querySelector('[name="project[name]"]')
+
+    if (!inputEl) return
+
+    const trimmed = (datasetName || '').trim()
+    if (!trimmed) return
+
+    // Use the dataset name as-is (it should already be the display name without extensions)
+    inputEl.value = trimmed
+  }
+
+  showUploadInputs() {
+    if (this.hasFileUploadContainerTarget) {
+      this.fileUploadContainerTarget.classList.remove('hidden')
+    }
+    if (this.hasDropzoneTarget) {
+      this.dropzoneTarget.classList.remove('hidden')
+    }
+    if (this.hasDownloadFormTarget) {
+      this.downloadFormTarget.classList.remove('hidden')
+    }
+    if (this.hasUploadInfoFrameTarget) {
+      this.uploadInfoFrameTarget.classList.add('hidden')
+    }
+    if (this.hasUploadInfoTextTarget) {
+      this.uploadInfoTextTarget.textContent = ''
+    }
+    if (this.hasUploadInfoIconTarget) {
+      this.uploadInfoIconTarget.innerHTML = ''
+      this.uploadInfoIconTarget.classList.add('hidden')
+    }
+  }
+
+  hideUploadInputs() {
+    if (this.hasFileUploadContainerTarget) {
+      this.fileUploadContainerTarget.classList.add('hidden')
+    }
+    if (this.hasDownloadFormTarget) {
+      this.downloadFormTarget.classList.add('hidden')
+    }
+  }
+
+  displayUploadSuccess(action, filename, sizeInBytes) {
+    this.hideUploadInputs()
+
+    if (this.hasUploadInfoTextTarget) {
+      const verb = action === 'downloaded' ? 'downloaded' : 'uploaded'
+      const safeName = filename || 'file'
+      let message = `Successfully ${verb} ${safeName}`
+      const sizeNumber = Number(sizeInBytes)
+      if (!Number.isNaN(sizeNumber) && sizeNumber > 0) {
+        message += ` (${this.formatBytes(sizeNumber)})`
+      }
+      this.uploadInfoTextTarget.textContent = message
+    }
+
+    if (this.hasUploadInfoIconTarget) {
+      const formatKey = this.determineFormatKeyFromFilename(filename || '')
+      const formatConfig = this.fileFormatsMap[formatKey] || this.fileFormatsMap['UNKNOWN'] || {}
+      const formatLabel = formatConfig.label || formatKey
+      
+      this.uploadInfoIconTarget.innerHTML = `
+        ${this.getFileFormatIcon(formatKey)}
+        <span class="ml-2 font-medium">${this.escapeHtml(formatLabel)}</span>
+      `
+      this.uploadInfoIconTarget.classList.remove('hidden')
+    }
+
+    if (this.hasUploadInfoFrameTarget) {
+      this.uploadInfoFrameTarget.classList.remove('hidden')
+    }
+  }
+
   loadFileFormats() {
     if (!this.hasFileFormatsDataTarget) return {}
     const rawValue = (this.fileFormatsDataTarget.textContent || '').trim()
@@ -1566,7 +1731,10 @@ export default class extends Controller {
 
     try {
       const parsed = JSON.parse(rawValue)
-      return parsed && typeof parsed === 'object' ? parsed : {}
+      const formats = parsed && typeof parsed === 'object' ? parsed : {}
+      // Rebuild extension map when formats are loaded
+      this._extensionToFormatMap = this.buildExtensionToFormatMap()
+      return formats
     } catch (error) {
       console.error('[FileUpload] Failed to parse file format metadata:', error)
       return {}
@@ -1577,20 +1745,93 @@ export default class extends Controller {
     return this._fileFormatsMap || {}
   }
 
+  buildExtensionToFormatMap() {
+    const extensionMap = {}
+    const multiExtensionPatterns = [] // Store patterns with dots for multi-extension matching
+    const compressionExtensions = [] // Store compression-only extensions (from COMPRESSED format)
+    const formatsMap = this.fileFormatsMap
+
+    // Build reverse lookup: extension -> format key
+    Object.keys(formatsMap).forEach(formatKey => {
+      const format = formatsMap[formatKey]
+      if (format && Array.isArray(format.extensions)) {
+        format.extensions.forEach(ext => {
+          // Normalize extension (remove leading dot if present, convert to lowercase)
+          const normalizedExt = ext.replace(/^\./, '').toLowerCase().trim()
+          if (normalizedExt) {
+            // Check if this is a multi-extension pattern (contains dots)
+            if (normalizedExt.includes('.')) {
+              // Store as a pattern to check against full filename
+              multiExtensionPatterns.push({
+                pattern: new RegExp(`\\.${normalizedExt.replace(/\./g, '\\.')}$`),
+                format: formatKey
+              })
+            } else {
+              // Single extension - store in map
+              if (!extensionMap[normalizedExt]) {
+                extensionMap[normalizedExt] = formatKey
+              }
+              
+              // If this is the COMPRESSED format, also store these as compression extensions
+              // These are extensions that can be stripped to get to the base file format
+              if (formatKey === 'COMPRESSED') {
+                compressionExtensions.push(normalizedExt)
+              }
+            }
+          }
+        })
+      }
+    })
+
+    return { single: extensionMap, multi: multiExtensionPatterns, compression: compressionExtensions }
+  }
+
   getFileFormatIcon(formatName) {
     const formatKey = (formatName || 'UNKNOWN').toString().toUpperCase()
     const config = this.fileFormatsMap[formatKey] || this.fileFormatsMap['UNKNOWN'] || {}
     const color = config.color || '#6B7280'
     const label = config.label || (formatKey === 'UNKNOWN' ? '?' : formatKey)
 
-    return `
-      <span class="inline-block relative">
-        <i class="far fa-file text-4xl text-gray-600 dark:text-gray-400"></i>
-        <div style="position: relative; top: -28px; left: 6px; width: 32px; font-size: 9px; font-weight: bold; text-align: center; font-family: Arial, Helvetica, sans-serif; background-color: ${this.escapeHtml(color)}; color: white; padding: 2px 3px; border: 2px solid white; border-radius: 2px;">
-          ${this.escapeHtml(label)}
-        </div>
-      </span>
-    `
+    return `<i class="far fa-file fa-3x"><div style="position:relative;top:-26px;left:6px;width:38px;font-size:10px;font-weight:bold;text-align:center;font-family:Arial, Helvetica, sans-serif;background-color:${this.escapeHtml(color)};color:white;padding:3px;border:2px solid white">${this.escapeHtml(label)}</div></i>`
+  }
+
+  determineFormatKeyFromFilename(filename) {
+    if (!filename) return 'UNKNOWN'
+    const lowerName = filename.toLowerCase()
+
+    const extensionData = this._extensionToFormatMap || { single: {}, multi: [] }
+
+    // Check for multi-extension patterns first (e.g., .tar.gz, .zip, .tgz)
+    // These are stored with their full pattern including dots
+    for (const { pattern, format } of extensionData.multi || []) {
+      if (pattern.test(lowerName)) {
+        return format
+      }
+    }
+
+    // Remove compression extensions to get the base extension
+    // This handles cases like file.txt.gz -> file.txt
+    // Note: We've already checked multi-extension patterns above, so we know none matched
+    let stripped = lowerName
+    const compressionExts = (extensionData.compression || []).map(ext => `.${ext}`)
+    
+    compressionExts.forEach(ext => {
+      if (stripped.endsWith(ext)) {
+        stripped = stripped.slice(0, -ext.length)
+      }
+    })
+
+    // Extract the last extension (after the last dot)
+    const ext = stripped.split('.').pop()?.toLowerCase()
+
+    if (!ext) return 'UNKNOWN'
+
+    // Look up single extension in the map built from FileFormat data
+    if (extensionData.single && extensionData.single[ext]) {
+      return extensionData.single[ext]
+    }
+
+    return 'UNKNOWN'
   }
 
   checkSubmitButton() {
@@ -1656,11 +1897,15 @@ export default class extends Controller {
 
     if (this.hasDownloadUrlButtonTarget) {
       this.downloadUrlButtonTarget.disabled = true
+      // Ensure spinner animation is available
+      this.ensureSpinnerAnimation()
       this.downloadUrlButtonTarget.innerHTML = `
         <span class="inline-flex items-center gap-2">
-          <svg class="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" fill="none" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566" opacity="0.25"/>
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="12.566" stroke-dashoffset="12.566">
+              <animate attributeName="stroke-dashoffset" dur="1.5s" values="12.566;0;12.566" repeatCount="indefinite"/>
+            </circle>
           </svg>
           Downloading...
         </span>
@@ -1736,8 +1981,9 @@ export default class extends Controller {
         this.subscribeToPreparsing(this.fuId)
       }
 
+      this.displayUploadSuccess('downloaded', result.filename || this.originalFilename || 'downloaded file', result.size)
       this.showPreparsingPanel()
-      this.setPreparsingStatus('Download complete. Preparsing will start automatically.', 'info')
+      this.setPreparsingStatus('Download complete. Preparsing will start automatically.', 'info', true)
       this.checkSubmitButton()
 
     } catch (error) {
@@ -1864,7 +2110,7 @@ export default class extends Controller {
   async updatePreparsingWithParams() {
     if (!this.fuId) return
     
-    this.setPreparsingStatus('Updating preparsing with new parameters...', 'info')
+    this.setPreparsingStatus('Updating preparsing with new parameters...', 'info', true)
     
     try {
       const organismField = this.form?.querySelector('[name="project[organism_id]"]')
@@ -1905,7 +2151,7 @@ export default class extends Controller {
       }
       
       // The websocket will handle the update when preparsing completes
-      this.setPreparsingStatus('Re-preparsing with new parameters. Please wait...', 'info')
+      this.setPreparsingStatus('Re-preparsing with new parameters. Please wait...', 'info', true)
     } catch (error) {
       console.error('Error updating preparsing:', error)
       this.setPreparsingStatus(`Error: ${error.message}`, 'error')
@@ -1973,6 +2219,7 @@ export default class extends Controller {
     this.selectedFileName = null
     this.archiveFilesData = null
     this.cameFromArchive = false
+    this.projectNameTouched = false
     
     // Reset preparsing state
     this.resetPreparsingState()
@@ -2010,6 +2257,7 @@ export default class extends Controller {
       this.dropzoneTarget.classList.remove('hidden')
     }
 
+    this.showUploadInputs()
     // Update submit button state
     this.checkSubmitButton()
     this.updateResetButtonState()

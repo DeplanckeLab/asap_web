@@ -66,6 +66,20 @@
     <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="flex items-center gap-4">
         <div class="flex-shrink-0">
+          <%= raw display_file_format @h_formats["H5AD"] %>
+        </div>
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">H5AD format</h3>
+      </div>
+      <p class="mt-4 text-gray-600 dark:text-gray-300">
+        From release 8, ASAP supports <a href="https://anndata.readthedocs.io/" class="text-indigo-600 dark:text-indigo-300 hover:underline">AnnData</a> files (.h5ad).
+        These files contain matrices, observations, variables, and embeddings in a single portable container that can be produced by tools such as
+        <a href="https://scanpy.readthedocs.io/" class="text-indigo-600 dark:text-indigo-300 hover:underline">Scanpy</a>.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-4">
+        <div class="flex-shrink-0">
           <%= raw display_file_format @h_formats["ARCHIVE"] %>
         </div>
         <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Archive</h3>
@@ -95,7 +109,7 @@
         <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Compressed</h3>
       </div>
       <p class="mt-4 text-gray-600 dark:text-gray-300">
-        ASAP supports compressed files (zip or gzip).
+        ASAP supports compressed files (zip and gzip, and from release 8, we added bzip2 and xz).
       </p>
     </div>
 
@@ -126,7 +140,7 @@
         <h3 class="text-xl font-semibold text-gray-900 dark:text-white">RDS</h3>
       </div>
       <p class="mt-4 text-gray-600 dark:text-gray-300">
-        From version 8, ASAP supports Seurat objects (.rds).
+        From release 8, ASAP supports Seurat objects (.rds).
       </p>
     </div>
   </div>

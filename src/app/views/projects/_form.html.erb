@@ -1,3 +1,9 @@
+<% file_formats_for_js = (@file_formats || FileFormat.all).each_with_object({}) do |ff, hash| %>
+<%   key = ff.name.to_s.upcase %>
+<%   next if key.blank? %>
+<%   hash[key] = { color: ff.color.presence || '#6B7280', label: ff.label.presence || key } %>
+<% end %>
+<% file_formats_for_js["UNKNOWN"] ||= { color: '#6B7280', label: '?' } %>
 <%= form_with(model: project, class: "contents") do |form| %>
   <% if project.errors.any? %>
     <div id="error_explanation" class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md mb-6">
@@ -11,6 +17,9 @@
   <% end %>
 
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-controller="file-upload" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>">
+    <script type="application/json" data-file-upload-target="fileFormatsData">
+      <%= raw(file_formats_for_js.to_json) %>
+    </script>
     <!-- Project Information Section -->
     <div class="mb-8">
       <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Project Information</h2>

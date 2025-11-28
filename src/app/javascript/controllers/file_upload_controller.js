@@ -23,7 +23,8 @@ export default class extends Controller {
     "delimiterSelect",
     "geneNameColSelect",
     "hasHeaderCheckbox",
-    "resetButton"
+    "resetButton",
+    "fileFormatsData"
   ]
 
   static values = {
@@ -52,6 +53,7 @@ export default class extends Controller {
       has_header: true
     }
     this.currentDetectedFormat = null  // Track current file format
+    this._fileFormatsMap = this.loadFileFormats()
     this.resetPreparsingState()
     this.updateResetButtonState()
 
@@ -1557,41 +1559,35 @@ export default class extends Controller {
     return Number.isFinite(number) ? number.toLocaleString() : this.escapeHtml(value)
   }
 
+  loadFileFormats() {
+    if (!this.hasFileFormatsDataTarget) return {}
+    const rawValue = (this.fileFormatsDataTarget.textContent || '').trim()
+    if (!rawValue) return {}
+
+    try {
+      const parsed = JSON.parse(rawValue)
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch (error) {
+      console.error('[FileUpload] Failed to parse file format metadata:', error)
+      return {}
+    }
+  }
+
+  get fileFormatsMap() {
+    return this._fileFormatsMap || {}
+  }
+
   getFileFormatIcon(formatName) {
-    // Map format names to icon configuration (color, label, and icon class)
-    const formatConfig = {
-      'LOOM': { color: '#4F46E5', label: 'LOOM', iconClass: 'far fa-file' },
-      'RAW_TEXT': { color: '#059669', label: 'TXT', iconClass: 'far fa-file' },
-      'ARCHIVE': { color: '#DC2626', label: 'ARC', iconClass: 'far fa-file-archive', showLabel: false },
-      'ARCHIVE_COMPRESSED': { color: '#B91C1C', label: 'ARC', iconClass: 'far fa-file-archive', showLabel: false },
-      'COMPRESSED': { color: '#7C3AED', label: 'ZIP', iconClass: 'far fa-file-archive', showLabel: false },
-      'H5AD': { color: '#EA580C', label: 'H5AD', iconClass: 'far fa-file' },
-      'H5': { color: '#EA580C', label: 'H5', iconClass: 'far fa-file' },
-      'H5_10X': { color: '#2563EB', label: '10X', iconClass: 'far fa-file' },
-      'RDS': { color: '#0284C7', label: 'RDS', iconClass: 'far fa-file' },
-      'UNKNOWN': { color: '#6B7280', label: '?', iconClass: 'far fa-file' }
-    }
-    
-    const format = formatName || 'UNKNOWN'
-    const config = formatConfig[format] || formatConfig['UNKNOWN']
-    const showLabel = config.showLabel !== false // Default to true unless explicitly set to false
-    
-    // Generate HTML similar to the original application's display_file_format helper
-    // Using text-4xl for a bigger icon (was text-3xl)
-    // For archive formats, show only the icon without label overlay
-    if (!showLabel) {
-      return `
-        <span class="inline-block">
-          <i class="${config.iconClass} text-4xl text-gray-600 dark:text-gray-400"></i>
-        </span>
-      `
-    }
-    
+    const formatKey = (formatName || 'UNKNOWN').toString().toUpperCase()
+    const config = this.fileFormatsMap[formatKey] || this.fileFormatsMap['UNKNOWN'] || {}
+    const color = config.color || '#6B7280'
+    const label = config.label || (formatKey === 'UNKNOWN' ? '?' : formatKey)
+
     return `
       <span class="inline-block relative">
-        <i class="${config.iconClass} text-4xl text-gray-600 dark:text-gray-400"></i>
-        <div style="position: relative; top: -28px; left: 6px; width: 32px; font-size: 9px; font-weight: bold; text-align: center; font-family: Arial, Helvetica, sans-serif; background-color: ${config.color}; color: white; padding: 2px 3px; border: 2px solid white; border-radius: 2px;">
-          ${this.escapeHtml(config.label)}
+        <i class="far fa-file text-4xl text-gray-600 dark:text-gray-400"></i>
+        <div style="position: relative; top: -28px; left: 6px; width: 32px; font-size: 9px; font-weight: bold; text-align: center; font-family: Arial, Helvetica, sans-serif; background-color: ${this.escapeHtml(color)}; color: white; padding: 2px 3px; border: 2px solid white; border-radius: 2px;">
+          ${this.escapeHtml(label)}
         </div>
       </span>
     `

@@ -1,5 +1,6 @@
 class Organism < ApplicationRecord
   has_many :projects
+  belongs_to :ensembl_subdomain, optional: true
   
   validates :name, presence: true
   

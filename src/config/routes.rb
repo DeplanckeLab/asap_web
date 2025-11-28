@@ -1,6 +1,9 @@
 Rails.application.routes.draw do
   devise_for :users
   resources :projects do
+    collection do
+      get :organisms_for_version
+    end
     member do
       get :instructions
       get :get_commands

@@ -35,5 +35,9 @@ import FileUploadController from "controllers/file_upload_controller"
 application.register("file-upload", FileUploadController)
 console.log('File upload controller registered')
 
+import OrganismSelectorController from "controllers/organism_selector_controller"
+application.register("organism-selector", OrganismSelectorController)
+console.log('Organism selector controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier)) 

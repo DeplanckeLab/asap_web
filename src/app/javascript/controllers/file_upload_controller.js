@@ -1833,8 +1833,12 @@ export default class extends Controller {
     const versionField = this.form?.querySelector('[name="project[version_id]"]')
     const hasVersion = versionField && versionField.value && versionField.value !== ''
 
+    // 5. Project type is selected
+    const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
+    const hasProjectType = projectTypeField && projectTypeField.value && projectTypeField.value !== ''
+
     // Enable button only if all conditions are met
-    const shouldEnable = this.isUploadComplete && hasValidPreparsing && hasOrganism && hasVersion
+    const shouldEnable = this.isUploadComplete && hasValidPreparsing && hasOrganism && hasVersion && hasProjectType
     this.submitButtonTarget.disabled = !shouldEnable
   }
 

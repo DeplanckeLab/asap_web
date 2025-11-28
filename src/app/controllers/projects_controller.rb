@@ -199,15 +199,40 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/organisms_for_version
+  def organisms_for_version
+    version_id = params[:version_id].presence
+    organisms = fetch_organisms_for_version(version_id)
+    grouped_organisms = group_organisms(organisms)
+    
+    render json: {
+      organisms: grouped_organisms.map do |domain, orgs|
+        {
+          domain: domain,
+          count: orgs.count,
+          organisms: orgs.map { |display_name, id, tax_id| { display_name: display_name, id: id, tax_id: tax_id } }
+        }
+      end
+    }
+  rescue StandardError => e
+    Rails.logger.error("[ProjectsController] Error fetching organisms for version #{version_id}: #{e.class} - #{e.message}")
+    Rails.logger.error("[ProjectsController] Backtrace: #{e.backtrace.first(5).join("\n")}")
+    render json: { error: e.message }, status: :internal_server_error
+  end
+
   # GET /projects/new
   def new
     @project = Project.new
-    @organisms = Organism.order(:name)
+    # Explicitly set organism_id to nil to override database default
+    @project.organism_id = nil
     @project_types = ProjectType.order(:name)
     @versions = available_versions
     @file_formats = FileFormat.ordered
     # Set default version to the latest available version
     @project.version_id = @versions.first&.id if @versions.any?
+    # Fetch organisms based on selected version (default to latest)
+    @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
+    @grouped_organisms = group_organisms(@organisms)
   end
 
   # GET /projects/1/edit
@@ -859,6 +884,113 @@ class ProjectsController < ApplicationController
       Rails.logger.error e.backtrace.join("\n")
       render json: { error: 'Failed to load gene expression', message: e.message }, status: 500
     end
+  end
+
+  def fetch_organisms_for_version(version_id)
+    # Get organisms based on the selected ASAP version
+    # Database version is stored in version.env_json['asap_data_db_version']
+    # Always use remote asap2_data_vX databases - if one doesn't exist, it's a database configuration issue
+    return [] unless version_id
+
+    version = Version.find_by(id: version_id)
+    return [] unless version
+
+    # Get database version from env_json
+    env_data = Basic.safe_parse_json(version.env_json, {})
+    db_version = env_data['asap_data_db_version']
+    
+    unless db_version
+      Rails.logger.error("[ProjectsController] Version #{version_id} does not have asap_data_db_version in env_json")
+      return []
+    end
+    
+    # Map to remote database name
+    db_name = "asap2_data_v#{db_version}"
+    
+    # Fetch from remote database - returns array of hashes
+    # If database doesn't exist, RemoteOrganism.list_for_version will raise an ArgumentError
+    # This indicates a database configuration issue that should be fixed
+    RemoteOrganism.list_for_version(db_name)
+  end
+
+  def group_organisms(organisms)
+    groups = Hash.new { |h, k| h[k] = [] }
+    
+    # Define model organisms - only these specific ones
+    model_organisms = ['Homo sapiens', 'Mus musculus', 'Rattus norvegicus', 'Danio rerio', 
+                       'Drosophila melanogaster', 'Caenorhabditis elegans', 'Arabidopsis thaliana']
+    
+    # Handle both ActiveRecord relations (local) and arrays of hashes (remote)
+    organisms_list = organisms.is_a?(Array) ? organisms : organisms.to_a
+    
+    organisms_list.each do |organism|
+      # Handle both ActiveRecord objects and hash objects
+      if organism.is_a?(Hash)
+        # Remote organism (hash)
+        organism_name = organism['name']
+        organism_id = organism['id']
+        display_name = organism['short_name'].presence || organism['name'] || 'Unknown'
+        tax_id = organism['tax_id']
+        
+        # Get domain name from hash (already fetched in RemoteOrganism.list_for_version)
+        domain_name = organism['domain_name'] || 'Other'
+      else
+        # Local organism (ActiveRecord)
+        organism_name = organism.name
+        organism_id = organism.id
+        display_name = organism.display_name.presence || organism.name || 'Unknown'
+        tax_id = organism.tax_id
+        
+        # Get domain name from local database
+        domain_name = if organism.ensembl_subdomain
+          organism.ensembl_subdomain.name
+        else
+          'Other'
+        end
+      end
+      
+      # Skip organisms without required data (name is required)
+      next unless organism_name.present? && organism_id.present?
+      
+      # Capitalize and format domain name for display
+      formatted_domain = domain_name.split('_').map(&:capitalize).join(' ')
+      
+      # Check if this is a model organism
+      is_model_organism = false
+      if model_organisms.include?(organism_name)
+        # For Mouse and Rat, only include the base species (not subspecies)
+        if organism_name == 'Mus musculus' || organism_name == 'Rattus norvegicus'
+          # Only include if display_name is exactly "Mouse" or "Rat"
+          if display_name == 'Mouse' || display_name == 'Rat'
+            is_model_organism = true
+          end
+        else
+          # For other model organisms, include all entries
+          is_model_organism = true
+        end
+      end
+      
+      # Add to domain group (all organisms go to their domain)
+      groups[formatted_domain] << [display_name, organism_id, tax_id]
+      
+      # Also add to Main model organisms group if applicable (model organisms appear in both groups)
+      if is_model_organism
+        groups['Main model organisms'] << [display_name, organism_id, tax_id]
+      end
+    end
+    
+    # Sort each group alphabetically by display name
+    groups.each { |_k, v| v.sort_by! { |item| (item[0] || '').downcase } }
+    
+    # Sort groups: Main model organisms first, then alphabetically, with Other at the end
+    sorted_groups = groups.sort_by do |k, _v|
+      case k
+      when 'Main model organisms' then '00'
+      when 'Other' then 'zzz'
+      else k.downcase
+      end
+    end.to_h
+    sorted_groups
   end
 
   private

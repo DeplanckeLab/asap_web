@@ -20,9 +20,13 @@ class OrganismsController < ApplicationController
 
   def fetch_organisms(source)
     if source == :local
-      [Organism.order(:name), "Local database", nil]
+      # Filter out organisms without names for local database
+      organisms = Organism.where.not(name: [nil, '']).order(:name)
+      [organisms, "Local database", nil]
     else
       organisms = RemoteOrganism.list_for_version(source)
+      # Filter out organisms without names (hashes where 'name' is nil or empty)
+      organisms = organisms.select { |org| org['name'].present? } if organisms.is_a?(Array)
       label = source.sub(/^asap2_data_/, "").upcase
       [organisms, "Remote #{label}", nil]
     end

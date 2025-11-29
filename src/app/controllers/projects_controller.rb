@@ -246,9 +246,49 @@ class ProjectsController < ApplicationController
   # POST /projects or /projects.json
   def create
     @project = Project.new(project_params)
+    
+    # Get file formats for parsing attributes handling
+    @h_formats = {}
+    FileFormat.all.map { |f| @h_formats[f.name] = f }
+    
+    # Delete project if already exists with this key (if editable)
+    # Note: This allows reusing project keys for the same user
+    if @project.key.present? && (existing_project = Project.find_by(key: @project.key))
+      if editable?(existing_project)
+        # Simple deletion - just destroy the project record
+        # In production, you might want to also clean up files and related records
+        existing_project.destroy
+      end
+    end
+    
+    # Handle parsing attributes from params
+    tmp_attrs = params[:attrs] || {}
+    tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
+    
+    # Collect parsing attributes from params
+    [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
+      if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
+        tmp_attrs[k] = params[k]
+      end
+    end
+    
+    # Remove RAW_TEXT parsing options for non-text formats
+    if tmp_attrs[:file_type] && @h_formats[tmp_attrs[:file_type]] && @h_formats[tmp_attrs[:file_type]].child_format != 'RAW_TEXT'
+      [:delimiter, :gene_name_col, :has_header].each do |k|
+        tmp_attrs.delete(k)
+      end
+    end
+    
+    # Set project attributes
+    @project.parsing_attrs_json = tmp_attrs.to_json
+    @project.nber_cols = params[:nber_cols] if params[:nber_cols]
+    @project.nber_rows = params[:nber_rows] if params[:nber_rows]
     @project.user_id = current_user.id if user_signed_in?
+    @project.user_id ||= 1
     @project.step_id ||= 1
     @project.status_id ||= 1
+    @project.sandbox = current_user ? false : true
+    @project.modified_at = Time.now
     
     # Generate unique project key if not provided
     unless @project.key.present?
@@ -258,50 +298,115 @@ class ProjectsController < ApplicationController
       end
     end
     
-    # Handle uploaded file if present
-    if session[:file_upload] && session[:file_upload][:complete]
-      @project.input_filename = session[:file_upload][:input_filename]
+    # Get version and docker image info
+    @version = @project.version
+    if @version
+      @h_env = Basic.safe_parse_json(@version.env_json, {})
+      if @h_env && @h_env['docker_images']
+        @list_docker_image_names = @h_env['docker_images'].keys.map { |k| 
+          @h_env['docker_images'][k]["name"] + ":" + @h_env['docker_images'][k]["tag"] 
+        }
+        tmp_text = "full_name in (" + @list_docker_image_names.map { |e| "'#{e}'" }.join(",") + ")"
+        @docker_images = DockerImage.where(tmp_text).all
+        asap_docker_name = ENV["ASAP_DOCKER_NAME"] || 'fabdavid/asap_run'
+        @asap_docker_image = @docker_images.select { |e| e.name == asap_docker_name }.first
+      end
     end
+    
+    # Get input file from session
+    input_file = nil
+    if session[:file_upload] && session[:file_upload][:complete] && session[:file_upload][:fu_id]
+      input_file = Fu.find_by(id: session[:file_upload][:fu_id], user_id: @project.user_id)
+    end
+    
+    # Set default filters
+    default_de_filter = {
+      fc_cutoff: '2',
+      fdr_cutoff: '0.05'
+    }
+    @project.de_filter_json = default_de_filter.to_json
+    
+    default_ge_filter = {
+      fdr_cutoff: 0.05
+    }
+    @project.ge_filter_json = default_ge_filter.to_json
 
     respond_to do |format|
+      # Require an input file for project creation
+      unless input_file && input_file.upload_file_name.present?
+        @organisms = Organism.order(:name)
+        @project_types = ProjectType.order(:name)
+        @versions = available_versions
+        @file_formats = FileFormat.ordered
+        @project.errors.add(:base, "An input file is required to create a project. Please upload a file first.")
+        format.html { render :new, status: :unprocessable_entity }
+        format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+        return
+      end
+      
       if @project.save
-        # Move uploaded file from /data/asap2/fus/{fu_id}/ to project directory
-        if session[:file_upload] && session[:file_upload][:complete]
-          upload_info = session[:file_upload]
-          
-          if upload_info[:fu_id]
-            fu = Fu.find_by(id: upload_info[:fu_id], user_id: current_user.id)
-            
-            if fu && fu.file_path && File.exist?(fu.file_path)
-              # Create project directory
-              user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
-              project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
-              FileUtils.mkdir_p(project_dir)
-              
-              # Move file to project directory
-              final_path = project_dir + fu.upload_file_name
-              FileUtils.mv(fu.file_path.to_s, final_path)
-              
-              # Clean up the temporary upload directory
-              upload_dir = fu.file_path.dirname
-              begin
-                Dir.rmdir(upload_dir) if upload_dir.exist? && Dir.empty?(upload_dir)
-              rescue => e
-                Rails.logger.warn "Could not remove empty upload directory #{upload_dir}: #{e.message}"
-              end
-              
-              # Update Fu record with project info
-              fu.update!(
-                project_id: @project.id,
-                project_key: @project.key,
-                status: 'completed'
-              )
-              
-              Rails.logger.info "Moved uploaded file from #{fu.file_path} to #{final_path}"
-            else
-              Rails.logger.error "Uploaded file not found at #{fu&.file_path}"
-            end
+        # Create project directory
+        user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+        project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+        FileUtils.mkdir_p(project_dir)
+        
+        # Get preparsing data from output.json
+        upload_base_dir = ENV["UPLOAD_DATA_DIR"]
+        
+        upload_dir = Pathname.new(upload_base_dir) + input_file.id.to_s
+        
+        # Use the original uploaded filename directly (no conversion needed)
+        input_filename = input_file.upload_file_name
+        
+        # Get all valid extensions from FileFormat model
+        valid_extensions = FileFormat.all.flat_map do |ff|
+          if ff.ext.present?
+            ff.ext.split(',').map(&:strip).reject(&:blank?)
+          else
+            []
           end
+        end.compact.uniq.map(&:downcase)
+        
+        # Determine extension from the filename
+        ext = input_filename.split(".").last.downcase
+        unless valid_extensions.include?(ext)
+          ext = 'txt'
+        end
+        
+        @project.input_filename = input_file.upload_file_name
+        @project.fu_id = input_file.id
+        @project.extension = ext
+        @project.save
+        
+        # Create symlink from upload directory to project directory
+        upload_path = upload_dir + input_filename
+        symlink_path = project_dir + ('input.' + ext)
+        
+        # Remove existing symlink if it exists
+        File.delete(symlink_path) if File.exist?(symlink_path) || File.symlink?(symlink_path)
+        
+        # Create symlink
+        if File.exist?(upload_path)
+          File.symlink(upload_path, symlink_path)
+          Rails.logger.info "Created symlink from #{upload_path} to #{symlink_path}"
+        else
+          Rails.logger.error "Upload file not found at #{upload_path}"
+        end
+        
+        # Update Fu record with project info
+        input_file.update!(
+          project_id: @project.id,
+          project_key: @project.key,
+          status: 'completed'
+        )
+        
+        # Initialize project steps
+        init_project_steps
+        
+        # Call parse_files if the method exists
+        if @project.respond_to?(:parse_files)
+          h_data = {}
+          @project.parse_files(h_data)
         end
         
         # Clean up session
@@ -993,6 +1098,22 @@ class ProjectsController < ApplicationController
     sorted_groups
   end
 
+  def init_project_steps
+    return unless @asap_docker_image
+    
+    Step.where(docker_image_id: @asap_docker_image.id).find_each do |step|
+      project_step = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
+      unless project_step
+        project_step = ProjectStep.new(
+          project_id: @project.id,
+          step_id: step.id,
+          status_id: (step.name == 'parsing') ? 1 : nil
+        )
+        project_step.save
+      end
+    end
+  end
+
   private
 
     def available_versions
@@ -1236,7 +1357,8 @@ class ProjectsController < ApplicationController
     def project_params
       params.fetch(:project, {}).permit(
         :name, :key, :description, :organism_id, :project_type_id, 
-        :version_id, :step_id, :status_id, :technology, :tissue, :extra_info, :input_filename
+        :version_id, :step_id, :status_id, :technology, :tissue, :extra_info, :input_filename,
+        :parsing_attrs_json, :nber_cols, :nber_rows, :extension, :fu_id
       )
     end
     

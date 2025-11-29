@@ -253,4 +253,19 @@ class Project < ApplicationRecord
     return {} unless landing_page_json.present?
     JSON.parse(landing_page_json) rescue {}
   end
+  
+  def parse_files(h_data = {})
+    # Create a job record for tracking
+    job = Basic.create_job(self, 1, self, :parsing_job_id, 1)
+    
+    # Enqueue the parsing job using ActiveJob
+    parsing_job = ProjectParsingJob.perform_later(id, h_data)
+    
+    # Update job with the ActiveJob job_id if available
+    if parsing_job.respond_to?(:job_id)
+      job.update_attributes(delayed_job_id: parsing_job.job_id) if job
+    end
+    
+    job
+  end
 end

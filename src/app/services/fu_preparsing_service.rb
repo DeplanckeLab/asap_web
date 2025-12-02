@@ -59,6 +59,7 @@ class FuPreparsingService
     FileUtils.rm_f(error_file)
 
     cmd = build_command(file_path)
+    @command = cmd  # Store command for JSON output
     @logger.info("[FuPreparsingService] Running preparsing: #{cmd}")
     
     stdout_str, stderr_str, status = Open3.capture3(cmd)
@@ -104,8 +105,11 @@ class FuPreparsingService
     script_args = ['python3', "/srv/#{python_script_name}"]
     script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
     script_args << '--col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
-    if @options[:delimiter].present? && @options[:delimiter] != ''
-      script_args << '--delim' << @options[:delimiter].to_s
+    # Check if delimiter key exists (not using present? because space is considered blank in Rails)
+    if @options.key?(:delimiter) && @options[:delimiter] != nil && @options[:delimiter] != ''
+      delim_value = @options[:delimiter].to_s
+      # Add delimiter argument - Shellwords.join will handle proper escaping
+      script_args << '--delim' << delim_value
     end
     if @options.key?(:has_header)
       header_value = (@options[:has_header] == '1' || @options[:has_header] == true) ? 'true' : 'false'
@@ -225,7 +229,8 @@ class FuPreparsingService
       list_files: output['list_files'],
       metadata: output['metadata'],
       displayed_error: output['displayed_error'],
-      primary_dimensions: primary_dimensions(primary_dataset)
+      primary_dimensions: primary_dimensions(primary_dataset),
+      command: @command  # Include the preparsing command
     }
     
     # Add prediction debug data to summary (always include, even if empty)

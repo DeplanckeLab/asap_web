@@ -31,6 +31,10 @@ import NavDropdownController from "controllers/nav_dropdown_controller"
 application.register("nav-dropdown", NavDropdownController)
 console.log('Nav dropdown controller registered')
 
+import NavItemController from "controllers/nav_item_controller"
+application.register("nav-item", NavItemController)
+console.log('Nav item controller registered')
+
 import FileUploadController from "controllers/file_upload_controller"
 application.register("file-upload", FileUploadController)
 console.log('File upload controller registered')

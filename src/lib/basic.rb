@@ -2172,7 +2172,25 @@ module Basic
     end
 
     def exec_run logger, run
+      if run.async == false
+        exec_run_sync logger, run
+      else
+        exec_run_async logger, run
+      end
+    end
 
+    def exec_run_async logger, run
+      if run.status_id != 1
+        logger.warn("Run##{run.id} is not in waiting status (current: #{run.status_id}), skipping")
+        return nil
+      end
+
+      logger.info("Submitting Run##{run.id} to SLURM via RunExecutionJob")
+      RunExecutionJob.perform_later(run.id)
+      return nil
+    end
+
+    def exec_run_sync logger, run
       start_time = Time.now
       
       project = run.project
@@ -2231,7 +2249,7 @@ module Basic
         end
       end
       
-      ## execute command                                                                                                                                                                     
+      ## execute command                                                                                                                                                                    
 
       hca_output_json_file = project_dir + 'parsing' + "get_loom_from_hca.json"
       h_output_hca = Basic.safe_parse_json(File.read(hca_output_json_file), {}) if File.exist? hca_output_json_file

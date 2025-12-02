@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
+ActiveRecord::Schema[8.0].define(version: 2025_01_11_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -154,6 +154,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.text "tag"
     t.text "format"
     t.text "tax_ids"
+    t.boolean "obsolete", default: false
+    t.text "url_mask"
+    t.text "file_url_bkp"
   end
 
   create_table "cell_ontologies_organisms", id: false, force: :cascade do |t|
@@ -181,6 +184,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.text "alt_identifiers"
     t.text "children_term_ids"
     t.boolean "original", default: false
+    t.integer "tax_id"
+    t.text "comment"
   end
 
   create_table "cell_sets", id: :serial, force: :cascade do |t|
@@ -423,6 +428,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.text "link"
     t.integer "rank"
     t.boolean "dim_reduction", default: false
+  end
+
+  create_table "direct_links", id: :serial, force: :cascade do |t|
+    t.integer "project_id"
+    t.text "view_key"
+    t.text "params_json"
+    t.integer "nber_views", default: 0
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "docker_images", id: :serial, force: :cascade do |t|
@@ -697,6 +711,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.boolean "handles_log", default: false
   end
 
+  create_table "ontology_term_types", id: :serial, force: :cascade do |t|
+    t.text "name"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "label"
+    t.text "cell_ontology_ids"
+    t.text "in_lineage_term_ids"
+    t.text "term_ids"
+    t.text "free_text_json"
+    t.integer "rank"
+  end
+
   create_table "orcid_users", id: :serial, force: :cascade do |t|
     t.text "name"
     t.text "key"
@@ -730,6 +756,24 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.integer "ensembl_subdomain_id"
     t.text "ensembl_db_name"
     t.integer "latest_ensembl_release"
+  end
+
+  create_table "ot_projects", id: :serial, force: :cascade do |t|
+    t.integer "ontology_term_type_id"
+    t.integer "project_id"
+    t.integer "cell_ontology_term_id"
+    t.text "free_text"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.integer "annot_id"
+  end
+
+  create_table "ott_projects", id: :serial, force: :cascade do |t|
+    t.integer "project_id"
+    t.integer "ontology_term_type_id"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.boolean "not_applicable"
   end
 
   create_table "output_attrs", id: :serial, force: :cascade do |t|
@@ -860,6 +904,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.integer "project_cell_set_id"
     t.integer "project_type_id"
     t.text "doi"
+    t.text "landing_page_key"
   end
 
   create_table "projects_provider_projects", id: false, force: :cascade do |t|
@@ -928,10 +973,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
     t.datetime "submitted_at", precision: nil
     t.text "pred_params_json"
     t.boolean "return_stdout", default: false
-    t.integer "pred_max_ram"
+    t.bigint "pred_max_ram"
     t.integer "pred_process_duration"
     t.text "pipeline_parent_run_ids", default: ""
     t.integer "cloned_run_id"
+    t.integer "slurm_job_id"
+    t.index ["slurm_job_id"], name: "index_runs_on_slurm_job_id"
   end
 
   create_table "sample_identifiers", id: :serial, force: :cascade do |t|
@@ -1268,6 +1315,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
   add_foreign_key "diff_exprs", "statuses", name: "diff_exprs_status_id_fkey"
   add_foreign_key "diff_exprs", "users", name: "diff_exprs_user_id_fkey"
   add_foreign_key "dim_reductions", "speeds", name: "dim_reductions_speed_id_fkey"
+  add_foreign_key "direct_links", "projects", name: "direct_links_project_id_fkey"
   add_foreign_key "docker_patches", "versions", name: "docker_patches_version_id_fkey"
   add_foreign_key "exp_entries", "identifier_types", name: "geo_entries_identifier_type_id_fkey"
   add_foreign_key "exp_entries_projects", "exp_entries", name: "geo_entries_projects_geo_entry_id_fkey"
@@ -1316,6 +1364,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_04_16_173741) do
   add_foreign_key "norms", "speeds", name: "norms_speed_id_fkey"
   add_foreign_key "organisms", "ensembl_subdomains", name: "organisms_ensembl_subdomain_id_fkey"
   add_foreign_key "organisms_bkp", "ensembl_subdomains_old", column: "ensembl_subdomain_id", name: "organisms_ensembl_subdomain_id_fkey"
+  add_foreign_key "ot_projects", "annots", name: "ot_projects_annot_id_fkey"
+  add_foreign_key "ot_projects", "cell_ontology_terms", name: "ot_projects_cell_ontology_term_id_fkey"
+  add_foreign_key "ot_projects", "ontology_term_types", name: "ot_projects_ontology_term_type_id_fkey"
+  add_foreign_key "ot_projects", "projects", name: "ot_projects_project_id_fkey"
+  add_foreign_key "ott_projects", "ontology_term_types", name: "ott_projects_ontology_term_type_id_fkey"
+  add_foreign_key "ott_projects", "projects", name: "ott_projects_project_id_fkey"
   add_foreign_key "project_dim_reductions", "dim_reductions", name: "project_dim_reductions_dim_reduction_id_fkey"
   add_foreign_key "project_dim_reductions", "jobs", name: "project_dim_reductions_job_id_fkey"
   add_foreign_key "project_dim_reductions", "projects", name: "project_dim_reductions_project_id_fkey"

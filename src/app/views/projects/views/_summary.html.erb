@@ -16,28 +16,6 @@
 </div>
 <% end %>
 
-<%# Run.where(:project_id => @project.id).all.map{|e| (@h_steps[e.step_id]) ? @h_steps[e.step_id].rank : e.step_id}.to_json if admin? %>
-
-<%= render :partial => 'projects/views/filter_runs' %>
-<%# session[:active_step] if admin? %>
- <%# raw editable?(@project).to_json %>
-<%# current_user.to_json %>
-<%# APP_CONFIG[:admin_emails].include?(current_user.email).to_json if current_user %>
-<%#  admin?.to_json %>
-<%# (p and ((!current_user and (p.sandbox == true and session[:sandbox] == p.key)) or (current_user and p.user_id == current_user.id) or (current_user and share = p.shares.select{|s| s.user_id == current_user.id}.first and share.analyze_perm == true))).to_json %>
-
-<%# @h_articles.to_json %>
-<%# @runs.size %>
-<%# (Run.select("runs.*").joins("join annots on (annots.run_id = runs.id)").where(:project_id => @project.id, :annots => {:store_run_id => session[:store_run_id][@project.id]}).all | Run.select("runs.*").joins("join annots on (annots.run_id = runs.id)").where(:project_id => @project.id, :annots => {:store_run_id => session[:store_run_id][@project.id]}).all).size %>
-
-<% if admin? %>
-<%# @docker_images.to_json %>
-<% end %>
-
-<!--<% if @project.key == 'hwukxt' %>
-<div class='alert alert-danger'>This project is corrupted and should be removed</div>
-<% end %>
--->
 <% if @project.cloned_project_id %>
 <% if @cloned_project %>
 <div class='alert alert-info'>This project has been cloned from <%= link_to "#{@cloned_project.name} [#{@cloned_project.key}]", project_path({:key => @cloned_project.key}) %></div>
@@ -45,25 +23,136 @@
 <div class='alert alert-danger'>This project has been cloned from a deleted project</div>
 <% end %>
 <% end %>
-<div class='row'>
-  <div class="col-md-5">
-    <!--    <div class='float-right'> -->
-    <h4>Reproducibility</h4>
-    <%= link_to(raw("<button class='btn btn-outline-info'>Instructions</button>"), instructions_project_path(@project.key), "target" => "_blank") %>
-    <%= link_to 'List of commands', get_commands_project_path(@project.key), {:class => 'btn btn-outline-secondary'} %>
-    <%= link_to(raw("<button class='btn btn-outline-secondary'>Initial Loom file</button>"), get_file_project_path(@project.key, :step => 'parsing', :filename => 'output.loom'), "target" => "_blank") if exportable?(@project) %>
-    <!--    </div >-->    
-    
-    <h4 class='mt-2'>Programmatic access & Downloads</h4>
-    <%= link_to 'List of Loom files (JSON)', get_loom_files_json_project_path(@project.key, {:download => 1}), {:class => 'btn btn-outline-secondary'} %>
-    <button id='loom_files_btn' class='btn btn-outline-secondary'>Downloads (Loom/H5AD)</button>
-    <h4 class='mt-2'>Pipeline
-      <% if session[:activated_filter] && session[:activated_filter][@project.id] == true %>
-      (filtered)
-      <% end %>
-    </h4>
-    <div id="cy" class="cy"></div>
-  </div>
+
+<div class='row mt-3'>
+  <!-- Main Content (no left panel on summary page) -->
+  <div class="col-md-12">
+    <div class="card shadow-sm" style="border: 1px solid #dee2e6;">
+      <div class="card-header bg-primary text-white" style="border-bottom: 2px solid #0056b3;">
+        <h5 class="mb-0 font-weight-bold">
+          <i class="fas fa-list-ol me-2"></i>Pipeline Steps
+        </h5>
+      </div>
+      <div class="list-group list-group-flush">
+        <% if @steps_with_status && @steps_with_status.any? %>
+          <% @steps_with_status.each do |step_info| %>
+            <% step = step_info[:step] %>
+            <% is_current = step_info[:is_current] %>
+            <% is_available = step_info[:is_available] %>
+            <% is_complete = step_info[:is_complete] %>
+            <% status = step_info[:status] %>
+            
+            <% 
+              # Determine CSS classes
+              item_classes = 'list-group-item'
+              item_style = ''
+              if is_current
+                item_classes += ' active'
+                item_style = 'background-color: #007bff; border-left: 4px solid #0056b3;'
+              elsif !is_available
+                item_classes += ' disabled'
+                item_style = 'opacity: 0.5; cursor: not-allowed; background-color: #f8f9fa;'
+              else
+                item_style = 'border-left: 4px solid transparent;'
+              end
+              
+              # Determine text color
+              text_class = if is_current
+                            'text-white'
+                          elsif !is_available
+                            'text-muted'
+                          elsif is_complete
+                            'text-success'
+                          else
+                            'text-dark'
+                          end
+            %>
+            
+            <div class="<%= item_classes %> <%= text_class %>" style="<%= item_style %> padding: 12px 16px; border-bottom: 1px solid #e9ecef;">
+              <div class="d-flex align-items-start">
+                <div class="flex-shrink-0 me-3 mt-1">
+                  <% if is_current %>
+                    <i class="fas fa-arrow-right fa-lg"></i>
+                  <% elsif is_complete %>
+                    <i class="fas fa-check-circle fa-lg text-success"></i>
+                  <% elsif status == 'running' %>
+                    <i class="fas fa-spinner fa-spin fa-lg text-info"></i>
+                  <% elsif status == 'waiting' %>
+                    <i class="fas fa-clock fa-lg text-warning"></i>
+                  <% elsif status == 'failed' %>
+                    <i class="fas fa-exclamation-circle fa-lg text-danger"></i>
+                  <% else %>
+                    <i class="far fa-circle fa-lg" style="opacity: 0.3;"></i>
+                  <% end %>
+                </div>
+                <div class="flex-grow-1">
+                  <div class="mb-1">
+                    <strong class="d-block"><%= step.label.presence || step.name %></strong>
+                    <% if step.rank %>
+                      <small class="text-muted">Rank: <%= step.rank %></small>
+                    <% end %>
+                  </div>
+                  <% if status != 'not_started' && status.present? %>
+                    <div class="mt-2">
+                      <span class="badge badge-<%= case status
+                                                    when 'complete' then 'success'
+                                                    when 'running' then 'info'
+                                                    when 'waiting' then 'warning'
+                                                    when 'failed' then 'danger'
+                                                    else 'secondary'
+                                                    end %>">
+                        <%= status.humanize %>
+                      </span>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        <% else %>
+          <div class="list-group-item text-center py-4">
+            <p class="text-muted mb-0">No steps available</p>
+            <% if admin? %>
+              <small class="text-muted d-block mt-2">
+                Debug info:<br/>
+                @steps_with_status present: <%= @steps_with_status.present? %><br/>
+                @steps_with_status count: <%= @steps_with_status&.count || 0 %><br/>
+                @pretreatment_steps count: <%= @pretreatment_steps&.count || 0 %><br/>
+                @all_project_steps count: <%= @all_project_steps&.count || 0 %>
+              </small>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+    <div class="card shadow-sm mb-4" style="border: 1px solid #dee2e6;">
+      <div class="card-body">
+            <h4 class="mb-3">
+              <i class="fas fa-cog me-2"></i>Reproducibility
+            </h4>
+            <div class="mb-4">
+              <%= link_to(raw("<button class='btn btn-outline-info me-2 mb-2'><i class='fas fa-book me-1'></i>Instructions</button>"), instructions_project_path(@project.key), "target" => "_blank") %>
+              <%= link_to raw("<button class='btn btn-outline-secondary me-2 mb-2'><i class='fas fa-list me-1'></i>List of commands</button>"), get_commands_project_path(@project.key), {:class => 'btn btn-outline-secondary'} %>
+              <%= link_to(raw("<button class='btn btn-outline-secondary me-2 mb-2'><i class='fas fa-file me-1'></i>Initial Loom file</button>"), get_file_project_path(@project.key, :step => 'parsing', :filename => 'output.loom'), "target" => "_blank") if exportable?(@project) %>
+            </div>
+            
+            <h4 class='mt-4 mb-3'>
+              <i class="fas fa-download me-2"></i>Programmatic access & Downloads
+            </h4>
+            <div class="mb-4">
+              <%= link_to raw("<button class='btn btn-outline-secondary me-2 mb-2'><i class='fas fa-code me-1'></i>List of Loom files (JSON)</button>"), get_loom_files_json_project_path(@project.key, {:download => 1}), {:class => 'btn btn-outline-secondary'} %>
+              <button id='loom_files_btn' class='btn btn-outline-secondary me-2 mb-2'>
+                <i class="fas fa-download me-1"></i>Downloads (Loom/H5AD)
+              </button>
+            </div>
+            
+            <h4 class='mt-4 mb-3'>
+              <i class="fas fa-project-diagram me-2"></i>Pipeline
+              <% if session[:activated_filter] && session[:activated_filter][@project.id] == true %>
+                <span class="badge badge-info">(filtered)</span>
+              <% end %>
+            </h4>
+            <div id="cy" class="cy mb-4" style="min-height: 300px; border: 1px solid #dee2e6; border-radius: 4px; background-color: #f8f9fa;"></div>
   <!--  <div id="summary_graph"></div> -->
   <%# @log %>
   <%# @project_steps.to_json %>
@@ -76,22 +165,25 @@
   
   <%# ActionCable.server.connections.to_json %>
   <%# Run.where(:project_id => @project.id, :step_id => 1).first.to_json %>
-  <div class="col-md-7">
-    <% if @project.doi %>
-      <h4>Analysis publications</h4>
-      <% @project.doi.to_s.split(/\s*,\s*/).each do |doi| %>
-      <%# a = Article.where(:pmid => pmid).first %>
-       <% a = @h_articles[doi] %>
-       <% if a %>
-         <% authors =  (a.authors) ? a.authors.split(";") : [""] %>
-         <%= raw authors.first + ((authors.size > 1) ? '<i> et al.</i> ' : '. ') + "<b>#{a.title}</b>" + " " + ((j = a.journal) ? "<i>#{j.name}</i>" : '') + ". " + a.year.to_s + "."  %> <%= link_to "DOI link", "https://doi.org/" + doi.to_s, {:class => 'badge badge-info'} %>
-        
-       <% end %>
-      <% end %>
-      <br/><br/>
-    <% end %>
+            <% if @project.doi %>
+              <h4 class="mb-3">
+                <i class="fas fa-book-open me-2"></i>Analysis publications
+              </h4>
+              <div class="mb-4">
+                <% @project.doi.to_s.split(/\s*,\s*/).each do |doi| %>
+                  <% a = @h_articles[doi] %>
+                  <% if a %>
+                    <% authors =  (a.authors) ? a.authors.split(";") : [""] %>
+                    <div class="mb-3 p-3 bg-light rounded border">
+                      <%= raw authors.first + ((authors.size > 1) ? '<i> et al.</i> ' : '. ') + "<b>#{a.title}</b>" + " " + ((j = a.journal) ? "<i>#{j.name}</i>" : '') + ". " + a.year.to_s + "."  %>
+                      <%= link_to raw("<span class='badge badge-info'><i class='fas fa-external-link-alt me-1'></i>DOI link</span>"), "https://doi.org/" + doi.to_s, {:class => 'ml-2', target: '_blank'} %>
+                    </div>
+                  <% end %>
+                <% end %>
+              </div>
+            <% end %>
 
-    <% if @project.replaced_by_project_key %>
+            <% if @project.replaced_by_project_key %>
 
     <div class='alert alert-danger'>
       This project is obsolete and replaced by
@@ -153,25 +245,37 @@
     <% end %>
     <% end %>
     <% end %>
-    <% if @project.provider_projects && @project.provider_projects.size > 0 %>
-    <h4>Data downloaded from</h4>
- <!--   <div class='alert alert-secondary'> -->
-      <% @project.provider_projects.each do |pp| %>
-        <% provider = pp.provider %>
-        <p><%= provider.name %> <%= link_to pp.key, provider.url_mask.gsub(/\#\{id\}/, pp.key) %></p>
-	<br/>
-      <% end %>
-<!--    </div> -->
-    <% end %>
-    <% if @project_type %>
-    <h4>Project type: <small><%= @project_type.name %></small></h4>
-    <% end %>
-    <h4>All runs 
-      <% if session[:activated_filter] && session[:activated_filter][@project.id] == true %>
-      (not filtered)
-      <% end %>
-    </h4>
-    <%= render :partial => 'projects/views/display_card_deck', :locals => {:cards => @list_cards, :card_class => 'card_sum', :card_type => 'step'} %>
+                <% if @project.provider_projects && @project.provider_projects.size > 0 %>
+                  <h4 class="mb-3">
+                    <i class="fas fa-database me-2"></i>Data downloaded from
+                  </h4>
+                  <div class="mb-4">
+                    <% @project.provider_projects.each do |pp| %>
+                      <% provider = pp.provider %>
+                      <div class="mb-2">
+                        <strong><%= provider.name %></strong>
+                        <%= link_to pp.key, provider.url_mask.gsub(/\#\{id\}/, pp.key), class: 'ml-2', target: '_blank' %>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
+                
+                <% if @project_type %>
+                  <h4 class="mb-3">
+                    <i class="fas fa-tag me-2"></i>Project type: 
+                    <span class="badge badge-secondary"><%= @project_type.name %></span>
+                  </h4>
+                <% end %>
+                
+                <h4 class="mb-3">
+                  <i class="fas fa-tasks me-2"></i>All runs
+                  <% if session[:activated_filter] && session[:activated_filter][@project.id] == true %>
+                    <span class="badge badge-info">(not filtered)</span>
+                  <% end %>
+                </h4>
+                <%= render :partial => 'projects/views/display_card_deck', :locals => {:cards => @list_cards, :card_class => 'card_sum', :card_type => 'step'} %>
+      </div>
+    </div>
   </div>
 </div>
 <%= javascript_tag do %>

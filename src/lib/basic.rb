@@ -218,10 +218,10 @@ module Basic
           pc = ProjectCellSet.new(:key => dataset_md5, :nber_cells => cells.size)
           pc.save
         else
-          pc.update_attributes({:nber_cells => cells.size})
+          pc.update({:nber_cells => cells.size})
         end
         
-        p.update_attributes({:project_cell_set_id => pc.id})
+        p.update({:project_cell_set_id => pc.id})
         
       end
     end
@@ -372,7 +372,7 @@ module Basic
                               :attrs_json => h_attrs.to_json
                             }).first
             if run
-              run.update_attributes(h_run)
+              run.update(h_run)
             else
               run = Run.new(h_run)
               run.save
@@ -500,7 +500,7 @@ module Basic
                             :attrs_json => h_attrs.to_json
                           }).first
           if run
-            run.update_attributes(h_run)
+            run.update(h_run)
           else
             run = Run.new(h_run)
             logger.debug("H_RUN2 => #{h_run.to_json}")
@@ -546,7 +546,7 @@ module Basic
 #            :command_json => h_cmd.to_json,    
 #            :status_id => 1   
 #          }
-#          #          run.update_attributes({
+#          #          run.update({
 #          #                                  :command_json => h_cmd.to_json,
 #          #                                  :status_id => 1
 #          #                                })
@@ -576,7 +576,7 @@ module Basic
           h_res = Basic.set_run(logger, h_p)
           #          #          if !h_res[:error]
           #          #
-          #          #            run.update_attributes({
+          #          #            run.update({
           #          #                                    :status_id => 1                                   
           #          #                                  })
           #          #          
@@ -1064,7 +1064,7 @@ module Basic
       
       p = Project.find_by_key(k)
       if p
-        p.update_attributes({:archive_status_id => 4})
+        p.update({:archive_status_id => 4})
         project_archive = p.key + '.tgz'
         user_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s
         filepath = user_dir + project_archive
@@ -1087,7 +1087,7 @@ module Basic
         if File.exist? user_dir + p.key and `du -s #{user_dir + p.key}`.to_i > 10 #and `du -s #{user_dir + p.key}`.to_i == p.disk_size ### IDEALLY should uncomment
           File.delete user_dir + project_archive
         end
-        p.update_attributes(:archive_status_id => 1, :disk_size_archived => nil)
+        p.update(:archive_status_id => 1, :disk_size_archived => nil)
       end
     end
     
@@ -1165,7 +1165,7 @@ module Basic
         
         project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
         filepath = project_dir + fo.filepath
-        fo.update_attributes(:filesize => File.size(filepath))
+        fo.update(:filesize => File.size(filepath))
       end
 
       return fo
@@ -1259,7 +1259,7 @@ module Basic
                 h_annot_cell_sets[[a.id, cat_idx]] = ac
                 puts "Create annot_cell_set #{ac.id}"
                 # elsif ac.cell_set_id != cell_set                                                                                                              
-                #   ac.update_attributes({:cell_set_id => cell_set.id})                                                                                         
+                #   ac.update({:cell_set_id => cell_set.id})                                                                                         
                 #   h_annot_cell_sets[[h_a[:annot].id, cat_idx]]= ac                                                                                            
                 # puts "Update annot_cell_set #{ac.id}"                                                                                                         
               else
@@ -1340,7 +1340,7 @@ module Basic
           #          end
           #
           #          ## update nber_votes                                                                                                    
-          #          cla.update_attributes({:nber_agree => 1})
+          #          cla.update({:nber_agree => 1})
           
         else
           sel_clas.push ""
@@ -1352,7 +1352,7 @@ module Basic
         :selected_cla_ids => sel_clas
       }
       
-      a.update_attributes({:cat_info_json => h_cla_sum.to_json})
+      a.update({:cat_info_json => h_cla_sum.to_json})
 
     end
     
@@ -1545,7 +1545,7 @@ module Basic
           annot.save!
         elsif !(h_annot[:data_class_ids] == '' and annot.data_class_ids != '')
           puts "H_ANNOT: " + h_annot.to_json
-          annot.update_attributes(h_annot)
+          annot.update(h_annot)
         end
 
         ## save list of stable_ids in file
@@ -1610,7 +1610,7 @@ module Basic
     def upd_project_size project
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       if File.exist? project_dir
-        project.update_attributes(:disk_size => `du -s #{project_dir}`.split(/\s+/).first.to_i * 1000)
+        project.update(:disk_size => `du -s #{project_dir}`.split(/\s+/).first.to_i * 1000)
       else
         puts "Project directory does not exist. Current size in DB: #{project.disk_size}" 
       end
@@ -1621,7 +1621,7 @@ module Basic
       all_project_steps = ProjectStep.where(:project_id => project.id).all
       project_step = all_project_steps.select{|e| e.step_id == step_id}.first #ProjectStep.where(:project_id => project.id, :step_id => step_id).first
       if project_step
-        project_step.update_attributes(h_project_step)
+        project_step.update(h_project_step)
       end
       # puts "PROJECT_STEP: " + project_step.to_json
       ### update project stats
@@ -1638,7 +1638,7 @@ module Basic
       if h_steps[step_id].hidden == false ## do not change modified_at when executing hidden step runs
         h_upd[:modified_at] = Time.now 
       end
-      project.update_attributes(h_upd)
+      project.update(h_upd)
     end
 
     def save_run run
@@ -1652,7 +1652,7 @@ module Basic
 
     def upd_run project, run, h_upd, upd_project_step
     #  puts "PROBLEM_HERE"
-      run.update_attributes(h_upd)
+      run.update(h_upd)
       flag_change_status = (h_upd[:status_id] and h_upd[:status_id] != run.status_id) ? true : false
     
       ### active run thingy....
@@ -1665,7 +1665,7 @@ module Basic
       #   #        if h_upd[:status_id] == 4
       #   #          active_run.delete          
       #   #        else
-      #   active_run.update_attributes(h_upd)
+      #   active_run.update(h_upd)
       #   sleep(0.3)
       # end
       
@@ -2023,7 +2023,7 @@ module Basic
       logger.debug("H_UPD:" + h_upd.to_json)
 
       Basic.upd_run h_p[:project], run, h_upd, true
-      #  run.update_attributes({
+      #  run.update({
       #                          #                              :host_name => host_name,
       #                          #                              :container_name => container_name, 
       #                          :command_json => h_cmd.to_json, 
@@ -2454,7 +2454,7 @@ puts "TEST RUN"
       #          #    :pid = pid        
       #        }
       #        upd_run project, run, h_run
-      #        #      run.update_attributes(h_run)
+      #        #      run.update(h_run)
       #        project.broadcast run.step_id
       #        
       #        Process.waitpid(pid)
@@ -2921,9 +2921,9 @@ puts "TEST RUN"
       }
 
 
-      #      run && run.update_attributes(h_upd)
+      #      run && run.update(h_upd)
       #      h_project_step =  Basic.get_project_step_details(project, step.id)
-      #      project_step.update_attributes(h_project_step)                                                                                                              
+      #      project_step.update(h_project_step)                                                                                                              
       run && upd_run(project, run, h_upd, true)
       upd_project_size project
       #   puts project.to_json
@@ -2937,7 +2937,7 @@ puts "TEST RUN"
       h = {:project_id => project.id, :step_id => step_id,  :status_id => 1, :speed_id => speed_id}
       job = Job.new(h)
       job.save
-      o.update_attributes({job_id_key => job.id, :status_id => 1})
+      o.update({job_id_key => job.id, :status_id => 1})
       return job
     end
 
@@ -2945,7 +2945,7 @@ puts "TEST RUN"
       h = {:project_id => project.id, :step_id => step_id,  :status_id => 1, :speed_id => speed_id}
       job = Job.new(h)
       job.save
-      o.update_attributes({job_id_key => job.id, :status_id => 1})
+      o.update({job_id_key => job.id, :status_id => 1})
       return job
     end
     
@@ -2981,17 +2981,17 @@ puts "TEST RUN"
       duration = Time.now - start_time
       if File.exists?(output_file) and !results["original_error"] and !results["displayed_error"]
         logger.debug("SUCCESSFUL #{o.id}")
-        o.update_attributes(:duration => duration, :status_id => 3)       
+        o.update(:duration => duration, :status_id => 3)       
         if step_id != 4
-          project.update_attributes(:duration => duration, :status_id => 3)
-          project_step.update_attributes(:status_id => 3)
+          project.update(:duration => duration, :status_id => 3)
+          project_step.update(:status_id => 3)
         end
       else
         logger.debug("FAILED #{o.id}")
-        o.update_attributes(:duration => duration, :status_id => 4)
+        o.update(:duration => duration, :status_id => 4)
         if step_id != 4 and project_step.status_id != nil ## second part of condition to prevent to update project_step when a job is killed when an earlier step is restarted (necessary if the kill is slower than the update of the ps.status to nil)
-          project.update_attributes(:duration => duration, :status_id => 4)
-          project_step.update_attributes(:status_id => 4)
+          project.update(:duration => duration, :status_id => 4)
+          project_step.update(:status_id => 4)
         end
       end
       
@@ -3018,7 +3018,7 @@ puts "TEST RUN"
             processes.each do |pe|
               Process.kill('INT', pe.pid)
           end
-            job.update_attributes(:status_id => 5)
+            job.update(:status_id => 5)
             delayed_job.destroy if delayed_job
           end
         end
@@ -3102,7 +3102,7 @@ puts "TEST RUN"
 #          if pid and `#{ps_cmd}`.to_i > 0
 #            ## kill main process   
 #            kill_pid(nil, pid)
-#            run.update_attributes(:status_id => 5)
+#            run.update(:status_id => 5)
 #          end
 #        end
 #      end
@@ -3136,7 +3136,7 @@ puts "TEST RUN"
 #            children_pids.each do |pe|
 #              kill_pid(docker_call, pe)
 #            end
-#            run.update_attributes(:status_id => 5)
+#            run.update(:status_id => 5)
 #         #   delayed_job.destroy if delayed_job
 #          end
 #        end
@@ -3164,7 +3164,7 @@ puts "TEST RUN"
 #          processes.each do |pe|
 #            Process.kill('INT', pe.pid)
 #          end
-#          job.update_attributes(:status_id => 5)
+#          job.update(:status_id => 5)
 #        end
       end
       #     end
@@ -3206,7 +3206,7 @@ puts "TEST RUN"
       }
 #      job = Job.new(h_job)
 #      job.save
-      job.update_attributes(h_job)
+      job.update(h_job)
     #  project.broadcast step_id
 #      job_id_fields = [:parsing_job_id, :filtering_job_id, :normalization_job_id]
 #      if step_id < 4
@@ -3238,9 +3238,9 @@ puts "TEST RUN"
         ### update duration                                                                                                                                                        
         duration = Time.now - start_time
         if File.exist?(output_file) and !results["original_error"] and !results["displayed_error"]
-          job && job.update_attributes(:status_id => 3, :duration => duration)
+          job && job.update(:status_id => 3, :duration => duration)
         else
-          job && job.update_attributes(:status_id => 4, :duration => duration)
+          job && job.update(:status_id => 4, :duration => duration)
         end
         
       end

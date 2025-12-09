@@ -3,4 +3,9 @@
 
 import { createConsumer } from "@rails/actioncable"
 
-export default createConsumer()
+const consumer = createConsumer()
+
+// Log consumer creation for debugging
+console.log('[ActionCable] Consumer created', consumer)
+
+export default consumer

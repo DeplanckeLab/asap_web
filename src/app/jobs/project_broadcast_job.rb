@@ -3,23 +3,29 @@ class ProjectBroadcastJob < ApplicationJob
   include Rails.application.routes.url_helpers
 
   def perform(project_id, step_id)
-#   ProjectChannel.broadcast_to project,
-#                               project_id: project.id,
-#                               new_status: project.status_id
     project = Project.find(project_id)
-#    h_data = {:reload_project => 1}
-#    if step_id
     h_data = get_results(project, step_id)
-    h_data.merge!({:project_id => project.id, :step_id => step_id, :new_status => project.status_id})
-#    end
+    
+    # Determine stage based on step_id - parsing step means we're in creation/parsing stage
+    parsing_step = Step.where(name: 'parsing').first
+    stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
+    
+    h_data.merge!({
+      project_id: project.id,
+      step_id: step_id,
+      new_status: project.status_id,
+      stage: stage
+    })
+    
+    # Always include parsing status information (useful for summary page)
+    h_data.merge!(get_parsing_status(project))
+    
+    # Add creation status information if in creation stage
+    if stage == 'creation'
+      h_data.merge!(get_creation_status(project, step_id))
+    end
+    
     ActionCable.server.broadcast "project_#{project.id}", h_data
-#    ActionCable.server.broadcast "project", h_data 
-#{
-#      project_id: project.id,
-#      step_id: step_id,
-#      new_status: project.status_id,
-#      results: get_results(project, step_id)
-#    }
   end
 
   def get_results(project, step_id)
@@ -75,13 +81,74 @@ class ProjectBroadcastJob < ApplicationJob
     
 #   return js_cmds.join "\n"
     return h_res
-    #    ProjectsController.render(
-#                            :partial => 'live_upd',
-#                             :locals => {
-#                               :project => project,
-#                               :js_cmds => js_cmds 
-#                             })
-                             
+  end
+
+  def get_parsing_status(project)
+    status_info = {
+      parsing_status: 'complete',
+      parsing_complete: true
+    }
+    
+    # Check parsing step status
+    parsing_step = Step.where(name: 'parsing').first
+    if parsing_step
+      project_step = ProjectStep.find_by(project_id: project.id, step_id: parsing_step.id)
+      if project_step
+        status_info[:parsing_status] = case project_step.status_id
+        when 1
+          'waiting'
+        when 2
+          'running'
+        when 3
+          'complete'
+        when 4
+          'failed'
+        else
+          'complete'
+        end
+        status_info[:parsing_complete] = (project_step.status_id == 3)
+      end
+    end
+    
+    status_info
+  end
+
+  def get_creation_status(project, step_id)
+    status_info = {
+      project_created: true,
+      project_key: project.key,
+      metadata_status: 'waiting',
+      metadata_complete: false,
+      all_complete: false,
+      redirect_url: nil
+    }
+    
+    # Get parsing status from dedicated method
+    parsing_status_info = get_parsing_status(project)
+    status_info.merge!(parsing_status_info)
+    
+    # Check metadata status
+    # Metadata copying happens after parsing completes
+    # We check if parsing is complete to determine metadata status
+    if status_info[:parsing_complete]
+      # If parsing is complete, check if we're still copying metadata
+      # This is determined by checking if there's metadata to copy and if it's been copied
+      # For now, we'll mark as complete when parsing is done
+      # The parse.rake task will broadcast 'running' status when metadata copying starts
+      # and 'complete' when it finishes
+      status_info[:metadata_status] = 'complete'
+      status_info[:metadata_complete] = true
+    elsif status_info[:parsing_status] == 'running'
+      status_info[:metadata_status] = 'waiting'
+    end
+    
+    # Check if project is fully ready
+    if status_info[:parsing_complete] && status_info[:metadata_complete]
+      status_info[:all_complete] = true
+      status_info[:redirect_url] = Rails.application.routes.url_helpers.project_path(project)
+    end
+    
+    status_info
   end
 
 end

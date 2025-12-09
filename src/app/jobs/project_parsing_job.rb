@@ -52,17 +52,24 @@ class ProjectParsingJob < ApplicationJob
     tmp_dir = project_dir + 'parsing'
     FileUtils.mkdir_p(tmp_dir) unless File.exist?(tmp_dir)
 
-    # Update project step status to running
-    project_step.update_attributes(status_id: 2) # 2 = running
-    project.update_attributes(status_id: 2)
+    # Update project step status to waiting (will be set to running when SLURM job starts)
+    project_step.update(status_id: 1) # 1 = waiting
+    project.update(status_id: 1)
 
     begin
-      # Build command hash
+      # Build command hash for parsing (similar to how parse.rake builds it)
+      # The rake task will be executed directly in a background job, not via SLURM
+      asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
+      h_env_docker_image = h_env['docker_images']['asap_run']
+      image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+      
       h_cmd = {
-        host_name: "localhost",
-        program: "rails parse[#{project.key}]",
-        opts: [],
-        args: []
+        'host_name' => 'localhost',
+        'container_name' => asap_instance_name + "_temp_#{project.id}",
+        'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
+        'program' => "rails parse[#{project.key}]",
+        'opts' => [],
+        'args' => []
       }
 
       # Define output files
@@ -86,13 +93,14 @@ class ProjectParsingJob < ApplicationJob
         command_json: h_cmd.to_json,
         attrs_json: project.parsing_attrs_json,
         output_json: h_outputs.to_json,
-        submitted_at: start_time
+        submitted_at: start_time,
+        async: false # Run synchronously in background job (not via SLURM)
       }
 
       # Find or create/update run
       run = Run.where(project_id: project.id, step_id: parsing_step.id).first
       if run
-        run.update_attributes(h_run)
+        run.update(h_run)
         Rails.logger.info("[ProjectParsingJob] Updated existing run #{run.id}")
       else
         run = Run.new(h_run)
@@ -100,18 +108,56 @@ class ProjectParsingJob < ApplicationJob
         Rails.logger.info("[ProjectParsingJob] Created new run #{run.id}")
       end
 
-      # Update container_name in command_json
-      h_cmd['container_name'] = 'asap_dev_' + run.id.to_s
-      run.update_attributes(command_json: h_cmd.to_json)
+      # Update container_name in command_json with actual run ID
+      h_cmd['container_name'] = asap_instance_name + "_" + run.id.to_s
+      run.update(command_json: h_cmd.to_json)
 
-      # Update project step details
+      # Update project step details (this may set resource requirements from predictions)
       h_project_step = Basic.get_project_step_details(project, parsing_step.id)
-      project_step.update_attributes(h_project_step)
+      project_step.update(h_project_step)
+      
+      # Reload run to get updated resource predictions if any
+      run.reload
+      
+      # Build command to run in Rails environment
+      # The rake task will be executed via SLURM
+      rails_root = Rails.root.to_s
+      rails_env = Rails.env
+      parse_cmd = "cd #{rails_root} && RAILS_ENV=#{rails_env} bundle exec rails parse[#{project.key}]"
+      
+      Rails.logger.info("[ProjectParsingJob] Submitting parsing task to SLURM for Run##{run.id}")
+      Rails.logger.debug("[ProjectParsingJob] Command: #{parse_cmd}")
+      
+      # Submit to SLURM
+      slurm_service = SlurmService.new(logger: Rails.logger)
+      slurm_job_id = slurm_service.submit_job(
+        run,
+        parse_cmd,
+        cores: run.nber_cores || 1,
+        memory_mb: run.pred_max_ram || run.max_ram || 4096,
+        time_limit: run.pred_process_duration || 3600
+      )
+      
+      # Update run with SLURM job ID and set status to running
+      run.update(
+        status_id: 2, # 2 = running
+        start_time: Time.now,
+        waiting_duration: Time.now - start_time,
+        pid: slurm_job_id.to_i,
+        slurm_job_id: slurm_job_id.to_i
+      )
+      
+      # Update project step status to running
+      project_step.update(status_id: 2) # 2 = running
+      project.update(status_id: 2)
       
       # Broadcast update
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
       
-      Rails.logger.info("[ProjectParsingJob] Parsing setup completed for Project##{project_id}, Run##{run.id}")
+      # Start monitoring the SLURM job
+      SlurmJobMonitorJob.set(wait: 30.seconds).perform_later(run.id, slurm_job_id)
+      
+      Rails.logger.info("[ProjectParsingJob] Parsing task submitted to SLURM for Project##{project_id}, Run##{run.id}, SLURM Job ID: #{slurm_job_id}")
       
     rescue StandardError => e
       Rails.logger.error("[ProjectParsingJob] Error setting up parsing for project #{project_id}: #{e.class} - #{e.message}")
@@ -119,11 +165,11 @@ class ProjectParsingJob < ApplicationJob
       
       # Update status to failed
       error_message = e.message
-      project_step.update_attributes(
+      project_step.update(
         status_id: 4, # 4 = failed
         error_message: error_message
       )
-      project.update_attributes(
+      project.update(
         status_id: 4,
         error_message: error_message
       )
@@ -134,5 +180,6 @@ class ProjectParsingJob < ApplicationJob
       raise e
     end
   end
+
 end
 

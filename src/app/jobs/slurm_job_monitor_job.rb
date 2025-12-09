@@ -99,12 +99,12 @@ class SlurmJobMonitorJob < ApplicationJob
     if job_info
       if job_info[:max_rss] && job_info[:max_rss] != 'N/A'
         max_rss_mb = parse_memory(job_info[:max_rss])
-        run.update_attributes(max_ram: max_rss_mb) if max_rss_mb
+        run.update(max_ram: max_rss_mb) if max_rss_mb
       end
       
       if job_info[:elapsed] && job_info[:elapsed] != 'N/A'
         duration_seconds = parse_duration(job_info[:elapsed])
-        run.update_attributes(duration: duration_seconds) if duration_seconds
+        run.update(duration: duration_seconds) if duration_seconds
       end
     end
 
@@ -120,20 +120,20 @@ class SlurmJobMonitorJob < ApplicationJob
     project = run.project
     step = run.step
     
-    run.update_attributes(
+    run.update(
       status_id: 4,
       error: error_message
     )
     
     project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
     if project_step
-      project_step.update_attributes(
+      project_step.update(
         status_id: 4,
         error_message: error_message
       )
     end
     
-    project.update_attributes(status_id: 4) if project
+    project.update(status_id: 4) if project
     project.broadcast(step.id) if project.respond_to?(:broadcast)
   end
 

@@ -55,7 +55,11 @@ class SlurmService
     @logger.debug("[SlurmService] Script: #{script_file}")
     @logger.debug("[SlurmService] Command: #{command}")
     
-    result = `sbatch --parsable #{script_file} 2>&1`
+    # Run sbatch via docker exec in the slurmctld container
+    # The script file path needs to be accessible from within the container
+    # Since we're mounting volumes, the path should be the same inside the container
+    docker_cmd = "docker exec slurmctld sbatch --parsable #{script_file} 2>&1"
+    result = `#{docker_cmd}`
     
     if $?.success?
       slurm_job_id = result.strip
@@ -71,13 +75,15 @@ class SlurmService
   def get_job_status(slurm_job_id)
     return nil if slurm_job_id.blank?
     
-    result = `squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
+    # Run squeue via docker exec in the slurmctld container
+    result = `docker exec slurmctld squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
     
     if $?.success? && !result.strip.empty?
       status = result.strip
       return normalize_status(status)
     else
-      result = `sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
+      # Try sacct if squeue doesn't return results
+      result = `docker exec slurmctld sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
       if $?.success? && !result.strip.empty?
         status = result.strip.split.first
         return normalize_status(status)
@@ -90,14 +96,14 @@ class SlurmService
   def cancel_job(slurm_job_id)
     return false if slurm_job_id.blank?
     
-    result = `scancel #{slurm_job_id} 2>&1`
+    result = `docker exec slurmctld scancel #{slurm_job_id} 2>&1`
     $?.success?
   end
 
   def get_job_info(slurm_job_id)
     return nil if slurm_job_id.blank?
     
-    result = `sacct -j #{slurm_job_id} -n -o JobID,State,ExitCode,Elapsed,MaxRSS,AllocCPUS --parsable2 --noheader 2>&1`
+    result = `docker exec slurmctld sacct -j #{slurm_job_id} -n -o JobID,State,ExitCode,Elapsed,MaxRSS,AllocCPUS --parsable2 --noheader 2>&1`
     
     if $?.success? && !result.strip.empty?
       fields = result.strip.split('|')
@@ -116,7 +122,7 @@ class SlurmService
 
   def check_resource_availability(cores:, memory_mb:, time_limit:)
     begin
-      result = `sinfo -h -o "%P|%C|%m|%l" 2>&1`
+      result = `docker exec slurmctld sinfo -h -o "%P|%C|%m|%l" 2>&1`
       
       if !$?.success?
         return {
@@ -166,7 +172,7 @@ class SlurmService
 
   def get_cluster_info
     begin
-      result = `sinfo -h -o "%P|%C|%m|%l|%D" 2>&1`
+      result = `docker exec slurmctld sinfo -h -o "%P|%C|%m|%l|%D" 2>&1`
       
       if !$?.success?
         return nil
@@ -259,6 +265,11 @@ class SlurmService
   end
 
   def build_slurm_script(options)
+    # The command will be executed in the website container via docker exec
+    # since slurmd doesn't have Rails installed
+    # Escape the command for use in bash script
+    escaped_command = options[:command].gsub("'", "'\"'\"'")
+    
     <<~SCRIPT
       #!/bin/bash
       #SBATCH --job-name=#{options[:job_name]}
@@ -280,7 +291,9 @@ class SlurmService
 
       trap 'echo "Job interrupted at $(date)"; exit 130' USR1
 
-      #{options[:command]}
+      # Execute command in website container (which has Rails installed)
+      # The website container is accessible via docker network
+      docker exec website bash -c '#{escaped_command}'
 
       EXIT_CODE=$?
       echo "Job completed at $(date)"

@@ -49,7 +49,7 @@ class RunExecutionJob < ApplicationJob
       
       start_time = Time.now
       
-      run.update_attributes(
+      run.update(
         status_id: 2,
         start_time: start_time,
         waiting_duration: start_time - (run.submitted_at || run.created_at),
@@ -67,20 +67,20 @@ class RunExecutionJob < ApplicationJob
       Rails.logger.error("[RunExecutionJob] Error executing Run##{run_id}: #{e.class} - #{e.message}")
       Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
       
-      run.update_attributes(
+      run.update(
         status_id: 4,
         error: e.message
       )
       
       project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
       if project_step
-        project_step.update_attributes(
+        project_step.update(
           status_id: 4,
           error_message: e.message
         )
       end
       
-      project.update_attributes(status_id: 4) if project
+      project.update(status_id: 4) if project
       project.broadcast(step.id) if project.respond_to?(:broadcast)
       
       raise e

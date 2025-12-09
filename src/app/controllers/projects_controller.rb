@@ -58,8 +58,6 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1 or /projects/1.json
   def show
-    @view_type = params[:view] || 'visualization'
-    
     # Get available loom files and metadata for the project
     all_loom_files = Annot.available_loom_files(@project.id)
     available_metadata = Annot.available_metadata(@project.id)
@@ -112,10 +110,152 @@ class ProjectsController < ApplicationController
     end
     build_best_cla_category_map(categorical_metadata)
     
+    # Check if we have visualization data (embeddings or categorical/numerical cell metadata)
+    has_visualization_embeddings = @all_embeddings_by_loom.any? { |_filepath, embeddings| embeddings.present? }
+    has_categorical_metadata = categorical_metadata.present?
+    has_numerical_cell_metadata = @h_metadata.any? do |_filepath, dimension_hash|
+      dimension_hash&.dig('cell', 'NUMERIC')&.present?
+    end
+    
+    has_visualization_data = has_visualization_embeddings || has_categorical_metadata || has_numerical_cell_metadata
+    
+    # Set default view type: use visualization if we have visualization data, otherwise use summary
+    @view_type = params[:view] || (has_visualization_data ? 'visualization' : 'summary')
+    
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 
-    # Variables for summary view
+    # Steps logic for summary and analysis views
+    if @view_type == 'summary' || @view_type == 'analysis'
+      # Get project type for display
+      @project_type = @project.project_type
+      
+      # Get runs for the project
+      @runs = @project.runs.includes(:annots)
+      
+      # Get steps hash
+      @h_steps = {}
+      Step.all.each do |step|
+        @h_steps[step.id] = step
+      end
+      
+      # Get project steps for availability checking
+      @project_steps_hash = {}
+      ProjectStep.where(project_id: @project.id).each do |ps|
+        @project_steps_hash[ps.step_id] = ps
+      end
+      
+      # Get all steps for this project's docker image, ordered by rank
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @all_project_steps = if asap_docker_image
+                             Step.where(docker_image_id: asap_docker_image.id)
+                                 .where.not(hidden: true)
+                                 .order(:rank, :name)
+                           else
+                             Step.none
+                           end
+      
+      # Filter to pretreatment group steps (steps with group_name 'pretreatment' or blank/null)
+      # Sort by rank to ensure proper order
+      # If no pretreatment steps found, show all steps (fallback)
+      @pretreatment_steps = @all_project_steps.select { |s| s.group_name == 'pretreatment' || s.group_name.blank? || s.group_name.nil? }
+                                             .sort_by { |s| [s.rank || 9999, s.name] }
+      
+      # Fallback: if no pretreatment steps found, use all steps
+      if @pretreatment_steps.empty?
+        Rails.logger.warn("[ProjectsController#show] No pretreatment steps found, using all steps")
+        @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
+      end
+      
+      Rails.logger.info("[ProjectsController#show] Found #{@pretreatment_steps.count} steps for project #{@project.id}")
+      Rails.logger.info("[ProjectsController#show] Steps: #{@pretreatment_steps.map { |s| "#{s.name} (rank: #{s.rank}, group: #{s.group_name})" }.join(', ')}")
+      
+      # Determine step availability: a step is available if all previous steps (by rank) are complete
+      @steps_with_status = []
+      @current_step_info = nil
+      
+      # Find parsing step index to filter out steps before it
+      parsing_step_index = @pretreatment_steps.index { |s| s.name == 'parsing' }
+      
+      # Filter to only show steps from parsing onwards
+      steps_to_show = if parsing_step_index
+                        @pretreatment_steps[parsing_step_index..-1]
+                      else
+                        @pretreatment_steps
+                      end
+      
+      steps_to_show.each_with_index do |step, adjusted_index|
+        project_step = @project_steps_hash[step.id]
+        status_id = project_step&.status_id
+        
+        # Check if all previous steps (by rank) are complete
+        # Previous steps are those with lower rank, or same rank but earlier in the list
+        # Only consider steps from parsing onwards
+        previous_steps = steps_to_show[0...adjusted_index]
+        all_previous_complete = previous_steps.all? do |prev_step|
+          prev_ps = @project_steps_hash[prev_step.id]
+          prev_ps && prev_ps.status_id == 3 # 3 = complete
+        end
+        
+        # Step is available if it's the parsing step (first after filtering) or all previous steps are complete
+        is_available = adjusted_index == 0 || all_previous_complete
+        
+        # Current step is the first incomplete step that is available
+        # Only set current if we haven't found one yet
+        is_current = false
+        if !@current_step_info && is_available && status_id != 3
+          is_current = true
+          @current_step_info = {
+            step: step,
+            project_step: project_step,
+            status_id: status_id,
+            index: adjusted_index
+          }
+        end
+        
+        @steps_with_status << {
+          step: step,
+          project_step: project_step,
+          status_id: status_id,
+          status: case status_id
+                  when 1 then 'waiting'
+                  when 2 then 'running'
+                  when 3 then 'complete'
+                  when 4 then 'failed'
+                  else 'not_started'
+                  end,
+          is_available: is_available,
+          is_current: is_current,
+          is_complete: (status_id == 3)
+        }
+      end
+      
+      # Find the current step
+      @current_step = @current_step_info ? @current_step_info[:step] : nil
+    end
+    
+    # Variables specific to summary view
     if @view_type == 'summary'
+      # Get parsing status for display
+      @parsing_status = 'complete'
+      @parsing_step = Step.where(name: 'parsing').first
+      if @parsing_step
+        @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
+        if @parsing_project_step
+          @parsing_status = case @parsing_project_step.status_id
+          when 1
+            'waiting'
+          when 2
+            'running'
+          when 3
+            'complete'
+          when 4
+            'failed'
+          else
+            'complete'
+          end
+        end
+      end
+      
       # Get time to destroy for sandbox projects
       @time_to_destroy = nil
       if @project.sandbox? && !current_user
@@ -126,12 +266,14 @@ class ProjectsController < ApplicationController
       @cloned_project = @project.cloned_project if @project.cloned_project_id
       
       # Get runs for the project (needed for filter_runs partial)
-      @runs = @project.runs.includes(:annots)
+      @runs = @project.runs.includes(:annots) unless @runs
       
       # Get steps hash (needed for filter_runs partial)
-      @h_steps = {}
-      Step.all.each do |step|
-        @h_steps[step.id] = step
+      unless @h_steps
+        @h_steps = {}
+        Step.all.each do |step|
+          @h_steps[step.id] = step
+        end
       end
       
       # Additional variables needed for filter_runs partial
@@ -315,9 +457,75 @@ class ProjectsController < ApplicationController
     
     # Get input file from session
     input_file = nil
-    if session[:file_upload] && session[:file_upload][:complete] && session[:file_upload][:fu_id]
-      input_file = Fu.find_by(id: session[:file_upload][:fu_id], user_id: @project.user_id)
+    Rails.logger.info("[ProjectsController#create] ===== START FILE UPLOAD CHECK =====")
+    Rails.logger.info("[ProjectsController#create] Checking session for file_upload: #{session[:file_upload].inspect}")
+    Rails.logger.info("[ProjectsController#create] Project user_id: #{@project.user_id}, current_user.id: #{current_user&.id}")
+    
+    # Initialize input_file to nil
+    input_file = nil
+    
+    # Check session conditions step by step
+    # Rails sessions serialize hash keys as strings, so we need to use string keys
+    has_session = session[:file_upload].present?
+    Rails.logger.info("[ProjectsController#create] Session[:file_upload] exists: #{has_session}")
+    
+    if has_session
+      # Try both symbol and string keys (Rails may serialize as strings)
+      file_upload_hash = session[:file_upload]
+      session_complete = file_upload_hash[:complete] || file_upload_hash['complete']
+      session_fu_id = file_upload_hash[:fu_id] || file_upload_hash['fu_id']
+      session_path = file_upload_hash[:path] || file_upload_hash['path']
+      
+      Rails.logger.info("[ProjectsController#create] Session[:file_upload][:complete]: #{file_upload_hash[:complete].inspect}")
+      Rails.logger.info("[ProjectsController#create] Session[:file_upload]['complete']: #{file_upload_hash['complete'].inspect}")
+      Rails.logger.info("[ProjectsController#create] session_complete (resolved): #{session_complete.inspect} (#{session_complete.class})")
+      Rails.logger.info("[ProjectsController#create] Session[:file_upload][:fu_id]: #{file_upload_hash[:fu_id].inspect}")
+      Rails.logger.info("[ProjectsController#create] Session[:file_upload]['fu_id']: #{file_upload_hash['fu_id'].inspect}")
+      Rails.logger.info("[ProjectsController#create] session_fu_id (resolved): #{session_fu_id.inspect} (#{session_fu_id.class})")
+      Rails.logger.info("[ProjectsController#create] session_path (resolved): #{session_path.inspect}")
+      
+      if session_complete && session_fu_id
+        fu_id = session_fu_id
+        # Fu records are created with current_user.id, so use that to find the record
+        search_user_id = current_user&.id
+        Rails.logger.info("[ProjectsController#create] Looking for Fu with id: #{fu_id}, user_id: #{search_user_id}")
+        
+        # Try to find Fu record - first with user_id, then without
+        input_file = if search_user_id
+                       Fu.find_by(id: fu_id, user_id: search_user_id)
+                     else
+                       Fu.find_by(id: fu_id)
+                     end
+        Rails.logger.info("[ProjectsController#create] First Fu lookup result: #{input_file.inspect}")
+        
+        # If not found with user_id filter, try without it (in case user_id doesn't match)
+        if input_file.nil? && search_user_id
+          Rails.logger.warn("[ProjectsController#create] Fu not found with user_id filter, trying without user_id")
+          input_file = Fu.find_by(id: fu_id)
+          Rails.logger.info("[ProjectsController#create] Second Fu lookup (without user_id) result: #{input_file.inspect}")
+        end
+        
+        Rails.logger.info("[ProjectsController#create] Final input_file after Fu lookup: #{input_file.inspect}")
+        
+        # If still not found, check if Fu record exists at all
+        if input_file.nil?
+          all_fus_with_id = Fu.where(id: fu_id)
+          Rails.logger.error("[ProjectsController#create] Fu record not found! Searched for id: #{fu_id}, user_id: #{search_user_id}")
+          Rails.logger.error("[ProjectsController#create] Total Fu records with this id: #{all_fus_with_id.count}")
+          all_fus_with_id.each_with_index do |fu, idx|
+            Rails.logger.error("[ProjectsController#create]   Fu[#{idx}]: id=#{fu.id}, user_id=#{fu.user_id}, upload_file_name=#{fu.upload_file_name}")
+          end
+        else
+          Rails.logger.info("[ProjectsController#create] ✓ Successfully found Fu record: id=#{input_file.id}, user_id=#{input_file.user_id}, upload_file_name=#{input_file.upload_file_name}")
+        end
+      else
+        Rails.logger.warn("[ProjectsController#create] Session check failed - complete: #{session_complete.inspect}, fu_id: #{session_fu_id.inspect}")
+      end
+    else
+      Rails.logger.warn("[ProjectsController#create] No session[:file_upload] found")
     end
+    
+    Rails.logger.info("[ProjectsController#create] ===== END FILE UPLOAD CHECK - input_file: #{input_file.inspect} =====")
     
     # Set default filters
     default_de_filter = {
@@ -331,20 +539,85 @@ class ProjectsController < ApplicationController
     }
     @project.ge_filter_json = default_ge_filter.to_json
 
+    Rails.logger.info("[ProjectsController#create] About to enter respond_to block, request format: #{request.format}")
     respond_to do |format|
+      Rails.logger.info("[ProjectsController#create] ===== VALIDATION CHECK =====")
+      Rails.logger.info("[ProjectsController#create] Inside respond_to block, format: #{format.inspect}")
+      Rails.logger.info("[ProjectsController#create] input_file at validation: #{input_file.inspect}")
+      Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
+      Rails.logger.info("[ProjectsController#create] input_file.upload_file_name: #{input_file&.upload_file_name.inspect}")
+      
       # Require an input file for project creation
-      unless input_file && input_file.upload_file_name.present?
+      # Check if we have either a Fu record OR a valid session path
+      # Rails sessions serialize hash keys as strings, so we need to use string keys
+      has_input_file = input_file.present? && input_file.upload_file_name.present?
+      file_upload_hash = session[:file_upload]
+      session_path_check = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
+      has_session_path = session_path_check && File.exist?(session_path_check)
+      
+      Rails.logger.info("[ProjectsController#create] has_input_file: #{has_input_file}")
+      Rails.logger.info("[ProjectsController#create] session[:file_upload][:path]: #{session_path_check.inspect}")
+      Rails.logger.info("[ProjectsController#create] File.exist?(session_path): #{session_path_check && File.exist?(session_path_check)}")
+      Rails.logger.info("[ProjectsController#create] has_session_path: #{has_session_path}")
+      
+      unless has_input_file || has_session_path
+        Rails.logger.warn("[ProjectsController#create] ===== VALIDATION FAILED =====")
+        Rails.logger.warn("[ProjectsController#create] Input file validation failed - input_file: #{input_file.inspect}, session_path exists: #{has_session_path}")
         @organisms = Organism.order(:name)
         @project_types = ProjectType.order(:name)
         @versions = available_versions
         @file_formats = FileFormat.ordered
+        @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id))
         @project.errors.add(:base, "An input file is required to create a project. Please upload a file first.")
-        format.html { render :new, status: :unprocessable_entity }
-        format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
-        return
+        format.html { 
+          Rails.logger.info("[ProjectsController#create] Rendering :new template (HTML format)")
+          render template: 'projects/new', status: :unprocessable_entity 
+          return
+        }
+        format.turbo_stream { 
+          Rails.logger.info("[ProjectsController#create] Rendering :new template (turbo_stream format)")
+          render template: 'projects/new', status: :unprocessable_entity 
+          return
+        }
+        format.json { 
+          render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity 
+          return
+        }
       end
       
+      Rails.logger.info("[ProjectsController#create] ===== BEFORE PROJECT SAVE =====")
+      Rails.logger.info("[ProjectsController#create] Attempting to save project: #{@project.inspect}")
+      Rails.logger.info("[ProjectsController#create] Request format: #{request.format}")
+      Rails.logger.info("[ProjectsController#create] input_file at save check: #{input_file.inspect}")
+      Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
+      Rails.logger.info("[ProjectsController#create] input_file.upload_file_name: #{input_file&.upload_file_name.inspect}")
+      
       if @project.save
+        Rails.logger.info("[ProjectsController#create] ===== PROJECT SAVED SUCCESSFULLY =====")
+        Rails.logger.info("[ProjectsController#create] Project saved successfully with ID: #{@project.id}, key: #{@project.key}")
+        Rails.logger.info("[ProjectsController#create] input_file after save: #{input_file.inspect}")
+        Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
+        
+        # Check session path
+        # Rails sessions serialize hash keys as strings, so we need to use string keys
+        file_upload_hash = session[:file_upload]
+        session_path = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
+        session_path_exists = session_path && File.exist?(session_path)
+        Rails.logger.info("[ProjectsController#create] session[:file_upload][:path]: #{file_upload_hash && file_upload_hash[:path].inspect}")
+        Rails.logger.info("[ProjectsController#create] session[:file_upload]['path']: #{file_upload_hash && file_upload_hash['path'].inspect}")
+        Rails.logger.info("[ProjectsController#create] session_path (resolved): #{session_path.inspect}")
+        Rails.logger.info("[ProjectsController#create] Session path file exists: #{session_path_exists}")
+        
+        # Ensure we have either input_file or session path (validation already checked this)
+        unless input_file.present? || session_path_exists
+          Rails.logger.error("[ProjectsController#create] Neither input_file nor session path available after validation passed! This should not happen.")
+          @project.errors.add(:base, "Internal error: input file not found")
+          format.html { render template: 'projects/new', status: :unprocessable_entity }
+          format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
+          format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+          return
+        end
+        
         # Create project directory
         user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
         project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
@@ -353,10 +626,34 @@ class ProjectsController < ApplicationController
         # Get preparsing data from output.json
         upload_base_dir = ENV["UPLOAD_DATA_DIR"]
         
-        upload_dir = Pathname.new(upload_base_dir) + input_file.id.to_s
+        # Use input_file.id if available, otherwise use session path
+        Rails.logger.info("[ProjectsController#create] ===== DETERMINING UPLOAD PATH =====")
+        Rails.logger.info("[ProjectsController#create] input_file: #{input_file.inspect}")
+        Rails.logger.info("[ProjectsController#create] input_file && input_file.id: #{input_file && input_file.id}")
         
-        # Use the original uploaded filename directly (no conversion needed)
-        input_filename = input_file.upload_file_name
+        if input_file && input_file.id
+          upload_dir = Pathname.new(upload_base_dir) + input_file.id.to_s
+          input_filename = input_file.upload_file_name
+          Rails.logger.info("[ProjectsController#create] Using input_file path - upload_dir: #{upload_dir}, input_filename: #{input_filename}")
+        else
+          # Fallback: use session path directly if Fu record not found
+          # Rails sessions serialize hash keys as strings, so we need to use string keys
+          file_upload_hash = session[:file_upload]
+          session_path_str = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
+          if session_path_str
+            session_path = Pathname.new(session_path_str)
+            upload_dir = session_path.dirname
+            input_filename = session_path.basename.to_s
+            Rails.logger.warn("[ProjectsController#create] Using session path fallback: #{upload_dir}/#{input_filename}")
+          else
+            Rails.logger.error("[ProjectsController#create] Cannot determine upload directory - input_file: #{input_file.inspect}, session: #{session[:file_upload].inspect}")
+            @project.errors.add(:base, "Cannot locate uploaded file")
+            format.html { render template: 'projects/new', status: :unprocessable_entity }
+            format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
+            format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+            return
+          end
+        end
         
         # Get all valid extensions from FileFormat model
         valid_extensions = FileFormat.all.flat_map do |ff|
@@ -373,8 +670,8 @@ class ProjectsController < ApplicationController
           ext = 'txt'
         end
         
-        @project.input_filename = input_file.upload_file_name
-        @project.fu_id = input_file.id
+        @project.input_filename = input_filename
+        @project.fu_id = input_file&.id  # Use safe navigation operator
         @project.extension = ext
         @project.save
         
@@ -393,12 +690,18 @@ class ProjectsController < ApplicationController
           Rails.logger.error "Upload file not found at #{upload_path}"
         end
         
-        # Update Fu record with project info
-        input_file.update!(
-          project_id: @project.id,
-          project_key: @project.key,
-          status: 'completed'
-        )
+        # Update Fu record with project info (if it exists)
+        if input_file.present?
+          input_file.update!(
+            project_id: @project.id,
+            project_key: @project.key,
+            status: 'completed'
+          )
+        else
+          file_upload_hash = session[:file_upload]
+          session_path = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
+          Rails.logger.warn("[ProjectsController#create] Fu record not found, skipping update. Project created with session path: #{session_path}")
+        end
         
         # Initialize project steps
         init_project_steps
@@ -412,14 +715,21 @@ class ProjectsController < ApplicationController
         # Clean up session
         session.delete(:file_upload)
         
+        Rails.logger.info("[ProjectsController#create] About to redirect to project #{@project.id}")
         format.html { redirect_to @project, notice: "Project was successfully created." }
+        format.turbo_stream { 
+          Rails.logger.info("[ProjectsController#create] Turbo stream format - redirecting to project #{@project.id}")
+          redirect_to project_path(@project), status: :see_other, notice: "Project was successfully created." 
+        }
         format.json { render :show, status: :created, location: @project }
       else
+        Rails.logger.error("[ProjectsController#create] Project save failed: #{@project.errors.full_messages.inspect}")
         @organisms = Organism.order(:name)
         @project_types = ProjectType.order(:name)
         @versions = available_versions
         @file_formats = FileFormat.ordered
         format.html { render :new, status: :unprocessable_entity }
+        format.turbo_stream { render :new, status: :unprocessable_entity }
         format.json { render json: @project.errors, status: :unprocessable_entity }
       end
     end
@@ -1111,6 +1421,90 @@ class ProjectsController < ApplicationController
         )
         project_step.save
       end
+    end
+  end
+
+  # GET /projects/:id/creating
+  def creating
+    @project = Project.find(params[:id])
+  end
+
+  # GET /projects/:id/step_results
+  def step_results
+    step_id = params[:step_id]
+    @step = Step.find_by(id: step_id)
+    
+    if @step.nil?
+      render plain: "Step not found", status: :not_found
+      return
+    end
+    
+    # Get runs for this step
+    @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+    
+    # Get project step status
+    @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
+    
+    respond_to do |format|
+      format.html { render partial: 'projects/views/step_results', layout: false }
+      format.json { render json: { step: @step, runs: @runs } }
+    end
+  end
+
+  # GET /projects/:id/creation_status
+  def creation_status
+    @project = Project.find(params[:id])
+    
+    # Determine current step based on project status and steps
+    status_info = {
+      project_created: true,
+      project_key: @project.key,
+      parsing_status: 'waiting',
+      parsing_complete: false,
+      metadata_status: 'waiting',
+      metadata_complete: false,
+      all_complete: false,
+      redirect_url: nil
+    }
+    
+    # Check parsing step status
+    parsing_step = Step.where(name: 'parsing').first
+    if parsing_step
+      project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
+      if project_step
+        status_info[:parsing_status] = case project_step.status_id
+        when 1
+          'waiting'
+        when 2
+          'running'
+        when 3
+          'complete'
+        when 4
+          'failed'
+        else
+          'waiting'
+        end
+        status_info[:parsing_complete] = (project_step.status_id == 3)
+      end
+    end
+    
+    # Check metadata status - for now, mark as complete when parsing is done
+    # In the future, you can add a separate metadata copying step check here
+    if status_info[:parsing_complete]
+      status_info[:metadata_status] = 'complete'
+      status_info[:metadata_complete] = true
+    elsif status_info[:parsing_status] == 'running'
+      status_info[:metadata_status] = 'waiting'
+    end
+    
+    # Check if project is fully ready (parsing and metadata complete)
+    if status_info[:parsing_complete] && status_info[:metadata_complete]
+      status_info[:all_complete] = true
+      status_info[:redirect_url] = project_path(@project)
+    end
+    
+    respond_to do |format|
+      format.json { render json: status_info }
     end
   end
 

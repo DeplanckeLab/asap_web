@@ -81,12 +81,13 @@ class FusController < ApplicationController
             # File is ahead of where we should be - something wrong, skip this chunk
             Rails.logger.warn "Upload size mismatch. File is #{current_size} bytes, expected #{expected_position} for chunk #{chunk_index}. Skipping chunk."
             # Return current status without writing
+            progress = file_size > 0 ? ((current_size.to_f / file_size) * 100).round(2) : 0.0
             render json: {
               fu_id: fu.id,
               chunk_index: chunk_index,
               uploaded_size: current_size,
               complete: false,
-              progress: ((current_size.to_f / file_size) * 100).round(2),
+              progress: progress,
               skipped: true
             }
             return
@@ -147,12 +148,13 @@ class FusController < ApplicationController
         Rails.logger.info("[FusController#upload_chunk] Not enqueueing preparsing job. is_complete: #{is_complete}")
       end
       
+      progress = file_size > 0 ? ((current_size.to_f / file_size) * 100).round(2) : 0.0
       render json: {
         fu_id: fu.id,
         chunk_index: chunk_index,
         uploaded_size: current_size,
         complete: is_complete,
-        progress: ((current_size.to_f / file_size) * 100).round(2)
+        progress: progress
       }
     rescue => e
       Rails.logger.error "Upload error: #{e.message}"
@@ -196,14 +198,18 @@ class FusController < ApplicationController
     if fu && fu.file_path && File.exist?(fu.file_path)
       current_size = File.size(fu.file_path)
       is_complete = fu.complete?
+      total_size = fu.upload_file_size || 0
+      
+      # Only mark as resumable if we have valid size information
+      resumable = fu.resumable? && total_size > 0 && current_size >= 0 && current_size <= total_size
       
       render json: {
         exists: true,
         fu_id: fu.id,
         size: current_size,
-        total_size: fu.upload_file_size || 0,
+        total_size: total_size,
         complete: is_complete,
-        resumable: fu.resumable?
+        resumable: resumable
       }
     else
       render json: { exists: false, size: 0, total_size: 0, complete: false }
@@ -378,8 +384,9 @@ class FusController < ApplicationController
     has_header = request_body['has_header']
 
     # Validate that we have either a dataset selection or parsing parameters
+    # Note: delimiter can be empty string (for tab), so we check for key presence, not value presence
     has_dataset_selection = sel.present?
-    has_parsing_params = delimiter.present? || gene_name_col.present? || has_header.present?
+    has_parsing_params = request_body.key?('delimiter') || gene_name_col.present? || request_body.key?('has_header')
     
     unless has_dataset_selection || has_parsing_params
       render json: { error: 'Either dataset selection (sel) or parsing parameters (delimiter, gene_name_col, has_header) must be provided' }, status: :bad_request

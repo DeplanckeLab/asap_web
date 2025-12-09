@@ -105,8 +105,10 @@ class FuPreparsingService
     script_args = ['python3', "/srv/#{python_script_name}"]
     script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
     script_args << '--col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
-    # Check if delimiter key exists (not using present? because space is considered blank in Rails)
-    if @options.key?(:delimiter) && @options[:delimiter] != nil && @options[:delimiter] != ''
+    # Check if delimiter key exists and has a non-empty value
+    # Empty string means tab delimiter - don't pass --delim argument (script defaults to tab)
+    # Only pass --delim when delimiter is explicitly set to a non-empty value
+    if @options.key?(:delimiter) && @options[:delimiter] != nil && @options[:delimiter].to_s != ''
       delim_value = @options[:delimiter].to_s
       # Add delimiter argument - Shellwords.join will handle proper escaping
       script_args << '--delim' << delim_value

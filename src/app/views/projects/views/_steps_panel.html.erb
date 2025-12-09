@@ -1,0 +1,109 @@
+<div class="flex flex-col h-full">
+  <div class="bg-blue-600 text-white px-4 py-3 border-b-2 border-blue-700 flex-shrink-0">
+    <h5 class="mb-0 font-bold text-lg">
+      <i class="fas fa-list-ol me-2"></i>Pipeline Steps
+    </h5>
+  </div>
+  <div class="flex-1 overflow-y-auto">
+    <% if @steps_with_status && @steps_with_status.any? %>
+      <% @steps_with_status.each do |step_info| %>
+        <% step = step_info[:step] %>
+        <% is_current = step_info[:is_current] %>
+        <% is_available = step_info[:is_available] %>
+        <% is_complete = step_info[:is_complete] %>
+        <% status = step_info[:status] %>
+        
+        <% 
+          # Determine CSS classes and styles
+          item_classes = 'flex items-start px-4 py-3 border-b border-gray-200 step-item'
+          item_style = ''
+          if is_current
+            item_classes += ' bg-blue-600'
+            item_style = 'border-left: 4px solid #0056b3;'
+          elsif !is_available
+            item_classes += ' opacity-50 cursor-not-allowed bg-gray-50'
+            item_style = ''
+          else
+            item_style = 'border-left: 4px solid transparent;'
+          end
+          
+          # Determine text color
+          text_class = if is_current
+                        'text-white'
+                      elsif !is_available
+                        'text-gray-500'
+                      elsif is_complete
+                        'text-green-600'
+                      else
+                        'text-gray-900'
+                      end
+        %>
+        
+        <div class="<%= item_classes %> <%= text_class %>" 
+             style="<%= item_style %> <%= 'cursor: pointer;' if is_available %>"
+             <% if is_available %>
+               data-action="click->step-selector#selectStep"
+               data-step-selector-step-id-param="<%= step.id %>"
+             <% end %>
+             data-step-id="<%= step.id %>">
+          <div class="flex-shrink-0 mr-3 mt-1">
+            <% if is_current %>
+              <i class="fas fa-arrow-right text-lg"></i>
+            <% elsif is_complete %>
+              <i class="fas fa-check-circle text-lg text-green-500"></i>
+            <% elsif status == 'running' %>
+              <i class="fas fa-spinner fa-spin text-lg text-blue-500"></i>
+            <% elsif status == 'waiting' %>
+              <i class="fas fa-clock text-lg text-yellow-500"></i>
+            <% elsif status == 'failed' %>
+              <i class="fas fa-exclamation-circle text-lg text-red-500"></i>
+            <% else %>
+              <i class="far fa-circle text-lg opacity-30"></i>
+            <% end %>
+          </div>
+          <div class="flex-grow">
+            <div class="mb-1">
+              <strong class="block"><%= step.label.presence || step.name %></strong>
+              <% if step.rank %>
+                <small class="text-gray-500">Rank: <%= step.rank %></small>
+              <% end %>
+            </div>
+            <% if status != 'not_started' && status.present? %>
+              <div class="mt-2">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-<%= case status
+                                                                                                              when 'complete' then 'green'
+                                                                                                              when 'running' then 'blue'
+                                                                                                              when 'waiting' then 'yellow'
+                                                                                                              when 'failed' then 'red'
+                                                                                                              else 'gray'
+                                                                                                              end %>-100 text-<%= case status
+                                                                                                                                    when 'complete' then 'green'
+                                                                                                                                    when 'running' then 'blue'
+                                                                                                                                    when 'waiting' then 'yellow'
+                                                                                                                                    when 'failed' then 'red'
+                                                                                                                                    else 'gray'
+                                                                                                                                    end %>-800">
+                  <%= status.humanize %>
+                </span>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% else %>
+      <div class="text-center py-8 px-4">
+        <p class="text-gray-500 mb-0">No steps available</p>
+        <% if admin? %>
+          <small class="text-gray-400 block mt-2 text-xs">
+            Debug info:<br/>
+            @steps_with_status present: <%= @steps_with_status.present? %><br/>
+            @steps_with_status count: <%= @steps_with_status&.count || 0 %><br/>
+            @pretreatment_steps count: <%= @pretreatment_steps&.count || 0 %><br/>
+            @all_project_steps count: <%= @all_project_steps&.count || 0 %>
+          </small>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
+

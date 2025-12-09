@@ -1,125 +1,43 @@
-<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-  <div class="mb-6">
-    <h2 class="text-2xl font-bold text-gray-900 mb-2">Analysis</h2>
-    <p class="text-gray-600">Data analysis tools and pipelines for single-cell transcriptomics</p>
+<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>">
+  <!-- Header -->
+  <div class="mb-4 flex-shrink-0">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-2xl font-bold text-gray-900">Analysis</h2>
+      <% if @project_type %>
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
+          <%= @project_type.name %>
+        </span>
+      <% end %>
+    </div>
+   <!-- <p class="text-gray-600">Data analysis tools and pipelines for single-cell transcriptomics</p>-->
   </div>
 
-  <!-- Analysis Pipeline Steps -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-    <!-- Quality Control -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold text-gray-900">Quality Control</h3>
-        <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Completed</span>
-      </div>
-      <p class="text-sm text-gray-600 mb-3">Filter cells and genes based on quality metrics</p>
-      <div class="space-y-2 text-sm">
-        <div class="flex justify-between">
-          <span>Cells filtered:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.cell_count) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span>Genes filtered:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.gene_count) %></span>
-        </div>
+  <!-- Two Column Layout: Steps Panel (Left) and Step Results (Right) -->
+  <div class="flex flex-row gap-4 flex-1 min-h-0">
+    <!-- Left Panel: Steps Navigation -->
+    <div class="w-1/4 flex-shrink-0 flex flex-col min-h-0">
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
+        <%= render partial: 'projects/views/steps_panel' %>
       </div>
     </div>
-
-    <!-- Normalization -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold text-gray-900">Normalization</h3>
-        <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Completed</span>
-      </div>
-      <p class="text-sm text-gray-600 mb-3">Normalize gene expression data</p>
-      <div class="space-y-2 text-sm">
-        <div class="flex justify-between">
-          <span>Method:</span>
-          <span class="font-medium">Log-normalize</span>
-        </div>
-        <div class="flex justify-between">
-          <span>Scale factor:</span>
-          <span class="font-medium">10,000</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Feature Selection -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold text-gray-900">Feature Selection</h3>
-        <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">In Progress</span>
-      </div>
-      <p class="text-sm text-gray-600 mb-3">Select highly variable genes</p>
-      <button class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
-        Run Selection
-      </button>
-    </div>
-
-    <!-- Dimensionality Reduction -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold text-gray-900">Dimensionality Reduction</h3>
-        <span class="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded-full">Pending</span>
-      </div>
-      <p class="text-sm text-gray-600 mb-3">PCA and UMAP/t-SNE analysis</p>
-      <button class="px-3 py-1 bg-gray-300 text-gray-700 text-sm rounded hover:bg-gray-400" disabled>
-        Run PCA
-      </button>
-    </div>
-  </div>
-
-  <!-- Analysis Results -->
-  <div class="bg-gray-50 rounded-lg p-6">
-    <h3 class="text-lg font-semibold text-gray-900 mb-4">Analysis Results</h3>
     
-    <!-- Statistics -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="bg-white rounded-lg p-4 text-center">
-        <div class="text-2xl font-bold text-blue-600"><%= number_with_delimiter(@project.cell_count) %></div>
-        <div class="text-sm text-gray-600">Total Cells</div>
-      </div>
-      <div class="bg-white rounded-lg p-4 text-center">
-        <div class="text-2xl font-bold text-green-600"><%= number_with_delimiter(@project.gene_count) %></div>
-        <div class="text-sm text-gray-600">Total Genes</div>
-      </div>
-      <div class="bg-white rounded-lg p-4 text-center">
-        <div class="text-2xl font-bold text-purple-600">5</div>
-        <div class="text-sm text-gray-600">Clusters</div>
-      </div>
-    </div>
-
-    <!-- Recent Analysis -->
-    <div class="bg-white rounded-lg p-4">
-      <h4 class="font-semibold text-gray-900 mb-3">Recent Analysis</h4>
-      <div class="space-y-2 text-sm">
-        <div class="flex justify-between items-center py-2 border-b border-gray-100">
-          <span>Quality Control</span>
-          <span class="text-green-600">✓ Completed</span>
-        </div>
-        <div class="flex justify-between items-center py-2 border-b border-gray-100">
-          <span>Normalization</span>
-          <span class="text-green-600">✓ Completed</span>
-        </div>
-        <div class="flex justify-between items-center py-2 border-b border-gray-100">
-          <span>Feature Selection</span>
-          <span class="text-yellow-600">⟳ Running</span>
-        </div>
-        <div class="flex justify-between items-center py-2">
-          <span>Clustering</span>
-          <span class="text-gray-400">⏸ Pending</span>
+    <!-- Right Panel: Step Results -->
+    <div class="flex-1 flex flex-col min-h-0">
+      <div data-step-selector-target="resultsContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
+        <div class="p-6 overflow-y-auto flex-1">
+          <div class="text-center text-gray-500 py-12" data-step-selector-target="emptyState">
+            <i class="fas fa-mouse-pointer text-5xl mb-4 opacity-30"></i>
+            <p class="mb-0">Select a step from the left panel to view its results</p>
+          </div>
+          <div data-step-selector-target="loadingState" style="display: none;" class="text-center py-12">
+            <i class="fas fa-spinner fa-spin text-3xl text-blue-600 mb-4"></i>
+            <p class="text-gray-600 mb-0">Loading step results...</p>
+          </div>
+          <div data-step-selector-target="content" style="display: none;">
+            <!-- Step results will be loaded here -->
+          </div>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Action Buttons -->
-  <div class="mt-6 flex justify-end space-x-3">
-    <button class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
-      <i class="fas fa-download mr-2"></i>Export Results
-    </button>
-    <button class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-      <i class="fas fa-play mr-2"></i>Run Analysis
-    </button>
   </div>
 </div>

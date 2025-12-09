@@ -263,7 +263,7 @@ class Project < ApplicationRecord
     
     # Update job with the ActiveJob job_id if available
     if parsing_job.respond_to?(:job_id)
-      job.update_attributes(delayed_job_id: parsing_job.job_id) if job
+      job.update(delayed_job_id: parsing_job.job_id) if job
     end
     
     job

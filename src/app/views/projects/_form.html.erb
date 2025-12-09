@@ -5,7 +5,7 @@
 <%   hash[key] = { color: ff.color.presence || '#6B7280', label: ff.label.presence || key, extensions: extensions } %>
 <% end %>
 <% file_formats_for_js["UNKNOWN"] ||= { color: '#6B7280', label: '?', extensions: [] } %>
-<%= form_with(model: project, class: "contents") do |form| %>
+<%= form_with(model: project, local: true, data: { turbo: false }, class: "contents") do |form| %>
   <% if project.errors.any? %>
     <div id="error_explanation" class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md mb-6">
       <h2 class="font-semibold mb-2"><%= pluralize(project.errors.count, "error") %> prohibited this project from being saved:</h2>

@@ -38,7 +38,12 @@ class Fu < ApplicationRecord
   
   # Check if we can resume this upload
   def resumable?
-    status == 'uploading' && file_path && File.exist?(file_path) && !complete?
+    return false unless status == 'uploading' && file_path && File.exist?(file_path) && !complete?
+    return false unless upload_file_size && upload_file_size > 0
+    
+    current_size = File.size(file_path)
+    # Validate that current size is reasonable (not larger than expected)
+    current_size >= 0 && current_size <= upload_file_size
   end
 end
 

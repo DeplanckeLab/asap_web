@@ -66,6 +66,17 @@ export default class extends Controller {
     this.updateResetButtonState()
 
     this.form = this.element.closest('form')
+    // Fallback: try to find form by ID or by the submit button's form property
+    if (!this.form && this.hasSubmitButtonTarget) {
+      this.form = this.submitButtonTarget.form
+    }
+    // Another fallback: find form by action attribute
+    if (!this.form) {
+      const forms = document.querySelectorAll('form[action*="/projects"]')
+      if (forms.length > 0) {
+        this.form = forms[0]
+      }
+    }
     this.projectNameInputElement = this.hasProjectNameTarget
       ? this.projectNameTarget
       : (this.form?.querySelector('[name="project[name]"]') || null)
@@ -94,6 +105,8 @@ export default class extends Controller {
     // Set up form submission handler
     if (this.form) {
       this.form.addEventListener('submit', this.handleFormSubmit.bind(this))
+    } else {
+      console.error('[FileUpload] Form not found! Cannot attach submit handler.')
     }
 
     // Initially disable submit button
@@ -305,15 +318,24 @@ export default class extends Controller {
       if (resumeInfo && resumeInfo.exists && resumeInfo.resumable) {
         this.fuId = resumeInfo.fu_id
         const resumeSize = resumeInfo.size
-        const resumePercent = ((resumeSize / resumeInfo.total_size) * 100).toFixed(1)
+        const totalSize = resumeInfo.total_size
         
-        if (confirm(`Found an incomplete upload (${resumePercent}% complete). Would you like to resume from where you left off?`)) {
-          this.updateProgress(resumeSize, resumeInfo.total_size)
-          if (this.hasStatusTarget) {
-            this.statusTarget.textContent = `Resuming upload from ${this.formatBytes(resumeSize)}...`
+        // Validate total_size to prevent division by zero or invalid percentages
+        if (totalSize > 0 && resumeSize >= 0 && resumeSize <= totalSize) {
+          const resumePercent = ((resumeSize / totalSize) * 100).toFixed(1)
+          
+          if (confirm(`Found an incomplete upload (${resumePercent}% complete). Would you like to resume from where you left off?`)) {
+            this.updateProgress(resumeSize, totalSize)
+            if (this.hasStatusTarget) {
+              this.statusTarget.textContent = `Resuming upload from ${this.formatBytes(resumeSize)}...`
+            }
+            this.subscribeToPreparsing(this.fuId)
+          } else {
+            this.fuId = null
           }
-          this.subscribeToPreparsing(this.fuId)
         } else {
+          // Invalid upload state - don't offer resume option
+          console.warn(`Invalid upload state: size=${resumeSize}, total_size=${totalSize}. Starting fresh upload.`)
           this.fuId = null
         }
       }
@@ -489,7 +511,23 @@ export default class extends Controller {
   }
 
   updateProgress(uploaded, total) {
-    const percentage = Math.round((uploaded / total) * 100)
+    // Validate inputs to prevent division by zero or invalid percentages
+    if (!total || total <= 0 || uploaded < 0) {
+      const percentage = 0
+      if (this.hasPercentageTarget) {
+        this.percentageTarget.textContent = '0%'
+      }
+      if (this.hasProgressBarTarget) {
+        this.progressBarTarget.style.width = '0%'
+      }
+      if (this.hasStatusTarget) {
+        this.statusTarget.textContent = `Uploading... ${this.formatBytes(uploaded)} / ${this.formatBytes(total)}`
+      }
+      return
+    }
+    
+    // Clamp percentage to valid range (0-100)
+    const percentage = Math.min(100, Math.max(0, Math.round((uploaded / total) * 100)))
     
     if (this.hasPercentageTarget) {
       this.percentageTarget.textContent = percentage + '%'
@@ -580,29 +618,64 @@ export default class extends Controller {
   }
 
   subscribeToPreparsing(fuId) {
-    if (!fuId) return
+    if (!fuId) {
+      console.warn('[FileUpload] Cannot subscribe to preparsing: fuId is not set')
+      return
+    }
+
+    // Check if consumer is available and has subscriptions
+    if (!consumer || !consumer.subscriptions) {
+      console.error('[FileUpload] ActionCable consumer is not available. Check websocket connection.')
+      this.setPreparsingStatus('Websocket connection error. Please refresh the page.', 'error', false)
+      return
+    }
 
     this.teardownPreparsingSubscription()
     this.showPreparsingPanel()
     this.setPreparsingStatus('Waiting for preparsing to start...', 'info', true)
     
-    this.preparsingSubscription = consumer.subscriptions.create(
-      { channel: "FuChannel", fu_id: fuId },
-      {
-        connected: () => {
-          console.log(`[FileUpload] Connected to FuChannel for fu_id: ${fuId}`)
-          // Check if preparsing is already complete (race condition fix)
-          this.checkPreparsingStatus(fuId)
-        },
-        disconnected: () => {
-          console.log(`[FileUpload] Disconnected from FuChannel for fu_id: ${fuId}`)
-        },
-        received: (data) => {
-          console.log(`[FileUpload] Received websocket message:`, data)
-          this.handlePreparsingUpdate(data)
+    try {
+      console.log(`[FileUpload] Creating websocket subscription for fu_id: ${fuId}`)
+      this.preparsingSubscription = consumer.subscriptions.create(
+        { channel: "FuChannel", fu_id: fuId },
+        {
+          connected: () => {
+            console.log(`[FileUpload] Connected to FuChannel for fu_id: ${fuId}`)
+            // Check if preparsing is already complete (race condition fix)
+            this.checkPreparsingStatus(fuId)
+          },
+          disconnected: () => {
+            console.warn(`[FileUpload] Disconnected from FuChannel for fu_id: ${fuId}`)
+            // Try to reconnect after a delay
+            setTimeout(() => {
+              if (this.fuId === fuId && !this.preparsingSubscription) {
+                console.log(`[FileUpload] Attempting to reconnect to FuChannel for fu_id: ${fuId}`)
+                this.subscribeToPreparsing(fuId)
+              }
+            }, 2000)
+          },
+          rejected: () => {
+            console.error(`[FileUpload] Subscription rejected for FuChannel fu_id: ${fuId}`)
+            this.setPreparsingStatus('Websocket subscription rejected. Preparsing updates may not work.', 'error', false)
+          },
+          received: (data) => {
+            console.log(`[FileUpload] Received websocket message:`, data)
+            this.handlePreparsingUpdate(data)
+          }
         }
+      )
+      
+      if (!this.preparsingSubscription) {
+        console.error('[FileUpload] Failed to create websocket subscription - subscriptions.create returned null/undefined')
+        this.setPreparsingStatus('Failed to establish websocket connection. Preparsing updates may not work.', 'error', false)
+      } else {
+        console.log(`[FileUpload] Websocket subscription created successfully for fu_id: ${fuId}`)
       }
-    )
+    } catch (error) {
+      console.error('[FileUpload] Error creating websocket subscription:', error)
+      console.error('[FileUpload] Error stack:', error.stack)
+      this.setPreparsingStatus('Websocket connection error. Preparsing updates may not work.', 'error', false)
+    }
   }
 
   async checkPreparsingStatus(fuId) {
@@ -730,8 +803,23 @@ export default class extends Controller {
 
   handlePreparsingUpdate(data) {
     console.log('[FileUpload] handlePreparsingUpdate called', data)
-    if (!data || data.stage !== 'preparsing') {
-      console.log('[FileUpload] Ignoring update - wrong stage or no data')
+    console.log('[FileUpload] Data stage:', data?.stage, 'Expected: preparsing')
+    console.log('[FileUpload] Data status:', data?.status)
+    console.log('[FileUpload] Data fu_id:', data?.fu_id, 'Current fuId:', this.fuId)
+    
+    if (!data) {
+      console.warn('[FileUpload] Ignoring update - no data')
+      return
+    }
+    
+    // Check if this update is for the current fuId
+    if (data.fu_id && data.fu_id.toString() !== this.fuId?.toString()) {
+      console.warn(`[FileUpload] Ignoring update - fu_id mismatch. Update fu_id: ${data.fu_id}, Current fuId: ${this.fuId}`)
+      return
+    }
+    
+    if (data.stage !== 'preparsing') {
+      console.log('[FileUpload] Ignoring update - wrong stage. Stage:', data.stage, 'Expected: preparsing')
       return
     }
 
@@ -1388,6 +1476,14 @@ export default class extends Controller {
         throw new Error(error.error || 'Failed to re-run preparsing')
       }
       
+      // Always re-subscribe when rerunning preparsing to ensure fresh connection
+      if (this.fuId) {
+        console.log('[FileUpload] Re-subscribing to preparsing websocket for dataset rerun')
+        this.subscribeToPreparsing(this.fuId)
+        // Start polling as fallback in case websocket misses the update
+        this.startPreparsingStatusPoll(this.fuId)
+      }
+      
       // The websocket will handle the update when preparsing completes
       this.setPreparsingStatus(`Preparsing for "${this.escapeHtml(datasetName)}" started. Please wait...`, 'info', true)
     } catch (error) {
@@ -1864,6 +1960,8 @@ export default class extends Controller {
       }
       return false
     }
+    // Otherwise, allow form to submit normally - don't prevent default
+    // The form will submit and follow the server redirect
   }
 
   async downloadFromUrl() {
@@ -2140,6 +2238,15 @@ export default class extends Controller {
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Failed to update preparsing' }))
         throw new Error(error.error || 'Failed to update preparsing')
+      }
+      
+      // Always re-subscribe when rerunning preparsing to ensure fresh connection
+      // This ensures we receive updates even if the previous subscription was disconnected
+      if (this.fuId) {
+        console.log('[FileUpload] Re-subscribing to preparsing websocket for rerun with new parameters')
+        this.subscribeToPreparsing(this.fuId)
+        // Start polling as fallback in case websocket misses the update
+        this.startPreparsingStatusPoll(this.fuId)
       }
       
       // The websocket will handle the update when preparsing completes

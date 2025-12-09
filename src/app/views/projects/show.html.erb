@@ -12,7 +12,7 @@
   <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
   <%= javascript_importmap_tags %>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
   <!-- Top Bar -->
   <div class="bg-black shadow-sm border-b border-gray-200">
     <div class="px-4 sm:px-6 lg:px-8 w-full">
@@ -183,20 +183,30 @@
   </div>
 
   <!-- Content Area -->
-  <div>
+  <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
     <% case @view_type %>
     <% when 'summary' %>
-      <%# render 'projects/views/summary_test' %>
+      <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <%= render 'projects/views/summary' %>
+      </div>
     <% when 'visualization' %>
       <%= render 'projects/views/visualization' %>
     <% when 'analysis' %>
-      <%= render 'projects/views/analysis' %>
+      <div class="flex-1 flex flex-col min-h-0 px-4 sm:px-6 lg:px-8 py-6">
+        <%= render 'projects/views/analysis' %>
+      </div>
     <% when 'data' %>
-      <%= render 'projects/views/data' %>
+      <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <%= render 'projects/views/data' %>
+      </div>
     <% when 'settings' %>
-      <%= render 'projects/views/settings' %>
+      <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <%= render 'projects/views/settings' %>
+      </div>
     <% else %>
-      <%= render 'projects/views/visualization' %>
+      <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <%= render 'projects/views/summary' %>
+      </div>
     <% end %>
   </div>
   

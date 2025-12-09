@@ -43,5 +43,17 @@ import OrganismSelectorController from "controllers/organism_selector_controller
 application.register("organism-selector", OrganismSelectorController)
 console.log('Organism selector controller registered')
 
+import ProjectCreationController from "controllers/project_creation_controller"
+application.register("project-creation", ProjectCreationController)
+console.log('Project creation controller registered')
+
+import ParsingStatusController from "controllers/parsing_status_controller"
+application.register("parsing-status", ParsingStatusController)
+console.log('Parsing status controller registered')
+
+import StepSelectorController from "controllers/step_selector_controller"
+application.register("step-selector", StepSelectorController)
+console.log('Step selector controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier)) 

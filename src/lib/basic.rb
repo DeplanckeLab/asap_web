@@ -2055,12 +2055,29 @@ module Basic
       cmd = core_cmd
       if h_cmd['docker_call']
      #   puts ">#{h_cmd['container_name']}-#{h_cmd['docker_call']}"
-        h_cmd['docker_call'].gsub!(/\#container_name/, h_cmd['container_name'])
+        h_cmd['docker_call'] = h_cmd['docker_call'].dup if h_cmd['docker_call'].frozen?
+        h_cmd['docker_call'].gsub!(/\#container_name/, h_cmd['container_name'] || '')
         host_option = ""
         if h_cmd['host_name'] != 'localhost'
           host_option = "-H #{h_cmd['host_name']}"
         end
         h_cmd['docker_call'].gsub!(/\#host_option/, host_option)
+        
+        # Replace relative .env_asap_run path with absolute path
+        # The docker command runs on the host, so we need an absolute path
+        # that's accessible from the host filesystem
+        # Use /data/asap2_test/.env_asap_run which is accessible from both container and host
+        env_file_path = '/data/asap2_test/.env_asap_run'
+        h_cmd['docker_call'].gsub!(/--env-file\s+\.env_asap_run/, "--env-file #{env_file_path}")
+        
+        # Add /data/asap2_test volume mount if USER_DATA_DIR points to it and it's not already mounted
+        # This is needed for parsing jobs that write to /data/asap2_test/users/...
+        user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/users')
+        if user_data_dir.include?('asap2_test') && !h_cmd['docker_call'].include?('-v /data/asap2_test:/data/asap2_test')
+          # Insert the volume mount after the existing /data/asap2 mount
+          # Match the pattern more flexibly to handle different spacing
+          h_cmd['docker_call'].gsub!(/(-v\s+\/data\/asap2:\/data\/asap2)/, "\\1 -v /data/asap2_test:/data/asap2_test")
+        end
 
         cmd = h_cmd['docker_call'] + " \"" + core_cmd + "\""
       end

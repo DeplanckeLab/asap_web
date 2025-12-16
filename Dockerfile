@@ -36,7 +36,16 @@ RUN apt-get update && \
     libboost-dev \
     yarn \
     openjdk-11-jre \
-    curl && \
+    curl \
+    libmunge-dev \
+    libmunge2 \
+    munge \
+    bzip2 \
+    autoconf \
+    automake \
+    libtool \
+    libssl-dev \
+    libpam0g-dev && \
     rm -rf /var/lib/apt/lists/*
 
 
@@ -76,6 +85,13 @@ RUN wget http://downloads.sourceforge.net/project/boost/boost/${BOOST_VERSION}/$
     && cd .. \
     && rm -rf ${BOOST_DIR} ${BOOST_DIR}.tar.bz2
 
+# Install SLURM client tools from Debian packages
+# Note: Version may differ from host, but client tools are generally compatible
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    slurm-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Rails
 RUN gem install rails
 
@@ -105,22 +121,40 @@ COPY ./lib/* ./lib/
 
 RUN mkdir /var/log/nginx
 
-#ENV USER=rvmuser USER_ID=1006 USER_GID=1006
+# Create rvmuser to match host user (for proper file permissions)
+ENV USER=rvmuser USER_ID=1006 USER_GID=1006
 
-# now creating user
-#RUN groupadd --gid "${USER_GID}" "${USER}" && \
-#    useradd \
-#      --uid ${USER_ID} \
-#      --gid ${USER_GID} \
-#      --create-home \
-#      --shell /bin/bash \
-#${USER}
+# Create user and group
+RUN groupadd --gid "${USER_GID}" "${USER}" && \
+    useradd \
+      --uid ${USER_ID} \
+      --gid ${USER_GID} \
+      --create-home \
+      --shell /bin/bash \
+      "${USER}"
 
-#RUN chown -R ${USER} /
+# Ensure docker group exists with GID 985 to match host (for Docker socket access)
+# Remove existing docker group if it exists with wrong GID, then recreate with correct GID
+RUN groupdel docker 2>/dev/null || true && \
+    groupadd --gid 985 docker || true
 
-#RUN usermod -a -G docker "${USER}"
+# Add user to docker and munge groups
+# munge group allows reading munge.key for SLURM authentication
+# docker group (GID 985) allows access to Docker socket
+RUN usermod -a -G docker,munge "${USER}"
 
-#USER ${USER}
+# Ensure bundle directory is writable by rvmuser (needed for bundle install in start.sh)
+RUN chown -R "${USER}:${USER}" /usr/local/bundle || true
+
+# Create /run/munge directory and prepare for munge key copy
+# The munge key will be mounted from host at runtime, we'll copy it in start.sh
+RUN mkdir -p /run/munge /var/log/munge && \
+    chmod 755 /run/munge && \
+    chmod 700 /var/log/munge && \
+    chown -R "${USER}:${USER}" /run/munge /var/log/munge || true
+
+# Note: We don't switch to USER here because docker-compose.test.yml sets user: "1006:1006"
+# This allows the container to start as rvmuser while still being able to switch to root if needed
 
 CMD ["bash", "start.sh"]
 

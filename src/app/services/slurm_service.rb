@@ -9,6 +9,7 @@ class SlurmService
     run_id = run.id
     project = run.project
     step = run.step
+    user_id = project.user_id
     
     cores = run.nber_cores || options[:cores] || 1
     memory_mb = (run.pred_max_ram || run.max_ram || options[:memory_mb] || 4096).to_i
@@ -37,6 +38,9 @@ class SlurmService
     error_file = output_dir + "slurm_#{run_id}.err"
     script_file = output_dir + "slurm_#{run_id}.sh"
     
+    # Ensure SLURM account exists for fair-share scheduling
+    ensure_slurm_account(user_id)
+    
     script_content = build_slurm_script(
       command: command,
       job_name: job_name,
@@ -45,7 +49,9 @@ class SlurmService
       time_limit: time_limit,
       output_file: output_file,
       error_file: error_file,
-      run_id: run_id
+      run_id: run_id,
+      user_id: user_id,
+      workdir: output_dir.to_s  # Use output directory as working directory on host
     )
     
     File.write(script_file, script_content)
@@ -55,11 +61,13 @@ class SlurmService
     @logger.debug("[SlurmService] Script: #{script_file}")
     @logger.debug("[SlurmService] Command: #{command}")
     
-    # Run sbatch via docker exec in the slurmctld container
-    # The script file path needs to be accessible from within the container
-    # Since we're mounting volumes, the path should be the same inside the container
-    docker_cmd = "docker exec slurmctld sbatch --parsable #{script_file} 2>&1"
-    result = `#{docker_cmd}`
+    # Run sbatch directly (SLURM client tools are installed in this container)
+    # The script file path is accessible via shared volumes
+    # SLURM_CONF_FILE environment variable points to mounted slurm.conf
+    # Explicitly pass --account to ensure it's used for fair-share scheduling
+    account_name = user_id ? "user_#{user_id}" : nil
+    account_flag = account_name ? "--account=#{account_name} " : ""
+    result = `sbatch #{account_flag}--parsable #{script_file} 2>&1`
     
     if $?.success?
       slurm_job_id = result.strip
@@ -72,21 +80,65 @@ class SlurmService
     end
   end
 
-  def get_job_status(slurm_job_id)
+  def get_job_status(slurm_job_id, run = nil)
     return nil if slurm_job_id.blank?
     
-    # Run squeue via docker exec in the slurmctld container
-    result = `docker exec slurmctld squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
+    # Run squeue directly (SLURM client tools are installed in this container)
+    result = `squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
     
     if $?.success? && !result.strip.empty?
       status = result.strip
       return normalize_status(status)
     else
       # Try sacct if squeue doesn't return results
-      result = `docker exec slurmctld sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
+      result = `sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
       if $?.success? && !result.strip.empty?
         status = result.strip.split.first
         return normalize_status(status)
+      end
+      
+      # If sacct fails (e.g., munge auth issues), check output files as fallback
+      if run
+        project = run.project
+        step = run.step
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        
+        output_file = output_dir + "slurm_#{run.id}.out"
+        error_file = output_dir + "slurm_#{run.id}.err"
+        
+        # If output files exist and are recent (modified within last hour), job likely completed
+        if File.exist?(output_file) && File.mtime(output_file) > 1.hour.ago
+          # Check error file for exit code or error messages
+          if File.exist?(error_file)
+            error_content = File.read(error_file)
+            # Check for common error patterns
+            if error_content.include?('NameError') || 
+               error_content.include?('NoMethodError') ||
+               error_content.include?('Errno::ENOENT') ||
+               error_content.include?('No such file') ||
+               error_content.include?('Error:') || 
+               error_content.include?('aborted!') ||
+               error_content.match(/exit code:?\s*[1-9]/i)
+              return :failed
+            end
+          end
+          
+          # Check if output.json exists (indicates successful completion for parsing)
+          output_json = output_dir + 'output.json'
+          if File.exist?(output_json)
+            return :completed
+          elsif File.exist?(output_file)
+            # Output file exists but no output.json - check if it contains completion message
+            output_content = File.read(output_file)
+            if output_content.include?('Job completed') || output_content.include?('Exit code: 0')
+              return :completed
+            elsif output_content.include?('Exit code:') && !output_content.match(/Exit code:\s*0/)
+              return :failed
+            end
+          end
+        end
       end
     end
     
@@ -96,14 +148,14 @@ class SlurmService
   def cancel_job(slurm_job_id)
     return false if slurm_job_id.blank?
     
-    result = `docker exec slurmctld scancel #{slurm_job_id} 2>&1`
+    result = `scancel #{slurm_job_id} 2>&1`
     $?.success?
   end
 
   def get_job_info(slurm_job_id)
     return nil if slurm_job_id.blank?
     
-    result = `docker exec slurmctld sacct -j #{slurm_job_id} -n -o JobID,State,ExitCode,Elapsed,MaxRSS,AllocCPUS --parsable2 --noheader 2>&1`
+    result = `sacct -j #{slurm_job_id} -n -o JobID,State,ExitCode,Elapsed,MaxRSS,AllocCPUS --parsable2 --noheader 2>&1`
     
     if $?.success? && !result.strip.empty?
       fields = result.strip.split('|')
@@ -122,7 +174,7 @@ class SlurmService
 
   def check_resource_availability(cores:, memory_mb:, time_limit:)
     begin
-      result = `docker exec slurmctld sinfo -h -o "%P|%C|%m|%l" 2>&1`
+      result = `sinfo -h -o "%P|%C|%m|%l" 2>&1`
       
       if !$?.success?
         return {
@@ -172,7 +224,7 @@ class SlurmService
 
   def get_cluster_info
     begin
-      result = `docker exec slurmctld sinfo -h -o "%P|%C|%m|%l|%D" 2>&1`
+      result = `sinfo -h -o "%P|%C|%m|%l|%D" 2>&1`
       
       if !$?.success?
         return nil
@@ -264,36 +316,59 @@ class SlurmService
     0
   end
 
+  def ensure_slurm_account(user_id)
+    account_name = "user_#{user_id}"
+    
+    # Check if account exists in database
+    unless SlurmAccountService.account_exists?(user_id)
+      @logger.error("[SlurmService] SLURM account #{account_name} does not exist. Please run 'rails slurm:create_account[#{user_id}]' to create it.")
+    end
+  rescue => e
+    @logger.error("[SlurmService] Error checking SLURM account: #{e.message}")
+  end
+
   def build_slurm_script(options)
     # The command will be executed in the website container via docker exec
     # since slurmd doesn't have Rails installed
     # Escape the command for use in bash script
     escaped_command = options[:command].gsub("'", "'\"'\"'")
+    account_name = options[:user_id] ? "user_#{options[:user_id]}" : nil
+    account_line = account_name ? "#SBATCH --account=#{account_name}\n" : ""
+    
+    # Set working directory to a safe location on the host (output directory or /tmp)
+    # This prevents SLURM from trying to chdir to container-only paths like /app
+    workdir = options[:workdir] || '/tmp'
     
     <<~SCRIPT
       #!/bin/bash
       #SBATCH --job-name=#{options[:job_name]}
-      #SBATCH --output=#{options[:output_file]}
+      #{account_line}#SBATCH --output=#{options[:output_file]}
       #SBATCH --error=#{options[:error_file]}
       #SBATCH --ntasks=1
       #SBATCH --cpus-per-task=#{options[:cores]}
       #SBATCH --mem=#{options[:memory_mb]}M
       #SBATCH --time=#{format_time_limit(options[:time_limit])}
       #SBATCH --signal=B:USR1@60
+      #SBATCH --chdir=#{workdir}
 
       set -e
+
+      # Change to working directory (explicitly set to avoid SLURM trying /app)
+      cd #{workdir} || cd /tmp
 
       RUN_ID=#{options[:run_id]}
       echo "Starting SLURM job for Run ID: $RUN_ID"
       echo "Job ID: $SLURM_JOB_ID"
       echo "Node: $SLURM_NODELIST"
+      echo "Working directory: $(pwd)"
       echo "Start time: $(date)"
 
       trap 'echo "Job interrupted at $(date)"; exit 130' USR1
 
       # Execute command in website container (which has Rails installed)
-      # The website container is accessible via docker network
-      docker exec website bash -c '#{escaped_command}'
+      # The website container is accessible from the host where slurmd runs
+      # Use the actual container name from docker-compose
+      docker exec asap2_test-website-1 bash -c '#{escaped_command}'
 
       EXIT_CODE=$?
       echo "Job completed at $(date)"

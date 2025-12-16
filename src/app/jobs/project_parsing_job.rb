@@ -50,7 +50,17 @@ class ProjectParsingJob < ApplicationJob
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
     tmp_dir = project_dir + 'parsing'
-    FileUtils.mkdir_p(tmp_dir) unless File.exist?(tmp_dir)
+    # Create directory with world-writable permissions so Docker container (user 1006) can write to it
+    FileUtils.mkdir_p(tmp_dir, mode: 0777) unless File.exist?(tmp_dir)
+    # Ensure directory is writable by the Java command (runs as user 1006 in Docker container)
+    begin
+      FileUtils.chmod(0777, tmp_dir)
+      Rails.logger.info("[ProjectParsingJob] Set permissions on #{tmp_dir} to 0777")
+    rescue => e
+      Rails.logger.warn("[ProjectParsingJob] Could not set permissions on #{tmp_dir}: #{e.message}")
+    end
+    # The Java command in the Docker container runs as HOST_USER_ID (1006), so make it world-writable
+    FileUtils.chmod(0777, tmp_dir) if File.exist?(tmp_dir)
 
     # Update project step status to waiting (will be set to running when SLURM job starts)
     project_step.update(status_id: 1) # 1 = waiting

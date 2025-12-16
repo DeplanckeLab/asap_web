@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel]
 
   # GET /projects or /projects.json
   def index
@@ -132,105 +132,8 @@ class ProjectsController < ApplicationController
       # Get runs for the project
       @runs = @project.runs.includes(:annots)
       
-      # Get steps hash
-      @h_steps = {}
-      Step.all.each do |step|
-        @h_steps[step.id] = step
-      end
-      
-      # Get project steps for availability checking
-      @project_steps_hash = {}
-      ProjectStep.where(project_id: @project.id).each do |ps|
-        @project_steps_hash[ps.step_id] = ps
-      end
-      
-      # Get all steps for this project's docker image, ordered by rank
-      asap_docker_image = Basic.get_asap_docker(@project.version)
-      @all_project_steps = if asap_docker_image
-                             Step.where(docker_image_id: asap_docker_image.id)
-                                 .where.not(hidden: true)
-                                 .order(:rank, :name)
-                           else
-                             Step.none
-                           end
-      
-      # Filter to pretreatment group steps (steps with group_name 'pretreatment' or blank/null)
-      # Sort by rank to ensure proper order
-      # If no pretreatment steps found, show all steps (fallback)
-      @pretreatment_steps = @all_project_steps.select { |s| s.group_name == 'pretreatment' || s.group_name.blank? || s.group_name.nil? }
-                                             .sort_by { |s| [s.rank || 9999, s.name] }
-      
-      # Fallback: if no pretreatment steps found, use all steps
-      if @pretreatment_steps.empty?
-        Rails.logger.warn("[ProjectsController#show] No pretreatment steps found, using all steps")
-        @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
-      end
-      
-      Rails.logger.info("[ProjectsController#show] Found #{@pretreatment_steps.count} steps for project #{@project.id}")
-      Rails.logger.info("[ProjectsController#show] Steps: #{@pretreatment_steps.map { |s| "#{s.name} (rank: #{s.rank}, group: #{s.group_name})" }.join(', ')}")
-      
-      # Determine step availability: a step is available if all previous steps (by rank) are complete
-      @steps_with_status = []
-      @current_step_info = nil
-      
-      # Find parsing step index to filter out steps before it
-      parsing_step_index = @pretreatment_steps.index { |s| s.name == 'parsing' }
-      
-      # Filter to only show steps from parsing onwards
-      steps_to_show = if parsing_step_index
-                        @pretreatment_steps[parsing_step_index..-1]
-                      else
-                        @pretreatment_steps
-                      end
-      
-      steps_to_show.each_with_index do |step, adjusted_index|
-        project_step = @project_steps_hash[step.id]
-        status_id = project_step&.status_id
-        
-        # Check if all previous steps (by rank) are complete
-        # Previous steps are those with lower rank, or same rank but earlier in the list
-        # Only consider steps from parsing onwards
-        previous_steps = steps_to_show[0...adjusted_index]
-        all_previous_complete = previous_steps.all? do |prev_step|
-          prev_ps = @project_steps_hash[prev_step.id]
-          prev_ps && prev_ps.status_id == 3 # 3 = complete
-        end
-        
-        # Step is available if it's the parsing step (first after filtering) or all previous steps are complete
-        is_available = adjusted_index == 0 || all_previous_complete
-        
-        # Current step is the first incomplete step that is available
-        # Only set current if we haven't found one yet
-        is_current = false
-        if !@current_step_info && is_available && status_id != 3
-          is_current = true
-          @current_step_info = {
-            step: step,
-            project_step: project_step,
-            status_id: status_id,
-            index: adjusted_index
-          }
-        end
-        
-        @steps_with_status << {
-          step: step,
-          project_step: project_step,
-          status_id: status_id,
-          status: case status_id
-                  when 1 then 'waiting'
-                  when 2 then 'running'
-                  when 3 then 'complete'
-                  when 4 then 'failed'
-                  else 'not_started'
-                  end,
-          is_available: is_available,
-          is_current: is_current,
-          is_complete: (status_id == 3)
-        }
-      end
-      
-      # Find the current step
-      @current_step = @current_step_info ? @current_step_info[:step] : nil
+      # Build steps with status using shared method
+      prepare_steps_with_status
     end
     
     # Variables specific to summary view
@@ -270,9 +173,9 @@ class ProjectsController < ApplicationController
       
       # Get steps hash (needed for filter_runs partial)
       unless @h_steps
-        @h_steps = {}
-        Step.all.each do |step|
-          @h_steps[step.id] = step
+      @h_steps = {}
+      Step.all.each do |step|
+        @h_steps[step.id] = step
         end
       end
       
@@ -414,6 +317,15 @@ class ProjectsController < ApplicationController
       end
     end
     
+    # Set defaults for RAW_TEXT file types (matching original application behavior)
+    # This matches the logic in /srv/asap2/app/controllers/fus_controller.rb lines 99-104
+    detected_format = tmp_attrs[:file_type] || params[:file_type]
+    if detected_format.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(detected_format)
+      tmp_attrs[:gene_name_col] ||= 'first' unless tmp_attrs[:gene_name_col].present?
+      tmp_attrs[:delimiter] ||= '' unless tmp_attrs[:delimiter].present?
+      tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
+    end
+    
     # Remove RAW_TEXT parsing options for non-text formats
     if tmp_attrs[:file_type] && @h_formats[tmp_attrs[:file_type]] && @h_formats[tmp_attrs[:file_type]].child_format != 'RAW_TEXT'
       [:delimiter, :gene_name_col, :has_header].each do |k|
@@ -517,7 +429,7 @@ class ProjectsController < ApplicationController
           end
         else
           Rails.logger.info("[ProjectsController#create] ✓ Successfully found Fu record: id=#{input_file.id}, user_id=#{input_file.user_id}, upload_file_name=#{input_file.upload_file_name}")
-        end
+    end
       else
         Rails.logger.warn("[ProjectsController#create] Session check failed - complete: #{session_complete.inspect}, fu_id: #{session_fu_id.inspect}")
       end
@@ -572,7 +484,7 @@ class ProjectsController < ApplicationController
         format.html { 
           Rails.logger.info("[ProjectsController#create] Rendering :new template (HTML format)")
           render template: 'projects/new', status: :unprocessable_entity 
-          return
+        return
         }
         format.turbo_stream { 
           Rails.logger.info("[ProjectsController#create] Rendering :new template (turbo_stream format)")
@@ -633,7 +545,7 @@ class ProjectsController < ApplicationController
         
         if input_file && input_file.id
           upload_dir = Pathname.new(upload_base_dir) + input_file.id.to_s
-          input_filename = input_file.upload_file_name
+        input_filename = input_file.upload_file_name
           Rails.logger.info("[ProjectsController#create] Using input_file path - upload_dir: #{upload_dir}, input_filename: #{input_filename}")
         else
           # Fallback: use session path directly if Fu record not found
@@ -679,6 +591,18 @@ class ProjectsController < ApplicationController
         upload_path = upload_dir + input_filename
         symlink_path = project_dir + ('input.' + ext)
         
+        # Check if there's an uncompressed version of the file (for compressed files like .bz2, .gz)
+        # Prefer uncompressed file if it exists, as Java parsing command may need it
+        uncompressed_path = nil
+        if input_filename.match(/\.(bz2|gz|zip)$/i)
+          base_name = input_filename.sub(/\.(bz2|gz|zip)$/i, '')
+          uncompressed_path = upload_dir + base_name
+          if File.exist?(uncompressed_path)
+            upload_path = uncompressed_path
+            Rails.logger.info "Found uncompressed file, using #{uncompressed_path} instead of #{upload_dir + input_filename}"
+          end
+        end
+        
         # Remove existing symlink if it exists
         File.delete(symlink_path) if File.exist?(symlink_path) || File.symlink?(symlink_path)
         
@@ -692,11 +616,11 @@ class ProjectsController < ApplicationController
         
         # Update Fu record with project info (if it exists)
         if input_file.present?
-          input_file.update!(
-            project_id: @project.id,
-            project_key: @project.key,
-            status: 'completed'
-          )
+        input_file.update!(
+          project_id: @project.id,
+          project_key: @project.key,
+          status: 'completed'
+        )
         else
           file_upload_hash = session[:file_upload]
           session_path = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
@@ -716,10 +640,10 @@ class ProjectsController < ApplicationController
         session.delete(:file_upload)
         
         Rails.logger.info("[ProjectsController#create] About to redirect to project #{@project.id}")
-        format.html { redirect_to @project, notice: "Project was successfully created." }
+        format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Project was successfully created." }
         format.turbo_stream { 
           Rails.logger.info("[ProjectsController#create] Turbo stream format - redirecting to project #{@project.id}")
-          redirect_to project_path(@project), status: :see_other, notice: "Project was successfully created." 
+          redirect_to project_path(@project, view: 'analysis'), status: :see_other, notice: "Project was successfully created." 
         }
         format.json { render :show, status: :created, location: @project }
       else
@@ -1445,9 +1369,74 @@ class ProjectsController < ApplicationController
     # Get project step status
     @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
     
+    # For parsing step, load the results from output.json
+    if @step.name == 'parsing'
+      # Get the first completed run, or fall back to the most recent run
+      @parsing_run = @runs.where(status_id: 3).first || @runs.first
+      @results = nil
+      
+      # Try to load results if we have a run
+      if @parsing_run
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+        step_dir = project_dir + 'parsing'
+        output_json = step_dir + 'output.json'
+        
+        # Load output.json if it exists (even if run is not complete, it might have partial results)
+        if File.exist?(output_json)
+          @results = Basic.safe_parse_json(File.read(output_json), {})
+          
+          # If output.json contains displayed_error, the parsing actually failed
+          # Update the run and project_step status to reflect this
+          if @results && @results['displayed_error'].present?
+            error_msg = if @results['displayed_error'].is_a?(Array)
+              @results['displayed_error'].join('; ')
+            else
+              @results['displayed_error'].to_s
+            end
+            
+            # Update run status to failed
+            if @parsing_run.status_id == 3
+              @parsing_run.update(status_id: 4, error: error_msg)
+            end
+            
+            # Update project_step status to failed
+            if @project_step && @project_step.status_id == 3
+              @project_step.update(status_id: 4, error_message: error_msg)
+            end
+            
+            # Reload the run to get updated status
+            @parsing_run.reload
+            @project_step.reload if @project_step
+          end
+        end
+      end
+      
+      # Load file formats for display
+      @h_formats = {}
+      FileFormat.all.each { |f| @h_formats[f.name] = f }
+    end
+    
     respond_to do |format|
       format.html { render partial: 'projects/views/step_results', layout: false }
       format.json { render json: { step: @step, runs: @runs } }
+    end
+  end
+
+  # GET /projects/:id/refresh_steps_panel
+  def refresh_steps_panel
+    # Get runs for the project
+    @runs = @project.runs.includes(:annots) unless @runs
+    
+    # Build steps with status using shared method
+    prepare_steps_with_status
+    
+    # Track which step is selected by the client (for blue border)
+    # This is separate from is_current (which is for the unlock icon)
+    @selected_step_id = params[:selected_step_id].present? ? params[:selected_step_id].to_i : nil
+    
+    respond_to do |format|
+      format.html { render partial: 'projects/views/steps_panel', layout: false }
+      format.json { render json: { steps: @steps_with_status } }
     end
   end
 
@@ -1509,6 +1498,108 @@ class ProjectsController < ApplicationController
   end
 
   private
+
+    def prepare_steps_with_status
+      # Get steps hash
+      @h_steps = {}
+      Step.all.each do |step|
+        @h_steps[step.id] = step
+      end
+      
+      # Get project steps for availability checking
+      @project_steps_hash = {}
+      ProjectStep.where(project_id: @project.id).each do |ps|
+        @project_steps_hash[ps.step_id] = ps
+      end
+      
+      # Get all steps for this project's docker image, ordered by rank
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @all_project_steps = if asap_docker_image
+                             Step.where(docker_image_id: asap_docker_image.id)
+                                 .where.not(hidden: true)
+                                 .order(:rank, :name)
+                           else
+                             Step.none
+                           end
+      
+      # Filter to pretreatment group steps (steps with group_name 'pretreatment' or blank/null)
+      # Sort by rank to ensure proper order
+      # If no pretreatment steps found, show all steps (fallback)
+      @pretreatment_steps = @all_project_steps.select { |s| s.group_name == 'pretreatment' || s.group_name.blank? || s.group_name.nil? }
+                                             .sort_by { |s| [s.rank || 9999, s.name] }
+      
+      # Fallback: if no pretreatment steps found, use all steps
+      if @pretreatment_steps.empty?
+        Rails.logger.warn("[ProjectsController] No pretreatment steps found, using all steps")
+        @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
+      end
+      
+      Rails.logger.info("[ProjectsController] Found #{@pretreatment_steps.count} steps for project #{@project.id}")
+      Rails.logger.info("[ProjectsController] Steps: #{@pretreatment_steps.map { |s| "#{s.name} (rank: #{s.rank}, group: #{s.group_name})" }.join(', ')}")
+      
+      # Determine step availability: a step is available if all previous steps (by rank) are complete
+      @steps_with_status = []
+      @current_step_info = nil
+      
+      # Find parsing step index to filter out steps before it
+      parsing_step_index = @pretreatment_steps.index { |s| s.name == 'parsing' }
+      
+      # Filter to only show steps from parsing onwards
+      steps_to_show = if parsing_step_index
+                        @pretreatment_steps[parsing_step_index..-1]
+                      else
+                        @pretreatment_steps
+                      end
+      
+      steps_to_show.each_with_index do |step, adjusted_index|
+        project_step = @project_steps_hash[step.id]
+        status_id = project_step&.status_id
+        
+        # Check if all previous steps (by rank) are complete
+        # Previous steps are those with lower rank, or same rank but earlier in the list
+        # Only consider steps from parsing onwards
+        previous_steps = steps_to_show[0...adjusted_index]
+        all_previous_complete = previous_steps.all? do |prev_step|
+          prev_ps = @project_steps_hash[prev_step.id]
+          prev_ps && prev_ps.status_id == 3 # 3 = complete
+        end
+        
+        # Step is available if it's the parsing step (first after filtering) or all previous steps are complete
+        is_available = adjusted_index == 0 || all_previous_complete
+        
+        # Current step is the first incomplete step that is available
+        # Only set current if we haven't found one yet
+        is_current = false
+        if !@current_step_info && is_available && status_id != 3
+          is_current = true
+          @current_step_info = {
+            step: step,
+            project_step: project_step,
+            status_id: status_id,
+            index: adjusted_index
+          }
+        end
+        
+        @steps_with_status << {
+          step: step,
+          project_step: project_step,
+          status_id: status_id,
+          status: case status_id
+                  when 1 then 'waiting'
+                  when 2 then 'running'
+                  when 3 then 'complete'
+                  when 4 then 'failed'
+                  else 'not_started'
+                  end,
+          is_available: is_available,
+          is_current: is_current,
+          is_complete: (status_id == 3)
+        }
+      end
+      
+      # Find the current step
+      @current_step = @current_step_info ? @current_step_info[:step] : nil
+    end
 
     def available_versions
       # Show all versions (activated or not, including beta) if admin, otherwise only activated versions

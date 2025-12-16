@@ -1,6 +1,11 @@
-# SLURM configuration for single-node cluster
+# SLURM configuration for client tools (website container)
+# This file is used by SLURM client tools (sbatch, squeue, scancel) in the website container
+# to connect to slurmctld running on the host machine
+
 ClusterName=asap_cluster
-ControlMachine=slurmctld
+# Use host.docker.internal to connect to host from Docker container
+# Docker provides this hostname automatically
+ControlMachine=host.docker.internal
 SlurmUser=slurm
 SlurmdUser=root
 SlurmctldPort=6817
@@ -14,8 +19,7 @@ SlurmctldPidFile=/var/run/slurmctld.pid
 SlurmdPidFile=/var/run/slurmd.pid
 ProctrackType=proctrack/pgid
 TaskPlugin=task/none
-PluginDir=/usr/lib/slurm
-# Force slurmd to not auto-detect cgroup
+PluginDir=/usr/lib/x86_64-linux-gnu/slurm-wlm
 LaunchParameters=disable_cgroup
 ReturnToService=1
 SlurmctldTimeout=300
@@ -42,7 +46,7 @@ JobCompType=jobcomp/none
 JobAcctGatherType=jobacct_gather/none
 JobAcctGatherFrequency=30
 AccountingStorageType=accounting_storage/slurmdbd
-AccountingStorageHost=slurmdbd
+AccountingStorageHost=host.docker.internal
 AccountingStoragePort=6819
 AccountingStorageUser=root
 AccountingStoragePass=slurm

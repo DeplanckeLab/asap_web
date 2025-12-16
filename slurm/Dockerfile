@@ -48,7 +48,8 @@ RUN apt-get update && \
 
 # Build SLURM from source to get all components including slurmdbd
 # Using SLURM 23.11.4 (latest stable)
-ENV SLURM_VERSION=23.11.4
+ENV SLURM_VERSION=22.05.9 
+#23.11.4
 ENV SLURM_USER=slurm
 ENV SLURM_UID=1000
 ENV SLURM_GROUP=slurm
@@ -109,12 +110,14 @@ COPY slurm.conf /tmp/slurm.conf
 COPY cgroup.conf /tmp/cgroup.conf
 COPY slurmd-wrapper.sh /usr/local/bin/slurmd-wrapper.sh
 COPY create-stub-cgroup.sh /tmp/create-stub-cgroup.sh
+COPY start-slurmdbd.sh /start-slurmdbd.sh
 # Move and set correct ownership in one step, create stub cgroup plugin
 RUN mv /tmp/slurmdbd.conf /etc/slurm/slurmdbd.conf && \
     mv /tmp/slurm.conf /etc/slurm/slurm.conf && \
     mv /tmp/cgroup.conf /etc/slurm/cgroup.conf && \
     chmod +x /usr/local/bin/slurmd-wrapper.sh && \
     chmod +x /tmp/create-stub-cgroup.sh && \
+    chmod +x /start-slurmdbd.sh && \
     /tmp/create-stub-cgroup.sh && \
     chown slurm:slurm /etc/slurm/slurmdbd.conf /etc/slurm/slurm.conf /etc/slurm/cgroup.conf && \
     chmod 600 /etc/slurm/slurmdbd.conf && \

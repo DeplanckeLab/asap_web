@@ -146,18 +146,27 @@ export default class extends Controller {
       ) || (e.dataTransfer.files && e.dataTransfer.files.length > 0)
     }
 
-    // Prevent dragenter/dragover events globally
+    // Helper to check if the event target is within the dropzone
+    this.isDropzoneTarget = (e) => {
+      if (!this.hasDropzoneTarget) return false
+      const dropzone = this.dropzoneTarget
+      const container = this.element.querySelector('#file-upload-container')
+      const target = e.target
+      return (dropzone && dropzone.contains(target)) || (container && container.contains(target))
+    }
+
+    // Prevent dragenter/dragover events globally (but allow on dropzone)
     this.globalDragHandler = (e) => {
-      if (this.isFileDragDrop(e)) {
+      if (this.isFileDragDrop(e) && !this.isDropzoneTarget(e)) {
         e.preventDefault()
         e.stopPropagation()
         return false
       }
     }
 
-    // Handle drop events globally - ALWAYS prevent default
+    // Handle drop events globally - prevent default only if NOT on dropzone
     this.globalDropHandler = (e) => {
-      if (this.isFileDragDrop(e)) {
+      if (this.isFileDragDrop(e) && !this.isDropzoneTarget(e)) {
         e.preventDefault()
         return false
       }

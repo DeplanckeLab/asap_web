@@ -20,6 +20,7 @@ Rails.application.routes.draw do
       get :creating
       get :creation_status
       get :step_results
+      get :refresh_steps_panel
     end
   end
   
@@ -51,6 +52,7 @@ Rails.application.routes.draw do
   resources :reqs
   resources :docker_images
   resources :tools
+  resources :data_classes
   resources :tool_types
   resources :ontology_term_types
   resources :cell_ontologies

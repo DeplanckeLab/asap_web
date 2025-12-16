@@ -50,4 +50,8 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # ActionCable configuration for test environment
+  config.action_cable.url = ENV.fetch("ACTION_CABLE_URL", "/websocket")
+  config.action_cable.disable_request_forgery_protection = true
 end

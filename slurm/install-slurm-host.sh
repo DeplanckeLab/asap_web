@@ -1,0 +1,141 @@
+#!/bin/bash
+# Script to install and configure slurmctld and slurmdbd on the host machine
+
+set -e
+
+echo "Installing SLURM controller and database daemon packages..."
+sudo dnf install -y slurm-slurmctld slurm-slurmdbd
+
+echo "Creating slurm user if it doesn't exist..."
+if ! getent passwd slurm > /dev/null 2>&1; then
+    echo "Creating slurm user..."
+    sudo useradd -r -s /bin/bash -d /var/lib/slurm slurm 2>&1 || echo "Warning: Could not create slurm user (may already exist)"
+else
+    echo "slurm user already exists"
+fi
+
+echo "Creating SLURM config directory..."
+sudo mkdir -p /etc/slurm
+sudo mkdir -p /var/spool/slurmctld
+sudo mkdir -p /var/spool/slurmdbd
+sudo mkdir -p /var/log/slurm
+
+# Set ownership
+sudo chown slurm:slurm /var/spool/slurmctld /var/spool/slurmdbd /var/log/slurm 2>/dev/null || sudo chown root:root /var/spool/slurmctld /var/spool/slurmdbd /var/log/slurm
+
+# Ensure slurm user has access to data directories (for job execution)
+echo "Setting up permissions for slurm user on data directories..."
+sudo chown -R slurm:slurm /data/asap2 /data/asap2_test /srv/asap_run_new 2>/dev/null || echo "Warning: Could not change ownership of data directories (may need manual setup)"
+
+# Add slurm user to docker group (needed for docker exec commands in jobs)
+echo "Adding slurm user to docker group..."
+sudo usermod -aG docker slurm 2>/dev/null || echo "Warning: Could not add slurm to docker group"
+
+echo "Copying slurm.conf from Docker container..."
+# Get slurm.conf from container or use local copy
+if docker exec slurmctld cat /etc/slurm/slurm.conf > /tmp/slurm.conf 2>/dev/null; then
+    echo "Copied slurm.conf from container"
+else
+    echo "Container not available, using local slurm.conf"
+    cp /srv/asap2_test/slurm/slurm.conf /tmp/slurm.conf
+fi
+
+echo "Updating slurm.conf for host..."
+HOST_IP=$(hostname -I | awk '{print $1}')
+HOSTNAME=$(hostname)
+
+# Update node definition to use host
+sed -i "s/NodeName=.*NodeAddr=.*CPUs=/NodeName=${HOSTNAME} NodeAddr=${HOST_IP} CPUs=/" /tmp/slurm.conf
+# Update PluginDir for RHEL9
+sed -i 's|PluginDir=/usr/lib/slurm|PluginDir=/usr/lib64/slurm|' /tmp/slurm.conf
+# Ensure SlurmUser is slurm
+sed -i 's/^SlurmUser=.*/SlurmUser=slurm/' /tmp/slurm.conf
+# Change SlurmdUser to slurm for better security (jobs won't run as root)
+sed -i 's/^SlurmdUser=.*/SlurmdUser=slurm/' /tmp/slurm.conf
+# Update ControlMachine to hostname (was slurmctld for Docker)
+sed -i "s/^ControlMachine=slurmctld/ControlMachine=${HOSTNAME}/" /tmp/slurm.conf
+# Update AccountingStorageHost to localhost (slurmdbd will run on host)
+sed -i "s/^AccountingStorageHost=slurmdbd/AccountingStorageHost=localhost/" /tmp/slurm.conf
+
+echo "Installing slurm.conf..."
+sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf
+sudo chmod 644 /etc/slurm/slurm.conf
+sudo chown root:root /etc/slurm/slurm.conf
+
+echo "Copying slurmdbd.conf..."
+# Get slurmdbd.conf from container or use local copy
+if docker exec slurmdbd cat /etc/slurm/slurmdbd.conf > /tmp/slurmdbd.conf 2>/dev/null; then
+    echo "Copied slurmdbd.conf from container"
+else
+    echo "Container not available, using local slurmdbd.conf"
+    cp /srv/asap2_test/slurm/slurmdbd.conf /tmp/slurmdbd.conf
+fi
+
+# Update slurmdbd.conf for host
+sed -i "s/^DbdHost=.*/DbdHost=localhost/" /tmp/slurmdbd.conf
+# Update StorageHost to Docker MySQL container
+MYSQL_IP=$(docker inspect slurmdb --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "localhost")
+if [ "$MYSQL_IP" != "localhost" ]; then
+    sed -i "s/^StorageHost=.*/StorageHost=${MYSQL_IP}/" /tmp/slurmdbd.conf
+else
+    # If we can't get IP, try using host.docker.internal or 172.17.0.1
+    sed -i "s/^StorageHost=.*/StorageHost=172.17.0.1/" /tmp/slurmdbd.conf
+fi
+
+echo "Installing slurmdbd.conf..."
+sudo cp /tmp/slurmdbd.conf /etc/slurm/slurmdbd.conf
+sudo chmod 600 /etc/slurm/slurmdbd.conf
+sudo chown slurm:slurm /etc/slurm/slurmdbd.conf
+
+echo "Setting up munge key (should already exist)..."
+sudo chmod 400 /etc/munge/munge.key
+sudo chown munge:munge /etc/munge/munge.key
+
+echo "Starting munge (if not already running)..."
+sudo systemctl start munge 2>/dev/null || echo "Munge may already be running"
+sudo systemctl enable munge 2>/dev/null || echo "Warning: Could not enable munge"
+
+echo "Starting slurmdbd..."
+sudo systemctl start slurmdbd 2>/dev/null || echo "Warning: slurmdbd may have failed to start"
+sudo systemctl enable slurmdbd 2>/dev/null || echo "Warning: Could not enable slurmdbd"
+
+echo "Waiting for slurmdbd to be ready..."
+sleep 3
+
+echo "Starting slurmctld..."
+sudo systemctl start slurmctld 2>/dev/null || echo "Warning: slurmctld may have failed to start"
+sudo systemctl enable slurmctld 2>/dev/null || echo "Warning: Could not enable slurmctld"
+
+echo "Checking status..."
+sleep 2
+
+if sudo systemctl is-active --quiet munge; then
+    echo "✓ Munge is running"
+else
+    echo "✗ Munge is not running"
+fi
+
+if sudo systemctl is-active --quiet slurmdbd; then
+    echo "✓ slurmdbd is running"
+    sudo systemctl status slurmdbd --no-pager -l | head -10
+else
+    echo "✗ slurmdbd is not running"
+    echo "Check logs with: sudo journalctl -u slurmdbd -n 50"
+fi
+
+if sudo systemctl is-active --quiet slurmctld; then
+    echo "✓ slurmctld is running"
+    sudo systemctl status slurmctld --no-pager -l | head -10
+else
+    echo "✗ slurmctld is not running"
+    echo "Check logs with: sudo journalctl -u slurmctld -n 50"
+fi
+
+echo ""
+echo "Done! You can now stop the Docker containers:"
+echo "  docker-compose stop slurmctld slurmdbd"
+echo ""
+echo "Check cluster status with:"
+echo "  sinfo"
+echo "  squeue"
+

@@ -32,7 +32,16 @@ task :parse, [:project_key] => [:environment] do |t, args|
   
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   tmp_dir = project_dir + 'parsing'
-  Dir.mkdir(tmp_dir) if !File.exist?(tmp_dir)
+  # Create directory with world-writable permissions so Docker container (user 1006) can write to it
+  FileUtils.mkdir_p(tmp_dir, mode: 0777) unless File.exist?(tmp_dir)
+  # Ensure directory is writable by the Java command (runs as user 1006 in Docker container)
+  # Use FileUtils.chmod with force option to ensure permissions are set even if directory already exists
+  begin
+    FileUtils.chmod(0777, tmp_dir)
+    logger.info("[ParseRake] Set permissions on #{tmp_dir} to 0777")
+  rescue => e
+    logger.warn("[ParseRake] Could not set permissions on #{tmp_dir}: #{e.message}")
+  end
 
   parsing_step = Step.where(:docker_image_id => asap_docker_image.id, :name => 'parsing').first
   unless parsing_step
@@ -88,18 +97,44 @@ task :parse, [:project_key] => [:environment] do |t, args|
     if !h_output_hca or h_output_hca['status_id'] != 4
 
       ### update run with predictions
-      fu = Fu.where(:project_id => project.id, :upload_type => 1).first
-      upload_base_dir = ENV["UPLOAD_DATA_DIR"] || ENV["DATA_DIR"]
-      upload_dir = Pathname.new(upload_base_dir) + 'fus' + fu.id.to_s
-      output_file = upload_dir + "output.json"
-      puts output_file
-      h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
-      puts h_preparsing.to_json
-      if list_group = h_preparsing['list_groups'][0]
-        run.update({
-                                :pred_max_ram => (list_group['pred_max_ram'] != '') ? list_group['pred_max_ram'] : nil, 
-                                :pred_process_duration => (list_group['pred_process_duration']) ? list_group['pred_process_duration'] : nil
-                              })
+      # Try to find Fu by project.fu_id first, then fall back to project_id lookup
+      fu = if project.fu_id
+             Fu.find_by(id: project.fu_id)
+           else
+             Fu.where(:project_id => project.id, :upload_type => 1).first
+           end
+      
+      if fu.nil?
+        logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), skipping prediction update")
+      else
+        begin
+          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                              ENV["UPLOAD_DATA_DIR"]
+                            elsif ENV["DATA_DIR"]
+                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                            else
+                              '/data/asap2/fus'
+                            end
+          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          output_file = upload_dir + "output.json"
+          
+          if File.exist?(output_file)
+            puts output_file
+            h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
+            puts h_preparsing.to_json
+            if list_group = h_preparsing['list_groups'][0]
+              run.update({
+                                      :pred_max_ram => (list_group['pred_max_ram'] != '') ? list_group['pred_max_ram'] : nil, 
+                                      :pred_process_duration => (list_group['pred_process_duration']) ? list_group['pred_process_duration'] : nil
+                                    })
+            end
+          else
+            logger.warn("[ParseRake] Output file not found: #{output_file}")
+          end
+        rescue => e
+          logger.error("[ParseRake] Error reading prediction file: #{e.class} - #{e.message}")
+          logger.error(e.backtrace.join("\n")) if e.backtrace
+        end
       end
 
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
@@ -114,9 +149,60 @@ task :parse, [:project_key] => [:environment] do |t, args|
       opts = []
       p['sel_name'] = 'mtx' if p["file_type"] == 'MEX'
       opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name'] 
-      opts.push({'opt' => "-col", 'value' => p["gene_name_col"]}) if p["gene_name_col"]
+      
+      # Get file_type to determine if we need to add -col and -header defaults
+      # Get file_type from parsing_attrs_json, or fall back to detected_format from preparsing
+      file_type = p["file_type"]
+      if file_type.blank?
+        # Try to get detected_format from preparsing output
+        begin
+          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                            ENV["UPLOAD_DATA_DIR"]
+                          elsif ENV["DATA_DIR"]
+                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                          else
+                            '/data/asap2/fus'
+                          end
+          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          output_file = upload_dir + "output.json"
+          
+          if File.exist?(output_file)
+            h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
+            detected_format = h_preparsing['detected_format']
+            if detected_format.present?
+              file_type = detected_format
+              logger.info("[ParseRake] Using detected_format from preparsing: #{detected_format}")
+            end
+          end
+        rescue => e
+          logger.warn("[ParseRake] Could not read preparsing output to get detected_format: #{e.message}")
+        end
+      end
+      
+      # Only add -col and -header for RAW_TEXT file type
+      if file_type == 'RAW_TEXT'
+        # -col parameter: gene name column (default: "first" if not specified)
+        gene_name_col = p["gene_name_col"]
+        if gene_name_col.blank? || gene_name_col == 'NA' || gene_name_col == 'none'
+          gene_name_col = 'first'  # Default to first column
+        end
+        opts.push({'opt' => "-col", 'value' => gene_name_col})
+        
+        # -header parameter: whether file has header row (default: true if not specified)
+        has_header = p['has_header']
+        if has_header.nil? || has_header == ''
+          has_header = '1'  # Default to true (has header)
+        end
+        header_value = (has_header.to_s == '1' || has_header.to_s == 'true') ? 'true' : 'false'
+        opts.push({'opt' => "-header", 'value' => header_value})
+      else
+        # For non-RAW_TEXT types, only add if explicitly specified
+        opts.push({'opt' => "-col", 'value' => p["gene_name_col"]}) if p["gene_name_col"].present?
+        opts.push({'opt' => "-header", 'value' => ((p['has_header'] and p['has_header'].to_i == 1) ? 'true' : 'false')}) if p['has_header'].present?
+      end
+      
       opts.push({'opt' => "-d", 'value' => p["delimiter"]}) if p["delimiter"] and p['delimiter'] != ''
-      opts.push({'opt' => "-header", 'value' => ((p['has_header'] and p['has_header'].to_i == 1) ? 'true' : 'false')}) if  p['has_header']
+      
       opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata']
       opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata']
 
@@ -128,13 +214,25 @@ task :parse, [:project_key] => [:environment] do |t, args|
       opts += [
                {'opt' => "-ncells", 'value' => p["nber_cols"]},
                {'opt' => "-ngenes", 'value' => p["nber_rows"]},
-               {'opt' => "-type", 'value' => (h_types[p["file_type"]]) ? h_types[p["file_type"]] : p["file_type"]},
                {'opt' => '-T', 'value' => "Parsing"},
                {'opt' => "-organism", 'value' => project.organism_id},
                {'opt' => "-o", 'value' => tmp_dir},
                {'opt' => "-f", 'value' => filepath},
                {'opt' => '-h', 'value' => db_conn}
               ]
+      
+      # Add -type option - use detected_format if file_type is not set
+      # Map common format names to Java command format names
+      file_type_value = if file_type.present?
+                          (h_types[file_type]) ? h_types[file_type] : file_type
+                        else
+                          # Default to RAW_TEXT if nothing is available
+                          logger.warn("[ParseRake] No file_type found, defaulting to RAW_TEXT")
+                          "RAW_TEXT"
+                        end
+      
+      # -type is mandatory according to Java command, so always include it
+      opts.push({'opt' => "-type", 'value' => file_type_value})
       
       mem = p["nber_cols"].to_i * p["nber_rows"].to_i * 128 / (31053 * 1474560)
       h_env_docker_image = h_env['docker_images']['asap_run']
@@ -175,7 +273,12 @@ task :parse, [:project_key] => [:environment] do |t, args|
       ## 
       puts "Define project cell set"
       Basic.upd_project_cell_set(project)
-      puts "=> " + project.project_cell_set.key
+      project.reload
+      if project.project_cell_set
+        puts "=> " + project.project_cell_set.key
+      else
+        logger.warn("[ParseRake] Project cell set not created for project #{project.key}")
+      end
 
       h_parsing_metadata = {}
       puts h_parsing.to_json
@@ -184,45 +287,151 @@ task :parse, [:project_key] => [:environment] do |t, args|
           h_parsing_metadata[meta['name']] = 1
         end
       end
-      fu = Fu.where(:project_id => project.id, :upload_type => 1).first
-      upload_base_dir = ENV["UPLOAD_DATA_DIR"] || ENV["DATA_DIR"]
-      upload_dir = Pathname.new(upload_base_dir) + 'fus' + fu.id.to_s
-      output_file = upload_dir + "output.json"
-      output_path = project_dir + "parsing" + "output.loom"
-      upload_data_dir = ENV["UPLOAD_DATA_DIR"] || ENV["DATA_DIR"]
-      ori_fu_path = Pathname.new(upload_data_dir) + 'fus' + fu.id.to_s + fu.upload_file_name
-      puts ori_fu_path
-      h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
-      puts h_preparsing.to_json
-      puts "bla"
+      # Try to find Fu by project.fu_id first, then fall back to project_id lookup
+      fu = if project.fu_id
+             Fu.find_by(id: project.fu_id)
+           else
+             Fu.where(:project_id => project.id, :upload_type => 1).first
+           end
       
-      # Check if metadata copying is needed and broadcast start
-      needs_metadata_copying = false
-      if h_preparsing && h_preparsing["detected_format"]
-        if (["RDS", "LOOM"].include?(h_preparsing["detected_format"]) && 
-            h_preparsing["list_groups"] && h_preparsing["list_groups"][0] && 
-            h_preparsing["list_groups"][0]["existing_metadata"]) ||
-           (["H5AD"].include?(h_preparsing["detected_format"]) && 
-            h_parsing["existing_metadata"])
-          needs_metadata_copying = true
-        end
-      end
-      
-      # Broadcast metadata copying start if needed, or mark as complete if not needed
-      if needs_metadata_copying
-        ActionCable.server.broadcast "project_#{project.id}", {
-          project_id: project.id,
-          step_id: parsing_step.id,
-          stage: 'creation',
-          parsing_status: 'complete',
-          parsing_complete: true,
-          metadata_status: 'running',
-          metadata_complete: false,
-          project_key: project.key
-        }
-        logger.info("[ParseRake] Metadata copying starting, broadcasting update")
+      if fu.nil?
+        logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), cannot proceed with metadata copying")
       else
-        # No metadata copying needed - mark as complete immediately
+        upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                            ENV["UPLOAD_DATA_DIR"]
+                          elsif ENV["DATA_DIR"]
+                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                          else
+                            '/data/asap2/fus'
+                          end
+        upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+        output_file = upload_dir + "output.json"
+        output_path = project_dir + "parsing" + "output.loom"
+        upload_data_dir = if ENV["UPLOAD_DATA_DIR"]
+                            ENV["UPLOAD_DATA_DIR"]
+                          elsif ENV["DATA_DIR"]
+                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                          else
+                            '/data/asap2/fus'
+                          end
+        ori_fu_path = Pathname.new(upload_data_dir) + fu.id.to_s + fu.upload_file_name
+        puts ori_fu_path
+        h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
+        puts h_preparsing.to_json
+        puts "bla"
+        
+        # Check if metadata copying is needed and broadcast start
+        needs_metadata_copying = false
+        if h_preparsing && h_preparsing["detected_format"]
+          if (["RDS", "LOOM"].include?(h_preparsing["detected_format"]) && 
+              h_preparsing["list_groups"] && h_preparsing["list_groups"][0] && 
+              h_preparsing["list_groups"][0]["existing_metadata"]) ||
+             (["H5AD"].include?(h_preparsing["detected_format"]) && 
+              h_parsing["existing_metadata"])
+            needs_metadata_copying = true
+          end
+        end
+        
+        # Broadcast metadata copying start if needed, or mark as complete if not needed
+        if needs_metadata_copying
+          ActionCable.server.broadcast "project_#{project.id}", {
+            project_id: project.id,
+            step_id: parsing_step.id,
+            stage: 'creation',
+            parsing_status: 'complete',
+            parsing_complete: true,
+            metadata_status: 'running',
+            metadata_complete: false,
+            project_key: project.key
+          }
+          logger.info("[ParseRake] Metadata copying starting, broadcasting update")
+        else
+          # No metadata copying needed - mark as complete immediately
+          ActionCable.server.broadcast "project_#{project.id}", {
+            project_id: project.id,
+            step_id: parsing_step.id,
+            stage: 'creation',
+            parsing_status: 'complete',
+            parsing_complete: true,
+            metadata_status: 'complete',
+            metadata_complete: true,
+            all_complete: true,
+            redirect_url: Rails.application.routes.url_helpers.project_path(project),
+            project_key: project.key
+          }
+          logger.info("[ParseRake] No metadata copying needed, marking as complete")
+        end
+
+        if ["H5AD"].include? h_preparsing["detected_format"]
+          list_metadata = h_parsing["existing_metadata"].select{|e| !h_parsing_metadata[e]}
+          if list_metadata
+            relative_filepath = Basic.relative_path(project, output_path)
+            list_metadata.each do |meta|
+              meta['imported'] = true
+              puts "add annot #{meta.to_json}"
+              Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
+            end
+          end
+        elsif ["RDS"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
+          h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
+          metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
+          File.open(metadata_list_file, 'w') do |f|
+            f.write(h_meta.to_json)
+          end
+          cmd = "java -jar lib/ASAP.jar -T CopyMetaData -loomFrom \"#{filepath}\" -loomTo #{output_path} -metaJSON #{metadata_list_file}"
+          puts cmd
+          output = `#{cmd}`
+          metadata_list_file2 = tmp_dir + 'list_metadata_to_copy2.json'
+          File.open(metadata_list_file2, 'w') do |f|
+            f.write(output)
+          end
+          cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -no-values -loom #{output_path} -metaJSON #{metadata_list_file2}"
+          puts cmd
+          output = `#{cmd}`
+          h_res = Basic.safe_parse_json(output, {})
+          puts output
+          puts h_res.to_json
+          
+          if list_metadata = h_res["list_meta"]
+            relative_filepath = Basic.relative_path(project, output_path)
+            list_metadata.each do |meta|
+              meta['imported'] = true
+              puts "add annot #{meta.to_json}"
+              Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
+            end
+          end
+        elsif ["LOOM"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
+          puts "bou"
+          h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
+          metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
+          File.open(metadata_list_file, 'w') do |f|
+            f.write(h_meta.to_json)
+          end
+          cmd = "java -jar lib/ASAP.jar -T CopyMetaData -loomFrom \"#{ori_fu_path}\" -loomTo #{output_path} -metaJSON #{metadata_list_file}"
+          puts cmd
+          output = `#{cmd}`
+          metadata_list_file2 = tmp_dir + 'list_metadata_to_copy2.json'
+          File.open(metadata_list_file2, 'w') do |f|
+            f.write(output)
+          end
+          cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -no-values -loom #{output_path} -metaJSON #{metadata_list_file2}"
+          puts cmd
+          output = `#{cmd}`
+          h_res = Basic.safe_parse_json(output, {})
+          puts output 
+          puts h_res.to_json
+          if list_metadata = h_res['list_meta']
+            relative_filepath = Basic.relative_path(project, output_path)
+            list_metadata.each do |meta|
+              meta['imported'] = true
+              puts "add annot #{meta.to_json}" 
+              Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
+            end
+          end
+        end
+
+        # Broadcast completion after metadata copying (or if no metadata copying was needed)
+        # If metadata copying was needed, it's now complete; if not needed, mark as complete
         ActionCable.server.broadcast "project_#{project.id}", {
           project_id: project.id,
           step_id: parsing_step.id,
@@ -235,93 +444,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
           redirect_url: Rails.application.routes.url_helpers.project_path(project),
           project_key: project.key
         }
-        logger.info("[ParseRake] No metadata copying needed, marking as complete")
+        project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
+        logger.info("[ParseRake] Parse and metadata copying completed, broadcasting final update")
       end
-
-     if ["H5AD"].include? h_preparsing["detected_format"]
-        list_metadata = h_parsing["existing_metadata"].select{|e| !h_parsing_metadata[e]}
-        if list_metadata
-          relative_filepath = Basic.relative_path(project, output_path)
-          list_metadata.each do |meta|
-            meta['imported'] = true
-            puts "add annot #{meta.to_json}"
-            Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
-          end
-        end
-     elsif ["RDS"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
-       h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
-       metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
-       File.open(metadata_list_file, 'w') do |f|
-         f.write(h_meta.to_json)
-       end
-       cmd = "java -jar lib/ASAP.jar -T CopyMetaData -loomFrom \"#{filepath}\" -loomTo #{output_path} -metaJSON #{metadata_list_file}"
-       puts cmd
-       output = `#{cmd}`
-       metadata_list_file2 = tmp_dir + 'list_metadata_to_copy2.json'
-       File.open(metadata_list_file2, 'w') do |f|
-         f.write(output)
-       end
-       cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -no-values -loom #{output_path} -metaJSON #{metadata_list_file2}"
-       puts cmd
-       output = `#{cmd}`
-       h_res = Basic.safe_parse_json(output, {})
-       puts output
-       puts h_res.to_json
-       
-       if list_metadata = h_res["list_meta"]
-          relative_filepath = Basic.relative_path(project, output_path)
-          list_metadata.each do |meta|
-            meta['imported'] = true
-            puts "add annot #{meta.to_json}"
-            Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
-          end
-        end
-     elsif ["LOOM"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
-        puts "bou"
-        h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
-        metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
-        File.open(metadata_list_file, 'w') do |f|
-          f.write(h_meta.to_json)
-        end
-        cmd = "java -jar lib/ASAP.jar -T CopyMetaData -loomFrom \"#{ori_fu_path}\" -loomTo #{output_path} -metaJSON #{metadata_list_file}"
-        puts cmd
-        output = `#{cmd}`
-        metadata_list_file2 = tmp_dir + 'list_metadata_to_copy2.json'
-        File.open(metadata_list_file2, 'w') do |f|
-          f.write(output)
-        end
-        cmd = "java -jar lib/ASAP.jar -T ExtractMetadata -no-values -loom #{output_path} -metaJSON #{metadata_list_file2}"
-        puts cmd
-        output = `#{cmd}`
-        h_res = Basic.safe_parse_json(output, {})
-        puts output 
-        puts h_res.to_json
-        if list_metadata = h_res['list_meta']
-          relative_filepath = Basic.relative_path(project, output_path)
-          list_metadata.each do |meta|
-            meta['imported'] = true
-            puts "add annot #{meta.to_json}" 
-            Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
-          end
-        end
-      end
-
-      # Broadcast completion after metadata copying (or if no metadata copying was needed)
-      # If metadata copying was needed, it's now complete; if not needed, mark as complete
-      ActionCable.server.broadcast "project_#{project.id}", {
-        project_id: project.id,
-        step_id: parsing_step.id,
-        stage: 'creation',
-        parsing_status: 'complete',
-        parsing_complete: true,
-        metadata_status: 'complete',
-        metadata_complete: true,
-        all_complete: true,
-        redirect_url: Rails.application.routes.url_helpers.project_path(project),
-        project_key: project.key
-      }
-      project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-      logger.info("[ParseRake] Parse and metadata copying completed, broadcasting final update")
 
     else
       h_output = {"displayed_error" => ["Error retrieving data from HCA", h_output_hca["error"]]}

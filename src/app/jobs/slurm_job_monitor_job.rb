@@ -20,7 +20,7 @@ class SlurmJobMonitorJob < ApplicationJob
 
     begin
       slurm_service = SlurmService.new(logger: Rails.logger)
-      status = slurm_service.get_job_status(slurm_job_id)
+      status = slurm_service.get_job_status(slurm_job_id, run)
       
       if status.nil?
         Rails.logger.warn("[SlurmJobMonitorJob] Could not get status for SLURM job #{slurm_job_id}, will retry")
@@ -36,6 +36,20 @@ class SlurmJobMonitorJob < ApplicationJob
       case status
       when :pending, :running
         Rails.logger.debug("[SlurmJobMonitorJob] Run##{run_id} still #{status}, will check again")
+
+        # If the job just transitioned to running, update status and broadcast
+        if status == :running && run.status_id != 2
+          project = run.project
+          step = run.step
+
+          run.update(status_id: 2)
+
+          project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
+          project_step.update(status_id: 2) if project_step
+
+          project.broadcast(step.id) if project.respond_to?(:broadcast)
+        end
+
         if attempt < MAX_MONITOR_ATTEMPTS
           SlurmJobMonitorJob.set(wait: MONITOR_INTERVAL).perform_later(run_id, slurm_job_id, attempt + 1)
         else
@@ -49,7 +63,9 @@ class SlurmJobMonitorJob < ApplicationJob
 
       when :failed, :timeout, :node_fail, :cancelled
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} finished with status: #{status}")
-        finish_run_with_error(run, "SLURM job finished with status: #{status}")
+        # Extract detailed error message from error file
+        error_message = extract_error_message(run)
+        finish_run_with_error(run, error_message || "SLURM job finished with status: #{status}")
 
       else
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has unknown status: #{status}, will retry")
@@ -74,7 +90,99 @@ class SlurmJobMonitorJob < ApplicationJob
 
   private
 
+  def extract_error_message(run)
+    return nil unless run
+    
+    project = run.project
+    step = run.step
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+    step_dir = project_dir + step.name
+    output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+    
+    error_file = output_dir + "slurm_#{run.id}.err"
+    return nil unless File.exist?(error_file)
+    
+    error_content = File.read(error_file)
+    
+    # Filter out Elasticsearch responses - these are not errors
+    # Elasticsearch responses have patterns like: {"_index":"...","_id":"...","_version":...,"result":"updated"...}
+    if error_content.match?(/\{"_index":|"_id":|"_version":|"result":"updated"/)
+      # This looks like an Elasticsearch response, filter it out
+      # Remove Elasticsearch response lines
+      lines = error_content.split("\n").reject do |line|
+        line.match?(/\{"_index":|"_id":|"_version":|"result":"updated"|"_shards":|"_seq_no":|"_primary_term":/)
+      end
+      error_content = lines.join("\n")
+    end
+    
+    # If after filtering we have no content, return nil
+    return nil if error_content.strip.empty?
+    
+    # First, look for docker errors (common issue)
+    if error_content.match?(/docker:.*no such file/i)
+      if match = error_content.match(/docker:.*?([^:]+):\s*no such file[^\n]*/i)
+        return "Docker error: #{match[1].strip}: no such file or directory"
+      end
+    end
+    
+    # Look for "bin/rails aborted!" followed by error message
+    if error_content.include?('bin/rails aborted!')
+      lines = error_content.split("\n")
+      aborted_index = lines.index { |line| line.include?('bin/rails aborted!') }
+      if aborted_index
+        # Get the error message line (usually right after "aborted!")
+        error_line = lines[aborted_index + 1]
+        if error_line && error_line.strip.present?
+          error_msg = error_line.strip
+          # If it's an Errno::ENOENT, extract the file path
+          if error_msg.match?(/Errno::ENOENT.*@ rb_sysopen - (.+)/)
+            file_path = $1
+            return "File not found: #{file_path}"
+          end
+          return error_msg.length > 500 ? error_msg[0..500] + "..." : error_msg
+        end
+      end
+    end
+    
+    # Extract the most relevant error message
+    # Look for lines with "Error:", "aborted!", or exception messages
+    # But exclude Elasticsearch patterns
+    error_lines = error_content.split("\n").select do |line|
+      line.match?(/Error:|aborted!|NameError|NoMethodError|Errno::|No such file|failed|docker:/i) &&
+      !line.match?(/warning:/i) && # Skip warnings
+      !line.match?(/\{"_index":|"_id":|"_version":|"result":"updated"/) # Skip Elasticsearch responses
+    end
+    
+    if error_lines.any?
+      # Get the last meaningful error line (usually the actual error)
+      error_line = error_lines.last
+      # Clean up the error message
+      error_line = error_line.strip
+      # If it's very long, truncate it but keep the important part
+      if error_line.length > 500
+        error_line = error_line[0..500] + "..."
+      end
+      return error_line
+    end
+    
+    # Fallback: return a summary if no specific error line found
+    if error_content.include?('aborted!')
+      # Try to extract the error type and message after "aborted!"
+      if match = error_content.match(/aborted!\s*(.+?)(?:\n|$)/)
+        return "Error: #{match[1].strip}"
+      end
+    end
+    
+    nil
+  end
+
   def finish_run_successfully(run, slurm_service, slurm_job_id)
+    # Don't re-process runs that are already marked as complete
+    if run.status_id == 3
+      Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete, skipping")
+      return
+    end
+    
     project = run.project
     step = run.step
     
@@ -109,6 +217,19 @@ class SlurmJobMonitorJob < ApplicationJob
     end
 
     if h_results.is_a?(Hash) && h_results.keys.size > 0
+      # Check if the results contain a displayed_error - this means parsing failed
+      if h_results['displayed_error'].present?
+        error_msg = if h_results['displayed_error'].is_a?(Array)
+          h_results['displayed_error'].join('; ')
+        else
+          h_results['displayed_error'].to_s
+        end
+        Rails.logger.warn("[SlurmJobMonitorJob] Run##{run.id} has displayed_error in output.json: #{error_msg}")
+        finish_run_with_error(run, error_msg)
+        return
+      end
+      
+      # If no displayed_error, proceed with successful completion
       Basic.finish_run(Rails.logger, run, h_results)
     else
       Rails.logger.warn("[SlurmJobMonitorJob] No valid results found for Run##{run.id}, marking as failed")
@@ -117,6 +238,22 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   def finish_run_with_error(run, error_message)
+    # Don't mark as failed if the run is already complete and has valid output
+    if run.status_id == 3
+      project = run.project
+      step = run.step
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+      step_dir = project_dir + step.name
+      output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+      output_json_filename = output_dir + 'output.json'
+      
+      # If output.json exists, the run was successful - don't mark as failed
+      if File.exist?(output_json_filename)
+        Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already complete with output.json, ignoring error message")
+        return
+      end
+    end
+    
     project = run.project
     step = run.step
     
@@ -127,6 +264,19 @@ class SlurmJobMonitorJob < ApplicationJob
     
     project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
     if project_step
+      # Don't overwrite a complete status with failed if output.json exists
+      if project_step.status_id == 3
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        output_json_filename = output_dir + 'output.json'
+        
+        if File.exist?(output_json_filename)
+          Rails.logger.info("[SlurmJobMonitorJob] ProjectStep already complete with output.json, not marking as failed")
+          return
+        end
+      end
+      
       project_step.update(
         status_id: 4,
         error_message: error_message

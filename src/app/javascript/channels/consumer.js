@@ -3,9 +3,11 @@
 
 import { createConsumer } from "@rails/actioncable"
 
-const consumer = createConsumer()
+// Use /websocket instead of the default /cable
+// This matches the mount path in config/routes.rb and config/application.rb
+const consumer = createConsumer("/websocket")
 
 // Log consumer creation for debugging
-console.log('[ActionCable] Consumer created', consumer)
+console.log('[ActionCable] Consumer created with URL: /websocket', consumer)
 
 export default consumer

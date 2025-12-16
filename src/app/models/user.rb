@@ -16,11 +16,19 @@ class User < ApplicationRecord
 
   # Callbacks
   before_save :ensure_displayed_name
+  after_create :create_slurm_account
 
   private
 
   def ensure_displayed_name
     self.displayed_name = email.split('@').first if displayed_name.blank?
+  end
+  
+  def create_slurm_account
+    # Create SLURM account for the new user
+    # Using perform_now since background job processor may not be running
+    # This is fast enough to run synchronously
+    SlurmAccountCreateJob.perform_now(self.id)
   end
 end
 

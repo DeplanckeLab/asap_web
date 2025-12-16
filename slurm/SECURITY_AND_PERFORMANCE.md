@@ -1,0 +1,118 @@
+# Security and Performance Analysis: SLURM on Host
+
+## Security Considerations
+
+### 1. **Network Access (Low Risk)**
+- **Current**: Docker containers connect to host slurmctld via `host.docker.internal:6817`
+- **Risk**: Containers can submit jobs to host SLURM
+- **Mitigation**: 
+  - SLURM uses munge authentication (shared key, read-only mount)
+  - Only containers with munge key can submit jobs
+  - Port 6817 is only accessible from Docker network (not exposed externally)
+  - Consider firewall rules if needed: `sudo firewall-cmd --add-port=6817/tcp --permanent`
+
+### 2. **Munge Key Sharing (Low-Medium Risk)**
+- **Current**: `/etc/munge/munge.key` mounted read-only into website container
+- **Risk**: If container is compromised, attacker has munge key
+- **Mitigation**:
+  - Key is read-only mount (container can't modify it)
+  - Key is already shared between host and containers (same risk as before)
+  - Consider: Use separate munge keys for containers vs host (more complex)
+
+### 3. **Job Execution User (Medium Risk)**
+- **Current**: `SlurmdUser=root` - jobs run as root on host
+- **Risk**: If a job script is malicious, it runs with root privileges
+- **Mitigation Options**:
+  1. **Change to non-root user** (recommended):
+     ```conf
+     SlurmdUser=slurm
+     ```
+     - Create dedicated user for job execution
+     - Set up proper permissions for data directories
+  2. **Use SLURM's user impersonation**:
+     - Configure jobs to run as submitting user
+     - Requires proper user mapping between container and host
+  3. **Sandbox with cgroups** (if enabled):
+     - Limit resource access
+     - Isolate job processes
+
+### 4. **File System Access (Same as Before)**
+- **Current**: Containers already have volume mounts (`/data/asap2`, `/data/asap2_test`)
+- **Risk**: Same as current setup - no change
+- **Note**: Jobs execute on host, so they have same file access as before
+
+### 5. **Docker Socket Access (Existing Risk)**
+- **Current**: Website container mounts `/var/run/docker.sock`
+- **Risk**: Container can control Docker daemon (already exists)
+- **Note**: This is unchanged - jobs still use `docker exec website` to run commands
+
+## Performance Considerations
+
+### 1. **Network Latency (Negligible)**
+- **Impact**: Client tools connect to slurmctld over network
+- **Latency**: <1ms for localhost connections
+- **Comparison**: Better than `docker exec` overhead (~10-50ms)
+
+### 2. **File I/O (Same)**
+- **Impact**: No change - same volume mounts
+- **Performance**: Same as before
+
+### 3. **Resource Usage (Better)**
+- **Before**: Docker exec overhead + container overhead
+- **After**: Direct network connection (lower overhead)
+- **Benefit**: Faster job submission and status checks
+
+### 4. **Scalability (Better)**
+- **Before**: Limited by Docker exec performance
+- **After**: Standard SLURM client-server architecture
+- **Benefit**: Can handle more concurrent job submissions
+
+## Recommendations
+
+### Security Improvements:
+
+1. **Change SlurmdUser to non-root** (High Priority):
+   ```bash
+   # In slurm.conf
+   SlurmdUser=slurm
+   
+   # Ensure slurm user has access to data directories
+   sudo chown -R slurm:slurm /data/asap2 /data/asap2_test
+   ```
+
+2. **Firewall Configuration** (Medium Priority):
+   ```bash
+   # Only allow SLURM ports from Docker network
+   sudo firewall-cmd --add-rich-rule='rule family="ipv4" source address="172.17.0.0/16" port port="6817" protocol="tcp" accept'
+   sudo firewall-cmd --add-rich-rule='rule family="ipv4" source address="172.17.0.0/16" port port="6818" protocol="tcp" accept'
+   ```
+
+3. **Munge Key Permissions** (Already Good):
+   - Read-only mount ✓
+   - Proper ownership (munge:munge) ✓
+   - 400 permissions ✓
+
+### Performance Optimizations:
+
+1. **Keep slurmctld on host** - Better performance than Docker
+2. **Use localhost connections** - Minimal latency
+3. **Monitor resource usage** - Use `sinfo` and `squeue` regularly
+
+## Comparison: Docker vs Host
+
+| Aspect | Docker Containers | Host Machine |
+|--------|------------------|--------------|
+| **Munge Auth** | Complex (current issue) | Simple (systemd) |
+| **Performance** | Docker exec overhead | Direct connection |
+| **Security** | Container isolation | Host-level security |
+| **Debugging** | Docker logs | systemd logs |
+| **Maintenance** | Docker updates | System package updates |
+
+## Conclusion
+
+**Security**: Acceptable with current setup, but consider changing SlurmdUser to non-root.
+
+**Performance**: Better than Docker exec approach - direct network connection is faster.
+
+**Overall**: Moving to host is a good choice - resolves munge issues and improves performance.
+

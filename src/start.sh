@@ -1,5 +1,32 @@
 #!/bin/bash                                                                                                                                                                
 
+# Start munged for SLURM authentication
+# Note: munge.key is mounted read-only from host, owned by munge:munge with 400 permissions
+# Since we're running as rvmuser (in munge group), we can't read it directly
+# We'll use the host's munged socket instead, or copy the key if we have root access
+# For now, try to use the host munged socket via the mounted volume
+if [ -f /usr/sbin/munged ]; then
+    # Check if we can access host munged socket
+    if [ -S /run/munge/munge.socket.2 ]; then
+        echo "Using host munged socket"
+    else
+        # Try to start our own munged if we have the key
+        if [ -f /etc/munge/munge.key ]; then
+            mkdir -p /run/munge /var/log/munge
+            chmod 755 /run/munge
+            chmod 700 /var/log/munge 2>/dev/null || true
+            # Try to copy key (may fail if no read permission)
+            # If we're in munge group and key has group read, this might work
+            cp /etc/munge/munge.key /run/munge/munge.key 2>/dev/null || true
+            if [ -f /run/munge/munge.key ]; then
+                chmod 400 /run/munge/munge.key 2>/dev/null || true
+                /usr/sbin/munged --force --num-threads=10 >/dev/null 2>&1 &
+                sleep 2
+            fi
+        fi
+    fi
+fi
+
 # Check if the Rails application already exists                                                                                                                            
 if [ ! -f "Gemfile" ]; then
   echo "Rails application not found. Creating a new one..."

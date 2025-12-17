@@ -21,6 +21,7 @@ Rails.application.routes.draw do
       get :creation_status
       get :step_results
       get :refresh_steps_panel
+      get :queue_position
       post :restart_step
     end
   end

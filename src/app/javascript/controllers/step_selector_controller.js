@@ -38,6 +38,20 @@ export default class extends Controller {
       console.log('[StepSelectorController] Project ID:', this.projectIdValue)
       console.log('[StepSelectorController] Element:', this.element)
       console.log('[StepSelectorController] Element HTML:', this.element.outerHTML.substring(0, 200))
+      
+      // Check if required targets exist
+      if (!this.hasEmptyStateTarget) {
+        console.warn('[StepSelectorController] emptyState target not found')
+      }
+      if (!this.hasLoadingStateTarget) {
+        console.warn('[StepSelectorController] loadingState target not found')
+      }
+      if (!this.hasContentTarget) {
+        console.warn('[StepSelectorController] content target not found')
+      }
+      if (!this.hasResultsContainerTarget) {
+        console.warn('[StepSelectorController] resultsContainer target not found')
+      }
     // Track currently displayed step
     this.currentStepId = null
     console.log('[StepSelectorController] Initial currentStepId set to:', this.currentStepId)
@@ -563,12 +577,16 @@ export default class extends Controller {
     }
     
     // Update UI states
-    this.emptyStateTarget.style.display = 'none'
-    if (showLoading) {
+    if (this.hasEmptyStateTarget) {
+      this.emptyStateTarget.style.display = 'none'
+    }
+    if (showLoading && this.hasLoadingStateTarget) {
       console.log('[StepSelectorController] Showing loading state')
       this.loadingStateTarget.style.display = 'block'
     }
-    this.contentTarget.style.display = 'none'
+    if (this.hasContentTarget) {
+      this.contentTarget.style.display = 'none'
+    }
     
     // Border is handled by server via refreshStepsPanel (called from selectStep/selectFirstAvailableStep)
 
@@ -614,9 +632,15 @@ export default class extends Controller {
       // Check if HTML is empty or just whitespace
       if (!html || html.trim().length === 0) {
         console.error('[StepSelectorController] Received empty HTML response!')
-        controller.loadingStateTarget.style.display = 'none'
-        controller.emptyStateTarget.style.display = 'block'
-        controller.contentTarget.style.display = 'none'
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        if (controller.hasEmptyStateTarget) {
+          controller.emptyStateTarget.style.display = 'block'
+        }
+        if (controller.hasContentTarget) {
+          controller.contentTarget.style.display = 'none'
+        }
         return
       }
       
@@ -630,30 +654,40 @@ export default class extends Controller {
       }
       
       // Verify contentTarget exists before updating
-      if (!controller.contentTarget) {
-        console.error('[StepSelectorController] contentTarget is null! Cannot update content.')
-        controller.loadingStateTarget.style.display = 'none'
-        controller.emptyStateTarget.style.display = 'block'
+      if (!controller.hasContentTarget) {
+        console.error('[StepSelectorController] contentTarget is missing! Cannot update content.')
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        if (controller.hasEmptyStateTarget) {
+          controller.emptyStateTarget.style.display = 'block'
+        }
         return
       }
       
       controller.contentTarget.innerHTML = html
-      controller.loadingStateTarget.style.display = 'none'
-      controller.emptyStateTarget.style.display = 'none'
+      if (controller.hasLoadingStateTarget) {
+        controller.loadingStateTarget.style.display = 'none'
+      }
+      if (controller.hasEmptyStateTarget) {
+        controller.emptyStateTarget.style.display = 'none'
+      }
       controller.contentTarget.style.display = 'block'
       
       console.log('[StepSelectorController] Content updated')
-      console.log('[StepSelectorController] Content target element:', controller.contentTarget)
-      console.log('[StepSelectorController] Content target display after update:', window.getComputedStyle(controller.contentTarget).display)
-      console.log('[StepSelectorController] Content target innerHTML length:', controller.contentTarget.innerHTML.length)
-      console.log('[StepSelectorController] Content target innerHTML preview:', controller.contentTarget.innerHTML.substring(0, 200))
-      console.log('[StepSelectorController] currentStepId AFTER update:', controller.currentStepId)
-      
-      // Double-check that content is visible
-      if (window.getComputedStyle(controller.contentTarget).display === 'none') {
-        console.warn('[StepSelectorController] Content is still hidden! Forcing display block...')
-        controller.contentTarget.style.display = 'block'
+      if (controller.hasContentTarget) {
+        console.log('[StepSelectorController] Content target element:', controller.contentTarget)
+        console.log('[StepSelectorController] Content target display after update:', window.getComputedStyle(controller.contentTarget).display)
+        console.log('[StepSelectorController] Content target innerHTML length:', controller.contentTarget.innerHTML.length)
+        console.log('[StepSelectorController] Content target innerHTML preview:', controller.contentTarget.innerHTML.substring(0, 200))
+        
+        // Double-check that content is visible
+        if (window.getComputedStyle(controller.contentTarget).display === 'none') {
+          console.warn('[StepSelectorController] Content is still hidden! Forcing display block...')
+          controller.contentTarget.style.display = 'block'
+        }
       }
+      console.log('[StepSelectorController] currentStepId AFTER update:', controller.currentStepId)
       console.log('[StepSelectorController] Data attribute value:', controller.element.getAttribute('data-current-step-id'))
       console.log('[StepSelectorController] Verifying currentStepId is still set correctly...')
       // Ensure currentStepId is still set (it might have been reset somehow)
@@ -669,15 +703,21 @@ export default class extends Controller {
       console.error('[StepSelectorController] Error:', error)
       console.error('[StepSelectorController] Error message:', error.message)
       console.error('[StepSelectorController] Error stack:', error.stack)
-      controller.loadingStateTarget.style.display = 'none'
-      controller.contentTarget.innerHTML = `
-        <div class="alert alert-danger">
-          <i class="fas fa-exclamation-triangle me-2"></i>
-          Error loading step results: ${error.message}. Please try again.
-        </div>
-      `
-      controller.contentTarget.style.display = 'block'
-      controller.emptyStateTarget.style.display = 'none'
+      if (controller.hasLoadingStateTarget) {
+        controller.loadingStateTarget.style.display = 'none'
+      }
+      if (controller.hasContentTarget) {
+        controller.contentTarget.innerHTML = `
+          <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            Error loading step results: ${error.message}. Please try again.
+          </div>
+        `
+        controller.contentTarget.style.display = 'block'
+      }
+      if (controller.hasEmptyStateTarget) {
+        controller.emptyStateTarget.style.display = 'none'
+      }
     })
   }
 

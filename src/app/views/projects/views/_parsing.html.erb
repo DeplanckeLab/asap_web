@@ -7,10 +7,27 @@
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
     <div class="px-6 py-8 text-center">
       <% if status_id.nil? || status_id == 1 %>
-        <div class="flex flex-col items-center justify-center">
+        <div class="flex flex-col items-center justify-center"
+             <% if @parsing_run&.slurm_job_id %>
+               data-controller="queue-position"
+               data-queue-position-run-id-value="<%= @parsing_run.id %>"
+               data-queue-position-slurm-job-id-value="<%= @parsing_run.slurm_job_id %>"
+               data-queue-position-project-id-value="<%= @project.id %>"
+             <% end %>>
           <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
           <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
           <p class="text-gray-600 mb-4">The parsing job is queued and will start shortly.</p>
+          <% if @parsing_run&.slurm_job_id %>
+            <div data-queue-position-target="queueInfo" class="text-gray-600">
+              <span>Position in the queue: </span>
+              <span data-queue-position-target="position" class="inline-block">
+                <i class="fas fa-spinner fa-spin"></i>
+              </span>
+            </div>
+            <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
+              Nothing in the queue, will start shortly...
+            </div>
+          <% end %>
         </div>
       <% elsif status_id == 2 %>
         <div class="flex flex-col items-center justify-center" 
@@ -64,7 +81,6 @@
     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 px-6 py-4">
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          <i class="fas fa-check-circle text-blue-600"></i>
           Parsing results
         </h3>
         <div class="flex items-center gap-3">
@@ -131,7 +147,7 @@
       <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
       <% if @results && !['LOOM', 'H5_10x', 'MEX'].include?(@results["detected_format"]) && @project.parsing_attrs_json %>
         <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-        <div class="border-t border-gray-200 pt-4 relative">
+        <div class="pt-4 relative">
           <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
             <i class="fas fa-cog text-gray-500"></i>
             Parameters
@@ -218,7 +234,7 @@
 
       <!-- Output Summary -->
       <div class="border-t border-gray-200 pt-4">
-        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-2">
           <i class="fas fa-chart-bar text-gray-500"></i>
           Output summary
         </h4>
@@ -239,87 +255,100 @@
       </div>
 
       <!-- Validation Warnings -->
-      <div class="border-t border-gray-200 pt-4 space-y-3">
-        <% if @results['nber_rows'] && @results['nber_rows'] < 3 %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-            <span>For many steps of the pipeline at least three genes are required</span>
-          </div>
-        <% end %>
-
-        <% if @results['nber_cols'] && @results['nber_cols'] == 0 %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-            <span>You may have selected wrong parameters for the parsing, in particular not the appropriated delimiter</span>
-          </div>
-        <% elsif @results['nber_cols'] && @results['nber_cols'] < 3 %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-            <div class="flex-1">
-              <p class="mb-1">Original dataset has less than 3 cells</p>
-              <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
-                For many steps of the pipeline at least three cells are required
-              </span>
-            </div>
-          </div>
-        <% end %>
-
-        <!-- Count Matrix Status -->
-        <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
-          <div class="alert alert-success flex items-start gap-3">
-            <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-            <span>The original matrix contains only counts</span>
-          </div>
-        <% else %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-            <div class="flex-1">
-              <p class="mb-1">The original matrix contains floats</p>
-              <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
-                Many methods will NOT be available if your original file is not a count matrix
-              </span>
-            </div>
-          </div>
-        <% end %>
-
-        <!-- Zero Values Percentage -->
-        <% if @results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] %>
-          <% total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f %>
-          <% if total_values > 0 %>
-            <% zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2) %>
-            <div class="alert alert-info flex items-start gap-3">
-              <i class="fas fa-info-circle text-blue-600 mt-0.5"></i>
-              <span><%= zero_percentage %>% of values are zeros</span>
+      <% 
+        nber_not_found_genes = @results['nber_not_found_genes'] if @results
+        has_validation_alerts = false
+        # Check if any alerts will be displayed
+        if (@results['nber_rows'] && @results['nber_rows'] < 3) ||
+           (@results['nber_cols'] && @results['nber_cols'] == 0) ||
+           (@results['nber_cols'] && @results['nber_cols'] < 3) ||
+           @results.key?('is_count_table') ||
+           (@results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] && (@results['nber_rows'].to_f * @results['nber_cols'].to_f > 0)) ||
+           (nber_not_found_genes && nber_not_found_genes > 0) ||
+           @results['nber_rows']
+          has_validation_alerts = true
+        end
+      %>
+      <% if has_validation_alerts %>
+        <div class="pt-4 space-y-3">
+          <% if @results['nber_rows'] && @results['nber_rows'] < 3 %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+              <span>For many steps of the pipeline at least three genes are required</span>
             </div>
           <% end %>
-        <% end %>
-      </div>
 
-      <!-- Ensembl Mapping Status -->
-      <div class="border-t border-gray-200 pt-4">
-        <% nber_not_found_genes = @results['nber_not_found_genes'] if @results %>
-        <% if nber_not_found_genes && nber_not_found_genes > 0 %>
-          <% total_genes = @results['nber_rows'] || 1 %>
-          <% not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2) %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-            <div class="flex-1">
-              <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) genes were not found in Ensembl</p>
-              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-200">
-                <i class="fas fa-lightbulb text-red-600"></i>
-                <span class="text-sm text-red-800">Did you select the right species (now <strong><%= @project.organism&.name || 'Unknown' %></strong>)? If not, create a new project</span>
+          <% if @results['nber_cols'] && @results['nber_cols'] == 0 %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+              <span>You may have selected wrong parameters for the parsing, in particular not the appropriated delimiter</span>
+            </div>
+          <% elsif @results['nber_cols'] && @results['nber_cols'] < 3 %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+              <div class="flex-1">
+                <p class="mb-1">Original dataset has less than 3 cells</p>
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
+                  For many steps of the pipeline at least three cells are required
+                </span>
               </div>
             </div>
-          </div>
-        <% else %>
-          <% if @results['nber_rows'] %>
+          <% end %>
+
+          <!-- Count Matrix Status -->
+          <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
             <div class="alert alert-success flex items-start gap-3">
               <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-              <span>All <strong><%= @results['nber_rows'] %></strong> genes were found in Ensembl</span>
+              <span>The original matrix contains only counts</span>
+            </div>
+          <% else %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+              <div class="flex-1">
+                <p class="mb-1">The original matrix contains floats</p>
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
+                  Many methods will NOT be available if your original file is not a count matrix
+                </span>
+              </div>
             </div>
           <% end %>
-        <% end %>
-      </div>
+
+          <!-- Zero Values Percentage -->
+          <% if @results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] %>
+            <% total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f %>
+            <% if total_values > 0 %>
+              <% zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2) %>
+              <div class="alert alert-info flex items-start gap-3">
+                <i class="fas fa-info-circle text-blue-600 mt-0.5"></i>
+                <span><%= zero_percentage %>% of values are zeros</span>
+              </div>
+            <% end %>
+          <% end %>
+
+          <!-- Ensembl Mapping Status -->
+          <% if nber_not_found_genes && nber_not_found_genes > 0 %>
+            <% total_genes = @results['nber_rows'] || 1 %>
+            <% not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2) %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+              <div class="flex-1">
+                <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) genes were not found in Ensembl</p>
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-200">
+                  <i class="fas fa-lightbulb text-red-600"></i>
+                  <span class="text-sm text-red-800">Did you select the right species (now <strong><%= @project.organism&.name || 'Unknown' %></strong>)? If not, create a new project</span>
+                </div>
+              </div>
+            </div>
+          <% else %>
+            <% if @results['nber_rows'] %>
+              <div class="alert alert-success flex items-start gap-3">
+                <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
+                <span>All <strong><%= @results['nber_rows'] %></strong> genes were found in Ensembl</span>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
 
       <!-- Results Files -->
       <div class="border-t border-gray-200 pt-4">
@@ -331,10 +360,10 @@
           <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
           <% loom_file = project_dir + 'parsing' + 'output.loom' %>
           <% if File.exist?(loom_file) && exportable?(@project) %>
-            <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.loom'), 
+            <%= link_to(get_file_project_path(@project, step: 'parsing', filename: 'output.loom'), 
                 target: '_blank',
                 class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
-              <i class="fas fa-file-archive"></i>
+              <i class="fas fa-file"></i>
               <span>Loom file</span>
               <i class="fas fa-external-link-alt text-xs"></i>
             <% end %>
@@ -345,17 +374,17 @@
           <% if admin? %>
             <% json_file = project_dir + 'parsing' + 'output.json' %>
             <% if File.exist?(json_file) && exportable?(@project) %>
-              <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.json'), 
+              <%= link_to(get_file_project_path(@project, step: 'parsing', filename: 'output.json'), 
                   target: '_blank',
                   class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
-                <i class="fas fa-file-code"></i>
+                <i class="fas fa-file"></i>
                 <span>JSON file</span>
                 <i class="fas fa-external-link-alt text-xs"></i>
               <% end %>
             <% end %>
             <% log_file = project_dir + 'parsing' + 'output.log' %>
             <% if File.exist?(log_file) && exportable?(@project) %>
-              <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.log'), 
+              <%= link_to(get_file_project_path(@project, step: 'parsing', filename: 'output.log'), 
                   target: '_blank',
                   class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
                 <i class="fas fa-file-alt"></i>
@@ -387,7 +416,11 @@
           <% elsif @parsing_run.status_id == 1 && @parsing_run.submitted_at %>
             <%# Ongoing wait - calculate from submitted_at to now %>
             <% wait_time = (Time.now - @parsing_run.submitted_at).round %>
-            <% metadata_parts << "<span id='ongoing_wait_#{@parsing_run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
+            <% wait_text = "Wait #{duration(wait_time)}" %>
+            <% if @queue_position %>
+              <% wait_text += " (queue position: #{@queue_position})" %>
+            <% end %>
+            <% metadata_parts << "<span id='ongoing_wait_#{@parsing_run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>#{wait_text}</span>" %>
           <% end %>
           <%# Running time - use duration if available, otherwise calculate from start_time %>
           <% run_time_display = nil %>

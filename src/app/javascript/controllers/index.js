@@ -63,6 +63,10 @@ import ParsingTimerController from "controllers/parsing_timer_controller"
 application.register("parsing-timer", ParsingTimerController)
 console.log('Parsing timer controller registered')
 
+import QueuePositionController from "controllers/queue_position_controller"
+application.register("queue-position", QueuePositionController)
+console.log('Queue position controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

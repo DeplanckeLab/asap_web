@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position]
 
   # GET /projects or /projects.json
   def index
@@ -712,7 +712,10 @@ class ProjectsController < ApplicationController
         return
       end
 
-      project_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
+      # Check if "users" is already in USER_DATA_DIR to avoid double "users"
+      user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp('/')
+      base_dir = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
+      project_dir = base_dir + @project.user_id.to_s + @project.key
       run_id = (params[:run_id]) ? params[:run_id] : nil #((params[:filename] and m = params[:filename].match(/^(\d+)\.\w{1,3}/)) ? m[1].to_i : nil)                                                                                               
       step_name = params[:step]
       if run_id
@@ -738,7 +741,11 @@ class ProjectsController < ApplicationController
       elsif params[:filename]
         filename = params[:filename]
         # Use @project.key instead of params[:key] since we already have the project loaded
-        tmp_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
+        # File structure: USER_DATA_DIR/users/user_id/project_key/step/filename
+        # Check if "users" is already in USER_DATA_DIR to avoid double "users"
+        user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp('/')
+        base_dir = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
+        tmp_dir = base_dir + @project.user_id.to_s + @project.key
         tmp_dir += step_name if step_name
         tmp_dir += params[:run_id].to_s if params[:run_id]
         filepath = tmp_dir + filename
@@ -812,15 +819,18 @@ class ProjectsController < ApplicationController
             end
           else
             logger.debug "FILEPATH:" + filepath.to_s
-            new_filepath = filepath.to_s.gsub(/^\/data\/asap2/, '/rails_send_file')
-
-                       path = filepath.to_s.gsub(/\/data\/asap2/, "/rails_send_file") #"/rails_send_file/FB2020_05.sql.gz.05"                                                                                                                      
-             headers['Content-Disposition'] = (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name,  run_id, filename].compact.join("_")) : ''
-              headers['X-Accel-Redirect'] = path #'/download_public/uploads/stories/' + params[:story_id] +'/' + params[:story_id] + '.zip'                                                                                                        
-             # headers["X-Accel-Mapping"]=  "/data/asap2/=/rails_send_file/"                                                                                                                                                                       
-             headers['Content-Type'] = "application/octet-stream"
-             headers['Content-Length'] = File.size filepath
-            render :nothing => true
+            # Stream file through Rails (proxy approach)
+            # This works when the proxy nginx doesn't have direct filesystem access
+            # For large files: x_sendfile will use X-Sendfile header if nginx supports it
+            # Otherwise Rails will stream the file chunked (which works but uses more memory)
+            file_size = File.size(filepath)
+            Rails.logger.info "get_file: Serving file #{filename}, size: #{file_size} bytes (#{(file_size / 1024.0 / 1024.0).round(2)} MB)"
+            
+            disposition = (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name, run_id, filename].compact.join("_")) : 'inline'
+            send_file filepath,
+              type: 'application/octet-stream',
+              disposition: disposition,
+              x_sendfile: true  # Use X-Sendfile if nginx supports it (most efficient for large files)
   
           end
         else
@@ -1398,6 +1408,19 @@ class ProjectsController < ApplicationController
         # This matches the logic used in the left panel - we want to show the current/active run's status
         @parsing_run = @runs.order(created_at: :desc).first
         Rails.logger.info("[step_results] Parsing run selected: #{@parsing_run&.id}, status_id: #{@parsing_run&.status_id}, created_at: #{@parsing_run&.created_at}")
+        
+        # Get queue position if run is waiting
+        @queue_position = nil
+        if @parsing_run && @parsing_run.status_id == 1 && @parsing_run.slurm_job_id
+          begin
+            slurm_service = SlurmService.new(logger: Rails.logger)
+            @queue_position = slurm_service.get_job_queue_position(@parsing_run.slurm_job_id)
+            Rails.logger.info("[step_results] Queue position for Run##{@parsing_run.id}: #{@queue_position}")
+          rescue => e
+            Rails.logger.warn("[step_results] Could not get queue position: #{e.message}")
+          end
+        end
+        
         @results = nil
         
         # Only load results if we have a completed run (status_id == 3)
@@ -1482,7 +1505,51 @@ class ProjectsController < ApplicationController
     end
   end
 
-  # GET /projects/:id/refresh_steps_panel
+  # GET /projects/:id/queue_position
+  def queue_position
+    slurm_job_id = params[:slurm_job_id]
+    run_id = params[:run_id]
+    
+    queue_position = nil
+    wait_time = nil
+    
+    if slurm_job_id.present?
+      begin
+        run = nil
+        run_status_id = nil
+        
+        # Verify run belongs to this project if run_id is provided
+        if run_id.present?
+          run = Run.find_by(id: run_id, project_id: @project.id)
+          unless run
+            render json: { error: 'Run not found or does not belong to this project' }, status: :not_found
+            return
+          end
+          
+          run_status_id = run.status_id
+          
+          if run.submitted_at
+            wait_time = (Time.now - run.submitted_at).to_i
+          end
+        end
+        
+        slurm_service = SlurmService.new(logger: Rails.logger)
+        # Pass the run's status_id to help determine if queue is empty
+        queue_position = slurm_service.get_job_queue_position(slurm_job_id, run_status_id)
+        Rails.logger.info("[queue_position] For SLURM job #{slurm_job_id}, run status_id: #{run_status_id}, queue_position: #{queue_position.inspect}, wait_time: #{wait_time.inspect}")
+      rescue => e
+        Rails.logger.warn("[queue_position] Error getting queue position: #{e.message}")
+        Rails.logger.warn("[queue_position] Backtrace: #{e.backtrace.first(5).join("\n")}")
+      end
+    end
+    
+    Rails.logger.info("[queue_position] Returning: queue_position=#{queue_position.inspect}, wait_time=#{wait_time.inspect}")
+    render json: {
+      queue_position: queue_position,
+      wait_time: wait_time
+    }
+  end
+
   def refresh_steps_panel
     # Ensure project steps exist (safeguard for existing projects)
     @project.ensure_project_steps
@@ -2055,7 +2122,10 @@ class ProjectsController < ApplicationController
         raise ActiveRecord::RecordNotFound, "Project not found with identifier: #{identifier}"
       end
       
-      @project_dir = Pathname.new(ENV["USER_DATA_DIR"]) + @project.user_id.to_s + @project.key
+      # Check if "users" is already in USER_DATA_DIR to avoid double "users"
+      user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp('/')
+      base_dir = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
+      @project_dir = base_dir + @project.user_id.to_s + @project.key
     end
 
     # Only allow a list of trusted parameters through.

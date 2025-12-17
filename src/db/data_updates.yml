@@ -1,0 +1,34 @@
+# Database Data Updates
+# This file stores database record updates that can be reapplied after a database refresh
+# Run with: rails db:apply_data_updates
+
+# Format:
+# - model: ModelName (e.g., Project, Step, User)
+#   find_by: { field: value }  # Hash of fields to find the record (e.g., { id: 1 } or { key: 'project_key' })
+#   updates: { field: new_value }  # Hash of fields to update
+
+# Example updates:
+# - model: Project
+#   find_by: { id: 1 }
+#   updates:
+#     name: "Updated Project Name"
+#     description: "Updated description"
+#
+# - model: Step
+#   find_by: { name: "parsing", docker_image_id: 5 }
+#   updates:
+#     label: "Updated Step Label"
+#     hidden: false
+#
+# - model: User
+#   find_by: { email: "user@example.com" }
+#   updates:
+#     admin: true
+
+# Add your updates below:
+
+- model: Step
+  find_by: { name: "parsing" }
+  updates:
+    has_std_view: false
+

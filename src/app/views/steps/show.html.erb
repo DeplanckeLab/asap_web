@@ -87,14 +87,58 @@
       <% end %>
       <% if @step.attrs_json.present? %>
         <div class="px-4 py-3">
-          <dt class="font-medium text-gray-900 mb-2">Optional Attributes</dt>
-          <dd class="text-gray-600 font-mono text-xs"><%= @step.attrs_json %></dd>
+          <dt class="font-medium text-gray-900 mb-2">Optional step attributes</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.attrs_json %></dd>
         </div>
       <% end %>
       <% if @step.method_attrs_json.present? %>
         <div class="px-4 py-3">
-          <dt class="font-medium text-gray-900 mb-2">Method Attributes</dt>
-          <dd class="text-gray-600 font-mono text-xs"><%= @step.method_attrs_json %></dd>
+          <dt class="font-medium text-gray-900 mb-2">Standard method attribute global properties</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.method_attrs_json %></dd>
+        </div>
+      <% end %>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Multiple runs allowed?</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.multiple_runs ? 'Yes' : 'No' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Has standard dashboard?</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.has_std_dashboard ? 'Yes' : 'No' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Has standard form?</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.has_std_form ? 'Yes' : 'No' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Has standard view?</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.has_std_view ? 'Yes' : 'No' %></dd>
+      </div>
+      <div class="px-4 py-3 flex items-start justify-between">
+        <dt class="font-medium text-gray-900">Hidden</dt>
+        <dd class="w-3/4 text-gray-600"><%= @step.hidden ? 'Yes' : 'No' %></dd>
+      </div>
+      <% if @step.output_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Standard outputs global properties</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.output_json %></dd>
+        </div>
+      <% end %>
+      <% if @step.command_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Default command</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.command_json %></dd>
+        </div>
+      <% end %>
+      <% if @step.dashboard_card_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Dashboard card details (for the std dashboard)</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.dashboard_card_json %></dd>
+        </div>
+      <% end %>
+      <% if @step.show_view_json.present? %>
+        <div class="px-4 py-3">
+          <dt class="font-medium text-gray-900 mb-2">Show view details (for the std view)</dt>
+          <dd class="text-gray-600 font-mono text-xs whitespace-pre-wrap"><%= @step.show_view_json %></dd>
         </div>
       <% end %>
     </dl>

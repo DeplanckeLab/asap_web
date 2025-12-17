@@ -1,0 +1,182 @@
+<%# Cell Filtering View - Based on form_cell_filtering_scalable.html.erb from original app %>
+
+<div id="cell_filtering_form_container" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 w-full max-w-full overflow-x-hidden">
+  <% if @parsing_run.nil? %>
+    <div class="alert alert-warning">
+      <i class="fas fa-exclamation-triangle me-2"></i>
+      Parsing step must be completed before cell filtering can be performed.
+      <% if Rails.env.development? %>
+        <br/><small>
+          Debug info:
+          <ul>
+            <li>Parsing step ID: <%= Step.find_by(name: 'parsing')&.id || 'not found' %></li>
+            <li>Project ID: <%= @project.id %></li>
+            <li>Total runs for project: <%= Run.where(project_id: @project.id).count %></li>
+            <li>Parsing runs: <%= Run.where(project_id: @project.id, step_id: Step.find_by(name: 'parsing')&.id).pluck(:id, :status_id).inspect if Step.find_by(name: 'parsing') %></li>
+            <li>All runs: <%= Run.where(project_id: @project.id).pluck(:id, :step_id, :status_id).inspect %></li>
+          </ul>
+        </small>
+      <% end %>
+    </div>
+  <% else %>
+  <%
+    # Check if we have QC data loaded
+    has_qc_data = (@h_data && !@h_data.empty? && @h_data.keys.any?) || @h_data_json.present?
+    Rails.logger.info("[cell_filtering view] has_qc_data: #{has_qc_data}, @h_data keys: #{@h_data&.keys&.inspect}, @h_data_json present: #{@h_data_json.present?}")
+  %>
+  <% if !has_qc_data %>
+    <div class="alert alert-info">
+      <i class="fas fa-info-circle me-2"></i>
+      QC data is being prepared. This may take a moment for large datasets.
+      <% if Rails.env.development? %>
+        <br/><small>
+          Debug: @h_data keys: <%= @h_data&.keys&.inspect || 'nil' %>, 
+          @h_data_json: <%= @h_data_json.present? ? 'present' : 'nil' %>,
+          has_qc_data: <%= has_qc_data %>,
+          @h_data class: <%= @h_data.class.name rescue 'error' %>,
+          @h_data empty?: <%= @h_data&.empty? rescue 'error' %>,
+          @parsing_run: <%= @parsing_run&.id || 'nil' %>
+        </small>
+      <% end %>
+    </div>
+    <script>
+      console.log("=== QC DATA NOT READY ===");
+      console.log("has_qc_data:", <%= has_qc_data %>);
+      console.log("@h_data keys:", <%= (@h_data&.keys || []).to_json %>);
+      console.log("@h_data_json present:", <%= @h_data_json.present? %>);
+    </script>
+  <% else %>
+    
+    <% 
+      # Prepare JSON data for Stimulus controller
+      h_data_for_stimulus = (@h_data_json.present?) ? @h_data_json : (@h_data.present? ? @h_data.to_json : '{}')
+      h_float_for_stimulus = @h_float.to_json
+      list_p_for_stimulus = @list_p.map { |e| { name: e[:name], type: e[:type].to_s } }.to_json
+    %>
+    <script>
+      // Set data for Stimulus controller (avoiding HTML attribute escaping issues)
+      // This must execute immediately, before Stimulus connects
+      (function() {
+        window.cellFilteringData = {
+          hData: <%= raw h_data_for_stimulus %>,
+          hFloat: <%= raw h_float_for_stimulus %>,
+          listP: <%= raw list_p_for_stimulus %>,
+          nberCells: <%= @project.nber_cols || 0 %>
+        };
+        console.log("=== cellFilteringData set ===");
+        console.log("hData keys:", Object.keys(window.cellFilteringData.hData || {}));
+        console.log("nberCells:", window.cellFilteringData.nberCells);
+      })();
+    </script>
+    <div data-controller="cell-filtering"
+         data-cell-filtering-nber-cells-value="<%= @project.nber_cols || 0 %>"
+         class="w-full max-w-full overflow-x-hidden"
+         style="width: 100%; max-width: 100%; box-sizing: border-box;">
+    
+    <div class="grid grid-cols-2 gap-4 mb-6 w-full max-w-full">
+      <div class='bg-green-50 border-2 border-green-200 rounded-lg p-4 shadow-sm w-full min-w-0'>
+        <h4 class='text-sm font-semibold text-green-700 uppercase tracking-wide mb-1'>Kept</h4>
+        <p class='text-2xl font-bold text-green-900'><span data-cell-filtering-target="result"><i class='fa fa-spinner fa-pulse'></i></span></p>
+      </div>
+      <div class='bg-gray-50 border-2 border-gray-200 rounded-lg p-4 shadow-sm w-full min-w-0'>
+        <h4 class='text-sm font-semibold text-gray-700 uppercase tracking-wide mb-1'>Discarded</h4>
+        <p class='text-2xl font-bold text-gray-900'><span data-cell-filtering-target="filtered"><i class='fa fa-spinner fa-pulse'></i></span></p>
+      </div>
+    </div>
+
+    <div class="space-y-6 w-full max-w-full">
+      <div class='bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 w-full max-w-full overflow-x-hidden'>
+        <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter with QC parameters</h4>
+        <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
+          <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> cells that match <span class='font-semibold'>all</span> the following conditions:</p>
+        </div>
+        <div class='space-y-2 w-full overflow-x-hidden'>
+          <% @list_p.each_index do |i| %>
+          <% e = @list_p[i] %>
+          <div id='param_row_<%= e[:name] %>' class='flex items-center gap-1.5 sm:gap-2 py-2 px-2 sm:px-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors w-full overflow-hidden'>
+            <div class='w-8 sm:w-10 text-center flex items-center justify-center flex-shrink-0'>
+              <% if i > 0 %>
+                <span class='text-xs font-bold text-gray-500'>AND</span>
+              <% end %>
+            </div>
+            <div class='flex-1 flex items-center gap-1.5 sm:gap-2 min-w-0 overflow-hidden w-full pr-1'>
+              <span class='text-xs sm:text-sm font-medium text-gray-700 w-16 sm:w-20 text-right flex-shrink-0'><%= (e[:type] == :greater) ? 'LESS' : 'MORE' %> than</span>
+              <input id="<%= e[:name] %>_value" name="attrs[<%= e[:attr_name] %>]" value="<%= e[:threshold] %>" type="text" class='w-16 sm:w-20 px-1.5 sm:px-2 py-1.5 border border-gray-300 rounded-md text-xs sm:text-sm text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 filter_input transition-colors flex-shrink-0' data-action="change->cell-filtering#filterInputChange keyup->cell-filtering#filterInputChange"/>
+              <%= hidden_field_tag e[:name] + "_saved", e[:threshold] %>
+              <span class='text-xs sm:text-sm text-gray-700 flex-1 font-medium min-w-0 truncate'><%= e[:label] %></span>
+              <button id='disable-btn-<%= e[:name] %>' class='px-2 sm:px-3 py-1.5 text-xs font-semibold text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled-btn transition-all duration-200 flex items-center justify-center flex-shrink-0 whitespace-nowrap mr-0.5' type='button' data-action="click->cell-filtering#disableButtonClick">Disable</button>
+            </div>
+          </div>
+          <% end %>
+        </div>
+
+          <input id='attrs_manually_discarded_cols' type="hidden" name="attrs[manually_discarded_cols]"/>
+          <input id='attrs_nber_manually_discarded_cols' type="hidden" name="attrs[nber_manually_discarded_cols]"/>
+          <input id='attrs_discarded_cols' type="hidden" name="attrs[discarded_cols]"/>
+          
+          <% if @parsing_run %>
+            <% h_run = {:run_id => @parsing_run.id, :output_attr_name => "output_matrix", :output_filename => "parsing/output.loom", :output_dataset => "/matrix"} %>
+            <%= hidden_field_tag 'attrs[input_matrix]', "[#{h_run.to_json}]" %>
+          <% end %>
+          
+          <%= hidden_field_tag 'attrs[manual_selection]', '', {:placeholder => '', :class => 'form-control'} %>
+          <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}' %>
+          
+          <% if @annots && @annots.size > 0 %>
+            <div class='mt-6 pt-6 border-t border-gray-200'>
+              <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter using metadata</h4>
+              <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
+                <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> cells that belong to selected metadata categories:</p>
+              </div>
+              <div class='space-y-3'>
+                <% l = ([@parsing_run] + @cell_filtering_runs + @gene_filtering_runs).compact.map{|r| [display_run(r), r.id]} %>
+                <div>
+                  <label class='block text-sm font-medium text-gray-700 mb-1'>Run</label>
+                  <%= select_tag 'store_run_id', options_for_select(l, @parsing_run&.id), {:class => 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} %>
+                </div>
+                <% l = @annots.map{|a| [a.name + " ", a.id]}.sort %>
+                <% l.unshift ["Select an annotation", nil] %>
+                <div>
+                  <label class='block text-sm font-medium text-gray-700 mb-1'>Annotation</label>
+                  <%= select_tag 'annot_id', options_for_select(l, nil), {:class => 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} %>
+                </div>
+                <div id='annot_categories' class='mt-3'></div>
+              </div>
+            </div>
+          <% end %>
+
+      </div>
+      
+      <div class='bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 w-full max-w-full overflow-x-hidden'>
+        <h4 class='text-lg font-semibold text-gray-900 mb-4'>QC plots</h4>
+        
+        <% l = [["Ordered depth by cell", 1], ["Detected genes", 2], ["Depth", 3], ["Percent protein-coding genes", 4], ["Percent mitochondrial genes", 5], ["Percent ribosomal genes", 6], ["Depth vs. Percent mitochondrial genes", 7], ["Depth vs Detected genes", 8]] %>
+        <div class='mb-4'>
+          <label class='block text-sm font-medium text-gray-700 mb-2'>Select plot type</label>
+          <%= select_tag "sel_plot", options_for_select(l), {:class => 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500', data: { action: 'change->cell-filtering#plotSelectChange' }} %>
+        </div>
+        <div id='cell_filtering_plotly_plot' class='bg-gray-50 border border-gray-200 rounded-md p-4 w-full max-w-full overflow-x-auto' style="min-height: 400px; width: 100%; max-width: 100%; box-sizing: border-box;">
+        </div>
+        <div id="customLegend" class="mt-4 flex gap-6 justify-center">
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-red-500"></div>
+            <span class="text-sm text-gray-700">Kept</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-gray-400"></div>
+            <span class="text-sm text-gray-700">Discarded</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <%# Load required libraries %>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    
+    </div> <%# end data-controller="cell-filtering" %>
+    
+    <% end %> <%# end if !has_qc_data %>
+  <% end %> <%# end if @parsing_run.nil? %>
+</div>
+

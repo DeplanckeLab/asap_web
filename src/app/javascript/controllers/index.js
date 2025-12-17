@@ -67,6 +67,10 @@ import QueuePositionController from "controllers/queue_position_controller"
 application.register("queue-position", QueuePositionController)
 console.log('Queue position controller registered')
 
+import CellFilteringController from "controllers/cell_filtering_controller"
+application.register("cell-filtering", CellFilteringController)
+console.log('Cell filtering controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

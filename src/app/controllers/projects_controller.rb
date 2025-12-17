@@ -1,3 +1,7 @@
+require 'open3'
+require 'zlib'
+require 'base64'
+
 class ProjectsController < ApplicationController
   before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position]
 
@@ -1474,6 +1478,27 @@ class ProjectsController < ApplicationController
         @h_formats = {}
         FileFormat.all.each { |f| @h_formats[f.name] = f }
       end
+      
+      # For cell_filtering step, prepare data for the form
+      if @step.name == 'cell_filtering'
+        begin
+          # Ensure @project is loaded and has the runs association
+          @project.reload if @project.changed?
+          prepare_cell_filtering_data
+          Rails.logger.info("[step_results] Cell filtering data prepared. @parsing_run: #{@parsing_run&.id || 'nil'}")
+        rescue => e
+          Rails.logger.error("[step_results] Error preparing cell filtering data: #{e.class} - #{e.message}")
+          Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
+          # Set defaults to prevent view errors
+          @parsing_run = nil
+          @h_data = {}
+          @h_data_json = nil
+          @list_p = []
+          @h_p = {}
+          @annots = []
+          @h_annots = {}
+        end
+      end
     rescue => e
       Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
       Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
@@ -2482,6 +2507,193 @@ class ProjectsController < ApplicationController
       end
     end
     
+    # Prepare data for cell filtering form
+    def prepare_cell_filtering_data
+      Rails.logger.info("[prepare_cell_filtering_data] Starting for project #{@project.id}")
+      
+      # Get the docker image for this project
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      Rails.logger.info("[prepare_cell_filtering_data] Docker image: #{asap_docker_image&.id || 'not found'}, version: #{@project.version}")
+      
+      if asap_docker_image.nil?
+        @parsing_run = nil
+        Rails.logger.error("[prepare_cell_filtering_data] No docker image found for project version #{@project.version}")
+        return
+      end
+      
+      # Find the parsing step for this docker image
+      parsing_step = Step.where(name: 'parsing', docker_image_id: asap_docker_image.id).first
+      Rails.logger.info("[prepare_cell_filtering_data] Parsing step: #{parsing_step&.id || 'not found'} for docker_image_id=#{asap_docker_image.id}")
+      
+      if parsing_step
+        # Query directly using Run model
+        all_parsing_runs = Run.where(project_id: @project.id, step_id: parsing_step.id).order(created_at: :desc)
+        Rails.logger.info("[prepare_cell_filtering_data] Found #{all_parsing_runs.count} parsing runs for project_id=#{@project.id}, step_id=#{parsing_step.id}")
+        
+        # Get the most recent completed parsing run (status_id == 3)
+        completed_run = all_parsing_runs.where(status_id: 3).first
+        @parsing_run = completed_run || all_parsing_runs.first
+        
+        Rails.logger.info("[prepare_cell_filtering_data] Selected parsing run: #{@parsing_run&.id || 'not found'}, status: #{@parsing_run&.status_id}")
+      else
+        @parsing_run = nil
+        Rails.logger.warn("[prepare_cell_filtering_data] Parsing step not found for docker_image_id=#{asap_docker_image.id}")
+      end
+      
+      # Get other filtering runs for metadata selection (using the same docker image)
+      cell_filtering_step = Step.where(name: 'cell_filtering', docker_image_id: asap_docker_image.id).first
+      gene_filtering_step = Step.where(name: 'gene_filtering', docker_image_id: asap_docker_image.id).first
+      
+      @cell_filtering_runs = []
+      @gene_filtering_runs = []
+      if cell_filtering_step
+        @cell_filtering_runs = Run.where(project_id: @project.id, step_id: cell_filtering_step.id).order(created_at: :desc).to_a
+      end
+      if gene_filtering_step
+        @gene_filtering_runs = Run.where(project_id: @project.id, step_id: gene_filtering_step.id).order(created_at: :desc).to_a
+      end
+      
+      # Get annotations for metadata filtering
+      store_run_id = @parsing_run&.id
+      @annots = Annot.where(project_id: @project.id, store_run_id: store_run_id, data_type_id: 3, dim: 1).all if store_run_id
+      @annots ||= []
+      
+      @h_annots = {}
+      @h_annot_runs = {}
+      @annots.each { |a| @h_annots[a.id] = { name: a.name } }
+      annot_run_ids = @annots.map(&:run_id).compact.uniq
+      Run.where(id: annot_run_ids).each { |r| @h_annot_runs[r.id] = r } if annot_run_ids.any?
+      
+      # Prepare QC data from parsing output
+      @h_float = { "mito" => 1, "ribo" => 1, "protein_coding" => 1 }
+      @h_data = {}
+      @h_data_json = nil
+      
+      if @parsing_run
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+        loom_file = project_dir + 'parsing' + 'output.loom'
+        compressed_zip_annot_json_file = project_dir + 'parsing' + 'compressed_zip_annot.json'
+        
+        # Generate QC data file if it doesn't exist or is invalid
+        # First try to load existing file to check if it's valid
+        if File.exist?(compressed_zip_annot_json_file) && File.size(compressed_zip_annot_json_file) > 2
+          if @project.nber_cols && @project.nber_cols > 20000
+            @h_data_json = File.read(compressed_zip_annot_json_file)
+          else
+            loaded_data = Basic.safe_parse_json(File.read(compressed_zip_annot_json_file), {})
+            @h_data = loaded_data if loaded_data.is_a?(Hash) && !loaded_data.empty?
+          end
+        end
+        
+        # Generate if file doesn't exist or doesn't have all 5 metrics
+        file_exists = File.exist?(compressed_zip_annot_json_file)
+        file_valid = false
+        if file_exists
+          begin
+            file_valid = File.size(compressed_zip_annot_json_file) > 2
+          rescue => e
+            Rails.logger.warn("[prepare_cell_filtering_data] Error checking file size: #{e.message}")
+            file_valid = false
+          end
+        end
+        data_valid = @h_data && @h_data.keys.size == 5
+        
+        if !file_valid || !data_valid
+          Rails.logger.info("[prepare_cell_filtering_data] Generating QC data file from LOOM file")
+          
+          if File.exist?(loom_file)
+            # Use H5DataService to extract metadata (runs in docker container)
+            begin
+              h_cmd = {
+                "depth" => H5DataService.asap_command('-T', 'ExtractMetadata', '-loom', loom_file.to_s, '-meta', '/col_attrs/_Depth'),
+                "ribo" => H5DataService.asap_command('-T', 'ExtractMetadata', '-prec', '1', '-loom', loom_file.to_s, '-meta', '/col_attrs/_Ribosomal_Content'),
+                "mito" => H5DataService.asap_command('-T', 'ExtractMetadata', '-prec', '1', '-loom', loom_file.to_s, '-meta', '/col_attrs/_Mitochondrial_Content'),
+                "detected_genes" => H5DataService.asap_command('-T', 'ExtractMetadata', '-loom', loom_file.to_s, '-meta', '/col_attrs/_Detected_Genes'),
+                "protein_coding" => H5DataService.asap_command('-T', 'ExtractMetadata', '-prec', '1', '-loom', loom_file.to_s, '-meta', '/col_attrs/_Protein_Coding_Content')
+              }
+              
+              File.open(compressed_zip_annot_json_file, "w", encoding: 'ascii-8bit') do |fw|
+                h_cmd.each_key do |k|
+                  begin
+                    stdout, stderr, status = Open3.capture3(*h_cmd[k])
+                    if status.success? && !stdout.empty?
+                      tmp_json = stdout.gsub(/\n/, '').encode('ASCII', :replace => '0')
+                      parsed_data = Basic.safe_parse_json(tmp_json, {})
+                      if parsed_data['values'] && parsed_data['values'].is_a?(Array)
+                        # Convert values: multiply by 10 for float types, then pack as shorts
+                        values = parsed_data['values'].map { |e| (@h_float[k] == 1) ? (e * 10).to_i : e.to_i }
+                        packed = values.pack("S*")
+                        compressed = Zlib::Deflate.deflate(packed)
+                        encoded = Base64.encode64(compressed).gsub("\n", "")
+                        @h_data[k] = {'values' => encoded}
+                        Rails.logger.info("[prepare_cell_filtering_data] Extracted #{values.length} values for #{k}")
+                      end
+                    else
+                      Rails.logger.warn("[prepare_cell_filtering_data] Failed to extract #{k}: #{stderr}")
+                    end
+                  rescue => e
+                    Rails.logger.error("[prepare_cell_filtering_data] Error extracting #{k}: #{e.message}")
+                  end
+                end
+                fw.write(@h_data.to_json)
+              end
+              
+              Rails.logger.info("[prepare_cell_filtering_data] QC data file generated with #{@h_data.keys.size} metrics")
+            rescue => e
+              Rails.logger.error("[prepare_cell_filtering_data] Error generating QC data: #{e.message}")
+              Rails.logger.error("[prepare_cell_filtering_data] Backtrace: #{e.backtrace.first(5).join("\n")}")
+            end
+          else
+            Rails.logger.warn("[prepare_cell_filtering_data] LOOM file not found: #{loom_file}")
+          end
+        end
+        
+        # Load compressed data if it exists (after generation attempt)
+        if File.exist?(compressed_zip_annot_json_file) && File.size(compressed_zip_annot_json_file) > 2
+          if @project.nber_cols && @project.nber_cols > 20000
+            @h_data_json = File.read(compressed_zip_annot_json_file)
+            Rails.logger.info("[prepare_cell_filtering_data] Loaded h_data_json (large dataset mode), size: #{@h_data_json.length}")
+          else
+            loaded_data = Basic.safe_parse_json(File.read(compressed_zip_annot_json_file), {})
+            if loaded_data.is_a?(Hash) && !loaded_data.empty?
+              @h_data = loaded_data
+              Rails.logger.info("[prepare_cell_filtering_data] Loaded h_data with keys: #{@h_data.keys.inspect}, total keys: #{@h_data.keys.size}")
+            else
+              Rails.logger.warn("[prepare_cell_filtering_data] Failed to load h_data, got: #{loaded_data.class}")
+            end
+          end
+        else
+          Rails.logger.warn("[prepare_cell_filtering_data] QC data file doesn't exist or is too small: #{compressed_zip_annot_json_file}")
+        end
+      else
+        Rails.logger.warn("[prepare_cell_filtering_data] No parsing run, cannot load QC data")
+      end
+      
+      # Define filter parameters
+      @list_p = [
+        { name: "depth", attr_name: 'depth', type: :lower, threshold: 1000, label: "UMI/reads" },
+        { name: "detected_genes", attr_name: 'detected_genes', type: :lower, threshold: 1000, label: "detected genes" },
+        { name: "protein_coding", attr_name: 'protein_coding_content', type: :lower, threshold: 80, label: "% protein coding genes" },
+        { name: "mito", attr_name: 'mito_content', type: :greater, threshold: 20, label: "% mitochondrial genes" },
+        { name: "ribo", attr_name: 'ribo_content', type: :greater, threshold: 40, label: "% ribosomal genes" }
+      ]
+      
+      @h_p = {}
+      @list_p.each do |e|
+        @h_p[e[:type]] ||= {}
+        @h_p[e[:type]][e[:name]] = { threshold: e[:threshold] }
+      end
+      
+      # Get standard method details if needed (optional for now)
+      @std_method = nil
+      @h_method_details = nil
+      if @step
+        @std_method = StdMethod.where(step_id: @step.id, obsolete: false).first
+        # @h_method_details = get_attr(@step, @std_method) if @std_method
+        # For now, we'll work without method details
+      end
+    end
+
     # Get status name for display
     def get_status_name(status_id)
       case status_id

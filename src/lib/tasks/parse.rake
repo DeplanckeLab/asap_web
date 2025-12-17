@@ -27,7 +27,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
     logger.error("[ParseRake] Could not find ASAP docker image for version #{version.id}")
     exit 1
   end
-
+  
   db_conn = "postgres:5434/asap2_data_v" + h_env['asap_data_db_version'].to_s
   
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
@@ -56,6 +56,22 @@ task :parse, [:project_key] => [:environment] do |t, args|
   end
   
   project_step = ProjectStep.find_by(:project_id => project.id, :step_id => parsing_step.id)
+  
+  # Update run status to running and calculate waiting_duration
+  # Set start_time and waiting_duration when parse.rake actually starts executing
+  start_time = Time.now
+  waiting_duration = run.submitted_at ? (start_time - run.submitted_at).to_f : nil
+  
+  # Update run status, start_time, and waiting_duration if not already set
+  # (SlurmJobMonitorJob might have already set them, but if not, we set them here)
+  if run.status_id == 1 || !run.start_time
+    run.update(
+      status_id: 2,
+      start_time: start_time,
+      waiting_duration: waiting_duration
+    )
+    logger.info("[ParseRake] Updated run #{run.id} to running, waiting_duration: #{waiting_duration}")
+  end
   
   # Update status to running and broadcast
   project_step.update(status_id: 2) if project_step
@@ -137,6 +153,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
+      # Broadcast after reading prediction file and before parsing starts
+      # This ensures the UI is updated with prediction data
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
 
       ### get parameters (potentially updated by get_loom_from_hca)
@@ -264,11 +282,84 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
-      # Parsing is complete - update status and broadcast
-      project_step.update(status_id: 3) if project_step
+      # Parse exec_run_details.log to extract max_ram and process_duration
+      exec_run_details_file = tmp_dir + 'exec_run_details.log'
+      max_ram_mb = nil
+      process_duration_seconds = nil
+      
+      if File.exist?(exec_run_details_file)
+        logger.info("[ParseRake] Reading exec_run_details.log from #{exec_run_details_file}")
+        h_time_info = {}
+        
+        File.readlines(exec_run_details_file).each do |line|
+          t = line.split(",")
+          if t.size > 1
+            t.each do |e|
+              if m = e.match(/^([A-Za-z])=([\d\:.]+)$/)
+                h_time_info[m[1]] = m[2]
+              end
+            end
+          end
+        end
+        
+        logger.info("[ParseRake] Parsed time info: #{h_time_info.to_json}")
+        
+        # Extract max_ram from M= (in KB, convert to MB)
+        if h_time_info['M']
+          max_ram_kb = h_time_info['M'].to_f
+          max_ram_mb = (max_ram_kb / 1024.0).round(2)
+          logger.info("[ParseRake] Extracted max_ram: #{max_ram_kb} KB = #{max_ram_mb} MB")
+        end
+        
+        # Extract process_duration from E= (elapsed time)
+        if h_time_info['E']
+          process_duration_seconds = 0.0
+          t = h_time_info['E'].split(":")
+          if t.size == 1
+            # Case of docker-compose context (e.g., "1h 2m 3.45s")
+            t_str = h_time_info['E']
+            t_str.scan(/([\d.]+)s/) { |match| process_duration_seconds += match[0].to_f }
+            t_str.scan(/([\d]+)m/) { |match| process_duration_seconds += match[0].to_f * 60 }
+            t_str.scan(/([\d]+)h/) { |match| process_duration_seconds += match[0].to_f * 3600 }
+            t_str.scan(/([\d]+)d/) { |match| process_duration_seconds += match[0].to_f * 3600 * 24 }
+          else
+            # Standard format HH:MM:SS or MM:SS
+            if t.size == 3
+              process_duration_seconds += t[0].to_f * 3600
+            end
+            if t.size >= 2
+              process_duration_seconds += t[t.size - 2].to_f * 60
+              process_duration_seconds += t[t.size - 1].to_f
+            end
+          end
+          process_duration_seconds = process_duration_seconds.round(2)
+          logger.info("[ParseRake] Extracted process_duration: #{h_time_info['E']} = #{process_duration_seconds} seconds")
+        end
+      else
+        logger.warn("[ParseRake] exec_run_details.log not found at #{exec_run_details_file}")
+      end
+      
+      # Calculate duration from start_time if available
+      duration_seconds = nil
+      if run.start_time
+        duration_seconds = (Time.now - run.start_time).to_f
+        logger.info("[ParseRake] Calculated duration from start_time: #{duration_seconds} seconds")
+      end
+      
+      # Parsing is complete - update run status and metrics
+      run_updates = { status_id: 3 }
+      run_updates[:max_ram] = max_ram_mb if max_ram_mb
+      run_updates[:process_duration] = process_duration_seconds if process_duration_seconds
+      run_updates[:duration] = duration_seconds if duration_seconds
+      
+      run.update(run_updates) if run
+      logger.info("[ParseRake] Updated run #{run.id} status to complete with metrics: #{run_updates.to_json}")
+      
+      # Update project_step based on run status (this will set it to 3 since run is now complete)
+      Basic.upd_project_step(project, parsing_step.id) if project_step
       project.update(status_id: 3)
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-      logger.info("[ParseRake] Parsing completed, broadcasting update")
+      logger.info("[ParseRake] Parsing completed, updated run and project_step status, broadcasting update")
 
       ## 
       puts "Define project cell set"

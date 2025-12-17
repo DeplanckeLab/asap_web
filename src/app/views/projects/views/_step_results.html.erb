@@ -1,7 +1,8 @@
 <% if @step %>
   <%# Check if there's a step-specific partial first %>
   <% step_partial_path = "projects/views/#{@step.name}" %>
-  <% if lookup_context.template_exists?(step_partial_path, [], true) %>
+  <% partial_exists = lookup_context.template_exists?(step_partial_path, [], true) %>
+  <% if partial_exists %>
     <%# Render step-specific partial if it exists %>
     <%= render partial: step_partial_path %>
   <% else %>

@@ -27,11 +27,18 @@ class FuPreparsingService
 
     output = load_output_json
     summary = build_summary(output)
+    
+    # Write predictions back to output.json so they're available when reading the file later
+    # IMPORTANT: Pass the modified output hash, not the original one
+    write_predictions_to_output(output, summary)
+    
+    # Reload output after writing to ensure we have the latest data
+    output = load_output_json
 
     {
       summary: summary,
       warnings: collect_warnings(output),
-      raw_output: output,  # Include raw Python script output
+      raw_output: output,  # Include raw Python script output (now with predictions)
       prediction_debug: summary[:prediction_debug]  # Include prediction debug data
     }
   end
@@ -80,12 +87,28 @@ class FuPreparsingService
       raise "Preparsing command failed (exit #{status.exitstatus}): #{error_msg}"
     end
     
-    # Ensure output file is readable by the Rails process (which might run as a different user)
+    # Ensure output file is readable and writable by the Rails process
     # Since we run the command as root, the output file might be owned by root
-    begin
-      FileUtils.chmod(0644, output_file)
-    rescue => e
-      @logger.warn("[FuPreparsingService] Could not set permissions on output file: #{e.message}")
+    # We need to change ownership so Rails can write to it later
+    if output_file.exist?
+      begin
+        # Get the current Rails process user/group
+        rails_uid = Process.uid
+        rails_gid = Process.gid
+        
+        # Change ownership to match Rails process
+        File.chown(rails_uid, rails_gid, output_file.to_s)
+        FileUtils.chmod(0664, output_file)
+        @logger.info("[FuPreparsingService] Changed ownership of output.json to #{rails_uid}:#{rails_gid}")
+      rescue => e
+        @logger.warn("[FuPreparsingService] Could not change ownership/permissions on output file: #{e.message}")
+        # Try chmod as fallback
+        begin
+          FileUtils.chmod(0666, output_file)  # Make world-writable as fallback
+        rescue => e2
+          @logger.warn("[FuPreparsingService] Could not chmod output file: #{e2.message}")
+        end
+      end
     end
   end
 
@@ -129,10 +152,11 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] Python script: #{python_script_name}")
     
     # Use docker exec on the existing asap_run container from docker-compose
-    # Run as root to ensure write permissions to the output directory
+    # Run as rvmuser (UID 1006) which is the default user in the Dockerfile
+    # This ensures files are created with the correct ownership
     docker_cmd = [
       'docker', 'exec',
-      '--user', 'root',
+      '--user', '1006:1006',  # rvmuser:rvmuser (matches Dockerfile USER directive)
       'asap_run',
       '/bin/sh', '-c', script_cmd
     ]
@@ -203,9 +227,13 @@ class FuPreparsingService
         
         # prediction_result should always be a hash now (never nil)
         if prediction_result && prediction_result.is_a?(Hash)
+          @logger.info("[FuPreparsingService] Prediction result for dataset #{group['group']}: #{prediction_result.inspect}")
           if prediction_result[:predictions]
             dataset_hash[:predicted_ram] = prediction_result[:predictions][:predicted_ram] if prediction_result[:predictions][:predicted_ram]
             dataset_hash[:predicted_duration] = prediction_result[:predictions][:predicted_duration] if prediction_result[:predictions][:predicted_duration]
+            @logger.info("[FuPreparsingService] Set predicted_ram=#{dataset_hash[:predicted_ram]}, predicted_duration=#{dataset_hash[:predicted_duration]} for dataset #{group['group']}")
+          else
+            @logger.warn("[FuPreparsingService] No predictions in prediction_result for dataset #{group['group']}")
           end
           
           # Always store debug data for this dataset (even if predictions failed)
@@ -217,6 +245,8 @@ class FuPreparsingService
               debug: prediction_result[:debug_data]
             }
           end
+        else
+          @logger.warn("[FuPreparsingService] prediction_result is nil or not a hash for dataset #{group['group']}")
         end
       end
       
@@ -239,6 +269,79 @@ class FuPreparsingService
     summary[:prediction_debug] = @prediction_debug_data
     
     summary
+  end
+
+  def write_predictions_to_output(output, summary)
+    # Add predictions to list_groups in the output hash so they're written to output.json
+    @logger.info("[FuPreparsingService] write_predictions_to_output called")
+    @logger.info("[FuPreparsingService] output['list_groups'] present? #{output['list_groups'].present?}")
+    @logger.info("[FuPreparsingService] summary[:datasets] present? #{summary[:datasets].present?}")
+    @logger.info("[FuPreparsingService] summary[:datasets] size: #{summary[:datasets]&.size}")
+    
+    if output['list_groups'] && summary[:datasets] && summary[:datasets].size > 0
+      summary[:datasets].each_with_index do |dataset, index|
+        @logger.info("[FuPreparsingService] Processing dataset #{index}: predicted_ram=#{dataset[:predicted_ram].inspect}, predicted_duration=#{dataset[:predicted_duration].inspect}")
+        if output['list_groups'][index]
+          # Write predictions back to the output hash
+          if dataset[:predicted_ram]
+            output['list_groups'][index]['pred_max_ram'] = dataset[:predicted_ram]
+            @logger.info("[FuPreparsingService] Set pred_max_ram=#{dataset[:predicted_ram]} for list_groups[#{index}]")
+          else
+            @logger.warn("[FuPreparsingService] predicted_ram is nil for dataset #{index}")
+          end
+          if dataset[:predicted_duration]
+            output['list_groups'][index]['pred_process_duration'] = dataset[:predicted_duration]
+            @logger.info("[FuPreparsingService] Set pred_process_duration=#{dataset[:predicted_duration]} for list_groups[#{index}]")
+          else
+            @logger.warn("[FuPreparsingService] predicted_duration is nil for dataset #{index}")
+          end
+        else
+          @logger.warn("[FuPreparsingService] output['list_groups'][#{index}] is nil")
+        end
+      end
+      
+      # Write the updated output back to the file
+      output_file = upload_dir + 'output.json'
+      @logger.info("[FuPreparsingService] About to write to file: #{output_file}")
+      
+      # Ensure file is writable - fix permissions if needed
+      begin
+        FileUtils.chmod(0644, output_file) if File.exist?(output_file)
+      rescue => e
+        @logger.warn("[FuPreparsingService] Could not chmod file: #{e.message}")
+      end
+      
+      begin
+        File.open(output_file, 'w') do |f|
+          f.write(JSON.pretty_generate(output))
+          f.fsync  # Force write to disk
+        end
+        @logger.info("[FuPreparsingService] Successfully wrote predictions back to output.json at #{output_file}")
+        
+        # Verify the write by reading it back immediately
+        if File.exist?(output_file)
+          verify_content = Basic.safe_parse_json(File.read(output_file), {})
+          if verify_content['list_groups'] && verify_content['list_groups'][0]
+            @logger.info("[FuPreparsingService] Verification - pred_max_ram in file: #{verify_content['list_groups'][0]['pred_max_ram'].inspect}")
+            @logger.info("[FuPreparsingService] Verification - pred_process_duration in file: #{verify_content['list_groups'][0]['pred_process_duration'].inspect}")
+            @logger.info("[FuPreparsingService] Verification - list_groups[0] keys in file: #{verify_content['list_groups'][0].keys.inspect}")
+          else
+            @logger.error("[FuPreparsingService] Verification failed - list_groups[0] not found in file")
+          end
+        else
+          @logger.error("[FuPreparsingService] Verification failed - file doesn't exist after write!")
+        end
+      rescue => e
+        @logger.error("[FuPreparsingService] Error writing predictions to file: #{e.class} - #{e.message}")
+        @logger.error(e.backtrace.join("\n")) if e.backtrace
+        # Don't raise - allow preparsing to continue even if we can't write predictions
+      end
+    else
+      @logger.warn("[FuPreparsingService] Cannot write predictions: output['list_groups']=#{output['list_groups'].present?}, summary[:datasets]=#{summary[:datasets].present?}, size=#{summary[:datasets]&.size}")
+    end
+  rescue => e
+    @logger.error("[FuPreparsingService] Error writing predictions to output.json: #{e.class} - #{e.message}")
+    @logger.error(e.backtrace.join("\n")) if e.backtrace
   end
 
   def parse_genes_or_cells(value)

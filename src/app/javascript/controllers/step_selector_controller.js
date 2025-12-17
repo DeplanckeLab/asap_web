@@ -1,14 +1,43 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer from "channels/consumer"
 
+console.log('[StepSelectorController] File loaded')
+
+// Check if element exists on page load
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', function() {
+    const element = document.querySelector('[data-controller*="step-selector"]')
+    console.log('[StepSelectorController] DOMContentLoaded - element found:', element)
+    if (element) {
+      console.log('[StepSelectorController] Element HTML:', element.outerHTML.substring(0, 300))
+    } else {
+      console.warn('[StepSelectorController] Element not found on DOMContentLoaded!')
+      // Try again after a delay
+      setTimeout(function() {
+        const element2 = document.querySelector('[data-controller*="step-selector"]')
+        console.log('[StepSelectorController] Delayed check - element found:', element2)
+      }, 1000)
+    }
+  })
+  
+  // Also check immediately if DOM is already loaded
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    const element = document.querySelector('[data-controller*="step-selector"]')
+    console.log('[StepSelectorController] Immediate check - element found:', element)
+  }
+}
+
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content"]
   static values = { projectId: Number }
 
   connect() {
-    console.log('[StepSelectorController] ===== CONNECTED =====')
-    console.log('[StepSelectorController] Project ID:', this.projectIdValue)
-    console.log('[StepSelectorController] Element:', this.element)
+    console.log('[StepSelectorController] CONNECT METHOD CALLED!')
+    try {
+      console.log('[StepSelectorController] ===== CONNECTED =====')
+      console.log('[StepSelectorController] Project ID:', this.projectIdValue)
+      console.log('[StepSelectorController] Element:', this.element)
+      console.log('[StepSelectorController] Element HTML:', this.element.outerHTML.substring(0, 200))
     // Track currently displayed step
     this.currentStepId = null
     console.log('[StepSelectorController] Initial currentStepId set to:', this.currentStepId)
@@ -31,11 +60,56 @@ export default class extends Controller {
       stepEl.style.borderLeft = '4px solid transparent'
     })
     
-    // Select the first available step by default if available
-    this.selectFirstAvailableStep()
-    // Subscribe to websocket updates for this project
-    this.subscribeToProject()
-    console.log('[StepSelectorController] Initial setup complete, currentStepId:', this.currentStepId)
+    // Check if step_id is in URL parameters
+    const urlParams = new URLSearchParams(window.location.search)
+    const stepIdFromUrl = urlParams.get('step_id')
+    
+    // Wait for steps panel to be loaded before trying to select a step
+    // The steps panel might be loaded asynchronously via refreshStepsPanel
+    const controller = this
+    const trySelectStep = function() {
+      if (stepIdFromUrl) {
+        // Select the step from URL parameter
+        console.log('[StepSelectorController] Found step_id in URL:', stepIdFromUrl)
+        const stepElement = controller.element.querySelector(`[data-step-id="${stepIdFromUrl}"]`)
+        console.log('[StepSelectorController] Step element found:', stepElement)
+        if (stepElement) {
+          const stepId = stepElement.getAttribute('data-step-id')
+          console.log('[StepSelectorController] Loading step results for step_id:', stepId)
+          controller.currentStepId = stepId.toString()
+          controller.element.setAttribute('data-current-step-id', stepId.toString())
+          controller.loadStepResults(stepId, stepElement, true)
+          return true
+        } else {
+          console.warn('[StepSelectorController] Step element not found for step_id:', stepIdFromUrl)
+          console.log('[StepSelectorController] Available step elements:', Array.from(controller.element.querySelectorAll('[data-step-id]')).map(el => el.getAttribute('data-step-id')))
+          return false
+        }
+      } else {
+        console.log('[StepSelectorController] No step_id in URL, selecting first available step')
+        return controller.selectFirstAvailableStep()
+      }
+    }
+    
+    // Try immediately, then retry after a short delay if steps panel isn't ready
+    if (!trySelectStep()) {
+      console.log('[StepSelectorController] Steps panel not ready, retrying after refresh...')
+      this.refreshStepsPanel()
+      setTimeout(function() {
+        if (!trySelectStep()) {
+          console.warn('[StepSelectorController] Still couldn\'t find step, falling back to first available')
+          controller.selectFirstAvailableStep()
+        }
+      }, 500)
+    }
+    
+      // Subscribe to websocket updates for this project
+      this.subscribeToProject()
+      console.log('[StepSelectorController] Initial setup complete, currentStepId:', this.currentStepId)
+    } catch (error) {
+      console.error('[StepSelectorController] Error in connect():', error)
+      console.error('[StepSelectorController] Error stack:', error.stack)
+    }
   }
 
   disconnect() {
@@ -99,6 +173,9 @@ export default class extends Controller {
   handleStatusUpdate(data) {
     console.log('[StepSelectorController] ===== HANDLE STATUS UPDATE =====')
     console.log('[StepSelectorController] handleStatusUpdate called with data:', data)
+    console.log('[StepSelectorController] data.step_id:', data.step_id)
+    console.log('[StepSelectorController] data.parsing_status:', data.parsing_status)
+    console.log('[StepSelectorController] Current step ID before update:', this.currentStepId)
     
     // Preserve currentStepId before refresh (it might get lost during DOM replacement)
     const preservedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
@@ -134,6 +211,30 @@ export default class extends Controller {
         }, 500)
       } else {
         console.warn(`[StepSelectorController] Step element not found for step_id: ${this.currentStepId}`)
+      }
+    } else if (updateStepId && !currentStepIdNum) {
+      // No step is currently selected, but we got an update for a step - select and load it
+      console.log(`[StepSelectorController] No step selected, but got update for step ${updateStepId}, selecting it...`)
+      const stepElement = this.element.querySelector(`[data-step-id="${updateStepId}"]`)
+      if (stepElement) {
+        this.currentStepId = updateStepId.toString()
+        this.element.setAttribute('data-current-step-id', updateStepId.toString())
+        clearTimeout(this.reloadTimeout)
+        this.reloadTimeout = setTimeout(() => {
+          console.log(`[StepSelectorController] Loading step ${updateStepId} from websocket update`)
+          this.loadStepResults(updateStepId, stepElement, true)
+        }, 300)
+      } else {
+        console.warn(`[StepSelectorController] Step element not found for step_id: ${updateStepId}, refreshing steps panel first...`)
+        this.refreshStepsPanel()
+        setTimeout(() => {
+          const stepElement2 = this.element.querySelector(`[data-step-id="${updateStepId}"]`)
+          if (stepElement2) {
+            this.currentStepId = updateStepId.toString()
+            this.element.setAttribute('data-current-step-id', updateStepId.toString())
+            this.loadStepResults(updateStepId, stepElement2, true)
+          }
+        }, 500)
       }
     } else {
       console.log(`[StepSelectorController] Not reloading step results - updateStepId (${updateStepId}) !== currentStepIdNum (${currentStepIdNum})`)
@@ -416,7 +517,9 @@ export default class extends Controller {
       this.refreshStepsPanel()
       // Load step results
       this.loadStepResults(stepId, firstStep, true)
+      return true
     }
+    return false
   }
 
   selectStep(event) {
@@ -490,18 +593,32 @@ export default class extends Controller {
     })
     .then((response) => {
       console.log('[StepSelectorController] Fetch response status:', response.status, response.statusText)
+      console.log('[StepSelectorController] Response headers:', response.headers)
       if (!response.ok) {
+        console.error('[StepSelectorController] Response not OK, status:', response.status)
         throw new Error(`HTTP error! status: ${response.status}`)
       }
+      console.log('[StepSelectorController] Converting response to text...')
       return response.text()
     })
     .then((html) => {
+      console.log('[StepSelectorController] Response text received, length:', html ? html.length : 0)
       console.log('[StepSelectorController] ===== STEP RESULTS LOADED =====')
       console.log('[StepSelectorController] HTML length:', html.length)
+      console.log('[StepSelectorController] HTML preview (first 500 chars):', html.substring(0, 500))
       console.log('[StepSelectorController] Updating content target')
       console.log('[StepSelectorController] currentStepId BEFORE update:', controller.currentStepId)
       console.log('[StepSelectorController] stepId parameter:', stepId, 'stepIdString:', stepIdString)
       console.log('[StepSelectorController] controller reference:', controller)
+      
+      // Check if HTML is empty or just whitespace
+      if (!html || html.trim().length === 0) {
+        console.error('[StepSelectorController] Received empty HTML response!')
+        controller.loadingStateTarget.style.display = 'none'
+        controller.emptyStateTarget.style.display = 'block'
+        controller.contentTarget.style.display = 'none'
+        return
+      }
       
       // Re-set currentStepId to ensure it's preserved
       if (stepIdString) {
@@ -512,12 +629,31 @@ export default class extends Controller {
         console.log('[StepSelectorController] Also stored in data attribute')
       }
       
+      // Verify contentTarget exists before updating
+      if (!controller.contentTarget) {
+        console.error('[StepSelectorController] contentTarget is null! Cannot update content.')
+        controller.loadingStateTarget.style.display = 'none'
+        controller.emptyStateTarget.style.display = 'block'
+        return
+      }
+      
       controller.contentTarget.innerHTML = html
       controller.loadingStateTarget.style.display = 'none'
+      controller.emptyStateTarget.style.display = 'none'
       controller.contentTarget.style.display = 'block'
       
       console.log('[StepSelectorController] Content updated')
+      console.log('[StepSelectorController] Content target element:', controller.contentTarget)
+      console.log('[StepSelectorController] Content target display after update:', window.getComputedStyle(controller.contentTarget).display)
+      console.log('[StepSelectorController] Content target innerHTML length:', controller.contentTarget.innerHTML.length)
+      console.log('[StepSelectorController] Content target innerHTML preview:', controller.contentTarget.innerHTML.substring(0, 200))
       console.log('[StepSelectorController] currentStepId AFTER update:', controller.currentStepId)
+      
+      // Double-check that content is visible
+      if (window.getComputedStyle(controller.contentTarget).display === 'none') {
+        console.warn('[StepSelectorController] Content is still hidden! Forcing display block...')
+        controller.contentTarget.style.display = 'block'
+      }
       console.log('[StepSelectorController] Data attribute value:', controller.element.getAttribute('data-current-step-id'))
       console.log('[StepSelectorController] Verifying currentStepId is still set correctly...')
       // Ensure currentStepId is still set (it might have been reset somehow)
@@ -531,15 +667,17 @@ export default class extends Controller {
     .catch(error => {
       console.error('[StepSelectorController] ===== ERROR LOADING STEP RESULTS =====')
       console.error('[StepSelectorController] Error:', error)
+      console.error('[StepSelectorController] Error message:', error.message)
       console.error('[StepSelectorController] Error stack:', error.stack)
-      this.loadingStateTarget.style.display = 'none'
-      this.contentTarget.innerHTML = `
+      controller.loadingStateTarget.style.display = 'none'
+      controller.contentTarget.innerHTML = `
         <div class="alert alert-danger">
           <i class="fas fa-exclamation-triangle me-2"></i>
-          Error loading step results. Please try again.
+          Error loading step results: ${error.message}. Please try again.
         </div>
       `
-      this.contentTarget.style.display = 'block'
+      controller.contentTarget.style.display = 'block'
+      controller.emptyStateTarget.style.display = 'none'
     })
   }
 

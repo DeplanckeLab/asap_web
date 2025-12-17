@@ -194,24 +194,29 @@ module ApplicationHelper
     raw html
   end
 
-  # Format memory in bytes to human-readable format (b, Kb, Mb, Gb)
+  # Format memory in bytes to human-readable format (B, KB, MB, GB, TB)
+  # Uses binary conversion (1024) to match system standard
   def display_mem(b)
     return '' unless b
-    g = b.to_f / 1_000_000_000
-    m = b.to_f / 1_000_000
-    k = b.to_f / 1_000
-    if g < 1
-      if m < 1
-        if k < 1
-          "#{b.round(3 - (b.to_i.to_s.size))}b"
-        else
-          "#{k.round(3 - (k.to_i.to_s.size))}Kb"
-        end
-      else
-        "#{m.round(3 - (m.to_i.to_s.size))}Mb"
-      end
+    t = b.to_f / (1024.0 ** 4)  # TB: 1024^4 bytes
+    g = b.to_f / (1024.0 ** 3)  # GB: 1024^3 bytes
+    m = b.to_f / (1024.0 ** 2)  # MB: 1024^2 bytes
+    k = b.to_f / 1024.0         # KB: 1024 bytes
+    if t >= 1
+      precision = [0, 3 - t.to_i.to_s.size].max
+      "#{t.round(precision)}TB"
+    elsif g >= 1
+      precision = [0, 3 - g.to_i.to_s.size].max
+      "#{g.round(precision)}GB"
+    elsif m >= 1
+      precision = [0, 3 - m.to_i.to_s.size].max
+      "#{m.round(precision)}MB"
+    elsif k >= 1
+      precision = [0, 3 - k.to_i.to_s.size].max
+      "#{k.round(precision)}KB"
     else
-      "#{g.round(3 - (g.to_i.to_s.size))}Gb"
+      precision = [0, 3 - b.to_i.to_s.size].max
+      "#{b.round(precision)}B"
     end
   end
 end

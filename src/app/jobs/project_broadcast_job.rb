@@ -38,7 +38,7 @@ class ProjectBroadcastJob < ApplicationJob
 
     step_header_callback =
       if respond_to?(:get_step_header_project_path)
-        get_step_header_project_path(:key => project.key, :nolayout => 1, :step_id => step_id)
+        get_step_header_project_path(project, :nolayout => 1, :step_id => step_id)
       end
 
     h_res = {
@@ -47,9 +47,9 @@ class ProjectBroadcastJob < ApplicationJob
       :h_nber_analyses => {},
       #      :h_statuses_json => h_status.to_json, 
       #      :summary_step_id => Step.find_by_name("summary").id,
-      :url_base_callback => get_step_project_path(:key => project.key, :nolayout => 1, :step_id => step_id),
+      :url_base_callback => get_step_project_path(project, :nolayout => 1, :step_id => step_id),
       :url_step_header_callback => step_header_callback,
-      :url_dim_reduction_callback => get_step_project_path(:key => project.key, :nolayout => 1, :step_id => step_id, :partial => 'dim_reduction_form'),
+      :url_dim_reduction_callback => get_step_project_path(project, :nolayout => 1, :step_id => step_id, :partial => 'dim_reduction_form'),
       :summary_step_id => summary_step&.id
     }
 

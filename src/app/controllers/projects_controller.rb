@@ -1,5 +1,5 @@
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step]
 
   # GET /projects or /projects.json
   def index
@@ -1347,67 +1347,137 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/step_results
   def step_results
-    # Ensure project steps exist (safeguard for existing projects)
-    @project.ensure_project_steps
+    Rails.logger.info("===== STEP_RESULTS CALLED =====")
+    Rails.logger.info("Project ID: #{@project&.id}, Step ID param: #{params[:step_id]}")
     
-    step_id = params[:step_id]
-    @step = Step.find_by(id: step_id)
-    
-    if @step.nil?
-      render plain: "Step not found", status: :not_found
+    begin
+      # Reload project to ensure fresh state (in case restart_step left it in a bad state)
+      @project.reload
+      Rails.logger.info("Project reloaded: #{@project.id}")
+      
+      # Ensure project steps exist (safeguard for existing projects)
+      @project.ensure_project_steps
+      Rails.logger.info("Project steps ensured")
+      
+      step_id = params[:step_id]
+      if step_id.blank?
+        Rails.logger.error("Step ID is blank!")
+        render plain: "Step ID is required", status: :bad_request
+        return
+      end
+      
+      Rails.logger.info("Looking for step with ID: #{step_id}")
+      @step = Step.find_by(id: step_id)
+      
+      if @step.nil?
+        Rails.logger.error("Step not found for ID: #{step_id}")
+        render plain: "Step not found", status: :not_found
+        return
+      end
+      
+      Rails.logger.info("Step found: #{@step.name} (ID: #{@step.id})")
+      
+      # Get runs for this step
+      @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+      
+      # Get project step status (ensure it exists)
+      @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
+      unless @project_step
+        # Create project step if it doesn't exist
+        @project_step = ProjectStep.create(
+          project_id: @project.id,
+          step_id: step_id,
+          status_id: (@step.name == 'parsing') ? 1 : nil
+        )
+      end
+      
+      # For parsing step, load the results from output.json
+      if @step.name == 'parsing'
+        # Get the run to use for status display
+        # Priority: 1) most recent run (to show current status), 2) completed run if no active run
+        # This matches the logic used in the left panel - we want to show the current/active run's status
+        @parsing_run = @runs.order(created_at: :desc).first
+        Rails.logger.info("[step_results] Parsing run selected: #{@parsing_run&.id}, status_id: #{@parsing_run&.status_id}, created_at: #{@parsing_run&.created_at}")
+        @results = nil
+        
+        # Only load results if we have a completed run (status_id == 3)
+        # After restart, runs are deleted, so @parsing_run will be nil or have a different status
+        if @parsing_run && @parsing_run.status_id == 3
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+          step_dir = project_dir + 'parsing'
+          output_json = step_dir + 'output.json'
+          
+          # Load output.json if it exists
+          if File.exist?(output_json)
+            @results = Basic.safe_parse_json(File.read(output_json), {})
+            
+            # If output.json contains displayed_error, the parsing actually failed
+            # Update the run and project_step status to reflect this
+            if @results && @results['displayed_error'].present?
+              error_msg = if @results['displayed_error'].is_a?(Array)
+                @results['displayed_error'].join('; ')
+              else
+                @results['displayed_error'].to_s
+              end
+              
+              # Update run status to failed if we have a run
+              if @parsing_run && @parsing_run.status_id == 3
+                @parsing_run.update(status_id: 4, error: error_msg)
+                @parsing_run.reload
+              end
+              
+              # Update project_step status to failed
+              if @project_step && @project_step.status_id == 3
+                @project_step.update(status_id: 4, error_message: error_msg)
+                @project_step.reload
+              end
+            end
+          end
+        end
+        
+        # Load file formats for display
+        @h_formats = {}
+        FileFormat.all.each { |f| @h_formats[f.name] = f }
+      end
+    rescue => e
+      Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
+      Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
+      render plain: "Error loading step results: #{e.message}", status: :internal_server_error
       return
     end
     
-    # Get runs for this step
-    @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
-    
-    # Get project step status
-    @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
-    
-    # For parsing step, load the results from output.json
-    if @step.name == 'parsing'
-      # Get the first completed run, or fall back to the most recent run
-      @parsing_run = @runs.where(status_id: 3).first || @runs.first
-      @results = nil
-      
-      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-      step_dir = project_dir + 'parsing'
-      output_json = step_dir + 'output.json'
-      
-      # Load output.json if it exists (even if there's no run record)
-      if File.exist?(output_json)
-        @results = Basic.safe_parse_json(File.read(output_json), {})
-        
-        # If output.json contains displayed_error, the parsing actually failed
-        # Update the run and project_step status to reflect this
-        if @results && @results['displayed_error'].present?
-          error_msg = if @results['displayed_error'].is_a?(Array)
-            @results['displayed_error'].join('; ')
-          else
-            @results['displayed_error'].to_s
-          end
-          
-          # Update run status to failed if we have a run
-          if @parsing_run && @parsing_run.status_id == 3
-            @parsing_run.update(status_id: 4, error: error_msg)
-            @parsing_run.reload
-          end
-          
-          # Update project_step status to failed
-          if @project_step && @project_step.status_id == 3
-            @project_step.update(status_id: 4, error_message: error_msg)
-            @project_step.reload
-          end
-        end
-      end
-      
-      # Load file formats for display
-      @h_formats = {}
-      FileFormat.all.each { |f| @h_formats[f.name] = f }
+    Rails.logger.info("About to render step_results partial")
+    Rails.logger.info("@step: #{@step.inspect}")
+    Rails.logger.info("@step.name: #{@step&.name}")
+    Rails.logger.info("@project_step: #{@project_step.inspect}")
+    Rails.logger.info("@project_step.status_id: #{@project_step&.status_id}")
+    Rails.logger.info("@runs count: #{@runs&.count}")
+    if @step&.name == 'parsing'
+      Rails.logger.info("@results: #{@results.present? ? 'present' : 'nil'}")
+      Rails.logger.info("@parsing_run: #{@parsing_run&.id}, status_id: #{@parsing_run&.status_id}")
+      Rails.logger.info("Status to use: #{@parsing_run&.status_id || @project_step&.status_id}")
+      Rails.logger.info("@h_formats: #{@h_formats&.keys}")
     end
     
     respond_to do |format|
-      format.html { render partial: 'projects/views/step_results', layout: false }
+      format.html { 
+        begin
+          Rails.logger.info("Rendering partial: projects/views/step_results")
+          result = render partial: 'projects/views/step_results', layout: false
+          Rails.logger.info("Render completed, result length: #{result&.length || 'nil'}")
+          Rails.logger.info("Result preview (first 1000 chars): #{result.to_s[0..1000] if result}")
+          
+          # If result is empty, render a test message to debug
+          if result.blank? || result.to_s.strip.length < 10
+            Rails.logger.error("Rendered content is empty! Step: #{@step&.name}, ProjectStep: #{@project_step&.id}, Status: #{@project_step&.status_id}, Results: #{@results.present? ? 'present' : 'nil'}")
+            render plain: "<div class='alert alert-warning p-4'><h3>Debug Info</h3><p>Step: #{@step&.name}</p><p>ProjectStep: #{@project_step&.id || 'nil'}</p><p>Status: #{@project_step&.status_id || 'nil'}</p><p>Results: #{@results.present? ? 'present' : 'nil'}</p><p>Runs: #{@runs&.count || 0}</p></div>", layout: false
+          end
+        rescue => e
+          Rails.logger.error("Error rendering step_results partial: #{e.class} - #{e.message}")
+          Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
+          render plain: "Error rendering step results: #{e.message}", status: :internal_server_error
+        end
+      }
       format.json { render json: { step: @step, runs: @runs } }
     end
   end
@@ -1430,6 +1500,155 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { render partial: 'projects/views/steps_panel', layout: false }
       format.json { render json: { steps: @steps_with_status } }
+    end
+  end
+
+  # POST /projects/:id/restart_step
+  def restart_step
+    begin
+      step_id = params[:step_id].to_i
+      @step = Step.find_by(id: step_id)
+      
+      if @step.nil?
+        redirect_to project_path(@project, view: 'analysis'), alert: 'Step not found.'
+        return
+      end
+      
+      # Check if step has multiple_runs = false and status is complete or failed
+      @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
+      
+      unless @project_step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4)
+        redirect_to project_path(@project, view: 'analysis', step_id: step_id), alert: 'Step cannot be restarted.'
+        return
+      end
+      
+      # Get the rank of the step being restarted
+      restart_step_rank = @step.rank
+      
+      if restart_step_rank.nil?
+        redirect_to project_path(@project, view: 'analysis', step_id: step_id), alert: 'Step has no rank and cannot be restarted.'
+        return
+      end
+      
+      # Get all steps with rank >= the restarted step's rank
+      steps_to_reset = Step.where('rank >= ?', restart_step_rank).order(:rank, :id).all
+      
+      steps_to_reset.each do |step|
+        project_step = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
+        if project_step
+          # Kill any running jobs for this step
+          begin
+            Basic.kill_jobs(Rails.logger, @project.id, step.id)
+          rescue => e
+            Rails.logger.error("Error killing jobs for step #{step.id}: #{e.message}")
+          end
+          
+          # Delete all runs for this step (not just waiting/running)
+          runs = @project.runs.where(step_id: step.id).all
+          runs.each do |run|
+            # Cancel SLURM job if it exists and is running/waiting
+            if run.slurm_job_id.present?
+              begin
+                slurm_service = SlurmService.new(logger: Rails.logger)
+                if slurm_service.cancel_job(run.slurm_job_id)
+                  Rails.logger.info("Cancelled SLURM job #{run.slurm_job_id} for run #{run.id}")
+                else
+                  Rails.logger.warn("Failed to cancel SLURM job #{run.slurm_job_id} for run #{run.id}")
+                end
+              rescue => e
+                Rails.logger.error("Error cancelling SLURM job for run #{run.id}: #{e.message}")
+              end
+            end
+            
+            # Properly destroy the run and clean up files/annotations
+            begin
+              # Clear any class-level instance variables that might pollute state
+              RunsController.instance_variable_set(:@log, nil)
+              RunsController.instance_variable_set(:@h_step_ids, nil)
+              
+              RunsController.destroy_run_call(@project, run)
+              
+              # Clear class-level instance variables after use to prevent state pollution
+              RunsController.instance_variable_set(:@log, nil)
+              RunsController.instance_variable_set(:@h_step_ids, nil)
+            rescue => e
+              Rails.logger.error("Error destroying run #{run.id}: #{e.message}")
+              Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
+              # Clear variables even on error
+              RunsController.instance_variable_set(:@log, nil)
+              RunsController.instance_variable_set(:@h_step_ids, nil)
+              # Fallback: just delete the run if destroy_run_call fails
+              begin
+                run.destroy
+              rescue => e2
+                Rails.logger.error("Error in fallback run destroy: #{e2.message}")
+              end
+            end
+          end
+          
+        # Reset project step status to nil BEFORE updating
+        # This ensures status is nil even if upd_project_step finds old runs
+        project_step.update(status_id: nil, error_message: nil)
+        Rails.logger.info("Reset project_step #{step.id} status to nil")
+        
+        # Verify runs are actually deleted
+        runs_count = @project.runs.where(step_id: step.id).count
+        Rails.logger.info("Runs count for step #{step.id} after deletion: #{runs_count}")
+        
+        # Update project step to reflect the deleted runs
+        # upd_project_step will set status to nil if there are no runs
+        begin
+          Basic.upd_project_step(@project, step.id)
+          # Reload and verify status is nil
+          project_step.reload
+          if project_step.status_id != nil && runs_count == 0
+            Rails.logger.warn("upd_project_step set status to #{project_step.status_id} but there are no runs, forcing to nil")
+            project_step.update(status_id: nil)
+          end
+          Rails.logger.info("Final project_step #{step.id} status: #{project_step.status_id}")
+        rescue => e
+          Rails.logger.error("Error updating project step #{step.id}: #{e.message}")
+          # Ensure status is nil on error
+          project_step.reload
+          project_step.update(status_id: nil) if project_step.status_id != nil
+        end
+          
+        # Broadcast update for this step so websockets update the UI
+        # Wrap in rescue to prevent broadcast errors from breaking restart
+        begin
+          if @project.respond_to?(:broadcast)
+            @project.broadcast(step.id)
+            Rails.logger.info("Broadcast sent for step #{step.id}")
+          end
+        rescue => e
+          Rails.logger.error("Error broadcasting update for step #{step.id}: #{e.class} - #{e.message}")
+          Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
+          # Don't fail restart if broadcast fails
+        end
+        end
+      end
+      
+      # Reload project to ensure fresh state
+      @project.reload
+      
+      # If we restarted the parsing step, automatically recreate the parsing job
+      if @step.name == 'parsing'
+        begin
+          ProjectParsingJob.perform_later(@project.id)
+          redirect_to project_path(@project, view: 'analysis'), notice: 'Parsing step restarted successfully. Parsing job has been recreated.'
+        rescue => e
+          Rails.logger.error("Error recreating parsing job: #{e.message}")
+          Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
+          redirect_to project_path(@project, view: 'analysis'), notice: 'Step restarted successfully, but failed to recreate parsing job. Please try again.'
+        end
+      else
+        # Redirect without step_id - websockets will handle the UI updates
+        redirect_to project_path(@project, view: 'analysis'), notice: 'Step restarted successfully. All subsequent steps have been reset.'
+      end
+    rescue => e
+      Rails.logger.error("Error in restart_step: #{e.class} - #{e.message}")
+      Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
+      redirect_to project_path(@project, view: 'analysis'), alert: "Error restarting step: #{e.message}"
     end
   end
 
@@ -1546,7 +1765,15 @@ class ProjectsController < ApplicationController
       
       steps_to_show.each_with_index do |step, adjusted_index|
         project_step = @project_steps_hash[step.id]
-        status_id = project_step&.status_id
+        # Use the run's status_id directly, not project_step status_id
+        # Get the most recent run for this step (to show current/active status), or fall back to project_step if no run exists
+        step_runs = @runs.select { |r| r.step_id == step.id }
+        if step_runs.any?
+          # Use the most recent run's status (to show current/active status)
+          status_id = step_runs.max_by(&:created_at)&.status_id
+        else
+          status_id = project_step&.status_id
+        end
         
         # Check if all previous steps (by rank) are complete
         # Previous steps are those with lower rank, or same rank but earlier in the list

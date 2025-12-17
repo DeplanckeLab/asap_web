@@ -2,32 +2,50 @@
   <div class="step-results h-full flex flex-col">
     <!-- Step Header -->
     <div class="mb-4">
-      <h3 class="mb-2">
-        <i class="fas fa-tasks me-2"></i><%= @step.label.presence || @step.name %>
-      </h3>
-      <% if @step.description.present? %>
-        <p class="text-muted mb-2"><%= @step.description %></p>
-      <% end %>
-      
-      <!-- Step Status -->
-      <% if @project_step %>
-        <% status_id = @project_step.status_id %>
-        <% status = case status_id
-                    when 1 then { name: 'waiting', class: 'warning', icon: 'clock' }
-                    when 2 then { name: 'running', class: 'info', icon: 'spinner fa-spin' }
-                    when 3 then { name: 'complete', class: 'success', icon: 'check-circle' }
-                    when 4 then { name: 'failed', class: 'danger', icon: 'exclamation-circle' }
-                    else { name: 'not started', class: 'secondary', icon: 'circle' }
-                    end %>
-        <div class="mb-3">
-          <span class="badge badge-<%= status[:class] %>">
-            <i class="fas fa-<%= status[:icon] %> me-1"></i><%= status[:name].humanize %>
-          </span>
-          <% if @step.rank %>
-            <span class="badge badge-secondary ml-2">Rank: <%= @step.rank %></span>
+      <div class="flex items-start justify-between">
+        <div class="flex-1">
+          <h3 class="mb-2">
+            <i class="fas fa-tasks me-2"></i><%= @step.label.presence || @step.name %>
+          </h3>
+          <% if @step.description.present? %>
+            <p class="text-muted mb-2"><%= @step.description %></p>
+          <% end %>
+          
+          <!-- Step Status -->
+          <% if @project_step %>
+            <% status_id = @project_step.status_id %>
+            <% status = case status_id
+                        when 1 then { name: 'waiting', class: 'warning', icon: 'clock' }
+                        when 2 then { name: 'running', class: 'info', icon: 'spinner fa-spin' }
+                        when 3 then { name: 'complete', class: 'success', icon: 'check-circle' }
+                        when 4 then { name: 'failed', class: 'danger', icon: 'exclamation-circle' }
+                        else { name: 'not started', class: 'secondary', icon: 'circle' }
+                        end %>
+            <div class="mb-3">
+              <span class="badge badge-<%= status[:class] %>">
+                <i class="fas fa-<%= status[:icon] %> me-1"></i><%= status[:name].humanize %>
+              </span>
+              <% if @step.rank %>
+                <span class="badge badge-secondary ml-2">Rank: <%= @step.rank %></span>
+              <% end %>
+            </div>
           <% end %>
         </div>
-      <% end %>
+        
+        <!-- Restart Button -->
+        <% if @project_step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+          <button type="button" 
+                  class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                  data-controller="restart-step"
+                  data-restart-step-project-id-value="<%= @project.id %>"
+                  data-restart-step-step-id-value="<%= @step.id %>"
+                  data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
+                  data-action="click->restart-step#restart"
+                  style="flex-shrink: 0;">
+            Restart
+          </button>
+        <% end %>
+      </div>
     </div>
 
     <!-- Error Display Section -->

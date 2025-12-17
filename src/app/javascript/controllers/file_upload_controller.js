@@ -1506,25 +1506,31 @@ export default class extends Controller {
   }
 
   // Format memory (bytes) to human-readable format (b, Kb, Mb, Gb)
+  // Format memory (bytes) to human-readable format (B, KB, MB, GB, TB)
+  // Uses binary conversion (1024) to match system standard
   formatMemory(bytes) {
     if (!bytes && bytes !== 0) return 'n/a'
     
-    const g = bytes / 1000000000
-    const m = bytes / 1000000
-    const k = bytes / 1000
+    const t = bytes / (1024 ** 4)  // TB: 1024^4 bytes
+    const g = bytes / (1024 ** 3)  // GB: 1024^3 bytes
+    const m = bytes / (1024 ** 2)  // MB: 1024^2 bytes
+    const k = bytes / 1024          // KB: 1024 bytes
     
-    if (g >= 1) {
+    if (t >= 1) {
+      const precision = Math.max(0, 3 - Math.floor(t).toString().length)
+      return `${t.toFixed(precision)}TB`
+    } else if (g >= 1) {
       const precision = Math.max(0, 3 - Math.floor(g).toString().length)
-      return `${g.toFixed(precision)}Gb`
+      return `${g.toFixed(precision)}GB`
     } else if (m >= 1) {
       const precision = Math.max(0, 3 - Math.floor(m).toString().length)
-      return `${m.toFixed(precision)}Mb`
+      return `${m.toFixed(precision)}MB`
     } else if (k >= 1) {
       const precision = Math.max(0, 3 - Math.floor(k).toString().length)
-      return `${k.toFixed(precision)}Kb`
+      return `${k.toFixed(precision)}KB`
     } else {
       const precision = Math.max(0, 3 - Math.floor(bytes).toString().length)
-      return `${bytes.toFixed(precision)}b`
+      return `${bytes.toFixed(precision)}B`
     }
   }
 
@@ -1574,9 +1580,9 @@ export default class extends Controller {
     const genes = this.formatNumber(dataset?.gene_count)
     const metadataCount = Array.isArray(dataset?.existing_metadata) ? dataset.existing_metadata.length : 0
     const matrixType = dataset?.is_count_matrix ? 'Count matrix' : 'Expression matrix'
-    // Format predicted RAM (value is in KB, convert to bytes for formatting)
+    // Format predicted RAM (value is in KB, convert to bytes using binary conversion 1024 to match system standard)
     const predictedRamValue = dataset?.predicted_ram
-    const predictedRam = predictedRamValue ? this.formatMemory(predictedRamValue * 1000) : 'n/a'
+    const predictedRam = predictedRamValue ? this.formatMemory(predictedRamValue * 1024) : 'n/a'
     
     // Format predicted duration (value is in seconds)
     const predictedDurationValue = dataset?.predicted_duration

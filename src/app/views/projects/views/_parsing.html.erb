@@ -1,5 +1,65 @@
+<%# Parsing Status Section (when waiting or running, before results are available) %>
+<%# Also show if status is complete but results are missing (after restart) %>
+<% if @step && @step.name == 'parsing' && !@results %>
+  <%# Always show something when there are no results %>
+  <%# Use ONLY the run's status_id, matching the left panel logic %>
+  <% status_id = @parsing_run&.status_id %>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
+    <div class="px-6 py-8 text-center">
+      <% if status_id.nil? || status_id == 1 %>
+        <div class="flex flex-col items-center justify-center">
+          <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
+          <p class="text-gray-600 mb-4">The parsing job is queued and will start shortly.</p>
+        </div>
+      <% elsif status_id == 2 %>
+        <div class="flex flex-col items-center justify-center" 
+             data-controller="parsing-timer"
+             <% if @parsing_run&.start_time %>
+               data-parsing-timer-start-time-value="<%= @parsing_run.start_time.iso8601 %>"
+             <% end %>
+             <% if @parsing_run&.pred_process_duration %>
+               data-parsing-timer-expected-duration-value="<%= @parsing_run.pred_process_duration %>"
+             <% end %>>
+          <i class="fas fa-spinner fa-spin text-blue-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is running</h3>
+          <p class="text-gray-600 mb-4">The parsing job is currently processing your data. Results will appear here when complete.</p>
+          
+          <%# Time counter section %>
+          <div class="mt-4 space-y-2">
+            <div class="text-sm text-gray-700">
+              <span class="font-medium">Elapsed time:</span>
+              <span data-parsing-timer-target="elapsedTime" class="ml-2 font-mono">--:--:--</span>
+            </div>
+            <% if @parsing_run&.pred_process_duration %>
+              <div class="text-sm text-gray-600">
+                <span class="font-medium">Expected time:</span>
+                <span data-parsing-timer-target="expectedTime" class="ml-2 font-mono"><%= duration(@parsing_run.pred_process_duration.to_i) %></span>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% elsif status_id == 3 %>
+        <%# Status says complete but no results - likely after restart %>
+        <div class="flex flex-col items-center justify-center">
+          <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
+          <p class="text-gray-600 mb-4">The parsing job has been restarted and is queued. Results will appear here when complete.</p>
+        </div>
+      <% else %>
+        <%# Fallback for any other status (including nil project_step) %>
+        <div class="flex flex-col items-center justify-center">
+          <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
+          <p class="text-gray-600 mb-4">The parsing step is being initialized. Results will appear here when ready.</p>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% end %>
+
 <%# Parsing Results Section %>
-<% if @step.name == 'parsing' && @results && !@results['displayed_error'] && (@parsing_run.nil? || @parsing_run.status_id == 3) %>
+<% if @step && @step.name == 'parsing' && @results && !@results['displayed_error'] && (@parsing_run.nil? || @parsing_run.status_id == 3) %>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden" id="result_summary">
     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 px-6 py-4">
       <div class="flex items-center justify-between">
@@ -7,12 +67,19 @@
           <i class="fas fa-check-circle text-blue-600"></i>
           Parsing results
         </h3>
-        <!-- File Format -->
-        <div class="flex items-center">
-          <% if @h_formats && @results && @results["detected_format"] && @h_formats[@results["detected_format"]] %>
-            <%= raw display_file_format(@h_formats[@results["detected_format"]]) %>
-          <% elsif @results && @results["detected_format"] %>
-            <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium"><%= @results["detected_format"] %></span>
+        <div class="flex items-center gap-3">
+          <!-- Restart Button -->
+          <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+            <button type="button" 
+                    class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                    data-controller="restart-step"
+                    data-restart-step-project-id-value="<%= @project.id %>"
+                    data-restart-step-step-id-value="<%= @step.id %>"
+                    data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
+                    data-action="click->restart-step#restart"
+                    style="flex-shrink: 0;">
+              Restart
+            </button>
           <% end %>
         </div>
       </div>
@@ -64,12 +131,20 @@
       <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
       <% if @results && !['LOOM', 'H5_10x', 'MEX'].include?(@results["detected_format"]) && @project.parsing_attrs_json %>
         <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-        <div class="border-t border-gray-200 pt-4">
+        <div class="border-t border-gray-200 pt-4 relative">
           <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
             <i class="fas fa-cog text-gray-500"></i>
             Parameters
           </h4>
-          <div class="flex flex-wrap gap-2">
+          <!-- File Format - Right Floating -->
+          <div class="absolute top-4 right-0">
+            <% if @h_formats && @results && @results["detected_format"] && @h_formats[@results["detected_format"]] %>
+              <%= raw display_file_format(@h_formats[@results["detected_format"]]) %>
+            <% elsif @results && @results["detected_format"] %>
+              <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium"><%= @results["detected_format"] %></span>
+            <% end %>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
             <% h_delimiter = {"\\t" => 'Tab', "\t" => "Tab", " " => "Space", "," => "Comma", ":" => "Colon"} %>
             <% if h_attrs['delimiter'] && h_attrs['delimiter'] != '' %>
               <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
@@ -301,36 +376,92 @@
           <% end %>
           <% if @parsing_run.created_at %>
             <% metadata_parts << "<span class='nowrap'>#{display_date_short(@parsing_run.created_at)}</span>" %>
-            <% if @parsing_run.submitted_at %>
-              <% metadata_parts << "<span id='created_time_#{@parsing_run.id}' class='hidden'>#{@parsing_run.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}</span>" %>
-            <% end %>
-            <% if @parsing_run.start_time %>
-              <% metadata_parts << "<span id='start_time_#{@parsing_run.id}' class='hidden'>#{@parsing_run.start_time.strftime('%Y-%m-%d %H:%M:%S')}</span>" %>
-            <% end %>
           <% end %>
+          <%# Waiting time - show if waiting_duration is set, or calculate from submitted_at to start_time, or show ongoing wait if status is waiting %>
           <% if @parsing_run.waiting_duration %>
-            <% metadata_parts << "<span class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(@parsing_run.waiting_duration.to_i)}</span>" %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(@parsing_run.waiting_duration.round)}</span>" %>
+          <% elsif @parsing_run.submitted_at && @parsing_run.start_time %>
+            <%# Calculate waiting time from submitted_at to start_time %>
+            <% wait_time = (@parsing_run.start_time - @parsing_run.submitted_at).round %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
           <% elsif @parsing_run.status_id == 1 && @parsing_run.submitted_at %>
-            <% wait_time = (Time.now - @parsing_run.submitted_at).to_i %>
+            <%# Ongoing wait - calculate from submitted_at to now %>
+            <% wait_time = (Time.now - @parsing_run.submitted_at).round %>
             <% metadata_parts << "<span id='ongoing_wait_#{@parsing_run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
           <% end %>
+          <%# Running time - use duration if available, otherwise calculate from start_time %>
+          <% run_time_display = nil %>
+          <% is_running = false %>
           <% if @parsing_run.duration %>
-            <% metadata_parts << "<span class='nowrap'><i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{duration(@parsing_run.duration.to_i)}</span>" %>
+            <% run_time_display = duration(@parsing_run.duration.to_i) %>
+          <% elsif @parsing_run.process_duration %>
+            <%# Use process_duration as fallback if duration is not set %>
+            <% run_time_display = duration(@parsing_run.process_duration.to_i) %>
           <% elsif @parsing_run.status_id == 2 && @parsing_run.start_time %>
+            <%# Running - show live time %>
             <% run_time = (Time.now - @parsing_run.start_time).to_i %>
-            <% metadata_parts << "<span id='ongoing_run_#{@parsing_run.id}' class='nowrap'><i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{duration(run_time)}</span>" %>
+            <% run_time_display = duration(run_time) %>
+            <% is_running = true %>
           <% end %>
+          
+          <% if run_time_display %>
+            <% run_time_text = "<i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{run_time_display}" %>
+            <% if @parsing_run.pred_process_duration %>
+              <% run_time_text += " <span class='text-gray-500'>(expected #{duration(@parsing_run.pred_process_duration.to_i)})</span>" %>
+            <% end %>
+            <% if is_running %>
+              <% metadata_parts << "<span id='ongoing_run_#{@parsing_run.id}' class='nowrap'>#{run_time_text}</span>" %>
+            <% else %>
+              <% metadata_parts << "<span class='nowrap'>#{run_time_text}</span>" %>
+            <% end %>
+          <% end %>
+          <%# Idle time - check both @results['time_idle'] and @parsing_run.process_idle_duration %>
+          <% idle_time_display = nil %>
           <% if @results && @results['time_idle'] %>
-            <% metadata_parts << "<span class='nowrap'><i class='fas fa-pause-circle text-gray-400 mr-1'></i>Idle #{@results['time_idle']}</span>" %>
+            <% idle_time_display = @results['time_idle'] %>
+          <% elsif @parsing_run.process_idle_duration %>
+            <% idle_time_display = duration(@parsing_run.process_idle_duration.to_i) %>
           <% end %>
+          <% if idle_time_display %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-pause-circle text-gray-400 mr-1'></i>Idle #{idle_time_display}</span>" %>
+          <% end %>
+          <%# Max RAM - max_ram is stored in MB (from Basic.finish_run or SlurmJobMonitorJob) %>
+          <%# display_mem expects bytes, so convert MB to bytes: MB * 1024 * 1024 %>
           <% if @parsing_run.max_ram %>
-            <% ram_mb = (@parsing_run.max_ram * 1000).to_f %>
-            <% ram_display = display_mem(ram_mb) %>
-            <% metadata_parts << "<span class='nowrap'><i class='fas fa-memory text-gray-400 mr-1'></i>Max. RAM #{ram_display}</span>" %>
+            <%# max_ram is in MB, convert to bytes for display_mem helper %>
+            <% ram_bytes = @parsing_run.max_ram * 1024 * 1024 %>
+            <% ram_display = display_mem(ram_bytes) %>
+            <% ram_text = "<i class='fas fa-memory text-gray-400 mr-1'></i>Max. RAM #{ram_display}" %>
+            <% if @parsing_run.pred_max_ram %>
+              <%# pred_max_ram is stored in KB (from prediction script output), convert to bytes using binary conversion (1024) to match system standard %>
+              <% pred_ram_bytes = @parsing_run.pred_max_ram.to_f * 1024 %>
+              <% pred_ram_display = display_mem(pred_ram_bytes) %>
+              <% ram_text += " <span class='text-gray-500'>(expected #{pred_ram_display})</span>" %>
+            <% end %>
+            <% metadata_parts << "<span class='nowrap'>#{ram_text}</span>" %>
           <% end %>
           <%= raw metadata_parts.compact.join(" <span class='text-gray-300'>•</span> ") %>
+          <%# Hidden spans for JavaScript - add separately after visible metadata to avoid extra separators %>
+          <% if @parsing_run.submitted_at %>
+            <span id="created_time_<%= @parsing_run.id %>" class="hidden"><%= @parsing_run.submitted_at.strftime('%Y-%m-%d %H:%M:%S') %></span>
+          <% end %>
+          <% if @parsing_run.start_time %>
+            <span id="start_time_<%= @parsing_run.id %>" class="hidden"><%= @parsing_run.start_time.strftime('%Y-%m-%d %H:%M:%S') %></span>
+          <% end %>
         </div>
       </div>
+      
+      <%# Admin debug card - show run data in JSON format %>
+      <% if admin? && @parsing_run %>
+        <div class="bg-yellow-50 border-t border-yellow-200 px-6 py-4 mt-4">
+          <div class="mb-2">
+            <h4 class="text-sm font-semibold text-yellow-900 mb-2">Debug: Run Data (Admin Only)</h4>
+            <div class="bg-white border border-yellow-300 rounded p-3 overflow-auto max-h-96">
+              <pre class="text-xs text-gray-800 whitespace-pre-wrap break-words"><code><%= JSON.pretty_generate(@parsing_run.as_json) %></code></pre>
+            </div>
+          </div>
+        </div>
+      <% end %>
     <% end %>
   </div>
   
@@ -357,9 +488,24 @@
       <% end %>
     <% end %>
   <% end %>
-<% elsif @step.name == 'parsing' && @results && @results['displayed_error'] %>
+<% elsif @step && @step.name == 'parsing' && @results && @results['displayed_error'] %>
   <!-- Parsing Error Display -->
   <div class="mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold text-gray-900">Parsing Error</h3>
+      <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+        <button type="button" 
+                class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                data-controller="restart-step"
+                data-restart-step-project-id-value="<%= @project.id %>"
+                data-restart-step-step-id-value="<%= @step.id %>"
+                data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
+                data-action="click->restart-step#restart"
+                style="flex-shrink: 0;">
+          Restart
+        </button>
+      <% end %>
+    </div>
     <% if @results['displayed_error'].is_a?(Array) %>
       <% @results['displayed_error'].each do |error| %>
         <p class="text-danger text-truncate" title="<%= error %>"><%= error %></p>
@@ -371,5 +517,6 @@
       <br/><span class="text-muted"><%= @results['original_error'] %></span>
     <% end %>
   </div>
+  
 <% end %>
 

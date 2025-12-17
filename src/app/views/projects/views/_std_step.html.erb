@@ -69,6 +69,77 @@
       </div>
     <% end %>
 
+    <!-- Waiting/Running Status Section (for steps with has_multiple_runs = false) -->
+    <% if @step && !@step.multiple_runs && @current_run && (@current_run.status_id == 1 || @current_run.status_id == 2) %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
+        <div class="px-6 py-8 text-center">
+          <% status_id = @current_run.status_id %>
+          <% step_name = @step.label.presence || @step.name %>
+          
+          <% if status_id == 1 %>
+            <div class="flex flex-col items-center justify-center"
+                 <% if @current_run&.slurm_job_id %>
+                   data-controller="queue-position"
+                   data-queue-position-run-id-value="<%= @current_run.id %>"
+                   data-queue-position-slurm-job-id-value="<%= @current_run.slurm_job_id %>"
+                   data-queue-position-project-id-value="<%= @project.id %>"
+                   <% if @current_run.submitted_at %>
+                     data-queue-position-submitted-at-value="<%= @current_run.submitted_at.iso8601 %>"
+                   <% end %>
+                 <% end %>>
+              <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+              <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_name %> is waiting</h3>
+              <p class="text-gray-600 mb-4">The job is queued and will start shortly.</p>
+              <% if @current_run&.slurm_job_id %>
+                <% if @current_run.submitted_at %>
+                  <div class="text-sm text-gray-600 mb-3">
+                    <span class="font-medium">Waiting time:</span>
+                    <span data-queue-position-target="waitingTime" class="ml-2 font-mono">--:--</span>
+                  </div>
+                <% end %>
+                <div data-queue-position-target="queueInfo" class="text-gray-600">
+                  <span>Position in the queue: </span>
+                  <span data-queue-position-target="position" class="inline-block">
+                    <i class="fas fa-spinner fa-spin"></i>
+                  </span>
+                </div>
+                <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
+                  Nothing in the queue, will start shortly...
+                </div>
+              <% end %>
+            </div>
+          <% elsif status_id == 2 %>
+            <div class="flex flex-col items-center justify-center" 
+                 data-controller="parsing-timer"
+                 <% if @current_run&.start_time %>
+                   data-parsing-timer-start-time-value="<%= @current_run.start_time.iso8601 %>"
+                 <% end %>
+                 <% if @current_run&.pred_process_duration %>
+                   data-parsing-timer-expected-duration-value="<%= @current_run.pred_process_duration %>"
+                 <% end %>>
+              <i class="fas fa-spinner fa-spin text-blue-500 text-5xl mb-4"></i>
+              <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_name %> is running</h3>
+              <p class="text-gray-600 mb-4">The job is currently processing your data. Results will appear here when complete.</p>
+              
+              <%# Time counter section %>
+              <div class="mt-4 space-y-2">
+                <div class="text-sm text-gray-700">
+                  <span class="font-medium">Elapsed time:</span>
+                  <span data-parsing-timer-target="elapsedTime" class="ml-2 font-mono">--:--:--</span>
+                </div>
+                <% if @current_run&.pred_process_duration %>
+                  <div class="text-sm text-gray-600">
+                    <span class="font-medium">Expected time:</span>
+                    <span data-parsing-timer-target="expectedTime" class="ml-2 font-mono"><%= duration(@current_run.pred_process_duration.to_i) %></span>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Step Results Section -->
     <% if @step.has_std_view %>
       <!-- Render standard view (template) -->

@@ -175,42 +175,55 @@ class SlurmService
   def get_job_queue_position(slurm_job_id, run_status_id = nil)
     return nil if slurm_job_id.blank?
     
+    @logger.info("[SlurmService] get_job_queue_position called: slurm_job_id=#{slurm_job_id}, run_status_id=#{run_status_id.inspect}")
+    
     # First check if job is running or completed - if so, return nil (no queue position)
+    # BUT: if run_status_id is 1 (waiting), the run thinks it's waiting, so check the queue anyway
+    # This handles cases where SLURM shows completed but run hasn't been updated yet
     job_status = get_job_status(slurm_job_id)
-    if job_status == :running || job_status == :completed
-      @logger.debug("[SlurmService] Job #{slurm_job_id} is #{job_status}, no queue position")
+    @logger.info("[SlurmService] Job #{slurm_job_id} SLURM status: #{job_status.inspect}")
+    
+    # Only skip queue check if job is running/completed AND run is NOT waiting
+    # If run is waiting (status_id == 1), check the queue even if SLURM says completed/running
+    # (this handles timing issues where run status hasn't updated yet)
+    if (job_status == :running || job_status == :completed) && run_status_id != 1
+      @logger.info("[SlurmService] Job #{slurm_job_id} is #{job_status} and run_status_id is #{run_status_id} (not waiting), no queue position - returning nil")
       return nil
+    elsif (job_status == :running || job_status == :completed) && run_status_id == 1
+      @logger.info("[SlurmService] Job #{slurm_job_id} is #{job_status} but run_status_id is 1 (waiting) - checking queue anyway (possible timing issue)")
     end
     
     # Get queue position by counting pending jobs ahead of this one
     # Get all pending jobs sorted by priority/submission time
     result = `squeue -t PENDING -h -o "%i %Q" --sort=+Q 2>&1`
     
-    @logger.debug("[SlurmService] squeue result for queue position: exit_code=#{$?.exitstatus}, result=#{result.strip.inspect}")
+    @logger.info("[SlurmService] squeue command result: exit_code=#{$?.exitstatus}, output_length=#{result.strip.length}, output=#{result.strip.inspect}")
     
     if $?.success?
       if result.strip.empty?
         # No pending jobs in queue
         # If run status is waiting (status_id == 1) or SLURM status is pending, queue is empty
         if run_status_id == 1 || job_status == :pending
-          @logger.debug("[SlurmService] No pending jobs found, job #{slurm_job_id} is next in line (run_status_id: #{run_status_id}, slurm_status: #{job_status})")
+          @logger.info("[SlurmService] No pending jobs found, job #{slurm_job_id} is next in line (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - returning 0")
           return 0  # Special value: 0 means "next in queue, will start shortly"
         else
           # Job is not waiting/pending, might have started or failed
-          @logger.debug("[SlurmService] No pending jobs found, job #{slurm_job_id} status is #{job_status}, run_status_id: #{run_status_id}")
+          @logger.info("[SlurmService] No pending jobs found, job #{slurm_job_id} status is #{job_status}, run_status_id: #{run_status_id} - returning nil")
           return nil
         end
       end
       
       # Parse pending jobs to find this job's position
       lines = result.strip.split("\n")
+      @logger.info("[SlurmService] Parsing #{lines.length} pending job lines, looking for job #{slurm_job_id}")
       position = nil
       lines.each_with_index do |line, index|
         parts = line.strip.split
+        @logger.info("[SlurmService] Line #{index + 1}: #{line.inspect}, parts: #{parts.inspect}, comparing '#{parts[0]}' with '#{slurm_job_id.to_s}'")
         if parts.size >= 1 && parts[0] == slurm_job_id.to_s
           # Position is 1-indexed (1st in queue, 2nd in queue, etc.)
           position = index + 1
-          @logger.debug("[SlurmService] Found job #{slurm_job_id} at position #{position} in queue")
+          @logger.info("[SlurmService] Found job #{slurm_job_id} at position #{position} in queue")
           break
         end
       end
@@ -218,12 +231,13 @@ class SlurmService
       if position.nil?
         # Job not found in pending queue
         # If run status is waiting (status_id == 1) or SLURM status is pending, queue is empty
+        @logger.info("[SlurmService] Job #{slurm_job_id} not found in pending queue. run_status_id: #{run_status_id.inspect}, slurm_status: #{job_status.inspect}")
         if run_status_id == 1 || job_status == :pending
-          @logger.debug("[SlurmService] Job #{slurm_job_id} not in pending queue but run is waiting (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - next in line")
+          @logger.info("[SlurmService] Job #{slurm_job_id} not in pending queue but run is waiting (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - returning 0 (next in line)")
           return 0  # Next in queue, will start shortly
         else
           # Job might have started or failed
-          @logger.debug("[SlurmService] Job #{slurm_job_id} not found in pending queue, status: #{job_status}, run_status_id: #{run_status_id}")
+          @logger.info("[SlurmService] Job #{slurm_job_id} not found in pending queue, status: #{job_status}, run_status_id: #{run_status_id} - returning nil")
           return nil
         end
       end

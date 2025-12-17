@@ -624,6 +624,29 @@ export default class extends Controller {
       console.log('[StepSelectorController] ===== STEP RESULTS LOADED =====')
       console.log('[StepSelectorController] HTML length:', html.length)
       console.log('[StepSelectorController] HTML preview (first 500 chars):', html.substring(0, 500))
+      
+      // Check if queue-position controller is in the HTML
+      if (html.includes('queue-position')) {
+        console.log('[StepSelectorController] ✓ Found "queue-position" in HTML')
+        // Try to find the exact element
+        const tempDiv = document.createElement('div')
+        tempDiv.innerHTML = html
+        const queuePositionElements = tempDiv.querySelectorAll('[data-controller*="queue-position"]')
+        console.log('[StepSelectorController] Found', queuePositionElements.length, 'elements with queue-position controller in HTML')
+        queuePositionElements.forEach((el, idx) => {
+          console.log(`[StepSelectorController] Queue position element ${idx + 1}:`, {
+            dataController: el.getAttribute('data-controller'),
+            runId: el.getAttribute('data-queue-position-run-id-value'),
+            slurmJobId: el.getAttribute('data-queue-position-slurm-job-id-value'),
+            projectId: el.getAttribute('data-queue-position-project-id-value'),
+            hasPositionTarget: el.querySelector('[data-queue-position-target="position"]') ? 'yes' : 'no',
+            hasQueueInfoTarget: el.querySelector('[data-queue-position-target="queueInfo"]') ? 'yes' : 'no',
+            hasEmptyQueueTarget: el.querySelector('[data-queue-position-target="emptyQueue"]') ? 'yes' : 'no'
+          })
+        })
+      } else {
+        console.log('[StepSelectorController] ✗ "queue-position" NOT found in HTML')
+      }
       console.log('[StepSelectorController] Updating content target')
       console.log('[StepSelectorController] currentStepId BEFORE update:', controller.currentStepId)
       console.log('[StepSelectorController] stepId parameter:', stepId, 'stepIdString:', stepIdString)
@@ -673,6 +696,83 @@ export default class extends Controller {
         controller.emptyStateTarget.style.display = 'none'
       }
       controller.contentTarget.style.display = 'block'
+      
+      // Log information about controllers in the loaded content for debugging
+      // Stimulus's MutationObserver should automatically detect and connect them
+      if (typeof window !== 'undefined' && window.Stimulus) {
+        // Function to check and log controller status
+        const checkControllerStatus = (delay = 0) => {
+          setTimeout(() => {
+            const elementsWithControllers = controller.contentTarget.querySelectorAll('[data-controller]')
+            console.log(`[StepSelectorController] Checking controller status (delay: ${delay}ms), found ${elementsWithControllers.length} elements with data-controller`)
+            
+            if (elementsWithControllers.length === 0) {
+              console.log('[StepSelectorController] No elements with data-controller found in loaded content')
+              return
+            }
+            
+            elementsWithControllers.forEach((element, index) => {
+              const controllerNames = element.getAttribute('data-controller').split(' ').filter(name => name.trim())
+              console.log(`[StepSelectorController] Element ${index + 1}: data-controller="${element.getAttribute('data-controller')}"`)
+              
+              // Log all data attributes for debugging
+              const dataAttributes = Array.from(element.attributes)
+                .filter(attr => attr.name.startsWith('data-'))
+                .map(attr => `${attr.name}="${attr.value}"`)
+              console.log(`[StepSelectorController] Element ${index + 1} data attributes:`, dataAttributes)
+              
+              controllerNames.forEach((controllerName) => {
+                try {
+                  // Check if controller is connected
+                  const connectedController = window.Stimulus.getControllerForElementAndIdentifier(element, controllerName.trim())
+                  if (!connectedController) {
+                    console.log(`[StepSelectorController] Controller "${controllerName.trim()}" NOT connected yet (delay: ${delay}ms)`)
+                  } else {
+                    console.log(`[StepSelectorController] Controller "${controllerName.trim()}" IS connected (delay: ${delay}ms)`)
+                    
+                    // For queue-position, log detailed information
+                    if (controllerName.trim() === 'queue-position') {
+                      console.log('[StepSelectorController] Queue position controller details:', {
+                        runId: connectedController.runIdValue,
+                        slurmJobId: connectedController.slurmJobIdValue,
+                        projectId: connectedController.projectIdValue,
+                        hasPositionTarget: connectedController.hasPositionTarget,
+                        hasQueueInfoTarget: connectedController.hasQueueInfoTarget,
+                        hasEmptyQueueTarget: connectedController.hasEmptyQueueTarget,
+                        pollInterval: connectedController.pollInterval ? 'active' : 'not set'
+                      })
+                      
+                      // Check if targets exist in DOM
+                      if (connectedController.hasPositionTarget) {
+                        console.log('[StepSelectorController] Position target element:', connectedController.positionTarget)
+                        console.log('[StepSelectorController] Position target content:', connectedController.positionTarget.innerHTML)
+                      }
+                      if (connectedController.hasQueueInfoTarget) {
+                        console.log('[StepSelectorController] QueueInfo target element:', connectedController.queueInfoTarget)
+                        console.log('[StepSelectorController] QueueInfo target classes:', connectedController.queueInfoTarget.className)
+                      }
+                      if (connectedController.hasEmptyQueueTarget) {
+                        console.log('[StepSelectorController] EmptyQueue target element:', connectedController.emptyQueueTarget)
+                        console.log('[StepSelectorController] EmptyQueue target classes:', connectedController.emptyQueueTarget.className)
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.warn(`[StepSelectorController] Error checking controller "${controllerName.trim()}":`, e)
+                }
+              })
+            })
+          }, delay)
+        }
+        
+        // Check multiple times with increasing delays to see when controllers connect
+        checkControllerStatus(0)   // Immediate
+        checkControllerStatus(50)  // After 50ms
+        checkControllerStatus(100) // After 100ms
+        checkControllerStatus(200) // After 200ms
+        checkControllerStatus(500) // After 500ms
+        checkControllerStatus(1000) // After 1 second (final check)
+      }
       
       console.log('[StepSelectorController] Content updated')
       if (controller.hasContentTarget) {

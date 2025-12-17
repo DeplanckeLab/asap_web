@@ -1401,25 +1401,37 @@ class ProjectsController < ApplicationController
         )
       end
       
-      # For parsing step, load the results from output.json
-      if @step.name == 'parsing'
+      # For steps with has_multiple_runs = false, get the current run for status display
+      # This is used to show waiting/running panels when results are not yet available
+      if @step && !@step.multiple_runs
         # Get the run to use for status display
         # Priority: 1) most recent run (to show current status), 2) completed run if no active run
         # This matches the logic used in the left panel - we want to show the current/active run's status
-        @parsing_run = @runs.order(created_at: :desc).first
-        Rails.logger.info("[step_results] Parsing run selected: #{@parsing_run&.id}, status_id: #{@parsing_run&.status_id}, created_at: #{@parsing_run&.created_at}")
+        @current_run = @runs.order(created_at: :desc).first
+        Rails.logger.info("[step_results] Current run selected for step #{@step.name}: #{@current_run&.id}, status_id: #{@current_run&.status_id}, created_at: #{@current_run&.created_at}")
         
-        # Get queue position if run is waiting
+        # For parsing step, also set @parsing_run for backward compatibility
+        if @step.name == 'parsing'
+          @parsing_run = @current_run
+        end
+        
+        # Get queue position if run is waiting (for any step, not just parsing)
         @queue_position = nil
-        if @parsing_run && @parsing_run.status_id == 1 && @parsing_run.slurm_job_id
+        if @current_run && @current_run.status_id == 1 && @current_run.slurm_job_id
           begin
             slurm_service = SlurmService.new(logger: Rails.logger)
-            @queue_position = slurm_service.get_job_queue_position(@parsing_run.slurm_job_id)
-            Rails.logger.info("[step_results] Queue position for Run##{@parsing_run.id}: #{@queue_position}")
+            @queue_position = slurm_service.get_job_queue_position(@current_run.slurm_job_id)
+            Rails.logger.info("[step_results] Queue position for Run##{@current_run.id}: #{@queue_position}")
           rescue => e
             Rails.logger.warn("[step_results] Could not get queue position: #{e.message}")
           end
         end
+      end
+      
+      # For parsing step, load the results from output.json
+      if @step.name == 'parsing'
+        # @parsing_run is already set above if @current_run exists
+        @parsing_run ||= @current_run if @current_run
         
         @results = nil
         
@@ -1527,6 +1539,7 @@ class ProjectsController < ApplicationController
           end
           
           run_status_id = run.status_id
+          Rails.logger.info("[queue_position] Run found: id=#{run.id}, status_id=#{run_status_id.inspect}, slurm_job_id=#{run.slurm_job_id}")
           
           if run.submitted_at
             wait_time = (Time.now - run.submitted_at).to_i
@@ -1535,6 +1548,7 @@ class ProjectsController < ApplicationController
         
         slurm_service = SlurmService.new(logger: Rails.logger)
         # Pass the run's status_id to help determine if queue is empty
+        Rails.logger.info("[queue_position] Calling get_job_queue_position with slurm_job_id=#{slurm_job_id}, run_status_id=#{run_status_id.inspect}")
         queue_position = slurm_service.get_job_queue_position(slurm_job_id, run_status_id)
         Rails.logger.info("[queue_position] For SLURM job #{slurm_job_id}, run status_id: #{run_status_id}, queue_position: #{queue_position.inspect}, wait_time: #{wait_time.inspect}")
       rescue => e

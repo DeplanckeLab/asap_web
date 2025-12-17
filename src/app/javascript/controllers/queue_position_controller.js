@@ -4,44 +4,82 @@ export default class extends Controller {
   static values = {
     runId: Number,
     slurmJobId: String,
-    projectId: Number
+    projectId: Number,
+    submittedAt: String
   }
 
-  static targets = ["position", "waitTime", "queueInfo", "emptyQueue"]
+  static targets = ["position", "waitTime", "queueInfo", "emptyQueue", "waitingTime"]
 
   connect() {
-    console.log(`[QueuePositionController] Connected for Run#${this.runIdValue}, SLURM Job#${this.slurmJobIdValue}, Project#${this.projectIdValue}`)
+    console.log(`[QueuePositionController] ===== CONNECT() CALLED =====`)
+    console.log(`[QueuePositionController] Element:`, this.element)
+    console.log(`[QueuePositionController] Element HTML:`, this.element.outerHTML.substring(0, 500))
+    console.log(`[QueuePositionController] Run ID: ${this.runIdValue}`)
+    console.log(`[QueuePositionController] SLURM Job ID: ${this.slurmJobIdValue}`)
+    console.log(`[QueuePositionController] Project ID: ${this.projectIdValue}`)
     console.log(`[QueuePositionController] Has position target: ${this.hasPositionTarget}`)
     console.log(`[QueuePositionController] Has queueInfo target: ${this.hasQueueInfoTarget}`)
     console.log(`[QueuePositionController] Has emptyQueue target: ${this.hasEmptyQueueTarget}`)
     
+    // Validate values
+    if (!this.runIdValue) {
+      console.warn(`[QueuePositionController] WARNING: runIdValue is missing!`)
+    }
+    if (!this.slurmJobIdValue) {
+      console.warn(`[QueuePositionController] WARNING: slurmJobIdValue is missing!`)
+    }
+    if (!this.projectIdValue) {
+      console.warn(`[QueuePositionController] WARNING: projectIdValue is missing!`)
+    }
+    
     // Show spinner initially in position target
     if (this.hasPositionTarget) {
+      console.log(`[QueuePositionController] Setting spinner in position target`)
       this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'
+    } else {
+      console.warn(`[QueuePositionController] WARNING: position target not found!`)
     }
     
     // Show queueInfo initially, hide emptyQueue
     if (this.hasQueueInfoTarget) {
+      console.log(`[QueuePositionController] Showing queueInfo target`)
       this.queueInfoTarget.classList.remove('hidden')
+    } else {
+      console.warn(`[QueuePositionController] WARNING: queueInfo target not found!`)
     }
     if (this.hasEmptyQueueTarget) {
+      console.log(`[QueuePositionController] Hiding emptyQueue target`)
       this.emptyQueueTarget.classList.add('hidden')
+    } else {
+      console.warn(`[QueuePositionController] WARNING: emptyQueue target not found!`)
     }
     
+    console.log(`[QueuePositionController] Starting polling...`)
     this.startPolling()
+    console.log(`[QueuePositionController] Polling started, pollInterval:`, this.pollInterval ? 'set' : 'not set')
+    
+    // Start waiting timer if submittedAt is available
+    if (this.hasSubmittedAtValue && this.hasWaitingTimeTarget) {
+      console.log(`[QueuePositionController] Starting waiting timer from: ${this.submittedAtValue}`)
+      this.startWaitingTimer()
+    }
   }
 
   disconnect() {
     console.log(`[QueuePositionController] Disconnected`)
     this.stopPolling()
+    this.stopWaitingTimer()
   }
 
   startPolling() {
+    console.log(`[QueuePositionController] startPolling() called`)
     // Poll every 5 seconds for queue position
     this.pollInterval = setInterval(() => {
+      console.log(`[QueuePositionController] Polling interval triggered`)
       this.updateQueuePosition()
     }, 5000)
     
+    console.log(`[QueuePositionController] Poll interval set, triggering initial update...`)
     // Initial update
     this.updateQueuePosition()
   }
@@ -53,7 +91,61 @@ export default class extends Controller {
     }
   }
 
+  startWaitingTimer() {
+    // Update every second
+    this.waitingTimerInterval = setInterval(() => {
+      this.updateWaitingTime()
+    }, 1000)
+    
+    // Initial update
+    this.updateWaitingTime()
+  }
+
+  stopWaitingTimer() {
+    if (this.waitingTimerInterval) {
+      clearInterval(this.waitingTimerInterval)
+      this.waitingTimerInterval = null
+    }
+  }
+
+  updateWaitingTime() {
+    if (!this.hasSubmittedAtValue || !this.hasWaitingTimeTarget) {
+      return
+    }
+
+    try {
+      const submittedAt = new Date(this.submittedAtValue)
+      const now = new Date()
+      const elapsedSeconds = Math.floor((now - submittedAt) / 1000)
+      
+      if (elapsedSeconds < 0) {
+        this.waitingTimeTarget.textContent = '0:00'
+        return
+      }
+
+      // Format as MM:SS or HH:MM:SS
+      const hours = Math.floor(elapsedSeconds / 3600)
+      const minutes = Math.floor((elapsedSeconds % 3600) / 60)
+      const seconds = elapsedSeconds % 60
+
+      const formatted = hours > 0
+        ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+        : `${minutes}:${String(seconds).padStart(2, '0')}`
+
+      this.waitingTimeTarget.textContent = formatted
+    } catch (error) {
+      console.error(`[QueuePositionController] Error updating waiting time:`, error)
+      this.waitingTimeTarget.textContent = '--:--'
+    }
+  }
+
   async updateQueuePosition() {
+    console.log(`[QueuePositionController] ===== updateQueuePosition() CALLED =====`)
+    console.log(`[QueuePositionController] slurmJobIdValue: ${this.slurmJobIdValue}`)
+    console.log(`[QueuePositionController] runIdValue: ${this.runIdValue}`)
+    console.log(`[QueuePositionController] projectIdValue: ${this.projectIdValue}`)
+    console.log(`[QueuePositionController] hasPositionTarget: ${this.hasPositionTarget}`)
+    
     if (!this.slurmJobIdValue) {
       console.warn(`[QueuePositionController] No SLURM job ID, skipping update`)
       return
@@ -90,9 +182,12 @@ export default class extends Controller {
       }
 
       const data = await response.json()
-      console.log(`[QueuePositionController] Queue position data:`, data)
+      console.log(`[QueuePositionController] Queue position data received:`, data)
+      console.log(`[QueuePositionController] queue_position value:`, data.queue_position, `(type: ${typeof data.queue_position})`)
+      console.log(`[QueuePositionController] wait_time value:`, data.wait_time)
       
       if (data.queue_position !== null && data.queue_position !== undefined) {
+        console.log(`[QueuePositionController] Processing queue_position: ${data.queue_position}`)
         if (data.queue_position === 0) {
           // Position 0 means queue is empty - show empty queue message, hide position info
           console.log(`[QueuePositionController] Queue is empty, showing empty queue message`)
@@ -146,7 +241,13 @@ export default class extends Controller {
         this.waitTimeTarget.textContent = this.formatDuration(data.wait_time)
       }
     } catch (error) {
-      console.warn(`[QueuePositionController] Error fetching queue position:`, error)
+      console.error(`[QueuePositionController] ===== ERROR IN updateQueuePosition() =====`)
+      console.error(`[QueuePositionController] Error type:`, error.constructor.name)
+      console.error(`[QueuePositionController] Error message:`, error.message)
+      console.error(`[QueuePositionController] Error stack:`, error.stack)
+      if (this.hasPositionTarget) {
+        this.positionTarget.textContent = `(error: ${error.message})`
+      }
     }
   }
 

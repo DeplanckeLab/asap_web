@@ -212,7 +212,7 @@ class ReqsController < ApplicationController
       list_of_runs2.each_index do |run_i|
         run = list_of_runs2[run_i][0]
         output_dir = (@step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
-        Dir.mkdir output_dir if !File.exists? output_dir
+        Dir.mkdir output_dir if !File.exist? output_dir
         if h_sha2[run_i]
           h_sha2[run_i].each_key do |k|
             sha2 = h_sha2[run_i][k]

@@ -1,0 +1,375 @@
+<%# Parsing Results Section %>
+<% if @step.name == 'parsing' && @results && !@results['displayed_error'] && (@parsing_run.nil? || @parsing_run.status_id == 3) %>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden" id="result_summary">
+    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 px-6 py-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <i class="fas fa-check-circle text-blue-600"></i>
+          Parsing results
+        </h3>
+        <!-- File Format -->
+        <div class="flex items-center">
+          <% if @h_formats && @results && @results["detected_format"] && @h_formats[@results["detected_format"]] %>
+            <%= raw display_file_format(@h_formats[@results["detected_format"]]) %>
+          <% elsif @results && @results["detected_format"] %>
+            <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium"><%= @results["detected_format"] %></span>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-5 space-y-6">
+
+      <!-- Warnings and Errors -->
+      <% if @results['warnings'] %>
+        <% warnings = @results['warnings'].is_a?(Array) ? @results['warnings'] : [@results['warnings']].compact %>
+        <% if warnings.any? %>
+          <% warnings.each do |warning| %>
+            <% next if warning.blank? %>
+            <div class="alert alert-warning flex items-start gap-3">
+              <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
+              <span><%= warning %></span>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @results['errors'] %>
+        <% errors = @results['errors'].is_a?(Array) ? @results['errors'] : [@results['errors']].compact %>
+        <% if errors.any? %>
+          <% errors.each do |error| %>
+            <% next if error.blank? %>
+            <div class="alert alert-danger flex items-start gap-3">
+              <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
+              <span><%= error %></span>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+      
+      <!-- Also check for any error messages that might be stored in other fields -->
+      <% if @results['error'] && @results['error'].present? && !@results['displayed_error'] %>
+        <div class="alert alert-danger flex items-start gap-3">
+          <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
+          <span><%= @results['error'] %></span>
+        </div>
+      <% end %>
+      
+      <% if @results['warning'] && @results['warning'].present? %>
+        <div class="alert alert-warning flex items-start gap-3">
+          <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
+          <span><%= @results['warning'] %></span>
+        </div>
+      <% end %>
+
+      <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
+      <% if @results && !['LOOM', 'H5_10x', 'MEX'].include?(@results["detected_format"]) && @project.parsing_attrs_json %>
+        <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
+        <div class="border-t border-gray-200 pt-4">
+          <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+            <i class="fas fa-cog text-gray-500"></i>
+            Parameters
+          </h4>
+          <div class="flex flex-wrap gap-2">
+            <% h_delimiter = {"\\t" => 'Tab', "\t" => "Tab", " " => "Space", "," => "Comma", ":" => "Colon"} %>
+            <% if h_attrs['delimiter'] && h_attrs['delimiter'] != '' %>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                Delimiter: <%= h_delimiter[h_attrs['delimiter']] || h_attrs['delimiter'] %>
+              </span>
+            <% end %>
+            <% h_gene_name_col = {"0" => "First", "first" => "First", "-1" => "Last", "last" => "Last", "NA" => "None", 'none' => "None"} %>
+            <% if h_attrs['gene_name_col'] %>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                Gene name column: <%= h_gene_name_col[h_attrs['gene_name_col']] || h_attrs['gene_name_col'] %>
+              </span>
+            <% end %>
+            <% if h_attrs['skip_line'] %>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                Skip lines: <%= h_attrs['skip_line'] %>
+              </span>
+            <% end %>
+            <% if h_attrs['has_header'] %>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                Has header: <%= (h_attrs['has_header'] == "1" || h_attrs['has_header'] == true) ? 'Yes' : 'No' %>
+              </span>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Integration section (if applicable) -->
+      <% if @project.parsing_attrs_json %>
+        <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
+        <% if h_attrs['integrate_batch_paths'] %>
+          <div class="border-t border-gray-200 pt-4">
+            <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center gap-2">
+              <i class="fas fa-layer-group text-gray-500"></i>
+              Integration
+            </h4>
+            <% integrated_projects = Project.where(key: h_attrs['integrate_batch_paths'].keys).all %>
+            <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+              <div class="flex items-center justify-between py-2 border-b border-gray-200">
+                <span class="text-sm font-medium text-gray-700">Number of PCs taken into account</span>
+                <span class="text-sm text-gray-900 font-semibold"><%= h_attrs["integrate_n_pcs"] %></span>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-gray-700 mb-3">Integrated projects</p>
+                <div class="overflow-x-auto">
+                  <table id="integration_projects" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-100">
+                      <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Project key</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Project name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Batch metadata</th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      <% integrated_projects.each do |p| %>
+                        <tr class="hover:bg-gray-50">
+                          <td class="px-4 py-3 text-sm text-gray-900"><%= p.key %></td>
+                          <td class="px-4 py-3 text-sm text-gray-900"><%= p.name %></td>
+                          <td class="px-4 py-3 text-sm text-gray-900">
+                            <%= (h_attrs['integrate_batch_paths'][p.key] == 'null') ? 'None' : h_attrs['integrate_batch_paths'][p.key] %>
+                          </td>
+                        </tr>
+                      <% end %>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+
+      <!-- Output Summary -->
+      <div class="border-t border-gray-200 pt-4">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-chart-bar text-gray-500"></i>
+          Output summary
+        </h4>
+        <div class="flex flex-wrap gap-3">
+          <% if @results['nber_rows'] %>
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+              <i class="fas fa-dna text-blue-600"></i>
+              <span class="text-sm font-medium text-blue-900">Genes: <span class="font-bold"><%= @results['nber_rows'] %></span></span>
+            </div>
+          <% end %>
+          <% if @results['nber_cols'] %>
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-200 rounded-lg">
+              <i class="fas fa-circle text-purple-600"></i>
+              <span class="text-sm font-medium text-purple-900">Cells: <span class="font-bold"><%= @results['nber_cols'] %></span></span>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <!-- Validation Warnings -->
+      <div class="border-t border-gray-200 pt-4 space-y-3">
+        <% if @results['nber_rows'] && @results['nber_rows'] < 3 %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+            <span>For many steps of the pipeline at least three genes are required</span>
+          </div>
+        <% end %>
+
+        <% if @results['nber_cols'] && @results['nber_cols'] == 0 %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+            <span>You may have selected wrong parameters for the parsing, in particular not the appropriated delimiter</span>
+          </div>
+        <% elsif @results['nber_cols'] && @results['nber_cols'] < 3 %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+            <div class="flex-1">
+              <p class="mb-1">Original dataset has less than 3 cells</p>
+              <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
+                For many steps of the pipeline at least three cells are required
+              </span>
+            </div>
+          </div>
+        <% end %>
+
+        <!-- Count Matrix Status -->
+        <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
+          <div class="alert alert-success flex items-start gap-3">
+            <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
+            <span>The original matrix contains only counts</span>
+          </div>
+        <% else %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+            <div class="flex-1">
+              <p class="mb-1">The original matrix contains floats</p>
+              <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
+                Many methods will NOT be available if your original file is not a count matrix
+              </span>
+            </div>
+          </div>
+        <% end %>
+
+        <!-- Zero Values Percentage -->
+        <% if @results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] %>
+          <% total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f %>
+          <% if total_values > 0 %>
+            <% zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2) %>
+            <div class="alert alert-info flex items-start gap-3">
+              <i class="fas fa-info-circle text-blue-600 mt-0.5"></i>
+              <span><%= zero_percentage %>% of values are zeros</span>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+
+      <!-- Ensembl Mapping Status -->
+      <div class="border-t border-gray-200 pt-4">
+        <% nber_not_found_genes = @results['nber_not_found_genes'] if @results %>
+        <% if nber_not_found_genes && nber_not_found_genes > 0 %>
+          <% total_genes = @results['nber_rows'] || 1 %>
+          <% not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2) %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
+            <div class="flex-1">
+              <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) genes were not found in Ensembl</p>
+              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-200">
+                <i class="fas fa-lightbulb text-red-600"></i>
+                <span class="text-sm text-red-800">Did you select the right species (now <strong><%= @project.organism&.name || 'Unknown' %></strong>)? If not, create a new project</span>
+              </div>
+            </div>
+          </div>
+        <% else %>
+          <% if @results['nber_rows'] %>
+            <div class="alert alert-success flex items-start gap-3">
+              <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
+              <span>All <strong><%= @results['nber_rows'] %></strong> genes were found in Ensembl</span>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+
+      <!-- Results Files -->
+      <div class="border-t border-gray-200 pt-4">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-download text-gray-500"></i>
+          Download Results
+        </h4>
+        <div class="flex flex-wrap gap-3">
+          <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
+          <% loom_file = project_dir + 'parsing' + 'output.loom' %>
+          <% if File.exist?(loom_file) && exportable?(@project) %>
+            <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.loom'), 
+                target: '_blank',
+                class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
+              <i class="fas fa-file-archive"></i>
+              <span>Loom file</span>
+              <i class="fas fa-external-link-alt text-xs"></i>
+            <% end %>
+            <span class="link_to_loom_tuto inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 cursor-pointer transition-colors">
+              <i class="fas fa-info-circle text-xs"></i>
+            </span>
+          <% end %>
+          <% if admin? %>
+            <% json_file = project_dir + 'parsing' + 'output.json' %>
+            <% if File.exist?(json_file) && exportable?(@project) %>
+              <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.json'), 
+                  target: '_blank',
+                  class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
+                <i class="fas fa-file-code"></i>
+                <span>JSON file</span>
+                <i class="fas fa-external-link-alt text-xs"></i>
+              <% end %>
+            <% end %>
+            <% log_file = project_dir + 'parsing' + 'output.log' %>
+            <% if File.exist?(log_file) && exportable?(@project) %>
+              <%= link_to(get_file_project_path(@project.key, step: 'parsing', filename: 'output.log'), 
+                  target: '_blank',
+                  class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
+                <i class="fas fa-file-alt"></i>
+                <span>Log file</span>
+                <i class="fas fa-external-link-alt text-xs"></i>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    <% if @parsing_run %>
+      <div class="bg-gray-50 border-t border-gray-200 px-6 py-3">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+          <% metadata_parts = [] %>
+          <% if admin? %>
+            <% metadata_parts << "<span class='font-medium text-gray-700'>Run ##{@parsing_run.id}</span>" %>
+          <% end %>
+          <% if @parsing_run.created_at %>
+            <% metadata_parts << "<span class='nowrap'>#{display_date_short(@parsing_run.created_at)}</span>" %>
+            <% if @parsing_run.submitted_at %>
+              <% metadata_parts << "<span id='created_time_#{@parsing_run.id}' class='hidden'>#{@parsing_run.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}</span>" %>
+            <% end %>
+            <% if @parsing_run.start_time %>
+              <% metadata_parts << "<span id='start_time_#{@parsing_run.id}' class='hidden'>#{@parsing_run.start_time.strftime('%Y-%m-%d %H:%M:%S')}</span>" %>
+            <% end %>
+          <% end %>
+          <% if @parsing_run.waiting_duration %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(@parsing_run.waiting_duration.to_i)}</span>" %>
+          <% elsif @parsing_run.status_id == 1 && @parsing_run.submitted_at %>
+            <% wait_time = (Time.now - @parsing_run.submitted_at).to_i %>
+            <% metadata_parts << "<span id='ongoing_wait_#{@parsing_run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
+          <% end %>
+          <% if @parsing_run.duration %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{duration(@parsing_run.duration.to_i)}</span>" %>
+          <% elsif @parsing_run.status_id == 2 && @parsing_run.start_time %>
+            <% run_time = (Time.now - @parsing_run.start_time).to_i %>
+            <% metadata_parts << "<span id='ongoing_run_#{@parsing_run.id}' class='nowrap'><i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{duration(run_time)}</span>" %>
+          <% end %>
+          <% if @results && @results['time_idle'] %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-pause-circle text-gray-400 mr-1'></i>Idle #{@results['time_idle']}</span>" %>
+          <% end %>
+          <% if @parsing_run.max_ram %>
+            <% ram_mb = (@parsing_run.max_ram * 1000).to_f %>
+            <% ram_display = display_mem(ram_mb) %>
+            <% metadata_parts << "<span class='nowrap'><i class='fas fa-memory text-gray-400 mr-1'></i>Max. RAM #{ram_display}</span>" %>
+          <% end %>
+          <%= raw metadata_parts.compact.join(" <span class='text-gray-300'>•</span> ") %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+  
+  <%= javascript_tag do %>
+    <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
+    <% loom_file = project_dir + 'parsing' + 'output.loom' %>
+    <% if File.exist?(loom_file) && exportable?(@project) %>
+      $(".link_to_loom_tuto").click(function(e){
+        var url = '<%= tutorial_home_index_path(t: 'loom') rescue '#' %>'
+        var win = window.open(url, '_blank');
+        if (win) win.focus();
+        e.stopPropagation();
+        e.preventDefault();
+        return false;
+      })
+    <% end %>
+    
+    <% if @project.parsing_attrs_json %>
+      <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
+      <% if h_attrs['integrate_batch_paths'] %>
+        if (typeof $.fn.DataTable !== 'undefined') {
+          $("#integration_projects").DataTable()
+        }
+      <% end %>
+    <% end %>
+  <% end %>
+<% elsif @step.name == 'parsing' && @results && @results['displayed_error'] %>
+  <!-- Parsing Error Display -->
+  <div class="mb-4">
+    <% if @results['displayed_error'].is_a?(Array) %>
+      <% @results['displayed_error'].each do |error| %>
+        <p class="text-danger text-truncate" title="<%= error %>"><%= error %></p>
+      <% end %>
+    <% else %>
+      <p class="text-danger"><%= @results['displayed_error'] %></p>
+    <% end %>
+    <% if admin? && @results['original_error'] %>
+      <br/><span class="text-muted"><%= @results['original_error'] %></span>
+    <% end %>
+  </div>
+<% end %>
+

@@ -58,6 +58,9 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1 or /projects/1.json
   def show
+    # Ensure project steps exist (safeguard for existing projects)
+    @project.ensure_project_steps
+    
     # Get available loom files and metadata for the project
     all_loom_files = Annot.available_loom_files(@project.id)
     available_metadata = Annot.available_metadata(@project.id)
@@ -627,8 +630,7 @@ class ProjectsController < ApplicationController
           Rails.logger.warn("[ProjectsController#create] Fu record not found, skipping update. Project created with session path: #{session_path}")
         end
         
-        # Initialize project steps
-        init_project_steps
+        # ProjectStep records are initialized lazily when needed for display
         
         # Call parse_files if the method exists
         if @project.respond_to?(:parse_files)
@@ -1332,20 +1334,10 @@ class ProjectsController < ApplicationController
     sorted_groups
   end
 
+  # Deprecated: Use @project.ensure_project_steps instead
+  # Kept for backwards compatibility
   def init_project_steps
-    return unless @asap_docker_image
-    
-    Step.where(docker_image_id: @asap_docker_image.id).find_each do |step|
-      project_step = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
-      unless project_step
-        project_step = ProjectStep.new(
-          project_id: @project.id,
-          step_id: step.id,
-          status_id: (step.name == 'parsing') ? 1 : nil
-        )
-        project_step.save
-      end
-    end
+    @project.ensure_project_steps
   end
 
   # GET /projects/:id/creating
@@ -1355,6 +1347,9 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/step_results
   def step_results
+    # Ensure project steps exist (safeguard for existing projects)
+    @project.ensure_project_steps
+    
     step_id = params[:step_id]
     @step = Step.find_by(id: step_id)
     
@@ -1375,38 +1370,33 @@ class ProjectsController < ApplicationController
       @parsing_run = @runs.where(status_id: 3).first || @runs.first
       @results = nil
       
-      # Try to load results if we have a run
-      if @parsing_run
-        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-        step_dir = project_dir + 'parsing'
-        output_json = step_dir + 'output.json'
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      step_dir = project_dir + 'parsing'
+      output_json = step_dir + 'output.json'
+      
+      # Load output.json if it exists (even if there's no run record)
+      if File.exist?(output_json)
+        @results = Basic.safe_parse_json(File.read(output_json), {})
         
-        # Load output.json if it exists (even if run is not complete, it might have partial results)
-        if File.exist?(output_json)
-          @results = Basic.safe_parse_json(File.read(output_json), {})
+        # If output.json contains displayed_error, the parsing actually failed
+        # Update the run and project_step status to reflect this
+        if @results && @results['displayed_error'].present?
+          error_msg = if @results['displayed_error'].is_a?(Array)
+            @results['displayed_error'].join('; ')
+          else
+            @results['displayed_error'].to_s
+          end
           
-          # If output.json contains displayed_error, the parsing actually failed
-          # Update the run and project_step status to reflect this
-          if @results && @results['displayed_error'].present?
-            error_msg = if @results['displayed_error'].is_a?(Array)
-              @results['displayed_error'].join('; ')
-            else
-              @results['displayed_error'].to_s
-            end
-            
-            # Update run status to failed
-            if @parsing_run.status_id == 3
-              @parsing_run.update(status_id: 4, error: error_msg)
-            end
-            
-            # Update project_step status to failed
-            if @project_step && @project_step.status_id == 3
-              @project_step.update(status_id: 4, error_message: error_msg)
-            end
-            
-            # Reload the run to get updated status
+          # Update run status to failed if we have a run
+          if @parsing_run && @parsing_run.status_id == 3
+            @parsing_run.update(status_id: 4, error: error_msg)
             @parsing_run.reload
-            @project_step.reload if @project_step
+          end
+          
+          # Update project_step status to failed
+          if @project_step && @project_step.status_id == 3
+            @project_step.update(status_id: 4, error_message: error_msg)
+            @project_step.reload
           end
         end
       end
@@ -1424,6 +1414,9 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/refresh_steps_panel
   def refresh_steps_panel
+    # Ensure project steps exist (safeguard for existing projects)
+    @project.ensure_project_steps
+    
     # Get runs for the project
     @runs = @project.runs.includes(:annots) unless @runs
     

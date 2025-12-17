@@ -268,4 +268,22 @@ class Project < ApplicationRecord
     
     job
   end
+  
+  # Ensure ProjectStep records exist for all steps associated with this project's docker image
+  # Called lazily when needed for display (show, step_results, refresh_steps_panel)
+  def ensure_project_steps
+    asap_docker_image = Basic.get_asap_docker(version)
+    return unless asap_docker_image
+    
+    Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+      project_step = ProjectStep.find_by(project_id: id, step_id: step.id)
+      unless project_step
+        ProjectStep.create(
+          project_id: id,
+          step_id: step.id,
+          status_id: (step.name == 'parsing') ? 1 : nil
+        )
+      end
+    end
+  end
 end

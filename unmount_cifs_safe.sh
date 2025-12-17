@@ -39,3 +39,4 @@ echo "  1. Kill specific processes (if safe)"
 echo "  2. Use force unmount (risky): sudo umount -f /mnt/asap-old"
 echo "  3. Reboot the system (last resort)"
 
+

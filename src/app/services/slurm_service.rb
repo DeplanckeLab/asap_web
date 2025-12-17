@@ -339,6 +339,17 @@ class SlurmService
     # This prevents SLURM from trying to chdir to container-only paths like /app
     workdir = options[:workdir] || '/tmp'
     
+    # Check if command is already a docker run command - if so, execute directly on host
+    # Otherwise, wrap in docker exec to run in website container
+    is_docker_run = options[:command].strip.start_with?('docker run')
+    execution_line = if is_docker_run
+      # Command is already a docker run - execute directly on SLURM node (host)
+      escaped_command
+    else
+      # Command needs Rails - execute in website container
+      "docker exec asap2_test-website-1 bash -c '#{escaped_command}'"
+    end
+    
     <<~SCRIPT
       #!/bin/bash
       #SBATCH --job-name=#{options[:job_name]}
@@ -365,10 +376,8 @@ class SlurmService
 
       trap 'echo "Job interrupted at $(date)"; exit 130' USR1
 
-      # Execute command in website container (which has Rails installed)
-      # The website container is accessible from the host where slurmd runs
-      # Use the actual container name from docker-compose
-      docker exec asap2_test-website-1 bash -c '#{escaped_command}'
+      # Execute command
+      #{execution_line}
 
       EXIT_CODE=$?
       echo "Job completed at $(date)"

@@ -27,3 +27,4 @@ echo ""
 echo "6. Load average:"
 uptime
 
+

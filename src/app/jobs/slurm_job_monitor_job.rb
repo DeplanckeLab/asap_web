@@ -13,6 +13,12 @@ class SlurmJobMonitorJob < ApplicationJob
       return
     end
 
+    # Stop monitoring if run is already complete or failed
+    if run.status_id == 3
+      Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete, stopping monitoring")
+      return
+    end
+
     if run.status_id == 4
       Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as failed, stopping monitoring")
       return
@@ -23,25 +29,70 @@ class SlurmJobMonitorJob < ApplicationJob
       status = slurm_service.get_job_status(slurm_job_id, run)
       
       if status.nil?
+        # If we can't get status from SLURM, check if the run has completed successfully
+        # by checking for output.json (this handles cases where SLURM job history is purged)
+        project = run.project
+        step = run.step
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        output_json_filename = output_dir + 'output.json'
+        
+        if File.exist?(output_json_filename)
+          # Output.json exists - check if run is already complete or needs to be finished
+          if run.status_id != 3
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but not marked complete, finishing run")
+            finish_run_successfully(run, slurm_service, slurm_job_id)
+          else
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already complete with output.json, stopping monitoring")
+          end
+          return
+        end
+        
+        # No output.json - job might still be running or failed
         Rails.logger.warn("[SlurmJobMonitorJob] Could not get status for SLURM job #{slurm_job_id}, will retry")
         if attempt < MAX_MONITOR_ATTEMPTS
           SlurmJobMonitorJob.set(wait: MONITOR_INTERVAL).perform_later(run_id, slurm_job_id, attempt + 1)
         else
-          Rails.logger.error("[SlurmJobMonitorJob] Max attempts reached for Run##{run_id}, marking as failed")
-          finish_run_with_error(run, "SLURM job status could not be determined after #{MAX_MONITOR_ATTEMPTS} attempts")
+          # Before marking as failed, double-check if output.json exists (might have been created between attempts)
+          if File.exist?(output_json_filename)
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json after max attempts, finishing run successfully")
+            finish_run_successfully(run, slurm_service, slurm_job_id)
+          else
+            # Also check ProjectStep status - if it's already complete, don't mark as failed
+            project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
+            if project_step && project_step.status_id == 3
+              Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} ProjectStep already complete, stopping monitoring without marking run as failed")
+              return
+            end
+            Rails.logger.error("[SlurmJobMonitorJob] Max attempts reached for Run##{run_id}, marking as failed")
+            finish_run_with_error(run, "SLURM job status could not be determined after #{MAX_MONITOR_ATTEMPTS} attempts")
+          end
         end
         return
       end
 
       case status
       when :pending, :running
+        # Even if SLURM reports running, check if output.json exists (job might have completed)
+        project = run.project
+        step = run.step
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        output_json_filename = output_dir + 'output.json'
+        
+        if File.exist?(output_json_filename)
+          # Output.json exists even though SLURM says running - job completed
+          Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but SLURM reports #{status}, finishing run")
+          finish_run_successfully(run, slurm_service, slurm_job_id)
+          return
+        end
+        
         Rails.logger.debug("[SlurmJobMonitorJob] Run##{run_id} still #{status}, will check again")
 
         # If the job just transitioned to running, update status and broadcast
         if status == :running && run.status_id != 2
-          project = run.project
-          step = run.step
-
           run.update(status_id: 2)
 
           project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
@@ -177,9 +228,15 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   def finish_run_successfully(run, slurm_service, slurm_job_id)
-    # Don't re-process runs that are already marked as complete
+    # Reload run to get latest status
+    run.reload
+    
+    # Don't re-process runs that are already marked as complete, but still broadcast
     if run.status_id == 3
-      Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete, skipping")
+      Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete, broadcasting update")
+      project = run.project
+      step = run.step
+      project.broadcast(step.id) if project.respond_to?(:broadcast)
       return
     end
     

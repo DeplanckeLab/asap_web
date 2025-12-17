@@ -1042,7 +1042,7 @@ module Basic
     # Show the average system load of the past minute
     def machine_load
       load = 0.0
-      if File.exists?("/proc/loadavg")
+      if File.exist?("/proc/loadavg")
         File.open("/proc/loadavg", "r") do |file|
           @loaddata = file.read
         end
@@ -1652,7 +1652,14 @@ module Basic
 
     def upd_run project, run, h_upd, upd_project_step
     #  puts "PROBLEM_HERE"
-      run.update(h_upd)
+      success = run.update(h_upd)
+      unless success
+        Rails.logger.error("[Basic.upd_run] Failed to update Run##{run.id}: #{run.errors.full_messages.join(', ')}")
+      end
+      
+      # Reload run to ensure we have the latest status from database
+      run.reload
+      
       flag_change_status = (h_upd[:status_id] and h_upd[:status_id] != run.status_id) ? true : false
     
       ### active run thingy....
@@ -2526,7 +2533,7 @@ puts "TEST RUN"
             output_key = [relative_filepath, dataset_path].compact.join(":")
        #     puts "OUTPUT_KEY: #{output_key}"
             #            puts "FILEPATH22: " + filepath
-            if File.exists? filepath
+            if File.exist? filepath
               h_output_files[k]||={}
               h_output_files[k][output_key]={ "onum" => onum, "filename" => File.basename(filepath), "dataset" => dataset_path, "types" => h_expected_outputs[k]["types"]}
               #  ["dataset"].select{|k2| h_expected_outputs[k][k2]}.each do |k2|
@@ -2915,7 +2922,7 @@ puts "TEST RUN"
       ### write final results                    
       if run.return_stdout == false
         output_json_filename = output_dir + 'output.json'
-        if File.exists? output_json_filename and h_results['displayed_error'] and h_results['displayed_error'].include?('Bad JSON format')
+        if File.exist? output_json_filename and h_results['displayed_error'] and h_results['displayed_error'].include?('Bad JSON format')
           FileUtils.cp output_json_filename, (output_dir + 'output.json.bad')
         end
         File.open(output_json_filename, 'w') do |f|
@@ -2926,6 +2933,13 @@ puts "TEST RUN"
       ### compute_pred_params
       h_pred_params = set_predict_params(project, run, std_method, h_runs, h_steps)
 
+      # Convert max_ram from KB (time command output) to MB for storage
+      max_ram_mb = nil
+      if h_time_info['M']
+        max_ram_kb = h_time_info['M'].to_f
+        max_ram_mb = (max_ram_kb / 1024.0).round(2)  # Convert KB to MB
+      end
+
       h_upd = {
         :output_json => h_output_files.to_json,
         :status_id => status_id,
@@ -2933,7 +2947,7 @@ puts "TEST RUN"
         :waiting_duration => (start_time) ? (start_time - run.created_at) : nil,
         :process_duration => process_duration, #h_time_info['E'].split(":"),                                      
         :process_idle_duration => h_results['time_idle'],
-        :max_ram => h_time_info['M'],
+        :max_ram => max_ram_mb,
         :pred_params_json => h_pred_params.to_json
       }
 
@@ -2941,11 +2955,16 @@ puts "TEST RUN"
       #      run && run.update(h_upd)
       #      h_project_step =  Basic.get_project_step_details(project, step.id)
       #      project_step.update(h_project_step)                                                                                                              
-      run && upd_run(project, run, h_upd, true)
+      if run
+        upd_run(project, run, h_upd, true)
+        # Reload run after update to ensure status is persisted
+        run.reload
+        Rails.logger.info("[Basic.finish_run] Run##{run.id} status after update: #{run.status_id}")
+      end
       upd_project_size project
       #   puts project.to_json
       #puts broadcast
-      project.broadcast run.step_id
+      project.broadcast run.step_id if run
       #    puts "broadcast done"
       return h_results
     end
@@ -2986,7 +3005,7 @@ puts "TEST RUN"
       #if alert == 0
       
       results = {}
-      if output_json and File.exists?(output_json)
+      if output_json and File.exist?(output_json)
         begin
           results = JSON.parse(File.read(output_json))
         rescue Exception => e
@@ -2996,7 +3015,7 @@ puts "TEST RUN"
       logger.debug("JSON1: #{results.to_json}")
 
       duration = Time.now - start_time
-      if File.exists?(output_file) and !results["original_error"] and !results["displayed_error"]
+      if File.exist?(output_file) and !results["original_error"] and !results["displayed_error"]
         logger.debug("SUCCESSFUL #{o.id}")
         o.update(:duration => duration, :status_id => 3)       
         if step_id != 4
@@ -3241,7 +3260,7 @@ puts "TEST RUN"
       if ! $?.stopped?  #(job and ! $?.stopped?) or (results["original_error"] or results["displayed_error"])
       
         results = {}
-        if  File.exists?(output_json)
+        if  File.exist?(output_json)
           begin
             results = JSON.parse(File.read(output_json))
           rescue Exception => e

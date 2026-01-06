@@ -29,12 +29,15 @@ export default class extends Controller {
     "hasHeaderCheckbox",
     "resetButton",
     "fileFormatsData",
+    "projectTypesData",
     "projectName"
   ]
 
   static values = {
     chunkSize: { type: Number, default: 5 * 1024 * 1024 }, // 5MB
-    isAdmin: { type: Boolean, default: false }
+    isAdmin: { type: Boolean, default: false },
+    rowLabel: { type: String, default: 'genes' },
+    colLabel: { type: String, default: 'cells' }
   }
 
   connect() {
@@ -61,6 +64,10 @@ export default class extends Controller {
     this.projectNameTouched = false
     this.projectNameInputHandler = null
     this._fileFormatsMap = this.loadFileFormats()  // This will also build the extension map
+    this.projectTypesMap = this.loadProjectTypes()  // Load project types data
+    this.preparsingResultData = null  // Store preparsing result for re-rendering
+    // Initialize labels from current project_type selection
+    this.updateProjectTypeLabels()
     this.resetPreparsingState()
     this.showUploadInputs()
     this.updateResetButtonState()
@@ -888,6 +895,15 @@ export default class extends Controller {
       return
     }
 
+    // Ensure labels are up-to-date before rendering
+    this.updateProjectTypeLabels()
+
+    // Ensure labels are up-to-date before rendering
+    this.updateProjectTypeLabels()
+
+    // Store preparsing result data for re-rendering when project_type changes
+    this.preparsingResultData = { summary, warnings, rawData }
+
     this.showPreparsingPanel()
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const detectedFormat = summary?.detected_format
@@ -1051,6 +1067,7 @@ export default class extends Controller {
     }
 
     this.preparsingResultTarget.innerHTML = html
+    this._isRendering = false
     
     // Set up event handlers for archive file selection
     if (isArchiveFormat && listFiles.length > 0 && !this.cameFromArchive) {
@@ -1306,11 +1323,11 @@ export default class extends Controller {
               </div>
               <dl class="mt-2 grid grid-cols-2 gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <div>
-                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Cells</dt>
+                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.colLabelValue)}</dt>
                   <dd class="text-sm font-medium text-gray-900 dark:text-white">${cells}</dd>
                 </div>
                 <div>
-                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Genes</dt>
+                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.rowLabelValue)}</dt>
                   <dd class="text-sm font-medium text-gray-900 dark:text-white">${genes}</dd>
                 </div>
               </dl>
@@ -1607,7 +1624,8 @@ export default class extends Controller {
         tableHtml += '<thead><tr>'
         tableHtml += '<th class="border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-1 text-left font-semibold"></th>' // Empty corner
         for (let col = 0; col < maxCols; col++) {
-          const cellName = cellNames[col] || `Cell ${col + 1}`
+          const cellLabel = this.colLabelValue.charAt(0).toUpperCase() + this.colLabelValue.slice(1)
+          const cellName = cellNames[col] || `${cellLabel} ${col + 1}`
           tableHtml += `<th class="border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-1 text-left font-semibold">${this.escapeHtml(cellName)}</th>`
         }
         if (sampleMatrix[0] && sampleMatrix[0].length > maxCols) {
@@ -1624,7 +1642,8 @@ export default class extends Controller {
         if (geneNames.length > row) {
           tableHtml += `<td class="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-1 font-semibold text-right">${this.escapeHtml(geneNames[row])}</td>`
         } else {
-          tableHtml += `<td class="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-1 font-semibold text-right">Gene ${row + 1}</td>`
+          const geneLabel = this.rowLabelValue.charAt(0).toUpperCase() + this.rowLabelValue.slice(1)
+          tableHtml += `<td class="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-1 font-semibold text-right">${geneLabel} ${row + 1}</td>`
         }
         // Matrix values
         for (let col = 0; col < maxCols; col++) {
@@ -1653,7 +1672,7 @@ export default class extends Controller {
       
       sampleMatrixHtml = `
         <div class="mt-4">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Sample Matrix (first ${maxRows} genes, first ${maxCols} cells)</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Sample Matrix (first ${maxRows} ${this.rowLabelValue}, first ${maxCols} ${this.colLabelValue})</p>
           <div class="overflow-x-auto max-w-full">
             ${tableHtml}
           </div>
@@ -1676,11 +1695,11 @@ export default class extends Controller {
         </div>
         <dl class="mt-4 grid grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
           <div>
-            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Cells (columns)</dt>
+            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.colLabelValue)} (columns)</dt>
             <dd class="text-base font-medium text-gray-900 dark:text-white">${cells}</dd>
           </div>
           <div>
-            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Genes (rows)</dt>
+            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.rowLabelValue)} (rows)</dt>
             <dd class="text-base font-medium text-gray-900 dark:text-white">${genes}</dd>
           </div>
           <div>
@@ -2375,6 +2394,75 @@ export default class extends Controller {
     // Update submit button state
     this.checkSubmitButton()
     this.updateResetButtonState()
+  }
+
+  capitalizeFirst(str) {
+    if (!str) return ''
+    return str.charAt(0).toUpperCase() + str.slice(1)
+  }
+
+  loadProjectTypes() {
+    if (!this.hasProjectTypesDataTarget) return {}
+    try {
+      const data = JSON.parse(this.projectTypesDataTarget.textContent)
+      return data || {}
+    } catch (e) {
+      console.error('Error loading project types data:', e)
+      return {}
+    }
+  }
+
+  updateProjectTypeLabels() {
+    const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
+    if (!projectTypeField || !projectTypeField.value) {
+      // Use default values from data attributes if project_type not selected
+      const defaultRowLabel = this.element.dataset.fileUploadRowLabelValue || 'genes'
+      const defaultColLabel = this.element.dataset.fileUploadColLabelValue || 'cells'
+      this.rowLabelValue = defaultRowLabel
+      this.colLabelValue = defaultColLabel
+      console.log('[FileUpload] updateProjectTypeLabels: Using defaults', { rowLabel: this.rowLabelValue, colLabel: this.colLabelValue })
+      return
+    }
+
+    const projectTypeId = projectTypeField.value
+    const projectType = this.projectTypesMap && this.projectTypesMap[projectTypeId]
+    
+    if (projectType) {
+      // Labels from projectTypesMap are already pluralized by the helper
+      const newRowLabel = projectType.row_label || 'genes'
+      const newColLabel = projectType.col_label || 'cells'
+      
+      // Only update and re-render if labels actually changed
+      const labelsChanged = this.rowLabelValue !== newRowLabel || this.colLabelValue !== newColLabel
+      
+      this.rowLabelValue = newRowLabel
+      this.colLabelValue = newColLabel
+      
+      console.log('[FileUpload] updateProjectTypeLabels: Updated', { 
+        projectTypeId, 
+        rowLabel: this.rowLabelValue, 
+        colLabel: this.colLabelValue,
+        labelsChanged 
+      })
+      
+      // Re-render preparsing result if it's already displayed and labels changed
+      // But avoid infinite loop by checking if we're not already in renderPreparsingResult
+      if (labelsChanged && this.hasPreparsingResultTarget && this.preparsingResultData && !this._isRendering) {
+        console.log('[FileUpload] Re-rendering preparsing result with new labels')
+        this.renderPreparsingResult(
+          this.preparsingResultData.summary,
+          this.preparsingResultData.warnings,
+          this.preparsingResultData.rawData
+        )
+      }
+    } else {
+      console.warn('[FileUpload] updateProjectTypeLabels: Project type not found in map', { projectTypeId, mapKeys: this.projectTypesMap ? Object.keys(this.projectTypesMap) : 'map not loaded' })
+      // Fallback to data attributes
+      const defaultRowLabel = this.element.dataset.fileUploadRowLabelValue || 'genes'
+      const defaultColLabel = this.element.dataset.fileUploadColLabelValue || 'cells'
+      this.rowLabelValue = defaultRowLabel
+      this.colLabelValue = defaultColLabel
+    }
   }
 }
 

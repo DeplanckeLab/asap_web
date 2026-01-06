@@ -73,7 +73,7 @@
               <% end %>
             </h1>
               <div class="flex items-center space-x-4 text-sm text-gray-300">
-                <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> cells</span>
+                <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
                 <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= formatted_organism_name(@project) %></span>
               </div>
             </div>

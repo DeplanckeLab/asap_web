@@ -66,11 +66,11 @@ default_cells = default_embedding_record&.nber_cols.presence || @project&.cell_c
 default_genes = @project&.gene_count
 default_dimension_label = nil
 if default_cells.present? && default_genes.present?
-  default_dimension_label = "#{number_with_delimiter(default_cells)} cells x #{number_with_delimiter(default_genes)} genes"
+  default_dimension_label = "#{number_with_delimiter(default_cells)} #{col_label(@project)} x #{number_with_delimiter(default_genes)} #{row_label(@project)}"
 elsif default_cells.present?
-  default_dimension_label = "#{number_with_delimiter(default_cells)} cells"
+  default_dimension_label = "#{number_with_delimiter(default_cells)} #{col_label(@project)}"
 elsif default_genes.present?
-  default_dimension_label = "#{number_with_delimiter(default_genes)} genes"
+  default_dimension_label = "#{number_with_delimiter(default_genes)} #{row_label(@project)}"
 end
 default_origin_label = default_group_key.present? ? (default_group_key.split('/').first || default_group_key).to_s.capitalize : ''
 %>
@@ -80,6 +80,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      data-visualization-default-loom-file-value="<%= (default_group_key.presence || @default_loom_file || 'parsing/output.loom') %>"
      data-visualization-default-embedding-id-value="<%= default_embedding_id&.to_s %>"
      data-visualization-gene-count-value="<%= @project&.gene_count || 0 %>"
+     data-visualization-row-label-value="<%= row_label(@project) %>"
+     data-visualization-col-label-value="<%= col_label(@project) %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
   
@@ -598,11 +600,11 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 <% group_cells_label = group_cells_value.present? ? number_with_delimiter(group_cells_value) : nil %>
                 <% group_genes_label = group_genes_value.present? ? number_with_delimiter(group_genes_value) : nil %>
                 <% group_dimension_text = if group_cells_label && group_genes_label
-                  "#{group_cells_label} cells x #{group_genes_label} genes"
+                  "#{group_cells_label} #{col_label(@project)} x #{group_genes_label} #{row_label(@project)}"
                 elsif group_cells_label
-                  "#{group_cells_label} cells"
+                  "#{group_cells_label} #{col_label(@project)}"
                 elsif group_genes_label
-                  "#{group_genes_label} genes"
+                  "#{group_genes_label} #{row_label(@project)}"
                 else
                   nil
                 end %>

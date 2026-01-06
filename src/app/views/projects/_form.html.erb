@@ -17,9 +17,16 @@
     </div>
   <% end %>
 
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-controller="file-upload organism-selector" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>">
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-controller="file-upload organism-selector" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>" data-file-upload-row-label-value="<%= row_label(project) %>" data-file-upload-col-label-value="<%= col_label(project) %>">
     <script type="application/json" data-file-upload-target="fileFormatsData">
       <%= raw(file_formats_for_js.to_json) %>
+    </script>
+    <script type="application/json" data-file-upload-target="projectTypesData">
+      <%= raw((@project_types || ProjectType.all).each_with_object({}) { |pt, hash| 
+        # Create a temporary project to use the helper methods for proper pluralization
+        temp_project = Project.new(project_type: pt)
+        hash[pt.id.to_s] = { row_label: row_label(temp_project), col_label: col_label(temp_project) }
+      }.to_json) %>
     </script>
     <!-- Project Information Section -->
     <div class="mb-8">
@@ -47,7 +54,7 @@
           <%= form.select :project_type_id,
                 options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
                 { prompt: "Select project type" },
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton" } } %>
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton change->file-upload#updateProjectTypeLabels" } } %>
           <p class="mt-1 text-xs text-red-600 dark:text-red-400">Mandatory</p>
         </div>
 

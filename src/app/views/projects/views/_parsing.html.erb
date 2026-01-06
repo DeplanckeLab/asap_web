@@ -251,13 +251,13 @@
           <% if @results['nber_rows'] %>
             <div class="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
               <i class="fas fa-dna text-blue-600"></i>
-              <span class="text-sm font-medium text-blue-900">Genes: <span class="font-bold"><%= @results['nber_rows'] %></span></span>
+              <span class="text-sm font-medium text-blue-900"><%= row_label(@project).capitalize %>: <span class="font-bold"><%= @results['nber_rows'] %></span></span>
             </div>
           <% end %>
           <% if @results['nber_cols'] %>
             <div class="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-200 rounded-lg">
               <i class="fas fa-circle text-purple-600"></i>
-              <span class="text-sm font-medium text-purple-900">Cells: <span class="font-bold"><%= @results['nber_cols'] %></span></span>
+              <span class="text-sm font-medium text-purple-900"><%= col_label(@project).capitalize %>: <span class="font-bold"><%= @results['nber_cols'] %></span></span>
             </div>
           <% end %>
         </div>
@@ -283,7 +283,7 @@
           <% if @results['nber_rows'] && @results['nber_rows'] < 3 %>
             <div class="alert alert-danger flex items-start gap-3">
               <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <span>For many steps of the pipeline at least three genes are required</span>
+              <span>For many steps of the pipeline at least three <%= row_label(@project) %> are required</span>
             </div>
           <% end %>
 
@@ -296,9 +296,9 @@
             <div class="alert alert-danger flex items-start gap-3">
               <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
               <div class="flex-1">
-                <p class="mb-1">Original dataset has less than 3 cells</p>
+                <p class="mb-1">Original dataset has less than 3 <%= col_label(@project) %></p>
                 <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
-                  For many steps of the pipeline at least three cells are required
+                  For many steps of the pipeline at least three <%= col_label(@project) %> are required
                 </span>
               </div>
             </div>
@@ -341,7 +341,7 @@
             <div class="alert alert-danger flex items-start gap-3">
               <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
               <div class="flex-1">
-                <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) genes were not found in Ensembl</p>
+                <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) <%= row_label(@project) %> were not found in Ensembl</p>
                 <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-200">
                   <i class="fas fa-lightbulb text-red-600"></i>
                   <span class="text-sm text-red-800">Did you select the right species (now <strong><%= @project.organism&.name || 'Unknown' %></strong>)? If not, create a new project</span>
@@ -352,7 +352,7 @@
             <% if @results['nber_rows'] %>
               <div class="alert alert-success flex items-start gap-3">
                 <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-                <span>All <strong><%= @results['nber_rows'] %></strong> genes were found in Ensembl</span>
+                <span>All <strong><%= @results['nber_rows'] %></strong> <%= row_label(@project) %> were found in Ensembl</span>
               </div>
             <% end %>
           <% end %>

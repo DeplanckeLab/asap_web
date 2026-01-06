@@ -88,7 +88,7 @@
       <div class='bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 w-full max-w-full overflow-x-hidden'>
         <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter with QC parameters</h4>
         <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
-          <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> cells that match <span class='font-semibold'>all</span> the following conditions:</p>
+          <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> <%= col_label(@project) %> that match <span class='font-semibold'>all</span> the following conditions:</p>
         </div>
         <div class='space-y-2 w-full overflow-x-hidden'>
           <% @list_p.each_index do |i| %>
@@ -126,7 +126,7 @@
             <div class='mt-6 pt-6 border-t border-gray-200'>
               <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter using metadata</h4>
               <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
-                <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> cells that belong to selected metadata categories:</p>
+                <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> <%= col_label(@project) %> that belong to selected metadata categories:</p>
               </div>
               <div class='space-y-3'>
                 <% l = ([@parsing_run] + @cell_filtering_runs + @gene_filtering_runs).compact.map{|r| [display_run(r), r.id]} %>

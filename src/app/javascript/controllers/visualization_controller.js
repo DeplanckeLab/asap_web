@@ -21,7 +21,9 @@ export default class extends Controller {
     embeddingsByLoom: Object,
     defaultLoomFile: String,
     defaultEmbeddingId: String,
-    geneCount: Number
+    geneCount: Number,
+    rowLabel: String,
+    colLabel: String
   }
   
   // Optional targets - manually check with querySelector
@@ -675,15 +677,17 @@ export default class extends Controller {
 
     const formattedCells = this.formatNumber(embedding.nber_cols)
     const geneCount = this.hasGeneCountValue ? this.formatNumber(this.geneCountValue) : null
+    const rowLabel = this.hasRowLabelValue ? this.rowLabelValue : 'genes'
+    const colLabel = this.hasColLabelValue ? this.colLabelValue : 'cells'
 
     if (formattedCells && geneCount) {
-      return `${formattedCells} cells x ${geneCount} genes`
+      return `${formattedCells} ${colLabel} x ${geneCount} ${rowLabel}`
     }
     if (formattedCells) {
-      return `${formattedCells} cells`
+      return `${formattedCells} ${colLabel}`
     }
     if (geneCount) {
-      return `${geneCount} genes`
+      return `${geneCount} ${rowLabel}`
     }
     return null
   }

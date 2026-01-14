@@ -255,18 +255,10 @@ class Project < ApplicationRecord
   end
   
   def parse_files(h_data = {})
-    # Create a job record for tracking
-    job = Basic.create_job(self, 1, self, :parsing_job_id, 1)
-    
     # Enqueue the parsing job using ActiveJob
-    parsing_job = ProjectParsingJob.perform_later(id, h_data)
-    
-    # Update job with the ActiveJob job_id if available
-    if parsing_job.respond_to?(:job_id)
-      job.update(delayed_job_id: parsing_job.job_id) if job
-    end
-    
-    job
+    # The Run object (created by ProjectParsingJob) tracks execution status
+    # No need for a separate Job object
+    ProjectParsingJob.perform_later(id, h_data)
   end
   
   # Ensure ProjectStep records exist for all steps associated with this project's docker image

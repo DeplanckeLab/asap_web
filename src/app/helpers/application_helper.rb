@@ -131,6 +131,12 @@ module ApplicationHelper
         icon: "fas fa-code-branch"
       },
       {
+        label: "Project types",
+        description: "Available project types and their configurations",
+        path: project_types_path,
+        icon: "fas fa-layer-group"
+      },
+      {
         label: "Cell ontologies",
         description: "Ontology catalogs mirrored from legacy ASAP",
         path: cell_ontologies_path,

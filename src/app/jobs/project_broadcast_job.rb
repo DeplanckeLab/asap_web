@@ -58,10 +58,9 @@ class ProjectBroadcastJob < ApplicationJob
 
     js_cmds = []
     if step.name == 'parsing'
-      if parsing_job_id = project.parsing_job_id
-        parsing_job = Run.where(:project_id => project.id, :step_id => step_id).first
-        h_res[:parsing_status_id] = parsing_job.status_id #(parsing_job) ? parsing_job.status_id : 1
-      end
+      # Use Run object to get parsing status (Job object is no longer used)
+      parsing_run = Run.where(:project_id => project.id, :step_id => step_id).first
+      h_res[:parsing_status_id] = parsing_run.status_id if parsing_run
     else ## update the nbers
       [1, 2, 3, 4, 5].each do |status_id|
         tmp_nber = Run.where(:project_id => project.id, :step_id => step_id, :status_id => status_id).count

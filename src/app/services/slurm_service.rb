@@ -15,6 +15,9 @@ class SlurmService
     memory_mb = (run.pred_max_ram || run.max_ram || options[:memory_mb] || 4096).to_i
     time_limit = (run.pred_process_duration || options[:time_limit] || 3600).to_i
     
+    # Add 5 minutes (300 seconds) buffer to predicted time to account for variability
+    time_limit = time_limit + 300
+    
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
     @logger.info("  - Memory: #{memory_mb}MB (predicted: #{run.pred_max_ram}, actual: #{run.max_ram})")
@@ -413,8 +416,6 @@ class SlurmService
   def build_slurm_script(options)
     # The command will be executed in the website container via docker exec
     # since slurmd doesn't have Rails installed
-    # Escape the command for use in bash script
-    escaped_command = options[:command].gsub("'", "'\"'\"'")
     account_name = options[:user_id] ? "user_#{options[:user_id]}" : nil
     account_line = account_name ? "#SBATCH --account=#{account_name}\n" : ""
     
@@ -427,9 +428,12 @@ class SlurmService
     is_docker_run = options[:command].strip.start_with?('docker run')
     execution_line = if is_docker_run
       # Command is already a docker run - execute directly on SLURM node (host)
-      escaped_command
+      # Don't escape it since it's executed directly (not wrapped in quotes)
+      options[:command]
     else
       # Command needs Rails - execute in website container
+      # Escape single quotes for use in bash -c '...'
+      escaped_command = options[:command].gsub("'", "'\"'\"'")
       "docker exec asap2_test-website-1 bash -c '#{escaped_command}'"
     end
     

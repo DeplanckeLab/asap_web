@@ -725,6 +725,11 @@ export default class extends Controller {
           this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info', true)
           // Start polling for status updates (in case websocket misses the message)
           this.startPreparsingStatusPoll(fuId)
+        } else if (data.status === 'uploaded') {
+          console.log('[FileUpload] Upload complete, waiting for preparsing to start...')
+          this.setPreparsingStatus('Upload complete. Preparsing will start automatically...', 'info', true)
+          // Start polling for status updates - preparsing should start soon
+          this.startPreparsingStatusPoll(fuId)
         } else if (data.status === 'preparsing_failed') {
           console.log('[FileUpload] Preparsing failed')
           const websocketData = {
@@ -797,6 +802,11 @@ export default class extends Controller {
               prediction_debug: data.prediction_debug
             }
             this.handlePreparsingUpdate(websocketData)
+          } else if (data.status === 'preparsing') {
+            console.log('[FileUpload] Preparsing started (from polling)')
+            // Update status message to indicate preparsing has started
+            this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info', true)
+            // Continue polling - websocket should handle completion, but polling is backup
           } else if (data.status === 'preparsing_failed') {
             console.log('[FileUpload] Preparsing failed (from polling)')
             clearInterval(this.preparsingStatusPollInterval)
@@ -809,7 +819,7 @@ export default class extends Controller {
             }
             this.handlePreparsingUpdate(websocketData)
           }
-          // If still 'preparsing', continue polling
+          // If still 'uploaded', continue polling (preparsing should start soon)
         }
       } catch (error) {
         console.error('[FileUpload] Error polling preparsing status:', error)

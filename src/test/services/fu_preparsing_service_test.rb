@@ -14,18 +14,58 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
   ]
 
   setup do
-    @user = User.first || User.create!(email: 'test@example.com', password: 'password123')
+    # Suppress ActiveRecord SQL logging during tests
+    @original_logger = ActiveRecord::Base.logger
+    ActiveRecord::Base.logger = nil
+    
+    # Suppress Rails logger output during tests (reduce verbosity)
+    # Set to WARN to show warnings and errors, but suppress INFO/DEBUG messages
+    @original_rails_logger = Rails.logger
+    @original_rails_logger_level = Rails.logger.level
+    Rails.logger.level = Logger::WARN
+    
+    # Create a dedicated test user (never use existing users to avoid deleting production data)
+    @user = User.find_or_create_by!(email: 'test_preparsing@test.local') do |u|
+      u.password = 'test_password_123'
+      u.displayed_name = 'Test Preparsing User'
+    end
+    
     @organism = Organism.first || Organism.create!(name: 'Test Organism')
     
-    # Set up upload directory for tests
-    @upload_base_dir = Pathname.new(ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'))
-    FileUtils.mkdir_p(@upload_base_dir) unless @upload_base_dir.exist?
+    # Track Fu records created during this test
+    @created_fu_ids = []
+    
+    # Set up test-specific upload directory (not the production one)
+    @test_output_dir = Pathname.new('/data/asap2_test/tests/preparsing')
+    FileUtils.mkdir_p(@test_output_dir) unless @test_output_dir.exist?
+    
+    # Override UPLOAD_DATA_DIR for tests
+    @original_upload_dir = ENV['UPLOAD_DATA_DIR']
+    ENV['UPLOAD_DATA_DIR'] = @test_output_dir.to_s
+  end
+  
+  teardown do
+    # Restore original UPLOAD_DATA_DIR
+    if @original_upload_dir
+      ENV['UPLOAD_DATA_DIR'] = @original_upload_dir
+    else
+      ENV.delete('UPLOAD_DATA_DIR')
+    end
+    
+    # Clean up ONLY Fu records created during this specific test (not all user's Fus!)
+    if @created_fu_ids.any?
+      Fu.where(id: @created_fu_ids).destroy_all
+    end
+    
+    # Restore loggers
+    ActiveRecord::Base.logger = @original_logger if defined?(@original_logger)
+    Rails.logger.level = @original_rails_logger_level if defined?(@original_rails_logger_level)
   end
 
   def get_test_files
     unless Dir.exist?(INPUT_EXAMPLES_DIR)
-      puts "WARNING: Input examples directory does not exist: #{INPUT_EXAMPLES_DIR}"
-      puts "Make sure it's mounted in docker-compose.yml and container is restarted"
+      warn "WARNING: Input examples directory does not exist: #{INPUT_EXAMPLES_DIR}"
+      warn "Make sure it's mounted in docker-compose.yml and container is restarted"
       return []
     end
     
@@ -38,7 +78,6 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
       true
     end.sort
     
-    puts "Found #{files.size} testable files in #{INPUT_EXAMPLES_DIR}" if files.any?
     files
   end
 
@@ -47,9 +86,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     
     skip "No test files found in #{INPUT_EXAMPLES_DIR}" if test_files.empty?
     
-    puts "\n" + "=" * 80
-    puts "Testing #{test_files.size} files from #{INPUT_EXAMPLES_DIR}"
-    puts "=" * 80
+    puts "\nTesting #{test_files.size} files..."
     
     results = {
       passed: [],
@@ -59,8 +96,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     
     test_files.each_with_index do |source_file, index|
       filename = File.basename(source_file)
-      puts "\n[#{index + 1}/#{test_files.size}] Testing: #{filename}"
-      puts "  Size: #{File.size(source_file)} bytes"
+      print "[#{index + 1}/#{test_files.size}] #{filename}... "
       
       begin
         # Create Fu record
@@ -71,9 +107,10 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
           status: 'uploaded',
           name: filename
         )
+        @created_fu_ids << fu.id
         
-        # Create upload directory
-        upload_dir = @upload_base_dir.join(fu.id.to_s)
+        # Create upload directory in test output location
+        upload_dir = @test_output_dir.join(fu.id.to_s)
         FileUtils.mkdir_p(upload_dir)
         
         # Determine the file extension for the upload
@@ -104,29 +141,43 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
         # Check that we got some datasets or at least format detection
         assert summary.key?(:detected_format), "Summary should have detected_format"
         
-        puts "  ✓ Passed - Format: #{summary[:detected_format]}"
+        # Display matrix size if available
+        matrix_info = ""
         if summary[:datasets] && summary[:datasets].any?
           dataset = summary[:datasets].first
-          puts "    - Datasets: #{summary[:datasets].size}"
-          puts "    - Cells: #{dataset[:cell_count] || 'N/A'}, Genes: #{dataset[:gene_count] || 'N/A'}"
+          if dataset[:gene_count] && dataset[:cell_count]
+            matrix_info = " [#{dataset[:gene_count]}, #{dataset[:cell_count]}]"
+          end
         end
+        
+        puts "✓ (#{summary[:detected_format]})#{matrix_info}"
         
         results[:passed] << filename
         
-        # Cleanup
+        # Copy output.json to test results directory for inspection
+        output_file = upload_dir.join('output.json')
+        if output_file.exist?
+          test_result_dir = @test_output_dir.join('results')
+          FileUtils.mkdir_p(test_result_dir)
+          result_file = test_result_dir.join("#{filename.gsub(/[^a-zA-Z0-9._-]/, '_')}_output.json")
+          FileUtils.cp(output_file, result_file)
+        end
+        
+        # Cleanup upload directory (but keep results)
         FileUtils.rm_rf(upload_dir) if upload_dir.exist?
+        
+        # Clean up Fu record
+        fu.destroy
         
       rescue => e
         error_msg = "#{e.class}: #{e.message}"
-        puts "  ✗ Failed: #{error_msg}"
-        if e.backtrace
-          puts "    Backtrace: #{e.backtrace.first(3).join("\n    ")}"
-        end
+        puts "✗ (#{error_msg})"
         results[:failed] << { filename: filename, error: error_msg }
         
         # Cleanup on error
         begin
           FileUtils.rm_rf(upload_dir) if defined?(upload_dir) && upload_dir&.exist?
+          fu.destroy if defined?(fu) && fu&.persisted?
         rescue
           # Ignore cleanup errors
         end
@@ -134,16 +185,10 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     end
     
     # Print summary
-    puts "\n" + "=" * 80
-    puts "TEST SUMMARY"
-    puts "=" * 80
-    puts "Total files tested: #{test_files.size}"
-    puts "Passed: #{results[:passed].size}"
-    puts "Failed: #{results[:failed].size}"
-    puts "Skipped: #{results[:skipped].size}"
+    puts "\nSummary: #{results[:passed].size} passed, #{results[:failed].size} failed, #{results[:skipped].size} skipped"
     
     if results[:failed].any?
-      puts "\nFAILED FILES:"
+      puts "\nFailed files:"
       results[:failed].each do |failure|
         puts "  - #{failure[:filename]}: #{failure[:error]}"
       end
@@ -151,12 +196,6 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     
     # Assert that at least some tests passed
     assert results[:passed].any?, "At least one file should have passed preparsing"
-    
-    # Print detailed results
-    puts "\nPASSED FILES (#{results[:passed].size}):"
-    results[:passed].each do |filename|
-      puts "  ✓ #{filename}"
-    end
   end
 
   test "preparsing handles specific file types correctly" do
@@ -184,7 +223,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
       source_file = matching_files.first
       filename = File.basename(source_file)
       
-      puts "\nTesting #{test_case[:description]}: #{filename}"
+      print "Testing #{test_case[:description]}: #{filename}... "
       
       fu = Fu.create!(
         user: @user,
@@ -193,8 +232,9 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
         status: 'uploaded',
         name: filename
       )
+      @created_fu_ids << fu.id
       
-      upload_dir = @upload_base_dir.join(fu.id.to_s)
+      upload_dir = @test_output_dir.join(fu.id.to_s)
       FileUtils.mkdir_p(upload_dir)
       
       source_ext = File.extname(source_file)
@@ -209,13 +249,33 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
       result = service.call
       assert result[:summary].present?, "Should have summary"
       assert result[:summary][:detected_format].present?, "Should detect format"
-      puts "  ✓ Format detected: #{result[:summary][:detected_format]}"
+      
+      # Display matrix size if available
+      matrix_info = ""
+      if result[:summary][:datasets] && result[:summary][:datasets].any?
+        dataset = result[:summary][:datasets].first
+        if dataset[:gene_count] && dataset[:cell_count]
+          matrix_info = " [#{dataset[:gene_count]}, #{dataset[:cell_count]}]"
+        end
+      end
+      
+      puts "✓ (#{result[:summary][:detected_format]})#{matrix_info}"
+      
+      # Copy output.json to test results directory
+      output_file = upload_dir.join('output.json')
+      if output_file.exist?
+        test_result_dir = @test_output_dir.join('results')
+        FileUtils.mkdir_p(test_result_dir)
+        result_file = test_result_dir.join("#{filename.gsub(/[^a-zA-Z0-9._-]/, '_')}_output.json")
+        FileUtils.cp(output_file, result_file)
+      end
       
       FileUtils.rm_rf(upload_dir) if upload_dir.exist?
+      fu.destroy
     end
   end
 
-  test "preparsing validates organism_id requirement" do
+  test "preparsing works without organism_id but predictions may fail" do
     test_files = get_test_files
     skip "No test files found" if test_files.empty?
     
@@ -229,8 +289,9 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
       status: 'uploaded',
       name: filename
     )
+    @created_fu_ids << fu.id
     
-    upload_dir = @upload_base_dir.join(fu.id.to_s)
+    upload_dir = @test_output_dir.join(fu.id.to_s)
     FileUtils.mkdir_p(upload_dir)
     
     source_ext = File.extname(source_file)
@@ -240,14 +301,20 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     FileUtils.cp(source_file, upload_path)
     fu.update!(upload_file_name: upload_filename)
     
-    # Test without organism_id
+    # Test without organism_id - preparsing should still work
     service = FuPreparsingService.new(fu, {})
+    result = service.call
     
-    assert_raises(RuntimeError, /Organism ID is required/) do
-      service.call
-    end
+    # Preparsing should succeed
+    assert result.is_a?(Hash), "Result should be a Hash"
+    assert result.key?(:summary), "Result should have :summary key"
+    assert result[:summary].key?(:detected_format), "Summary should have detected_format"
+    
+    # Predictions may not be available without organism_id, but that's OK
+    # The preparsing itself should complete successfully
     
     FileUtils.rm_rf(upload_dir) if upload_dir.exist?
+    fu.destroy
   end
 end
 

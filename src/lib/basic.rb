@@ -2060,6 +2060,13 @@ module Basic
     
     def build_docker_cmd h_cmd, core_cmd
       cmd = core_cmd
+      
+      # Rails commands should run in the website container, not in asap_run container
+      # SLURM will wrap them in docker exec asap2_test-website-1
+      if h_cmd['program'] && h_cmd['program'].start_with?('rails')
+        return cmd
+      end
+      
       if h_cmd['docker_call']
      #   puts ">#{h_cmd['container_name']}-#{h_cmd['docker_call']}"
         h_cmd['docker_call'] = h_cmd['docker_call'].dup if h_cmd['docker_call'].frozen?
@@ -2113,8 +2120,17 @@ module Basic
       h_cmd['args']||=[]
       puts "H_CMD: " + h_cmd.to_json
       
+      # For rails commands, add working directory and environment setup
+      program_cmd = if h_cmd['program'] && h_cmd['program'].start_with?('rails')
+        rails_root = Rails.root.to_s
+        rails_env = Rails.env
+        "cd #{rails_root} && RAILS_ENV=#{rails_env} bundle exec #{h_cmd['program']}"
+      else
+        h_cmd['program']
+      end
+      
       cmd_parts = [
-                   h_cmd['program'],
+                   program_cmd,
                    h_cmd['opts'].map{|e| "#{e['opt']} #{safe_cmdline_param(e['value'])}"}.join(" "), 
                    h_cmd['args'].map{|e| safe_cmdline_param(e['value'])}.join(" "),
                    (h_cmd['exec_stdout']) ? "1> #{h_cmd['exec_stdout']}" : nil,

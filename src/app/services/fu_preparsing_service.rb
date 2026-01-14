@@ -154,9 +154,11 @@ class FuPreparsingService
     # Use docker exec on the existing asap_run container from docker-compose
     # Run as rvmuser (UID 1006) which is the default user in the Dockerfile
     # This ensures files are created with the correct ownership
+    # Set working directory to output directory so extracted files go there
     docker_cmd = [
       'docker', 'exec',
       '--user', '1006:1006',  # rvmuser:rvmuser (matches Dockerfile USER directive)
+      '--workdir', upload_dir_str,  # Set working directory to output directory
       'asap_run',
       '/bin/sh', '-c', script_cmd
     ]
@@ -199,7 +201,13 @@ class FuPreparsingService
   def build_summary(output)
     @prediction_debug_data = []  # Store prediction debug info for each dataset
     
-    datasets = Array(output['list_groups']).map do |group|
+    # Check if we have any datasets
+    list_groups = output['list_groups']
+    if list_groups.blank? || (list_groups.is_a?(Array) && list_groups.empty?)
+      @logger.warn("[FuPreparsingService] No datasets found in preparsing output. File may be an archive listing files only, or preparsing may have failed to detect matrix data.")
+    end
+    
+    datasets = Array(list_groups).map do |group|
       # Parse genes and cells - they can be arrays (from JSON) or Python list strings like "['gene1', 'gene2']"
       genes = parse_genes_or_cells(group['genes'])
       cells = parse_genes_or_cells(group['cells'])
@@ -254,6 +262,12 @@ class FuPreparsingService
     end
 
     primary_dataset = datasets.first
+    
+    # Warn if no datasets found
+    if datasets.empty?
+      @logger.warn("[FuPreparsingService] Preparsing completed but found 0 datasets. Format: #{output['detected_format']}. This may be normal for archive files or files without matrix data.")
+    end
+    
     summary = {
       detected_format: output['detected_format'],
       dataset_count: datasets.size,
@@ -337,7 +351,12 @@ class FuPreparsingService
         # Don't raise - allow preparsing to continue even if we can't write predictions
       end
     else
-      @logger.warn("[FuPreparsingService] Cannot write predictions: output['list_groups']=#{output['list_groups'].present?}, summary[:datasets]=#{summary[:datasets].present?}, size=#{summary[:datasets]&.size}")
+      # Only warn if we expected to have datasets but don't
+      if summary[:datasets].empty?
+        @logger.warn("[FuPreparsingService] Cannot write predictions: no datasets found in preparsing output")
+      else
+        @logger.debug("[FuPreparsingService] Cannot write predictions: output['list_groups']=#{output['list_groups'].present?}, summary[:datasets]=#{summary[:datasets].present?}, size=#{summary[:datasets]&.size}")
+      end
     end
   rescue => e
     @logger.error("[FuPreparsingService] Error writing predictions to output.json: #{e.class} - #{e.message}")

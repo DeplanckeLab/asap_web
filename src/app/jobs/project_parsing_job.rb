@@ -68,7 +68,7 @@ class ProjectParsingJob < ApplicationJob
 
     begin
       # Build command hash for parsing (similar to how parse.rake builds it)
-      # The rake task will be executed directly in a background job, not via SLURM
+      # The rake task will be executed via SLURM through exec_run -> RunExecutionJob
       asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
       h_env_docker_image = h_env['docker_images']['asap_run']
       image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
@@ -173,7 +173,7 @@ class ProjectParsingJob < ApplicationJob
       end
 
       # Build run hash
-      # Note: submitted_at will be set after submitting to SLURM, not here
+      # Use async: true to execute through SLURM via exec_run -> RunExecutionJob
       h_run = {
         project_id: project.id,
         step_id: parsing_step.id,
@@ -184,7 +184,7 @@ class ProjectParsingJob < ApplicationJob
         command_json: h_cmd.to_json,
         attrs_json: project.parsing_attrs_json,
         output_json: h_outputs.to_json,
-        async: false # Run synchronously in background job (not via SLURM)
+        async: true # Execute through SLURM via exec_run
       }
       
       # Add predictions if available (always set, even if nil)
@@ -235,54 +235,12 @@ class ProjectParsingJob < ApplicationJob
       # Reload run to get updated resource predictions if any
       run.reload
       
-      # Build command to run in Rails environment
-      # The rake task will be executed via SLURM
-      rails_root = Rails.root.to_s
-      rails_env = Rails.env
-      parse_cmd = "cd #{rails_root} && RAILS_ENV=#{rails_env} bundle exec rails parse[#{project.key}]"
+      # Execute run through SLURM using the standard exec_run flow
+      # This will call exec_run_async -> RunExecutionJob -> SLURM
+      Rails.logger.info("[ProjectParsingJob] Executing Run##{run.id} through SLURM via exec_run")
+      Basic.exec_run(Rails.logger, run)
       
-      Rails.logger.info("[ProjectParsingJob] Submitting parsing task to SLURM for Run##{run.id}")
-      Rails.logger.debug("[ProjectParsingJob] Command: #{parse_cmd}")
-      
-      # Submit to SLURM
-      slurm_service = SlurmService.new(logger: Rails.logger)
-      slurm_job_id = slurm_service.submit_job(
-        run,
-        parse_cmd,
-        cores: run.nber_cores || 1,
-        memory_mb: run.pred_max_ram || run.max_ram || 4096,
-        time_limit: run.pred_process_duration || 3600
-      )
-      
-      # Set submitted_at NOW - when the job is actually submitted to SLURM queue
-      # This ensures waiting_duration only includes queue time, not preparation time
-      submitted_at = Time.now
-      
-      Rails.logger.info("[ProjectParsingJob] Job submitted to SLURM queue:")
-      Rails.logger.info("[ProjectParsingJob]   Run ID: #{run.id}")
-      Rails.logger.info("[ProjectParsingJob]   SLURM Job ID: #{slurm_job_id}")
-      Rails.logger.info("[ProjectParsingJob]   Submitted at: #{submitted_at.strftime('%Y-%m-%d %H:%M:%S.%3N')}")
-      Rails.logger.info("[ProjectParsingJob]   Queue time will be logged when job starts execution")
-      
-      # Update run with SLURM job ID and submitted_at - keep status as waiting until job actually starts
-      # The status will be updated to running by parse.rake when it actually starts executing
-      run.update(
-        status_id: 1, # 1 = waiting (job is queued, not running yet)
-        submitted_at: submitted_at,
-        pid: slurm_job_id.to_i,
-        slurm_job_id: slurm_job_id.to_i
-      )
-      
-      # Keep project step status as waiting - will be updated when job starts
-      # project_step and project status will be updated by parse.rake or SlurmJobMonitorJob
-      
-      # Broadcast update to show job is queued
-      project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-      
-      # Start monitoring the SLURM job
-      SlurmJobMonitorJob.set(wait: 30.seconds).perform_later(run.id, slurm_job_id)
-      
-      Rails.logger.info("[ProjectParsingJob] Parsing task submitted to SLURM for Project##{project_id}, Run##{run.id}, SLURM Job ID: #{slurm_job_id}")
+      Rails.logger.info("[ProjectParsingJob] Parsing Run##{run.id} queued for execution via SLURM")
       
     rescue StandardError => e
       Rails.logger.error("[ProjectParsingJob] Error setting up parsing for project #{project_id}: #{e.class} - #{e.message}")

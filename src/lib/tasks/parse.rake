@@ -197,60 +197,141 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
       
-      # Only add -col and -header for RAW_TEXT file type
-      if file_type == 'RAW_TEXT'
-        # -col parameter: gene name column (default: "first" if not specified)
-        gene_name_col = p["gene_name_col"]
-        if gene_name_col.blank? || gene_name_col == 'NA' || gene_name_col == 'none'
-          gene_name_col = 'first'  # Default to first column
-        end
-        opts.push({'opt' => "-col", 'value' => gene_name_col})
-        
-        # -header parameter: whether file has header row (default: true if not specified)
-        has_header = p['has_header']
-        if has_header.nil? || has_header == ''
-          has_header = '1'  # Default to true (has header)
-        end
-        header_value = (has_header.to_s == '1' || has_header.to_s == 'true') ? 'true' : 'false'
-        opts.push({'opt' => "-header", 'value' => header_value})
-      else
-        # For non-RAW_TEXT types, only add if explicitly specified
-        opts.push({'opt' => "-col", 'value' => p["gene_name_col"]}) if p["gene_name_col"].present?
-        opts.push({'opt' => "-header", 'value' => ((p['has_header'] and p['has_header'].to_i == 1) ? 'true' : 'false')}) if p['has_header'].present?
-      end
       
-      opts.push({'opt' => "-d", 'value' => p["delimiter"]}) if p["delimiter"] and p['delimiter'] != ''
-      
-      opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata']
-      opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata']
+      if version.id >= 8
 
-      h_types = {
-        'MEX' => "H5_10x",
-        'RDS' => "LOOM"
-      }
-      
-      opts += [
-               {'opt' => "-ncells", 'value' => p["nber_cols"]},
-               {'opt' => "-ngenes", 'value' => p["nber_rows"]},
-               {'opt' => '-T', 'value' => "Parsing"},
-               {'opt' => "-organism", 'value' => project.organism_id},
-               {'opt' => "-o", 'value' => tmp_dir},
-               {'opt' => "-f", 'value' => filepath},
-               {'opt' => '-h', 'value' => db_conn}
-              ]
-      
-      # Add -type option - use detected_format if file_type is not set
-      # Map common format names to Java command format names
-      file_type_value = if file_type.present?
-                          (h_types[file_type]) ? h_types[file_type] : file_type
-                        else
-                          # Default to RAW_TEXT if nothing is available
-                          logger.warn("[ParseRake] No file_type found, defaulting to RAW_TEXT")
-                          "RAW_TEXT"
-                        end
-      
-      # -type is mandatory according to Java command, so always include it
-      opts.push({'opt' => "-type", 'value' => file_type_value})
+        
+#      usage: parse.v8.py -f File to parse [-o Output folder] --filetype File type [--header [RAW_TEXT] Is there a header] [--col [RAW_TEXT] Which column contains row names]            
+#                   [--sel In case of multiple matrices, which one to use] [--delim [RAW_TEXT] Delimiter to parse columns] --organism Organism --dburl Host URL for DB                   
+#                   (format HOST:PORT/DB)                                                                                                                                                
+#parse.v8.py: error: the following arguments are required: -f, --filetype, --organism, --dburl   
+        
+        opts = []
+        if file_type == 'RAW_TEXT'
+          opts.push({'opt' => "--col", 'value' => gene_name_col})
+          opts.push({'opt' => "--header", 'value' => header_value})
+        end
+        
+        opts.push({'opt' => "--delim", 'value' => p["delimiter"]}) if p["delimiter"] and p['delimiter'] != ''
+        
+        #opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata']
+        #opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata']
+        
+        opts += [
+          #          {'opt' => "-ncells", 'value' => p["nber_cols"]},
+          #          {'opt' => "-ngenes", 'value' => p["nber_rows"]},
+          {'opt' => "--organism", 'value' => project.organism_id},
+          {'opt' => "--filetype", 'value' => file_type},
+          {'opt' => "-o", 'value' => tmp_dir},
+          {'opt' => "-f", 'value' => filepath},
+          {'opt' => '--dburl', 'value' => db_conn}
+        ]
+        
+        
+        h_env_docker_image = h_env['docker_images']['asap_run']
+        image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+        
+        asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
+        h_cmd_parse = {
+          'host_name' => "localhost",
+          'time_call' => h_env["time_call"].gsub(/\#output_dir/, tmp_dir.to_s),
+          'container_name' => asap_instance_name + "_" + run.id.to_s,
+          'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
+          'program' => "python3 parse.v8.py",
+          'opts' => opts,
+          'args' => []
+        }
+        
+#        output_file = tmp_dir + "output.loom"
+#        output_json = tmp_dir + "output.json"
+        
+        puts h_cmd_parse
+        cmd_parse = Basic.build_cmd(h_cmd_parse)
+        puts "CMD_PYTHON:" + cmd_parse
+        `#{cmd_parse}`
+
+        # exit removed - continue with post-processing
+        # Verify output files were created by Python script
+        output_file = tmp_dir + "output.loom"
+        output_json = tmp_dir + "output.json"
+        
+        unless File.exist?(output_file)
+          logger.error("[ParseRake] Python parsing completed but output.loom not found at #{output_file}")
+          if File.exist?(output_json)
+            h_output = Basic.safe_parse_json(File.read(output_json), {})
+            if h_output['error'] || h_output['displayed_error']
+              error_msg = h_output['error'] || h_output['displayed_error']
+              logger.error("[ParseRake] Python parsing error: #{error_msg}")
+            end
+          end
+          exit 1
+        end
+        
+        # Read parsing results from output.json
+        h_parsing = {}
+        if File.exist?(output_json)
+          h_parsing = Basic.safe_parse_json(File.read(output_json), {})
+        end
+        
+        
+        # Python path post-processing - update run status to complete
+        exec_run_details_file = tmp_dir + 'exec_run_details.log'
+        max_ram_mb = nil
+        process_duration_seconds = nil
+        
+        if File.exist?(exec_run_details_file)
+          logger.info("[ParseRake] Reading exec_run_details.log")
+          h_time_info = {}
+          File.readlines(exec_run_details_file).each do |line|
+            t = line.split(",")
+            if t.size > 1
+              t.each do |e|
+                if m = e.match(/^([A-Za-z])=([\d\:.]+)$/)
+                  h_time_info[m[1]] = m[2]
+                end
+              end
+            end
+          end
+          if h_time_info['M']
+            max_ram_kb = h_time_info['M'].to_f
+            max_ram_mb = (max_ram_kb / 1024.0).round(2)
+          end
+          if h_time_info['E']
+            process_duration_seconds = 0.0
+            t = h_time_info['E'].split(":")
+            if t.size == 1
+              t_str = h_time_info['E']
+              t_str.scan(/([\d.]+)s/) { |match| process_duration_seconds += match[0].to_f }
+              t_str.scan(/([\d]+)m/) { |match| process_duration_seconds += match[0].to_f * 60 }
+              t_str.scan(/([\d]+)h/) { |match| process_duration_seconds += match[0].to_f * 3600 }
+            else
+              if t.size == 3
+                process_duration_seconds += t[0].to_f * 3600
+              end
+              if t.size >= 2
+                process_duration_seconds += t[t.size - 2].to_f * 60
+                process_duration_seconds += t[t.size - 1].to_f
+              end
+            end
+            process_duration_seconds = process_duration_seconds.round(2)
+          end
+        end
+        
+        duration_seconds = nil
+        if run.start_time
+          duration_seconds = (Time.now - run.start_time).to_f
+        end
+        
+        run_updates = { status_id: 3 }
+        run_updates[:max_ram] = max_ram_mb if max_ram_mb
+        run_updates[:process_duration] = process_duration_seconds if process_duration_seconds
+        run_updates[:duration] = duration_seconds if duration_seconds
+        run.update(run_updates) if run
+        Basic.upd_project_step(project, parsing_step.id) if project_step
+        project.update(status_id: 3)
+        project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
+        logger.info("[ParseRake] Python parsing completed, updated run and project status")
+      else
       
       mem = p["nber_cols"].to_i * p["nber_rows"].to_i * 128 / (31053 * 1474560)
       h_env_docker_image = h_env['docker_images']['asap_run']

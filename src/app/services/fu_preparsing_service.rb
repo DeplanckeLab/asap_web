@@ -119,11 +119,11 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] Upload directory: #{upload_dir_str}")
     @logger.info("[FuPreparsingService] File exists before command? #{File.exist?(file_path)}")
 
-    docker_tag = get_docker_image_tag
+    #docker_tag = get_docker_image_tag
     # Construct script name using the tag (e.g., 'v8' -> 'preparse.v8.py')
     # Ensure tag has 'v' prefix
-    tag_with_v = docker_tag.start_with?('v') ? docker_tag : "v#{docker_tag}"
-    python_script_name = "preparse.#{tag_with_v}.py"
+    #tag_with_v = docker_tag.start_with?('v') ? docker_tag : "v#{docker_tag}"
+    python_script_name = "preparse.v8.py"
     
     script_args = ['python3', "/srv/#{python_script_name}"]
     script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
@@ -161,33 +161,14 @@ class FuPreparsingService
       '--workdir', upload_dir_str,  # Set working directory to output directory
       'asap_run',
       '/bin/sh', '-c', script_cmd
-    ]
+     ]
 
     full_cmd = Shellwords.join(docker_cmd)
     @logger.info("[FuPreparsingService] Docker command: #{full_cmd}")
     full_cmd
   end
 
-  def get_docker_image_tag
-    # Try to get docker image tag from version_id
-    if @options[:version_id].present?
-      version_id = safe_integer(@options[:version_id])
-      if version_id
-        version = Version.find_by(id: version_id)
-        if version
-          begin
-            docker_image = Basic.get_asap_docker(version)
-            return docker_image.tag if docker_image&.tag
-          rescue => e
-            @logger.warn("[FuPreparsingService] Could not get docker image from version #{version_id}: #{e.message}")
-          end
-        end
-      end
-    end
-    
-    # Default to v8
-    'v8'
-  end
+ 
 
   def load_output_json
     output_path = upload_dir + 'output.json'

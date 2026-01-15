@@ -5,7 +5,7 @@
       <div class="flex items-start justify-between">
         <div class="flex-1">
           <h3 class="mb-2">
-            <i class="fas fa-tasks me-2"></i><%= @step.label.presence || @step.name %>
+j
           </h3>
           <% if @step.description.present? %>
             <p class="text-muted mb-2"><%= @step.description %></p>
@@ -144,6 +144,11 @@
     <% if @step.has_std_view && @step.name == 'parsing' %>
       <!-- Render parsing-specific view -->
       <%= render 'projects/views/parsing' %>
+    <% end %>
+    
+    <!-- Standard Form (when no runs exist) -->
+    <% if @show_form %>
+      <%= render 'projects/views/std_form' %>
     <% end %>
     
     <!-- Standard Dashboard (for multiple runs) -->

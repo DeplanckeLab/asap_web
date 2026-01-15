@@ -1501,8 +1501,18 @@ class ProjectsController < ApplicationController
       end
       
       # Prepare data for standard dashboard and view
-      if @step.has_std_dashboard || @step.has_std_view
-        prepare_std_step_data
+      # Skip for parsing step as it has its own special handling
+      if @step.name != 'parsing' && (@step.has_std_dashboard || @step.has_std_view || @step.has_std_form)
+        begin
+          prepare_std_step_data
+        rescue => e
+          Rails.logger.error("[step_results] Error preparing std step data: #{e.class} - #{e.message}")
+          Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
+          # Set defaults to prevent view errors
+          @show_dashboard = false
+          @show_view = false
+          @show_form = false
+        end
       end
     rescue => e
       Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
@@ -2748,13 +2758,18 @@ class ProjectsController < ApplicationController
       @h_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step.attrs_json.present?
       @h_attrs ||= {}
       
-      # Determine if we should show dashboard or view
+      # Determine if we should show dashboard, view, or form
       # Version 8+: only 1 run allowed, so show view directly if has_std_view
       # Before version 8: multiple runs possible, show dashboard if has_std_dashboard and multiple runs
       @show_dashboard = false
       @show_view = false
+      @show_form = false
       
-      if @step.has_std_dashboard && (@step.multiple_runs || @runs.count > 1)
+      # If no runs and has_std_form, show form
+      if @runs.empty? && @step.has_std_form
+        @show_form = true
+        prepare_std_form_data
+      elsif @step.has_std_dashboard && (@step.multiple_runs || @runs.count > 1)
         @show_dashboard = true
         # Prepare dashboard data
         @h_cards = create_run_cards(@runs.to_a, nil)
@@ -2773,6 +2788,61 @@ class ProjectsController < ApplicationController
           prepare_run_view_data(@run)
         end
       end
+    end
+    
+    # Prepare data for standard form
+    def prepare_std_form_data
+      # Get docker image
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      return unless asap_docker_image
+      
+      # Get step attributes
+      @h_step_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step.attrs_json.present?
+      @h_step_attrs ||= {}
+      
+      # Get standard methods for this step
+      @h_std_methods = {}
+      all_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false).all
+      all_std_methods.each { |s| @h_std_methods[s.id] = s }
+      
+      @std_methods = all_std_methods.select { |e| e.step_id == @step.id }.sort { |a, b| a.name <=> b.name }
+      
+      # Get steps by name for lookups (ensure @h_steps is set from prepare_std_step_data)
+      @h_steps ||= {}
+      @h_steps_by_name = {}
+      @h_steps.each { |id, step| @h_steps_by_name[step.name] = step if step.respond_to?(:name) }
+      
+      # Get object attributes by standard method
+      @h_obj_attrs_by_std_method = {}
+      @std_methods.each { |s| @h_obj_attrs_by_std_method[s.id] = Basic.safe_parse_json(s.obj_attrs_json, {}) }
+      
+      # Get standard methods by name
+      @h_std_methods_by_name = {}
+      @std_methods.each { |s| @h_std_methods_by_name[s.name] = s }
+      
+      # Check available methods based on existing runs
+      @h_unavailable_methods = {}
+      successful_runs = Run.where(project_id: @project.id, status_id: 3) # status_id 3 = success
+      
+      @std_methods.each do |std_method|
+        # Check if method has required input attributes
+        method_attrs = @h_obj_attrs_by_std_method[std_method.id] || {}
+        (method_attrs.keys & ['input_matrix', 'input_de']).each do |attr_name|
+          if method_attrs[attr_name] && method_attrs[attr_name]['valid_types']
+            valid_types = method_attrs[attr_name]['valid_types']
+            source_steps = method_attrs[attr_name]['source_steps'] || []
+            source_step_ids = source_steps.map { |ssn| @h_steps_by_name[ssn]&.id }.compact
+            tmp_runs = successful_runs.select { |run| source_step_ids.include?(run.step_id) }
+            
+            if tmp_runs.empty?
+              @h_unavailable_methods[std_method.id] = true
+            end
+          end
+        end
+      end
+      
+      # Create a new Req object for the form
+      @req = Req.new
     end
     
     # Prepare data for a single run view

@@ -1,0 +1,140 @@
+<%# Standard Form for Creating New Runs %>
+<% obj_name = 'req' %>
+
+<%= form_for(@req, method: 'post', html: { id: @step.name + '_form' }) do |f| %>
+  <% if @project.errors.any? %>
+    <div id="error_explanation" class="alert alert-danger">
+      <h4><%= pluralize(@project.errors.count, "error") %> prohibited this from being saved:</h4>
+      <ul>
+        <% @project.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <% available_methods = @std_methods.select { |s| !@h_unavailable_methods[s.id] } %>
+  <% unavailable_methods = @std_methods.select { |s| @h_unavailable_methods[s.id] } %>
+  <% default_methods = (@h_step_attrs['default_std_method'] || []).map { |method_name| @h_std_methods_by_name[method_name] }.compact & available_methods %>
+
+  <% unless @h_step_attrs['hide_method'] %>
+    <div class="alert alert-secondary mb-4">
+      <div class="form-group row">
+        <%= label_tag 'std_method_id', "Method", { class: 'col-sm-2 col-form-label', 'data-toggle' => 'tooltip', 'title' => "" } %>
+        <% l = @std_methods.select { |s| 
+          method_attrs = @h_obj_attrs_by_std_method[s.id] || {}
+          project_types = method_attrs["project_types"] || []
+          project_types.empty? || project_types.include?((@project.project_type) ? @project.project_type.tag : nil)
+        }.map { |e| [e.label, e.id] }.sort %>
+        <div class="col-sm-10">
+          <%= f.select :std_method_id, options_for_select(l, ((d = default_methods.first) ? d.id : ((d = available_methods.first) ? d.id : nil))), {}, { class: 'custom-select' } %>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-1">
+          <% if defined?(Speed) %>
+            <% Speed.all.each do |s| %>
+              <%= image_tag 'speed_' + s.name + '.png', id: 'speed_' + s.id.to_s, class: 'speed_image hidden', width: '25px' %>
+            <% end %>
+          <% end %>
+        </div>
+        <div class="col-md-11">
+          <span id="method_desc" class=""></span><br/>
+          <span id="method_pred" class=""></span>
+          <%= hidden_field_tag :pred_process_duration %>
+          <%= hidden_field_tag :pred_max_ram %>
+        </div>
+      </div>
+    </div>
+  <% else %>
+    <%= f.hidden_field :std_method_id, value: ((d = default_methods.first) ? d.id : ((d = available_methods.first) ? d.id : nil)) %>
+  <% end %>
+
+  <div id="attrs_container"></div>
+
+  <%= f.hidden_field :step_id, value: @step.id %>
+  <%= hidden_field_tag :format, 'json' %>
+
+  <% unless @h_step_attrs["hide_submit_btns"] %>
+    <div class="actions mb-4">
+      <div id="prevent_req_messages" class="alert alert-danger hidden"></div>
+      <button id="<%= @step.name %>_button" type="button" class="btn btn-primary req_submit">
+        <%= @h_step_attrs['action_button_label'] || 'Submit' %>
+      </button>
+      <button id="form_req_cancel" type="button" class="btn btn-secondary">Cancel</button>
+    </div>
+  <% end %>
+<% end %>
+
+<%= javascript_tag do %>
+  $('#<%= @step.name %>_form').unbind('submit');
+  $('#<%= @step.name %>_form').submit(false);
+
+  var h_unavailable_method_ids = <%= raw @h_unavailable_methods.to_json %>;
+  $("#req_std_method_id > option").each(function() {
+    if (h_unavailable_method_ids[this.value]) {
+      $(this).addClass("unavailable_method");
+    }
+  });
+
+  var h_methods = <%= h = {}; @std_methods.map { |f| h[f.id] = [(f.speed_id rescue nil), f.description, (f.link rescue '')] }; raw h.to_json %>;
+
+  function change_method() {
+    var smid = $("#req_std_method_id").val();
+    if (smid && h_methods[smid]) {
+      $("#<%= @step.name %>_button").prop("disabled", ((h_unavailable_method_ids[smid]) ? "disabled" : false));
+      // Load attributes via AJAX
+      // Note: get_attributes endpoint needs to be implemented separately
+      // For now, we'll show a placeholder
+      $("#attrs_container").html("<p class='text-muted'>Select a method to configure parameters...</p>");
+      var img = $("#speed_" + h_methods[smid][0]);
+      if (img.length) { img.removeClass('hidden'); }
+      $("#method_desc").html(h_methods[smid][1] + " " + h_methods[smid][2]);
+    } else {
+      $("#attrs_container").html("");
+    }
+  }
+
+  $("#req_std_method_id").change(function() {
+    $(".speed_image").addClass('hidden');
+    change_method();
+  });
+
+  $("#<%= @step.name %>_button").click(function() {
+    $("#<%= @step.name %>_button").attr("disabled", true);
+    $("#<%= @step.name %>_button").html("<i class='fa fa-pulse fa-spinner'></i> <%= @h_step_attrs['action_button_label'] || 'Submit' %>");
+
+    var p = $('#<%= @step.name %>_form').serializeArray();
+    p.push({ 'name': 'project_id', 'value': '<%= @project.id %>' });
+
+    $.ajax({
+      url: "<%= reqs_path() %>",
+      type: "post",
+      data: p,
+      beforeSend: function() {
+        $("#step_container").html("<div class='loading'><i class='fa fa-spinner fa-pulse fa-fw fa-lg fa-2x'></i></div>");
+      },
+      success: function(returnData) {
+        var other_params = '';
+        if (returnData.errors) {
+          other_params += "&errors=" + returnData.errors;
+        }
+        $("#<%= @step.name %>_button").attr("disabled", false);
+        $("#<%= @step.name %>_button").html("<%= @h_step_attrs['action_button_label'] || 'Submit' %>");
+        refresh("step_container", "<%= step_results_project_path(@project) %>?step_id=<%= @step.id %>" + other_params, {loading: 'fa-2x loading-step'});
+      },
+      error: function(e) {
+        $("#<%= @step.name %>_button").attr("disabled", false);
+        $("#<%= @step.name %>_button").html("<%= @h_step_attrs['action_button_label'] || 'Submit' %>");
+        alert("Error submitting form: " + (e.responseJSON?.error || e.statusText || "Unknown error"));
+      }
+    });
+  });
+
+  $("#form_req_cancel").click(function() {
+    refresh("step_container", "<%= step_results_project_path(@project) %>?step_id=<%= @step.id %>", {loading: 'fa-2x'});
+  });
+
+  change_method();
+<% end %>
+

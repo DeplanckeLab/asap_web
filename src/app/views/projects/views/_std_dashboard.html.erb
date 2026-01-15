@@ -1,0 +1,23 @@
+<%# Standard Dashboard View - Shows multiple runs %>
+<div id="std_dashboard_<%= @step.id %>" class="std-dashboard">
+  <% if @runs && @runs.any? %>
+    <div class="mb-3">
+      <div class="alert alert-info">
+        <%= @runs.size %> run<%= (@runs.size > 1) ? 's' : '' %> found.
+      </div>
+    </div>
+    
+    <% if @h_cards && @h_cards[:run_cards] && @h_cards[:run_cards].any? %>
+      <%= render partial: 'projects/views/display_card_deck', locals: { cards: @h_cards[:run_cards], card_type: 'run' } %>
+    <% else %>
+      <div class="alert alert-warning">
+        No run cards available.
+      </div>
+    <% end %>
+  <% else %>
+    <div class="alert alert-info">
+      No runs found for this step.
+    </div>
+  <% end %>
+</div>
+

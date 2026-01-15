@@ -1499,6 +1499,11 @@ class ProjectsController < ApplicationController
           @h_annots = {}
         end
       end
+      
+      # Prepare data for standard dashboard and view
+      if @step.has_std_dashboard || @step.has_std_view
+        prepare_std_step_data
+      end
     rescue => e
       Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
       Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
@@ -2718,7 +2723,319 @@ class ProjectsController < ApplicationController
         # For now, we'll work without method details
       end
     end
-
+    
+    # Prepare data for standard dashboard and view
+    def prepare_std_step_data
+      # Get docker image and steps
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      return unless asap_docker_image
+      
+      # Get all steps for this docker image
+      @h_steps = {}
+      Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+      
+      # Get statuses
+      @h_statuses = {}
+      Status.all.each { |s| @h_statuses[s.id] = s }
+      
+      # Get dashboard card configuration
+      @h_dashboard_card = {}
+      if @step.dashboard_card_json.present?
+        @h_dashboard_card[@step.id] = Basic.safe_parse_json(@step.dashboard_card_json, {})
+      end
+      
+      # Get step attributes
+      @h_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step.attrs_json.present?
+      @h_attrs ||= {}
+      
+      # Determine if we should show dashboard or view
+      # Version 8+: only 1 run allowed, so show view directly if has_std_view
+      # Before version 8: multiple runs possible, show dashboard if has_std_dashboard and multiple runs
+      @show_dashboard = false
+      @show_view = false
+      
+      if @step.has_std_dashboard && (@step.multiple_runs || @runs.count > 1)
+        @show_dashboard = true
+        # Prepare dashboard data
+        @h_cards = create_run_cards(@runs.to_a, nil)
+      elsif @step.has_std_view && !@step.multiple_runs && @runs.count <= 1
+        @show_view = true
+        # Prepare view data for single run
+        @run = @runs.first
+        if @run
+          prepare_run_view_data(@run)
+        end
+      elsif @step.has_std_view && @runs.count == 1
+        # Even if multiple_runs is true, if there's only one run, show view
+        @show_view = true
+        @run = @runs.first
+        if @run
+          prepare_run_view_data(@run)
+        end
+      end
+    end
+    
+    # Prepare data for a single run view
+    def prepare_run_view_data(run)
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      step_dir = project_dir + @step.name
+      output_dir = (@step.multiple_runs) ? (step_dir + run.id.to_s) : step_dir
+      
+      output_json_file = output_dir + "output.json"
+      @h_res = {}
+      @h_outputs = {}
+      @h_run_attrs = {}
+      
+      begin
+        @h_run_attrs = Basic.safe_parse_json(run.attrs_json, {}) if run.attrs_json.present?
+        @h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+        @h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
+      rescue => e
+        Rails.logger.error("[prepare_run_view_data] Error loading run data: #{e.message}")
+      end
+      
+      # Get annotations
+      @h_annots_by_dim = {}
+      annots = Annot.where(run_id: run.id).all
+      annots.each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
+      
+      # Get standard method attributes
+      @h_std_method_attrs = {}
+      if run.std_method_id
+        std_method = StdMethod.find_by(id: run.std_method_id)
+        if std_method && std_method.method_attrs_json.present?
+          @h_std_method_attrs = Basic.safe_parse_json(std_method.method_attrs_json, {})
+        end
+      end
+      
+      # Get layout from show_view_json
+      @layout = []
+      if @step.show_view_json.present?
+        @layout = Basic.safe_parse_json(@step.show_view_json, [])
+      end
+      
+      # Prepare element data (@h_el) for standard view
+      @h_el = {}
+      
+      # Prepare files and links
+      h_files = {}
+      h_links = {}
+      
+      if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_links"]
+        h_links = get_h_links(@h_outputs, @h_dashboard_card[@step.id]["output_links"])
+      end
+      
+      if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_files"]
+        list_p = @h_dashboard_card[@step.id]["output_files"]
+        list_p.select { |e| @h_outputs && @h_outputs[e["key"]] && ((admin? || e["admin"] == true) || !e["admin"]) }.each do |e|
+          k = e["key"]
+          @h_outputs[k].keys.each do |output_key|
+            t = output_key.split(":")
+            h_files[t[0]] ||= {
+              h_output: @h_outputs[k][output_key],
+              datasets: []
+            }
+            h_files[t[0]][:datasets].push({ name: t[1], dataset_size: @h_outputs[k][output_key]['dataset_size'] }) if t.size > 1
+          end
+        end
+      end
+      
+      # Build dataset results
+      dataset_results = []
+      h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
+      @h_annots_by_dim.each_key do |dim|
+        subtitle = h_dim[dim]
+        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
+        dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
+          @h_annots_by_dim[dim].map { |annot|
+            col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
+            row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
+            col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
+            row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
+            "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
+          }.join(" ") + "</p>"
+      end
+      
+      # Set standard card elements
+      @h_el = {
+        "card-params" => {
+          card_header: 'Parameters',
+          card_body: display_run_attrs(run, @h_run_attrs, @h_std_method_attrs, {})
+        },
+        "card-downloads" => {
+          card_header: 'Downloads',
+          card_body: ((h_files.keys.size > 0) ? ("<p class='card-text'>" + h_files.keys.map { |k| display_download_btn(run, h_files[k]) }.join(" ") + "</p>") : "")
+        },
+        "card-results" => {
+          card_header: 'Results',
+          card_body: ((run.status_id == 3 && @h_res['warnings']) ? @h_res['warnings'].map { |e|
+            if e.is_a?(Hash)
+              "<p class='text-warning text-truncate' title=\"#{e['name']}. #{e['description']}\">#{e['name']}</p>"
+            else
+              "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
+            end
+          }.join(" ") : '') + dataset_results.join("<br/>\n")
+        }
+      }
+    end
+    
+    # Create run cards for dashboard
+    def create_run_cards(runs, sel_req_id)
+      return { run_cards: [], req_cards: [] } if runs.empty?
+      
+      # Ensure @h_steps is set
+      unless @h_steps
+        asap_docker_image = Basic.get_asap_docker(@project.version)
+        @h_steps = {}
+        if asap_docker_image
+          Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+        end
+      end
+      
+      # Ensure @h_statuses is set
+      unless @h_statuses
+        @h_statuses = {}
+        Status.all.each { |s| @h_statuses[s.id] = s }
+      end
+      
+      # Ensure @h_dashboard_card is set
+      unless @h_dashboard_card
+        @h_dashboard_card = {}
+        if @step && @step.dashboard_card_json.present?
+          @h_dashboard_card[@step.id] = Basic.safe_parse_json(@step.dashboard_card_json, {})
+        end
+      end
+      
+      # Get standard method details
+      std_method_ids = runs.map(&:std_method_id).compact.uniq
+      @h_std_methods = {}
+      StdMethod.where(id: std_method_ids).each { |m| @h_std_methods[m.id] = m }
+      
+      # Get users
+      @h_users = {}
+      user_ids = runs.map(&:user_id).compact.uniq
+      User.where(id: user_ids).each { |u| @h_users[u.id] = u }
+      
+      run_cards = []
+      runs.sort { |a, b| (b.created_at || Time.at(0)) <=> (a.created_at || Time.at(0)) }.each do |run|
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+        step_dir = project_dir + @h_steps[run.step_id].name
+        output_dir = (@h_steps[run.step_id].multiple_runs) ? (step_dir + run.id.to_s) : step_dir
+        output_json_file = output_dir + "output.json"
+        
+        h_attrs = {}
+        h_res = {}
+        h_outputs = {}
+        
+        begin
+          h_attrs = Basic.safe_parse_json(run.attrs_json, {}) if run.attrs_json.present?
+          h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+          h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
+        rescue => e
+          Rails.logger.error("[create_run_cards] Error loading data for run #{run.id}: #{e.message}")
+        end
+        
+        # Prepare files
+        h_files = {}
+        if @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_files"]
+          list_p = @h_dashboard_card[run.step_id]["output_files"]
+          list_p.select { |e| h_outputs && h_outputs[e["key"]] && ((admin? || e["admin"] == true) || !e["admin"]) }.each do |e|
+            k = e["key"]
+            h_outputs[k].keys.each do |output_key|
+              t = output_key.split(":")
+              h_files[t[0]] ||= {
+                h_output: h_outputs[k][output_key],
+                datasets: []
+              }
+              h_files[t[0]][:datasets].push({ name: t[1], dataset_size: h_outputs[k][output_key]['dataset_size'] }) if t.size > 1
+            end
+          end
+        end
+        
+        # Get standard method attributes
+        h_std_method_attrs = {}
+        if run.std_method_id && @h_std_methods[run.std_method_id]
+          std_method = @h_std_methods[run.std_method_id]
+          if std_method.method_attrs_json.present?
+            h_std_method_attrs = Basic.safe_parse_json(std_method.method_attrs_json, {})
+          end
+        end
+        
+        status_name = (@h_statuses[run.status_id] && @h_statuses[run.status_id].respond_to?(:name)) ? @h_statuses[run.status_id].name : 
+                      (case run.status_id
+                       when 1 then 'Waiting'
+                       when 2 then 'Running'
+                       when 3 then 'Completed'
+                       when 4 then 'Failed'
+                       else 'Unknown'
+                       end)
+        status_badge = case run.status_id
+        when 1 then 'warning'
+        when 2 then 'info'
+        when 3 then 'success'
+        when 4 then 'danger'
+        else 'secondary'
+        end
+        
+        run_time = (run.start_time && run.duration) ? (run.start_time + run.duration) : Time.now
+        estimated_time_txt = (run.pred_process_duration) ? "Estimated #{duration(run.pred_process_duration)} - " : ''
+        
+        card_body = [
+          "<p class='card-title'><span class='badge badge-#{status_badge}'>#{status_name}</span> #{display_run(run)}</p>",
+          "<p class='sub-run_card'>Parameters</p>",
+          display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
+          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='sub-run_card'>Output summary</p><p class='card-text'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res[e["key"]] }.map { |e| "<span class='badge badge-info'>#{e["label"]}:#{(h_res[e["key"]]) ? h_res[e["key"]] : 'NA'}</span>" }.join(" ") + "</p>") : ''),
+          ((h_files.keys.size > 0) ? ("<p class='sub-run_card'>Results</p><p class='card-text'>" + h_files.keys.map { |k| display_download_btn(run, h_files[k]) }.join(" ") + "</p>") : ""),
+          ((run.status_id == 3 && h_res['warnings']) ? h_res['warnings'].map { |e|
+            if e.is_a?(Hash)
+              "<p class='text-warning text-truncate' title=\"#{e['name']}. #{e['description']}\">#{e['name']}</p>"
+            else
+              "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
+            end
+          }.join(" ") : ''),
+          (([4, 5].include?(run.status_id) && h_res['displayed_error'].is_a?(Array)) ? ("<p class='card-text'>" + ((h_res['displayed_error']) ? h_res['displayed_error'].map { |e|
+            help = (e && (e.match(/Probably out of RAM/) || e.match(/Not enough memory/))) ? "<a href='#{tutorial_home_index_path({ t: 'out_of_ram' })}'>Help</a>" : ''
+            "<p class='text-danger text-truncate' title=\"#{e}\">#{e} <small>#{help}</small></p>"
+          }.join(" ") : '') + "</p>") : '')
+        ].join("")
+        
+        card_footer = "<small class='text-muted'>" +
+          "##{run.id}, " +
+          [
+            "<span class='nowrap'>#{run.created_at&.strftime("%Y-%m-%d %H:%M") || 'N/A'}</span>",
+            ((run.waiting_duration) ? "<span class='nowrap'>Wait #{duration(run.waiting_duration.to_i)}</span>" : ((run.status_id == 1) ? "<span id='ongoing_wait_#{run.id}' class='nowrap'>Wait #{duration((Time.now - (run.submitted_at || run.created_at)).to_i)}</span>" : nil)),
+            ((run.duration && run.status_id != 2) ? "<span class='nowrap'>Run #{duration(run.duration.to_i)}</span>" : (([1, 2].include?(run.status_id)) ? "<br/>#{estimated_time_txt}<span id='ongoing_run_#{run.id}' class='nowrap'>Run #{duration((run.start_time) ? (Time.now - run.start_time).to_i : 0)}</span>" : nil)),
+            ((run.max_ram) ? "<span class='nowrap'>Max. RAM #{display_mem(run.max_ram * 1000)}</span>" : nil),
+            "created by #{(admin? && @h_users[run.user_id]) ? 'Admin' : (@h_users[run.user_id]&.email&.split(/\@/)&.first || 'Unknown')}"
+          ].compact.join(", ") +
+          "</small>"
+        
+        run_cards.push({
+          card_id: "run_card_#{run.id}",
+          card_class: "run_card",
+          body: card_body,
+          footer: card_footer
+        })
+      end
+      
+      { run_cards: run_cards, req_cards: [] }
+    end
+    
+    # Helper method to get links from outputs
+    def get_h_links(h_outputs, output_links_config)
+      h_links = {}
+      return h_links unless h_outputs && output_links_config
+      
+      output_links_config.each do |link_config|
+        key = link_config["key"]
+        if h_outputs[key]
+          h_links[key] = h_outputs[key]
+        end
+      end
+      
+      h_links
+    end
+    
     # Get status name for display
     def get_status_name(status_id)
       case status_id

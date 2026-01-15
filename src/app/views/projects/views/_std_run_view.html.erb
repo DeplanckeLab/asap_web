@@ -1,0 +1,86 @@
+<%# Standard Run View - Shows single run results %>
+<div id="std_run_view_<%= @step.id %>" class="std-run-view">
+  <% if @run %>
+    <div id='show_run_<%= @run.id %>' class='run_container'>
+      <% if @layout && @layout.any? %>
+        <% @layout.each do |vertical_el| %>
+          <% if (!vertical_el['admin'] || admin?) %>
+            <div class="vert_element row">
+              <% vertical_el["horiz_elements"].each do |horiz_element| %>
+                <% id = horiz_element['id'].to_s %>
+                <div class="horiz_element <%= horiz_element['container_class'] || '' %>">
+                  <% if horiz_element['type'] == 'card' && (@h_el[id] || (horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?))) %>
+                    <div class="card <%= horiz_element['class'] || '' %>">
+                      <% if @h_el[id] %>
+                        <% if @h_el[id][:card_header] %>
+                          <div class="card-header"><%= raw @h_el[id][:card_header] %></div>
+                        <% end %>
+                        <div class="card-body">
+                          <%= raw @h_el[id][:card_body] %>
+                        </div>
+                      <% elsif horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?) %>
+                        <%= render partial: horiz_element['partial'], locals: { horiz_element: horiz_element } %>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+      <% else %>
+        <%# Default layout if no layout specified %>
+        <div class="row">
+          <div class="col-md-12">
+            <% if @h_el['card-params'] %>
+              <div class="card mb-3">
+                <% if @h_el['card-params'][:card_header] %>
+                  <div class="card-header"><%= raw @h_el['card-params'][:card_header] %></div>
+                <% end %>
+                <div class="card-body">
+                  <%= raw @h_el['card-params'][:card_body] %>
+                </div>
+              </div>
+            <% end %>
+            
+            <% if @h_el['card-results'] %>
+              <div class="card mb-3">
+                <% if @h_el['card-results'][:card_header] %>
+                  <div class="card-header"><%= raw @h_el['card-results'][:card_header] %></div>
+                <% end %>
+                <div class="card-body">
+                  <%= raw @h_el['card-results'][:card_body] %>
+                </div>
+              </div>
+            <% end %>
+            
+            <% if @h_el['card-downloads'] %>
+              <div class="card mb-3">
+                <% if @h_el['card-downloads'][:card_header] %>
+                  <div class="card-header"><%= raw @h_el['card-downloads'][:card_header] %></div>
+                <% end %>
+                <div class="card-body">
+                  <%= raw @h_el['card-downloads'][:card_body] %>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="alert alert-warning">
+      No run data available.
+    </div>
+  <% end %>
+</div>
+
+<%= javascript_tag do %>
+  $(".annot_btn").click(function(){
+    var annot_id = this.id.split("_")[1]
+    // Navigate to annotation view - adjust path as needed
+    console.log("Annotation clicked:", annot_id)
+    // refresh("step_container", "<%= project_path(@project) %>?annot_id=" + annot_id, {loading:'fa-2x'})
+  })
+<% end %>
+

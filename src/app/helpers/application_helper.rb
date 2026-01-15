@@ -225,4 +225,123 @@ module ApplicationHelper
       "#{b.round(precision)}B"
     end
   end
+  
+  # Display run attributes
+  def display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
+    return { datasets: [], attrs: [] } unless run && h_attrs
+    
+    input_lineage_class = opt[:input_lineage_class] || 'input_lineage'
+    array_dataset = []
+    reject_attrs = []
+    if defined?(@h_dashboard_card) && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["reject_attrs"]
+      reject_attrs = @h_dashboard_card[run.step_id]["reject_attrs"]
+    end
+    
+    array = h_attrs.keys.reject { |attr|
+      reject_attrs.include?(attr) ||
+      (opt[:reject_if_default] && run && h_std_method_attrs && h_std_method_attrs[run.std_method_id] &&
+       (std_method_attr = h_std_method_attrs[run.std_method_id][attr]) &&
+       (attr_default = std_method_attr['default']) &&
+       attr_default.to_s == h_attrs[attr].to_s)
+    }.map { |attr|
+      v = h_attrs[attr]
+      txt = ''
+      list_datasets_by_attr_name = {}
+      
+      if v.is_a?(Hash) && v['run_id']
+        list_datasets_by_attr_name[attr] ||= []
+        list_datasets_by_attr_name[attr].push(v)
+      elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
+        list_datasets_by_attr_name[attr] = v
+      else
+        std_method_attr = (h_std_method_attrs && h_std_method_attrs[run.std_method_id]) ? h_std_method_attrs[run.std_method_id][attr] : nil
+        if std_method_attr
+          txt = "<span class='badge badge-light cursor-help wrap' data-toggle='tooltip' data-placement='bottom' title=\"" +
+            [std_method_attr['label'], (std_method_attr['description_text'] || std_method_attr['description'] || 'No description')].select { |e| e && !e.empty? }.join(": ") +
+            "\">#{attr}:#{v.to_s}</span>"
+        else
+          txt = "<span class='badge badge-light'>#{attr}:#{v.to_s}</span>"
+        end
+      end
+      
+      # Get annots for datasets
+      annot_ids = list_datasets_by_attr_name.values.flatten.map { |e| e['annot_id'] }.compact.uniq
+      h_annots = {}
+      if annot_ids.any? && defined?(Annot)
+        Annot.where(id: annot_ids).each { |a| h_annots[a.id] = a }
+      end
+      
+      list_datasets_by_attr_name.each_key do |attr_name|
+        if list_datasets_by_attr_name[attr_name].size < 10
+          list_datasets_by_attr_name[attr_name].each do |v|
+            if v['annot_id'] && h_annots[v['annot_id']]
+              v['output_dataset'] = h_annots[v['annot_id']].name
+            end
+            tmp_run = (defined?(Run) && v['run_id']) ? Run.find_by(id: v['run_id']) : nil
+            tmp_step = (tmp_run && @h_steps) ? @h_steps[tmp_run.step_id] : nil
+            if tmp_run && tmp_step
+              additional_classes = input_lineage_class + ' pointer'
+              displayed_val = ''
+              if v['output_dataset'] && m = v['output_dataset'].match(/^\/.{3}_attrs\/(.+)/)
+                displayed_val = m[1]
+              else
+                displayed_val = "#{tmp_step.name}" + ((tmp_step.multiple_runs) ? " ##{tmp_run.num}" : "")
+              end
+              array_dataset.push "<span id='input_lineage_#{tmp_run.id}' class='badge badge-dark #{additional_classes}'>#{attr}:#{displayed_val}</span>"
+            else
+              array_dataset.push "<span class='badge badge-secondary'>#{attr}:NA</span>"
+            end
+          end
+        else
+          array_dataset.push "<span class='badge badge-secondary'>#{attr}:#{list_datasets_by_attr_name[attr_name].size} datasets</span>"
+        end
+      end
+      
+      txt
+    }
+    
+    { datasets: array_dataset, attrs: array }
+  end
+  
+  def display_run_attrs(run, h_attrs, h_std_method_attrs, opt)
+    h = display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
+    '<p>' + h[:datasets].join(" ") + " " + h[:attrs].join(" ") + "</p>"
+  end
+  
+  def display_download_btn(run, h_file)
+    return "" unless h_file && h_file[:h_output]
+    
+    h_output = h_file[:h_output]
+    title = ""
+    h_filename = {
+      'output.loom' => 'Loom file',
+      'output.json' => 'JSON file'
+    }
+    
+    if h_file[:datasets] && h_file[:datasets].size > 0
+      title = "data-toggle='tooltip' data-placement='bottom' title='Added/changed datasets: " +
+        h_file[:datasets].map { |d| d[:name] + ((d[:dataset_size]) ? " [#{display_mem(d[:dataset_size])}]" : '') }.join(", ") + "'"
+    end
+    
+    if h_output["size"] && h_output["size"] > 0
+      filename = h_filename[h_output["filename"]] || h_output["filename"] || 'file'
+      result = "<div class='nowrap'><div id='run_#{run.id}_#{h_output["onum"]}' class='btn btn-sm btn-outline-secondary white-bg download_file_btn' #{title}><div class='float-right'><sub>#{display_mem(h_output["size"])}</sub></div><div class='download_btn_text'>#{filename}</div></div>"
+      result += " <span class='link_to_loom_tuto info-btn pointer'><sup><i class='fas fa-info-circle fa-lg'></i></sup></span>" if h_output["filename"] == 'output.loom'
+      result += "</div>"
+      result
+    else
+      ""
+    end
+  end
+  
+  def display_run2(run, step, std_method)
+    return "" unless run && step
+    step_label = step.label || step.name
+    method_label = (std_method && std_method.label) ? std_method.label : ''
+    if step.multiple_runs
+      "<span id='show_run_#{run.id}' class='show_link show_run_link pointer'><b>##{run.num}</b> #{step_label} #{method_label}</span>"
+    else
+      "<span id='show_run_#{run.id}' class='show_link show_run_link pointer'><b>##{run.num}</b> #{step_label}</span>"
+    end
+  end
 end

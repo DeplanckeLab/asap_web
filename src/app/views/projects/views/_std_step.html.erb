@@ -141,101 +141,113 @@
     <% end %>
 
     <!-- Step Results Section -->
-    <% if @step.has_std_view %>
-      <!-- Render standard view (template) -->
+    <% if @step.has_std_view && @step.name == 'parsing' %>
+      <!-- Render parsing-specific view -->
       <%= render 'projects/views/parsing' %>
     <% end %>
+    
+    <!-- Standard Dashboard (for multiple runs) -->
+    <% if @show_dashboard %>
+      <%= render 'projects/views/std_dashboard' %>
+    <% end %>
+    
+    <!-- Standard Run View (for single run) -->
+    <% if @show_view %>
+      <%= render 'projects/views/std_run_view' %>
+    <% end %>
 
-    <!-- Runs Section -->
-    <div class="runs-section">
-      <h4 class="mb-3">
-        <i class="fas fa-list me-2"></i>Runs
-        <span class="badge badge-info"><%= @runs.count %></span>
-      </h4>
-      
-      <% if @runs.any? %>
-        <div class="table-responsive">
-          <table class="table table-hover">
-            <thead class="thead-light">
-              <tr>
-                <th>Run #</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Error</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <% @runs.each do |run| %>
-                <% run_status = case run.status_id
-                                when 1 then { name: 'waiting', class: 'warning' }
-                                when 2 then { name: 'running', class: 'info' }
-                                when 3 then { name: 'complete', class: 'success' }
-                                when 4 then { name: 'failed', class: 'danger' }
-                                else { name: 'unknown', class: 'secondary' }
-                                end %>
+    <!-- Runs Section (fallback if no standard dashboard/view) -->
+    <% unless @show_dashboard || @show_view %>
+      <div class="runs-section">
+        <h4 class="mb-3">
+          <i class="fas fa-list me-2"></i>Runs
+          <span class="badge badge-info"><%= @runs.count %></span>
+        </h4>
+        
+        <% if @runs.any? %>
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead class="thead-light">
                 <tr>
-                  <td>
-                    <strong>#<%= run.num || run.id %></strong>
-                  </td>
-                  <td>
-                    <span class="badge badge-<%= run_status[:class] %>">
-                      <%= run_status[:name].humanize %>
-                    </span>
-                  </td>
-                  <td>
-                    <% if run.created_at %>
-                      <%= run.created_at.strftime("%Y-%m-%d %H:%M") %>
-                    <% else %>
-                      <span class="text-muted">N/A</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <% if run.status_id == 4 && run.error.present? %>
-                      <div class="text-red-600 text-xs max-w-xs truncate" title="<%= run.error %>">
-                        <i class="fas fa-exclamation-triangle me-1"></i>
-                        <%= truncate(run.error, length: 50) %>
-                      </div>
-                    <% else %>
-                      <span class="text-muted">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <%= link_to project_path(@project, view: 'data'), class: 'btn btn-sm btn-outline-primary' do %>
-                      <i class="fas fa-eye me-1"></i>View
-                    <% end %>
-                  </td>
+                  <th>Run #</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Error</th>
+                  <th>Actions</th>
                 </tr>
-                <% if run.status_id == 4 && run.error.present? %>
-                  <tr class="bg-red-50">
-                    <td colspan="5" class="p-3">
-                      <div class="bg-white border border-red-200 rounded p-3">
-                        <div class="flex items-start">
-                          <i class="fas fa-exclamation-circle text-red-600 mt-1 mr-2"></i>
-                          <div class="flex-1">
-                            <strong class="text-red-800 text-sm block mb-1">Error Details:</strong>
-                            <div class="text-red-700 text-xs font-mono whitespace-pre-wrap break-words">
-                              <%= run.error %>
+              </thead>
+              <tbody>
+                <% @runs.each do |run| %>
+                  <% run_status = case run.status_id
+                                  when 1 then { name: 'waiting', class: 'warning' }
+                                  when 2 then { name: 'running', class: 'info' }
+                                  when 3 then { name: 'complete', class: 'success' }
+                                  when 4 then { name: 'failed', class: 'danger' }
+                                  else { name: 'unknown', class: 'secondary' }
+                                  end %>
+                  <tr>
+                    <td>
+                      <strong>#<%= run.num || run.id %></strong>
+                    </td>
+                    <td>
+                      <span class="badge badge-<%= run_status[:class] %>">
+                        <%= run_status[:name].humanize %>
+                      </span>
+                    </td>
+                    <td>
+                      <% if run.created_at %>
+                        <%= run.created_at.strftime("%Y-%m-%d %H:%M") %>
+                      <% else %>
+                        <span class="text-muted">N/A</span>
+                      <% end %>
+                    </td>
+                    <td>
+                      <% if run.status_id == 4 && run.error.present? %>
+                        <div class="text-red-600 text-xs max-w-xs truncate" title="<%= run.error %>">
+                          <i class="fas fa-exclamation-triangle me-1"></i>
+                          <%= truncate(run.error, length: 50) %>
+                        </div>
+                      <% else %>
+                        <span class="text-muted">-</span>
+                      <% end %>
+                    </td>
+                    <td>
+                      <%= link_to project_path(@project, view: 'data'), class: 'btn btn-sm btn-outline-primary' do %>
+                        <i class="fas fa-eye me-1"></i>View
+                      <% end %>
+                    </td>
+                  </tr>
+                  <% if run.status_id == 4 && run.error.present? %>
+                    <tr class="bg-red-50">
+                      <td colspan="5" class="p-3">
+                        <div class="bg-white border border-red-200 rounded p-3">
+                          <div class="flex items-start">
+                            <i class="fas fa-exclamation-circle text-red-600 mt-1 mr-2"></i>
+                            <div class="flex-1">
+                              <strong class="text-red-800 text-sm block mb-1">Error Details:</strong>
+                              <div class="text-red-700 text-xs font-mono whitespace-pre-wrap break-words">
+                                <%= run.error %>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                  <% end %>
                 <% end %>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% else %>
-        <div class="flex-1 flex items-center justify-center">
-          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-            <i class="fas fa-info-circle text-blue-600 mb-2"></i>
-            <p class="text-blue-800 mb-0">No runs found for this step.</p>
+              </tbody>
+            </table>
           </div>
-        </div>
-      <% end %>
-    </div>
+        <% else %>
+          <div class="flex-1 flex items-center justify-center">
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+              <i class="fas fa-info-circle text-blue-600 mb-2"></i>
+              <p class="text-blue-800 mb-0">No runs found for this step.</p>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
 
     <!-- Step Information -->
     <div class="step-info mt-4 flex-shrink-0 border-t border-gray-200 pt-4">

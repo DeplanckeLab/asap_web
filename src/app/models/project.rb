@@ -263,11 +263,26 @@ class Project < ApplicationRecord
   
   # Ensure ProjectStep records exist for all steps associated with this project's docker image
   # Called lazily when needed for display (show, step_results, refresh_steps_panel)
+  # Only creates ProjectStep records for steps that match the project's project type
   def ensure_project_steps
     asap_docker_image = Basic.get_asap_docker(version)
     return unless asap_docker_image
     
     Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+      # Filter by project type if project has a project type
+      if project_type
+        step_attrs = Basic.safe_parse_json(step.attrs_json, {})
+        project_types = step_attrs['project_types']
+        
+        # If project_types is specified and not empty, check if it includes this project's type
+        if project_types.present? && project_types.any?
+          project_type_name = project_type.name
+          project_type_tag = project_type.tag
+          next unless project_types.include?(project_type_name) || (project_type_tag.present? && project_types.include?(project_type_tag))
+        end
+        # If project_types is empty or missing, include the step (backward compatibility)
+      end
+      
       project_step = ProjectStep.find_by(project_id: id, step_id: step.id)
       unless project_step
         ProjectStep.create(

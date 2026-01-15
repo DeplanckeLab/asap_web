@@ -1,6 +1,8 @@
 <%# Parsing Status Section (when waiting or running, before results are available) %>
 <%# Also show if status is complete but results are missing (after restart) %>
-<% if @step && @step.name == 'parsing' && !@results %>
+<%# Show status section if no results OR if results exist but have displayed_error (so we show status + error) %>
+<%# Also show if parsing_run exists with status_id 4 (failed) even if @results is nil %>
+<% if @step && @step.name == 'parsing' && (!@results || (@results && @results['displayed_error']) || (@parsing_run && @parsing_run.status_id == 4)) %>
   <%# Always show something when there are no results %>
   <%# Use ONLY the run's status_id, matching the left panel logic %>
   <% status_id = @parsing_run&.status_id %>
@@ -71,6 +73,26 @@
           <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
           <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
           <p class="text-gray-600 mb-4">The parsing job has been restarted and is queued. Results will appear here when complete.</p>
+        </div>
+      <% elsif status_id == 4 %>
+        <%# Parsing failed - show error message %>
+        <div class="flex flex-col items-center justify-center">
+          <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-red-900 mb-2">Parsing Failed</h3>
+          <p class="text-gray-600 mb-4">
+            <% if @results && @results['displayed_error'] %>
+              <%# Show error from output.json if available %>
+              <% if @results['displayed_error'].is_a?(Array) %>
+                <%= @results['displayed_error'].first %>
+              <% else %>
+                <%= @results['displayed_error'] %>
+              <% end %>
+            <% elsif @parsing_run && @parsing_run.error.present? %>
+              <%= @parsing_run.error %>
+            <% else %>
+              The parsing job failed. Please check the logs or try restarting the parsing step.
+            <% end %>
+          </p>
         </div>
       <% else %>
         <%# Fallback for any other status (including nil project_step) %>
@@ -530,35 +552,48 @@
       <% end %>
     <% end %>
   <% end %>
-<% elsif @step && @step.name == 'parsing' && @results && @results['displayed_error'] %>
+<% end %>
+
+<%# Parsing Error Display (separate conditional so it always shows when there's an error) %>
+<% if @step && @step.name == 'parsing' && @results && @results['displayed_error'] %>
   <!-- Parsing Error Display -->
-  <div class="mb-4">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-lg font-semibold text-gray-900">Parsing Error</h3>
-      <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
-        <button type="button" 
-                class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                data-controller="restart-step"
-                data-restart-step-project-id-value="<%= @project.id %>"
-                data-restart-step-step-id-value="<%= @step.id %>"
-                data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
-                data-action="click->restart-step#restart"
-                style="flex-shrink: 0;">
-          Restart
-        </button>
-      <% end %>
+  <div class="bg-white rounded-lg shadow-sm border border-red-200 mb-6 overflow-hidden">
+    <div class="bg-gradient-to-r from-red-50 to-pink-50 border-b border-red-200 px-6 py-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-red-900 flex items-center gap-2">
+          <i class="fas fa-exclamation-circle text-red-600"></i>
+          Parsing Error
+        </h3>
+        <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+          <button type="button" 
+                  class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                  data-controller="restart-step"
+                  data-restart-step-project-id-value="<%= @project.id %>"
+                  data-restart-step-step-id-value="<%= @step.id %>"
+                  data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
+                  data-action="click->restart-step#restart"
+                  style="flex-shrink: 0;">
+            Restart
+          </button>
+        <% end %>
+      </div>
     </div>
-    <% if @results['displayed_error'].is_a?(Array) %>
-      <% @results['displayed_error'].each do |error| %>
-        <p class="text-danger text-truncate" title="<%= error %>"><%= error %></p>
-      <% end %>
-    <% else %>
-      <p class="text-danger"><%= @results['displayed_error'] %></p>
-    <% end %>
-    <% if admin? && @results['original_error'] %>
-      <br/><span class="text-muted"><%= @results['original_error'] %></span>
-    <% end %>
+    <div class="px-6 py-5">
+      <div class="bg-red-50 border border-red-200 rounded-md p-4">
+        <% if @results['displayed_error'].is_a?(Array) %>
+          <% @results['displayed_error'].each do |error| %>
+            <p class="text-red-800 mb-2" title="<%= error %>"><%= error %></p>
+          <% end %>
+        <% else %>
+          <p class="text-red-800"><%= @results['displayed_error'] %></p>
+        <% end %>
+        <% if admin? && @results['original_error'] %>
+          <div class="mt-3 pt-3 border-t border-red-300">
+            <p class="text-sm text-red-600 font-mono"><%= @results['original_error'] %></p>
+          </div>
+        <% end %>
+      </div>
+    </div>
   </div>
-  
 <% end %>
 

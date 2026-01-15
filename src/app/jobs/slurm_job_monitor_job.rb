@@ -300,7 +300,18 @@ class SlurmJobMonitorJob < ApplicationJob
         return
       end
       
-      # If no displayed_error, proceed with successful completion
+      # For parsing step, verify that output.loom exists (required output file)
+      if step.name == 'parsing'
+        output_loom_file = output_dir + 'output.loom'
+        unless File.exist?(output_loom_file)
+          error_msg = "Parsing completed but required output.loom file not found at #{output_loom_file}"
+          Rails.logger.error("[SlurmJobMonitorJob] Run##{run.id}: #{error_msg}")
+          finish_run_with_error(run, error_msg)
+          return
+        end
+      end
+      
+      # If no displayed_error and required files exist, proceed with successful completion
       Basic.finish_run(Rails.logger, run, h_results)
     else
       Rails.logger.warn("[SlurmJobMonitorJob] No valid results found for Run##{run.id}, marking as failed")

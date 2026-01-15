@@ -1439,9 +1439,9 @@ class ProjectsController < ApplicationController
         
         @results = nil
         
-        # Only load results if we have a completed run (status_id == 3)
+        # Load results if we have a run (completed or failed)
         # After restart, runs are deleted, so @parsing_run will be nil or have a different status
-        if @parsing_run && @parsing_run.status_id == 3
+        if @parsing_run && (@parsing_run.status_id == 3 || @parsing_run.status_id == 4)
           project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
           step_dir = project_dir + 'parsing'
           output_json = step_dir + 'output.json'
@@ -1459,13 +1459,13 @@ class ProjectsController < ApplicationController
                 @results['displayed_error'].to_s
               end
               
-              # Update run status to failed if we have a run
+              # Update run status to failed if we have a run that was marked as complete
               if @parsing_run && @parsing_run.status_id == 3
                 @parsing_run.update(status_id: 4, error: error_msg)
                 @parsing_run.reload
               end
               
-              # Update project_step status to failed
+              # Update project_step status to failed if it was marked as complete
               if @project_step && @project_step.status_id == 3
                 @project_step.update(status_id: 4, error_message: error_msg)
                 @project_step.reload
@@ -1850,6 +1850,31 @@ class ProjectsController < ApplicationController
       if @pretreatment_steps.empty?
         Rails.logger.warn("[ProjectsController] No pretreatment steps found, using all steps")
         @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
+      end
+      
+      # Filter steps based on project type
+      # Steps can have a project_types array in attrs_json that specifies which project types they apply to
+      # If project_types is empty or missing, the step applies to all project types (backward compatibility)
+      if @project.project_type
+        project_type_name = @project.project_type.name
+        project_type_tag = @project.project_type.tag
+        
+        @pretreatment_steps = @pretreatment_steps.select do |step|
+          step_attrs = Basic.safe_parse_json(step.attrs_json, {})
+          project_types = step_attrs['project_types']
+          
+          # If project_types is not specified or empty, include the step (backward compatibility)
+          if project_types.nil? || project_types.empty?
+            true
+          else
+            # Check if the step's project_types array includes the project's type name or tag
+            project_types.include?(project_type_name) || (project_type_tag.present? && project_types.include?(project_type_tag))
+          end
+        end
+        
+        Rails.logger.info("[ProjectsController] After project type filtering (#{project_type_name}): #{@pretreatment_steps.count} steps")
+      else
+        Rails.logger.info("[ProjectsController] No project type set, including all steps")
       end
       
       Rails.logger.info("[ProjectsController] Found #{@pretreatment_steps.count} steps for project #{@project.id}")

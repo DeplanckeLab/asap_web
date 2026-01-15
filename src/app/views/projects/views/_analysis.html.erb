@@ -24,12 +24,12 @@
     <!-- Right Panel: Step Results -->
     <div class="flex-1 flex flex-col min-h-0">
       <div data-step-selector-target="resultsContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
-        <div class="p-6 overflow-y-auto flex-1">
-          <div class="text-center text-gray-500 py-12" data-step-selector-target="emptyState">
+        <div class="overflow-y-auto flex-1">
+          <div class="text-center text-gray-500 py-12 px-6" data-step-selector-target="emptyState">
             <i class="fas fa-mouse-pointer text-5xl mb-4 opacity-30"></i>
             <p class="mb-0">Select a step from the left panel to view its results</p>
           </div>
-          <div data-step-selector-target="loadingState" style="display: none;" class="text-center py-12">
+          <div data-step-selector-target="loadingState" style="display: none;" class="text-center py-12 px-6">
             <i class="fas fa-spinner fa-spin text-3xl text-blue-600 mb-4"></i>
             <p class="text-gray-600 mb-0">Loading step results...</p>
           </div>

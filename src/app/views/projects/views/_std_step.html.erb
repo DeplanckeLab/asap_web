@@ -5,7 +5,7 @@
       <div class="flex items-start justify-between">
         <div class="flex-1">
           <h3 class="mb-2">
-j
+            <i class="fas fa-tasks me-2"></i><%= @step.label.presence || @step.name %>
           </h3>
           <% if @step.description.present? %>
             <p class="text-muted mb-2"><%= @step.description %></p>

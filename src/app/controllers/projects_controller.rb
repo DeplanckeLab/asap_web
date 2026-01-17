@@ -1512,6 +1512,7 @@ class ProjectsController < ApplicationController
           @show_dashboard = false
           @show_view = false
           @show_form = false
+          @show_custom_form = false
         end
       end
     rescue => e
@@ -2764,9 +2765,20 @@ class ProjectsController < ApplicationController
       @show_dashboard = false
       @show_view = false
       @show_form = false
+      @show_custom_form = false
       
-      # If no runs and has_std_form, show form
-      if @runs.empty? && @step.has_std_form
+      # For steps with only one run authorized (multiple_runs == false) that are just unlocked (no runs yet)
+      if !@step.multiple_runs && @runs.empty?
+        if @step.has_std_form
+          # Show standard form if std_form option is activated
+          @show_form = true
+          prepare_std_form_data
+        else
+          # Show specific partial _<step_name>_form.html.erb if std_form == false
+          @show_custom_form = true
+        end
+      # If no runs and has_std_form (for multiple_runs steps), show form
+      elsif @runs.empty? && @step.has_std_form
         @show_form = true
         prepare_std_form_data
       elsif @step.has_std_dashboard && (@step.multiple_runs || @runs.count > 1)

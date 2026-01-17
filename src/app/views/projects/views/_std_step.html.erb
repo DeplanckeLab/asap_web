@@ -1,5 +1,6 @@
 <% if @step %>
   <div class="step-results h-full flex flex-col">
+    <% unless @show_form %>
     <!-- Step Header -->
     <div class="mb-4">
       <div class="flex items-start justify-between">
@@ -145,10 +146,22 @@
       <!-- Render parsing-specific view -->
       <%= render 'projects/views/parsing' %>
     <% end %>
+    <% end %>
     
     <!-- Standard Form (when no runs exist) -->
     <% if @show_form %>
       <%= render 'projects/views/std_form' %>
+    <% end %>
+    
+    <% unless @show_form %>
+    <!-- Custom Form (when std_form is false for single-run steps) -->
+    <% if @show_custom_form %>
+      <% custom_form_partial = "projects/views/#{@step.name}_form" %>
+      <% begin %>
+        <%= render custom_form_partial %>
+      <% rescue ActionView::MissingTemplate => e %>
+        <!-- Custom form partial not found: <%= custom_form_partial %> -->
+      <% end %>
     <% end %>
     
     <!-- Standard Dashboard (for multiple runs) -->
@@ -365,6 +378,7 @@
         </div>
       <% end %>
     </div>
+    <% end %>
   </div>
 <% else %>
   <div class="alert alert-warning">

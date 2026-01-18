@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position get_attributes]
 
   # GET /projects or /projects.json
   def index
@@ -1844,6 +1844,69 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/:key/get_attributes?step_id=:step_id&obj_id=:obj_id
+  # Returns attribute fields for a step and method
+  def get_attributes
+    step_id = params[:step_id]
+    obj_id = params[:obj_id] || params[:std_method_id]
+    
+    unless step_id && obj_id
+      render plain: '<div class="p-4 text-center text-red-600">Missing required parameters: step_id and obj_id</div>', status: :bad_request
+      return
+    end
+    
+    @step = Step.find_by(id: step_id)
+    @std_method = StdMethod.find_by(id: obj_id)
+    
+    unless @step && @std_method
+      render plain: '<div class="p-4 text-center text-red-600">Step or method not found</div>', status: :not_found
+      return
+    end
+    
+    # Get attributes using Basic.get_std_method_attrs
+    h_res = Basic.get_std_method_attrs(@std_method, @step)
+    @h_attrs = h_res[:h_attrs]
+    
+    # Get attribute layout from std_method
+    @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
+    
+    # If no layout, create a simple default layout
+    if @attr_layout.empty? && @h_attrs.any?
+      @attr_layout = [{
+        "horiz_elements" => [{
+          "attr_list" => @h_attrs.keys,
+          "class" => "",
+          "container_class" => "col-12"
+        }]
+      }]
+    end
+    
+    # Get available runs for input selection
+    @h_runs = {}
+    successful_runs = Run.where(project_id: @project.id, status_id: 3) # status_id 3 = success
+    successful_runs.each { |run| @h_runs[run.id] = run }
+    
+      # Get steps for lookups
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @h_steps = {}
+      if asap_docker_image
+        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+      end
+      
+      # Get annotations for input_data widgets (needed to find annot_id)
+      @h_annots = {}
+      successful_runs.each do |run|
+        annots = Annot.where(run_id: run.id, data_type_id: 3).all
+        annots.each { |a| @h_annots[a.id] = a }
+      end
+      
+      render partial: 'projects/views/attributes', layout: false
+  rescue StandardError => e
+    Rails.logger.error("[get_attributes] Error: #{e.class} - #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
+    render plain: "<div class='p-4 text-center text-red-600'>Error loading attributes: #{e.message}</div>", status: :internal_server_error
+  end
+
   private
 
     def prepare_steps_with_status
@@ -3159,3 +3222,4 @@ class ProjectsController < ApplicationController
       end
     end
 end
+

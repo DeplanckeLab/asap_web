@@ -140,8 +140,10 @@ export default class extends Controller {
         }
       })
 
-      // Show placeholder in attrs container
-      if (this.hasAttrsContainerTarget) {
+      // Load attributes when method is selected
+      if (this.hasAttrsContainerTarget && selectedMethodId) {
+        this.loadAttributes(selectedMethodId)
+      } else if (this.hasAttrsContainerTarget) {
         this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">Select a method to configure parameters...</p>'
       }
     } else {
@@ -149,6 +151,72 @@ export default class extends Controller {
         this.attrsContainerTarget.innerHTML = ''
       }
     }
+  }
+
+  loadAttributes(stdMethodId) {
+    if (!this.hasAttrsContainerTarget || !this.projectKeyValue || !this.stepIdValue) {
+      return
+    }
+    
+    const stepId = this.stepIdValue
+    const projectKey = this.projectKeyValue
+    
+    // Show loading state
+    this.attrsContainerTarget.innerHTML = '<div class="flex items-center justify-center p-4"><i class="fa fa-spinner fa-pulse mr-2"></i>Loading attributes...</div>'
+    
+    // Build URL
+    const url = `/projects/${projectKey}/get_attributes?step_id=${stepId}&obj_id=${stdMethodId}&format=html`
+    
+    // Fetch attributes
+    fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/html',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      return response.text()
+    })
+    .then(html => {
+      if (html && html.trim().length > 0) {
+        this.attrsContainerTarget.innerHTML = html
+        // Re-initialize any event listeners that might be needed
+        this.initializeAttributeListeners()
+      } else {
+        this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">No attributes available for this method.</p>'
+      }
+    })
+    .catch(error => {
+      console.error('[FormReqController] Error loading attributes:', error)
+      this.attrsContainerTarget.innerHTML = `<p class="text-red-600 text-sm">Error loading attributes: ${error.message}</p>`
+    })
+  }
+  
+  initializeAttributeListeners() {
+    // Handle checkbox changes for attributes loaded dynamically
+    const checkboxes = this.attrsContainerTarget.querySelectorAll('.std_form_checkbox')
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', function() {
+        const attrName = this.id.replace('checkbox-', '')
+        const hiddenField = document.getElementById('attrs_' + attrName)
+        if (hiddenField) {
+          hiddenField.value = this.checked ? 'true' : 'false'
+        }
+      })
+    })
+    
+    // Handle attribute field changes for validation or other updates
+    const attrInputs = this.attrsContainerTarget.querySelectorAll('input, select, textarea')
+    attrInputs.forEach(input => {
+      input.addEventListener('change', () => {
+        console.log('[FormReqController] Attribute changed:', input.name || input.id)
+      })
+    })
   }
 
   submit(event) {

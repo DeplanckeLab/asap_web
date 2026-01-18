@@ -1,0 +1,270 @@
+<%# Simplified attributes partial for rendering attribute fields %>
+<% @h_attr_vals ||= {} %>
+
+<div class="space-y-4">
+  <% @attr_layout.each do |vertical_el| %>
+    <div class="space-y-4">
+      <% vertical_el["horiz_elements"].each do |horiz_element| %>
+        <div class="<%= horiz_element['container_class'] || 'w-full' %>">
+          <% if horiz_element['attr_list'] %>
+            <% horiz_element['attr_list'].each do |attr_name| %>
+              <% attr = @h_attrs[attr_name] %>
+              <% next unless attr && attr['widget'] && !attr['obsolete'] %>
+              <% form_attr_name = "attrs[" + attr_name + "]" %>
+              <% attr_val = @h_attr_vals[attr_name] %>
+              
+              <div id="form-container_<%= attr_name %>" class="mb-4">
+                <% if attr['widget'] != 'checkbox' && attr['widget'] != 'hidden' %>
+                  <label for="attrs_<%= attr_name %>" class="block text-sm font-medium text-gray-700 mb-2">
+                    <%= raw(attr['label'] || attr_name.humanize) %>
+                    <% if attr['description'].present? %>
+                      <span class="text-gray-400 text-xs ml-1" title="<%= attr['description'] %>">?</span>
+                    <% end %>
+                  </label>
+                <% end %>
+                
+                <% case attr['widget'] %>
+                <% when 'input_data' %>
+                  <%# Input data widget - for selecting loom files or other input datasets %>
+                  <% if attr['valid_types'] && attr['source_steps'] %>
+                    <%# Get available runs from source steps %>
+                    <% source_step_ids = attr['source_steps'].map { |ssn| @h_steps.values.find { |s| s.name == ssn }&.id }.compact %>
+                    <% available_runs = @h_runs.values.select { |r| source_step_ids.include?(r.step_id) } %>
+                    
+                    <% if available_runs.any? %>
+                      <%# Get std_methods for runs %>
+                      <% std_method_ids = available_runs.map(&:std_method_id).compact.uniq %>
+                      <% h_std_methods = {} %>
+                      <% StdMethod.where(id: std_method_ids).each { |m| h_std_methods[m.id] = m } %>
+                      
+                      <%# For input_data with req_data_structure array, we need to store as JSON array in hidden field %>
+                      <%# Use a custom multi-select dropdown with enriched information %>
+                      <% min_items = attr['min_nber_items'] || 0 %>
+                      <% max_items = attr['max_nber_items'] %>
+                      <% is_multiple = attr['req_data_structure'] == 'array' && (max_items.nil? || max_items > 1) %>
+                      <% is_required = min_items && min_items > 0 %>
+                      
+                      <div class="input_data_widget relative" 
+                           data-controller="input-data-selector"
+                           data-input-data-selector-attr-name-value="<%= attr_name %>"
+                           data-input-data-selector-is-array-value="<%= attr['req_data_structure'] == 'array' ? 'true' : 'false' %>"
+                           data-input-data-selector-min-items-value="<%= min_items %>"
+                           data-input-data-selector-max-items-value="<%= max_items || '' %>"
+                           data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>">
+                        <%# Custom dropdown button %>
+                        <button type="button" 
+                                data-input-data-selector-target="dropdownButton"
+                                data-action="click->input-data-selector#toggleDropdown"
+                                class="w-full rounded-md border border-gray-300 px-3 py-2 text-left shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white flex items-center justify-between">
+                          <span class="text-gray-500" data-input-data-selector-target="dropdownText">-- Select <%= attr['label'] || attr_name.humanize %> --</span>
+                          <span class="ml-2 text-gray-400">▼</span>
+                        </button>
+                        
+                        <%# Dropdown menu %>
+                        <div data-input-data-selector-target="dropdownMenu"
+                             class="hidden absolute z-50 mt-1 w-full max-h-96 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg">
+                          <div class="py-1">
+                            <% options_count = 0 %>
+                            <% available_runs.each do |run| %>
+                              <% step = @h_steps[run.step_id] %>
+                              <% next unless step %>
+                              
+                              <%# Build the proper structure for input_data attribute %>
+                              <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
+                              <% step_dir = project_dir + step.name %>
+                              <% output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir %>
+                              <% loom_file = output_dir + 'output.loom' %>
+                              
+                              <%# Skip if loom file doesn't exist %>
+                              <% next unless File.exist?(loom_file) %>
+                              
+                              <%# Get annotations for this run - try to find /matrix annotation %>
+                              <% annots = Annot.where(run_id: run.id, data_type_id: 3).all %>
+                              <% matrix_annot = annots.find { |a| a.name == '/matrix' } || annots.first %>
+                              
+                              <%# If no annotation found, create a fallback structure %>
+                              <% unless matrix_annot %>
+                                <%# Try to find any annotation for this run %>
+                                <% any_annot = Annot.where(run_id: run.id).where("dim = 3 OR name LIKE '/matrix%' OR name = '/matrix'").first %>
+                                <% if any_annot %>
+                                  <% matrix_annot = any_annot %>
+                                <% end %>
+                              <% end %>
+                              
+                              <%# Get matrix dimensions %>
+                              <% if matrix_annot && matrix_annot.respond_to?(:nber_rows) && matrix_annot.respond_to?(:nber_cols) %>
+                                <% nber_rows = matrix_annot.nber_rows %>
+                                <% nber_cols = matrix_annot.nber_cols %>
+                                <% if nber_rows && nber_cols && nber_rows > 0 && nber_cols > 0 %>
+                                  <% matrix_size = "#{nber_cols.to_i} cells × #{nber_rows.to_i} genes" %>
+                                <% else %>
+                                  <% matrix_size = "N/A (dimensions unknown)" %>
+                                <% end %>
+                              <% else %>
+                                <% matrix_size = "N/A (dimensions unknown)" %>
+                              <% end %>
+                              
+                              <%# For display purposes, handle the fallback case %>
+                              <% unless matrix_annot %>
+                                <% matrix_annot_name = '/matrix' %>
+                              <% else %>
+                                <% matrix_annot_name = matrix_annot.respond_to?(:name) ? matrix_annot.name : '/matrix' %>
+                              <% end %>
+                              
+                              <%# Get method name %>
+                              <% method_name = (run.std_method_id && h_std_methods[run.std_method_id]) ? h_std_methods[run.std_method_id].name : 'N/A' %>
+                              
+                              <%# Get step/run number %>
+                              <% step_run_info = step.name.humanize %>
+                              <% if step.multiple_runs %>
+                                <% step_run_info += " ##{run.num || run.id}" %>
+                              <% end %>
+                              
+                              <% relative_path = loom_file.to_s.gsub(project_dir.to_s + '/', '') %>
+                              <%# Build data hash - use annot_id only if annotation exists %>
+                              <% if matrix_annot && matrix_annot.respond_to?(:id) && matrix_annot.id %>
+                                <% data_hash = { run_id: run.id, annot_id: matrix_annot.id, output_filename: relative_path, output_dataset: matrix_annot_name, output_attr_name: 'output_matrix' } %>
+                              <% else %>
+                                <%# Fallback: use run_id only, ASAP will find the matrix automatically %>
+                                <% data_hash = { run_id: run.id, output_filename: relative_path, output_dataset: matrix_annot_name, output_attr_name: 'output_matrix' } %>
+                              <% end %>
+                              <% data_value = data_hash.to_json %>
+                              <% options_count += 1 %>
+                              
+                              <label class="flex items-start px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0" 
+                                     data-run-id="<%= run.id %>" 
+                                     data-annot-id="<%= matrix_annot && matrix_annot.respond_to?(:id) ? matrix_annot.id : '' %>"
+                                     data-data-value="<%= data_value.to_json %>">
+                                <input type="<%= is_multiple ? 'checkbox' : 'radio' %>" 
+                                       name="attrs_<%= attr_name %>_options" 
+                                       value="<%= data_value %>"
+                                       class="mt-1 mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                       data-input-data-selector-target="option"
+                                       data-action="change->input-data-selector#optionChanged">
+                                <div class="flex-1">
+                                  <div class="font-medium text-gray-900"><%= step_run_info %></div>
+                                  <div class="text-sm text-gray-600 mt-1">
+                                    <span class="inline-block mr-3"><strong>Method:</strong> <%= method_name %></span>
+                                    <span class="inline-block mr-3"><strong>Matrix:</strong> <%= matrix_size %></span>
+                                    <span class="inline-block text-gray-500 text-xs"><%= relative_path %></span>
+                                  </div>
+                                </div>
+                              </label>
+                            <% end %>
+                            <% if options_count == 0 %>
+                              <div class="px-4 py-3 text-sm text-gray-500 text-center">
+                                No datasets available
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+                        
+                        <%# Selected items display %>
+                        <div data-input-data-selector-target="selectedDiv" class="mt-2 space-y-1 hidden"></div>
+                        
+                        <%# Hidden field to store the actual value (array if req_data_structure is array) %>
+                        <%= hidden_field_tag form_attr_name, '', { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
+                        
+                        <%# Validation message %>
+                        <div data-input-data-selector-target="validationDiv" class="mt-1 text-xs"></div>
+                        
+                        <% if is_required %>
+                          <p class="mt-1 text-xs text-gray-500">
+                            <%= attr['description'] %>
+                            <span class="text-red-600">*</span>
+                            <% if min_items > 0 %>
+                              <span class="text-gray-600">(Select at least <%= min_items %> item<%= min_items > 1 ? 's' : '' %><% if max_items %> up to <%= max_items %><% end %>)</span>
+                            <% end %>
+                          </p>
+                        <% else %>
+                          <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                        <% end %>
+                      </div>
+                    <% else %>
+                      <p class="text-sm text-red-600">No available datasets found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>
+                    <% end %>
+                  <% else %>
+                    <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
+                           value="<%= attr_val || attr['default'] || '' %>" 
+                           placeholder="<%= attr['placeholder'] || '' %>"
+                           class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
+                  <% end %>
+                  
+                <% when 'textfield' %>
+                  <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
+                         value="<%= attr_val || attr['default'] || '' %>" 
+                         placeholder="<%= attr['placeholder'] || '' %>"
+                         class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
+                  <% if attr['description'].present? %>
+                    <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                  <% end %>
+                  
+                <% when 'hidden' %>
+                  <%= hidden_field_tag form_attr_name, attr_val || attr['default'] || '' %>
+                  
+                <% when 'checkbox' %>
+                  <div class="flex items-center">
+                    <%= check_box_tag "checkbox-#{attr_name}", 'true', 
+                        ((attr_val && attr_val != false) || (!attr_val && attr['default'] != false)),
+                        { class: 'rounded border-gray-300 text-gray-900 focus:ring-gray-900 std_form_checkbox',
+                          id: "checkbox-#{attr_name}" } %>
+                    <%= hidden_field_tag form_attr_name, 
+                        ((attr_val && attr_val != false) || (!attr_val && attr['default'] != false)) ? 'true' : 'false',
+                        { id: "attrs_#{attr_name}" } %>
+                    <label for="checkbox-<%= attr_name %>" class="ml-2 text-sm text-gray-700">
+                      <%= raw(attr['label'] || attr_name.humanize) %>
+                    </label>
+                  </div>
+                  <% if attr['description'].present? %>
+                    <p class="mt-1 ml-6 text-xs text-gray-500"><%= attr['description'] %></p>
+                  <% end %>
+                  
+                <% when 'select' %>
+                  <% l = [] %>
+                  <% if attr['min_val'] && attr['max_val'] %>
+                    <% l = (attr['min_val']..attr['max_val']).to_a.map { |e| [e.to_s, e.to_s] } %>
+                  <% elsif attr['list'] %>
+                    <% l = attr['list'] %>
+                  <% end %>
+                  <% l.unshift([attr['null_name'] || "None", '']) unless attr['not_null'] %>
+                  <%= select_tag form_attr_name, 
+                      options_for_select(l, attr_val || attr['default']), 
+                      { class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
+                        id: "attrs_#{attr_name}" } %>
+                  <% if attr['description'].present? %>
+                    <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                  <% end %>
+                  
+                <% else %>
+                  <%# Default: text field %>
+                  <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
+                         value="<%= attr_val || attr['default'] || '' %>" 
+                         placeholder="<%= attr['placeholder'] || '' %>"
+                         class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
+                <% end %>
+                
+                <div id="validation_<%= attr_name %>" class="text-xs text-red-600 mt-1"></div>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<script>
+  // Handle checkbox changes
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.std_form_checkbox').forEach(function(checkbox) {
+      checkbox.addEventListener('change', function() {
+        var attrName = this.id.replace('checkbox-', '');
+        var hiddenField = document.getElementById('attrs_' + attrName);
+        if (hiddenField) {
+          hiddenField.value = this.checked ? 'true' : 'false';
+        }
+      });
+    });
+  });
+</script>
+

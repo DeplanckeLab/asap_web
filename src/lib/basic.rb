@@ -1214,7 +1214,9 @@ module Basic
             vals.each_index do |i|
               #    puts vals[i]                                                                                                                                 
               if h_cells[vals[i]] and stable_ids[i]
-                h_cells[vals[i]].push cells[stable_ids[i]]
+                # Convert stable_ids[i] to integer if it's a string, to use as array index
+                stable_id_idx = stable_ids[i].is_a?(String) ? stable_ids[i].to_i : stable_ids[i]
+                h_cells[vals[i]].push cells[stable_id_idx] if cells[stable_id_idx]
               else
                 puts "Category #{vals[i]} not found in #{a.name} [#{project_dir + a.filepath}]."
               end

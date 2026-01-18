@@ -348,7 +348,15 @@ class ReqsController < ApplicationController
     if tmp_attrs
       tmp_attrs.each_pair do |k, v|
         if @h_attrs[k] and @h_attrs[k]['req_data_structure'] and ["array", "hash"].include? @h_attrs[k]['req_data_structure']
-          tmp_attrs[k] = JSON.parse(v) #Basic.safe_parse_json(v, nil)
+          # Only parse as JSON if the value looks like JSON (starts with '{' or '[')
+          # Otherwise, keep it as a string
+          if v.is_a?(String) && (v.strip.start_with?('{') || v.strip.start_with?('['))
+            tmp_attrs[k] = Basic.safe_parse_json(v, nil)
+          else
+            # If it's not JSON but expected to be array/hash, keep as string
+            # This handles cases where the value is a simple string path
+            tmp_attrs[k] = v
+          end
         end
       end
     end

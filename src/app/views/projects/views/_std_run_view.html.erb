@@ -1,5 +1,10 @@
 <%# Standard Run View - Shows single run results %>
 <div id="std_run_view_<%= @step.id %>" class="std-run-view">
+  <div class="mb-3">
+    <div class="alert alert-info">
+      <strong>Display Mode:</strong> Standard View (multiple_runs: <%= @step.multiple_runs %>, has_std_view: <%= @step.has_std_view %>, run_id: <%= @run ? @run.id : 'none' %>)
+    </div>
+  </div>
   <% if @run %>
     <div id='show_run_<%= @run.id %>' class='run_container'>
       <% if @layout && @layout.any? %>

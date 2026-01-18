@@ -1,146 +1,12 @@
 <% if @step %>
-  <div class="step-results h-full flex flex-col">
+  <div class="step-results h-full flex flex-col" 
+       data-controller="slide-in-form"
+       data-slide-in-form-form-url-value="<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>"
+       data-slide-in-form-step-id-value="<%= @step.id %>"
+       data-slide-in-form-project-id-value="<%= @project.id %>"
+       data-step-id="<%= @step.id %>"
+       data-project-id="<%= @project.id %>">
     <% unless @show_form %>
-    <!-- Step Header -->
-    <div class="mb-4">
-      <div class="flex items-start justify-between">
-        <div class="flex-1">
-          <h3 class="mb-2">
-            <i class="fas fa-tasks me-2"></i><%= @step.label.presence || @step.name %>
-          </h3>
-          <% if @step.description.present? %>
-            <p class="text-muted mb-2"><%= @step.description %></p>
-          <% end %>
-          
-          <!-- Step Status -->
-          <% if @project_step %>
-            <% status_id = @project_step.status_id %>
-            <% status = case status_id
-                        when 1 then { name: 'waiting', class: 'warning', icon: 'clock' }
-                        when 2 then { name: 'running', class: 'info', icon: 'spinner fa-spin' }
-                        when 3 then { name: 'complete', class: 'success', icon: 'check-circle' }
-                        when 4 then { name: 'failed', class: 'danger', icon: 'exclamation-circle' }
-                        else { name: 'not started', class: 'secondary', icon: 'circle' }
-                        end %>
-            <div class="mb-3">
-              <span class="badge badge-<%= status[:class] %>">
-                <i class="fas fa-<%= status[:icon] %> me-1"></i><%= status[:name].humanize %>
-              </span>
-              <% if @step.rank %>
-                <span class="badge badge-secondary ml-2">Rank: <%= @step.rank %></span>
-              <% end %>
-            </div>
-          <% end %>
-        </div>
-        
-        <!-- Restart Button -->
-        <% if @project_step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
-          <button type="button" 
-                  class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                  data-controller="restart-step"
-                  data-restart-step-project-id-value="<%= @project.id %>"
-                  data-restart-step-step-id-value="<%= @step.id %>"
-                  data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
-                  data-action="click->restart-step#restart"
-                  style="flex-shrink: 0;">
-            Restart
-          </button>
-        <% end %>
-      </div>
-    </div>
-
-    <!-- Error Display Section -->
-    <% if @project_step && @project_step.status_id == 4 && @project_step.error_message.present? %>
-      <div class="mb-4">
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg shadow-sm">
-          <div class="flex items-start">
-            <div class="flex-shrink-0">
-              <i class="fas fa-exclamation-circle text-red-600 text-xl"></i>
-            </div>
-            <div class="ml-3 flex-1">
-              <h4 class="text-red-800 font-semibold mb-2">
-                <i class="fas fa-times-circle me-2"></i>Step Failed
-              </h4>
-              <div class="text-red-700 text-sm whitespace-pre-wrap break-words">
-                <%= @project_step.error_message %>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    <% end %>
-
-    <!-- Waiting/Running Status Section (for steps with has_multiple_runs = false) -->
-    <% if @step && !@step.multiple_runs && @current_run && (@current_run.status_id == 1 || @current_run.status_id == 2) %>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
-        <div class="px-6 py-8 text-center">
-          <% status_id = @current_run.status_id %>
-          <% step_name = @step.label.presence || @step.name %>
-          
-          <% if status_id == 1 %>
-            <div class="flex flex-col items-center justify-center"
-                 <% if @current_run&.slurm_job_id %>
-                   data-controller="queue-position"
-                   data-queue-position-run-id-value="<%= @current_run.id %>"
-                   data-queue-position-slurm-job-id-value="<%= @current_run.slurm_job_id %>"
-                   data-queue-position-project-id-value="<%= @project.id %>"
-                   <% if @current_run.submitted_at %>
-                     data-queue-position-submitted-at-value="<%= @current_run.submitted_at.iso8601 %>"
-                   <% end %>
-                 <% end %>>
-              <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-              <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_name %> is waiting</h3>
-              <p class="text-gray-600 mb-4">The job is queued and will start shortly.</p>
-              <% if @current_run&.slurm_job_id %>
-                <% if @current_run.submitted_at %>
-                  <div class="text-sm text-gray-600 mb-3">
-                    <span class="font-medium">Waiting time:</span>
-                    <span data-queue-position-target="waitingTime" class="ml-2 font-mono">--:--</span>
-                  </div>
-                <% end %>
-                <div data-queue-position-target="queueInfo" class="text-gray-600">
-                  <span>Position in the queue: </span>
-                  <span data-queue-position-target="position" class="inline-block">
-                    <i class="fas fa-spinner fa-spin"></i>
-                  </span>
-                </div>
-                <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
-                  Nothing in the queue, will start shortly...
-                </div>
-              <% end %>
-            </div>
-          <% elsif status_id == 2 %>
-            <div class="flex flex-col items-center justify-center" 
-                 data-controller="parsing-timer"
-                 <% if @current_run&.start_time %>
-                   data-parsing-timer-start-time-value="<%= @current_run.start_time.iso8601 %>"
-                 <% end %>
-                 <% if @current_run&.pred_process_duration %>
-                   data-parsing-timer-expected-duration-value="<%= @current_run.pred_process_duration %>"
-                 <% end %>>
-              <i class="fas fa-spinner fa-spin text-blue-500 text-5xl mb-4"></i>
-              <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_name %> is running</h3>
-              <p class="text-gray-600 mb-4">The job is currently processing your data. Results will appear here when complete.</p>
-              
-              <%# Time counter section %>
-              <div class="mt-4 space-y-2">
-                <div class="text-sm text-gray-700">
-                  <span class="font-medium">Elapsed time:</span>
-                  <span data-parsing-timer-target="elapsedTime" class="ml-2 font-mono">--:--:--</span>
-                </div>
-                <% if @current_run&.pred_process_duration %>
-                  <div class="text-sm text-gray-600">
-                    <span class="font-medium">Expected time:</span>
-                    <span data-parsing-timer-target="expectedTime" class="ml-2 font-mono"><%= duration(@current_run.pred_process_duration.to_i) %></span>
-                  </div>
-                <% end %>
-              </div>
-            </div>
-          <% end %>
-        </div>
-      </div>
-    <% end %>
-
     <!-- Step Results Section -->
     <% if @step.has_std_view && @step.name == 'parsing' %>
       <!-- Render parsing-specific view -->
@@ -171,78 +37,200 @@
     
     <!-- Standard Run View (for single run) -->
     <% if @show_view %>
-      <%= render 'projects/views/std_run_view' %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col" id="result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+        <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <%= @step.label.presence || @step.name %> results
+            </h3>
+            <div class="flex items-center gap-3">
+              <!-- New Run Button -->
+              <% if @step.has_std_form && @step.multiple_runs %>
+                <button type="button" 
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                        data-action="click->slide-in-form#open"
+                        style="flex-shrink: 0;">
+                  + New run
+                </button>
+              <% end %>
+              <!-- Restart Button -->
+              <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+                <button type="button" 
+                        class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                        data-controller="restart-step"
+                        data-restart-step-project-id-value="<%= @project.id %>"
+                        data-restart-step-step-id-value="<%= @step.id %>"
+                        data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
+                        data-action="click->restart-step#restart"
+                        style="flex-shrink: 0;">
+                  Restart
+                </button>
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div class="px-6 py-5 space-y-6 flex-1">
+          <%= render 'projects/views/std_run_view' %>
+        </div>
+      </div>
+    <% end %>
+    
+    <!-- Debug info: Show what display mode is active -->
+    <% if @show_dashboard || @show_view || @show_form || @show_custom_form %>
+      <div class="mb-3">
+        <div class="alert alert-secondary">
+          <strong>Step Configuration:</strong> multiple_runs=<%= @step.multiple_runs %>, has_std_view=<%= @step.has_std_view %>, has_std_dashboard=<%= @step.has_std_dashboard %>, has_std_form=<%= @step.has_std_form %> | 
+          <strong>Display Flags:</strong> show_dashboard=<%= @show_dashboard %>, show_view=<%= @show_view %>, show_form=<%= @show_form %>, show_custom_form=<%= @show_custom_form %> | 
+          <strong>Runs:</strong> <%= @runs ? @runs.size : 0 %>
+        </div>
+      </div>
     <% end %>
 
     <!-- Runs Section (fallback if no standard dashboard/view) -->
     <% unless @show_dashboard || @show_view %>
-      <div class="runs-section">
-        <h4 class="mb-3">
-          <i class="fas fa-list me-2"></i>Runs
-          <span class="badge badge-info"><%= @runs.count %></span>
-        </h4>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+        <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <%= @step.label.presence || @step.name %> results
+            </h3>
+            <div class="flex items-center gap-3">
+              <!-- New Run Button -->
+              <% if @step.has_std_form && @step.multiple_runs %>
+                <button type="button" 
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
+                        data-action="click->slide-in-form#open"
+                        style="flex-shrink: 0;">
+                  + New run
+                </button>
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div class="flex-1 flex flex-col min-h-0">
+          <div class="px-6 py-5 flex-shrink-0">
+            <div class="runs-section">
+              <h4 class="mb-4 text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                <i class="fas fa-list me-2"></i>Runs
+                <span class="badge badge-info"><%= @runs.count %></span>
+              </h4>
+            </div>
+          </div>
         
         <% if @runs.any? %>
-          <div class="table-responsive">
-            <table class="table table-hover">
-              <thead class="thead-light">
+          <%# Load std_methods for method labels %>
+          <% unless defined?(@h_std_methods) && @h_std_methods %>
+            <% std_method_ids = @runs.map(&:std_method_id).compact.uniq %>
+            <% @h_std_methods = {} %>
+            <% StdMethod.where(id: std_method_ids).each { |m| @h_std_methods[m.id] = m } if std_method_ids.any? %>
+          <% end %>
+          
+          <div class="flex-1 min-h-0 px-6 pb-5 overflow-x-hidden">
+            <table class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
+              <thead class="bg-gray-50">
                 <tr>
-                  <th>Run #</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Error</th>
-                  <th>Actions</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">#</th>
+                  <% if admin? %>
+                    <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">ID</th>
+                  <% end %>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider max-w-xs">Parameters</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Status</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Created</th>
+                  <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody class="bg-white divide-y divide-gray-200">
                 <% @runs.each do |run| %>
                   <% run_status = case run.status_id
-                                  when 1 then { name: 'waiting', class: 'warning' }
-                                  when 2 then { name: 'running', class: 'info' }
-                                  when 3 then { name: 'complete', class: 'success' }
-                                  when 4 then { name: 'failed', class: 'danger' }
-                                  else { name: 'unknown', class: 'secondary' }
+                                  when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
+                                  when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
+                                  when 3 then { name: 'complete', class: 'success', bg: 'bg-green-100', text: 'text-green-800' }
+                                  when 4 then { name: 'failed', class: 'danger', bg: 'bg-red-100', text: 'text-red-800' }
+                                  else { name: 'unknown', class: 'secondary', bg: 'bg-gray-100', text: 'text-gray-800' }
                                   end %>
-                  <tr>
-                    <td>
-                      <strong>#<%= run.num || run.id %></strong>
+                  <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
+                  <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
+                  <%# Parse run attributes for parameters %>
+                  <% h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
+                  <% params_display = h_run_attrs.map { |k, v| "#{k}: #{v}" }.join(", ") %>
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-3 py-4 whitespace-nowrap">
+                      <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
                     </td>
-                    <td>
-                      <span class="badge badge-<%= run_status[:class] %>">
-                        <%= run_status[:name].humanize %>
-                      </span>
+                    <% if admin? %>
+                      <td class="px-3 py-4 whitespace-nowrap">
+                        <div class="text-xs text-gray-600 font-mono"><%= run.id %></div>
+                      </td>
+                    <% end %>
+                    <td class="px-3 py-4">
+                      <div class="text-sm text-gray-900 truncate" style="max-width: 120px;" title="<%= method_label %>"><%= method_label %></div>
                     </td>
-                    <td>
-                      <% if run.created_at %>
-                        <%= run.created_at.strftime("%Y-%m-%d %H:%M") %>
-                      <% else %>
-                        <span class="text-muted">N/A</span>
-                      <% end %>
+                    <td class="px-3 py-4">
+                      <div class="text-xs text-gray-600">
+                        <% if params_display.present? %>
+                          <div class="truncate" style="max-width: 150px;" title="<%= params_display %>">
+                            <%= truncate(params_display, length: 35) %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400">-</span>
+                        <% end %>
+                      </div>
                     </td>
-                    <td>
-                      <% if run.status_id == 4 && run.error.present? %>
-                        <div class="text-red-600 text-xs max-w-xs truncate" title="<%= run.error %>">
-                          <i class="fas fa-exclamation-triangle me-1"></i>
-                          <%= truncate(run.error, length: 50) %>
-                        </div>
-                      <% else %>
-                        <span class="text-muted">-</span>
-                      <% end %>
+                    <td class="px-3 py-4 whitespace-nowrap">
+                      <div class="flex flex-col gap-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
+                          <%= run_status[:name].humanize %>
+                        </span>
+                        <% if run.status_id == 4 && run.error.present? %>
+                          <div class="text-xs text-red-600 truncate" style="max-width: 120px;" title="<%= run.error %>">
+                            <i class="fas fa-exclamation-triangle"></i>
+                          </div>
+                        <% end %>
+                      </div>
                     </td>
-                    <td>
-                      <%= link_to project_path(@project, view: 'data'), class: 'btn btn-sm btn-outline-primary' do %>
-                        <i class="fas fa-eye me-1"></i>View
-                      <% end %>
+                    <td class="px-3 py-4 whitespace-nowrap">
+                      <div class="text-xs text-gray-900">
+                        <% if run.created_at %>
+                          <%= run.created_at.strftime("%Y-%m-%d<br>%H:%M").html_safe %>
+                        <% else %>
+                          <span class="text-gray-400">N/A</span>
+                        <% end %>
+                      </div>
+                    </td>
+                    <td class="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div class="flex items-center justify-end gap-1.5">
+                        <%= link_to run_path(run), class: 'inline-flex items-center px-2 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500', title: 'View' do %>
+                          <i class="fas fa-eye"></i>
+                        <% end %>
+                        <% if editable?(@project) %>
+                          <%= button_to run_path(run, format: :json), 
+                              method: :delete,
+                              remote: true,
+                              form: {
+                                data: {
+                                  controller: 'delete-run',
+                                  action: 'submit->delete-run#deleteRun',
+                                  'delete-run-step-id-value': @step.id,
+                                  'delete-run-run-num-value': (run.num || run.id).to_s
+                                }
+                              },
+                              class: 'inline-flex items-center px-2 py-1 border border-red-300 shadow-sm text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500', 
+                              title: 'Delete' do %>
+                            <i class="fas fa-trash"></i>
+                          <% end %>
+                        <% end %>
+                      </div>
                     </td>
                   </tr>
                   <% if run.status_id == 4 && run.error.present? %>
                     <tr class="bg-red-50">
-                      <td colspan="5" class="p-3">
-                        <div class="bg-white border border-red-200 rounded p-3">
+                      <td colspan="<%= admin? ? 7 : 6 %>" class="px-3 py-4">
+                        <div class="bg-white border border-red-200 rounded-lg p-4">
                           <div class="flex items-start">
-                            <i class="fas fa-exclamation-circle text-red-600 mt-1 mr-2"></i>
+                            <i class="fas fa-exclamation-circle text-red-600 mt-0.5 mr-3"></i>
                             <div class="flex-1">
-                              <strong class="text-red-800 text-sm block mb-1">Error Details:</strong>
+                              <strong class="text-red-800 text-sm block mb-2">Error Details:</strong>
                               <div class="text-red-700 text-xs font-mono whitespace-pre-wrap break-words">
                                 <%= run.error %>
                               </div>
@@ -264,122 +252,37 @@
             </div>
           </div>
         <% end %>
+          </div>
+        </div>
       </div>
     <% end %>
-
-    <!-- Step Information -->
-    <div class="step-info mt-4 flex-shrink-0 border-t border-gray-200 pt-4">
-      <h4 class="mb-3 text-lg font-semibold text-gray-900">
-        <i class="fas fa-info-circle me-2"></i>Step Information
-      </h4>
-      <div class="grid grid-cols-2 gap-4">
-        <dl class="grid grid-cols-2 gap-x-4 gap-y-2">
-          <dt class="text-sm font-medium text-gray-500">Name:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.name %></dd>
-          
-          <% if @step.label.present? %>
-            <dt class="text-sm font-medium text-gray-500">Label:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.label %></dd>
-          <% end %>
-          
-          <% if @step.obj_name.present? %>
-            <dt class="text-sm font-medium text-gray-500">Object Name:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.obj_name %></dd>
-          <% end %>
-          
-          <% if @step.tag.present? %>
-            <dt class="text-sm font-medium text-gray-500">Tag:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.tag %></dd>
-          <% end %>
-          
-          <% if @step.rank.present? %>
-            <dt class="text-sm font-medium text-gray-500">Rank:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.rank %></dd>
-          <% end %>
-          
-          <% if @step.group_name.present? %>
-            <dt class="text-sm font-medium text-gray-500">Group:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.group_name %></dd>
-          <% end %>
-          
-          <% if @step.version_id.present? %>
-            <dt class="text-sm font-medium text-gray-500">Version ID:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.version_id %></dd>
-          <% end %>
-          
-          <% if @step.docker_image_id.present? %>
-            <dt class="text-sm font-medium text-gray-500">Docker Image ID:</dt>
-            <dd class="text-sm text-gray-900"><%= @step.docker_image_id %></dd>
-          <% end %>
-          
-          <dt class="text-sm font-medium text-gray-500">Multiple Runs:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.multiple_runs ? 'Yes' : 'No' %></dd>
-          
-          <dt class="text-sm font-medium text-gray-500">Has Standard Dashboard:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.has_std_dashboard ? 'Yes' : 'No' %></dd>
-          
-          <dt class="text-sm font-medium text-gray-500">Has Standard Form:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.has_std_form ? 'Yes' : 'No' %></dd>
-          
-          <dt class="text-sm font-medium text-gray-500">Has Standard View:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.has_std_view ? 'Yes' : 'No' %></dd>
-          
-          <dt class="text-sm font-medium text-gray-500">Hidden:</dt>
-          <dd class="text-sm text-gray-900"><%= @step.hidden ? 'Yes' : 'No' %></dd>
-        </dl>
+    <% end %>
+    
+    <!-- Slide-in Form Panel -->
+    <div data-slide-in-form-target="overlay" 
+         class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden transition-opacity duration-300"
+         data-action="click->slide-in-form#overlayClick"
+         style="display: none;"></div>
+    
+    <div data-slide-in-form-target="panel" 
+         class="fixed top-0 right-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 hidden overflow-y-auto transition-transform duration-300 ease-out"
+         style="display: none; transform: translateX(100%);">
+      <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10 flex items-center justify-between" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+        <h3 class="text-lg font-semibold text-gray-900">
+          New <%= @step.label.presence || @step.name.humanize %>
+        </h3>
+        <button type="button" 
+                class="text-gray-500 hover:text-gray-700 transition-colors"
+                data-action="click->slide-in-form#close">
+          <i class="fas fa-times text-xl"></i>
+        </button>
       </div>
-      
-      <% if @step.warnings.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Warnings:</dt>
-          <dd class="text-sm text-gray-900 whitespace-pre-line bg-yellow-50 border border-yellow-200 rounded p-3"><%= @step.warnings %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.attrs_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Optional Step Attributes:</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.attrs_json %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.method_attrs_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Standard Method Attribute Global Properties:</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.method_attrs_json %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.output_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Standard Outputs Global Properties:</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.output_json %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.command_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Default Command:</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.command_json %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.dashboard_card_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Dashboard Card Details (for the std dashboard):</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.dashboard_card_json %></dd>
-        </div>
-      <% end %>
-      
-      <% if @step.show_view_json.present? %>
-        <div class="mt-4">
-          <dt class="text-sm font-medium text-gray-500 mb-2">Show View Details (for the std view):</dt>
-          <dd class="text-sm text-gray-900 font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words"><%= @step.show_view_json %></dd>
-        </div>
-      <% end %>
+      <div data-slide-in-form-target="content" class="p-6">
+        <!-- Form content will be loaded here -->
+      </div>
     </div>
-    <% end %>
   </div>
+
 <% else %>
   <div class="alert alert-warning">
     <i class="fas fa-exclamation-triangle me-2"></i>Step not found.

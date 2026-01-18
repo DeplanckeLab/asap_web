@@ -1,4 +1,282 @@
-<p id="notice"><%= notice %></p>
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col" id="run_show">
+  <!-- Header with gradient background -->
+  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <% if @step %>
+            <i class="fas fa-cog text-blue-600"></i>
+            <%= @step.label.presence || @step.name.humanize %>
+          <% end %>
+          - Run #<%= @run.num || @run.id %>
+        </h3>
+        <% if @status %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= case @run.status_id
+                                                                                                      when 1 then 'bg-yellow-100 text-yellow-800'
+                                                                                                      when 2 then 'bg-blue-100 text-blue-800'
+                                                                                                      when 3 then 'bg-green-100 text-green-800'
+                                                                                                      when 4 then 'bg-red-100 text-red-800'
+                                                                                                      else 'bg-gray-100 text-gray-800'
+                                                                                                      end %>">
+            <%= @status.name.humanize %>
+          </span>
+        <% end %>
+      </div>
+      <div class="flex items-center gap-3">
+        <%= link_to project_path(@project, view: 'data'), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+          <i class="fas fa-arrow-left mr-2"></i>Back
+        <% end %>
+        <% if admin? %>
+          <%= link_to edit_run_path(@run), class: 'inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-edit mr-2"></i>Edit
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
 
-<%= link_to 'Edit', edit_run_path(@run) %> |
-<%= link_to 'Back', runs_path %>
+  <div class="px-6 py-5 space-y-6 flex-1">
+    <!-- Run Information Section -->
+    <div class="pt-4 relative">
+      <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+        <i class="fas fa-info-circle text-gray-500"></i>
+        Run Information
+      </h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <% if @std_method %>
+          <div>
+            <span class="text-xs font-medium text-gray-500 uppercase">Method</span>
+            <p class="text-sm text-gray-900 mt-1"><%= @std_method.label.presence || @std_method.name %></p>
+          </div>
+        <% end %>
+        <% if @step %>
+          <div>
+            <span class="text-xs font-medium text-gray-500 uppercase">Step</span>
+            <p class="text-sm text-gray-900 mt-1"><%= @step.label.presence || @step.name.humanize %></p>
+          </div>
+        <% end %>
+        <div>
+          <span class="text-xs font-medium text-gray-500 uppercase">Created</span>
+          <p class="text-sm text-gray-900 mt-1"><%= @run.created_at ? @run.created_at.strftime("%Y-%m-%d %H:%M:%S") : 'N/A' %></p>
+        </div>
+        <% if @run.submitted_at %>
+          <div>
+            <span class="text-xs font-medium text-gray-500 uppercase">Submitted</span>
+            <p class="text-sm text-gray-900 mt-1"><%= @run.submitted_at.strftime("%Y-%m-%d %H:%M:%S") %></p>
+          </div>
+        <% end %>
+        <% if @run.start_time %>
+          <div>
+            <span class="text-xs font-medium text-gray-500 uppercase">Started</span>
+            <p class="text-sm text-gray-900 mt-1"><%= @run.start_time.strftime("%Y-%m-%d %H:%M:%S") %></p>
+          </div>
+        <% end %>
+        <% if @run.duration %>
+          <div>
+            <span class="text-xs font-medium text-gray-500 uppercase">Duration</span>
+            <p class="text-sm text-gray-900 mt-1 font-mono"><%= duration(@run.duration.to_i) %></p>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <!-- Error Display -->
+    <% if @run.status_id == 4 && (@run.error.present? || (@h_res && @h_res['displayed_error'])) %>
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
+          <div class="flex-1">
+            <h4 class="text-sm font-semibold text-red-800 mb-2">Error</h4>
+            <% if @run.error.present? %>
+              <div class="text-red-700 text-sm font-mono whitespace-pre-wrap break-words"><%= @run.error %></div>
+            <% end %>
+            <% if @h_res && @h_res['displayed_error'] %>
+              <% errors = @h_res['displayed_error'].is_a?(Array) ? @h_res['displayed_error'] : [@h_res['displayed_error']] %>
+              <% errors.each do |error_msg| %>
+                <p class="text-red-800 mb-1" title="<%= error_msg %>"><%= error_msg %></p>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Parameters Section -->
+    <% if @h_run_attrs.any? %>
+      <div class="pt-4 relative">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-cog text-gray-500"></i>
+          Parameters
+        </h4>
+        <div class="flex flex-wrap gap-2 items-center">
+          <% @h_run_attrs.each do |key, value| %>
+            <% if value.is_a?(Hash) && value['run_id'] %>
+              <% linked_run = Run.find_by(id: value['run_id']) %>
+              <% if linked_run %>
+                <%= link_to run_path(linked_run), class: 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors' do %>
+                  <%= key %>: Run #<%= linked_run.num || linked_run.id %>
+                <% end %>
+              <% else %>
+                <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-600">
+                  <%= key %>: Run #<%= value['run_id'] %> (not found)
+                </span>
+              <% end %>
+            <% elsif value.is_a?(Array) %>
+              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
+                <%= key %>: <%= value.join(', ') %>
+              </span>
+            <% else %>
+              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800" data-toggle="tooltip" title="<%= "#{key}: #{value}" %>">
+                <%= truncate("#{key}: #{value}", length: 30) %>
+              </span>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Output Summary -->
+    <% if @run.status_id == 3 && @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
+      <div class="pt-4 relative">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-chart-bar text-gray-500"></i>
+          Output Summary
+        </h4>
+        <div class="flex flex-wrap gap-2 items-center">
+          <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
+            <% if @h_res && @h_res[output["key"]] %>
+              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-800">
+                <%= output["label"] %>: <%= @h_res[output["key"]] %>
+              </span>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Warnings -->
+    <% if @run.status_id == 3 && @h_res && @h_res['warnings'] && @h_res['warnings'].any? %>
+      <div class="alert alert-warning flex items-start gap-3">
+        <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
+        <div class="flex-1">
+          <h4 class="text-sm font-semibold text-yellow-800 mb-2">Warnings</h4>
+          <% @h_res['warnings'].each do |warning| %>
+            <% if warning.is_a?(Hash) %>
+              <p class="text-yellow-800 mb-1">
+                <strong><%= warning['name'] %></strong>
+                <% if warning['description'] %>
+                  <span class="block text-sm mt-1"><%= warning['description'] %></span>
+                <% end %>
+              </p>
+            <% else %>
+              <p class="text-yellow-800 mb-1"><%= warning %></p>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Output Files -->
+    <% if @h_outputs && @h_outputs.any? %>
+      <div class="pt-4 relative">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-file-alt text-gray-500"></i>
+          Output Files
+        </h4>
+        <div class="space-y-3">
+          <% @h_outputs.each do |output_key, output_data| %>
+            <% if output_data.is_a?(Hash) %>
+              <div>
+                <p class="text-sm font-medium text-gray-700 mb-2"><%= output_key.humanize %>:</p>
+                <ul class="list-disc list-inside space-y-1 ml-4">
+                  <% output_data.each do |file_key, file_info| %>
+                    <li class="text-sm text-gray-600">
+                      <% if file_info.is_a?(Hash) && file_info['filename'] %>
+                        <%= file_info['filename'] %>
+                        <% if file_info['filesize'] %>
+                          <span class="text-gray-500">(<%= display_mem(file_info['filesize']) %>)</span>
+                        <% end %>
+                      <% else %>
+                        <%= file_key %>
+                      <% end %>
+                    </li>
+                  <% end %>
+                </ul>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Additional Information (Admin only) -->
+    <% if admin? %>
+      <div class="pt-4 border-t border-gray-200 relative">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-shield-alt text-gray-500"></i>
+          Admin Information
+        </h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Run ID</span>
+              <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.id %></p>
+            </div>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Project ID</span>
+              <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.project_id %></p>
+            </div>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Step ID</span>
+              <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.step_id %></p>
+            </div>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Std Method ID</span>
+              <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.std_method_id || 'N/A' %></p>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Status ID</span>
+              <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.status_id %></p>
+            </div>
+            <% if @run.slurm_job_id %>
+              <div>
+                <span class="text-xs font-medium text-gray-500 uppercase">SLURM Job ID</span>
+                <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.slurm_job_id %></p>
+              </div>
+            <% end %>
+            <% if @run.pid %>
+              <div>
+                <span class="text-xs font-medium text-gray-500 uppercase">PID</span>
+                <p class="text-sm text-gray-900 font-mono mt-1"><%= @run.pid %></p>
+              </div>
+            <% end %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Async</span>
+              <p class="text-sm text-gray-900 mt-1"><%= @run.async ? 'Yes' : 'No' %></p>
+            </div>
+            <% if @run.max_ram %>
+              <div>
+                <span class="text-xs font-medium text-gray-500 uppercase">Max RAM</span>
+                <p class="text-sm text-gray-900 mt-1"><%= display_mem(@run.max_ram * 1000) %></p>
+              </div>
+            <% end %>
+            <% if @run.waiting_duration %>
+              <div>
+                <span class="text-xs font-medium text-gray-500 uppercase">Waiting Duration</span>
+                <p class="text-sm text-gray-900 font-mono mt-1"><%= duration(@run.waiting_duration.to_i) %></p>
+              </div>
+            <% end %>
+          </div>
+        </div>
+        <% if @run.command_json.present? %>
+          <div class="mt-4 pt-4 border-t border-gray-200">
+            <span class="text-xs font-medium text-gray-500 uppercase block mb-2">Command JSON</span>
+            <pre class="bg-gray-50 border border-gray-200 rounded-md p-3 text-xs font-mono text-gray-700 overflow-x-auto"><%= JSON.pretty_generate(Basic.safe_parse_json(@run.command_json, {})) %></pre>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>

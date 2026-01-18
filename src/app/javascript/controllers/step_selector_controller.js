@@ -689,6 +689,54 @@ export default class extends Controller {
       }
       
       controller.contentTarget.innerHTML = html
+      
+      // Trigger Stimulus to scan for new controllers in the loaded content
+      // Stimulus should automatically detect via MutationObserver, but we'll also manually trigger
+      if (window.Stimulus) {
+        console.log('[StepSelectorController] Triggering Stimulus scan for new controllers...')
+        try {
+          // Use setTimeout to ensure DOM is fully updated
+          // Multiple timeouts to ensure targets are found
+          setTimeout(() => {
+            // Manually scan using Stimulus's router
+            if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+              console.log('[StepSelectorController] Calling Stimulus router.scan()')
+              window.Stimulus.router.scan()
+            }
+            
+            // Scan again after a delay to catch any controllers that need targets
+            setTimeout(() => {
+              if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+                console.log('[StepSelectorController] Calling second Stimulus router.scan() to ensure all controllers connected')
+                window.Stimulus.router.scan()
+              }
+            }, 100)
+            
+            // Check for form-req controller after a short delay
+            setTimeout(() => {
+              const formReqElement = controller.contentTarget.querySelector('[data-controller*="form-req"]')
+              if (formReqElement) {
+                console.log('[StepSelectorController] Found form-req element')
+                const formReqController = window.Stimulus.getControllerForElementAndIdentifier(formReqElement, 'form-req')
+                if (!formReqController) {
+                  console.warn('[StepSelectorController] form-req controller NOT connected yet')
+                  // Try scanning again
+                  if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+                    window.Stimulus.router.scan()
+                  }
+                } else {
+                  console.log('[StepSelectorController] form-req controller IS connected')
+                }
+              } else {
+                console.log('[StepSelectorController] No form-req element found in loaded content')
+              }
+            }, 100)
+          }, 0)
+        } catch (e) {
+          console.warn('[StepSelectorController] Error triggering Stimulus scan:', e)
+        }
+      }
+      
       if (controller.hasLoadingStateTarget) {
         controller.loadingStateTarget.style.display = 'none'
       }

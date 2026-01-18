@@ -49,6 +49,89 @@ class SlurmJobMonitorJob < ApplicationJob
           return
         end
         
+        # No output.json - check exec.out for displayed_error (indicates job failed)
+        exec_out = output_dir + 'exec.out'
+        exec_run_details = output_dir + 'exec_run_details.log'
+        
+        if File.exist?(exec_out) && File.mtime(exec_out) > 1.hour.ago
+          begin
+            exec_content = File.read(exec_out)
+            exec_json = JSON.parse(exec_content)
+            if exec_json.is_a?(Hash) && exec_json['displayed_error'].present?
+              error_msg = if exec_json['displayed_error'].is_a?(Array)
+                exec_json['displayed_error'].join('; ')
+              else
+                exec_json['displayed_error'].to_s
+              end
+              Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has displayed_error in exec.out: #{error_msg}")
+              
+              # Create output.json with the error so it's available for the UI
+              unless File.exist?(output_json_filename)
+                Rails.logger.info("[SlurmJobMonitorJob] Creating output.json with displayed_error for Run##{run_id}")
+                File.open(output_json_filename, 'w') do |f|
+                  f.write(exec_json.to_json)
+                end
+              end
+              
+              # Mark run as failed - no need to run full finish_run processing for early failures
+              finish_run_with_error(run, error_msg)
+              return
+            end
+          rescue JSON::ParserError
+            # Not JSON, continue checking
+          end
+        end
+        
+        # Check exec_run_details.log for exit code
+        if File.exist?(exec_run_details) && File.mtime(exec_run_details) > 1.hour.ago
+          details_content = File.read(exec_run_details)
+          if details_content.include?('Command exited with non-zero status')
+            error_msg = extract_error_message(run) || "Job exited with non-zero status (see exec.err or exec.out for details)"
+            Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} exited with non-zero status")
+            
+            # Create output.json with displayed_error if it doesn't exist
+            unless File.exist?(output_json_filename)
+              # Try to get error from exec.out first (might have displayed_error JSON)
+              if File.exist?(exec_out) && File.mtime(exec_out) > 1.hour.ago
+                begin
+                  exec_content = File.read(exec_out)
+                  exec_json = JSON.parse(exec_content)
+                  if exec_json.is_a?(Hash) && exec_json['displayed_error'].present?
+                    Rails.logger.info("[SlurmJobMonitorJob] Creating output.json with displayed_error from exec.out for Run##{run_id}")
+                    error_msg = if exec_json['displayed_error'].is_a?(Array)
+                      exec_json['displayed_error'].join('; ')
+                    else
+                      exec_json['displayed_error'].to_s
+                    end
+                    File.open(output_json_filename, 'w') do |f|
+                      f.write(exec_json.to_json)
+                    end
+                    # Mark run as failed - no need to run full finish_run processing for early failures
+                    finish_run_with_error(run, error_msg)
+                    return
+                  end
+                rescue JSON::ParserError
+                  # Not JSON, create output.json with generic error
+                end
+              end
+              
+              # Create output.json with error message
+              Rails.logger.info("[SlurmJobMonitorJob] Creating output.json with error message for Run##{run_id}")
+              h_error = { 'displayed_error' => error_msg }
+              File.open(output_json_filename, 'w') do |f|
+                f.write(h_error.to_json)
+              end
+              
+              # Mark run as failed - no need to run full finish_run processing for early failures
+              finish_run_with_error(run, error_msg)
+            else
+              # output.json already exists, just mark as failed directly
+              finish_run_with_error(run, error_msg)
+            end
+            return
+          end
+        end
+        
         # No output.json - job might still be running or failed
         Rails.logger.warn("[SlurmJobMonitorJob] Could not get status for SLURM job #{slurm_job_id}, will retry")
         if attempt < MAX_MONITOR_ATTEMPTS
@@ -166,6 +249,36 @@ class SlurmJobMonitorJob < ApplicationJob
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
     step_dir = project_dir + step.name
     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+    
+    # First check exec.out for displayed_error (application-level errors)
+    exec_out = output_dir + "exec.out"
+    if File.exist?(exec_out)
+      begin
+        exec_content = File.read(exec_out)
+        exec_json = JSON.parse(exec_content)
+        if exec_json.is_a?(Hash) && exec_json['displayed_error'].present?
+          if exec_json['displayed_error'].is_a?(Array)
+            return exec_json['displayed_error'].join('; ')
+          else
+            return exec_json['displayed_error'].to_s
+          end
+        end
+      rescue JSON::ParserError
+        # Not JSON, continue checking other files
+      end
+    end
+    
+    # Check exec.err for errors
+    exec_err = output_dir + "exec.err"
+    if File.exist?(exec_err)
+      exec_err_content = File.read(exec_err)
+      if exec_err_content.strip.present?
+        # Filter out Elasticsearch responses
+        if !exec_err_content.match?(/\{"_index":|"_id":|"_version":|"result":"updated"/)
+          return exec_err_content.strip
+        end
+      end
+    end
     
     error_file = output_dir + "slurm_#{run.id}.err"
     return nil unless File.exist?(error_file)

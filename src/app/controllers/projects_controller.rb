@@ -1504,7 +1504,9 @@ class ProjectsController < ApplicationController
       # Skip for parsing step as it has its own special handling
       if @step.name != 'parsing' && (@step.has_std_dashboard || @step.has_std_view || @step.has_std_form)
         begin
+          Rails.logger.info("[step_results] Calling prepare_std_step_data for step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, runs_count: #{@runs&.count || 0}")
           prepare_std_step_data
+          Rails.logger.info("[step_results] After prepare_std_step_data: show_dashboard=#{@show_dashboard}, show_view=#{@show_view}, show_form=#{@show_form}, show_custom_form=#{@show_custom_form}")
         rescue => e
           Rails.logger.error("[step_results] Error preparing std step data: #{e.class} - #{e.message}")
           Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
@@ -1514,6 +1516,8 @@ class ProjectsController < ApplicationController
           @show_form = false
           @show_custom_form = false
         end
+      else
+        Rails.logger.info("[step_results] Skipping prepare_std_step_data - step: #{@step.name}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}")
       end
     rescue => e
       Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
@@ -1538,15 +1542,24 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { 
         begin
-          Rails.logger.info("Rendering partial: projects/views/step_results")
-          result = render partial: 'projects/views/step_results', layout: false
-          Rails.logger.info("Render completed, result length: #{result&.length || 'nil'}")
-          Rails.logger.info("Result preview (first 1000 chars): #{result.to_s[0..1000] if result}")
-          
-          # If result is empty, render a test message to debug
-          if result.blank? || result.to_s.strip.length < 10
-            Rails.logger.error("Rendered content is empty! Step: #{@step&.name}, ProjectStep: #{@project_step&.id}, Status: #{@project_step&.status_id}, Results: #{@results.present? ? 'present' : 'nil'}")
-            render plain: "<div class='alert alert-warning p-4'><h3>Debug Info</h3><p>Step: #{@step&.name}</p><p>ProjectStep: #{@project_step&.id || 'nil'}</p><p>Status: #{@project_step&.status_id || 'nil'}</p><p>Results: #{@results.present? ? 'present' : 'nil'}</p><p>Runs: #{@runs&.count || 0}</p></div>", layout: false
+          # If show_form is requested and it's an AJAX request, return just the form
+          if params[:show_form].present? && params[:show_form].to_s == '1' && request.xhr?
+            if @show_form
+              render partial: 'projects/views/std_form', layout: false
+            else
+              render plain: '<div class="p-4 text-center text-red-600">Form not available for this step.</div>', status: :not_found
+            end
+          else
+            Rails.logger.info("Rendering partial: projects/views/step_results")
+            result = render partial: 'projects/views/step_results', layout: false
+            Rails.logger.info("Render completed, result length: #{result&.length || 'nil'}")
+            Rails.logger.info("Result preview (first 1000 chars): #{result.to_s[0..1000] if result}")
+            
+            # If result is empty, render a test message to debug
+            if result.blank? || result.to_s.strip.length < 10
+              Rails.logger.error("Rendered content is empty! Step: #{@step&.name}, ProjectStep: #{@project_step&.id}, Status: #{@project_step&.status_id}, Results: #{@results.present? ? 'present' : 'nil'}")
+              render plain: "<div class='alert alert-warning p-4'><h3>Debug Info</h3><p>Step: #{@step&.name}</p><p>ProjectStep: #{@project_step&.id || 'nil'}</p><p>Status: #{@project_step&.status_id || 'nil'}</p><p>Results: #{@results.present? ? 'present' : 'nil'}</p><p>Runs: #{@runs&.count || 0}</p></div>", layout: false
+            end
           end
         rescue => e
           Rails.logger.error("Error rendering step_results partial: #{e.class} - #{e.message}")
@@ -2739,7 +2752,10 @@ class ProjectsController < ApplicationController
     def prepare_std_step_data
       # Get docker image and steps
       asap_docker_image = Basic.get_asap_docker(@project.version)
-      return unless asap_docker_image
+      unless asap_docker_image
+        Rails.logger.warn("[prepare_std_step_data] No docker image found for version: #{@project.version}")
+        return
+      end
       
       # Get all steps for this docker image
       @h_steps = {}
@@ -2767,8 +2783,21 @@ class ProjectsController < ApplicationController
       @show_form = false
       @show_custom_form = false
       
+      # Convert runs to array for consistent checking
+      runs_array = @runs.to_a
+      runs_count = runs_array.size
+      
+      Rails.logger.info("[prepare_std_step_data] Step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, runs_count: #{runs_count}")
+      
+      # Check if show_form parameter is set (for "New run" button)
+      force_show_form = params[:show_form].present? && params[:show_form].to_s == '1'
+      
+      # If show_form is requested and step has std_form, show form
+      if force_show_form && @step.has_std_form
+        @show_form = true
+        prepare_std_form_data
       # For steps with only one run authorized (multiple_runs == false) that are just unlocked (no runs yet)
-      if !@step.multiple_runs && @runs.empty?
+      elsif !@step.multiple_runs && runs_count == 0
         if @step.has_std_form
           # Show standard form if std_form option is activated
           @show_form = true
@@ -2778,24 +2807,20 @@ class ProjectsController < ApplicationController
           @show_custom_form = true
         end
       # If no runs and has_std_form (for multiple_runs steps), show form
-      elsif @runs.empty? && @step.has_std_form
+      elsif runs_count == 0 && @step.has_std_form
         @show_form = true
         prepare_std_form_data
-      elsif @step.has_std_dashboard && (@step.multiple_runs || @runs.count > 1)
+      # When multiple_runs == true, has_std_dashboard == true, and at least one run exists, show standard dashboard
+      elsif @step.multiple_runs && @step.has_std_dashboard && runs_count > 0
+        Rails.logger.info("[prepare_std_step_data] Setting show_dashboard = true for step: #{@step.name}")
         @show_dashboard = true
         # Prepare dashboard data
-        @h_cards = create_run_cards(@runs.to_a, nil)
-      elsif @step.has_std_view && !@step.multiple_runs && @runs.count <= 1
+        @h_cards = create_run_cards(runs_array, nil)
+      # When multiple_runs == false, has_std_view == true, and at least one run exists, show standard view
+      elsif !@step.multiple_runs && @step.has_std_view && runs_count > 0
         @show_view = true
         # Prepare view data for single run
-        @run = @runs.first
-        if @run
-          prepare_run_view_data(@run)
-        end
-      elsif @step.has_std_view && @runs.count == 1
-        # Even if multiple_runs is true, if there's only one run, show view
-        @show_view = true
-        @run = @runs.first
+        @run = runs_array.first
         if @run
           prepare_run_view_data(@run)
         end

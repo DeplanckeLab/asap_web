@@ -1,6 +1,6 @@
 class RunsController < ApplicationController
   before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy]
-  before_action :get_base_data, only: [:get_de_gene_list, :get_ge_geneset_list, :download_de_gene_list]
+  before_action :get_base_data, only: [:get_de_gene_list, :get_ge_geneset_list]
   include ApplicationHelper
   
   def get_base_data 
@@ -146,6 +146,58 @@ class RunsController < ApplicationController
   # GET /runs/1
   # GET /runs/1.json
   def show
+    # Prepare data for displaying the run
+    prepare_run_show_data
+  end
+  
+  def prepare_run_show_data
+    # Get status
+    @status = Status.find_by(id: @run.status_id)
+    
+    # Parse run attributes
+    @h_run_attrs = {}
+    if @run.attrs_json.present?
+      @h_run_attrs = Basic.safe_parse_json(@run.attrs_json, {})
+    end
+    
+    # Get standard method attributes using the helper method
+    @h_std_method_attrs = {}
+    if @std_method && @step
+      h_res = Basic.get_std_method_attrs(@std_method, @step)
+      @h_std_method_attrs = h_res[:h_attrs] || {}
+    elsif @std_method && @std_method.attrs_json.present?
+      @h_std_method_attrs = Basic.safe_parse_json(@std_method.attrs_json, {})
+    end
+    
+    # Get dashboard card configuration
+    @h_dashboard_card = {}
+    if @step.dashboard_card_json.present?
+      @h_dashboard_card[@step.id] = Basic.safe_parse_json(@step.dashboard_card_json, {})
+    end
+    
+    # Load output data
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    step_dir = project_dir + @step.name
+    output_dir = (@step.multiple_runs) ? (step_dir + @run.id.to_s) : step_dir
+    output_json_file = output_dir + "output.json"
+    
+    @h_res = {}
+    @h_outputs = {}
+    
+    begin
+      @h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+      @h_outputs = Basic.safe_parse_json(@run.output_json, {}) if @run.output_json.present? && @run.output_json.match(/^\{/)
+    rescue => e
+      Rails.logger.error("[prepare_run_show_data] Error loading run data: #{e.message}")
+    end
+    
+    # Get steps hash for display helpers
+    @h_steps = {}
+    Step.where(docker_image_id: @asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+    
+    # Get statuses hash
+    @h_statuses = {}
+    Status.all.each { |s| @h_statuses[s.id] = s }
   end
 
   # GET /runs/new
@@ -294,11 +346,13 @@ class RunsController < ApplicationController
     ## move run in the deleted_runs if it finished or failed                                                                                                                    
     if [3, 4].include? run.status_id
       h_run = run.as_json
-        if ! DelRun.where(h_run).first
-          del_run = DelRun.new(h_run)
-          del_run.run_id = h_run["id"]
-          del_run.save!        
-        end
+      # Remove slurm_job_id as it doesn't exist in del_runs table
+      h_run.delete("slurm_job_id")
+      if ! DelRun.where(h_run).first
+        del_run = DelRun.new(h_run)
+        del_run.run_id = h_run["id"]
+        del_run.save!        
+      end
     end
     
     run.destroy  

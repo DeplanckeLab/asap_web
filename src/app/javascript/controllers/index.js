@@ -71,6 +71,18 @@ import CellFilteringController from "controllers/cell_filtering_controller"
 application.register("cell-filtering", CellFilteringController)
 console.log('Cell filtering controller registered')
 
+import FormReqController from "controllers/form_req_controller"
+application.register("form-req", FormReqController)
+console.log('Form req controller registered')
+
+import SlideInFormController from "controllers/slide_in_form_controller"
+application.register("slide-in-form", SlideInFormController)
+console.log('Slide in form controller registered')
+
+import DeleteRunController from "controllers/delete_run_controller"
+application.register("delete-run", DeleteRunController)
+console.log('Delete run controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

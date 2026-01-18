@@ -1943,7 +1943,9 @@ module Basic
           std_method_attr = h_std_method_attrs[h_arg['param_key']]          
           value = (h_arg['value'] || h_var[h_arg['param_key']] || ((std_method_attr) && std_method_attr['default'])).dup
           logger.debug "VALUE: " + value.to_json + "[" + h_arg['value'].to_json + "]"
-          value.to_s.gsub!(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
+          # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
+          value_str = value.to_s.dup
+          value = value_str.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
           list_args.push({:param_key => h_arg['param_key'], :value => (value != nil and value != '') ? value : h_arg["null_value"]})
         end
       end
@@ -1954,7 +1956,9 @@ module Basic
           std_method_attr = h_std_method_attrs[opt['param_key']]
           value = (opt['value'] || h_var[opt['param_key']] || (std_method_attr && std_method_attr['default'])).dup
           logger.debug "VALUE: #{opt}: " + value.to_json          
-          value.to_s.gsub!(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
+          # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
+          value_str = value.to_s.dup
+          value = value_str.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
           list_opts.push({:opt => opt['opt'], :param_key => opt['param_key'], :value => (value != nil and value != '') ? value : opt["null_value"]})
         end
       end

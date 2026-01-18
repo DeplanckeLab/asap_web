@@ -35,10 +35,12 @@ class Req < ApplicationRecord
 
       if h_res[:error]
         Basic.upd_run(project, run, { status_id: 4 }, true)
-      elsif run.async == false
-        Basic.exec_run(run)
+      else
+        # Always call exec_run - it will handle both sync and async cases
+        # For async runs, this will enqueue RunExecutionJob which submits to SLURM
+        Basic.exec_run(Rails.logger, run)
+      end
     end
-  end
   
     Basic.upd_project_step(project, step.id) if project && step
   end

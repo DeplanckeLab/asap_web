@@ -58,6 +58,7 @@ export default class extends Controller {
     
     // Remove any blue background from server-rendered steps (all should be white)
     // This ensures consistency with the new design
+    // DO NOT reset borders - server already sets them correctly based on @selected_step_id
     const allSteps = this.element.querySelectorAll('[data-step-id]')
     allSteps.forEach((stepEl) => {
       stepEl.classList.remove('bg-blue-600')
@@ -70,8 +71,7 @@ export default class extends Controller {
       textElements.forEach((el) => {
         el.classList.remove('text-white')
       })
-      // Reset border
-      stepEl.style.borderLeft = '4px solid transparent'
+      // Border is already set correctly by server based on @selected_step_id, don't modify it
     })
     
     // Check if step_id is in URL parameters
@@ -313,8 +313,8 @@ export default class extends Controller {
         }
       }
       
-      // Find the steps panel container - it's the left panel div
-      const stepsPanelContainer = controller.element.querySelector('.w-1\\/4') // Left panel
+      // Find the steps panel container - it's the left panel div (using w-64 on larger screens)
+      const stepsPanelContainer = controller.element.querySelector('.w-64') || controller.element.querySelector('.w-1\\/4') // Left panel
       if (stepsPanelContainer) {
         // The steps panel is rendered inside a div with specific classes
         const panelWrapper = stepsPanelContainer.querySelector('.bg-white.rounded-lg.shadow-sm.border')
@@ -544,8 +544,20 @@ export default class extends Controller {
     this.currentStepId = stepId.toString()
     this.element.setAttribute('data-current-step-id', stepId.toString())
     
+    // Update dropdown element's data-selected-step-id attribute
+    const dropdownElement = document.querySelector('[data-controller~="dropdown"]')
+    if (dropdownElement) {
+      dropdownElement.setAttribute('data-selected-step-id', stepId.toString())
+    }
+    
     // Refresh steps panel to show the border (server will render it)
     this.refreshStepsPanel()
+    
+    // Update dropdown button if it exists
+    this.updateDropdownButton(stepElement)
+    
+    // Update selected step in dropdown list
+    this.updateDropdownListSelection(stepId)
     
     // Don't proceed if step is disabled
     if (stepElement.classList.contains('disabled')) {
@@ -553,6 +565,101 @@ export default class extends Controller {
     }
 
     this.loadStepResults(stepId, stepElement)
+  }
+
+  selectStepFromDropdown(event) {
+    const selectElement = event.currentTarget
+    const stepId = selectElement.value
+    
+    if (!stepId) {
+      return
+    }
+    
+    // Update currentStepId
+    this.currentStepId = stepId.toString()
+    this.element.setAttribute('data-current-step-id', stepId.toString())
+    
+    // Update dropdown element's data-selected-step-id attribute
+    const dropdownElement = document.querySelector('[data-controller~="dropdown"]')
+    if (dropdownElement) {
+      dropdownElement.setAttribute('data-selected-step-id', stepId.toString())
+    }
+    
+    // Refresh steps panel to show the border (server will render it)
+    this.refreshStepsPanel()
+    
+    // Find or create a step element for compatibility with loadStepResults
+    let stepElement = document.querySelector(`[data-step-id="${stepId}"]`)
+    if (!stepElement) {
+      // Create a temporary element if not found (for dropdown usage)
+      stepElement = { getAttribute: () => stepId }
+    }
+
+    // Update dropdown button if it exists
+    if (stepElement && stepElement.nodeType === 1) {
+      this.updateDropdownButton(stepElement)
+    }
+
+    this.loadStepResults(stepId, stepElement)
+  }
+
+  updateDropdownButton(stepElement) {
+    // Find the dropdown button (only visible on narrow screens)
+    const dropdownContainer = document.querySelector('[data-controller~="dropdown"]')
+    if (!dropdownContainer) return
+    
+    const button = dropdownContainer.querySelector('[data-dropdown-target="button"]')
+    if (!button) return
+    
+    // Get step info from the step element
+    const stepName = stepElement.querySelector('strong')?.textContent?.trim() || 'Unknown Step'
+    
+    // Get icon and status from the step element
+    const iconElement = stepElement.querySelector('i')
+    const iconClass = iconElement ? iconElement.className : 'far fa-circle text-base text-gray-400'
+    
+    // Get text color class
+    const textColorClass = stepElement.classList.contains('text-gray-500') ? 'text-gray-500' :
+                          stepElement.classList.contains('text-green-600') ? 'text-green-600' :
+                          'text-gray-900'
+    
+    // Add blue left border to button (since this step is selected)
+    button.style.borderLeft = '4px solid #007bff'
+    button.style.setProperty('border-left', '4px solid #007bff', 'important')
+    
+    // Update button content
+    const buttonContent = button.querySelector('.flex.items-center')
+    if (buttonContent) {
+      buttonContent.innerHTML = `
+        <div class="flex-shrink-0 mr-3 w-5 flex items-center justify-center">
+          <i class="${iconClass}"></i>
+        </div>
+        <span class="${textColorClass} font-semibold truncate">
+          ${stepName}
+        </span>
+      `
+    }
+  }
+
+  updateDropdownListSelection(stepId) {
+    // Find all step items in the dropdown list
+    const dropdownContainer = document.querySelector('[data-controller~="dropdown"]')
+    if (!dropdownContainer) return
+    
+    const menu = dropdownContainer.querySelector('[data-dropdown-target="menu"]')
+    if (!menu) return
+    
+    // Remove blue border from all items
+    const allStepItems = menu.querySelectorAll('[data-step-id]')
+    allStepItems.forEach(item => {
+      item.style.borderLeft = '4px solid transparent'
+    })
+    
+    // Add blue border to the selected step
+    const selectedItem = menu.querySelector(`[data-step-id="${stepId}"]`)
+    if (selectedItem) {
+      selectedItem.style.borderLeft = '4px solid #007bff'
+    }
   }
 
   loadStepResults(stepId, stepElement, showLoading = true) {

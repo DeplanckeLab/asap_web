@@ -191,6 +191,10 @@ export default class extends Controller {
     console.log('[StepSelectorController] data.parsing_status:', data.parsing_status)
     console.log('[StepSelectorController] Current step ID before update:', this.currentStepId)
     
+    // Check if any form is currently open
+    const isFormOpen = this.isAnyFormOpen()
+    console.log('[StepSelectorController] Is form open?', isFormOpen)
+    
     // Preserve currentStepId before refresh (it might get lost during DOM replacement)
     const preservedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
     console.log('[StepSelectorController] Preserving step ID before refresh:', preservedStepId)
@@ -212,8 +216,13 @@ export default class extends Controller {
     console.log('[StepSelectorController] Update step ID:', updateStepId, 'Current step ID:', currentStepIdNum)
     console.log('[StepSelectorController] Comparison:', updateStepId, '===', currentStepIdNum, '?', updateStepId === currentStepIdNum)
     
-    // If the update is for the currently displayed step, reload it from server
-    if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
+    // Only reload the right panel if:
+    // 1. The form is NOT open (user is not editing)
+    // 2. The finished run is from the same step as the one displayed
+    if (isFormOpen) {
+      console.log('[StepSelectorController] Form is open, skipping right panel refresh to avoid interrupting user')
+    } else if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
+      // If the update is for the currently displayed step, reload it from server
       console.log(`[StepSelectorController] Status update for current step ${this.currentStepId}, reloading from server...`)
       const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
       if (stepElement) {
@@ -256,7 +265,8 @@ export default class extends Controller {
     
     // Also reload if parsing_status changed and we're viewing the parsing step
     // This handles the case where parsing_status is sent but step_id might not match exactly
-    if (data.parsing_status && this.currentStepId) {
+    // BUT: only if form is not open
+    if (!isFormOpen && data.parsing_status && this.currentStepId) {
       const currentStepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
       if (currentStepElement) {
         // If parsing status changed to complete or failed, reload the current step
@@ -268,7 +278,36 @@ export default class extends Controller {
           }, 500)
         }
       }
+    } else if (isFormOpen && data.parsing_status) {
+      console.log(`[StepSelectorController] Parsing status changed but form is open, skipping reload`)
     }
+  }
+
+  isAnyFormOpen() {
+    // Check if any slide-in form is currently open
+    // Find all slide-in-form controllers and check if any are open
+    if (!window.Stimulus) {
+      return false
+    }
+    
+    try {
+      // Find all elements with slide-in-form controller
+      const formElements = document.querySelectorAll('[data-controller*="slide-in-form"]')
+      
+      for (const element of formElements) {
+        const controller = window.Stimulus.getControllerForElementAndIdentifier(element, 'slide-in-form')
+        if (controller && typeof controller.isOpen === 'function') {
+          if (controller.isOpen()) {
+            console.log('[StepSelectorController] Found open form:', element)
+            return true
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[StepSelectorController] Error checking if form is open:', error)
+    }
+    
+    return false
   }
 
   refreshStepsPanel() {

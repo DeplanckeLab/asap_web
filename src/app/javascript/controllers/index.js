@@ -87,6 +87,10 @@ import InputDataSelectorController from "controllers/input_data_selector_control
 application.register("input-data-selector", InputDataSelectorController)
 console.log('Input data selector controller registered')
 
+import RunTimerController from "controllers/run_timer_controller"
+application.register("run-timer", RunTimerController)
+console.log('Run timer controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

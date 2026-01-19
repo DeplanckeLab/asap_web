@@ -24,6 +24,7 @@ Rails.application.routes.draw do
       get :queue_position
       get :get_attributes
       post :restart_step
+      get :reset_parsing
     end
   end
   

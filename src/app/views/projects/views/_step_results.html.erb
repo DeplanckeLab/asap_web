@@ -1,13 +1,19 @@
 <% if @step %>
-  <%# Check if there's a step-specific partial first %>
-  <% step_partial_path = "projects/views/#{@step.name}" %>
-  <% partial_exists = lookup_context.template_exists?(step_partial_path, [], true) %>
-  <% if partial_exists %>
-    <%# Render step-specific partial if it exists %>
-    <%= render partial: step_partial_path %>
-  <% else %>
-    <%# Otherwise render the standard step view %>
+  <%# If show_form or show_custom_form is true, always use std_step (which handles the form display) %>
+  <%# Otherwise, check for step-specific partial %>
+  <% if @show_form || @show_custom_form %>
     <%= render 'projects/views/std_step' %>
+  <% else %>
+    <%# Check if there's a step-specific partial first %>
+    <% step_partial_path = "projects/views/#{@step.name}" %>
+    <% partial_exists = lookup_context.template_exists?(step_partial_path, [], true) %>
+    <% if partial_exists %>
+      <%# Render step-specific partial if it exists %>
+      <%= render partial: step_partial_path %>
+    <% else %>
+      <%# Otherwise render the standard step view %>
+      <%= render 'projects/views/std_step' %>
+    <% end %>
   <% end %>
 <% else %>
   <div class="alert alert-warning">

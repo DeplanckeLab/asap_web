@@ -110,31 +110,6 @@ class SlurmService
         
         output_file = output_dir + "slurm_#{run.id}.out"
         error_file = output_dir + "slurm_#{run.id}.err"
-        exec_out = output_dir + "exec.out"
-        exec_err = output_dir + "exec.err"
-        exec_run_details = output_dir + "exec_run_details.log"
-        
-        # Check exec.out for displayed_error (indicates job failed with application error)
-        if File.exist?(exec_out) && File.mtime(exec_out) > 1.hour.ago
-          exec_content = File.read(exec_out)
-          begin
-            exec_json = JSON.parse(exec_content)
-            if exec_json.is_a?(Hash) && exec_json['displayed_error'].present?
-              # Job completed but with an application error
-              return :failed
-            end
-          rescue JSON::ParserError
-            # Not JSON, continue checking other files
-          end
-        end
-        
-        # Check exec_run_details.log for exit code
-        if File.exist?(exec_run_details) && File.mtime(exec_run_details) > 1.hour.ago
-          details_content = File.read(exec_run_details)
-          if details_content.include?('Command exited with non-zero status')
-            return :failed
-          end
-        end
         
         # If output files exist and are recent (modified within last hour), job likely completed
         if File.exist?(output_file) && File.mtime(output_file) > 1.hour.ago

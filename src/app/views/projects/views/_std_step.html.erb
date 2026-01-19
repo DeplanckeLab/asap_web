@@ -122,9 +122,6 @@
               <thead class="bg-gray-50">
                 <tr>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">#</th>
-                  <% if admin? %>
-                    <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">ID</th>
-                  <% end %>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameters</th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Status</th>
@@ -149,12 +146,10 @@
                   <tr class="hover:bg-gray-50">
                     <td class="px-3 py-4 whitespace-nowrap">
                       <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
+                      <% if admin? %>
+                        <div class="text-xs text-gray-500 font-mono" style="font-size: 0.7rem;"><%= run.id %></div>
+                      <% end %>
                     </td>
-                    <% if admin? %>
-                      <td class="px-3 py-4 whitespace-nowrap">
-                        <div class="text-xs text-gray-600 font-mono"><%= run.id %></div>
-                      </td>
-                    <% end %>
                     <td class="px-3 py-4" style="max-width: 0;">
                       <div class="text-sm text-gray-900 truncate" title="<%= method_label %>" style="width: 100%;"><%= method_label %></div>
                     </td>
@@ -172,6 +167,47 @@
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
                           <%= run_status[:name].humanize %>
                         </span>
+                        <%# Duration/Timer below status %>
+                        <% if run.status_id == 3 && run.duration %>
+                          <%# Completed: show duration %>
+                          <div class="text-xs text-gray-500 mt-0.5">
+                            <i class="fas fa-clock text-gray-400 mr-1"></i>
+                            <span><%= duration(run.duration.to_i) %></span>
+                          </div>
+                        <% elsif run.status_id == 2 && run.start_time %>
+                          <%# Running: show live timer %>
+                          <div class="text-xs text-gray-500 mt-0.5"
+                               data-controller="run-timer"
+                               data-run-timer-start-time-value="<%= run.start_time.iso8601 %>">
+                            <i class="fas fa-clock text-gray-400 mr-1"></i>
+                            <span data-run-timer-target="elapsedTime" class="font-mono">--:--</span>
+                          </div>
+                        <% elsif run.status_id == 1 %>
+                          <%# Waiting: show waiting timer and queue position %>
+                          <div class="text-xs text-gray-500 mt-0.5 space-y-0.5">
+                            <% if run.submitted_at %>
+                              <div data-controller="run-timer"
+                                   data-run-timer-submitted-at-value="<%= run.submitted_at.iso8601 %>">
+                                <i class="fas fa-clock text-gray-400 mr-1"></i>
+                                <span data-run-timer-target="elapsedTime" class="font-mono">--:--</span>
+                              </div>
+                            <% end %>
+                            <% if run.slurm_job_id %>
+                              <div data-controller="queue-position"
+                                   data-queue-position-run-id-value="<%= run.id %>"
+                                   data-queue-position-slurm-job-id-value="<%= run.slurm_job_id %>"
+                                   data-queue-position-project-id-value="<%= @project.id %>"
+                                   <% if run.submitted_at %>
+                                     data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
+                                   <% end %>>
+                                <span class="text-gray-400">Queue: </span>
+                                <span data-queue-position-target="position" class="font-mono text-xs">
+                                  <i class="fas fa-spinner fa-spin"></i>
+                                </span>
+                              </div>
+                            <% end %>
+                          </div>
+                        <% end %>
                       </div>
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap">

@@ -1,8 +1,10 @@
 class Cla < ApplicationRecord
   self.table_name = 'clas'
 
+  belongs_to :annot, optional: true
   belongs_to :cell_set
   belongs_to :project, optional: true
+  has_many :cla_votes, dependent: :destroy
 
   scope :active, -> { where(obsolete: [false, nil]) }
 

@@ -115,18 +115,13 @@
           Parsing results
         </h3>
         <div class="flex items-center gap-3">
-          <!-- Restart Button -->
+          <!-- Reset Button -->
           <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
-            <button type="button" 
-                    class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                    data-controller="restart-step"
-                    data-restart-step-project-id-value="<%= @project.id %>"
-                    data-restart-step-step-id-value="<%= @step.id %>"
-                    data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
-                    data-action="click->restart-step#restart"
-                    style="flex-shrink: 0;">
-              Restart
-            </button>
+            <%= link_to reset_parsing_project_path(@project),
+                  class: "px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block",
+                  style: "flex-shrink: 0;" do %>
+              Reset
+            <% end %>
           <% end %>
         </div>
       </div>
@@ -565,16 +560,11 @@
           Parsing Error
         </h3>
         <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
-          <button type="button" 
-                  class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                  data-controller="restart-step"
-                  data-restart-step-project-id-value="<%= @project.id %>"
-                  data-restart-step-step-id-value="<%= @step.id %>"
-                  data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
-                  data-action="click->restart-step#restart"
-                  style="flex-shrink: 0;">
-            Restart
-          </button>
+          <%= link_to reset_parsing_project_path(@project),
+                class: "px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block",
+                style: "flex-shrink: 0;" do %>
+            Reset
+          <% end %>
         <% end %>
       </div>
     </div>

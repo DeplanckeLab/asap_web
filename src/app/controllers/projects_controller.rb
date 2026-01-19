@@ -307,6 +307,9 @@ class ProjectsController < ApplicationController
     # Note: This allows reusing project keys for the same user
     if @project.key.present? && (existing_project = Project.find_by(key: @project.key))
       if editable?(existing_project)
+        # Clear Fu records that reference this project to avoid foreign key constraint violations
+        Fu.where(project_id: existing_project.id).update_all(project_id: nil)
+        
         # Simple deletion - just destroy the project record
         # In production, you might want to also clean up files and related records
         existing_project.destroy
@@ -1477,6 +1480,22 @@ class ProjectsController < ApplicationController
         # Load file formats for display
         @h_formats = {}
         FileFormat.all.each { |f| @h_formats[f.name] = f }
+        
+        # Handle show_form parameter for parsing step
+        # Since parsing skips prepare_std_step_data, we need to set @show_custom_form manually
+        # Parsing step uses custom form (has_std_form = false), so we use @show_custom_form
+        if params[:show_form].present? && params[:show_form].to_s == '1'
+          @show_custom_form = true
+          @show_form = false
+          @show_view = false
+          @show_dashboard = false
+        else
+          # Initialize @show_form if not set (parsing might not always show form)
+          @show_form ||= false
+          @show_view ||= false
+          @show_dashboard ||= false
+          @show_custom_form ||= false
+        end
       end
       
       # For cell_filtering step, prepare data for the form
@@ -1766,15 +1785,53 @@ class ProjectsController < ApplicationController
       # Reload project to ensure fresh state
       @project.reload
       
-      # If we restarted the parsing step, automatically recreate the parsing job
+      # If we restarted the parsing step, show the form and rerun preparsing
       if @step.name == 'parsing'
         begin
-          ProjectParsingJob.perform_later(@project.id)
-          redirect_to project_path(@project, view: 'analysis'), notice: 'Parsing step restarted successfully. Parsing job has been recreated.'
+          # Find the Fu (file upload) associated with this project
+          fu = if @project.fu_id
+                 Fu.find_by(id: @project.fu_id)
+               else
+                 Fu.where(:project_id => @project.id, :upload_type => 1).first
+               end
+          
+          if fu
+            # Extract parsing parameters from parsing_attrs_json
+            h_attrs = {}
+            if @project.parsing_attrs_json.present?
+              h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {})
+            end
+            
+            # Build options hash for preparsing job
+            options = {}
+            
+            # Get organism_id and version_id from project
+            options[:organism_id] = @project.organism_id if @project.organism_id.present?
+            options[:version_id] = @project.version_id if @project.version_id.present?
+            
+            # Add dataset selection if present
+            options[:sel] = h_attrs['sel'] if h_attrs['sel'].present?
+            
+            # Add parsing parameters for text files (delimiter can be empty string for tab)
+            options[:delimiter] = h_attrs['delimiter'] if h_attrs.key?('delimiter')
+            options[:gene_name_col] = h_attrs['gene_name_col'] if h_attrs['gene_name_col'].present?
+            options[:has_header] = h_attrs['has_header'] if h_attrs.key?('has_header')
+            
+            # Rerun preparsing with saved parameters (this updates preparsing results)
+            fu.update!(status: 'preparsing')
+            FuPreparsingJob.perform_later(fu.id, options.compact)
+            
+            # Redirect to show the form (user can then submit to trigger parsing)
+            redirect_to step_results_project_path(@project, step_id: @step.id, show_form: 1), notice: 'Parsing step restarted successfully. Preparsing has been rerun with saved parameters.'
+          else
+            Rails.logger.error("No Fu found for project #{@project.id} when restarting parsing step")
+            # Still redirect to form, parsing will fail if Fu is missing but that's expected
+            redirect_to step_results_project_path(@project, step_id: @step.id, show_form: 1), alert: 'Parsing step restarted, but file upload record not found. Please try again.'
+          end
         rescue => e
-          Rails.logger.error("Error recreating parsing job: #{e.message}")
+          Rails.logger.error("Error rerunning preparsing: #{e.message}")
           Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
-          redirect_to project_path(@project, view: 'analysis'), notice: 'Step restarted successfully, but failed to recreate parsing job. Please try again.'
+          redirect_to step_results_project_path(@project, step_id: @step.id, show_form: 1), alert: 'Step restarted successfully, but failed to rerun preparsing. Please try again.'
         end
       else
         # Redirect without step_id - websockets will handle the UI updates
@@ -1785,6 +1842,120 @@ class ProjectsController < ApplicationController
       Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
       redirect_to project_path(@project, view: 'analysis'), alert: "Error restarting step: #{e.message}"
     end
+  end
+
+  # GET /projects/:id/reset_parsing
+  def reset_parsing
+    @original_project = Project.find(params[:id])
+    
+    # Find the Fu (file upload) associated with this project
+    fu = if @original_project.fu_id
+           Fu.find_by(id: @original_project.fu_id)
+         else
+           Fu.where(:project_id => @original_project.id, :upload_type => 1).first
+         end
+    
+    unless fu
+      redirect_to project_path(@original_project, view: 'analysis'), alert: 'File upload record not found. Cannot reset parsing.'
+      return
+    end
+    
+    # Set up session with existing file upload data
+    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                        ENV["UPLOAD_DATA_DIR"]
+                      elsif ENV["DATA_DIR"]
+                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                      else
+                        '/data/asap2/fus'
+                      end
+    upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+    upload_file_path = upload_dir + fu.upload_file_name
+    
+    unless File.exist?(upload_file_path)
+      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Uploaded file not found. Cannot reset parsing.'
+      return
+    end
+    
+    # Set up session with file upload info
+    session[:file_upload] = {
+      fu_id: fu.id,
+      original_filename: fu.name || fu.upload_file_name,
+      input_filename: fu.upload_file_name,
+      path: upload_file_path.to_s,
+      size: fu.upload_file_size || File.size(upload_file_path),
+      total_size: fu.upload_file_size || File.size(upload_file_path),
+      complete: true,
+      organism_id: @original_project.organism_id,
+      version_id: @original_project.version_id
+    }
+    
+    # Extract parsing attributes from existing project
+    h_attrs = {}
+    if @original_project.parsing_attrs_json.present?
+      h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
+    end
+    
+    # Create a new project object with pre-filled values
+    # Use @project for the form (the form expects @project)
+    @project = Project.new
+    @project.name = @original_project.name
+    @project.key = @original_project.key  # Use existing project key
+    @project.organism_id = @original_project.organism_id
+    @project.version_id = @original_project.version_id
+    @project.project_type_id = @original_project.project_type_id
+    
+    # Set up form data
+    @project_types = ProjectType.order(:name)
+    @versions = available_versions
+    @file_formats = FileFormat.ordered
+    @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
+    @grouped_organisms = group_organisms(@organisms)
+    
+    # Store parsing attributes in instance variable for form pre-filling
+    @parsing_attrs = h_attrs
+    
+    # Check if preparsing is already complete by checking for output.json
+    output_file = upload_dir + 'output.json'
+    if File.exist?(output_file) && File.size(output_file) > 0
+      # Preparsing is complete - ensure Fu status reflects this
+      # This prevents the JavaScript from thinking preparsing is still running
+      if fu.status != 'preparsed'
+        begin
+          # Try to load the output to verify it's valid
+          output_content = File.read(output_file)
+          output_json = Basic.safe_parse_json(output_content, {})
+          if output_json.present? && output_json.is_a?(Hash)
+            fu.update!(status: 'preparsed')
+            Rails.logger.info("[reset_parsing] Set Fu##{fu.id} status to 'preparsed' (preparsing already complete)")
+          else
+            Rails.logger.warn("[reset_parsing] Output file exists but is invalid, keeping Fu##{fu.id} status as: #{fu.status}")
+          end
+        rescue => e
+          Rails.logger.error("[reset_parsing] Error checking preparsing output: #{e.message}")
+          # If we can't read the file, don't change the status
+        end
+      end
+    else
+      # Preparsing output doesn't exist - if status is 'preparsing', it might be stuck
+      # Set to 'uploaded' so it can be detected properly
+      if fu.status == 'preparsing'
+        fu.update!(status: 'uploaded')
+        Rails.logger.info("[reset_parsing] Set Fu##{fu.id} status to 'uploaded' (preparsing output missing, may need to rerun)")
+      end
+    end
+    
+    # Store fu_id for the form to detect existing upload
+    @existing_fu_id = fu.id
+    @existing_filename = fu.name || fu.upload_file_name
+    
+    # Flag to indicate we're resetting parsing (for button text)
+    @is_resetting_parsing = true
+    
+    # Note: We don't rerun preparsing - the existing preparsing results will be used
+    # The file upload controller will detect the existing fu_id and show preparsing results
+    
+    # Render the new project form
+    render :new
   end
 
   # GET /projects/:id/creation_status

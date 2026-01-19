@@ -37,7 +37,9 @@ export default class extends Controller {
     chunkSize: { type: Number, default: 5 * 1024 * 1024 }, // 5MB
     isAdmin: { type: Boolean, default: false },
     rowLabel: { type: String, default: 'genes' },
-    colLabel: { type: String, default: 'cells' }
+    colLabel: { type: String, default: 'cells' },
+    existingFuId: { type: Number, default: null },
+    existingFilename: { type: String, default: '' }
   }
 
   connect() {
@@ -118,6 +120,33 @@ export default class extends Controller {
 
     // Initially disable submit button
     this.checkSubmitButton()
+    
+    // Check if we have an existing upload (from reset_parsing)
+    if (this.hasExistingFuIdValue && this.existingFuIdValue) {
+      this.fuId = this.existingFuIdValue
+      this.originalFilename = this.hasExistingFilenameValue ? this.existingFilenameValue : null
+      this.isUploadComplete = true
+      
+      // Display the file as already uploaded
+      if (this.hasInputFilenameTarget) {
+        this.inputFilenameTarget.value = this.originalFilename || 'uploaded_file'
+      }
+      if (this.hasStatusTarget) {
+        this.statusTarget.textContent = 'File already uploaded'
+        this.statusTarget.classList.remove('text-gray-600')
+        this.statusTarget.classList.add('text-green-600')
+      }
+      this.displayUploadSuccess('uploaded', this.originalFilename || 'uploaded_file', 0)
+      this.showPreparsingPanel()
+      
+      // Subscribe to preparsing updates
+      this.subscribeToPreparsing(this.fuId)
+      
+      // Check preparsing status immediately
+      this.checkPreparsingStatus(this.fuId)
+      
+      this.updateResetButtonState()
+    }
   }
 
   disconnect() {

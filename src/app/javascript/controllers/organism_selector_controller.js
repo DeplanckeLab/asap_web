@@ -201,6 +201,10 @@ export default class extends Controller {
 
     console.log('[OrganismSelector] Reloading organisms for version:', versionId)
     
+    // Remember the currently selected organism before resetting
+    const previouslySelectedOrganismId = this.hasHiddenInputTarget ? this.hiddenInputTarget.value : null
+    console.log('[OrganismSelector] Previously selected organism ID:', previouslySelectedOrganismId)
+    
     // Show loading state
     if (this.hasSelectedTextTarget) {
       this.selectedTextTarget.textContent = 'Loading organisms...'
@@ -219,7 +223,18 @@ export default class extends Controller {
         console.log('[OrganismSelector] Received organisms data:', data)
         this.updateOrganismDropdown(data.organisms)
         
-        // Reset selection
+        // Try to reapply the previously selected organism if it exists in the new list
+        if (previouslySelectedOrganismId) {
+          const organismExists = this.trySelectOrganismById(previouslySelectedOrganismId)
+          if (organismExists) {
+            console.log('[OrganismSelector] Successfully reapplied previously selected organism:', previouslySelectedOrganismId)
+            return
+          } else {
+            console.log('[OrganismSelector] Previously selected organism not found in new list, resetting selection')
+          }
+        }
+        
+        // Reset selection if organism wasn't found or wasn't previously selected
         if (this.hasHiddenInputTarget) {
           this.hiddenInputTarget.value = ''
         }
@@ -233,6 +248,55 @@ export default class extends Controller {
           this.selectedTextTarget.textContent = 'Error loading organisms'
         }
       })
+  }
+
+  trySelectOrganismById(organismId) {
+    // Find the option with the matching organism ID
+    // Query DOM directly to ensure we get the updated elements after dropdown rebuild
+    const option = this.dropdownMenuTarget?.querySelector(`[data-organism-id="${organismId}"]`)
+    
+    if (!option) {
+      return false
+    }
+    
+    // Get the organism name from the option
+    const organismName = option.textContent.trim()
+    
+    // Update hidden input
+    if (this.hasHiddenInputTarget) {
+      this.hiddenInputTarget.value = organismId
+      // Trigger change event
+      this.hiddenInputTarget.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    
+    // Update selected text
+    if (this.hasSelectedTextTarget) {
+      this.selectedTextTarget.textContent = organismName
+    }
+    
+    // Update option styles
+    // Query all options directly from the DOM
+    const allOptions = this.dropdownMenuTarget?.querySelectorAll('[data-organism-id]') || []
+    allOptions.forEach(opt => {
+      if (opt.dataset.organismId === organismId) {
+        opt.classList.add("bg-blue-50", "dark:bg-blue-900/30", "font-medium")
+      } else {
+        opt.classList.remove("bg-blue-50", "dark:bg-blue-900/30", "font-medium")
+      }
+    })
+    
+    // Expand the group containing this organism
+    const groupContent = option.closest('[data-organism-selector-target="groupContent"]')
+    if (groupContent) {
+      groupContent.classList.remove('hidden')
+      const header = groupContent.previousElementSibling
+      const chevron = header?.querySelector('[data-organism-selector-target="groupChevron"]')
+      if (chevron) {
+        chevron.style.transform = 'rotate(90deg)'
+      }
+    }
+    
+    return true
   }
 
   updateOrganismDropdown(groups) {

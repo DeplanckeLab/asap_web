@@ -265,7 +265,13 @@
 
     <!-- Actions -->
     <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
-      <%= link_to "Back to projects", projects_path, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
+      <% if @is_resetting_parsing && @original_project %>
+        <% parsing_step = Step.find_by(name: 'parsing') %>
+        <% cancel_path = parsing_step ? project_path(@original_project, view: 'analysis', step_id: parsing_step.id) : project_path(@original_project, view: 'analysis') %>
+        <%= link_to "Cancel parsing reset", cancel_path, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
+      <% else %>
+        <%= link_to "Back to projects", projects_path, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
+      <% end %>
       <%= form.submit (@is_resetting_parsing ? "Recreate project" : "Create project"), id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: true %>
     </div>
   </div>

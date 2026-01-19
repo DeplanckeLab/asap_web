@@ -671,13 +671,132 @@ class ProjectsController < ApplicationController
   # POST /projects/upload_file_chunk
   # PATCH/PUT /projects/1 or /projects/1.json
   def update
-    respond_to do |format|
-      if @project.update(project_params)
-        format.html { redirect_to @project, notice: "Project was successfully updated." }
-        format.json { render :show, status: :ok, location: @project }
-      else
-        format.html { render :edit, status: :unprocessable_entity }
-        format.json { render json: @project.errors, status: :unprocessable_entity }
+    # Check if we're resetting parsing
+    is_resetting_parsing = session[:resetting_parsing] && session[:resetting_parsing_project_id] == @project.id
+    
+    if is_resetting_parsing
+      # Handle parsing reset similar to create action
+      # Get file formats for parsing attributes handling
+      @h_formats = {}
+      FileFormat.all.map { |f| @h_formats[f.name] = f }
+      
+      # Handle parsing attributes from params
+      tmp_attrs = params[:attrs] || {}
+      tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
+      
+      # Collect parsing attributes from params
+      [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
+        if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
+          tmp_attrs[k] = params[k]
+        end
+      end
+      
+      # Set defaults for RAW_TEXT file types
+      detected_format = tmp_attrs[:file_type] || params[:file_type]
+      if detected_format.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(detected_format)
+        tmp_attrs[:gene_name_col] ||= 'first' unless tmp_attrs[:gene_name_col].present?
+        tmp_attrs[:delimiter] ||= '' unless tmp_attrs[:delimiter].present?
+        tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
+      end
+      
+      # Remove RAW_TEXT parsing options for non-text formats
+      if tmp_attrs[:file_type] && @h_formats[tmp_attrs[:file_type]] && @h_formats[tmp_attrs[:file_type]].child_format != 'RAW_TEXT'
+        [:delimiter, :gene_name_col, :has_header].each do |k|
+          tmp_attrs.delete(k)
+        end
+      end
+      
+      # Update project attributes
+      @project.assign_attributes(project_params)
+      @project.parsing_attrs_json = tmp_attrs.to_json
+      @project.nber_cols = params[:nber_cols] if params[:nber_cols]
+      @project.nber_rows = params[:nber_rows] if params[:nber_rows]
+      @project.step_id ||= 1
+      @project.status_id ||= 1
+      @project.modified_at = Time.now
+      
+      # Get input file from session
+      input_file = nil
+      if session[:file_upload].present?
+        file_upload_hash = session[:file_upload]
+        session_complete = file_upload_hash[:complete] || file_upload_hash['complete']
+        session_fu_id = file_upload_hash[:fu_id] || file_upload_hash['fu_id']
+        
+        if session_complete && session_fu_id
+          fu_id = session_fu_id
+          search_user_id = current_user&.id
+          input_file = if search_user_id
+                         Fu.find_by(id: fu_id, user_id: search_user_id)
+                       else
+                         Fu.find_by(id: fu_id)
+                       end
+          
+          if input_file.nil? && search_user_id
+            input_file = Fu.find_by(id: fu_id)
+          end
+        end
+      end
+      
+      # Update Fu record with project info (if it exists)
+      if input_file.present?
+        input_file.update!(
+          project_id: @project.id,
+          project_key: @project.key,
+          status: 'completed'
+        )
+        @project.fu_id = input_file.id
+      end
+      
+      # Reset parsing step status
+      parsing_step = Step.where(name: 'parsing').first
+      if parsing_step
+        project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
+        if project_step
+          project_step.update!(status_id: 1) # Set to waiting
+        else
+          ProjectStep.create!(
+            project_id: @project.id,
+            step_id: parsing_step.id,
+            status_id: 1
+          )
+        end
+      end
+      
+      respond_to do |format|
+        if @project.save
+          # Call parse_files if the method exists
+          if @project.respond_to?(:parse_files)
+            h_data = {}
+            @project.parse_files(h_data)
+          end
+          
+          # Clean up session flags
+          session.delete(:resetting_parsing)
+          session.delete(:resetting_parsing_project_id)
+          session.delete(:file_upload)
+          
+          format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Project parsing was successfully reset." }
+          format.json { render :show, status: :ok, location: @project }
+        else
+          @project_types = ProjectType.order(:name)
+          @versions = available_versions
+          @file_formats = FileFormat.ordered
+          @organisms = fetch_organisms_for_version(@project.version_id)
+          @grouped_organisms = group_organisms(@organisms)
+          format.html { render :new, status: :unprocessable_entity }
+          format.json { render json: @project.errors, status: :unprocessable_entity }
+        end
+      end
+    else
+      # Normal update
+      respond_to do |format|
+        if @project.update(project_params)
+          format.html { redirect_to @project, notice: "Project was successfully updated." }
+          format.json { render :show, status: :ok, location: @project }
+        else
+          format.html { render :edit, status: :unprocessable_entity }
+          format.json { render json: @project.errors, status: :unprocessable_entity }
+        end
       end
     end
   end
@@ -1895,14 +2014,13 @@ class ProjectsController < ApplicationController
       h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
     end
     
-    # Create a new project object with pre-filled values
-    # Use @project for the form (the form expects @project)
-    @project = Project.new
-    @project.name = @original_project.name
-    @project.key = @original_project.key  # Use existing project key
-    @project.organism_id = @original_project.organism_id
-    @project.version_id = @original_project.version_id
-    @project.project_type_id = @original_project.project_type_id
+    # Use the existing project instead of creating a new one
+    # This ensures we keep the same project ID
+    @project = @original_project
+    
+    # Store flag in session to indicate we're resetting parsing
+    session[:resetting_parsing] = true
+    session[:resetting_parsing_project_id] = @original_project.id
     
     # Set up form data
     @project_types = ProjectType.order(:name)

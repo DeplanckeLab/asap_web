@@ -404,14 +404,28 @@ task :parse, [:project_key] => [:environment] do |t, args|
         logger.info("[ParseRake] Calculated duration from start_time: #{duration_seconds} seconds")
       end
       
-      # Parsing is complete - update run status and metrics
-      run_updates = { status_id: 3 }
-      run_updates[:max_ram] = max_ram_mb if max_ram_mb
-      run_updates[:process_duration] = process_duration_seconds if process_duration_seconds
-      run_updates[:duration] = duration_seconds if duration_seconds
+      # Parsing is complete - call finish_run to create annotations (including matrix annotation)
+      # finish_run will set status_id = 3 and create all necessary annotations
+      # finish_run builds h_output_files from step.output_json (expected_outputs) and files in output_dir
+      # It uses h_results['nber_rows'] and h_results['nber_cols'] for matrix dimensions
+      logger.info("[ParseRake] Calling Basic.finish_run to create annotations for run #{run.id}")
+      logger.info("[ParseRake] h_parsing has nber_rows=#{h_parsing['nber_rows']}, nber_cols=#{h_parsing['nber_cols']}")
       
-      run.update(run_updates) if run
-      logger.info("[ParseRake] Updated run #{run.id} status to complete with metrics: #{run_updates.to_json}")
+      # Call finish_run with h_parsing as h_results
+      # finish_run will build h_output_files from step.output_json and create annotations
+      Basic.finish_run(logger, run, h_parsing)
+      
+      # Reload run to get updated status and metrics from finish_run
+      run.reload
+      
+      # Update metrics that finish_run doesn't handle (max_ram, process_duration from exec_run_details.log)
+      run_updates = {}
+      run_updates[:max_ram] = max_ram_mb if max_ram_mb && run.max_ram != max_ram_mb
+      run_updates[:process_duration] = process_duration_seconds if process_duration_seconds && run.process_duration != process_duration_seconds
+      run.update(run_updates) if run_updates.any?
+      
+      annot_count = Annot.where(run_id: run.id).count
+      logger.info("[ParseRake] finish_run completed for run #{run.id}, status_id=#{run.status_id}, annotations created: #{annot_count}")
       
       # Update project_step based on run status (this will set it to 3 since run is now complete)
       Basic.upd_project_step(project, parsing_step.id) if project_step

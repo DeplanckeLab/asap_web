@@ -14,9 +14,18 @@ class SlurmJobMonitorJob < ApplicationJob
     end
 
     # Stop monitoring if run is already complete or failed
+    # BUT: if complete and has no annotations, we need to call finish_run to create them
     if run.status_id == 3
-      Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete, stopping monitoring")
-      return
+      annot_count = Annot.where(run_id: run.id).count
+      if annot_count == 0
+        Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} is complete (status_id=3) but has NO annotations (#{annot_count}). Calling finish_run_successfully to create annotations.")
+        slurm_service = SlurmService.new(logger: Rails.logger)
+        finish_run_successfully(run, slurm_service, slurm_job_id)
+        return
+      else
+        Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete with #{annot_count} annotations, stopping monitoring")
+        return
+      end
     end
 
     if run.status_id == 4
@@ -40,11 +49,15 @@ class SlurmJobMonitorJob < ApplicationJob
         
         if File.exist?(output_json_filename)
           # Output.json exists - check if run is already complete or needs to be finished
+          annot_count = Annot.where(run_id: run.id).count
           if run.status_id != 3
             Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but not marked complete, finishing run")
             finish_run_successfully(run, slurm_service, slurm_job_id)
+          elsif annot_count == 0
+            Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} already complete but has NO annotations (#{annot_count}). Will call finish_run_successfully to create annotations.")
+            finish_run_successfully(run, slurm_service, slurm_job_id)
           else
-            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already complete with output.json, stopping monitoring")
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already complete with output.json and #{annot_count} annotations, stopping monitoring")
           end
           return
         end
@@ -190,11 +203,15 @@ class SlurmJobMonitorJob < ApplicationJob
         if File.exist?(output_json_filename)
           # Output.json exists - check if run status is already complete (set by parse.rake)
           # Only mark as complete if run status is not already complete
+          annot_count = Annot.where(run_id: run.id).count
           if run.status_id != 3
             Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but run status is #{run.status_id}, finishing run")
             finish_run_successfully(run, slurm_service, slurm_job_id)
+          elsif annot_count == 0
+            Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} already marked as complete but has NO annotations (#{annot_count}). Will call finish_run_successfully to create annotations.")
+            finish_run_successfully(run, slurm_service, slurm_job_id)
           else
-            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete by parse.rake, skipping")
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete by parse.rake with #{annot_count} annotations, skipping")
           end
           return
         end
@@ -361,10 +378,17 @@ class SlurmJobMonitorJob < ApplicationJob
     # Reload run to get latest status
     run.reload
     
-    # Don't re-process runs that are already marked as complete
+    # finish_run is the only place that should set status_id = 3
+    # If a run is already complete but has no annotations, something went wrong
+    # We should still call finish_run to create annotations
     if run.status_id == 3
-      Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete, skipping")
-      return
+      annot_count = Annot.where(run_id: run.id).count
+      if annot_count == 0
+        Rails.logger.warn("[SlurmJobMonitorJob] Run##{run.id} is complete (status_id=3) but has NO annotations. This should not happen - finish_run should have created them. Calling finish_run again to create annotations.")
+      else
+        Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete with #{annot_count} annotations. finish_run should have been called already, skipping.")
+        return
+      end
     end
     
     project = run.project
@@ -425,7 +449,14 @@ class SlurmJobMonitorJob < ApplicationJob
       end
       
       # If no displayed_error and required files exist, proceed with successful completion
+      Rails.logger.info("[SlurmJobMonitorJob] Calling Basic.finish_run for Run##{run.id}")
+      Rails.logger.debug("[SlurmJobMonitorJob] h_results keys: #{h_results.keys.inspect}")
+      Rails.logger.debug("[SlurmJobMonitorJob] h_results has output_files: #{h_results.key?('output_files')}")
+      Rails.logger.debug("[SlurmJobMonitorJob] h_results has nber_rows: #{h_results.key?('nber_rows')}, nber_cols: #{h_results.key?('nber_cols')}")
       Basic.finish_run(Rails.logger, run, h_results)
+      # Check if annotations were created
+      annot_count_after = Annot.where(run_id: run.id).count
+      Rails.logger.info("[SlurmJobMonitorJob] After finish_run, Run##{run.id} has #{annot_count_after} annotations")
     else
       Rails.logger.warn("[SlurmJobMonitorJob] No valid results found for Run##{run.id}, marking as failed")
       finish_run_with_error(run, "No output.json found or invalid output")

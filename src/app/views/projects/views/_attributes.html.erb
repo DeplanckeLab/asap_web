@@ -86,29 +86,63 @@
                               <% next unless File.exist?(loom_file) %>
                               
                               <%# Get annotations for this run - try to find /matrix annotation %>
-                              <% annots = Annot.where(run_id: run.id, data_type_id: 3).all %>
+                              <%# Search by dim=3 (EXPRESSION_MATRIX) instead of data_type_id, as matrix annotations may have different data_type_ids %>
+                              <% annots = Annot.where(run_id: run.id, dim: 3).all %>
                               <% matrix_annot = annots.find { |a| a.name == '/matrix' } || annots.first %>
                               
-                              <%# If no annotation found, create a fallback structure %>
+                              <%# DEBUG: Log annotation search %>
+                              <% debug_info = [] %>
+                              <% debug_info << "Run ID: #{run.id}" %>
+                              <% debug_info << "Run status_id: #{run.status_id}" %>
+                              <% debug_info << "Project ID: #{@project.id}" %>
+                              <% debug_info << "Total annots for project: #{Annot.where(project_id: @project.id).count}" %>
+                              <% debug_info << "Annots found (run_id=#{run.id}, dim=3): #{annots.count}" %>
+                              <% annots.each_with_index { |a, i| debug_info << "  Annot[#{i}]: id=#{a.id}, name=#{a.name}, dim=#{a.dim}, data_type_id=#{a.data_type_id}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
+                              
+                              <%# If no annotation found, try searching by ori_run_id as well %>
                               <% unless matrix_annot %>
+                                <% debug_info << "No annot found with run_id, trying ori_run_id" %>
+                                <% ori_annots = Annot.where(ori_run_id: run.id, dim: 3).all %>
+                                <% debug_info << "Annots found (ori_run_id=#{run.id}, dim=3): #{ori_annots.count}" %>
+                                <% ori_annots.each_with_index { |a, i| debug_info << "  OriAnnot[#{i}]: id=#{a.id}, name=#{a.name}, run_id=#{a.run_id}, ori_run_id=#{a.ori_run_id}, dim=#{a.dim}, data_type_id=#{a.data_type_id}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
+                                <% matrix_annot = ori_annots.find { |a| a.name == '/matrix' } || ori_annots.first %>
+                              <% end %>
+                              
+                              <%# If still no annotation found, try broader search %>
+                              <% unless matrix_annot %>
+                                <% debug_info << "No annot found with dim=3, trying broader search" %>
                                 <%# Try to find any annotation for this run %>
                                 <% any_annot = Annot.where(run_id: run.id).where("dim = 3 OR name LIKE '/matrix%' OR name = '/matrix'").first %>
                                 <% if any_annot %>
                                   <% matrix_annot = any_annot %>
-                                <% end %>
-                              <% end %>
-                              
-                              <%# Get matrix dimensions %>
-                              <% if matrix_annot && matrix_annot.respond_to?(:nber_rows) && matrix_annot.respond_to?(:nber_cols) %>
-                                <% nber_rows = matrix_annot.nber_rows %>
-                                <% nber_cols = matrix_annot.nber_cols %>
-                                <% if nber_rows && nber_cols && nber_rows > 0 && nber_cols > 0 %>
-                                  <% matrix_size = "#{nber_cols.to_i} cells × #{nber_rows.to_i} genes" %>
+                                  <% debug_info << "Fallback annot found: id=#{any_annot.id}, name=#{any_annot.name}, dim=#{any_annot.dim}, data_type_id=#{any_annot.data_type_id}" %>
                                 <% else %>
-                                  <% matrix_size = "N/A (dimensions unknown)" %>
+                                  <% debug_info << "No fallback annot found" %>
+                                  <% all_annots_for_run = Annot.where(run_id: run.id).all %>
+                                  <% debug_info << "All annots for run (run_id=#{run.id}): #{all_annots_for_run.count}" %>
+                                  <% all_annots_for_run.each_with_index { |a, i| debug_info << "  AllAnnot[#{i}]: id=#{a.id}, name=#{a.name}, data_type_id=#{a.data_type_id}, dim=#{a.dim}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
+                                  <% all_ori_annots = Annot.where(ori_run_id: run.id).all %>
+                                  <% debug_info << "All annots for run (ori_run_id=#{run.id}): #{all_ori_annots.count}" %>
+                                  <% all_ori_annots.each_with_index { |a, i| debug_info << "  AllOriAnnot[#{i}]: id=#{a.id}, name=#{a.name}, run_id=#{a.run_id}, ori_run_id=#{a.ori_run_id}, data_type_id=#{a.data_type_id}, dim=#{a.dim}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
                                 <% end %>
                               <% else %>
-                                <% matrix_size = "N/A (dimensions unknown)" %>
+                                <% debug_info << "matrix_annot found: id=#{matrix_annot.id}, name=#{matrix_annot.name}, dim=#{matrix_annot.dim}, data_type_id=#{matrix_annot.data_type_id}" %>
+                              <% end %>
+                              
+                              <%# Get matrix dimensions from annot object %>
+                              <% matrix_size = nil %>
+                              <% if matrix_annot %>
+                                <% nber_rows = matrix_annot.nber_rows %>
+                                <% nber_cols = matrix_annot.nber_cols %>
+                                <% debug_info << "matrix_annot.nber_rows=#{nber_rows.inspect}, matrix_annot.nber_cols=#{nber_cols.inspect}" %>
+                                <% if nber_rows.present? && nber_cols.present? && nber_rows.to_i > 0 && nber_cols.to_i > 0 %>
+                                  <% matrix_size = "#{nber_cols.to_i} cells × #{nber_rows.to_i} genes" %>
+                                  <% debug_info << "matrix_size set to: #{matrix_size}" %>
+                                <% else %>
+                                  <% debug_info << "Dimensions not valid: rows=#{nber_rows.inspect}, cols=#{nber_cols.inspect}" %>
+                                <% end %>
+                              <% else %>
+                                <% debug_info << "No matrix_annot object available" %>
                               <% end %>
                               
                               <%# For display purposes, handle the fallback case %>
@@ -152,8 +186,15 @@
                                   <div class="font-medium text-gray-900"><%= step_run_info %></div>
                                   <div class="text-sm text-gray-600 mt-1">
                                     <span class="inline-block mr-3"><strong>Method:</strong> <%= method_name %></span>
-                                    <span class="inline-block mr-3"><strong>Matrix:</strong> <%= matrix_size %></span>
+                                    <span class="inline-block mr-3"><strong>Matrix:</strong> <%= matrix_annot_name %><% if matrix_size.present? %> (<%= matrix_size %>)<% end %></span>
                                     <span class="inline-block text-gray-500 text-xs"><%= relative_path %></span>
+                                  </div>
+                                  <%# DEBUG: Show debug information %>
+                                  <div class="text-xs text-red-600 mt-1 font-mono" style="background-color: #fee; padding: 4px; border: 1px solid #fcc;">
+                                    <strong>DEBUG:</strong><br>
+                                    <% debug_info.each do |info| %>
+                                      <%= info %><br>
+                                    <% end %>
                                   </div>
                                 </div>
                               </label>

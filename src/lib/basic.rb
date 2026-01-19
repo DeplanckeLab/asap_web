@@ -1394,7 +1394,12 @@ module Basic
       puts "ORI_ANNOT : " + ori_annot.to_json
       if ori_annot and annot != ori_annot ## second part of expression: in case of re-importing a metadata or creating again the same metadata, do not get the metadata attributes from the previous metadata version (it might be outdated, for example in the case of imported metadata => the type can me changed by the user)
         meta["type"] = (dt = ori_annot.data_type) ? dt.name : nil
-        meta["data_class_names"] = ori_annot.data_class_ids.split(",").map{|e| h_data_classes[e.to_i].name} 
+        if ori_annot.data_class_ids and ori_annot.data_class_ids != ''
+          meta["data_class_names"] = ori_annot.data_class_ids.split(",").map{|e| 
+            dc = h_data_classes[e.to_i]
+            dc ? dc.name : nil
+          }.compact
+        end
         meta["imported"] = ori_annot.imported
         type_txt = (dt = ori_annot.data_type) ? "-type #{dt.name}" : ""
       end
@@ -1406,18 +1411,19 @@ module Basic
         meta["type"]= 'DISCRETE'
       end
       values_opt = (meta["type"] == 'DISCRETE') ? '' : '-no-values' 
-      cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar #{values_opt} -T ExtractMetadata -loom #{loom_path} #{type_txt} -meta \"#{meta['name']}\""
-      puts cmd
-      res_json =`#{cmd}`
+      ##cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar #{values_opt} -T ExtractMetadata -loom #{loom_path} #{type_txt} -meta \"#{meta['name']}\""
+      ##puts cmd
+      ##res_json =`#{cmd}`
       #   puts res_json
-      meta_compl = Basic.safe_parse_json(res_json, {})
-      puts meta_compl
+      ##meta_compl = Basic.safe_parse_json(res_json, {})
+      ##puts meta_compl
       #        begin
       #          meta_compl = JSON.parse(res_json)
       #        rescue
       #        end
 
       ## complement for h5ad existing_metadata or if we want to change type (call from annot update)
+      meta_compl ||= {}
       ['type', 'on', 'nber_rows', 'nber_cols', 'dataset_size'].each do |k|
         meta[k] ||= meta_compl[k] 
       end
@@ -2356,6 +2362,9 @@ module Basic
     
     def finish_run logger, run, h_results
       
+      logger.info("[Basic.finish_run] Starting for Run##{run.id}, Project##{run.project_id}")
+      logger.debug("[Basic.finish_run] h_results keys: #{h_results.keys.inspect}")
+      
       #      start_time = Time.now
       run = Run.find(run.id)
       project = run.project
@@ -2744,7 +2753,8 @@ puts "TEST RUN"
       end
 
       loaded_annots = []
-      puts h_output_files.to_json
+      logger.info("[Basic.finish_run] h_output_files keys: #{h_output_files.keys.inspect}")
+      logger.debug("[Basic.finish_run] h_output_files: #{h_output_files.to_json}")
       ## edit type of output_files in function of properties described in output.json
       h_output_files.each_key do |k|
         h_output_files[k].each_key do |k2|           
@@ -2785,8 +2795,13 @@ puts "TEST RUN"
                   'name' => dataset_name,
                   'count' => (h_results and h_results['is_count_table'].to_i == 1) ? true : false
                 }
-                puts "H_DATA1: #{h_data.to_json}"
+                logger.info("[Basic.finish_run] Creating matrix annotation: #{h_data.to_json}")
                 new_annot = load_annot(run, h_data, relative_filepath, h_data_types, h_data_classes, logger)
+                if new_annot
+                  logger.info("[Basic.finish_run] Matrix annotation created: id=#{new_annot.id}, name=#{new_annot.name}, nber_rows=#{new_annot.nber_rows}, nber_cols=#{new_annot.nber_cols}")
+                else
+                  logger.warn("[Basic.finish_run] load_annot returned nil for matrix annotation")
+                end
                 h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                 #  puts  h_output_json.to_json
                 

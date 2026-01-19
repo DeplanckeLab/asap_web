@@ -57,18 +57,26 @@ export default class extends Controller {
     
     if (isHidden) {
       this.dropdownMenuTarget.classList.remove('hidden')
-      // Position relative to button
+      // Position relative to button with no gap
       this.dropdownMenuTarget.style.width = this.dropdownButtonTarget.offsetWidth + 'px'
       this.dropdownMenuTarget.style.display = 'block'
       this.dropdownMenuTarget.style.position = 'absolute'
       this.dropdownMenuTarget.style.zIndex = '9999'
       this.dropdownMenuTarget.style.top = '100%'
       this.dropdownMenuTarget.style.left = '0'
-      this.dropdownMenuTarget.style.marginTop = '4px'
+      this.dropdownMenuTarget.style.marginTop = '0'
+      // Hide selected tags when dropdown is open
+      if (this.hasSelectedDivTarget && !this.selectedDivTarget.classList.contains('hidden')) {
+        this.selectedDivTarget.classList.add('hidden')
+      }
       console.log("[InputDataSelectorController] Dropdown opened, visible:", this.dropdownMenuTarget.offsetHeight > 0)
     } else {
       this.dropdownMenuTarget.classList.add('hidden')
       this.dropdownMenuTarget.style.display = 'none'
+      // Show selected tags when dropdown is closed (if there are any selected)
+      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
+        this.selectedDivTarget.classList.remove('hidden')
+      }
     }
   }
 
@@ -77,6 +85,10 @@ export default class extends Controller {
     if (!this.dropdownMenuTarget.contains(event.target) && !this.dropdownButtonTarget.contains(event.target)) {
       this.dropdownMenuTarget.classList.add('hidden')
       this.dropdownMenuTarget.style.display = 'none'
+      // Show selected tags when dropdown is closed (if there are any selected)
+      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
+        this.selectedDivTarget.classList.remove('hidden')
+      }
     }
   }
 
@@ -151,9 +163,8 @@ export default class extends Controller {
       this.dropdownTextTarget.classList.remove('text-gray-500')
       this.dropdownTextTarget.classList.add('text-gray-900', 'font-medium')
       
-      // Show selected items
+      // Build selected items tags
       this.selectedDivTarget.innerHTML = ''
-      this.selectedDivTarget.classList.remove('hidden')
       selectedLabels.forEach((label) => {
         const badge = document.createElement('span')
         badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2 mb-1'
@@ -166,6 +177,13 @@ export default class extends Controller {
         badge.appendChild(removeBtn)
         this.selectedDivTarget.appendChild(badge)
       })
+      // Only show selected tags when dropdown is closed
+      const isDropdownOpen = !this.dropdownMenuTarget.classList.contains('hidden')
+      if (!isDropdownOpen) {
+        this.selectedDivTarget.classList.remove('hidden')
+      } else {
+        this.selectedDivTarget.classList.add('hidden')
+      }
     } else {
       this.dropdownTextTarget.textContent = '-- Select ' + (this.attrNameValue.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())) + ' --'
       this.dropdownTextTarget.classList.remove('text-gray-900', 'font-medium')
@@ -185,14 +203,17 @@ export default class extends Controller {
     if (this.minItemsValue > 0 && selectedCount < this.minItemsValue) {
       errorMsg = 'Please select at least ' + this.minItemsValue + ' item' + (this.minItemsValue > 1 ? 's' : '')
       this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
+      this.validationDivTarget.textContent = errorMsg
+      this.validationDivTarget.style.display = 'block'
     } else if (this.maxItemsValue && selectedCount > this.maxItemsValue) {
       errorMsg = 'Please select at most ' + this.maxItemsValue + ' item' + (this.maxItemsValue > 1 ? 's' : '')
       this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
+      this.validationDivTarget.textContent = errorMsg
+      this.validationDivTarget.style.display = 'block'
     } else {
-      this.validationDivTarget.className = 'mt-1 text-xs text-green-600'
-      errorMsg = selectedCount + ' item' + (selectedCount !== 1 ? 's' : '') + ' selected'
+      // Hide validation message when there's no error (constraint message above button shows the info)
+      this.validationDivTarget.style.display = 'none'
+      this.validationDivTarget.textContent = ''
     }
-    
-    this.validationDivTarget.textContent = errorMsg
   }
 }

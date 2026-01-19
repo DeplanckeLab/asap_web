@@ -59,10 +59,9 @@
                           <span class="text-gray-500" data-input-data-selector-target="dropdownText">-- Select <%= attr['label'] || attr_name.humanize %> --</span>
                           <span class="ml-2 text-gray-400">▼</span>
                         </button>
-                        
-                        <%# Dropdown menu %>
+                        <%# Dropdown menu - positioned directly under the button with no gap %>
                         <div data-input-data-selector-target="dropdownMenu"
-                             class="hidden absolute z-50 mt-1 w-full max-h-96 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg">
+                             class="hidden absolute z-50 top-full left-0 w-full max-h-96 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg">
                           <div class="py-1">
                             <% options_count = 0 %>
                             <% available_runs.each do |run| %>
@@ -159,26 +158,14 @@
                           </div>
                         </div>
                         
-                        <%# Selected items display %>
+                        <%# Selected items display - shown after dropdown when closed %>
                         <div data-input-data-selector-target="selectedDiv" class="mt-2 space-y-1 hidden"></div>
                         
                         <%# Hidden field to store the actual value (array if req_data_structure is array) %>
                         <%= hidden_field_tag form_attr_name, '', { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
                         
-                        <%# Validation message %>
+                        <%# Validation message - only shows errors, not count %>
                         <div data-input-data-selector-target="validationDiv" class="mt-1 text-xs"></div>
-                        
-                        <% if is_required %>
-                          <p class="mt-1 text-xs text-gray-500">
-                            <%= attr['description'] %>
-                            <span class="text-red-600">*</span>
-                            <% if min_items > 0 %>
-                              <span class="text-gray-600">(Select at least <%= min_items %> item<%= min_items > 1 ? 's' : '' %><% if max_items %> up to <%= max_items %><% end %>)</span>
-                            <% end %>
-                          </p>
-                        <% else %>
-                          <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
-                        <% end %>
                       </div>
                     <% else %>
                       <p class="text-sm text-red-600">No available datasets found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>

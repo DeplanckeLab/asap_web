@@ -16,71 +16,196 @@
     </div>
 
     <div class="md:order-3 flex justify-end items-center gap-x-1">
-      <!-- Collapse Button -->
-      <button type="button" class="md:hidden relative p-2 flex items-center font-medium text-sm rounded-lg border border-gray-200 text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 focus:text-black disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" id="hs-header-base-collapse" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base" >
-        Menu
-        <svg class="shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-      </button>
-      <!-- End Collapse Button -->
-
-      <div class="hidden md:inline-block md:me-2">
-        <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
-      </div>
-
-      <!-- Info Dropdown -->
-      <div class="relative inline-block text-left"
-           id="info-nav-dropdown"
-           data-controller="nav-dropdown"
-           data-nav-dropdown>
-        <button type="button"
-                class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
-                title="Open access resources"
-                aria-expanded="false"
-                data-nav-dropdown-toggle>
-          Info
-          <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m6 9 6 6 6-6"/>
+      <!-- Hamburger Menu Button (Mobile) -->
+      <div class="md:hidden relative" data-controller="mobile-menu">
+        <button type="button" 
+                class="relative p-2 flex items-center font-medium text-sm rounded-lg border border-gray-200 text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 focus:text-black disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" 
+                aria-expanded="false" 
+                aria-label="Toggle navigation"
+                data-mobile-menu-target="toggle"
+                data-action="click->mobile-menu#toggle">
+          <svg class="shrink-0 size-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
         </button>
-
-        <%= render "shared/info_menu",
-                  wrapper_classes: "hidden absolute right-0 mt-2 min-w-56 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
-                  data_attributes: { nav_menu: true } %>
+        
+        <!-- Mobile Dropdown Menu -->
+        <div class="hidden absolute right-0 mt-2 w-64 bg-white shadow-lg rounded-lg border border-gray-200 dark:bg-gray-800 dark:border-gray-700 z-[1000] max-h-[80vh] overflow-y-auto"
+             data-mobile-menu-target="menu">
+          <div class="py-2">
+            <!-- New Project -->
+            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= raw(new_project_path) %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              New project
+            </a>
+            
+            <!-- Browse Projects -->
+            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= projects_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Browse projects
+            </a>
+            
+            <!-- Tutorials -->
+            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= tutorial_home_index_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              Tutorials
+            </a>
+            
+            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+            
+            <!-- Info Section -->
+            <div class="px-4 py-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Info</p>
+            </div>
+            <% info_menu_links.each do |link| %>
+              <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= link[:path] %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                <div class="flex-1">
+                  <p class="font-medium"><%= link[:label] %></p>
+                  <% if link[:description].present? %>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5"><%= link[:description] %></p>
+                  <% end %>
+                </div>
+              </a>
+            <% end %>
+            
+            <% if admin? %>
+              <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+              
+              <!-- Admin Section -->
+              <div class="px-4 py-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Admin</p>
+              </div>
+              <% admin_menu_links.each do |link| %>
+                <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                   href="<%= link[:path] %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate">
+                  <div class="flex-1">
+                    <p class="font-medium"><%= link[:label] %></p>
+                    <% if link[:description].present? %>
+                      <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5"><%= link[:description] %></p>
+                    <% end %>
+                  </div>
+                </a>
+              <% end %>
+            <% end %>
+            
+            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+            
+            <% if user_signed_in? %>
+              <!-- User Account -->
+              <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= edit_user_registration_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                My Account
+              </a>
+              
+              <!-- Sign Out -->
+              <%= link_to destroy_user_session_path, method: :delete,
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700",
+                  data: {
+                    controller: "nav-item",
+                    action: "click->nav-item#navigate",
+                    "turbo-method": :delete
+                  } do %>
+                Sign Out
+              <% end %>
+            <% else %>
+              <!-- Sign In -->
+              <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= new_user_session_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                Sign In
+              </a>
+              
+              <!-- Sign Up -->
+              <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= new_user_registration_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                Sign Up
+              </a>
+            <% end %>
+          </div>
+        </div>
       </div>
-      <!-- End Info Dropdown -->
+      <!-- End Hamburger Menu Button -->
+      
+      <!-- Desktop Menu Items -->
+      <div class="hidden md:flex items-center gap-x-1">
+        <div class="hidden md:inline-block md:me-2">
+          <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
+        </div>
 
-      <% if admin? %>
-        <!-- Admin Dropdown -->
+        <!-- Info Dropdown -->
         <div class="relative inline-block text-left"
-             id="admin-nav-dropdown"
+             id="info-nav-dropdown"
              data-controller="nav-dropdown"
              data-nav-dropdown>
-          <button type="button" 
-                  id="admin-nav-button"
-                  class="hidden md:inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
-                  title="Admin tools"
+          <button type="button"
+                  class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
+                  title="Open access resources"
                   aria-expanded="false"
                   data-nav-dropdown-toggle>
-            Admin
+            Info
             <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m6 9 6 6 6-6"/>
             </svg>
           </button>
 
-          <!-- Dropdown Menu -->
-          <%= render "shared/admin_menu",
-                    wrapper_classes: "hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
+          <%= render "shared/info_menu",
+                    wrapper_classes: "hidden absolute right-0 mt-2 min-w-56 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
                     data_attributes: { nav_menu: true } %>
         </div>
-        <!-- End Admin Dropdown -->
-      <% end %>
+        <!-- End Info Dropdown -->
 
-      <!-- Offcanvas Toggle -->
-      <button type="button" class="relative size-9 flex justify-center items-center text-sm font-semibold rounded-lg border border-transparent text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-transparent dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base-offcanvas" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base-offcanvas">
-        <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>
-        <span class="sr-only">Toggle navigation</span>
-      </button>
-      <!-- End Offcanvas Toggle -->
+        <% if admin? %>
+          <!-- Admin Dropdown -->
+          <div class="relative inline-block text-left"
+               id="admin-nav-dropdown"
+               data-controller="nav-dropdown"
+               data-nav-dropdown>
+            <button type="button" 
+                    id="admin-nav-button"
+                    class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-gray-900 border border-transparent rounded-lg hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 transition-colors"
+                    title="Admin tools"
+                    aria-expanded="false"
+                    data-nav-dropdown-toggle>
+              Admin
+              <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+
+            <!-- Dropdown Menu -->
+            <%= render "shared/admin_menu",
+                      wrapper_classes: "hidden absolute right-0 mt-2 min-w-48 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
+                      data_attributes: { nav_menu: true } %>
+          </div>
+          <!-- End Admin Dropdown -->
+        <% end %>
+
+        <!-- Offcanvas Toggle -->
+        <button type="button" class="relative size-9 flex justify-center items-center text-sm font-semibold rounded-lg border border-transparent text-white hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 disabled:opacity-50 disabled:pointer-events-none dark:text-white dark:border-transparent dark:hover:bg-neutral-700 dark:focus:bg-neutral-700" aria-haspopup="dialog" aria-expanded="false" aria-controls="hs-header-base-offcanvas" aria-label="Toggle navigation" data-hs-overlay="#hs-header-base-offcanvas">
+          <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>
+          <span class="sr-only">Toggle navigation</span>
+        </button>
+        <!-- End Offcanvas Toggle -->
+      </div>
+      <!-- End Desktop Menu Items -->
     </div>
 
     <!-- Collapse -->

@@ -106,7 +106,113 @@
         </div>
         
         <!-- Right side: Navigation Icons -->
-        <div class="flex items-center space-x-2">
+        <!-- Hamburger Menu Button (Mobile) -->
+        <div class="md:hidden relative" data-controller="mobile-menu">
+          <button type="button" 
+                  class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition"
+                  aria-expanded="false" 
+                  aria-label="Toggle navigation"
+                  data-mobile-menu-target="toggle"
+                  data-action="click->mobile-menu#toggle">
+            <svg class="shrink-0 size-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          
+          <!-- Mobile Dropdown Menu -->
+          <div class="hidden absolute right-0 mt-2 w-64 bg-white shadow-lg rounded-lg border border-gray-200 z-[1000] max-h-[80vh] overflow-y-auto"
+               data-mobile-menu-target="menu">
+            <div class="py-2">
+              <!-- Summary -->
+              <%= link_to project_path(@project, view: 'summary'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'summary' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-info-circle text-lg mr-3"></i>
+                Summary
+              <% end %>
+              
+              <!-- Visualization -->
+              <%= link_to project_path(@project, view: 'visualization'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'visualization' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-chart-line text-lg mr-3"></i>
+                Visualization
+              <% end %>
+              
+              <!-- Analysis -->
+              <%= link_to project_path(@project, view: 'analysis'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'analysis' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-microscope text-lg mr-3"></i>
+                Analysis
+              <% end %>
+              
+              <!-- Data -->
+              <%= link_to project_path(@project, view: 'data'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'data' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-database text-lg mr-3"></i>
+                Data
+              <% end %>
+              
+              <!-- Settings -->
+              <%= link_to project_path(@project, view: 'settings'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'settings' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-cog text-lg mr-3"></i>
+                Settings
+              <% end %>
+              
+              <div class="border-t border-gray-200 my-1"></div>
+              
+              <!-- Info Section -->
+              <div class="px-4 py-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Info</p>
+              </div>
+              <% info_menu_links.each do |link| %>
+                <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                   href="<%= link[:path] %>">
+                  <div class="flex-1">
+                    <p class="font-medium"><%= link[:label] %></p>
+                    <% if link[:description].present? %>
+                      <p class="text-xs text-gray-500 mt-0.5"><%= link[:description] %></p>
+                    <% end %>
+                  </div>
+                </a>
+              <% end %>
+              
+              <% if admin? %>
+                <div class="border-t border-gray-200 my-1"></div>
+                
+                <!-- Admin Section -->
+                <div class="px-4 py-2">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Admin</p>
+                </div>
+                <% admin_menu_links.each do |link| %>
+                  <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                     href="<%= link[:path] %>">
+                    <div class="flex-1">
+                      <p class="font-medium"><%= link[:label] %></p>
+                      <% if link[:description].present? %>
+                        <p class="text-xs text-gray-500 mt-0.5"><%= link[:description] %></p>
+                      <% end %>
+                    </div>
+                  </a>
+                <% end %>
+              <% end %>
+              
+              <div class="border-t border-gray-200 my-1"></div>
+              
+              <!-- Back to Projects -->
+              <%= link_to projects_path, 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                <i class="fas fa-arrow-left text-lg mr-3"></i>
+                Back to Projects
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <!-- End Hamburger Menu Button -->
+        
+        <!-- Desktop Menu Items -->
+        <div class="hidden md:flex items-center space-x-2">
           <!-- Summary Icon -->
           <%= link_to project_path(@project, view: 'summary'), 
               class: "p-2 rounded-lg #{@view_type == 'summary' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}" do %>
@@ -178,6 +284,7 @@
             <i class="fas fa-arrow-left text-lg"></i>
           <% end %>
         </div>
+        <!-- End Desktop Menu Items -->
       </div>
     </div>
   </div>

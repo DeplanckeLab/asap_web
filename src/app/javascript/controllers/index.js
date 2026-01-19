@@ -91,6 +91,10 @@ import RunTimerController from "controllers/run_timer_controller"
 application.register("run-timer", RunTimerController)
 console.log('Run timer controller registered')
 
+import MobileMenuController from "controllers/mobile_menu_controller"
+application.register("mobile-menu", MobileMenuController)
+console.log('Mobile menu controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

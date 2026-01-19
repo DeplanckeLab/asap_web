@@ -41,6 +41,8 @@ export default class extends Controller {
       this.methodSelectTarget.addEventListener('change', () => {
         console.log("[FormReqController] Method selection changed")
         this.handleMethodChange()
+        // Validate form after method change
+        setTimeout(() => this.validateForm(), 100)
       })
     } else {
       console.warn("[FormReqController] Method select target not found")
@@ -50,6 +52,8 @@ export default class extends Controller {
     if (this.hasSubmitButtonTarget) {
       console.log("[FormReqController] Submit button found:", this.submitButtonTarget)
       console.log("[FormReqController] Submit button ID:", this.submitButtonTarget.id)
+      // Initial validation
+      setTimeout(() => this.validateForm(), 100)
     } else {
       console.error("[FormReqController] Submit button target NOT found!")
     }
@@ -145,6 +149,7 @@ export default class extends Controller {
         this.loadAttributes(selectedMethodId)
       } else if (this.hasAttrsContainerTarget) {
         this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">Select a method to configure parameters...</p>'
+        this.validateForm()
       }
     } else {
       if (this.hasAttrsContainerTarget) {
@@ -187,8 +192,11 @@ export default class extends Controller {
         this.attrsContainerTarget.innerHTML = html
         // Re-initialize any event listeners that might be needed
         this.initializeAttributeListeners()
+        // Validate form after attributes are loaded
+        setTimeout(() => this.validateForm(), 100)
       } else {
         this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">No attributes available for this method.</p>'
+        this.validateForm()
       }
     })
     .catch(error => {
@@ -210,13 +218,179 @@ export default class extends Controller {
       })
     })
     
-    // Handle attribute field changes for validation or other updates
+    // Handle attribute field changes for validation
     const attrInputs = this.attrsContainerTarget.querySelectorAll('input, select, textarea')
     attrInputs.forEach(input => {
       input.addEventListener('change', () => {
         console.log('[FormReqController] Attribute changed:', input.name || input.id)
+        this.validateForm()
+      })
+      input.addEventListener('input', () => {
+        this.validateForm()
       })
     })
+    
+    // Listen to input-data-selector validation events
+    const inputDataSelectors = this.attrsContainerTarget.querySelectorAll('[data-controller*="input-data-selector"]')
+    inputDataSelectors.forEach(selector => {
+      // Listen for custom validation events from input-data-selector
+      selector.addEventListener('validation-changed', () => {
+        this.validateForm()
+      })
+    })
+    
+    // Initial validation
+    this.validateForm()
+  }
+  
+  validateForm() {
+    if (!this.hasSubmitButtonTarget) {
+      return true
+    }
+    
+    let isValid = true
+    const errors = []
+    
+    // Check if method is selected (if method select exists)
+    if (this.hasMethodSelectTarget) {
+      const methodValue = this.methodSelectTarget.value
+      if (!methodValue || methodValue === '') {
+        isValid = false
+        errors.push('Please select a method')
+      }
+    }
+    
+    // If no attributes container, just check method selection
+    if (!this.hasAttrsContainerTarget) {
+      this.submitButtonTarget.disabled = !isValid
+      if (isValid) {
+        this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
+        this.submitButtonTarget.classList.add('cursor-pointer')
+      } else {
+        this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
+        this.submitButtonTarget.classList.remove('cursor-pointer')
+      }
+      return isValid
+    }
+    
+    // Get all attribute containers
+    const attrContainers = this.attrsContainerTarget.querySelectorAll('[data-attr-name]')
+    
+    attrContainers.forEach(container => {
+      const attrName = container.getAttribute('data-attr-name')
+      const widget = container.getAttribute('data-attr-widget')
+      const notNull = container.getAttribute('data-attr-not-null') === 'true'
+      const minItems = parseInt(container.getAttribute('data-attr-min-items') || '0')
+      const maxItems = container.getAttribute('data-attr-max-items')
+      const minVal = container.getAttribute('data-attr-min-val')
+      const maxVal = container.getAttribute('data-attr-max-val')
+      
+      // Skip hidden widgets
+      if (widget === 'hidden') {
+        return
+      }
+      
+      let value = null
+      let isEmpty = true
+      
+      if (widget === 'input_data') {
+        // For input_data widgets, check the hidden field value
+        const hiddenField = container.querySelector('[data-input-data-selector-target="hiddenField"]')
+        if (hiddenField && hiddenField.value) {
+          try {
+            const parsed = JSON.parse(hiddenField.value)
+            if (Array.isArray(parsed)) {
+              value = parsed
+              isEmpty = parsed.length === 0
+            } else if (typeof parsed === 'object' && parsed !== null) {
+              value = [parsed]
+              isEmpty = false
+            }
+          } catch (e) {
+            // Invalid JSON, treat as empty
+            isEmpty = true
+          }
+        }
+        
+        // Check min/max items constraints
+        if (isEmpty && minItems > 0) {
+          isValid = false
+          errors.push(`${attrName}: Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`)
+        } else if (!isEmpty && value) {
+          const count = Array.isArray(value) ? value.length : 1
+          if (minItems > 0 && count < minItems) {
+            isValid = false
+            errors.push(`${attrName}: Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`)
+          }
+          if (maxItems && count > parseInt(maxItems)) {
+            isValid = false
+            errors.push(`${attrName}: Please select at most ${maxItems} item${maxItems > 1 ? 's' : ''}`)
+          }
+        }
+      } else if (widget === 'checkbox') {
+        // For checkboxes, check the hidden field
+        const hiddenField = container.querySelector(`#attrs_${attrName}`)
+        if (hiddenField) {
+          value = hiddenField.value
+          isEmpty = !value || value === 'false'
+        }
+      } else {
+        // For other widgets (text, select), check the input/select element
+        const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"]`)
+        if (input) {
+          if (input.type === 'checkbox') {
+            value = input.checked ? input.value : null
+            isEmpty = !input.checked
+          } else {
+            value = input.value
+            isEmpty = !value || value.trim() === ''
+          }
+        }
+      }
+      
+      // Check not_null constraint
+      if (notNull && isEmpty) {
+        isValid = false
+        const label = container.querySelector('label')?.textContent?.trim() || attrName
+        errors.push(`${label}: This field is required`)
+      }
+      
+      // Check min_val/max_val constraints for numeric values
+      if (!isEmpty && value && (minVal || maxVal)) {
+        const numValue = parseFloat(value)
+        if (!isNaN(numValue)) {
+          if (minVal && numValue < parseFloat(minVal)) {
+            isValid = false
+            errors.push(`${attrName}: Value must be at least ${minVal}`)
+          }
+          if (maxVal && numValue > parseFloat(maxVal)) {
+            isValid = false
+            errors.push(`${attrName}: Value must be at most ${maxVal}`)
+          }
+        }
+      }
+    })
+    
+    // Update submit button state
+    this.submitButtonTarget.disabled = !isValid
+    
+    // Update button styling
+    if (isValid) {
+      this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
+      this.submitButtonTarget.classList.add('cursor-pointer')
+    } else {
+      this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
+      this.submitButtonTarget.classList.remove('cursor-pointer')
+    }
+    
+    // Log validation result
+    if (!isValid) {
+      console.log('[FormReqController] Validation failed:', errors)
+    } else {
+      console.log('[FormReqController] Form is valid')
+    }
+    
+    return isValid
   }
 
   submit(event) {
@@ -227,6 +401,12 @@ export default class extends Controller {
 
     if (!this.hasSubmitButtonTarget) {
       console.error("[FormReqController] Submit button target not found")
+      return
+    }
+    
+    // Validate form before submission
+    if (!this.validateForm()) {
+      console.warn("[FormReqController] Form validation failed, preventing submission")
       return
     }
 

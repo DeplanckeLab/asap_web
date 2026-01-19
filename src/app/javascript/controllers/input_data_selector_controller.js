@@ -192,28 +192,40 @@ export default class extends Controller {
       this.selectedDivTarget.innerHTML = ''
     }
     
-    // Validate
+    // Validate and trigger form validation
     this.validateSelection()
   }
 
   validateSelection() {
     const selectedCount = this.optionTargets.filter((input) => input.checked).length
     let errorMsg = ''
+    let isValid = true
     
     if (this.minItemsValue > 0 && selectedCount < this.minItemsValue) {
       errorMsg = 'Please select at least ' + this.minItemsValue + ' item' + (this.minItemsValue > 1 ? 's' : '')
       this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
       this.validationDivTarget.textContent = errorMsg
       this.validationDivTarget.style.display = 'block'
+      isValid = false
     } else if (this.maxItemsValue && selectedCount > this.maxItemsValue) {
       errorMsg = 'Please select at most ' + this.maxItemsValue + ' item' + (this.maxItemsValue > 1 ? 's' : '')
       this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
       this.validationDivTarget.textContent = errorMsg
       this.validationDivTarget.style.display = 'block'
+      isValid = false
     } else {
       // Hide validation message when there's no error (constraint message above button shows the info)
       this.validationDivTarget.style.display = 'none'
       this.validationDivTarget.textContent = ''
     }
+    
+    // Dispatch custom event for form validation
+    const event = new CustomEvent('validation-changed', {
+      bubbles: true,
+      detail: { isValid: isValid, selectedCount: selectedCount }
+    })
+    this.element.dispatchEvent(event)
+    
+    return isValid
   }
 }

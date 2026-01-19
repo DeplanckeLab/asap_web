@@ -13,7 +13,15 @@
               <% form_attr_name = "attrs[" + attr_name + "]" %>
               <% attr_val = @h_attr_vals[attr_name] %>
               
-              <div id="form-container_<%= attr_name %>" class="mb-4">
+              <div id="form-container_<%= attr_name %>" 
+                   class="mb-4"
+                   data-attr-name="<%= attr_name %>"
+                   data-attr-widget="<%= attr['widget'] %>"
+                   data-attr-not-null="<%= attr['not_null'] ? 'true' : 'false' %>"
+                   data-attr-min-items="<%= attr['min_nber_items'] || 0 %>"
+                   data-attr-max-items="<%= attr['max_nber_items'] || '' %>"
+                   data-attr-min-val="<%= attr['min_val'] || '' %>"
+                   data-attr-max-val="<%= attr['max_val'] || '' %>">
                 <% if attr['widget'] != 'checkbox' && attr['widget'] != 'hidden' %>
                   <label for="attrs_<%= attr_name %>" class="block text-sm font-medium text-gray-700 mb-2">
                     <%= raw(attr['label'] || attr_name.humanize) %>

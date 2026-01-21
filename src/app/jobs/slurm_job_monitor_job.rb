@@ -509,6 +509,9 @@ class SlurmJobMonitorJob < ApplicationJob
       )
     end
     
+    # Update project_step run counts so UI can display failed status correctly
+    Basic.upd_project_step(project, step.id) if project_step
+    
     project.update(status_id: 4) if project
     project.broadcast(step.id) if project.respond_to?(:broadcast)
   end

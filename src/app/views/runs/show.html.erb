@@ -87,14 +87,29 @@
           <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
           <div class="flex-1">
             <h4 class="text-sm font-semibold text-red-800 mb-2">Error</h4>
-            <% if @run.error.present? %>
-              <div class="text-red-700 text-sm font-mono whitespace-pre-wrap break-words"><%= @run.error %></div>
-            <% end %>
-            <% if @h_res && @h_res['displayed_error'] %>
-              <% errors = @h_res['displayed_error'].is_a?(Array) ? @h_res['displayed_error'] : [@h_res['displayed_error']] %>
-              <% errors.each do |error_msg| %>
-                <p class="text-red-800 mb-1" title="<%= error_msg %>"><%= error_msg %></p>
-              <% end %>
+            <% 
+              # Collect unique error messages to avoid duplication
+              error_messages = []
+              
+              # Add displayed_error if present (preferred source)
+              if @h_res && @h_res['displayed_error']
+                displayed_errors = @h_res['displayed_error'].is_a?(Array) ? @h_res['displayed_error'] : [@h_res['displayed_error']]
+                error_messages.concat(displayed_errors.compact)
+              end
+              
+              # Add run.error if present and different from displayed_error
+              if @run.error.present?
+                run_error = @run.error.strip
+                # Only add if it's not already in the error_messages array
+                unless error_messages.any? { |msg| msg.to_s.strip == run_error }
+                  error_messages << run_error
+                end
+              end
+              
+              # Display unique error messages
+              error_messages.uniq.each do |error_msg|
+            %>
+              <p class="text-red-800 mb-1" title="<%= error_msg %>"><%= error_msg %></p>
             <% end %>
           </div>
         </div>

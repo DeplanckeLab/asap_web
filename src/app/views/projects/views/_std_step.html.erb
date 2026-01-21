@@ -117,6 +117,43 @@
             <% StdMethod.where(id: std_method_ids).each { |m| @h_std_methods[m.id] = m } if std_method_ids.any? %>
           <% end %>
           
+          <%# Pre-load annots and their associated runs/steps for dataset parameters %>
+          <% unless defined?(@h_annots_for_params) && @h_annots_for_params %>
+            <% @h_annots_for_params = {} %>
+            <% @h_ori_runs_for_params = {} %>
+            <% @h_steps_for_params = {} %>
+            <% annot_ids = [] %>
+            <% @runs.each do |run| %>
+              <% h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
+              <% h_attrs.each_value do |v| %>
+                <% if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?) %>
+                  <% annot_ids << (v['annot_id'] || v[:annot_id]) %>
+                <% elsif v.is_a?(Array) %>
+                  <% v.each do |item| %>
+                    <% if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?) %>
+                      <% annot_ids << (item['annot_id'] || item[:annot_id]) %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+            <% if annot_ids.any? %>
+              <% Annot.where(id: annot_ids.uniq).each do |annot| %>
+                <% @h_annots_for_params[annot.id] = annot %>
+                <% if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id] %>
+                  <% ori_run = Run.find_by(id: annot.ori_run_id) %>
+                  <% if ori_run %>
+                    <% @h_ori_runs_for_params[annot.ori_run_id] = ori_run %>
+                    <% if ori_run.step_id.present? && !@h_steps_for_params[ori_run.step_id] %>
+                      <% step = Step.find_by(id: ori_run.step_id) %>
+                      <% @h_steps_for_params[ori_run.step_id] = step if step %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+          
           <div class="flex-1 min-h-0 px-6 pb-5 overflow-x-auto">
             <table class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
               <thead class="bg-gray-50">
@@ -142,7 +179,8 @@
                   <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
                   <%# Parse run attributes for parameters %>
                   <% h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
-                  <% params_display = h_run_attrs.map { |k, v| "#{k}: #{v}" }.join(", ") %>
+                  <% params_array = h_run_attrs.to_a %>
+                  <% params_display = params_array.map { |k, v| "#{k}: #{v}" }.join(", ") %>
                   <tr class="hover:bg-gray-50">
                     <td class="px-3 py-4 whitespace-nowrap">
                       <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
@@ -153,13 +191,94 @@
                     <td class="px-3 py-4" style="max-width: 0;">
                       <div class="text-sm text-gray-900 truncate" title="<%= method_label %>" style="width: 100%;"><%= method_label %></div>
                     </td>
-                    <td class="px-3 py-4" style="max-width: 0;">
-                      <% if params_display.present? %>
-                        <div class="text-xs text-gray-600 truncate" title="<%= params_display %>" style="width: 100%;">
-                          <%= params_display %>
+                    <td class="px-3 py-4">
+                      <% if params_array.any? %>
+                        <div class="flex flex-wrap gap-1.5 items-center" title="<%= params_display %>">
+                          <% max_visible = 3 %>
+                          <% params_array.first(max_visible).each do |key, value| %>
+                            <%# Check if value is a dataset (annot object) or array of datasets %>
+                            <% annot_id = nil %>
+                            <% if value.is_a?(Hash) %>
+                              <% annot_id = value['annot_id'] || value[:annot_id] %>
+                            <% end %>
+                            <% if annot_id.present? %>
+                              <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+                              <% if annot %>
+                                <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                                <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                                <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                                <% if ori_step && ori_step.multiple_runs && ori_run %>
+                                  <% run_num = ori_run.num || ori_run.id %>
+                                  <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
+                                <% else %>
+                                  <% dataset_display = "#{step_name} #{annot.name}" %>
+                                <% end %>
+                                <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                  <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                  <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
+                                </span>
+                              <% else %>
+                                <% value_str = value.to_json %>
+                                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                  <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                </span>
+                              <% end %>
+                            <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
+                              <%# Array of datasets - show first dataset and count %>
+                              <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
+                              <% if first_annot_id.present? %>
+                                <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                                <% if first_annot %>
+                                  <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                                  <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                                  <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                                  <% if ori_step && ori_step.multiple_runs && ori_run %>
+                                    <% run_num = ori_run.num || ori_run.id %>
+                                    <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                                  <% else %>
+                                    <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                                  <% end %>
+                                  <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
+                                  <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                    <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                    <span class="ml-1 text-blue-600" title="<%= array_display %>"><%= truncated_array %></span>
+                                  </span>
+                                <% else %>
+                                  <% value_str = "[#{value.size} datasets]" %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                    <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                    <span class="ml-1 text-gray-600"><%= value_str %></span>
+                                  </span>
+                                <% end %>
+                              <% else %>
+                                <% value_str = value.to_s %>
+                                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                  <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                </span>
+                              <% end %>
+                            <% else %>
+                              <% value_str = value.to_s %>
+                              <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                              </span>
+                            <% end %>
+                          <% end %>
+                          <% if params_array.size > max_visible %>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300">
+                              +<%= params_array.size - max_visible %> more
+                            </span>
+                          <% end %>
                         </div>
                       <% else %>
-                        <span class="text-gray-400">-</span>
+                        <span class="text-gray-400 text-xs">-</span>
                       <% end %>
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap">

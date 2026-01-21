@@ -189,6 +189,7 @@ export default class extends Controller {
     console.log('[StepSelectorController] handleStatusUpdate called with data:', data)
     console.log('[StepSelectorController] data.step_id:', data.step_id)
     console.log('[StepSelectorController] data.parsing_status:', data.parsing_status)
+    console.log('[StepSelectorController] data.h_nber_analyses:', data.h_nber_analyses)
     console.log('[StepSelectorController] Current step ID before update:', this.currentStepId)
     
     // Check if any form is currently open
@@ -199,8 +200,29 @@ export default class extends Controller {
     const preservedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
     console.log('[StepSelectorController] Preserving step ID before refresh:', preservedStepId)
     
+    // Convert step_id to number for comparison
+    const updateStepId = data.step_id ? parseInt(data.step_id) : null
+    
+    // Store websocket data to update badge after panel refresh (since DOM gets replaced)
+    const websocketData = data
+    
     // Always refresh the steps panel from the server to ensure consistency
-    this.refreshStepsPanel()
+    // After refresh completes, update the badge with websocket data
+    this.refreshStepsPanel().then(() => {
+      // Update step status badge with websocket data after panel refresh
+      // This ensures the badge reflects the latest run counts from the websocket
+      if (updateStepId && (websocketData.h_nber_analyses || websocketData.parsing_status)) {
+        console.log(`[StepSelectorController] Updating status badge for step ${updateStepId} with websocket data after panel refresh`)
+        this.updateStepStatusBadge(updateStepId.toString(), websocketData)
+      }
+    }).catch((error) => {
+      console.error('[StepSelectorController] Error refreshing steps panel:', error)
+      // Still try to update badge even if refresh failed
+      if (updateStepId && (websocketData.h_nber_analyses || websocketData.parsing_status)) {
+        console.log(`[StepSelectorController] Updating status badge for step ${updateStepId} with websocket data (refresh failed)`)
+        this.updateStepStatusBadge(updateStepId.toString(), websocketData)
+      }
+    })
     
     // Restore currentStepId after refresh (DOM replacement might have cleared it)
     if (preservedStepId && !this.currentStepId) {
@@ -209,8 +231,6 @@ export default class extends Controller {
       this.element.setAttribute('data-current-step-id', preservedStepId)
     }
     
-    // Convert step_id to number for comparison
-    const updateStepId = data.step_id ? parseInt(data.step_id) : null
     const currentStepIdNum = this.currentStepId ? parseInt(this.currentStepId) : null
     
     console.log('[StepSelectorController] Update step ID:', updateStepId, 'Current step ID:', currentStepIdNum)
@@ -323,7 +343,7 @@ export default class extends Controller {
     
     const controller = this
     
-    fetch(url, {
+    return fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'text/html',
@@ -412,6 +432,7 @@ export default class extends Controller {
       console.error('[StepSelectorController] ===== ERROR REFRESHING STEPS PANEL =====')
       console.error('[StepSelectorController] Error:', error)
       controller._refreshingStepsPanel = false
+      throw error // Re-throw so handleStatusUpdate can catch it
     })
   }
 

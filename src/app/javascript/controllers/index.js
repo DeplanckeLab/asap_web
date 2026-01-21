@@ -91,6 +91,10 @@ import RunTimerController from "controllers/run_timer_controller"
 application.register("run-timer", RunTimerController)
 console.log('Run timer controller registered')
 
+import RunParamsToggleController from "controllers/run_params_toggle_controller"
+application.register("run-params-toggle", RunParamsToggleController)
+console.log('Run params toggle controller registered')
+
 import MobileMenuController from "controllers/mobile_menu_controller"
 application.register("mobile-menu", MobileMenuController)
 console.log('Mobile menu controller registered')

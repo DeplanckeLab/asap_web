@@ -193,65 +193,75 @@
                     </td>
                     <td class="px-3 py-4">
                       <% if params_array.any? %>
-                        <div class="flex flex-wrap gap-1.5 items-center" title="<%= params_display %>">
+                        <div class="flex flex-wrap gap-1.5 items-center" title="<%= params_display %>" data-run-params-container="<%= run.id %>" data-controller="run-params-toggle">
                           <% max_visible = 3 %>
-                          <% params_array.first(max_visible).each do |key, value| %>
-                            <%# Check if value is a dataset (annot object) or array of datasets %>
-                            <% annot_id = nil %>
-                            <% if value.is_a?(Hash) %>
-                              <% annot_id = value['annot_id'] || value[:annot_id] %>
-                            <% end %>
-                            <% if annot_id.present? %>
-                              <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
-                              <% if annot %>
-                                <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
-                                <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
-                                <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
-                                <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                  <% run_num = ori_run.num || ori_run.id %>
-                                  <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
-                                <% else %>
-                                  <% dataset_display = "#{step_name} #{annot.name}" %>
-                                <% end %>
-                                <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
-                                  <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                  <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
-                                </span>
-                              <% else %>
-                                <% value_str = value.to_json %>
-                                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                                  <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
-                                </span>
+                          <% params_array.each_with_index do |(key, value), index| %>
+                            <% is_hidden = index >= max_visible %>
+                            <span class="<%= is_hidden ? 'hidden' : '' %> run-param-badge" data-run-id="<%= run.id %>">
+                              <%# Check if value is a dataset (annot object) or array of datasets %>
+                              <% annot_id = nil %>
+                              <% if value.is_a?(Hash) %>
+                                <% annot_id = value['annot_id'] || value[:annot_id] %>
                               <% end %>
-                            <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
-                              <%# Array of datasets - show first dataset and count %>
-                              <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
-                              <% if first_annot_id.present? %>
-                                <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
-                                <% if first_annot %>
-                                  <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                              <% if annot_id.present? %>
+                                <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+                                <% if annot %>
+                                  <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
                                   <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
                                   <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
                                   <% if ori_step && ori_step.multiple_runs && ori_run %>
                                     <% run_num = ori_run.num || ori_run.id %>
-                                    <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                                    <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
                                   <% else %>
-                                    <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                                    <% dataset_display = "#{step_name} #{annot.name}" %>
                                   <% end %>
-                                  <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
-                                  <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
                                     <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                    <span class="ml-1 text-blue-600" title="<%= array_display %>"><%= truncated_array %></span>
+                                    <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
                                   </span>
                                 <% else %>
-                                  <% value_str = "[#{value.size} datasets]" %>
+                                  <% value_str = value.to_json %>
+                                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
                                     <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                    <span class="ml-1 text-gray-600"><%= value_str %></span>
+                                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                  </span>
+                                <% end %>
+                              <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
+                                <%# Array of datasets - show first dataset and count %>
+                                <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
+                                <% if first_annot_id.present? %>
+                                  <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                                  <% if first_annot %>
+                                    <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                                    <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                                    <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                                    <% if ori_step && ori_step.multiple_runs && ori_run %>
+                                      <% run_num = ori_run.num || ori_run.id %>
+                                      <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                                    <% else %>
+                                      <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                                    <% end %>
+                                    <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
+                                    <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                      <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                      <span class="ml-1 text-blue-600" title="<%= array_display %>"><%= truncated_array %></span>
+                                    </span>
+                                  <% else %>
+                                    <% value_str = "[#{value.size} datasets]" %>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                      <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                      <span class="ml-1 text-gray-600"><%= value_str %></span>
+                                    </span>
+                                  <% end %>
+                                <% else %>
+                                  <% value_str = value.to_s %>
+                                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                    <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
                                   </span>
                                 <% end %>
                               <% else %>
@@ -262,19 +272,15 @@
                                   <span class="ml-1 text-gray-600"><%= truncated_value %></span>
                                 </span>
                               <% end %>
-                            <% else %>
-                              <% value_str = value.to_s %>
-                              <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                                <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                <span class="ml-1 text-gray-600"><%= truncated_value %></span>
-                              </span>
-                            <% end %>
+                            </span>
                           <% end %>
                           <% if params_array.size > max_visible %>
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300">
+                            <button type="button" 
+                                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300 hover:bg-gray-300 cursor-pointer transition-colors run-params-more-btn" 
+                                    data-run-id="<%= run.id %>"
+                                    data-action="click->run-params-toggle#toggle">
                               +<%= params_array.size - max_visible %> more
-                            </span>
+                            </button>
                           <% end %>
                         </div>
                       <% else %>
@@ -299,7 +305,7 @@
                                data-controller="run-timer"
                                data-run-timer-start-time-value="<%= run.start_time.iso8601 %>">
                             <i class="fas fa-clock text-gray-400 mr-1"></i>
-                            <span data-run-timer-target="elapsedTime" class="font-mono">--:--</span>
+                            <span data-run-timer-target="elapsedTime">--:--</span>
                           </div>
                         <% elsif run.status_id == 1 %>
                           <%# Waiting: show waiting timer and queue position %>
@@ -308,7 +314,7 @@
                               <div data-controller="run-timer"
                                    data-run-timer-submitted-at-value="<%= run.submitted_at.iso8601 %>">
                                 <i class="fas fa-clock text-gray-400 mr-1"></i>
-                                <span data-run-timer-target="elapsedTime" class="font-mono">--:--</span>
+                                <span data-run-timer-target="elapsedTime">--:--</span>
                               </div>
                             <% end %>
                             <% if run.slurm_job_id %>
@@ -411,4 +417,77 @@
     <i class="fas fa-exclamation-triangle me-2"></i>Step not found.
   </div>
 <% end %>
+
+<script>
+  // Fallback handler for run params toggle
+  (function() {
+    var buttonsSetup = new WeakSet()
+    
+    function setupRunParamsToggle() {
+      document.querySelectorAll('.run-params-more-btn').forEach(function(button) {
+        // Skip if already setup
+        if (buttonsSetup.has(button)) return
+        buttonsSetup.add(button)
+        
+        button.addEventListener('click', function(event) {
+          // Let Stimulus handle it first if it's connected
+          // This will still fire but Stimulus should handle it
+          event.stopPropagation()
+          
+          const runId = this.getAttribute('data-run-id')
+          if (!runId) return
+          
+          const container = this.closest('[data-run-params-container]')
+          if (!container) return
+          
+          const allBadges = Array.from(container.querySelectorAll('.run-param-badge[data-run-id="' + runId + '"]'))
+          const hiddenBadges = allBadges.filter(function(badge) {
+            return badge.classList.contains('hidden')
+          })
+          const maxVisible = 3
+          
+          if (hiddenBadges.length === 0) {
+            // All parameters are visible, hide the ones beyond max_visible
+            allBadges.forEach(function(badge, index) {
+              if (index >= maxVisible) {
+                badge.classList.add('hidden')
+              }
+            })
+            const hiddenCount = allBadges.length - maxVisible
+            this.textContent = hiddenCount > 0 ? '+' + hiddenCount + ' more' : ''
+          } else {
+            // Show all hidden parameters
+            hiddenBadges.forEach(function(badge) {
+              badge.classList.remove('hidden')
+            })
+            this.textContent = 'Show less'
+          }
+        })
+      })
+    }
+    
+    // Setup when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupRunParamsToggle)
+    } else {
+      setupRunParamsToggle()
+    }
+    
+    // Also setup after delays in case content loads dynamically
+    setTimeout(setupRunParamsToggle, 500)
+    setTimeout(setupRunParamsToggle, 1000)
+    
+    // Use MutationObserver to catch dynamically added content
+    if (typeof MutationObserver !== 'undefined') {
+      var observer = new MutationObserver(function(mutations) {
+        setupRunParamsToggle()
+      })
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      })
+    }
+  })()
+</script>
 

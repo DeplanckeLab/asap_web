@@ -198,6 +198,39 @@ class RunsController < ApplicationController
     # Get statuses hash
     @h_statuses = {}
     Status.all.each { |s| @h_statuses[s.id] = s }
+    
+    # Pre-load annots and their associated runs/steps for dataset parameters
+    @h_annots_for_params = {}
+    @h_ori_runs_for_params = {}
+    @h_steps_for_params = {}
+    annot_ids = []
+    h_attrs = @run.attrs_json.present? ? Basic.safe_parse_json(@run.attrs_json, {}) : {}
+    h_attrs.each_value do |v|
+      if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?)
+        annot_ids << (v['annot_id'] || v[:annot_id])
+      elsif v.is_a?(Array)
+        v.each do |item|
+          if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?)
+            annot_ids << (item['annot_id'] || item[:annot_id])
+          end
+        end
+      end
+    end
+    if annot_ids.any?
+      Annot.where(id: annot_ids.uniq).each do |annot|
+        @h_annots_for_params[annot.id] = annot
+        if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
+          ori_run = Run.find_by(id: annot.ori_run_id)
+          if ori_run
+            @h_ori_runs_for_params[annot.ori_run_id] = ori_run
+            if ori_run.step_id.present? && !@h_steps_for_params[ori_run.step_id]
+              step = Step.find_by(id: ori_run.step_id)
+              @h_steps_for_params[ori_run.step_id] = step if step
+            end
+          end
+        end
+      end
+    end
   end
 
   # GET /runs/new

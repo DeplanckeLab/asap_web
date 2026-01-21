@@ -42,41 +42,63 @@
         <i class="fas fa-info-circle text-gray-500"></i>
         Run Information
       </h4>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="space-y-4">
         <% if @std_method %>
           <div>
             <span class="text-xs font-medium text-gray-500 uppercase">Method</span>
             <p class="text-sm text-gray-900 mt-1"><%= @std_method.label.presence || @std_method.name %></p>
           </div>
         <% end %>
-        <% if @step %>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Step</span>
-            <p class="text-sm text-gray-900 mt-1"><%= @step.label.presence || @step.name.humanize %></p>
+            <span class="text-xs font-medium text-gray-500 uppercase">Created</span>
+            <p class="text-sm text-gray-900 mt-1"><%= @run.created_at ? @run.created_at.strftime("%Y-%m-%d %H:%M:%S") : 'N/A' %></p>
           </div>
-        <% end %>
-        <div>
-          <span class="text-xs font-medium text-gray-500 uppercase">Created</span>
-          <p class="text-sm text-gray-900 mt-1"><%= @run.created_at ? @run.created_at.strftime("%Y-%m-%d %H:%M:%S") : 'N/A' %></p>
+          <% if @run.start_time %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Started</span>
+              <p class="text-sm text-gray-900 mt-1"><%= @run.start_time.strftime("%Y-%m-%d %H:%M:%S") %></p>
+            </div>
+          <% end %>
         </div>
-        <% if @run.submitted_at %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Submitted</span>
-            <p class="text-sm text-gray-900 mt-1"><%= @run.submitted_at.strftime("%Y-%m-%d %H:%M:%S") %></p>
-          </div>
-        <% end %>
-        <% if @run.start_time %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Started</span>
-            <p class="text-sm text-gray-900 mt-1"><%= @run.start_time.strftime("%Y-%m-%d %H:%M:%S") %></p>
-          </div>
-        <% end %>
-        <% if @run.duration %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Duration</span>
-            <p class="text-sm text-gray-900 mt-1 font-mono"><%= duration(@run.duration.to_i) %></p>
-          </div>
-        <% end %>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <% if @run.waiting_duration %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
+              <div class="text-xs text-gray-500 mt-1">
+                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
+                <span><%= duration(@run.waiting_duration.to_i) %></span>
+              </div>
+            </div>
+          <% elsif @run.submitted_at && @run.start_time %>
+            <% wait_time = (@run.start_time - @run.submitted_at).round %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
+              <div class="text-xs text-gray-500 mt-1">
+                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
+                <span><%= duration(wait_time) %></span>
+              </div>
+            </div>
+          <% elsif @run.status_id == 1 && @run.submitted_at %>
+            <% wait_time = (Time.now - @run.submitted_at).round %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
+              <div class="text-xs text-gray-500 mt-1">
+                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
+                <span><%= duration(wait_time) %></span>
+              </div>
+            </div>
+          <% end %>
+          <% if @run.duration %>
+            <div>
+              <span class="text-xs font-medium text-gray-500 uppercase">Duration</span>
+              <div class="text-xs text-gray-500 mt-1">
+                <i class="fas fa-clock text-gray-400 mr-1"></i>
+                <span><%= duration(@run.duration.to_i) %></span>
+              </div>
+            </div>
+          <% end %>
+        </div>
       </div>
     </div>
 
@@ -123,26 +145,81 @@
           <i class="fas fa-cog text-gray-500"></i>
           Parameters
         </h4>
-        <div class="flex flex-wrap gap-2 items-center">
-          <% @h_run_attrs.each do |key, value| %>
-            <% if value.is_a?(Hash) && value['run_id'] %>
-              <% linked_run = Run.find_by(id: value['run_id']) %>
-              <% if linked_run %>
-                <%= link_to run_path(linked_run), class: 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors' do %>
-                  <%= key %>: Run #<%= linked_run.num || linked_run.id %>
+        <div class="flex flex-wrap gap-1.5 items-center">
+          <% params_array = @h_run_attrs.to_a %>
+          <% params_array.each do |key, value| %>
+            <%# Check if value is a dataset (annot object) or array of datasets %>
+            <% annot_id = nil %>
+            <% if value.is_a?(Hash) %>
+              <% annot_id = value['annot_id'] || value[:annot_id] %>
+            <% end %>
+            <% if annot_id.present? %>
+              <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+              <% if annot %>
+                <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                <% if ori_step && ori_step.multiple_runs && ori_run %>
+                  <% run_num = ori_run.num || ori_run.id %>
+                  <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
+                <% else %>
+                  <% dataset_display = "#{step_name} #{annot.name}" %>
                 <% end %>
+                <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                  <span class="font-semibold text-blue-800"><%= key %>:</span>
+                  <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
+                </span>
               <% else %>
-                <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-600">
-                  <%= key %>: Run #<%= value['run_id'] %> (not found)
+                <% value_str = value.to_json %>
+                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  <span class="font-semibold text-gray-800"><%= key %>:</span>
+                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
                 </span>
               <% end %>
-            <% elsif value.is_a?(Array) %>
-              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
-                <%= key %>: <%= value.join(', ') %>
-              </span>
+            <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
+              <%# Array of datasets - show first dataset and count %>
+              <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
+              <% if first_annot_id.present? %>
+                <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                <% if first_annot %>
+                  <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                  <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                  <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                  <% if ori_step && ori_step.multiple_runs && ori_run %>
+                    <% run_num = ori_run.num || ori_run.id %>
+                    <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                  <% else %>
+                    <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                  <% end %>
+                  <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
+                  <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                    <span class="font-semibold text-blue-800"><%= key %>:</span>
+                    <span class="ml-1 text-blue-600" title="<%= array_display %>"><%= truncated_array %></span>
+                  </span>
+                <% else %>
+                  <% value_str = "[#{value.size} datasets]" %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                    <span class="font-semibold text-gray-800"><%= key %>:</span>
+                    <span class="ml-1 text-gray-600"><%= value_str %></span>
+                  </span>
+                <% end %>
+              <% else %>
+                <% value_str = value.to_s %>
+                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  <span class="font-semibold text-gray-800"><%= key %>:</span>
+                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                </span>
+              <% end %>
             <% else %>
-              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800" data-toggle="tooltip" title="<%= "#{key}: #{value}" %>">
-                <%= truncate("#{key}: #{value}", length: 30) %>
+              <% value_str = value.to_s %>
+              <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                <span class="font-semibold text-gray-800"><%= key %>:</span>
+                <span class="ml-1 text-gray-600"><%= truncated_value %></span>
               </span>
             <% end %>
           <% end %>
@@ -151,18 +228,32 @@
     <% end %>
 
     <!-- Output Summary -->
-    <% if @run.status_id == 3 && @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
+    <% if @run.status_id == 3 && @h_res %>
       <div class="pt-4 relative">
-        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-2">
           <i class="fas fa-chart-bar text-gray-500"></i>
-          Output Summary
+          Output summary
         </h4>
-        <div class="flex flex-wrap gap-2 items-center">
-          <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
-            <% if @h_res && @h_res[output["key"]] %>
-              <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-800">
-                <%= output["label"] %>: <%= @h_res[output["key"]] %>
-              </span>
+        <div class="flex flex-wrap gap-3">
+          <% if @h_res['nber_rows'] %>
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+              <i class="fas fa-dna text-blue-600"></i>
+              <span class="text-sm font-medium text-blue-900"><%= row_label(@project).capitalize %>: <span class="font-bold"><%= @h_res['nber_rows'] %></span></span>
+            </div>
+          <% end %>
+          <% if @h_res['nber_cols'] %>
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-200 rounded-lg">
+              <i class="fas fa-circle text-purple-600"></i>
+              <span class="text-sm font-medium text-purple-900"><%= col_label(@project).capitalize %>: <span class="font-bold"><%= @h_res['nber_cols'] %></span></span>
+            </div>
+          <% end %>
+          <% if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
+            <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
+              <% if @h_res[output["key"]] && output["key"] != 'nber_rows' && output["key"] != 'nber_cols' %>
+                <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                  <span class="text-sm font-medium text-gray-900"><%= output["label"] %>: <span class="font-bold"><%= @h_res[output["key"]] %></span></span>
+                </div>
+              <% end %>
             <% end %>
           <% end %>
         </div>
@@ -191,34 +282,80 @@
       </div>
     <% end %>
 
-    <!-- Output Files -->
+    <!-- Output Files and Metadata -->
     <% if @h_outputs && @h_outputs.any? %>
       <div class="pt-4 relative">
         <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
           <i class="fas fa-file-alt text-gray-500"></i>
-          Output Files
+          Output Files and Metadata
         </h4>
-        <div class="space-y-3">
+        <div class="space-y-4">
+          <%# Collect unique files by relative path to avoid duplicates %>
+          <% h_unique_files = {} %>
           <% @h_outputs.each do |output_key, output_data| %>
             <% if output_data.is_a?(Hash) %>
-              <div>
-                <p class="text-sm font-medium text-gray-700 mb-2"><%= output_key.humanize %>:</p>
-                <ul class="list-disc list-inside space-y-1 ml-4">
-                  <% output_data.each do |file_key, file_info| %>
-                    <li class="text-sm text-gray-600">
-                      <% if file_info.is_a?(Hash) && file_info['filename'] %>
-                        <%= file_info['filename'] %>
-                        <% if file_info['filesize'] %>
-                          <span class="text-gray-500">(<%= display_mem(file_info['filesize']) %>)</span>
-                        <% end %>
-                      <% else %>
-                        <%= file_key %>
-                      <% end %>
-                    </li>
+              <% output_data.each do |file_key, file_info| %>
+                <% if file_info.is_a?(Hash) %>
+                  <%# Extract relative path from file_key (format: "relative_path:dataset_path" or just "relative_path") %>
+                  <% relative_path = file_key.split(":").first %>
+                  <%# Only add if we haven't seen this file yet, or merge file info if needed %>
+                  <% unless h_unique_files[relative_path] %>
+                    <% h_unique_files[relative_path] = file_info.dup %>
+                  <% else %>
+                    <%# Merge file info, preferring non-nil values %>
+                    <% h_unique_files[relative_path]['filename'] ||= file_info['filename'] %>
+                    <% h_unique_files[relative_path]['filesize'] ||= file_info['filesize'] %>
+                    <% h_unique_files[relative_path]['size'] ||= file_info['size'] %>
                   <% end %>
-                </ul>
-              </div>
+                <% end %>
+              <% end %>
             <% end %>
+          <% end %>
+          <%# Display unique files %>
+          <% h_unique_files.each do |relative_path, file_info| %>
+            <% is_loom = relative_path.end_with?('.loom') %>
+            <%# Get annotations for this file if it's a loom file %>
+            <% file_annots = [] %>
+            <% if is_loom %>
+              <% file_annots = Annot.where(project_id: @project.id, filepath: relative_path).order(:name) %>
+            <% end %>
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+              <h5 class="text-sm font-semibold text-gray-900 mb-3">
+                <%= relative_path %>
+                <% if file_info['filesize'] || file_info['size'] %>
+                  <span class="text-gray-500 font-normal">(<%= display_mem(file_info['filesize'] || file_info['size']) %>)</span>
+                <% end %>
+              </h5>
+              <% if is_loom && file_annots.any? %>
+                <div class="mt-3 pt-3 border-t border-gray-200">
+                  <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Metadata</h6>
+                  <div class="flex flex-wrap gap-1.5">
+                    <% file_annots.each do |annot| %>
+                      <%# Determine metadata type and color %>
+                      <% annot_name = annot.name || '' %>
+                      <% badge_class = 'bg-gray-100 text-gray-700 border-gray-200' %>
+                      <% if annot_name.start_with?('/row_attrs/') %>
+                        <% badge_class = 'bg-blue-50 text-blue-700 border-blue-200' %>
+                        <% display_name = annot_name.gsub(/^\/row_attrs\//, '') %>
+                      <% elsif annot_name.start_with?('/col_attrs/') %>
+                        <% badge_class = 'bg-purple-50 text-purple-700 border-purple-200' %>
+                        <% display_name = annot_name.gsub(/^\/col_attrs\//, '') %>
+                      <% elsif annot_name == '/matrix' %>
+                        <% badge_class = 'bg-green-50 text-green-700 border-green-200' %>
+                        <% display_name = 'matrix' %>
+                      <% else %>
+                        <%# Global metadata or other %>
+                        <% badge_class = 'bg-gray-100 text-gray-700 border-gray-200' %>
+                        <% display_name = annot_name.gsub(/^\//, '') %>
+                      <% end %>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= badge_class %> border">
+                        <%= display_name %>
+                      </span>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+            </div>
           <% end %>
         </div>
       </div>

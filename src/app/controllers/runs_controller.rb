@@ -176,8 +176,8 @@ class RunsController < ApplicationController
     end
     
     # Load output data
-    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-    step_dir = project_dir + @step.name
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    step_dir = @project_dir + @step.name
     output_dir = (@step.multiple_runs) ? (step_dir + @run.id.to_s) : step_dir
     output_json_file = output_dir + "output.json"
     
@@ -198,6 +198,93 @@ class RunsController < ApplicationController
     # Get statuses hash
     @h_statuses = {}
     Status.all.each { |s| @h_statuses[s.id] = s }
+    
+    # Prepare std_view data if step has std_view enabled
+    if @step && @step.has_std_view
+      # Get annotations by dimension
+      @h_annots_by_dim = {}
+      annots = Annot.where(run_id: @run.id).all
+      annots.each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
+      
+      # Get layout from show_view_json
+      @layout = []
+      if @step.show_view_json.present?
+        @layout = Basic.safe_parse_json(@step.show_view_json, [])
+      end
+      
+      # Prepare element data (@h_el) for standard view
+      @h_el = {}
+      
+      # Prepare files and links
+      h_files = {}
+      h_links = {}
+      
+      if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_links"]
+        h_links = {}
+        output_links_config = @h_dashboard_card[@step.id]["output_links"]
+        if @h_outputs && output_links_config
+          output_links_config.each do |link_config|
+            key = link_config["key"]
+            if @h_outputs[key]
+              h_links[key] = @h_outputs[key]
+            end
+          end
+        end
+      end
+      
+      if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_files"]
+        list_p = @h_dashboard_card[@step.id]["output_files"]
+        list_p.select { |e| @h_outputs && @h_outputs[e["key"]] && ((admin? || e["admin"] == true) || !e["admin"]) }.each do |e|
+          k = e["key"]
+          @h_outputs[k].keys.each do |output_key|
+            t = output_key.split(":")
+            h_files[t[0]] ||= {
+              h_output: @h_outputs[k][output_key],
+              datasets: []
+            }
+            h_files[t[0]][:datasets].push({ name: t[1], dataset_size: @h_outputs[k][output_key]['dataset_size'] }) if t.size > 1
+          end
+        end
+      end
+      
+      # Build dataset results
+      dataset_results = []
+      h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
+      @h_annots_by_dim.each_key do |dim|
+        subtitle = h_dim[dim]
+        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
+        dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
+          @h_annots_by_dim[dim].map { |annot|
+            col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
+            row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
+            col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
+            row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
+            "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
+          }.join(" ") + "</p>"
+      end
+      
+      # Set standard card elements (will be overridden with improved content in view)
+      @h_el = {
+        "card-params" => {
+          card_header: 'Parameters',
+          card_body: display_run_attrs(@run, @h_run_attrs, @h_std_method_attrs, {})
+        },
+        "card-downloads" => {
+          card_header: 'Downloads',
+          card_body: ((h_files.keys.size > 0) ? ("<p class='card-text'>" + h_files.keys.map { |k| display_download_btn(@run, h_files[k]) }.join(" ") + "</p>") : "")
+        },
+        "card-results" => {
+          card_header: 'Results',
+          card_body: ((@run.status_id == 3 && @h_res['warnings']) ? @h_res['warnings'].map { |e|
+            if e.is_a?(Hash)
+              "<p class='text-warning text-truncate' title=\"#{e['name']}. #{e['description']}\">#{e['name']}</p>"
+            else
+              "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
+            end
+          }.join(" ") : '') + dataset_results.join("<br/>\n")
+        }
+      }
+    end
     
     # Pre-load annots and their associated runs/steps for dataset parameters
     @h_annots_for_params = {}

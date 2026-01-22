@@ -36,6 +36,7 @@
   </div>
 
   <div class="px-6 py-5 space-y-6 flex-1">
+    <%# Always show our improved sections first %>
     <!-- Run Information Section -->
     <div class="pt-4 relative">
       <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
@@ -110,25 +111,17 @@
           <div class="flex-1">
             <h4 class="text-sm font-semibold text-red-800 mb-2">Error</h4>
             <% 
-              # Collect unique error messages to avoid duplication
               error_messages = []
-              
-              # Add displayed_error if present (preferred source)
               if @h_res && @h_res['displayed_error']
                 displayed_errors = @h_res['displayed_error'].is_a?(Array) ? @h_res['displayed_error'] : [@h_res['displayed_error']]
                 error_messages.concat(displayed_errors.compact)
               end
-              
-              # Add run.error if present and different from displayed_error
               if @run.error.present?
                 run_error = @run.error.strip
-                # Only add if it's not already in the error_messages array
                 unless error_messages.any? { |msg| msg.to_s.strip == run_error }
                   error_messages << run_error
                 end
               end
-              
-              # Display unique error messages
               error_messages.uniq.each do |error_msg|
             %>
               <p class="text-red-800 mb-1" title="<%= error_msg %>"><%= error_msg %></p>
@@ -148,7 +141,6 @@
         <div class="flex flex-wrap gap-1.5 items-center">
           <% params_array = @h_run_attrs.to_a %>
           <% params_array.each do |key, value| %>
-            <%# Check if value is a dataset (annot object) or array of datasets %>
             <% annot_id = nil %>
             <% if value.is_a?(Hash) %>
               <% annot_id = value['annot_id'] || value[:annot_id] %>
@@ -179,7 +171,6 @@
                 </span>
               <% end %>
             <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
-              <%# Array of datasets - show first dataset and count %>
               <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
               <% if first_annot_id.present? %>
                 <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
@@ -247,7 +238,7 @@
               <span class="text-sm font-medium text-purple-900"><%= col_label(@project).capitalize %>: <span class="font-bold"><%= @h_res['nber_cols'] %></span></span>
             </div>
           <% end %>
-          <% if @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
+          <% if @step && @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
             <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
               <% if @h_res[output["key"]] && output["key"] != 'nber_rows' && output["key"] != 'nber_cols' %>
                 <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
@@ -290,19 +281,15 @@
           Output Files and Metadata
         </h4>
         <div class="space-y-4">
-          <%# Collect unique files by relative path to avoid duplicates %>
           <% h_unique_files = {} %>
           <% @h_outputs.each do |output_key, output_data| %>
             <% if output_data.is_a?(Hash) %>
               <% output_data.each do |file_key, file_info| %>
                 <% if file_info.is_a?(Hash) %>
-                  <%# Extract relative path from file_key (format: "relative_path:dataset_path" or just "relative_path") %>
                   <% relative_path = file_key.split(":").first %>
-                  <%# Only add if we haven't seen this file yet, or merge file info if needed %>
                   <% unless h_unique_files[relative_path] %>
                     <% h_unique_files[relative_path] = file_info.dup %>
                   <% else %>
-                    <%# Merge file info, preferring non-nil values %>
                     <% h_unique_files[relative_path]['filename'] ||= file_info['filename'] %>
                     <% h_unique_files[relative_path]['filesize'] ||= file_info['filesize'] %>
                     <% h_unique_files[relative_path]['size'] ||= file_info['size'] %>
@@ -311,10 +298,8 @@
               <% end %>
             <% end %>
           <% end %>
-          <%# Display unique files %>
           <% h_unique_files.each do |relative_path, file_info| %>
             <% is_loom = relative_path.end_with?('.loom') %>
-            <%# Get annotations for this file if it's a loom file %>
             <% file_annots = [] %>
             <% if is_loom %>
               <% file_annots = Annot.where(project_id: @project.id, filepath: relative_path).order(:name) %>
@@ -331,7 +316,6 @@
                   <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Metadata</h6>
                   <div class="flex flex-wrap gap-1.5">
                     <% file_annots.each do |annot| %>
-                      <%# Determine metadata type and color %>
                       <% annot_name = annot.name || '' %>
                       <% badge_class = 'bg-gray-100 text-gray-700 border-gray-200' %>
                       <% if annot_name.start_with?('/row_attrs/') %>
@@ -344,7 +328,6 @@
                         <% badge_class = 'bg-green-50 text-green-700 border-green-200' %>
                         <% display_name = 'matrix' %>
                       <% else %>
-                        <%# Global metadata or other %>
                         <% badge_class = 'bg-gray-100 text-gray-700 border-gray-200' %>
                         <% display_name = annot_name.gsub(/^\//, '') %>
                       <% end %>
@@ -360,6 +343,108 @@
         </div>
       </div>
     <% end %>
+
+    <% if @step && @step.has_std_view %>
+      <%# Use std_view structure for additional content %>
+      <% if @layout && @layout.any? %>
+        <% @layout.each do |vertical_el| %>
+          <% if (!vertical_el['admin'] || admin?) %>
+            <div class="vert_element <%= tw_class('row') %>">
+              <% vertical_el["horiz_elements"].each do |horiz_element| %>
+                <% id = horiz_element['id'].to_s %>
+                <% container_class_str = horiz_element['container_class'] || '' %>
+                <% container_classes = container_class_str.present? ? tw_class(container_class_str) : 'w-full flex-[1_1_100%] min-w-full' %>
+                <div class="horiz_element <%= container_classes %>">
+                  <% if horiz_element['type'] == 'card' && (@h_el[id] || (horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?))) %>
+                    <% card_class_str = horiz_element['class'] || '' %>
+                    <% card_classes = card_class_str.present? ? tw_class(card_class_str) : '' %>
+                    <div class="<%= tw_class('card') %> <%= card_classes %>">
+                      <% if @h_el[id] %>
+                        <% if @h_el[id][:card_header] %>
+                          <div class="<%= tw_class('card-header') %>">
+                            <%= raw translate_bootstrap_in_html(@h_el[id][:card_header]) %>
+                          </div>
+                        <% end %>
+                        <div class="<%= tw_class('card-body') %>">
+                          <%= raw translate_bootstrap_in_html(@h_el[id][:card_body]) %>
+                        </div>
+                      <% elsif horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?) %>
+                        <% begin %>
+                          <% partial_path = horiz_element['partial'] %>
+                          <%# Try the specified path first, then try projects/ prefix if it's just a name %>
+                          <% partial_found = lookup_context.template_exists?(partial_path, [], true) %>
+                          <% unless partial_found && !partial_path.include?('/') %>
+                            <% projects_path = "projects/#{partial_path}" %>
+                            <% if lookup_context.template_exists?(projects_path, [], true) %>
+                              <% partial_path = projects_path %>
+                              <% partial_found = true %>
+                            <% end %>
+                          <% end %>
+                          <% if partial_found %>
+                            <%= render partial: partial_path, locals: { horiz_element: horiz_element } %>
+                          <% else %>
+                            <div class="<%= tw_class('card-body') %>">
+                              <p class="<%= tw_class('text-muted') %>">Partial '<%= horiz_element['partial'] %>' not found</p>
+                            </div>
+                          <% end %>
+                        <% rescue => e %>
+                          <div class="<%= tw_class('card-body') %>">
+                            <p class="<%= tw_class('text-danger') %>">Error rendering partial: <%= e.message %></p>
+                          </div>
+                        <% end %>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+      <% else %>
+        <%# Default layout if no layout specified %>
+        <div class="space-y-4">
+          <% if @h_el['card-params'] %>
+            <div class="<%= tw_class('card') %>">
+              <% if @h_el['card-params'][:card_header] %>
+                <div class="<%= tw_class('card-header') %>">
+                  <%= raw translate_bootstrap_in_html(@h_el['card-params'][:card_header]) %>
+                </div>
+              <% end %>
+              <div class="<%= tw_class('card-body') %>">
+                <%= raw translate_bootstrap_in_html(@h_el['card-params'][:card_body]) %>
+              </div>
+            </div>
+          <% end %>
+          
+          <% if @h_el['card-results'] %>
+            <div class="<%= tw_class('card') %>">
+              <% if @h_el['card-results'][:card_header] %>
+                <div class="<%= tw_class('card-header') %>">
+                  <%= raw translate_bootstrap_in_html(@h_el['card-results'][:card_header]) %>
+                </div>
+              <% end %>
+              <div class="<%= tw_class('card-body') %>">
+                <%= raw translate_bootstrap_in_html(@h_el['card-results'][:card_body]) %>
+              </div>
+            </div>
+          <% end %>
+          
+          <% if @h_el['card-downloads'] %>
+            <div class="<%= tw_class('card') %>">
+              <% if @h_el['card-downloads'][:card_header] %>
+                <div class="<%= tw_class('card-header') %>">
+                  <%= raw translate_bootstrap_in_html(@h_el['card-downloads'][:card_header]) %>
+                </div>
+              <% end %>
+              <div class="<%= tw_class('card-body') %>">
+                <%= raw translate_bootstrap_in_html(@h_el['card-downloads'][:card_body]) %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+    <%# End of std_view conditional - our improved sections are always shown above %>
 
     <!-- Additional Information (Admin only) -->
     <% if admin? %>

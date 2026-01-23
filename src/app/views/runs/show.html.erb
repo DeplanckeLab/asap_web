@@ -23,12 +23,13 @@
         <% end %>
       </div>
       <div class="flex items-center gap-3">
-        <%= link_to project_path(@project, view: 'data'), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
-          <i class="fas fa-arrow-left mr-2"></i>Back
-        <% end %>
-        <% if admin? %>
-          <%= link_to edit_run_path(@run), class: 'inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
-            <i class="fas fa-edit mr-2"></i>Edit
+        <% if @step %>
+          <%= link_to project_path(@project, view: 'analysis', step_id: @step.id), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-arrow-left mr-2"></i>Back
+          <% end %>
+        <% else %>
+          <%= link_to project_path(@project, view: 'analysis'), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-arrow-left mr-2"></i>Back
           <% end %>
         <% end %>
       </div>

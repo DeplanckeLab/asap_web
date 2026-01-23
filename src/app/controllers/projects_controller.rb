@@ -141,6 +141,10 @@ class ProjectsController < ApplicationController
       
       # Build steps with status using shared method
       prepare_steps_with_status
+      
+      # Set selected step ID from URL parameter (for step selector on narrow screens)
+      # This allows linking directly to a specific step from the run show page
+      @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
     end
     
     # Variables specific to summary view

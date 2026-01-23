@@ -263,6 +263,29 @@ class RunsController < ApplicationController
           }.join(" ") + "</p>"
       end
       
+      # Add exec.out and exec.err files for admin
+      exec_files_html = ""
+      if admin?
+        step_dir = @project_dir + @step.name
+        output_dir = (@step.multiple_runs) ? (step_dir + @run.id.to_s) : step_dir
+        exec_out_path = output_dir + "exec.out"
+        exec_err_path = output_dir + "exec.err"
+        
+        exec_files = []
+        if File.exist?(exec_out_path)
+          file_size = File.size(exec_out_path)
+          file_size_display = display_mem(file_size)
+          exec_files << "<a href='#{get_file_project_path(@project, filename: 'exec.out', step: @step.name, run_id: @run.id)}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'><span>exec.out</span><span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{file_size_display}</span></a>"
+        end
+        if File.exist?(exec_err_path)
+          file_size = File.size(exec_err_path)
+          file_size_display = display_mem(file_size)
+          exec_files << "<a href='#{get_file_project_path(@project, filename: 'exec.err', step: @step.name, run_id: @run.id)}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'><span>exec.err</span><span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{file_size_display}</span></a>"
+        end
+        
+        exec_files_html = exec_files.any? ? exec_files.join("") : ""
+      end
+      
       # Set standard card elements (will be overridden with improved content in view)
       @h_el = {
         "card-params" => {
@@ -271,7 +294,7 @@ class RunsController < ApplicationController
         },
         "card-downloads" => {
           card_header: 'Downloads',
-          card_body: ((h_files.keys.size > 0) ? ("<p class='card-text'>" + h_files.keys.map { |k| display_download_btn(@run, h_files[k]) }.join(" ") + "</p>") : "")
+          card_body: ((h_files.keys.size > 0) ? ("<div class='flex flex-wrap gap-1 items-start'>" + h_files.keys.map { |k| display_download_btn(@run, h_files[k]) }.join("") + "</div>") : "") + (exec_files_html.present? ? "<div class='flex flex-wrap gap-1 items-start mt-1'>" + exec_files_html.strip + "</div>" : "")
         },
         "card-results" => {
           card_header: 'Results',

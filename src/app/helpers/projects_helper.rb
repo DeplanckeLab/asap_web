@@ -58,4 +58,30 @@ module ProjectsHelper
       label.end_with?('s') ? label.chomp('s') : label
     end
   end
+
+  # Generate a dimension badge with count and label (with proper pluralization)
+  # @param count [Integer] The count value
+  # @param label_type [Symbol] Either :row or :col
+  # @param project [Project] The project instance
+  # @return [String] HTML string for the badge
+  def dimension_badge(count, label_type, project)
+    return '' unless count.present?
+    
+    count_int = count.to_i
+    is_plural = count_int != 1
+    
+    label = if label_type == :row
+      row_label(project, plural: is_plural)
+    else
+      col_label(project, plural: is_plural)
+    end
+    
+    badge_class = if label_type == :row
+      'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200'
+    else
+      'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200'
+    end
+    
+    content_tag(:span, "#{count_int} #{label}", class: badge_class)
+  end
 end

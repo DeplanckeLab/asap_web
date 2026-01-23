@@ -48,6 +48,7 @@ module TailwindHelper
       # Grid system - using gap instead of negative margins, full width cards
       'row' => 'flex flex-wrap gap-4 w-full items-stretch',
       'col-md-12' => 'w-full flex-[1_1_100%] min-w-full',
+      'col-md-8' => 'w-full md:w-[calc(66.667%-0.667rem)] md:flex-[1_1_calc(66.667%-0.667rem)]',
       'col-md-6' => 'w-full md:w-[calc(50%-0.5rem)] md:flex-[1_1_calc(50%-0.5rem)]',
       'col-md-4' => 'w-full md:w-[calc(33.333%-0.667rem)] md:flex-[1_1_calc(33.333%-0.667rem)]',
       'col-md-3' => 'w-full md:w-[calc(25%-0.75rem)] md:flex-[1_1_calc(25%-0.75rem)]',

@@ -319,15 +319,18 @@ module ApplicationHelper
     }
     
     if h_file[:datasets] && h_file[:datasets].size > 0
-      title = "data-toggle='tooltip' data-placement='bottom' title='Added/changed datasets: " +
+      title = "title='Added/changed datasets: " +
         h_file[:datasets].map { |d| d[:name] + ((d[:dataset_size]) ? " [#{display_mem(d[:dataset_size])}]" : '') }.join(", ") + "'"
     end
     
     if h_output["size"] && h_output["size"] > 0
       filename = h_filename[h_output["filename"]] || h_output["filename"] || 'file'
-      result = "<div class='nowrap'><div id='run_#{run.id}_#{h_output["onum"]}' class='btn btn-sm btn-outline-secondary white-bg download_file_btn' #{title}><div class='float-right'><sub>#{display_mem(h_output["size"])}</sub></div><div class='download_btn_text'>#{filename}</div></div>"
-      result += " <span class='link_to_loom_tuto info-btn pointer'><sup><i class='fas fa-info-circle fa-lg'></i></sup></span>" if h_output["filename"] == 'output.loom'
-      result += "</div>"
+      file_size = display_mem(h_output["size"])
+      result = "<a href='#{get_file_project_path(run.project, onum: h_output["onum"], run_id: run.id)}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors' #{title}>"
+      result += "<span>#{filename}</span>"
+      result += "<span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{file_size}</span>"
+      result += " <span class='link_to_loom_tuto info-btn pointer'><i class='fas fa-info-circle text-xs'></i></span>" if h_output["filename"] == 'output.loom'
+      result += "</a>"
       result
     else
       ""

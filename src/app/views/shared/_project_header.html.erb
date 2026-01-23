@@ -1,0 +1,275 @@
+<!-- Top Bar -->
+<div class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-50">
+  <div class="px-4 sm:px-6 lg:px-8 w-full">
+    <div class="flex items-center justify-between h-16">
+      <!-- Left side: Logo and Project Info -->
+      <div class="flex items-center space-x-6">
+        <!-- ASAP Logo -->
+        <div class="flex-shrink-0">
+          <%= link_to projects_path,
+                class: "inline-block rounded focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" do %>
+            <%= image_tag "ASAP_sansTagline_White.svg", 
+                class: 'h-8 w-32 object-contain', 
+                alt: 'ASAP Logo' %>
+          <% end %>
+        </div>
+        
+        <!-- Project Info -->
+        <% version_label = @project.version_id.presence || '2.0.0' %>
+        <% owner_user = @project.user %>
+        <% organism = @project.organism %>
+        <% owned_by_current_user = user_signed_in? && owner_user&.id == current_user.id %>
+        <% share_record = user_signed_in? && !owned_by_current_user ? @project.shares.find_by(user_id: current_user.id) : nil %>
+        <% owner_email = owner_user&.email.to_s
+           owner_email_part = owner_email.split('@').first if owner_email.present?
+           project_status_label =
+            if owned_by_current_user
+              'Owned by me'
+            elsif share_record.present?
+              "Shared by #{owner_email_part || 'unknown'}"
+            elsif @project.public? && owner_user
+              "Owned by #{owner_email_part || 'unknown'}"
+            else
+              'Read only access'
+            end %>
+        <% rights_summary = {
+             'Edit' => editable?(@project),
+             'Clone' => clonable?(@project),
+             'Export' => exportable?(@project)
+           } %>
+        <% account_status = if user_signed_in?
+                              email = current_user.email.to_s
+                              email_part = email.split('@').first
+                              "Logged in as #{current_user.displayed_name.presence || email_part}"
+                            else
+                              'GUEST'
+                            end %>
+        <div class="flex items-center space-x-4">
+            <div>
+            <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+              <span class="truncate max-w-[14rem] sm:max-w-sm lg:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-gray-100 bg-gray-700 rounded-full border border-gray-600">
+                v<%= version_label %>
+              </span>
+              <% if @project.public? %>
+                <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-emerald-200 bg-emerald-600/30 rounded-full border border-emerald-400/40">
+                  Public
+                </span>
+              <% end %>
+            </h1>
+              <div class="flex items-center space-x-4 text-sm text-gray-300">
+                <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
+                <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= formatted_organism_name(@project) %></span>
+              </div>
+            </div>
+            <div class="hidden lg:flex items-stretch space-x-6 border-l border-gray-700 pl-6 text-sm text-gray-300">
+              <div class="flex flex-col justify-center">
+                <span class="text-xs text-gray-300"><%= project_status_label %></span>
+                <div class="flex items-center gap-3 mt-1">
+                  <% icon_map = {
+                    'Edit' => 'fa-edit',
+                    'Clone' => 'fa-clone',
+                    'Export' => 'fa-download'
+                  } %>
+                  <% rights_summary.each do |label, allowed| %>
+                    <i class="fas <%= icon_map[label] %> text-base <%= allowed ? 'text-emerald-300' : 'text-gray-400' %>" 
+                       title="<%= label %>: <%= allowed ? 'Allowed' : 'Not allowed' %>"></i>
+                  <% end %>
+                </div>
+              </div>
+              <div class="w-px h-10 bg-gray-700 self-center"></div>
+              <div class="flex flex-col justify-center">
+                <span class="text-xs text-gray-300"><%= account_status %></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      
+      <!-- Center: ASAP Version -->
+      <div class="flex-1 flex justify-center">
+      </div>
+      
+      <!-- Right side: Navigation Icons -->
+      <!-- Hamburger Menu Button (Mobile) -->
+      <div class="md:hidden relative" data-controller="mobile-menu">
+        <button type="button" 
+                class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition"
+                aria-expanded="false" 
+                aria-label="Toggle navigation"
+                data-mobile-menu-target="toggle"
+                data-action="click->mobile-menu#toggle">
+          <svg class="shrink-0 size-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        
+        <!-- Mobile Dropdown Menu -->
+        <div class="hidden absolute right-0 mt-2 w-64 bg-white shadow-lg rounded-lg border border-gray-200 z-[1000] max-h-[80vh] overflow-y-auto"
+             data-mobile-menu-target="menu">
+          <div class="py-2">
+            <!-- Summary -->
+            <%= link_to project_path(@project, view: 'summary'), 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-info-circle text-lg mr-3"></i>
+              Summary
+            <% end %>
+            
+            <!-- Visualization -->
+            <%= link_to project_path(@project, view: 'visualization'), 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-chart-line text-lg mr-3"></i>
+              Visualization
+            <% end %>
+            
+            <!-- Analysis -->
+            <%= link_to project_path(@project, view: 'analysis'), 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-microscope text-lg mr-3"></i>
+              Analysis
+            <% end %>
+            
+            <!-- Data -->
+            <%= link_to project_path(@project, view: 'data'), 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-database text-lg mr-3"></i>
+              Data
+            <% end %>
+            
+            <!-- Settings -->
+            <%= link_to project_path(@project, view: 'settings'), 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-cog text-lg mr-3"></i>
+              Settings
+            <% end %>
+            
+            <div class="border-t border-gray-200 my-1"></div>
+            
+            <!-- Info Section -->
+            <div class="px-4 py-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Info</p>
+            </div>
+            <% info_menu_links.each do |link| %>
+              <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                 href="<%= link[:path] %>">
+                <div class="flex-1">
+                  <p class="font-medium"><%= link[:label] %></p>
+                  <% if link[:description].present? %>
+                    <p class="text-xs text-gray-500 mt-0.5"><%= link[:description] %></p>
+                  <% end %>
+                </div>
+              </a>
+            <% end %>
+            
+            <% if admin? %>
+              <div class="border-t border-gray-200 my-1"></div>
+              
+              <!-- Admin Section -->
+              <div class="px-4 py-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Admin</p>
+              </div>
+              <% admin_menu_links.each do |link| %>
+                <a class="flex items-start gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                   href="<%= link[:path] %>">
+                  <div class="flex-1">
+                    <p class="font-medium"><%= link[:label] %></p>
+                    <% if link[:description].present? %>
+                      <p class="text-xs text-gray-500 mt-0.5"><%= link[:description] %></p>
+                    <% end %>
+                  </div>
+                </a>
+              <% end %>
+            <% end %>
+            
+            <div class="border-t border-gray-200 my-1"></div>
+            
+            <!-- Back to Projects -->
+            <%= link_to projects_path, 
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+              <i class="fas fa-arrow-left text-lg mr-3"></i>
+              Back to Projects
+            <% end %>
+          </div>
+        </div>
+      </div>
+      <!-- End Hamburger Menu Button -->
+      
+      <!-- Desktop Menu Items -->
+      <div class="hidden md:flex items-center space-x-2">
+        <!-- Summary Icon -->
+        <%= link_to project_path(@project, view: 'summary'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+          <i class="fas fa-info-circle text-lg"></i>
+        <% end %>
+        
+        <!-- Visualization Icon -->
+        <%= link_to project_path(@project, view: 'visualization'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+          <i class="fas fa-chart-line text-lg"></i>
+        <% end %>
+        
+        <!-- Analysis Icon -->
+        <%= link_to project_path(@project, view: 'analysis'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+          <i class="fas fa-microscope text-lg"></i>
+        <% end %>
+        
+        <!-- Data Icon -->
+        <%= link_to project_path(@project, view: 'data'), 
+            class: "p-2 rounded-lg bg-gray-700 text-white" do %>
+          <i class="fas fa-database text-lg"></i>
+        <% end %>
+        
+        <!-- Settings Icon -->
+        <%= link_to project_path(@project, view: 'settings'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+          <i class="fas fa-cog text-lg"></i>
+        <% end %>
+        
+        <!-- Info Dropdown -->
+        <div class="relative ml-4"
+             id="info-nav-dropdown"
+             data-controller="nav-dropdown">
+          <button type="button"
+                  class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
+                  title="Open access resources"
+                  data-nav-dropdown-toggle>
+            <i class="fas fa-info-circle text-lg"></i>
+            <span class="hidden sm:inline text-sm">Info</span>
+            <i class="fas fa-chevron-down text-xs"></i>
+          </button>
+          <%= render "shared/info_menu",
+                      wrapper_classes: "hidden absolute right-0 mt-2 min-w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
+                      data_attributes: { nav_menu: true } %>
+        </div>
+        
+      <% if admin? %>
+        <div class="relative ml-4"
+             id="admin-tools-dropdown"
+             data-controller="nav-dropdown">
+          <button id="admin-tools-button"
+                  class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition flex items-center gap-2"
+                  title="Admin tools"
+                  data-nav-dropdown-toggle>
+              <i class="fas fa-tools text-lg"></i>
+              <span class="hidden sm:inline text-sm">Admin</span>
+              <i class="fas fa-chevron-down text-xs"></i>
+            </button>
+          <%= render "shared/admin_menu",
+                      wrapper_classes: "hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
+                      data_attributes: { nav_menu: true } %>
+        </div>
+        <% end %>
+        
+        <!-- Back to Projects -->
+        <%= link_to projects_path, 
+            class: "ml-4 p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+          <i class="fas fa-arrow-left text-lg"></i>
+        <% end %>
+      </div>
+      <!-- End Desktop Menu Items -->
+    </div>
+  </div>
+</div>
+

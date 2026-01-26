@@ -122,6 +122,33 @@ module ProjectsHelper
     parts.join(' ')
   end
 
+  # Format an annotation name by removing path prefixes
+  # @param annot_name [String] The annotation name (e.g., "/col_attrs/CellType")
+  # @return [String] The formatted name (e.g., "CellType")
+  def format_annot_name(annot_name)
+    return 'Unnamed' unless annot_name.present?
+    
+    formatted = annot_name.to_s
+      .gsub(/^\/col_attrs\//, '')
+      .gsub(/^\/row_attrs\//, '')
+      .gsub(/^\/layers\//, '')
+      .gsub(/^\/attrs\//, '')
+      .gsub(/^\//, '')
+    
+    formatted.presence || 'Unnamed'
+  end
+
+  # Get the metadata type label for an annotation
+  # @param annot [Annot] The annotation object
+  # @param project [Project] The project instance
+  # @return [String] The metadata type label
+  def annot_metadata_type_label(annot, project)
+    return 'Expression Matrix' if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/')
+    return "#{col_label(project, plural: false).capitalize} Metadata" if annot.name.start_with?('/col_attrs/')
+    return "#{row_label(project, plural: false).capitalize} Metadata" if annot.name.start_with?('/row_attrs/')
+    return 'Global Metadata'
+  end
+
   # Generate download URL for a loom file
   # @param filepath [String] The filepath of the loom file
   # @return [String] The download URL or nil if not available

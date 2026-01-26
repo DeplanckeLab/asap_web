@@ -53,6 +53,7 @@ Rails.application.routes.draw do
     end
   end
   
+  resources :annots, only: [:show]
   resources :runs
   resources :reqs
   resources :docker_images

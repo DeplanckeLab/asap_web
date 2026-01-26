@@ -60,11 +60,12 @@
       <% if selected_annots && selected_annots.any? %>
         <div class="space-y-3">
           <% selected_annots.each do |annot| %>
-            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4">
+            <%= link_to annot_path(annot), class: 'block bg-gray-50 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 hover:border-blue-300 transition-colors cursor-pointer' do %>
               <div class="flex items-start justify-between">
                 <div class="flex-1">
-                  <h4 class="text-sm font-semibold text-gray-900 mb-2">
-                    <%= annot.name.gsub(/^\/col_attrs\//, '').gsub(/^\/row_attrs\//, '').gsub(/^\/layers\//, '').gsub(/^\/attrs\//, '').gsub(/^\//, '') || 'Unnamed' %>
+                  <h4 class="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <%= format_annot_name(annot.name) %>
+                    <i class="fas fa-chevron-right text-xs text-gray-400"></i>
                   </h4>
                   <div class="flex flex-wrap gap-2 items-center">
                     <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
@@ -98,7 +99,7 @@
                   <% end %>
                 </div>
               </div>
-            </div>
+            <% end %>
           <% end %>
         </div>
       <% else %>

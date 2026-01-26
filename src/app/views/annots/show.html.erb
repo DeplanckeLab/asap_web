@@ -1,0 +1,365 @@
+<!-- Fixed header for annot - positioned below project header -->
+<div class="fixed top-16 left-0 right-0 z-40 flex-shrink-0 bg-white shadow-sm border-b border-gray-200">
+  <div class="px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between py-4">
+      <div class="flex items-center gap-3">
+        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <i class="fas fa-database text-blue-600"></i>
+          <% if @annot.filepath.present? %>
+            <%= loom_file_label(@annot.filepath) %> -
+          <% end %>
+          <%= annot_metadata_type_label(@annot, @project) %> -
+          <%= @annot.label.presence || format_annot_name(@annot.name) %>
+        </h3>
+      </div>
+      <div class="flex items-center gap-3">
+        <%= link_to project_path(@project, view: 'data', loom_file: @annot.filepath), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+          <i class="fas fa-arrow-left mr-2"></i>Back
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scrollable content area -->
+<div class="flex-1 overflow-y-auto">
+  <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24">
+    <div class="space-y-6">
+      <!-- General Info Card -->
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <i class="fas fa-info-circle text-blue-600"></i>
+          General Information
+        </h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <% if @annot.dim != 3 %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Annotation Type</span>
+              <p class="mt-1 text-sm text-gray-900">
+                <%= (@annot.dim == 1) ? col_label(@project, plural: false).capitalize : row_label(@project, plural: false).capitalize %>
+              </p>
+            </div>
+          <% end %>
+          <div>
+            <span class="text-sm font-medium text-gray-500">Dimensions</span>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <% if @annot.dim == 3 || @annot.name == '/matrix' || @annot.name.start_with?('/layers/') %>
+                <%= dimension_badge(@annot.nber_rows, :row, @project) if @annot.nber_rows %>
+                <%= dimension_badge(@annot.nber_cols, :col, @project) if @annot.nber_cols %>
+              <% elsif @annot.name.start_with?('/col_attrs/') %>
+                <%= dimension_badge(1, :row, @project) %>
+                <%= dimension_badge(@matrix_nber_cols, :col, @project) if @matrix_nber_cols %>
+              <% elsif @annot.name.start_with?('/row_attrs/') %>
+                <%= dimension_badge(@matrix_nber_rows, :row, @project) if @matrix_nber_rows %>
+                <%= dimension_badge(1, :col, @project) %>
+              <% else %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  Global
+                </span>
+              <% end %>
+            </div>
+          </div>
+          <div>
+            <span class="text-sm font-medium text-gray-500">Data Type</span>
+            <div class="mt-2">
+              <% if @annot.data_type %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  <%= @annot.data_type.name %>
+                </span>
+              <% else %>
+                <span class="text-sm text-gray-500">N/A</span>
+              <% end %>
+            </div>
+          </div>
+          <div>
+            <span class="text-sm font-medium text-gray-500">Produced by Analysis</span>
+            <p class="mt-1 text-sm text-gray-900">
+              <% if @run %>
+                <%= link_to run_path(@run), class: 'text-blue-600 hover:text-blue-800 hover:underline' do %>
+                  <%= @run.step ? (@run.step.label.presence || @run.step.name.humanize) : 'Unknown' %>
+                  <% if @run.step && @run.step.multiple_runs %>
+                    #<%= @run.num || @run.id %>
+                  <% end %>
+                  <i class="fas fa-arrow-circle-right ml-1"></i>
+                <% end %>
+              <% else %>
+                N/A
+              <% end %>
+            </p>
+          </div>
+          <% if @annot.mem_size %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Size</span>
+              <p class="mt-1 text-sm text-gray-900">
+                <%= display_mem(@annot.mem_size) %>
+              </p>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <!-- Categories Card (if available) -->
+      <% if @categories && @categories.any? %>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h4 class="text-lg font-semibold text-gray-900 mb-4">Categories</h4>
+          <div class="flex flex-wrap gap-2">
+            <% base_label = (@annot.dim == 1) ? col_label(@project, plural: false) : row_label(@project, plural: false) %>
+            <% @categories.each do |cat, count| %>
+              <span class="inline-flex items-center px-3 py-1 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                <%= cat %> <span class="ml-2 text-gray-500">(<%= count %> <%= count == 1 ? base_label : base_label.pluralize %>)</span>
+              </span>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Preview Card -->
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <i class="fas fa-table text-blue-600"></i>
+          Preview
+        </h4>
+        
+        <% if @annot.dim == 3 %>
+          <%# Expression Matrix Preview %>
+          <% if @preview_data && @preview_data.any? %>
+            <div class="mb-4">
+              <p class="text-sm text-gray-600 mb-2">
+                Sample: 10 <%= row_label(@project, plural: false) %> × up to 10 <%= col_label(@project, plural: false) %>
+                <span class="text-gray-500">(showing first 10 rows)</span>
+              </p>
+              <div class="overflow-x-auto border border-gray-200 rounded-lg">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
+                        <%= row_label(@project, plural: false).capitalize %> \ <%= col_label(@project, plural: false).capitalize %>
+                      </th>
+                      <% (0..[@preview_data.first&.length.to_i - 1, 9].min).each do |j| %>
+                        <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <%= col_label(@project, plural: false).capitalize %> <%= j + 1 %>
+                        </th>
+                      <% end %>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    <% @preview_data.first(10).each_with_index do |row, i| %>
+                      <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-2 text-xs font-medium text-gray-900 bg-gray-50 border-r border-gray-200">
+                          <%= row_label(@project, plural: false).capitalize %> <%= i + 1 %>
+                        </td>
+                        <% (0..[row.length - 1, 9].min).each do |j| %>
+                          <td class="px-3 py-2 text-xs text-gray-700 text-center">
+                            <%= number_with_precision(row[j], precision: 2) rescue row[j].to_s %>
+                          </td>
+                        <% end %>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          <% else %>
+            <p class="text-sm text-gray-500">No preview data available</p>
+          <% end %>
+        <% else %>
+          <%# Metadata Preview %>
+          <% if @h_results['values'] && @h_results['values'].any? %>
+            <div class="mb-4">
+              <p class="text-sm text-gray-600 mb-2">
+                <%= number_with_delimiter(@h_results['values'].size) %> values
+                <% if @h_results['values'].uniq.size != @h_results['values'].size %>
+                  (<%= number_with_delimiter(@h_results['values'].uniq.size) %> unique)
+                <% end %>
+              </p>
+              <div class="overflow-x-auto border border-gray-200 rounded-lg max-h-96">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead class="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Index</th>
+                      <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    <% @preview_data.each_with_index do |value, i| %>
+                      <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2 text-xs text-gray-500"><%= i %></td>
+                        <td class="px-4 py-2 text-xs text-gray-900 font-mono">
+                          <%= value.is_a?(Hash) ? value.to_json : value.to_s %>
+                        </td>
+                      </tr>
+                    <% end %>
+                    <% if @h_results['values'].size > 100 %>
+                      <tr>
+                        <td colspan="2" class="px-4 py-2 text-xs text-gray-500 text-center italic">
+                          ... and <%= number_with_delimiter(@h_results['values'].size - 100) %> more values
+                        </td>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          <% else %>
+            <p class="text-sm text-gray-500">No preview data available</p>
+          <% end %>
+        <% end %>
+      </div>
+
+      <!-- Distribution Plot Card -->
+      <% if @annot.dim == 3 %>
+        <%# Expression Matrix Distributions %>
+        <% if @h_sums && @h_sums.any? %>
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <i class="fas fa-chart-bar text-blue-600"></i>
+              Distribution
+            </h4>
+            <div class="space-y-6">
+              <% @h_sums.each_key do |k| %>
+                <% if @h_sums[k][:bin_counts] %>
+                  <div>
+                    <h5 class="text-sm font-medium text-gray-700 mb-2">
+                      <%= (k == :sum) ? 'Distribution of total counts by ' + row_label(@project, plural: false) : 'Distribution of total counts by ' + col_label(@project, plural: false) %>
+                    </h5>
+                    <div id="plotly_histo_<%= k %>" style="height: 300px;"></div>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      <% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
+        <%# Numerical Metadata Histogram %>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <i class="fas fa-chart-bar text-blue-600"></i>
+            Distribution
+          </h4>
+          <div id="plotly_histo" style="height: 400px;"></div>
+        </div>
+      <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
+        <%# Categorical Metadata Bar Chart %>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <i class="fas fa-chart-bar text-blue-600"></i>
+            Distribution
+            <span class="text-sm font-normal text-gray-500">(Top 25 categories)</span>
+          </h4>
+          <div id="plotly_histo" style="height: 400px;"></div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>
+
+<%# Load Plotly for charts %>
+<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+
+<%= javascript_tag do %>
+<% if @annot.dim == 3 %>
+  <%# Expression Matrix Distribution Plots %>
+  <% @h_sums.each_key do |k| %>
+    <% if @h_sums[k][:bin_counts] %>
+      var trace_<%= k %> = {
+        x: <%= raw (0..@h_sums[k][:bin_counts].size - 1).map { |bin_i| @h_sums[k][:min] + bin_i * @h_sums[k][:bin_size] }.to_json %>,
+        y: <%= raw @h_sums[k][:bin_counts].to_json %>,
+        type: 'bar',
+        marker: {
+          color: '#3b82f6',
+          line: {
+            color: '#2563eb',
+            width: 0.5
+          }
+        }
+      };
+      var layout_<%= k %> = {
+        title: {
+          text: '<%= (k == :sum) ? "Distribution of total counts by " + row_label(@project, plural: false) : "Distribution of total counts by " + col_label(@project, plural: false) %>',
+          font: { size: 14 }
+        },
+        xaxis: {
+          title: 'Count',
+          type: 'linear'
+        },
+        yaxis: {
+          title: 'Frequency'
+        },
+        bargap: 0,
+        margin: { l: 60, r: 20, t: 50, b: 50 },
+        plot_bgcolor: '#f9fafb',
+        paper_bgcolor: 'white'
+      };
+      var data_<%= k %> = [trace_<%= k %>];
+      Plotly.newPlot('plotly_histo_<%= k %>', data_<%= k %>, layout_<%= k %>, {responsive: true});
+    <% end %>
+  <% end %>
+<% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
+  <%# Numerical Metadata Histogram %>
+  var trace = {
+    x: <%= raw (0..@bin_counts.size - 1).map { |bin_i| @min + bin_i * @bin_size }.to_json %>,
+    y: <%= raw @bin_counts.to_json %>,
+    type: 'bar',
+    marker: {
+      color: '#3b82f6',
+      line: {
+        color: '#2563eb',
+        width: 0.5
+      }
+    }
+  };
+  var layout = {
+    title: {
+      text: 'Value Distribution',
+      font: { size: 14 }
+    },
+    xaxis: {
+      title: '<%= format_annot_name(@annot.name) %>',
+      type: 'linear'
+    },
+    yaxis: {
+      title: 'Frequency'
+    },
+    bargap: 0,
+    margin: { l: 60, r: 20, t: 50, b: 50 },
+    plot_bgcolor: '#f9fafb',
+    paper_bgcolor: 'white'
+  };
+  var data = [trace];
+  Plotly.newPlot('plotly_histo', data, layout, {responsive: true});
+<% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
+  <%# Categorical Metadata Bar Chart %>
+  <% ordered_keys = @h_counts.keys.sort { |a, b| @h_counts[b] <=> @h_counts[a] }.first(25) %>
+  var trace = {
+    x: <%= raw ordered_keys.to_json %>,
+    y: <%= raw ordered_keys.map { |k| @h_counts[k] }.to_json %>,
+    type: 'bar',
+    marker: {
+      color: '#3b82f6',
+      line: {
+        color: '#2563eb',
+        width: 0.5
+      }
+    }
+  };
+  var layout = {
+    title: {
+      text: 'Category Distribution',
+      font: { size: 14 }
+    },
+    xaxis: {
+      title: '<%= format_annot_name(@annot.name) %>',
+      type: 'category'
+    },
+    yaxis: {
+      title: 'Frequency'
+    },
+    bargap: 0.05,
+    margin: { l: 60, r: 20, t: 50, b: 100 },
+    plot_bgcolor: '#f9fafb',
+    paper_bgcolor: 'white'
+  };
+  var data = [trace];
+  Plotly.newPlot('plotly_histo', data, layout, {responsive: true});
+<% end %>
+<% end %>

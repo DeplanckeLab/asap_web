@@ -3308,7 +3308,7 @@ class ProjectsController < ApplicationController
       h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
       @h_annots_by_dim.each_key do |dim|
         subtitle = h_dim[dim]
-        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
+        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1 && dim > 2
         dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
           @h_annots_by_dim[dim].map { |annot|
             col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'

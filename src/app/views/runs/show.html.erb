@@ -284,7 +284,7 @@
                                 <% end %>
                                 <% if loom_filepath %>
                                   <span class="text-xs font-normal text-gray-500 normal-case">
-                                    (stored in 
+                                    (stored in
                                     <% if loom_onum %>
                                       <%= link_to loom_filepath, get_file_project_path(@project, onum: loom_onum, run_id: @run.id), class: 'text-blue-600 hover:text-blue-800 underline' %>
                                     <% else %>
@@ -416,7 +416,7 @@
                                 <% end %>
                                 <% if col_attrs.any? %>
                                   <div>
-                                    <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project).capitalize %> Metadata</h6>
+                                    <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project, plural:false) %> Metadata</h6>
                                     <div class="flex flex-wrap gap-1.5">
                                       <% col_attrs.each do |annot| %>
                                         <% annot_name = annot.name || '' %>
@@ -432,7 +432,7 @@
                                 <% end %>
                                 <% if row_attrs.any? %>
                                   <div>
-                                    <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project).capitalize %> Metadata</h6>
+                                    <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project, plural:false) %> Metadata</h6>
                                     <div class="flex flex-wrap gap-1.5">
                                       <% row_attrs.each do |annot| %>
                                         <% annot_name = annot.name || '' %>
@@ -695,7 +695,7 @@
                     <% end %>
                     <% if col_attrs.any? %>
                       <div>
-                        <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project).capitalize %> Metadata</h6>
+                        <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project) %> Metadata</h6>
                         <div class="flex flex-wrap gap-1.5">
                           <% col_attrs.each do |annot| %>
                             <% annot_name = annot.name || '' %>
@@ -711,7 +711,7 @@
                     <% end %>
                     <% if row_attrs.any? %>
                       <div>
-                        <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project).capitalize %> Metadata</h6>
+                        <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project) %> Metadata</h6>
                         <div class="flex flex-wrap gap-1.5">
                           <% row_attrs.each do |annot| %>
                             <% annot_name = annot.name || '' %>

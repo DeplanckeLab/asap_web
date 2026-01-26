@@ -1,158 +1,125 @@
-<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-  <div class="mb-6">
-    <h2 class="text-2xl font-bold text-gray-900 mb-2">Data</h2>
-    <p class="text-gray-600">Data files, metadata, and project information</p>
+<div class="flex flex-col h-full" data-controller="data-view" data-data-view-project-id-value="<%= @project.id %>">
+  <!-- Header -->
+  <div class="mb-4 flex-shrink-0">
+    <h2 class="text-2xl font-bold text-gray-900">Data</h2>
   </div>
 
-  <!-- Project Information -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-    <!-- Basic Info -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <h3 class="text-lg font-semibold text-gray-900 mb-3">Project Information</h3>
-      <div class="space-y-3 text-sm">
-        <div class="flex justify-between">
-          <span class="text-gray-600">Project Name:</span>
-          <span class="font-medium"><%= @project.display_name %></span>
+  <!-- Loom File Selector for Narrow Screens (Mobile/Tablet) -->
+  <% if @available_loom_files && @available_loom_files.any? %>
+    <div class="mb-4 lg:hidden relative" data-controller="dropdown">
+      <button type="button" 
+              class="w-full bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 text-left flex items-center justify-between"
+              style="border-left: 4px solid #007bff !important; border-top-left-radius: 0.5rem; border-bottom-left-radius: 0.5rem;"
+              data-action="click->dropdown#toggle"
+              data-dropdown-target="button">
+        <div class="flex items-center flex-1 min-w-0">
+          <span class="font-semibold text-gray-900 truncate">
+            <%= @selected_loom_file ? loom_file_label(@selected_loom_file) : 'Select loom file' %>
+          </span>
         </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Key:</span>
-          <span class="font-medium"><%= @project.key || 'N/A' %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Technology:</span>
-          <span class="font-medium"><%= @project.technology_display %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Tissue:</span>
-          <span class="font-medium"><%= @project.tissue_display %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Organism:</span>
-          <span class="font-medium"><%= formatted_organism_name(@project) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Status:</span>
-          <span class="font-medium"><%= @project.status_display %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Public:</span>
-          <span class="font-medium"><%= @project.is_public? ? 'Yes' : 'No' %></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Data Statistics -->
-    <div class="bg-gray-50 rounded-lg p-4">
-      <h3 class="text-lg font-semibold text-gray-900 mb-3">Data Statistics</h3>
-      <div class="space-y-3 text-sm">
-        <div class="flex justify-between">
-          <span class="text-gray-600">Total <%= col_label(@project).capitalize %>:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.cell_count) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Total <%= row_label(@project).capitalize %>:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.gene_count) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Disk Size:</span>
-          <span class="font-medium"><%= @project.disk_size_mb %> MB</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Views:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.view_count) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Clones:</span>
-          <span class="font-medium"><%= number_with_delimiter(@project.clone_count) %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Created:</span>
-          <span class="font-medium"><%= @project.created_date %></span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-gray-600">Updated:</span>
-          <span class="font-medium"><%= @project.updated_date %></span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Data Files -->
-  <div class="bg-gray-50 rounded-lg p-6 mb-6">
-    <h3 class="text-lg font-semibold text-gray-900 mb-4">Data Files</h3>
-    
-    <div class="bg-white rounded-lg border border-gray-200">
-      <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
-        <div class="grid grid-cols-12 gap-4 text-sm font-medium text-gray-700">
-          <div class="col-span-4">File Name</div>
-          <div class="col-span-2">Type</div>
-          <div class="col-span-2">Size</div>
-          <div class="col-span-2">Status</div>
-          <div class="col-span-2">Actions</div>
-        </div>
-      </div>
+        <i class="fas fa-chevron-down ml-3 text-gray-400 flex-shrink-0" data-dropdown-target="icon"></i>
+      </button>
       
-      <div class="divide-y divide-gray-200">
-        <div class="px-4 py-3">
-          <div class="grid grid-cols-12 gap-4 text-sm">
-            <div class="col-span-4 font-medium text-gray-900">expression_matrix.h5ad</div>
-            <div class="col-span-2 text-gray-600">AnnData</div>
-            <div class="col-span-2 text-gray-600">245.6 MB</div>
-            <div class="col-span-2">
-              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Processed</span>
+      <div class="hidden absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto z-50" 
+           data-dropdown-target="menu">
+        <div>
+          <% @available_loom_files.each do |filepath| %>
+            <% is_selected = @selected_loom_file == filepath %>
+            <% download_url = loom_file_download_url(filepath) %>
+            <div class="flex items-center px-4 py-3 border-b border-gray-200 <%= is_selected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50' %>"
+                 style="<%= is_selected ? 'border-left: 4px solid #007bff !important;' : 'border-left: 4px solid transparent;' %>">
+              <div class="flex-grow cursor-pointer"
+                   data-action="click->dropdown#close click->data-view#selectLoomFile"
+                   data-loom-file="<%= filepath %>"
+                   data-data-type="<%= @selected_data_type %>">
+                <span class="<%= is_selected ? 'text-blue-900 font-semibold' : 'text-gray-900' %> truncate">
+                  <%= loom_file_label(filepath) %>
+                </span>
+              </div>
+              <% if download_url %>
+                <div class="flex-shrink-0 ml-3">
+                  <%= link_to download_url, 
+                      target: '_blank',
+                      class: 'inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors',
+                      onclick: 'event.stopPropagation();',
+                      title: 'Download loom file' do %>
+                    <i class="fas fa-download"></i>
+                  <% end %>
+                </div>
+              <% end %>
             </div>
-            <div class="col-span-2">
-              <button class="text-blue-600 hover:text-blue-800 text-sm">Download</button>
-            </div>
-          </div>
-        </div>
-        
-        <div class="px-4 py-3">
-          <div class="grid grid-cols-12 gap-4 text-sm">
-            <div class="col-span-4 font-medium text-gray-900">metadata.csv</div>
-            <div class="col-span-2 text-gray-600">CSV</div>
-            <div class="col-span-2 text-gray-600">2.1 MB</div>
-            <div class="col-span-2">
-              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Processed</span>
-            </div>
-            <div class="col-span-2">
-              <button class="text-blue-600 hover:text-blue-800 text-sm">Download</button>
-            </div>
-          </div>
-        </div>
-        
-        <div class="px-4 py-3">
-          <div class="grid grid-cols-12 gap-4 text-sm">
-            <div class="col-span-4 font-medium text-gray-900">raw_counts.mtx</div>
-            <div class="col-span-2 text-gray-600">Matrix</div>
-            <div class="col-span-2 text-gray-600">156.8 MB</div>
-            <div class="col-span-2">
-              <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">Processing</span>
-            </div>
-            <div class="col-span-2">
-              <button class="text-gray-400 text-sm" disabled>Download</button>
-            </div>
-          </div>
+          <% end %>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- Description -->
-  <% if @project.description.present? %>
-    <div class="bg-gray-50 rounded-lg p-6 mb-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-3">Description</h3>
-      <p class="text-gray-700"><%= @project.description %></p>
     </div>
   <% end %>
 
-  <!-- Action Buttons -->
-  <div class="flex justify-end space-x-3">
-    <button class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
-      <i class="fas fa-edit mr-2"></i>Edit Project
-    </button>
-    <button class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-      <i class="fas fa-upload mr-2"></i>Upload Files
-    </button>
+  <!-- Two Column Layout: Loom Files Panel (Left) and Data Content (Right) -->
+  <div class="flex flex-row gap-4 flex-1 min-h-0">
+    <!-- Left Panel: Loom Files Navigation (Hidden on narrow screens) -->
+    <div class="hidden lg:flex w-64 flex-shrink-0 flex flex-col min-h-0">
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
+        <div class="flex flex-col h-full">
+          <div class="bg-gray-600 text-white px-4 py-3 border-b-2 border-gray-700 flex-shrink-0">
+            <h5 class="mb-0 font-bold text-lg flex items-center gap-2">
+              <i class="fas fa-folder-open"></i>
+              Loom Files
+            </h5>
+          </div>
+          <div class="flex-1 overflow-y-auto">
+            <% if @available_loom_files && @available_loom_files.any? %>
+              <% @available_loom_files.each do |filepath| %>
+                <% is_selected = @selected_loom_file == filepath %>
+                <% download_url = loom_file_download_url(filepath) %>
+                <div class="flex items-center px-4 py-3 border-b border-gray-200 <%= is_selected ? 'bg-blue-50' : 'bg-white' %> cursor-pointer hover:bg-gray-50"
+                     style="<%= is_selected ? 'border-left: 4px solid #007bff;' : 'border-left: 4px solid transparent;' %>"
+                     data-action="click->data-view#selectLoomFile"
+                     data-loom-file="<%= filepath %>"
+                     data-data-type="<%= @selected_data_type %>">
+                  <div class="flex-grow">
+                    <div>
+                      <strong class="block <%= is_selected ? 'text-blue-900' : 'text-gray-900' %>"><%= loom_file_label(filepath) %></strong>
+                    </div>
+                  </div>
+                  <% if download_url %>
+                    <div class="flex-shrink-0 ml-3">
+                      <%= link_to download_url, 
+                          target: '_blank',
+                          class: 'inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors',
+                          onclick: 'event.stopPropagation();',
+                          title: 'Download loom file' do %>
+                        <i class="fas fa-download"></i>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            <% else %>
+              <div class="text-center py-8 px-4">
+                <p class="text-gray-500 mb-0">No loom files available</p>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Right Panel: Data Content -->
+    <div class="flex-1 flex flex-col min-h-0">
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
+        <!-- Loading State -->
+        <div data-data-view-target="loading" style="display: none;" class="flex-1 flex items-center justify-center">
+          <div class="text-center py-12 px-6">
+            <i class="fas fa-spinner fa-spin text-3xl text-blue-600 mb-4"></i>
+            <p class="text-gray-600 mb-0">Loading data...</p>
+          </div>
+        </div>
+        
+        <!-- Content Container -->
+        <div data-data-view-target="content" class="flex flex-col h-full">
+          <%= render partial: 'projects/views/data_content' %>
+        </div>
+      </div>
+    </div>
   </div>
 </div>

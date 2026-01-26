@@ -84,4 +84,64 @@ module ProjectsHelper
     
     content_tag(:span, "#{count_int} #{label}", class: badge_class)
   end
+
+  # Generate a label for a loom file in the format: <step name> <std_method_name> #<run_number>
+  # If multiple_runs == false, display only <std_method_name> capitalized
+  # @param filepath [String] The filepath of the loom file
+  # @return [String] The formatted label
+  def loom_file_label(filepath)
+    return filepath unless defined?(@filepath_info) && @filepath_info && @filepath_info[filepath]
+    return filepath unless defined?(@loom_file_runs) && @loom_file_runs
+    
+    run_id = @filepath_info[filepath][:run_id]
+    return filepath unless run_id
+    
+    run = @loom_file_runs[run_id]
+    return filepath unless run
+    
+    # Get std_method name
+    std_method_name = run.std_method ? (run.std_method.name.presence || '') : ''
+    
+    # Check if step has multiple_runs == false
+    if run.step && run.step.multiple_runs == false
+      # Display only capitalized std_method_name
+      return std_method_name.present? ? std_method_name.capitalize : filepath
+    end
+    
+    # Get step name (prefer label, fallback to name)
+    step_name = run.step ? (run.step.label.presence || run.step.name.presence || 'Unknown') : 'Unknown'
+    
+    # Get run number (prefer num, fallback to id)
+    run_number = run.num || run.id
+    
+    # Build the full label
+    parts = [step_name]
+    parts << "##{run_number}"
+    parts << "(#{std_method_name})" if std_method_name.present? && std_method_name != 'Unknown'
+    
+    parts.join(' ')
+  end
+
+  # Generate download URL for a loom file
+  # @param filepath [String] The filepath of the loom file
+  # @return [String] The download URL or nil if not available
+  def loom_file_download_url(filepath)
+    return nil unless defined?(@filepath_info) && @filepath_info && @filepath_info[filepath]
+    return nil unless defined?(@loom_file_runs) && @loom_file_runs
+    
+    run_id = @filepath_info[filepath][:run_id]
+    return nil unless run_id
+    
+    run = @loom_file_runs[run_id]
+    return nil unless run && run.step
+    
+    # Extract filename from filepath (last part after "/")
+    filename = filepath.split('/').last || 'output.loom'
+    
+    # Get step name
+    step_name = run.step.name
+    
+    # Build download URL
+    get_file_project_path(@project, step: step_name, filename: filename, run_id: run_id)
+  end
 end

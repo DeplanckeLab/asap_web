@@ -1,0 +1,125 @@
+<div class="flex flex-col h-full">
+<% if @selected_loom_file && @annots_by_loom_and_type && @annots_by_loom_and_type[@selected_loom_file] %>
+  <% loom_data = @annots_by_loom_and_type[@selected_loom_file] %>
+  
+  <!-- Sticky Top Menu: Data Type Tabs -->
+  <div class="sticky top-0 z-10 bg-white border-b border-gray-200 flex-shrink-0">
+    <div class="flex items-center gap-1 px-4 py-2">
+      <button type="button"
+              class="px-4 py-2 text-sm font-medium rounded-md transition-colors <%= @selected_data_type == 'matrices' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' %>"
+              data-action="click->data-view#selectDataType"
+              data-data-view-data-type-param="matrices"
+              data-data-view-loom-file-param="<%= @selected_loom_file %>">
+        Expression Matrices
+      </button>
+      <button type="button"
+              class="px-4 py-2 text-sm font-medium rounded-md transition-colors <%= @selected_data_type == 'col_attrs' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' %>"
+              data-action="click->data-view#selectDataType"
+              data-data-view-data-type-param="col_attrs"
+              data-data-view-loom-file-param="<%= @selected_loom_file %>">
+        <%= col_label(@project, plural: false).capitalize %> Metadata
+      </button>
+      <button type="button"
+              class="px-4 py-2 text-sm font-medium rounded-md transition-colors <%= @selected_data_type == 'row_attrs' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' %>"
+              data-action="click->data-view#selectDataType"
+              data-data-view-data-type-param="row_attrs"
+              data-data-view-loom-file-param="<%= @selected_loom_file %>">
+        <%= row_label(@project, plural: false).capitalize %> Metadata
+      </button>
+      <button type="button"
+              class="px-4 py-2 text-sm font-medium rounded-md transition-colors <%= @selected_data_type == 'global' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' %>"
+              data-action="click->data-view#selectDataType"
+              data-data-view-data-type-param="global"
+              data-data-view-loom-file-param="<%= @selected_loom_file %>">
+        Global Metadata
+      </button>
+    </div>
+  </div>
+  
+  <!-- Content Area: List of Items -->
+  <div class="overflow-y-auto flex-1">
+    <div class="p-6">
+      <% selected_annots = case @selected_data_type
+                           when 'matrices'
+                             loom_data[:matrices]
+                           when 'col_attrs'
+                             loom_data[:col_attrs]
+                           when 'row_attrs'
+                             loom_data[:row_attrs]
+                           when 'global'
+                             loom_data[:global]
+                           else
+                             loom_data[:matrices]
+                           end %>
+      
+      <%# Get matrix dimensions for metadata annotations %>
+      <% matrix_dims = @matrix_dims_by_loom[@selected_loom_file] if @matrix_dims_by_loom %>
+      <% matrix_nber_cols = matrix_dims&.dig(:nber_cols) %>
+      <% matrix_nber_rows = matrix_dims&.dig(:nber_rows) %>
+      
+      <% if selected_annots && selected_annots.any? %>
+        <div class="space-y-3">
+          <% selected_annots.each do |annot| %>
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4">
+              <div class="flex items-start justify-between">
+                <div class="flex-1">
+                  <h4 class="text-sm font-semibold text-gray-900 mb-2">
+                    <%= annot.name.gsub(/^\/col_attrs\//, '').gsub(/^\/row_attrs\//, '').gsub(/^\/layers\//, '').gsub(/^\/attrs\//, '').gsub(/^\//, '') || 'Unnamed' %>
+                  </h4>
+                  <div class="flex flex-wrap gap-2 items-center">
+                    <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
+                      <%# Expression matrix %>
+                      <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
+                      <%= dimension_badge(annot.nber_cols, :col, @project) if annot.nber_cols %>
+                    <% elsif annot.name.start_with?('/col_attrs/') %>
+                      <%# Column metadata - use matrix dimensions %>
+                      <%= dimension_badge(1, :row, @project) %>
+                      <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
+                    <% elsif annot.name.start_with?('/row_attrs/') %>
+                      <%# Row metadata - use matrix dimensions %>
+                      <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
+                      <%= dimension_badge(1, :col, @project) %>
+                    <% else %>
+                      <%# Global metadata %>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                        Global
+                      </span>
+                    <% end %>
+                    <% if annot.data_type %>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                        <%= annot.data_type.name %>
+                      </span>
+                    <% end %>
+                  </div>
+                  <% if annot.mem_size %>
+                    <div class="mt-2 text-xs text-gray-500">
+                      Size: <%= display_mem(annot.mem_size) %>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% else %>
+        <div class="text-center py-12 px-6">
+          <p class="text-gray-500 mb-0">No <%= @selected_data_type == 'matrices' ? 'expression matrices' : (@selected_data_type == 'col_attrs' ? col_label(@project) + ' metadata' : (@selected_data_type == 'row_attrs' ? row_label(@project) + ' metadata' : 'global metadata')) %> available for this loom file</p>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% elsif @available_loom_files && @available_loom_files.any? %>
+  <div class="flex-1 overflow-y-auto flex items-center justify-center">
+    <div class="text-center py-12 px-6">
+      <p class="text-gray-500 mb-0">Select a loom file from the left panel to view data</p>
+    </div>
+  </div>
+<% else %>
+  <div class="flex-1 overflow-y-auto flex items-center justify-center">
+    <div class="text-center py-12 px-6">
+      <p class="text-gray-500 mb-0">No loom files available for this project</p>
+    </div>
+  </div>
+<% end %>
+</div>
+

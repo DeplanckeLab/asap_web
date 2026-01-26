@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position get_attributes]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position get_attributes data_content]
 
   # GET /projects or /projects.json
   def index
@@ -145,6 +145,116 @@ class ProjectsController < ApplicationController
       # Set selected step ID from URL parameter (for step selector on narrow screens)
       # This allows linking directly to a specific step from the run show page
       @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
+    end
+    
+    # Variables specific to data view
+    if @view_type == 'data'
+      # Get project type for display
+      @project_type = @project.project_type
+      
+      # Get all annotations with step and run information for ordering
+      all_annots = Annot.where(project_id: @project.id)
+                        .where.not(filepath: nil)
+                        .includes(:step, run: [:std_method])
+                        .order(:name)
+      
+      # Get unique filepaths with their minimum step rank and run id for ordering
+      # We use the minimum to get the earliest step/run that created each file
+      filepath_info = {}
+      all_annots.each do |annot|
+        next unless annot.filepath.present?
+        
+        filepath = annot.filepath
+        step_rank = annot.step&.rank
+        run_id = annot.run_id
+        
+        if filepath_info[filepath]
+          # Update with minimum step rank and run id
+          # Priority: step_rank first, then run_id
+          existing = filepath_info[filepath]
+          existing_step_rank = existing[:step_rank] || 9999
+          existing_run_id = existing[:run_id] || 999999
+          
+          current_step_rank = step_rank || 9999
+          current_run_id = run_id || 999999
+          
+          # Compare: step_rank first, then run_id if step_rank is equal
+          should_update = false
+          if current_step_rank < existing_step_rank
+            should_update = true
+          elsif current_step_rank == existing_step_rank && current_run_id < existing_run_id
+            should_update = true
+          end
+          
+          if should_update
+            existing[:step_rank] = step_rank
+            existing[:run_id] = run_id
+          end
+        else
+          # Initialize with this annotation's step rank and run id
+          filepath_info[filepath] = {
+            step_rank: step_rank,
+            run_id: run_id
+          }
+        end
+      end
+      
+      # Sort loom files by step rank (ascending) then by run id (ascending)
+      # Use high numbers for nil values to push them to the end
+      @available_loom_files = filepath_info.keys.sort_by do |filepath|
+        info = filepath_info[filepath]
+        [info[:step_rank] || 9999, info[:run_id] || 999999]
+      end
+      
+      # Store filepath info for use in helper
+      @filepath_info = filepath_info
+      
+      # Preload runs and steps for helper
+      run_ids = filepath_info.values.map { |info| info[:run_id] }.compact.uniq
+      @loom_file_runs = Run.where(id: run_ids).includes(:step, :std_method).index_by(&:id) if run_ids.any?
+      @loom_file_runs ||= {}
+      
+      # Get selected loom file from params or use first available
+      @selected_loom_file = params[:loom_file].presence || @available_loom_files.first
+      
+      # Group annotations by loom file and type
+      @annots_by_loom_and_type = {}
+      @matrix_dims_by_loom = {}
+      @available_loom_files.each do |filepath|
+        @annots_by_loom_and_type[filepath] = {
+          matrices: [],
+          col_attrs: [],
+          row_attrs: [],
+          global: []
+        }
+        
+        file_annots = all_annots.select { |a| a.filepath == filepath }
+        
+        # Find the matrix annotation (name == '/matrix') to get dimensions for metadata
+        matrix_annot = file_annots.find { |a| a.name == '/matrix' }
+        if matrix_annot
+          @matrix_dims_by_loom[filepath] = {
+            nber_cols: matrix_annot.nber_cols,
+            nber_rows: matrix_annot.nber_rows
+          }
+        end
+        
+        file_annots.each do |annot|
+          annot_name = annot.name || ''
+          if annot_name == '/matrix' || (annot.dim == 3 && annot_name.start_with?('/layers/'))
+            @annots_by_loom_and_type[filepath][:matrices] << annot
+          elsif annot_name.start_with?('/col_attrs/')
+            @annots_by_loom_and_type[filepath][:col_attrs] << annot
+          elsif annot_name.start_with?('/row_attrs/')
+            @annots_by_loom_and_type[filepath][:row_attrs] << annot
+          else
+            @annots_by_loom_and_type[filepath][:global] << annot
+          end
+        end
+      end
+      
+      # Get selected data type from params or default to matrices
+      @selected_data_type = params[:data_type].presence || 'matrices'
     end
     
     # Variables specific to summary view
@@ -978,6 +1088,119 @@ class ProjectsController < ApplicationController
     end
   end
 
+
+  # GET /projects/1/data_content
+  # Returns just the right panel content for AJAX loading
+  def data_content
+    # Set view type to data
+    @view_type = 'data'
+    
+    # Get project type for display
+    @project_type = @project.project_type
+    
+    # Get all annotations with step and run information for ordering
+    all_annots = Annot.where(project_id: @project.id)
+                      .where.not(filepath: nil)
+                      .includes(:step, run: [:std_method])
+                      .order(:name)
+    
+    # Get unique filepaths with their minimum step rank and run id for ordering
+    filepath_info = {}
+    all_annots.each do |annot|
+      next unless annot.filepath.present?
+      
+      filepath = annot.filepath
+      step_rank = annot.step&.rank
+      run_id = annot.run_id
+      
+      if filepath_info[filepath]
+        existing = filepath_info[filepath]
+        existing_step_rank = existing[:step_rank] || 9999
+        existing_run_id = existing[:run_id] || 999999
+        
+        current_step_rank = step_rank || 9999
+        current_run_id = run_id || 999999
+        
+        should_update = false
+        if current_step_rank < existing_step_rank
+          should_update = true
+        elsif current_step_rank == existing_step_rank && current_run_id < existing_run_id
+          should_update = true
+        end
+        
+        if should_update
+          existing[:step_rank] = step_rank
+          existing[:run_id] = run_id
+        end
+      else
+        filepath_info[filepath] = {
+          step_rank: step_rank,
+          run_id: run_id
+        }
+      end
+    end
+    
+    # Get selected loom file from params
+    @selected_loom_file = params[:loom_file].presence
+    
+    # Get selected data type from params or default to matrices
+    @selected_data_type = params[:data_type].presence || 'matrices'
+    
+    # Get available loom files list for empty state check
+    @available_loom_files = filepath_info.keys.sort_by do |filepath|
+      info = filepath_info[filepath]
+      [info[:step_rank] || 9999, info[:run_id] || 999999]
+    end
+    
+    # Group annotations by loom file and type
+    @annots_by_loom_and_type = {}
+    @matrix_dims_by_loom = {}
+    
+    if @selected_loom_file
+      @annots_by_loom_and_type[@selected_loom_file] = {
+        matrices: [],
+        col_attrs: [],
+        row_attrs: [],
+        global: []
+      }
+      
+      file_annots = all_annots.select { |a| a.filepath == @selected_loom_file }
+      
+      # Find the matrix annotation (name == '/matrix') to get dimensions for metadata
+      matrix_annot = file_annots.find { |a| a.name == '/matrix' }
+      if matrix_annot
+        @matrix_dims_by_loom[@selected_loom_file] = {
+          nber_cols: matrix_annot.nber_cols,
+          nber_rows: matrix_annot.nber_rows
+        }
+      end
+      
+      file_annots.each do |annot|
+        annot_name = annot.name || ''
+        if annot_name == '/matrix' || (annot.dim == 3 && annot_name.start_with?('/layers/'))
+          @annots_by_loom_and_type[@selected_loom_file][:matrices] << annot
+        elsif annot_name.start_with?('/col_attrs/')
+          @annots_by_loom_and_type[@selected_loom_file][:col_attrs] << annot
+        elsif annot_name.start_with?('/row_attrs/')
+          @annots_by_loom_and_type[@selected_loom_file][:row_attrs] << annot
+        else
+          @annots_by_loom_and_type[@selected_loom_file][:global] << annot
+        end
+      end
+    end
+    
+    # Store filepath info for use in helper
+    @filepath_info = filepath_info
+    
+    # Preload runs and steps for helper
+    run_ids = filepath_info.values.map { |info| info[:run_id] }.compact.uniq
+    @loom_file_runs = Run.where(id: run_ids).includes(:step, :std_method).index_by(&:id) if run_ids.any?
+    @loom_file_runs ||= {}
+    
+    respond_to do |format|
+      format.html { render partial: 'projects/views/data_content', layout: false }
+    end
+  end
 
   # GET /projects/1/get_loom_files_json
   def get_loom_files_json

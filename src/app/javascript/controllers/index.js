@@ -99,6 +99,10 @@ import MobileMenuController from "controllers/mobile_menu_controller"
 application.register("mobile-menu", MobileMenuController)
 console.log('Mobile menu controller registered')
 
+import DataViewController from "controllers/data_view_controller"
+application.register("data-view", DataViewController)
+console.log('Data view controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

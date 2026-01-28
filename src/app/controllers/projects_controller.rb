@@ -2490,6 +2490,7 @@ class ProjectsController < ApplicationController
 
     # Helper method to check if a step can be unlocked based on attrs_json requirements
     # This checks ONLY if required Annot instances are available, regardless of step completion status
+    # A step is unlocked only if at least one std_method is available (has all required inputs)
     def step_can_be_unlocked?(step, previous_steps_with_status, successful_runs)
       # Debug logging for project 69560
       if @project.id == 69560 && step.name == 'normalization'
@@ -2507,8 +2508,8 @@ class ProjectsController < ApplicationController
         std_methods.each { |m| Rails.logger.info("[DEBUG]   StdMethod #{m.id}: #{m.name}") }
       end
       
-      # If no std_methods, step can be unlocked (no requirements to check)
-      return true if std_methods.empty?
+      # If no std_methods, step cannot be unlocked (no methods available)
+      return false if std_methods.empty?
       
       # Get ALL available annotations in this project (not just from successful runs)
       # We check all annotations because they represent available datasets
@@ -2518,15 +2519,35 @@ class ProjectsController < ApplicationController
         Rails.logger.info("[DEBUG] Available annotations count: #{available_annots.count}")
       end
       
-      # Check if at least one std_method has all required parameters satisfied
+      # Get project type for filtering
+      project_type_tag = @project.project_type ? @project.project_type.tag : nil
+      
+      # Check if at least one std_method has all required parameters satisfied AND matches project type
+      # This means at least one method is available
+      available_methods_count = 0
       result = std_methods.any? do |std_method|
-        std_method_has_all_requirements?(step, std_method, available_annots)
+        # Check project type compatibility
+        method_obj_attrs = Basic.safe_parse_json(std_method.obj_attrs_json, {})
+        method_project_types = method_obj_attrs["project_types"] || []
+        project_type_match = method_project_types.empty? || method_project_types.include?(project_type_tag)
+        
+        # Check if method has all required inputs
+        has_requirements = std_method_has_all_requirements?(step, std_method, available_annots)
+        
+        # Method is available only if it matches project type AND has all requirements
+        is_available = project_type_match && has_requirements
+        available_methods_count += 1 if is_available
+        
+        is_available
       end
       
       if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] Available methods count: #{available_methods_count} out of #{std_methods.count}")
         Rails.logger.info("[DEBUG] step_can_be_unlocked? result: #{result}")
       end
       
+      # Step is unlocked only if at least one method is available
+      # If no methods are available (after all checks), step is locked
       result
     end
     
@@ -3687,9 +3708,18 @@ class ProjectsController < ApplicationController
     
     # Prepare data for standard form
     def prepare_std_form_data
+      Rails.logger.info("[prepare_std_form_data] Called for step #{@step.id} (#{@step.name})")
+      
       # Get docker image
       asap_docker_image = Basic.get_asap_docker(@project.version)
-      return unless asap_docker_image
+      unless asap_docker_image
+        Rails.logger.error("[prepare_std_form_data] No docker image found for version #{@project.version}")
+        @std_methods = []
+        @h_unavailable_methods = {}
+        @h_obj_attrs_by_std_method = {}
+        @h_std_methods_by_name = {}
+        return
+      end
       
       # Get step attributes
       @h_step_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step.attrs_json.present?
@@ -3701,11 +3731,16 @@ class ProjectsController < ApplicationController
       all_std_methods.each { |s| @h_std_methods[s.id] = s }
       
       @std_methods = all_std_methods.select { |e| e.step_id == @step.id }.sort { |a, b| a.name <=> b.name }
+      Rails.logger.info("[prepare_std_form_data] Found #{@std_methods.count} std_methods for step #{@step.id}")
       
-      # Get steps by name for lookups (ensure @h_steps is set from prepare_std_step_data)
+      # Get steps by name for lookups - use steps from project's docker_image_id
       @h_steps ||= {}
       @h_steps_by_name = {}
-      @h_steps.each { |id, step| @h_steps_by_name[step.name] = step if step.respond_to?(:name) }
+      if asap_docker_image
+        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+      end
+      # Also populate from @h_steps if it exists (for backward compatibility)
+      @h_steps.each { |id, step| @h_steps_by_name[step.name] = step if step.respond_to?(:name) && !@h_steps_by_name[step.name] }
       
       # Get object attributes by standard method
       @h_obj_attrs_by_std_method = {}
@@ -3715,23 +3750,80 @@ class ProjectsController < ApplicationController
       @h_std_methods_by_name = {}
       @std_methods.each { |s| @h_std_methods_by_name[s.name] = s }
       
-      # Check available methods based on existing runs
+      # Check available methods based on available annotations
+      # Use the same logic as step unlocking - check if required datasets are available
       @h_unavailable_methods = {}
-      successful_runs = Run.where(project_id: @project.id, status_id: 3) # status_id 3 = success
+      
+      # Get all available annotations in the project
+      all_annots = Annot.where(project_id: @project.id).includes(:run).all
+      
+      # Get data classes for validation
+      h_data_classes = {}
+      DataClass.all.each { |dc| h_data_classes[dc.id] = dc; h_data_classes[dc.name] = dc }
+      
+      Rails.logger.info("[prepare_std_form_data] Checking #{@std_methods.count} std_methods for step #{@step.id} (#{@step.name})")
+      Rails.logger.info("[prepare_std_form_data] h_steps_by_name count: #{@h_steps_by_name.count}")
       
       @std_methods.each do |std_method|
-        # Check if method has required input attributes
-        method_attrs = @h_obj_attrs_by_std_method[std_method.id] || {}
-        (method_attrs.keys & ['input_matrix', 'input_de']).each do |attr_name|
-          if method_attrs[attr_name] && method_attrs[attr_name]['valid_types']
-            valid_types = method_attrs[attr_name]['valid_types']
-            source_steps = method_attrs[attr_name]['source_steps'] || []
-            source_step_ids = source_steps.map { |ssn| @h_steps_by_name[ssn]&.id }.compact
-            tmp_runs = successful_runs.select { |run| source_step_ids.include?(run.step_id) }
-            
-            if tmp_runs.empty?
-              @h_unavailable_methods[std_method.id] = true
+        # Use Basic.get_std_method_attrs to get properly combined attributes
+        begin
+          h_res = Basic.get_std_method_attrs(std_method, @step)
+          combined_attrs = h_res[:h_attrs] || {}
+        rescue => e
+          Rails.logger.error("[prepare_std_form_data] Error calling get_std_method_attrs for method #{std_method.id}: #{e.message}")
+          Rails.logger.error("[prepare_std_form_data] Error backtrace: #{e.backtrace.first(5).join("\n")}")
+          # Fallback to obj_attrs_json only
+          combined_attrs = @h_obj_attrs_by_std_method[std_method.id] || {}
+        end
+        
+        # Check each parameter that requires a dataset
+        combined_attrs.each do |attr_name, attr_config|
+          next unless attr_config.is_a?(Hash)
+          next unless attr_config['source_steps'].present? && attr_config['valid_types'].present?
+          
+          source_steps = attr_config['source_steps']
+          valid_types = attr_config['valid_types']
+          
+          # Get source step IDs from project's docker_image_id
+          source_step_ids = source_steps.map { |ssn| @h_steps_by_name[ssn]&.id }.compact
+          next if source_step_ids.empty?
+          
+          # Filter annotations to only those from source steps
+          source_annots = all_annots.select do |annot|
+            if annot.step_id && source_step_ids.include?(annot.step_id)
+              true
+            elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
+              true
+            else
+              annot_run = if annot.run_id && annot.run
+                            annot.run
+                          elsif annot.ori_run_id
+                            Run.find_by(id: annot.ori_run_id)
+                          else
+                            nil
+                          end
+              annot_run && source_step_ids.include?(annot_run.step_id)
             end
+          end
+          
+          # Check if any annotation matches valid_types requirement
+          has_valid_dataset = source_annots.any? do |annot|
+            next false unless annot.data_class_ids.present?
+            
+            annot_data_class_names = annot.data_class_ids.split(',').map do |dc_id|
+              h_data_classes[dc_id.to_i]&.name
+            end.compact
+            
+            # Check if annotation matches valid_types requirement
+            valid_types.all? do |or_group|
+              or_group.any? { |valid_type| annot_data_class_names.include?(valid_type) }
+            end
+          end
+          
+          # If this required parameter doesn't have a matching dataset, mark method as unavailable
+          unless has_valid_dataset
+            @h_unavailable_methods[std_method.id] = true
+            break # No need to check other parameters for this method
           end
         end
       end

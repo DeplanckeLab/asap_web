@@ -35,6 +35,19 @@
     </div>
   <% end %>
 
+  <% 
+    # Debug: Check if @std_methods is set
+    if @std_methods.nil?
+      Rails.logger.error("[_form_req] @std_methods is nil!")
+    elsif @std_methods.empty?
+      Rails.logger.warn("[_form_req] @std_methods is empty for step #{@step&.id} (#{@step&.name})")
+    end
+    
+    @std_methods ||= []
+    @h_unavailable_methods ||= {}
+    @h_std_methods_by_name ||= {}
+    @h_step_attrs ||= {}
+  %>
   <% available_methods = @std_methods.select { |s| !@h_unavailable_methods[s.id] } %>
   <% unavailable_methods = @std_methods.select { |s| @h_unavailable_methods[s.id] } %>
   <% default_methods = (@h_step_attrs['default_std_method'] || []).map { |method_name| @h_std_methods_by_name[method_name] }.compact & available_methods %>
@@ -57,15 +70,57 @@
           <%= label_tag 'std_method_id', "Method", { class: 'block text-sm font-medium text-gray-700 pt-2', 'data-toggle' => 'tooltip', 'title' => "" } %>
         </div>
         <div class="flex-1">
-          <% l = @std_methods.select { |s| 
-            method_attrs = @h_obj_attrs_by_std_method[s.id] || {}
-            project_types = method_attrs["project_types"] || []
-            project_types.empty? || project_types.include?((@project.project_type) ? @project.project_type.tag : nil)
-          }.map { |e| [e.label, e.id] }.sort %>
-          <%= f.select :std_method_id, options_for_select(l, ((d = default_methods.first) ? d.id : ((d = available_methods.first) ? d.id : nil))), {}, { 
-              class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
-              data: { form_req_target: 'methodSelect' }
-            } %>
+          <% 
+            # Debug logging
+            Rails.logger.info("[_form_req] @std_methods count: #{@std_methods&.count || 0}")
+            Rails.logger.info("[_form_req] @h_obj_attrs_by_std_method keys: #{@h_obj_attrs_by_std_method&.keys&.inspect}")
+            Rails.logger.info("[_form_req] @h_unavailable_methods: #{@h_unavailable_methods&.inspect}")
+            
+            # Filter by project type first
+            project_type_tag = @project.project_type ? @project.project_type.tag : nil
+            filtered_methods = @std_methods.select { |s| 
+              method_attrs = @h_obj_attrs_by_std_method[s.id] || {}
+              project_types = method_attrs["project_types"] || []
+              project_types.empty? || project_types.include?(project_type_tag)
+            }.sort_by { |m| m.label }
+            
+            Rails.logger.info("[_form_req] Filtered methods count: #{filtered_methods.count}")
+            
+            # Build options - include all methods, mark unavailable ones
+            options = filtered_methods.map do |method|
+              is_unavailable = @h_unavailable_methods[method.id] == true
+              label = method.label || method.name
+              label = "#{label} (not available)" if is_unavailable
+              [label, method.id]
+            end
+            
+            # Get IDs of unavailable methods for disabled attribute
+            unavailable_method_ids = filtered_methods.select { |m| @h_unavailable_methods[m.id] == true }.map(&:id)
+            
+            Rails.logger.info("[_form_req] Options count: #{options.count}")
+            Rails.logger.info("[_form_req] Unavailable method IDs: #{unavailable_method_ids.inspect}")
+            
+            # Set default value
+            default_value = (default_methods.first ? default_methods.first.id : (available_methods.first ? available_methods.first.id : nil))
+          %>
+          <% if options.empty? %>
+            <div class="text-red-600 text-sm p-2">
+              No methods available for this step.
+            </div>
+          <% else %>
+            <%= f.select :std_method_id, options_for_select(options, default_value), 
+                { disabled: unavailable_method_ids }, 
+                { 
+                  class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
+                  data: { form_req_target: 'methodSelect' }
+                } %>
+            <style>
+              select option:disabled {
+                color: #dc2626 !important;
+                font-style: italic;
+              }
+            </style>
+          <% end %>
         </div>
       </div>
       <div class="flex items-start gap-4">

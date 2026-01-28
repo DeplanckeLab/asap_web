@@ -126,7 +126,7 @@ export default class extends Controller {
 
       // Update method description
       if (this.hasMethodDescTarget) {
-        this.methodDescTarget.textContent = (description || '') + ' ' + (link || '')
+        this.methodDescTarget.innerHTML = (description || '') + ' ' + (link || '')
       }
 
       // Show/hide speed image

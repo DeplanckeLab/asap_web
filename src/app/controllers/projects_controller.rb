@@ -2488,6 +2488,199 @@ class ProjectsController < ApplicationController
 
   private
 
+    # Helper method to check if a step can be unlocked based on attrs_json requirements
+    # This checks ONLY if required Annot instances are available, regardless of step completion status
+    def step_can_be_unlocked?(step, previous_steps_with_status, successful_runs)
+      # Debug logging for project 69560
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] step_can_be_unlocked? called for normalization step")
+      end
+      
+      # Get all std_methods for this step
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      return true unless asap_docker_image # If no docker image, allow step (fallback)
+      
+      std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, step_id: step.id, obsolete: false).all
+      
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] StdMethods count: #{std_methods.count}")
+        std_methods.each { |m| Rails.logger.info("[DEBUG]   StdMethod #{m.id}: #{m.name}") }
+      end
+      
+      # If no std_methods, step can be unlocked (no requirements to check)
+      return true if std_methods.empty?
+      
+      # Get ALL available annotations in this project (not just from successful runs)
+      # We check all annotations because they represent available datasets
+      available_annots = get_available_annotations_for_project
+      
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] Available annotations count: #{available_annots.count}")
+      end
+      
+      # Check if at least one std_method has all required parameters satisfied
+      result = std_methods.any? do |std_method|
+        std_method_has_all_requirements?(step, std_method, available_annots)
+      end
+      
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] step_can_be_unlocked? result: #{result}")
+      end
+      
+      result
+    end
+    
+    # Get all available annotations in the project
+    # This checks ALL annotations, not just from successful runs
+    def get_available_annotations_for_project
+      # Get all annotations for this project
+      # Include run association for later filtering by step
+      Annot.where(project_id: @project.id)
+           .includes(:run)
+           .all
+    end
+    
+    # Check if a std_method has all required parameters satisfied
+    def std_method_has_all_requirements?(step, std_method, available_annots)
+      # Use Basic.get_std_method_attrs to get properly combined attributes
+      # This method handles the combination of step.attrs_json, step.method_attrs_json,
+      # std_method.attrs_json, and std_method.obj_attrs_json correctly
+      begin
+        h_res = Basic.get_std_method_attrs(std_method, step)
+        combined_attrs = h_res[:h_attrs] || {}
+      rescue => e
+        Rails.logger.error("[std_method_has_all_requirements] Error calling get_std_method_attrs: #{e.message}")
+        # Fallback to manual combination
+        step_attrs = Basic.safe_parse_json(step.attrs_json, {})
+        method_attrs = Basic.safe_parse_json(std_method.attrs_json, {})
+        method_obj_attrs = Basic.safe_parse_json(std_method.obj_attrs_json, {})
+        combined_attrs = step_attrs.deep_merge(method_attrs).deep_merge(method_obj_attrs)
+      end
+      
+      # Debug logging for project 69560
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] Checking normalization step for project #{@project.id}")
+        Rails.logger.info("[DEBUG] Step attrs_json: #{step.attrs_json}")
+        Rails.logger.info("[DEBUG] StdMethod #{std_method.id} (#{std_method.name}) attrs_json: #{std_method.attrs_json}")
+        Rails.logger.info("[DEBUG] StdMethod #{std_method.id} obj_attrs_json: #{std_method.obj_attrs_json}")
+        Rails.logger.info("[DEBUG] Combined attrs: #{combined_attrs.to_json}")
+        Rails.logger.info("[DEBUG] Available annotations count: #{available_annots.count}")
+      end
+      
+      # Get data classes hash for lookup
+      h_data_classes = {}
+      DataClass.all.each { |dc| h_data_classes[dc.id] = dc; h_data_classes[dc.name] = dc }
+      
+      # Get steps by name for lookup - use steps from project's docker_image_id
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      h_steps_by_name = {}
+      if asap_docker_image
+        Step.where(docker_image_id: asap_docker_image.id).each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+      end
+      
+      # Check each parameter that requires a dataset
+      combined_attrs.each do |attr_name, attr_config|
+        next unless attr_config.is_a?(Hash)
+        next unless attr_config['source_steps'].present? && attr_config['valid_types'].present?
+        
+        source_steps = attr_config['source_steps']
+        valid_types = attr_config['valid_types']
+        
+        # Debug logging for project 69560
+        if @project.id == 69560 && step.name == 'normalization'
+          Rails.logger.info("[DEBUG] Checking parameter: #{attr_name}")
+          Rails.logger.info("[DEBUG] Source steps: #{source_steps.inspect}")
+          Rails.logger.info("[DEBUG] Valid types: #{valid_types.inspect}")
+        end
+        
+        # Get source step IDs from the project's docker_image_id
+        source_step_ids = source_steps.map { |ssn| h_steps_by_name[ssn]&.id }.compact
+        
+        if @project.id == 69560 && step.name == 'normalization'
+          Rails.logger.info("[DEBUG] Source step names: #{source_steps.inspect}")
+          Rails.logger.info("[DEBUG] Source step IDs: #{source_step_ids.inspect}")
+          source_steps.each do |ssn|
+            step_obj = h_steps_by_name[ssn]
+            Rails.logger.info("[DEBUG] Step '#{ssn}': #{step_obj ? "found (id=#{step_obj.id})" : 'NOT FOUND'}")
+          end
+        end
+        
+        next if source_step_ids.empty? # Skip if source steps don't exist
+        
+        # Filter annotations to only those from source steps
+        # Match by step ID from the project's docker_image_id
+        source_annots = available_annots.select do |annot|
+          # Check step_id directly
+          if annot.step_id && source_step_ids.include?(annot.step_id)
+            true
+          # Check ori_step_id
+          elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
+            true
+          else
+            # Otherwise check the run's step_id
+            annot_run = if annot.run_id && annot.run
+                          annot.run
+                        elsif annot.ori_run_id
+                          Run.find_by(id: annot.ori_run_id)
+                        else
+                          nil
+                        end
+            
+            annot_run && source_step_ids.include?(annot_run.step_id)
+          end
+        end
+        
+        if @project.id == 69560 && step.name == 'normalization'
+          Rails.logger.info("[DEBUG] Source annotations count: #{source_annots.count}")
+          source_annots.first(5).each do |annot|
+            Rails.logger.info("[DEBUG]   Annot #{annot.id}: step_id=#{annot.step_id}, run_id=#{annot.run_id}, ori_run_id=#{annot.ori_run_id}, data_class_ids=#{annot.data_class_ids}")
+          end
+        end
+        
+        # Check if any annotation matches valid_types requirement
+        # valid_types is an array of arrays: [["dataset"], ["num_matrix", "int_matrix"]]
+        # Inner arrays are OR conditions, outer array elements are AND conditions
+        has_valid_dataset = source_annots.any? do |annot|
+          next false unless annot.data_class_ids.present?
+          
+          # Get data class names for this annotation
+          annot_data_class_names = annot.data_class_ids.split(',').map do |dc_id|
+            h_data_classes[dc_id.to_i]&.name
+          end.compact
+          
+          if @project.id == 69560 && step.name == 'normalization' && source_annots.index(annot) < 3
+            Rails.logger.info("[DEBUG]   Checking annot #{annot.id}: data_class_names=#{annot_data_class_names.inspect}")
+          end
+          
+          # Check if annotation matches valid_types requirement
+          # Each inner array is OR, outer array elements are AND
+          matches = valid_types.all? do |or_group|
+            # At least one type in the OR group must match
+            or_group.any? { |valid_type| annot_data_class_names.include?(valid_type) }
+          end
+          
+          if @project.id == 69560 && step.name == 'normalization' && source_annots.index(annot) < 3
+            Rails.logger.info("[DEBUG]   Matches: #{matches}")
+          end
+          
+          matches
+        end
+        
+        if @project.id == 69560 && step.name == 'normalization'
+          Rails.logger.info("[DEBUG] Has valid dataset for #{attr_name}: #{has_valid_dataset}")
+        end
+        
+        # If this required parameter doesn't have a matching dataset, this std_method is not available
+        return false unless has_valid_dataset
+      end
+      
+      # All required parameters have matching datasets
+      if @project.id == 69560 && step.name == 'normalization'
+        Rails.logger.info("[DEBUG] StdMethod #{std_method.id} (#{std_method.name}) PASSED all requirements")
+      end
+      true
+    end
+
     def prepare_steps_with_status
       # Get steps hash
       @h_steps = {}
@@ -2551,7 +2744,11 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[ProjectsController] Found #{@pretreatment_steps.count} steps for project #{@project.id}")
       Rails.logger.info("[ProjectsController] Steps: #{@pretreatment_steps.map { |s| "#{s.name} (rank: #{s.rank}, group: #{s.group_name})" }.join(', ')}")
       
+      # Get successful runs for checking input requirements
+      successful_runs = @runs.select { |r| r.status_id == 3 } # status_id 3 = complete/success
+      
       # Determine step availability: a step is available if all previous steps (by rank) are complete
+      # AND if all required inputs (from attrs_json) are available
       @steps_with_status = []
       @current_step_info = nil
       
@@ -2582,12 +2779,31 @@ class ProjectsController < ApplicationController
         # Only consider steps from parsing onwards
         previous_steps = steps_to_show[0...adjusted_index]
         all_previous_complete = previous_steps.all? do |prev_step|
-          prev_ps = @project_steps_hash[prev_step.id]
-          prev_ps && prev_ps.status_id == 3 # 3 = complete
+          # Check runs first (more accurate), then fall back to ProjectStep
+          prev_step_runs = @runs.select { |r| r.step_id == prev_step.id }
+          if prev_step_runs.any?
+            # Use the most recent run's status
+            prev_status_id = prev_step_runs.max_by(&:created_at)&.status_id
+            prev_status_id == 3 # 3 = complete
+          else
+            # Fall back to ProjectStep status
+            prev_ps = @project_steps_hash[prev_step.id]
+            prev_ps && prev_ps.status_id == 3 # 3 = complete
+          end
         end
         
-        # Step is available if it's the parsing step (first after filtering) or all previous steps are complete
-        is_available = adjusted_index == 0 || all_previous_complete
+        # Get previous steps with status for input requirement checking
+        previous_steps_with_status = @steps_with_status.select { |s| previous_steps.include?(s[:step]) }
+        
+        # Step is available if:
+        # 1. It's the parsing step (first after filtering), OR
+        # 2. At least one std_method has all required inputs available (based on Annot instances)
+        # We don't check previous step completion - only check if required datasets are available
+        is_available = if adjusted_index == 0
+                          true # Parsing step is always available
+                        else
+                          step_can_be_unlocked?(step, previous_steps_with_status, successful_runs)
+                        end
         
         # Current step is the first incomplete step that is available
         # Only set current if we haven't found one yet

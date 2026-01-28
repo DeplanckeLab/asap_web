@@ -75,7 +75,7 @@
               item_style = is_selected ? 'border-left: 4px solid #007bff !important;' : 'border-left: 4px solid transparent;'
               
               if !is_available
-                item_classes += ' opacity-50 cursor-not-allowed'
+                item_classes += ' opacity-50 cursor-not-allowed disabled'
               else
                 item_classes += ' cursor-pointer hover:bg-gray-50'
               end
@@ -92,6 +92,13 @@
                             'text-gray-900'
                           end
               
+              # Determine cursor style for locked steps
+              cursor_style = if !is_available
+                              'cursor: not-allowed !important;'
+                            else
+                              ''
+                            end
+              
               # Debug output for the parsing step
               debug_info = step.name == 'parsing' ? "<!-- DEBUG: step.id=#{step.id}, selected_step.id=#{selected_step ? selected_step.id : 'nil'}, effective_selected_step_id=#{effective_selected_step_id}, step_id_match=#{step_id_match}, selected_step_match=#{selected_step_match}, is_selected=#{is_selected}, item_style=#{item_style} -->" : ''
             %>
@@ -99,10 +106,13 @@
             <%= raw debug_info %>
             
             <div class="<%= item_classes %> <%= text_class %>" 
-                 style="<%= item_style %>"
+                 style="<%= item_style %> <%= cursor_style %>"
                  <% if is_available %>
                    data-action="click->step-selector#selectStep click->dropdown#close"
                    data-step-selector-step-id-param="<%= step.id %>"
+                 <% else %>
+                   data-step-locked="true"
+                   onclick="event.preventDefault(); event.stopPropagation(); return false;"
                  <% end %>
                  data-step-id="<%= step.id %>">
               <div class="flex-shrink-0 mr-3 w-5 flex items-center justify-center">

@@ -24,7 +24,7 @@
           item_style = is_selected ? 'border-left: 4px solid #007bff;' : 'border-left: 4px solid transparent;'
           
           if !is_available
-            item_classes += ' opacity-50 cursor-not-allowed'
+            item_classes += ' opacity-50 cursor-not-allowed disabled'
           end
           
           if is_selected
@@ -38,13 +38,23 @@
                       else
                         'text-gray-900'
                       end
+          
+          # Determine cursor style
+          cursor_style = if !is_available
+                          'cursor: not-allowed !important;'
+                        else
+                          'cursor: pointer;'
+                        end
         %>
         
         <div class="<%= item_classes %> <%= text_class %>" 
-             style="<%= item_style %> <%= 'cursor: pointer;' if is_available %>"
+             style="<%= item_style %> <%= cursor_style %>"
              <% if is_available %>
                data-action="click->step-selector#selectStep"
                data-step-selector-step-id-param="<%= step.id %>"
+             <% else %>
+               data-step-locked="true"
+               onclick="event.preventDefault(); event.stopPropagation(); return false;"
              <% end %>
              data-step-id="<%= step.id %>">
           <div class="flex-shrink-0 mr-3 w-5 flex items-center justify-center">

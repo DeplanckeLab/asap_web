@@ -1823,6 +1823,69 @@ class ProjectsController < ApplicationController
           end
         end
         
+        # Build summary arrays for warnings and errors based on all conditions in the view
+        @parsing_warnings = []
+        @parsing_errors = []
+        
+        if @results
+          # Collect warnings from @results['warnings'] (array or single value)
+          if @results['warnings']
+            warnings = @results['warnings'].is_a?(Array) ? @results['warnings'] : [@results['warnings']]
+            @parsing_warnings.concat(warnings.compact.reject(&:blank?))
+          end
+          
+          # Collect warnings from @results['warning'] (single value)
+          if @results['warning'].present?
+            @parsing_warnings << @results['warning']
+          end
+          
+          # Collect errors from @results['errors'] (array or single value)
+          if @results['errors']
+            errors = @results['errors'].is_a?(Array) ? @results['errors'] : [@results['errors']]
+            @parsing_errors.concat(errors.compact.reject(&:blank?))
+          end
+          
+          # Collect errors from @results['error'] (single value, but not displayed_error)
+          if @results['error'].present? && !@results['displayed_error']
+            @parsing_errors << @results['error']
+          end
+          
+          # Collect validation warnings/errors based on data conditions
+          nber_not_found_genes = @results['nber_not_found_genes']
+          
+          # Validation errors (shown as danger alerts)
+          if @results['nber_rows'] && @results['nber_rows'] < 3
+            @parsing_errors << "For many steps of the pipeline at least three #{helpers.row_label(@project)} are required"
+          end
+          
+          if @results['nber_cols'] && @results['nber_cols'] == 0
+            @parsing_errors << "You may have selected wrong parameters for the parsing, in particular not the appropriated delimiter"
+          elsif @results['nber_cols'] && @results['nber_cols'] < 3
+            @parsing_errors << "Original dataset has less than 3 #{helpers.col_label(@project)}. For many steps of the pipeline at least three #{helpers.col_label(@project)} are required"
+          end
+          
+          # Count matrix validation (error if not a count table)
+          if @results['is_count_table'] != 1 && @results['is_count_table'] != true && @results.key?('is_count_table')
+            @parsing_errors << "The original matrix contains floats. Many methods will NOT be available if your original file is not a count matrix"
+          end
+          
+          # Ensembl mapping errors
+          if nber_not_found_genes && nber_not_found_genes > 0
+            total_genes = @results['nber_rows'] || 1
+            not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2)
+            @parsing_errors << "#{nber_not_found_genes} (#{not_found_percentage}%) #{helpers.row_label(@project)} were not found in Ensembl. Did you select the right species (now #{@project.organism&.name || 'Unknown'})? If not, create a new project"
+          end
+          
+          # Validation warnings (info alerts - zero values percentage)
+          if @results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols']
+            total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f
+            if total_values > 0
+              zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2)
+              @parsing_warnings << "#{zero_percentage}% of values are zeros"
+            end
+          end
+        end
+        
         # Load file formats for display
         @h_formats = {}
         FileFormat.all.each { |f| @h_formats[f.name] = f }

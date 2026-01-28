@@ -134,14 +134,17 @@
             </span>
           <% end %>
           
-          <% if @results && @results['warning'] %>          
-            <% warnings = @results['warning'].is_a?(Array) ? @results['warning'] : [@results['warning']].compact %>
-            <% if warnings.any? %>
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                <i class="fas fa-exclamation-triangle mr-1"></i>
-                <%= warnings.size == 1 ? 'Warning' : "#{warnings.size} Warnings" %>
-              </span>
-            <% end %>
+          <% if @parsing_warnings && @parsing_warnings.any? %>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+              <i class="fas fa-exclamation-triangle mr-1"></i>
+              <%= @parsing_warnings.size == 1 ? 'Warning' : "#{@parsing_warnings.size} Warnings" %>
+            </span>
+          <% end %>
+          <% if @parsing_errors && @parsing_errors.any? %>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+              <i class="fas fa-exclamation-circle mr-1"></i>
+              <%= @parsing_errors.size == 1 ? 'Error' : "#{@parsing_errors.size} Errors" %>
+            </span>
           <% end %>
         </div>
         <div class="flex items-center gap-3">
@@ -165,47 +168,22 @@
     <div class="px-6 py-5 space-y-6 flex-1">
 
       <!-- Warnings and Errors -->
-      <% if @results['warnings'] %>
-        <% warnings = @results['warnings'].is_a?(Array) ? @results['warnings'] : [@results['warnings']].compact %>
-        <% if warnings.any? %>
-          <% warnings.each do |warning| %>
-            <% next if warning.blank? %>
-            <div class="alert alert-warning flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
-              <span><%= warning %></span>
-            </div>
-          <% end %>
+      <% if @parsing_warnings && @parsing_warnings.any? %>
+        <% @parsing_warnings.each do |warning| %>
+          <div class="alert alert-warning flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
+            <span><%= warning %></span>
+          </div>
         <% end %>
       <% end %>
 
-      <% if @results['errors'] %>
-        <% errors = @results['errors'].is_a?(Array) ? @results['errors'] : [@results['errors']].compact %>
-        <% if errors.any? %>
-          
-          <% errors.each do |error| %>
-          
-            <% next if error.blank? %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
-              <span><%= error %></span>
-            </div>
-          <% end %>
+      <% if @parsing_errors && @parsing_errors.any? %>
+        <% @parsing_errors.each do |error| %>
+          <div class="alert alert-danger flex items-start gap-3">
+            <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
+            <span><%= error %></span>
+          </div>
         <% end %>
-      <% end %>
-      
-      <!-- Also check for any error messages that might be stored in other fields -->
-      <% if @results['error'] && @results['error'].present? && !@results['displayed_error'] %>
-        <div class="alert alert-danger flex items-start gap-3">
-          <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
-          <span><%= @results['error'] %></span>
-        </div>
-      <% end %>
-      
-      <% if @results['warning'] && @results['warning'].present? %>
-        <div class="alert alert-warning flex items-start gap-3">
-          <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
-          <span>test<%= @results['warning'] %></span>
-        </div>
       <% end %>
 
       <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
@@ -318,100 +296,36 @@
         </div>
       </div>
 
-      <!-- Validation Warnings -->
-      <% 
-        nber_not_found_genes = @results['nber_not_found_genes'] if @results
-        has_validation_alerts = false
-        # Check if any alerts will be displayed
-        if (@results['nber_rows'] && @results['nber_rows'] < 3) ||
-           (@results['nber_cols'] && @results['nber_cols'] == 0) ||
-           (@results['nber_cols'] && @results['nber_cols'] < 3) ||
-           @results.key?('is_count_table') ||
-           (@results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] && (@results['nber_rows'].to_f * @results['nber_cols'].to_f > 0)) ||
-           (nber_not_found_genes && nber_not_found_genes > 0) ||
-           @results['nber_rows']
-          has_validation_alerts = true
-        end
-      %>
-      <% if has_validation_alerts %>
-        <div class="pt-4 space-y-3">
-          <% if @results['nber_rows'] && @results['nber_rows'] < 3 %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <span>For many steps of the pipeline at least three <%= row_label(@project) %> are required</span>
-            </div>
-          <% end %>
-
-          <% if @results['nber_cols'] && @results['nber_cols'] == 0 %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <span>You may have selected wrong parameters for the parsing, in particular not the appropriated delimiter</span>
-            </div>
-          <% elsif @results['nber_cols'] && @results['nber_cols'] < 3 %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <div class="flex-1">
-                <p class="mb-1">Original dataset has less than 3 <%= col_label(@project) %></p>
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
-                  For many steps of the pipeline at least three <%= col_label(@project) %> are required
-                </span>
-              </div>
-            </div>
-          <% end %>
-
-          <!-- Count Matrix Status -->
-          <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
-            <div class="alert alert-success flex items-start gap-3">
-              <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-              <span>The original matrix contains only counts</span>
-            </div>
-          <% else %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <div class="flex-1">
-                <p class="mb-1">The original matrix contains floats</p>
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-200 text-red-800">
-                  Many methods will NOT be available if your original file is not a count matrix
-                </span>
-              </div>
-            </div>
-          <% end %>
-
-          <!-- Zero Values Percentage -->
-          <% if @results['nber_zeros'] && @results['nber_rows'] && @results['nber_cols'] %>
-            <% total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f %>
-            <% if total_values > 0 %>
-              <% zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2) %>
-              <div class="alert alert-info flex items-start gap-3">
-                <i class="fas fa-info-circle text-blue-600 mt-0.5"></i>
-                <span><%= zero_percentage %>% of values are zeros</span>
+      <!-- Validation Success Messages -->
+      <% if @results %>
+        <% 
+          nber_not_found_genes = @results['nber_not_found_genes']
+          has_success_messages = false
+          # Check if any success messages should be displayed
+          if (@results['is_count_table'] == 1 || @results['is_count_table'] == true) ||
+             (nber_not_found_genes.nil? || nber_not_found_genes == 0) && @results['nber_rows']
+            has_success_messages = true
+          end
+        %>
+        <% if has_success_messages %>
+          <div class="pt-4 space-y-3">
+            <!-- Count Matrix Status -->
+            <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
+              <div class="alert alert-success flex items-start gap-3">
+                <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
+                <span>The original matrix contains only counts</span>
               </div>
             <% end %>
-          <% end %>
 
-          <!-- Ensembl Mapping Status -->
-          <% if nber_not_found_genes && nber_not_found_genes > 0 %>
-            <% total_genes = @results['nber_rows'] || 1 %>
-            <% not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2) %>
-            <div class="alert alert-danger flex items-start gap-3">
-              <i class="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-              <div class="flex-1">
-                <p class="mb-2"><%= nber_not_found_genes %> (<%= not_found_percentage %>%) <%= row_label(@project) %> were not found in Ensembl</p>
-                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-200">
-                  <i class="fas fa-lightbulb text-red-600"></i>
-                  <span class="text-sm text-red-800">Did you select the right species (now <strong><%= @project.organism&.name || 'Unknown' %></strong>)? If not, create a new project</span>
-                </div>
-              </div>
-            </div>
-          <% else %>
-            <% if @results['nber_rows'] %>
+            <!-- Ensembl Mapping Status -->
+            <% if (nber_not_found_genes.nil? || nber_not_found_genes == 0) && @results['nber_rows'] %>
               <div class="alert alert-success flex items-start gap-3">
                 <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
                 <span>All <strong><%= @results['nber_rows'] %></strong> <%= row_label(@project) %> were found in Ensembl</span>
               </div>
             <% end %>
-          <% end %>
-        </div>
+          </div>
+        <% end %>
       <% end %>
 
       <!-- Results Files -->

@@ -406,7 +406,7 @@ export default class extends Controller {
           
           // Re-attach event listeners to the new step elements
           stepElements.forEach((stepEl) => {
-            if (!stepEl.classList.contains('disabled')) {
+            if (!stepEl.classList.contains('disabled') && stepEl.getAttribute('data-step-locked') !== 'true') {
               // Remove existing listeners and add new one
               stepEl.removeEventListener('click', controller.selectStep)
               stepEl.addEventListener('click', (e) => {
@@ -600,6 +600,13 @@ export default class extends Controller {
     const stepElement = event.currentTarget
     const stepId = stepElement.getAttribute('data-step-id')
     
+    // Don't proceed if step is disabled or locked
+    if (stepElement.classList.contains('disabled') || stepElement.getAttribute('data-step-locked') === 'true') {
+      event.preventDefault()
+      event.stopPropagation()
+      return false
+    }
+    
     // Update currentStepId
     this.currentStepId = stepId.toString()
     this.element.setAttribute('data-current-step-id', stepId.toString())
@@ -618,11 +625,6 @@ export default class extends Controller {
     
     // Update selected step in dropdown list
     this.updateDropdownListSelection(stepId)
-    
-    // Don't proceed if step is disabled
-    if (stepElement.classList.contains('disabled')) {
-      return
-    }
 
     this.loadStepResults(stepId, stepElement)
   }

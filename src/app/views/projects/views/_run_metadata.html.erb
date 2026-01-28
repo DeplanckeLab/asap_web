@@ -1,0 +1,92 @@
+<%# Run Metadata Partial - Displays run information (ID, date, wait time, run time, RAM, etc.) %>
+<%# Accepts: run (required), results (optional), queue_position (optional) %>
+<% if run %>
+  <div class="bg-gray-50 border-b border-gray-200 px-6 py-3">
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+    <% metadata_parts = [] %>
+    <% if admin? %>
+      <% metadata_parts << "<span class='font-medium text-gray-700'>Run ##{run.id}</span>" %>
+    <% end %>
+    <% if run.created_at %>
+      <% metadata_parts << "<span class='nowrap'>#{display_date_short(run.created_at)}</span>" %>
+    <% end %>
+    <%# Waiting time - show if waiting_duration is set, or calculate from submitted_at to start_time, or show ongoing wait if status is waiting %>
+    <% if run.waiting_duration %>
+      <% metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(run.waiting_duration.round)}</span>" %>
+    <% elsif run.submitted_at && run.start_time %>
+      <%# Calculate waiting time from submitted_at to start_time %>
+      <%# wait_time = (run.start_time - run.submitted_at).round %>
+      <%# metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
+    <% elsif run.status_id == 1 && run.submitted_at %>
+      <%# Ongoing wait - calculate from submitted_at to now %>
+      <% wait_time = (Time.now - run.submitted_at).round %>
+      <% wait_text = "Wait #{duration(wait_time)}" %>
+      <% if local_assigns[:queue_position] && queue_position %>
+        <% wait_text += " (queue position: #{queue_position})" %>
+      <% end %>
+      <% metadata_parts << "<span id='ongoing_wait_#{run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>#{wait_text}</span>" %>
+    <% end %>
+    <%# Running time - use duration if available, otherwise calculate from start_time %>
+    <% run_time_display = nil %>
+    <% is_running = false %>
+    <% if run.duration %>
+      <% run_time_display = duration(run.duration.to_i) %>
+    <% elsif run.process_duration %>
+      <%# Use process_duration as fallback if duration is not set %>
+      <% run_time_display = duration(run.process_duration.to_i) %>
+    <% elsif run.status_id == 2 && run.start_time %>
+      <%# Running - show live time %>
+      <% run_time = (Time.now - run.start_time).to_i %>
+      <% run_time_display = duration(run_time) %>
+      <% is_running = true %>
+    <% end %>
+    
+    <% if run_time_display %>
+      <%# run_time_text = "<i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{run_time_display}" %>
+      <% run_time_text = "<i class='fas fa-clock text-gray-400 mr-1'></i>Run #{run_time_display}" %>
+      <% if run.pred_process_duration %>
+        <% run_time_text += " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" %>
+      <% end %>
+      <% if is_running %>
+        <% metadata_parts << "<span id='ongoing_run_#{run.id}' class='nowrap'>#{run_time_text}</span>" %>
+      <% else %>
+        <% metadata_parts << "<span class='nowrap'>#{run_time_text}</span>" %>
+      <% end %>
+    <% end %>
+    <%# Idle time - check both results['time_idle'] and run.process_idle_duration %>
+    <% idle_time_display = nil %>
+    <% if local_assigns[:results] && results && results['time_idle'] %>
+      <% idle_time_display = results['time_idle'] %>
+    <% elsif run.process_idle_duration %>
+      <% idle_time_display = duration(run.process_idle_duration.to_i) %>
+    <% end %>
+    <% if idle_time_display %>
+      <% metadata_parts << "<span class='nowrap'><i class='fas fa-pause-circle text-gray-400 mr-1'></i>Idle #{idle_time_display}</span>" %>
+    <% end %>
+    <%# Max RAM - max_ram is stored in MB (from Basic.finish_run or SlurmJobMonitorJob) %>
+    <%# display_mem expects bytes, so convert MB to bytes: MB * 1024 * 1024 %>
+    <% if run.max_ram %>
+      <%# max_ram is in MB, convert to bytes for display_mem helper %>
+      <% ram_bytes = run.max_ram * 1024 * 1024 %>
+      <% ram_display = display_mem(ram_bytes) %>
+      <% ram_text = "<i class='fas fa-memory text-gray-400 mr-1'></i>Max. RAM #{ram_display}" %>
+      <% if run.pred_max_ram %>
+        <%# pred_max_ram is stored in KB (from prediction script output), convert to bytes using binary conversion (1024) to match system standard %>
+        <% pred_ram_bytes = run.pred_max_ram.to_f * 1024 %>
+        <% pred_ram_display = display_mem(pred_ram_bytes) %>
+        <% ram_text += " <span class='text-gray-500'>(expected #{pred_ram_display})</span>" %>
+      <% end %>
+      <% metadata_parts << "<span class='nowrap'>#{ram_text}</span>" %>
+    <% end %>
+    <%= raw metadata_parts.compact.join(" <span class='text-gray-300'>•</span> ") %>
+    <%# Hidden spans for JavaScript - add separately after visible metadata to avoid extra separators %>
+    <% if run.submitted_at %>
+      <span id="created_time_<%= run.id %>" class="hidden"><%= run.submitted_at.strftime('%Y-%m-%d %H:%M:%S') %></span>
+    <% end %>
+    <% if run.start_time %>
+      <span id="start_time_<%= run.id %>" class="hidden"><%= run.start_time.strftime('%Y-%m-%d %H:%M:%S') %></span>
+    <% end %>
+  </div>
+</div>
+<% end %>
+

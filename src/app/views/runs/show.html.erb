@@ -40,87 +40,11 @@
 <!-- Scrollable content area -->
 <div class="flex-1 overflow-y-auto">
   <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24">
+    <!-- Run Metadata -->
+    <%# render partial: 'projects/views/run_metadata', locals: { run: @run, results: @h_res } %>
     <div class="space-y-6">
     <%# Always show our improved sections first %>
-    <!-- Run Information Section -->
-    <div class="pt-4 relative">
-      <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
-        <i class="fas fa-info-circle text-gray-500"></i>
-        Run Information
-      </h4>
-      <div class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <% if @step %>
-            <div>
-              <span class="text-xs font-medium text-gray-500 uppercase">Step</span>
-              <p class="text-sm text-gray-900 mt-1"><%= @step.label.presence || @step.name.humanize %></p>
-            </div>
-          <% end %>
-          <% if @std_method %>
-            <div>
-              <span class="text-xs font-medium text-gray-500 uppercase">Method</span>
-              <p class="text-sm text-gray-900 mt-1"><%= @std_method.label.presence || @std_method.name %></p>
-            </div>
-          <% end %>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <span class="text-xs font-medium text-gray-500 uppercase">Created</span>
-          <p class="text-sm text-gray-900 mt-1"><%= @run.created_at ? @run.created_at.strftime("%Y-%m-%d %H:%M:%S") : 'N/A' %></p>
-          </div>
-        <% if @run.start_time %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Started</span>
-            <p class="text-sm text-gray-900 mt-1"><%= @run.start_time.strftime("%Y-%m-%d %H:%M:%S") %></p>
-          </div>
-        <% end %>
-        </div>
-        <% if @run.max_ram %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Max RAM</span>
-            <p class="text-sm text-gray-900 mt-1"><%= display_mem(@run.max_ram * 1000) %></p>
-          </div>
-        <% end %>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <% if @run.waiting_duration %>
-            <div>
-              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
-              <div class="text-xs text-gray-500 mt-1">
-                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
-                <span><%= duration(@run.waiting_duration.to_i) %></span>
-              </div>
-            </div>
-          <% elsif @run.submitted_at && @run.start_time %>
-            <% wait_time = (@run.start_time - @run.submitted_at).round %>
-            <div>
-              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
-              <div class="text-xs text-gray-500 mt-1">
-                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
-                <span><%= duration(wait_time) %></span>
-              </div>
-            </div>
-          <% elsif @run.status_id == 1 && @run.submitted_at %>
-            <% wait_time = (Time.now - @run.submitted_at).round %>
-            <div>
-              <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
-              <div class="text-xs text-gray-500 mt-1">
-                <i class="fas fa-hourglass-half text-gray-400 mr-1"></i>
-                <span><%= duration(wait_time) %></span>
-              </div>
-            </div>
-          <% end %>
-        <% if @run.duration %>
-          <div>
-            <span class="text-xs font-medium text-gray-500 uppercase">Duration</span>
-              <div class="text-xs text-gray-500 mt-1">
-                <i class="fas fa-clock text-gray-400 mr-1"></i>
-                <span><%= duration(@run.duration.to_i) %></span>
-              </div>
-          </div>
-        <% end %>
-        </div>
-      </div>
-    </div>
+    <%# render partial: 'runs/run_information', locals: { run: @run, step: @step, std_method: @std_method } %>
 
     <!-- Error Display -->
     <% if @run.status_id == 4 && (@run.error.present? || (@h_res && @h_res['displayed_error'])) %>

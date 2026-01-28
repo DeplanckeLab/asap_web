@@ -5,6 +5,7 @@
       <strong>Display Mode:</strong> Standard View (multiple_runs: <%= @step.multiple_runs %>, has_std_view: <%= @step.has_std_view %>, run_id: <%= @run ? @run.id : 'none' %>)
     </div>
   </div>
+  <%= render partial: 'projects/views/run_metadata', locals: { run: @run, results: @h_res } %>
   <% if @run %>
     <div id='show_run_<%= @run.id %>' class='run_container'>
       <% if @layout && @layout.any? %>

@@ -134,7 +134,7 @@
             </span>
           <% end %>
           
-          <% if @parsing_warnings && @parsing_warnings.any? %>
+        <!--  <% if @parsing_warnings && @parsing_warnings.any? %>
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
               <i class="fas fa-exclamation-triangle mr-1"></i>
               <%= @parsing_warnings.size == 1 ? 'Warning' : "#{@parsing_warnings.size} Warnings" %>
@@ -145,7 +145,7 @@
               <i class="fas fa-exclamation-circle mr-1"></i>
               <%= @parsing_errors.size == 1 ? 'Error' : "#{@parsing_errors.size} Errors" %>
             </span>
-          <% end %>
+          <% end %>-->
         </div>
         <div class="flex items-center gap-3">
           <!-- Reset Button -->

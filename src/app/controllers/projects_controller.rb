@@ -2839,6 +2839,14 @@ class ProjectsController < ApplicationController
           }
         end
         
+        # Count runs by status for this step
+        status_counts = {
+          waiting: step_runs.count { |r| r.status_id == 1 },
+          running: step_runs.count { |r| r.status_id == 2 },
+          completed: step_runs.count { |r| r.status_id == 3 },
+          failed: step_runs.count { |r| r.status_id == 4 }
+        }
+        
         @steps_with_status << {
           step: step,
           project_step: project_step,
@@ -2852,7 +2860,8 @@ class ProjectsController < ApplicationController
                   end,
           is_available: is_available,
           is_current: is_current,
-          is_complete: (status_id == 3)
+          is_complete: (status_id == 3),
+          status_counts: status_counts
         }
       end
       

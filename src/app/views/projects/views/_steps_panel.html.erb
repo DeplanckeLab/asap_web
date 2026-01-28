@@ -12,6 +12,7 @@
         <% is_available = step_info[:is_available] %>
         <% is_complete = step_info[:is_complete] %>
         <% status = step_info[:status] %>
+        <% status_counts = step_info[:status_counts] || { waiting: 0, running: 0, completed: 0, failed: 0 } %>
         
         <% 
           # Determine if this step is selected (shown in right panel)
@@ -25,6 +26,8 @@
           
           if !is_available
             item_classes += ' opacity-50 cursor-not-allowed disabled'
+          else
+            item_classes += ' step-item-hover'
           end
           
           if is_selected
@@ -57,41 +60,108 @@
                onclick="event.preventDefault(); event.stopPropagation(); return false;"
              <% end %>
              data-step-id="<%= step.id %>">
-          <div class="flex-shrink-0 mr-3 w-5 flex items-center justify-center">
-            <% 
-              tooltip_text = if !is_available
-                               "Locked"
-                             elsif is_complete
-                               status.present? ? status.humanize : "Complete"
-                             elsif status == 'running'
-                               "Running"
-                             elsif status == 'waiting'
-                               "Waiting"
-                             elsif status == 'failed'
-                               "Failed"
-                             else
-                               "Not started"
-                             end
-            %>
-            <div class="relative group">
-              <% if !is_available %>
-                <i class="fas fa-lock text-base text-gray-400"></i>
-              <% elsif is_complete %>
-                <i class="fas fa-check-circle text-base text-green-500"></i>
-              <% elsif status == 'running' %>
-                <i class="fas fa-spinner fa-spin text-base text-blue-500"></i>
-              <% elsif status == 'waiting' %>
-                <i class="fas fa-clock text-base text-yellow-500"></i>
-              <% elsif status == 'failed' %>
-                <i class="fas fa-exclamation-circle text-base text-red-500"></i>
-              <% else %>
-                <i class="far fa-circle text-base text-gray-400"></i>
-              <% end %>
-              <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
-                <%= tooltip_text %>
-                <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
+          <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+            <% if !is_available %>
+              <div class="relative group">
+                <i class="fas fa-lock text-sm text-gray-400"></i>
+                <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
+                  Locked
+                  <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
+                </div>
               </div>
-            </div>
+            <% elsif !step.multiple_runs %>
+              <% 
+                # Single icon for steps with multiple_runs = false
+                tooltip_text = if is_complete
+                                 status.present? ? status.humanize : "Complete"
+                               elsif status == 'running'
+                                 "Running"
+                               elsif status == 'waiting'
+                                 "Waiting"
+                               elsif status == 'failed'
+                                 "Failed"
+                               else
+                                 "Not started"
+                               end
+              %>
+              <div class="relative group">
+                <% if is_complete %>
+                  <i class="fas fa-check-circle text-sm text-green-500"></i>
+                <% elsif status == 'running' %>
+                  <i class="fas fa-spinner fa-spin text-sm text-blue-500"></i>
+                <% elsif status == 'waiting' %>
+                  <i class="fas fa-clock text-sm text-yellow-500"></i>
+                <% elsif status == 'failed' %>
+                  <i class="fas fa-exclamation-circle text-sm text-red-500"></i>
+                <% else %>
+                  <i class="far fa-circle text-sm text-gray-400"></i>
+                <% end %>
+                <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
+                  <%= tooltip_text %>
+                  <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
+                </div>
+              </div>
+            <% else %>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%;">
+                <% 
+                  # Define status icons with their properties in 2x2 grid order
+                  status_icons = [
+                    { 
+                      key: :waiting, 
+                      icon_base: 'fas fa-clock', 
+                      icon_spin: '',
+                      active_color: 'text-yellow-500',
+                      inactive_color: 'text-gray-300',
+                      count: status_counts[:waiting],
+                      tooltip_label: 'Waiting'
+                    },
+                    { 
+                      key: :running, 
+                      icon_base: 'fas fa-spinner', 
+                      icon_spin: 'fa-spin',
+                      active_color: 'text-blue-500',
+                      inactive_color: 'text-gray-300',
+                      count: status_counts[:running],
+                      tooltip_label: 'Running'
+                    },
+                    { 
+                      key: :completed, 
+                      icon_base: 'fas fa-check-circle', 
+                      icon_spin: '',
+                      active_color: 'text-green-500',
+                      inactive_color: 'text-gray-300',
+                      count: status_counts[:completed],
+                      tooltip_label: 'Completed'
+                    },
+                    { 
+                      key: :failed, 
+                      icon_base: 'fas fa-exclamation-circle', 
+                      icon_spin: '',
+                      active_color: 'text-red-500',
+                      inactive_color: 'text-gray-300',
+                      count: status_counts[:failed],
+                      tooltip_label: 'Failed'
+                    }
+                  ]
+                %>
+                <% status_icons.each do |status_icon| %>
+                  <% 
+                    is_active = status_icon[:count] > 0
+                    icon_class = status_icon[:icon_base]
+                    icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
+                    color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
+                    tooltip_text = "#{status_icon[:tooltip_label]} (#{status_icon[:count]})"
+                  %>
+                  <div class="relative group" style="display: flex; align-items: center; justify-content: center;">
+                    <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
+                    <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
+                      <%= tooltip_text %>
+                      <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
           </div>
           <div class="flex-grow">
             <div>
@@ -116,4 +186,11 @@
     <% end %>
   </div>
 </div>
+
+<style>
+  .step-item-hover:hover:not(.active) {
+    background-color: #f0f4f8 !important;
+    border-left-color: #9ca3af !important;
+  }
+</style>
 

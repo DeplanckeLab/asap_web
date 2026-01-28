@@ -222,7 +222,7 @@
                     <h5 class="text-sm font-medium text-gray-700 mb-2">
                       <%= (k == :sum) ? 'Distribution of total counts by ' + row_label(@project, plural: false) : 'Distribution of total counts by ' + col_label(@project, plural: false) %>
                     </h5>
-                    <div id="plotly_histo_<%= k %>" style="height: 300px;"></div>
+                    <canvas id="plotly_histo_<%= k %>" style="width: 100%; height: 300px;"></canvas>
                   </div>
                 <% end %>
               <% end %>
@@ -236,7 +236,7 @@
             <i class="fas fa-chart-bar text-blue-600"></i>
             Distribution
           </h4>
-          <div id="plotly_histo" style="height: 400px;"></div>
+          <canvas id="plotly_histo" style="width: 100%; height: 400px;"></canvas>
         </div>
       <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
         <%# Categorical Metadata Bar Chart %>
@@ -253,113 +253,294 @@
   </div>
 </div>
 
-<%# Load Plotly for charts %>
-<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-
 <%= javascript_tag do %>
+// Canvas-based chart rendering (matching CustomPlotManager style)
+function renderHistogram(canvasId, binCenters, binCounts, title, xLabel) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width = canvas.offsetWidth;
+  const height = canvas.height = canvas.offsetHeight || 400;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Padding (matching CustomPlotManager style)
+  const topPadding = 40;
+  const bottomPadding = 60;
+  const leftPadding = 60;
+  const rightPadding = 20;
+  const plotWidth = width - leftPadding - rightPadding;
+  const plotHeight = height - topPadding - bottomPadding;
+  
+  // Find max count for scaling
+  const maxCount = Math.max(...binCounts);
+  if (maxCount === 0) return;
+  
+  // Draw title
+  ctx.fillStyle = '#374151';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, width / 2, 20);
+  
+  // Draw axes (matching CustomPlotManager style)
+  const axisStroke = '#9ca3af';
+  ctx.strokeStyle = axisStroke;
+  ctx.lineWidth = 1;
+  
+  // Y-axis
+  ctx.beginPath();
+  ctx.moveTo(leftPadding, topPadding);
+  ctx.lineTo(leftPadding, height - bottomPadding);
+  ctx.stroke();
+  
+  // X-axis
+  ctx.beginPath();
+  ctx.moveTo(leftPadding, height - bottomPadding);
+  ctx.lineTo(width - rightPadding, height - bottomPadding);
+  ctx.stroke();
+  
+  // Draw bars
+  const barWidth = plotWidth / binCenters.length;
+  ctx.fillStyle = '#3b82f6';
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 0.5;
+  
+  binCenters.forEach((center, i) => {
+    if (binCounts[i] > 0) {
+      const barHeight = (binCounts[i] / maxCount) * plotHeight;
+      const x = leftPadding + i * barWidth;
+      const y = height - bottomPadding - barHeight;
+      
+      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.strokeRect(x, y, barWidth, barHeight);
+    }
+  });
+  
+  // Draw x-axis label
+  ctx.fillStyle = '#374151';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
+  
+  // Draw y-axis label
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('Frequency', 0, 0);
+  ctx.restore();
+  
+  // Draw x-axis ticks and labels (matching CustomPlotManager style)
+  ctx.fillStyle = '#374151';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  
+  const numXTicks = Math.min(10, binCenters.length);
+  for (let i = 0; i < numXTicks; i++) {
+    const idx = Math.floor((i / (numXTicks - 1)) * (binCenters.length - 1));
+    const x = leftPadding + idx * barWidth + barWidth / 2;
+    const value = binCenters[idx];
+    const label = typeof value === 'number' ? (value < 0.01 ? value.toExponential(1) : value.toFixed(2)) : value.toString();
+    
+    ctx.beginPath();
+    ctx.moveTo(x, height - bottomPadding);
+    ctx.lineTo(x, height - bottomPadding + 5);
+    ctx.stroke();
+    
+    ctx.fillText(label, x, height - bottomPadding + 8);
+  }
+  
+  // Draw y-axis ticks (matching CustomPlotManager style)
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const numYTicks = 5;
+  
+  // Format tick values to avoid duplicates and show proper decimals
+  const formatTickValue = (val) => {
+    if (val === 0) return '0';
+    if (val < 0.01) return val.toExponential(1);
+    if (val === Math.floor(val)) return val.toString();
+    // Show decimals based on the value range
+    if (maxCount <= 1) return val.toFixed(2);
+    if (maxCount <= 10) return val.toFixed(1);
+    return Math.round(val).toString();
+  };
+  
+  for (let i = 0; i <= numYTicks; i++) {
+    const value = (maxCount / numYTicks) * i;
+    const y = height - bottomPadding - (i / numYTicks) * plotHeight;
+    
+    ctx.beginPath();
+    ctx.moveTo(leftPadding, y);
+    ctx.lineTo(leftPadding - 5, y);
+    ctx.stroke();
+    
+    const label = formatTickValue(value);
+    ctx.fillText(label, leftPadding - 8, y);
+  }
+}
+
+function renderBarChart(canvasId, categories, counts, title, xLabel) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width = canvas.offsetWidth;
+  const height = canvas.height = canvas.offsetHeight || 400;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Padding (matching CustomPlotManager style)
+  const topPadding = 40;
+  const bottomPadding = 100;
+  const leftPadding = 60;
+  const rightPadding = 20;
+  const plotWidth = width - leftPadding - rightPadding;
+  const plotHeight = height - topPadding - bottomPadding;
+  
+  // Find max count for scaling
+  const maxCount = Math.max(...counts);
+  if (maxCount === 0) return;
+  
+  // Draw title
+  ctx.fillStyle = '#374151';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, width / 2, 20);
+  
+  // Draw axes (matching CustomPlotManager style)
+  const axisStroke = '#9ca3af';
+  ctx.strokeStyle = axisStroke;
+  ctx.lineWidth = 1;
+  
+  // Y-axis
+  ctx.beginPath();
+  ctx.moveTo(leftPadding, topPadding);
+  ctx.lineTo(leftPadding, height - bottomPadding);
+  ctx.stroke();
+  
+  // X-axis
+  ctx.beginPath();
+  ctx.moveTo(leftPadding, height - bottomPadding);
+  ctx.lineTo(width - rightPadding, height - bottomPadding);
+  ctx.stroke();
+  
+  // Draw bars
+  const barWidth = (plotWidth / categories.length) * 0.8;
+  const barSpacing = (plotWidth / categories.length) * 0.2;
+  ctx.fillStyle = '#3b82f6';
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 0.5;
+  
+  categories.forEach((category, i) => {
+    if (counts[i] > 0) {
+      const barHeight = (counts[i] / maxCount) * plotHeight;
+      const x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2;
+      const y = height - bottomPadding - barHeight;
+      
+      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.strokeRect(x, y, barWidth, barHeight);
+    }
+  });
+  
+  // Draw x-axis label
+  ctx.fillStyle = '#374151';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
+  
+  // Draw y-axis label
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('Frequency', 0, 0);
+  ctx.restore();
+  
+  // Draw category labels (rotated, matching CustomPlotManager style)
+  ctx.fillStyle = '#374151';
+  ctx.font = '10px sans-serif';
+  categories.forEach((category, i) => {
+    const x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2 + barWidth / 2;
+    const y = height - bottomPadding + 8;
+    
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-Math.PI / 4);
+    ctx.textAlign = 'right';
+    const label = category.length > 15 ? category.substring(0, 12) + '...' : category;
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  });
+  
+  // Draw y-axis ticks (matching CustomPlotManager style)
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const numYTicks = 5;
+  
+  // Format tick values to avoid duplicates and show proper decimals
+  const formatTickValue = (val) => {
+    if (val === 0) return '0';
+    if (val < 0.01) return val.toExponential(1);
+    if (val === Math.floor(val)) return val.toString();
+    // Show decimals based on the value range
+    if (maxCount <= 1) return val.toFixed(2);
+    if (maxCount <= 10) return val.toFixed(1);
+    return Math.round(val).toString();
+  };
+  
+  for (let i = 0; i <= numYTicks; i++) {
+    const value = (maxCount / numYTicks) * i;
+    const y = height - bottomPadding - (i / numYTicks) * plotHeight;
+    
+    ctx.beginPath();
+    ctx.moveTo(leftPadding, y);
+    ctx.lineTo(leftPadding - 5, y);
+    ctx.stroke();
+    
+    const label = formatTickValue(value);
+    ctx.fillText(label, leftPadding - 8, y);
+  }
+}
+
 <% if @annot.dim == 3 %>
   <%# Expression Matrix Distribution Plots %>
   <% @h_sums.each_key do |k| %>
     <% if @h_sums[k][:bin_counts] %>
-      var trace_<%= k %> = {
-        x: <%= raw (0..@h_sums[k][:bin_counts].size - 1).map { |bin_i| @h_sums[k][:min] + bin_i * @h_sums[k][:bin_size] }.to_json %>,
-        y: <%= raw @h_sums[k][:bin_counts].to_json %>,
-        type: 'bar',
-        marker: {
-          color: '#3b82f6',
-          line: {
-            color: '#2563eb',
-            width: 0.5
-          }
-        }
-      };
-      var layout_<%= k %> = {
-        title: {
-          text: '<%= (k == :sum) ? "Distribution of total counts by " + row_label(@project, plural: false) : "Distribution of total counts by " + col_label(@project, plural: false) %>',
-          font: { size: 14 }
-        },
-        xaxis: {
-          title: 'Count',
-          type: 'linear'
-        },
-        yaxis: {
-          title: 'Frequency'
-        },
-        bargap: 0,
-        margin: { l: 60, r: 20, t: 50, b: 50 },
-        plot_bgcolor: '#f9fafb',
-        paper_bgcolor: 'white'
-      };
-      var data_<%= k %> = [trace_<%= k %>];
-      Plotly.newPlot('plotly_histo_<%= k %>', data_<%= k %>, layout_<%= k %>, {responsive: true});
+      (function() {
+        var binCenters = <%= raw (0..@h_sums[k][:bin_counts].size - 1).map { |bin_i| @h_sums[k][:min] + bin_i * @h_sums[k][:bin_size] }.to_json %>;
+        var binCounts = <%= raw @h_sums[k][:bin_counts].to_json %>;
+        var title = '<%= (k == :sum) ? "Distribution of total counts by " + row_label(@project, plural: false) : "Distribution of total counts by " + col_label(@project, plural: false) %>';
+        renderHistogram('plotly_histo_<%= k %>', binCenters, binCounts, title, 'Count');
+      })();
     <% end %>
   <% end %>
 <% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
   <%# Numerical Metadata Histogram %>
-  var trace = {
-    x: <%= raw (0..@bin_counts.size - 1).map { |bin_i| @min + bin_i * @bin_size }.to_json %>,
-    y: <%= raw @bin_counts.to_json %>,
-    type: 'bar',
-    marker: {
-      color: '#3b82f6',
-      line: {
-        color: '#2563eb',
-        width: 0.5
-      }
-    }
-  };
-  var layout = {
-    title: {
-      text: 'Value Distribution',
-      font: { size: 14 }
-    },
-    xaxis: {
-      title: '<%= format_annot_name(@annot.name) %>',
-      type: 'linear'
-    },
-    yaxis: {
-      title: 'Frequency'
-    },
-    bargap: 0,
-    margin: { l: 60, r: 20, t: 50, b: 50 },
-    plot_bgcolor: '#f9fafb',
-    paper_bgcolor: 'white'
-  };
-  var data = [trace];
-  Plotly.newPlot('plotly_histo', data, layout, {responsive: true});
+  (function() {
+    var binCenters = <%= raw (0..@bin_counts.size - 1).map { |bin_i| @min + bin_i * @bin_size }.to_json %>;
+    var binCounts = <%= raw @bin_counts.to_json %>;
+    var title = 'Value Distribution';
+    var xLabel = '<%= format_annot_name(@annot.name) %>';
+    renderHistogram('plotly_histo', binCenters, binCounts, title, xLabel);
+  })();
 <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
   <%# Categorical Metadata Bar Chart %>
   <% ordered_keys = @h_counts.keys.sort { |a, b| @h_counts[b] <=> @h_counts[a] }.first(25) %>
-  var trace = {
-    x: <%= raw ordered_keys.to_json %>,
-    y: <%= raw ordered_keys.map { |k| @h_counts[k] }.to_json %>,
-    type: 'bar',
-    marker: {
-      color: '#3b82f6',
-      line: {
-        color: '#2563eb',
-        width: 0.5
-      }
-    }
-  };
-  var layout = {
-    title: {
-      text: 'Category Distribution',
-      font: { size: 14 }
-    },
-    xaxis: {
-      title: '<%= format_annot_name(@annot.name) %>',
-      type: 'category'
-    },
-    yaxis: {
-      title: 'Frequency'
-    },
-    bargap: 0.05,
-    margin: { l: 60, r: 20, t: 50, b: 100 },
-    plot_bgcolor: '#f9fafb',
-    paper_bgcolor: 'white'
-  };
-  var data = [trace];
-  Plotly.newPlot('plotly_histo', data, layout, {responsive: true});
+  (function() {
+    var categories = <%= raw ordered_keys.to_json %>;
+    var counts = <%= raw ordered_keys.map { |k| @h_counts[k] }.to_json %>;
+    var title = 'Category Distribution';
+    var xLabel = '<%= format_annot_name(@annot.name) %>';
+    renderBarChart('plotly_histo', categories, counts, title, xLabel);
+  })();
 <% end %>
 <% end %>

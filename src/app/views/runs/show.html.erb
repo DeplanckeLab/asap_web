@@ -405,11 +405,11 @@
                                     <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Expression Matrices</h6>
                                     <div class="flex flex-wrap gap-1.5">
                                       <% matrices.each do |annot| %>
-                                        <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                                        <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                           <span>matrix</span>
                                           <%= dimension_badge(annot.nber_rows, :row, @project) %>
                                           <%= dimension_badge(annot.nber_cols, :col, @project) %>
-                                        </button>
+                                        <% end %>
                                       <% end %>
                                     </div>
                                   </div>
@@ -421,11 +421,11 @@
                                       <% col_attrs.each do |annot| %>
                                         <% annot_name = annot.name || '' %>
                                         <% display_name = annot_name.gsub(/^\/col_attrs\//, '') %>
-                                        <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                                        <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                           <span><%= display_name %></span>
                                           <%= dimension_badge(1, :row, @project) %>
                                           <%= dimension_badge(matrix_nber_cols, :col, @project) %>
-                                        </button>
+                                        <% end %>
                                       <% end %>
                                     </div>
                                   </div>
@@ -437,11 +437,11 @@
                                       <% row_attrs.each do |annot| %>
                                         <% annot_name = annot.name || '' %>
                                         <% display_name = annot_name.gsub(/^\/row_attrs\//, '') %>
-                                        <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                                        <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                           <span><%= display_name %></span>
                                           <%= dimension_badge(matrix_nber_rows, :row, @project) %>
                                           <%= dimension_badge(1, :col, @project) %>
-                                        </button>
+                                        <% end %>
                                       <% end %>
                                     </div>
                                   </div>
@@ -453,9 +453,9 @@
                                       <% global_attrs.each do |annot| %>
                                         <% annot_name = annot.name || '' %>
                                         <% display_name = annot_name.gsub(/^\/attrs\//, '').gsub(/^\//, '') %>
-                                        <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                                        <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                           <span><%= display_name %></span>
-                                        </button>
+                                        <% end %>
                                       <% end %>
                                     </div>
                                   </div>
@@ -684,11 +684,11 @@
                         <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Expression Matrices</h6>
                         <div class="flex flex-wrap gap-1.5">
                           <% matrices.each do |annot| %>
-                            <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                            <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                               <span>matrix</span>
                               <%= dimension_badge(annot.nber_rows, :row, @project) %>
                               <%= dimension_badge(annot.nber_cols, :col, @project) %>
-                            </button>
+                            <% end %>
                           <% end %>
                         </div>
                       </div>
@@ -700,11 +700,11 @@
                           <% col_attrs.each do |annot| %>
                             <% annot_name = annot.name || '' %>
                             <% display_name = annot_name.gsub(/^\/col_attrs\//, '') %>
-                            <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                            <%= link_to annot_path(annot), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                               <span><%= display_name %></span>
                               <%= dimension_badge(1, :row, @project) %>
                               <%= dimension_badge(matrix_nber_cols, :col, @project) %>
-                            </button>
+                            <% end %>
                           <% end %>
                         </div>
                       </div>

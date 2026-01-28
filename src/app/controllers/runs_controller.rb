@@ -259,7 +259,8 @@ class RunsController < ApplicationController
             row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
             col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
             row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
-            "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
+            annot_path = Rails.application.routes.url_helpers.annot_path(annot)
+            "<a href='#{annot_path}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'>#{annot.name} <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_cols} #{col_name}</span> <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_rows} #{row_name}</span></a>"
           }.join(" ") + "</p>"
       end
       

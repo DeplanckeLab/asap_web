@@ -71,6 +71,22 @@
               <% end %>
             </div>
           </div>
+          <% if @annot.filepath.present? %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Loom File Path</span>
+              <p class="mt-1 text-sm text-gray-900 font-mono break-all">
+                <%= @annot.filepath %>
+              </p>
+            </div>
+          <% end %>
+          <% if @annot.name.present? %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Path in Loom File</span>
+              <p class="mt-1 text-sm text-gray-900 font-mono break-all">
+                <%= @annot.name %>
+              </p>
+            </div>
+          <% end %>
           <div>
             <span class="text-sm font-medium text-gray-500">Produced by Analysis</span>
             <p class="mt-1 text-sm text-gray-900">

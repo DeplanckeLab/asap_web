@@ -83,6 +83,10 @@ import DeleteRunController from "controllers/delete_run_controller"
 application.register("delete-run", DeleteRunController)
 console.log('Delete run controller registered')
 
+import DeleteAllRunsController from "controllers/delete_all_runs_controller"
+application.register("delete-all-runs", DeleteAllRunsController)
+console.log('Delete all runs controller registered')
+
 import InputDataSelectorController from "controllers/input_data_selector_controller"
 application.register("input-data-selector", InputDataSelectorController)
 console.log('Input data selector controller registered')

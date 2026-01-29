@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status]
 
   # GET /projects or /projects.json
   def index
@@ -2083,6 +2083,42 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/:id/run_status?run_id=:run_id
+  def run_status
+    # Check authorization - user must be able to read the project
+    unless readable?(@project)
+      render json: { error: 'Not authorized' }, status: :forbidden
+      return
+    end
+    
+    run_id = params[:run_id].to_i
+    run = @project.runs.find_by(id: run_id)
+    
+    unless run
+      render json: { error: 'Run not found' }, status: :not_found
+      return
+    end
+    
+    # Reload to get latest status
+    run.reload
+    
+    render json: {
+      run_id: run.id,
+      status_id: run.status_id,
+      status_name: case run.status_id
+                   when 1 then 'Waiting'
+                   when 2 then 'Running'
+                   when 3 then 'Completed'
+                   when 4 then 'Failed'
+                   else 'Unknown'
+                   end,
+      duration: run.duration ? run.duration.to_i : nil,
+      start_time: run.start_time ? run.start_time.iso8601 : nil,
+      submitted_at: run.submitted_at ? run.submitted_at.iso8601 : nil,
+      waiting_duration: run.waiting_duration ? run.waiting_duration.to_i : nil
+    }
+  end
+
   # POST /projects/:id/restart_step
   def restart_step
     begin
@@ -2364,10 +2400,23 @@ class ProjectsController < ApplicationController
       
       # Check if there are no runs left and step has std_form - if so, show the form
       remaining_runs = @project.runs.where(step_id: step_id).count
-      if remaining_runs == 0 && @step.has_std_form
-        redirect_to step_results_project_path(@project, step_id: step_id, show_form: 1), notice: "All runs deleted successfully."
-      else
-        redirect_to step_results_project_path(@project, step_id: step_id), notice: "All runs deleted successfully."
+      show_form = remaining_runs == 0 && @step.has_std_form
+      
+      respond_to do |format|
+        format.html {
+          if show_form
+            redirect_to step_results_project_path(@project, step_id: step_id, show_form: 1), notice: "All runs deleted successfully."
+          else
+            redirect_to step_results_project_path(@project, step_id: step_id), notice: "All runs deleted successfully."
+          end
+        }
+        format.json {
+          render json: {
+            status: 'success',
+            message: 'All runs deleted successfully.',
+            show_form: show_form
+          }
+        }
       end
     rescue => e
       Rails.logger.error("Error in delete_all_runs_from_step: #{e.class} - #{e.message}")

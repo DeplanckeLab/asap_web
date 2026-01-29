@@ -19,11 +19,18 @@
           <% if editable?(@project) && @runs && @runs.any? %>
             <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
                 method: :post,
+                form: {
+                  data: {
+                    controller: 'delete-all-runs',
+                    action: 'submit->delete-all-runs#deleteAllRuns',
+                    'delete-all-runs-step-id-value': @step.id,
+                    'delete-all-runs-project-id-value': @project.id
+                  }
+                },
                 class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors cursor-pointer',
                 style: 'flex-shrink: 0;',
                 data: { 
-                  confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone.",
-                  turbo: false
+                  confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
                 } do %>
               Delete all
             <% end %>

@@ -108,11 +108,27 @@
 
 <%# Parsing Results Section %>
 <% if @step && @step.name == 'parsing' && @results && !@results['displayed_error'] && (@parsing_run.nil? || @parsing_run.status_id == 3) %>
-  <div class="bg-white rounded-lg shadow-sm flex flex-col" id="result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+  <style>
+    [data-step-selector-target="content"] > * {
+      max-width: 100% !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    #result_summary, #result_summary * {
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    #result_summary {
+      overflow-x: hidden !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+  </style>
+  <div class="bg-white rounded-lg shadow-sm flex flex-col" id="result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; min-width: 0; width: 100% !important;">
     <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+      <div class="flex items-center justify-between min-w-0">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+          <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2 min-w-0 truncate">
             Parsing results
           </h3>
           <% if @parsing_run && @parsing_run.status_id %>
@@ -147,7 +163,7 @@
             </span>
           <% end %>-->
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-shrink-0">
           <!-- Reset Button -->
           <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
             <%= link_to reset_parsing_project_path(@project),
@@ -165,23 +181,23 @@
         <%# render partial: 'runs/run_information', locals: { run: @parsing_run, step: @step, std_method: @std_method } %>
       </div>
     <% end %>
-    <div class="px-6 py-5 space-y-6 flex-1">
+    <div class="px-6 py-5 space-y-6 flex-1 min-w-0 overflow-x-hidden">
 
       <!-- Warnings and Errors -->
       <% if @parsing_warnings && @parsing_warnings.any? %>
         <% @parsing_warnings.each do |warning| %>
-          <div class="alert alert-warning flex items-start gap-3">
-            <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
-            <span><%= warning %></span>
+          <div class="alert alert-warning flex items-start gap-3 min-w-0">
+            <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5 flex-shrink-0"></i>
+            <span class="min-w-0 break-words"><%= warning %></span>
           </div>
         <% end %>
       <% end %>
 
       <% if @parsing_errors && @parsing_errors.any? %>
         <% @parsing_errors.each do |error| %>
-          <div class="alert alert-danger flex items-start gap-3">
-            <i class="fas fa-exclamation-circle text-red-600 mt-0.5"></i>
-            <span><%= error %></span>
+          <div class="alert alert-danger flex items-start gap-3 min-w-0">
+            <i class="fas fa-exclamation-circle text-red-600 mt-0.5 flex-shrink-0"></i>
+            <span class="min-w-0 break-words"><%= error %></span>
           </div>
         <% end %>
       <% end %>
@@ -189,17 +205,17 @@
       <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
       <% if @results && !['LOOM', 'H5_10x', 'MEX'].include?(@results["detected_format"]) && @project.parsing_attrs_json %>
         <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-        <div class="pt-4 relative">
+        <div class="pt-4 relative overflow-hidden">
           <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
             <i class="fas fa-cog text-gray-500"></i>
             Parameters
           </h4>
           <!-- File Format - Right Floating -->
-          <div class="absolute top-4 right-0">
+          <div class="absolute top-4 right-6 max-w-[calc(100%-3rem)] overflow-hidden">
             <% if @h_formats && @results && @results["detected_format"] && @h_formats[@results["detected_format"]] %>
               <%= raw display_file_format(@h_formats[@results["detected_format"]]) %>
             <% elsif @results && @results["detected_format"] %>
-              <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium"><%= @results["detected_format"] %></span>
+              <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium whitespace-nowrap"><%= @results["detected_format"] %></span>
             <% end %>
           </div>
           <div class="flex flex-wrap gap-2 items-center">
@@ -246,8 +262,8 @@
               </div>
               <div>
                 <p class="text-sm font-medium text-gray-700 mb-3">Integrated projects</p>
-                <div class="overflow-x-auto">
-                  <table id="integration_projects" class="min-w-full divide-y divide-gray-200">
+                <div class="overflow-x-auto max-w-full w-full">
+                  <table id="integration_projects" class="w-full divide-y divide-gray-200" style="table-layout: auto; max-width: 100%;">
                     <thead class="bg-gray-100">
                       <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Project key</th>
@@ -311,17 +327,17 @@
           <div class="pt-4 space-y-3">
             <!-- Count Matrix Status -->
             <% if @results['is_count_table'] == 1 || @results['is_count_table'] == true %>
-              <div class="alert alert-success flex items-start gap-3">
-                <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-                <span>The original matrix contains only counts</span>
+              <div class="alert alert-success flex items-start gap-3 min-w-0">
+                <i class="fas fa-check-circle text-green-600 mt-0.5 flex-shrink-0"></i>
+                <span class="min-w-0 break-words">The original matrix contains only counts</span>
               </div>
             <% end %>
 
             <!-- Ensembl Mapping Status -->
             <% if (nber_not_found_genes.nil? || nber_not_found_genes == 0) && @results['nber_rows'] %>
-              <div class="alert alert-success flex items-start gap-3">
-                <i class="fas fa-check-circle text-green-600 mt-0.5"></i>
-                <span>All <strong><%= @results['nber_rows'] %></strong> <%= row_label(@project) %> were found in Ensembl</span>
+              <div class="alert alert-success flex items-start gap-3 min-w-0">
+                <i class="fas fa-check-circle text-green-600 mt-0.5 flex-shrink-0"></i>
+                <span class="min-w-0 break-words">All <strong><%= @results['nber_rows'] %></strong> <%= row_label(@project) %> were found in Ensembl</span>
               </div>
             <% end %>
           </div>
@@ -377,11 +393,11 @@
       
       <%# Admin debug card - show run data in JSON format %>
       <% if admin? && @parsing_run %>
-        <div class="bg-yellow-50 border-t border-yellow-200 px-6 py-4 mt-4">
-          <div class="mb-2">
+        <div class="bg-yellow-50 border-t border-yellow-200 px-6 py-4 mt-4 overflow-x-hidden">
+          <div class="mb-2 min-w-0">
             <h4 class="text-sm font-semibold text-yellow-900 mb-2">Debug: Run Data (Admin Only)</h4>
-            <div class="bg-white border border-yellow-300 rounded p-3 overflow-auto max-h-96">
-              <pre class="text-xs text-gray-800 whitespace-pre-wrap break-words"><code><%= JSON.pretty_generate(@parsing_run.as_json) %></code></pre>
+            <div class="bg-white border border-yellow-300 rounded p-3 overflow-x-auto overflow-y-auto max-h-96 max-w-full">
+              <pre class="text-xs text-gray-800 whitespace-pre-wrap break-words max-w-full overflow-x-auto"><code class="block max-w-full overflow-x-auto"><%= JSON.pretty_generate(@parsing_run.as_json) %></code></pre>
             </div>
           </div>
         </div>
@@ -418,11 +434,11 @@
 <%# Parsing Error Display (separate conditional so it always shows when there's an error) %>
 <% if @step && @step.name == 'parsing' && @results && @results['displayed_error'] %>
   <!-- Parsing Error Display -->
-  <div class="bg-white rounded-lg shadow-sm border border-red-200 mb-6 overflow-hidden">
-    <div class="bg-gradient-to-r from-red-50 to-pink-50 border-b border-red-200 px-6 py-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold text-red-900 flex items-center gap-2">
-          <i class="fas fa-exclamation-circle text-red-600"></i>
+  <div class="bg-white rounded-lg shadow-sm border border-red-200 mb-6 overflow-hidden w-full max-w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden; box-sizing: border-box;">
+    <div class="bg-gradient-to-r from-red-50 to-pink-50 border-b border-red-200 px-6 py-4 overflow-x-hidden">
+      <div class="flex items-center justify-between min-w-0">
+        <h3 class="text-lg font-semibold text-red-900 flex items-center gap-2 min-w-0 truncate">
+          <i class="fas fa-exclamation-circle text-red-600 flex-shrink-0"></i>
           Parsing Error
         </h3>
         <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
@@ -434,18 +450,18 @@
         <% end %>
       </div>
     </div>
-    <div class="px-6 py-5">
-      <div class="bg-red-50 border border-red-200 rounded-md p-4">
+    <div class="px-6 py-5 overflow-x-hidden min-w-0">
+      <div class="bg-red-50 border border-red-200 rounded-md p-4 overflow-x-hidden min-w-0">
         <% if @results['displayed_error'].is_a?(Array) %>
           <% @results['displayed_error'].each do |error| %>
-            <p class="text-red-800 mb-2" title="<%= error %>"><%= error %></p>
+            <p class="text-red-800 mb-2 break-words min-w-0" title="<%= error %>"><%= error %></p>
           <% end %>
         <% else %>
-          <p class="text-red-800"><%= @results['displayed_error'] %></p>
+          <p class="text-red-800 break-words min-w-0"><%= @results['displayed_error'] %></p>
         <% end %>
         <% if admin? && @results['original_error'] %>
-          <div class="mt-3 pt-3 border-t border-red-300">
-            <p class="text-sm text-red-600 font-mono"><%= @results['original_error'] %></p>
+          <div class="mt-3 pt-3 border-t border-red-300 overflow-x-auto">
+            <p class="text-sm text-red-600 font-mono break-words whitespace-pre-wrap"><%= @results['original_error'] %></p>
           </div>
         <% end %>
       </div>

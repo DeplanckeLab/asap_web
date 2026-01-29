@@ -255,21 +255,55 @@ export default class extends Controller {
     console.log('[StepSelectorController] Update step ID:', updateStepId, 'Current step ID:', currentStepIdNum)
     console.log('[StepSelectorController] Comparison:', updateStepId, '===', currentStepIdNum, '?', updateStepId === currentStepIdNum)
     
-    // Reload the right panel if the update is for the currently displayed step
-    // Note: Form card isolation logic will preserve the form card on top during refresh
+    // Update specific runs in the right panel if the update is for the currently displayed step
+    // Instead of reloading the whole panel, only update status/time for runs that finished
     if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
-      // If the update is for the currently displayed step, reload it from server
-      console.log(`[StepSelectorController] Status update for current step ${this.currentStepId}, reloading from server...`)
-      const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
-      if (stepElement) {
-        // Use a small delay to avoid too frequent reloads, but reload to show latest status
-        clearTimeout(this.reloadTimeout)
-        this.reloadTimeout = setTimeout(() => {
-          console.log(`[StepSelectorController] Executing server-side reload for step ${this.currentStepId}`)
-          this.loadStepResults(this.currentStepId, stepElement, false) // false = don't show loading state
-        }, 500)
+      console.log(`[StepSelectorController] Status update for current step ${this.currentStepId}, updating specific runs...`)
+      
+      // Find all run rows in the current view and update those that are waiting, running, or might have just finished
+      if (this.hasContentTarget) {
+        // Search for run rows - they might be in a table or nested in the content
+        const runRows = this.contentTarget.querySelectorAll('tr[data-run-id]')
+        console.log(`[StepSelectorController] Found ${runRows.length} run rows in content target`)
+        
+        if (runRows.length === 0) {
+          console.log(`[StepSelectorController] No run rows found. Content target HTML preview:`, this.contentTarget.innerHTML.substring(0, 500))
+        }
+        
+        const runsToUpdate = []
+        
+        runRows.forEach(row => {
+          const runId = parseInt(row.getAttribute('data-run-id'))
+          console.log(`[StepSelectorController] Checking run row with ID: ${runId}`)
+          
+          // Update all runs - we don't know which ones changed, so update all to be safe
+          // This is still more efficient than reloading the whole panel
+          runsToUpdate.push(runId)
+          console.log(`[StepSelectorController] Adding run ${runId} to update list`)
+        })
+        
+        if (runsToUpdate.length > 0) {
+          console.log(`[StepSelectorController] Found ${runsToUpdate.length} runs to update:`, runsToUpdate)
+          // Update each run's status/time
+          runsToUpdate.forEach(runId => {
+            this.updateRunStatus(runId)
+          })
+        } else {
+          console.log(`[StepSelectorController] No runs found to update (checked ${runRows.length} rows)`)
+          // Fallback: if no runs found but we have content, try reloading the whole panel
+          if (runRows.length === 0 && this.hasContentTarget && this.contentTarget.innerHTML.trim().length > 0) {
+            console.log(`[StepSelectorController] No run rows found but content exists, falling back to full reload`)
+            const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
+            if (stepElement) {
+              clearTimeout(this.reloadTimeout)
+              this.reloadTimeout = setTimeout(() => {
+                this.loadStepResults(this.currentStepId, stepElement, false)
+              }, 500)
+            }
+          }
+        }
       } else {
-        console.warn(`[StepSelectorController] Step element not found for step_id: ${this.currentStepId}`)
+        console.warn(`[StepSelectorController] No content target available`)
       }
     } else if (updateStepId && !currentStepIdNum) {
       // No step is currently selected, but we got an update for a step - select and load it
@@ -850,6 +884,12 @@ export default class extends Controller {
       
       // Simple approach: Just insert the HTML directly
       console.log('[StepSelectorController] Inserting HTML into content target')
+      // Ensure content target is properly constrained before inserting content
+      controller.contentTarget.style.width = '100%'
+      controller.contentTarget.style.maxWidth = '100%'
+      controller.contentTarget.style.minWidth = '0'
+      controller.contentTarget.style.overflowX = 'hidden'
+      controller.contentTarget.style.boxSizing = 'border-box'
       controller.contentTarget.innerHTML = html
       
       // Trigger Stimulus to scan for new controllers
@@ -1007,6 +1047,200 @@ export default class extends Controller {
         controller.emptyStateTarget.style.display = 'none'
       }
     })
+  }
+
+  // Update a specific run's status and time without reloading the whole panel
+  updateRunStatus(runId) {
+    console.log(`[StepSelectorController] Updating run status for run ${runId}`)
+    
+    if (!this.hasContentTarget) {
+      console.warn('[StepSelectorController] No content target available for updating run status')
+      return
+    }
+    
+    const runRow = this.contentTarget.querySelector(`tr[data-run-id="${runId}"]`)
+    if (!runRow) {
+      console.warn(`[StepSelectorController] Run row not found for run ${runId}`)
+      return
+    }
+    
+    // Fetch updated run status from server
+    fetch(`/projects/${this.projectIdValue}/run_status?run_id=${runId}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      return response.json()
+    })
+    .then(data => {
+      console.log(`[StepSelectorController] Received run status for run ${runId}:`, data)
+      this.updateRunStatusInDOM(runRow, data)
+    })
+    .catch(error => {
+      console.error(`[StepSelectorController] Error fetching run status for run ${runId}:`, error)
+    })
+  }
+
+  // Update the DOM for a specific run row with new status/time data
+  updateRunStatusInDOM(runRow, data) {
+    console.log(`[StepSelectorController] Updating DOM for run ${data.run_id} with status ${data.status_id}`)
+    
+    // Find status cell - it's the 4th td in the row
+    const cells = runRow.querySelectorAll('td')
+    const statusCell = cells[3] // 0-indexed, so 3 is the 4th column
+    if (!statusCell) {
+      console.warn('[StepSelectorController] Status cell not found in run row')
+      return
+    }
+    
+    // Update status badge
+    const statusBadge = statusCell.querySelector('.inline-flex.items-center')
+    if (statusBadge) {
+      const statusConfig = this.getStatusConfig(data.status_id)
+      statusBadge.className = `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.text}`
+      statusBadge.textContent = data.status_name
+      console.log(`[StepSelectorController] Updated status badge to: ${data.status_name}`)
+    } else {
+      console.warn('[StepSelectorController] Status badge not found')
+    }
+    
+    // Update duration/timer section
+    const durationContainer = statusCell.querySelector('.flex.flex-col.gap-1')
+    if (durationContainer) {
+      // First, disconnect any existing run-timer controllers before removing elements
+      // Search for timer controllers in the entire status cell to catch nested ones
+      const allTimerElements = statusCell.querySelectorAll('[data-controller*="run-timer"]')
+      allTimerElements.forEach(el => {
+        // Get the controller instance and disconnect it properly
+        if (window.Stimulus) {
+          try {
+            const controller = window.Stimulus.getControllerForElementAndIdentifier(el, 'run-timer')
+            if (controller && typeof controller.disconnect === 'function') {
+              controller.disconnect()
+              console.log(`[StepSelectorController] Disconnected run-timer controller for run ${data.run_id}`)
+            }
+          } catch (e) {
+            // Controller might not be connected yet, that's okay
+            console.log(`[StepSelectorController] Timer controller not found or already disconnected`)
+          }
+        }
+      })
+      
+      // Remove all existing duration/timer elements (there might be multiple)
+      // Remove elements that contain timers or are timer containers
+      const existingDurations = durationContainer.querySelectorAll('.text-xs.text-gray-500.mt-0.5, .text-xs.text-gray-500.space-y-0.5, [data-controller*="run-timer"]')
+      existingDurations.forEach(el => {
+        el.remove()
+      })
+      
+      // Also remove any queue-position controllers that might be in waiting status
+      const queuePositionElements = durationContainer.querySelectorAll('[data-controller*="queue-position"]')
+      queuePositionElements.forEach(el => {
+        if (window.Stimulus) {
+          try {
+            const controller = window.Stimulus.getControllerForElementAndIdentifier(el, 'queue-position')
+            if (controller && typeof controller.disconnect === 'function') {
+              controller.disconnect()
+            }
+          } catch (e) {
+            // Controller might not be connected, that's okay
+          }
+        }
+        el.remove()
+      })
+      
+      // Add new duration/timer based on status
+      if (data.status_id === 3 && data.duration) {
+        // Completed: show duration
+        const durationDiv = document.createElement('div')
+        durationDiv.className = 'text-xs text-gray-500 mt-0.5'
+        durationDiv.innerHTML = `<i class="fas fa-clock text-gray-400 mr-1"></i><span>${this.formatDuration(data.duration)}</span>`
+        durationContainer.appendChild(durationDiv)
+        console.log(`[StepSelectorController] Added completed duration: ${this.formatDuration(data.duration)}`)
+      } else if (data.status_id === 2 && data.start_time) {
+        // Running: show live timer (will be updated by run-timer controller)
+        const timerDiv = document.createElement('div')
+        timerDiv.className = 'text-xs text-gray-500 mt-0.5'
+        timerDiv.setAttribute('data-controller', 'run-timer')
+        timerDiv.setAttribute('data-run-timer-start-time-value', data.start_time)
+        timerDiv.innerHTML = `<i class="fas fa-clock text-gray-400 mr-1"></i><span data-run-timer-target="elapsedTime">--:--</span>`
+        durationContainer.appendChild(timerDiv)
+        console.log(`[StepSelectorController] Added running timer with start_time: ${data.start_time}`)
+        
+        // Trigger Stimulus to connect the new controller
+        if (window.Stimulus && window.Stimulus.router) {
+          setTimeout(() => {
+            if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+              window.Stimulus.router.scan()
+            }
+          }, 0)
+        }
+      } else if (data.status_id === 1) {
+        // Waiting: show waiting timer
+        const waitingDiv = document.createElement('div')
+        waitingDiv.className = 'text-xs text-gray-500 mt-0.5 space-y-0.5'
+        
+        if (data.submitted_at) {
+          const timerDiv = document.createElement('div')
+          timerDiv.setAttribute('data-controller', 'run-timer')
+          timerDiv.setAttribute('data-run-timer-submitted-at-value', data.submitted_at)
+          timerDiv.innerHTML = `<i class="fas fa-clock text-gray-400 mr-1"></i><span data-run-timer-target="elapsedTime">--:--</span>`
+          waitingDiv.appendChild(timerDiv)
+          console.log(`[StepSelectorController] Added waiting timer with submitted_at: ${data.submitted_at}`)
+        }
+        
+        durationContainer.appendChild(waitingDiv)
+        
+        // Trigger Stimulus to connect the new controller
+        if (window.Stimulus && window.Stimulus.router) {
+          setTimeout(() => {
+            if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+              window.Stimulus.router.scan()
+            }
+          }, 0)
+        }
+      }
+    } else {
+      console.warn('[StepSelectorController] Duration container not found')
+    }
+  }
+
+  // Get status configuration for a status_id
+  getStatusConfig(statusId) {
+    switch(statusId) {
+      case 1:
+        return { name: 'Waiting', bg: 'bg-yellow-100', text: 'text-yellow-800' }
+      case 2:
+        return { name: 'Running', bg: 'bg-blue-100', text: 'text-blue-800' }
+      case 3:
+        return { name: 'Completed', bg: 'bg-green-100', text: 'text-green-800' }
+      case 4:
+        return { name: 'Failed', bg: 'bg-red-100', text: 'text-red-800' }
+      default:
+        return { name: 'Unknown', bg: 'bg-gray-100', text: 'text-gray-800' }
+    }
+  }
+
+  // Format duration in seconds to HH:MM:SS or MM:SS
+  formatDuration(seconds) {
+    if (!seconds && seconds !== 0) return '0s'
+    
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    } else {
+      return `${minutes}:${String(secs).padStart(2, '0')}`
+    }
   }
 
   // Note: updateActiveStep is no longer needed - the server renders the border

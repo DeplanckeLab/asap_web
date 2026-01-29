@@ -27,6 +27,7 @@ Rails.application.routes.draw do
       post :restart_step
       post :delete_all_runs_from_step
       get :reset_parsing
+      get :run_status
     end
   end
   

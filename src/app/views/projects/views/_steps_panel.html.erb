@@ -20,7 +20,7 @@
           
           # Determine CSS classes and styles
           # All steps have white background by default
-          item_classes = 'flex items-start px-4 py-3 border-b border-gray-200 step-item bg-white'
+          item_classes = 'flex items-center px-4 py-3 border-b border-gray-200 step-item bg-white'
           # Apply blue left border if this is the selected step
           item_style = is_selected ? 'border-left: 4px solid #007bff;' : 'border-left: 4px solid transparent;'
           
@@ -60,7 +60,7 @@
                onclick="event.preventDefault(); event.stopPropagation(); return false;"
              <% end %>
              data-step-id="<%= step.id %>">
-          <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+          <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; align-self: center;">
             <% if !is_available %>
               <div class="relative group">
                 <i class="fas fa-lock text-sm text-gray-400"></i>
@@ -102,7 +102,7 @@
                 </div>
               </div>
             <% else %>
-              <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%;">
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%; align-content: center;">
                 <% 
                   # Define status icons with their properties in 2x2 grid order
                   status_icons = [

@@ -328,6 +328,93 @@
   </div>
 </div>
 
+
+<script>
+  function loadFormInRightPanel(formUrl) {
+    console.log('[loadFormInRightPanel] Loading form from:', formUrl)
+    
+    // Find the step-selector controller and its content target
+    const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+    if (!stepSelectorElement) {
+      console.error('[loadFormInRightPanel] Step selector element not found')
+      return
+    }
+    
+    // Get the controller instance
+    if (!window.Stimulus) {
+      console.error('[loadFormInRightPanel] Stimulus not available')
+      return
+    }
+    
+    const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
+    if (!controller || !controller.hasContentTarget) {
+      console.error('[loadFormInRightPanel] Step selector controller or content target not found')
+      return
+    }
+    
+    // Hide empty state and loading state, show content
+    if (controller.hasEmptyStateTarget) {
+      controller.emptyStateTarget.style.display = 'none'
+    }
+    if (controller.hasLoadingStateTarget) {
+      controller.loadingStateTarget.style.display = 'block'
+    }
+    controller.contentTarget.style.display = 'none'
+    
+    // Fetch the form
+    fetch(formUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/html',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      return response.text()
+    })
+    .then(html => {
+      console.log('[loadFormInRightPanel] Form loaded, length:', html.length)
+      
+      // Update content with form
+      controller.contentTarget.innerHTML = html
+      controller.contentTarget.style.display = 'block'
+      
+      // Hide loading state
+      if (controller.hasLoadingStateTarget) {
+        controller.loadingStateTarget.style.display = 'none'
+      }
+      
+      // Trigger Stimulus to scan for new controllers in the form
+      if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+        setTimeout(() => {
+          window.Stimulus.router.scan()
+        }, 0)
+        
+        setTimeout(() => {
+          window.Stimulus.router.scan()
+        }, 100)
+      }
+    })
+    .catch(error => {
+      console.error('[loadFormInRightPanel] Error loading form:', error)
+      if (controller.hasLoadingStateTarget) {
+        controller.loadingStateTarget.style.display = 'none'
+      }
+      controller.contentTarget.innerHTML = `
+        <div class="alert alert-danger p-4">
+          <i class="fas fa-exclamation-triangle me-2"></i>
+          Error loading form: ${error.message}
+        </div>
+      `
+      controller.contentTarget.style.display = 'block'
+    })
+  }
+</script>
+
 <style>
   .step-item-hover:hover:not(.active) {
     background-color: #f0f4f8 !important;

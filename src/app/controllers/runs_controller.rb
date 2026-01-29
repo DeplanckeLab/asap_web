@@ -390,6 +390,7 @@ class RunsController < ApplicationController
     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
     
     tmp_dir = project_dir + 'tmp'
+    FileUtils.mkdir_p(tmp_dir)
     ## kill run if necessary
     Basic.kill_run run
     

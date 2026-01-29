@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step queue_position get_attributes data_content]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content]
 
   # GET /projects or /projects.json
   def index
@@ -1932,7 +1932,7 @@ class ProjectsController < ApplicationController
       # Skip for parsing step as it has its own special handling
       if @step.name != 'parsing' && (@step.has_std_dashboard || @step.has_std_view || @step.has_std_form)
         begin
-          Rails.logger.info("[step_results] Calling prepare_std_step_data for step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, runs_count: #{@runs&.count || 0}")
+          Rails.logger.info("[step_results] Calling prepare_std_step_data for step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}, runs_count: #{@runs&.count || 0}")
           prepare_std_step_data
           Rails.logger.info("[step_results] After prepare_std_step_data: show_dashboard=#{@show_dashboard}, show_view=#{@show_view}, show_form=#{@show_form}, show_custom_form=#{@show_custom_form}")
         rescue => e
@@ -1946,6 +1946,17 @@ class ProjectsController < ApplicationController
         end
       else
         Rails.logger.info("[step_results] Skipping prepare_std_step_data - step: #{@step.name}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}")
+        # Initialize display flags even if prepare_std_step_data is not called
+        @show_dashboard = false
+        @show_view = false
+        @show_form = false
+        @show_custom_form = false
+        # If step has std_form and no runs, show the form
+        if @step.has_std_form && @runs.empty?
+          Rails.logger.info("[step_results] Step has std_form and no runs - setting show_form = true")
+          @show_form = true
+          prepare_std_form_data
+        end
       end
     rescue => e
       Rails.logger.error("Error in step_results: #{e.class} - #{e.message}")
@@ -1970,10 +1981,16 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { 
         begin
-          # If show_form is requested and it's an AJAX request, return just the form
-          if params[:show_form].present? && params[:show_form].to_s == '1' && request.xhr?
+          # If show_form is requested, return just the form (for AJAX or new page)
+          if params[:show_form].present? && params[:show_form].to_s == '1'
             if @show_form
-              render partial: 'projects/views/std_form', layout: false
+              if request.xhr?
+                # AJAX request - return just the form partial
+                render partial: 'projects/views/std_form', layout: false
+              else
+                # Regular page request - render full page with just the form
+                render 'projects/views/form_only', layout: 'application'
+              end
             else
               render plain: '<div class="p-4 text-center text-red-600">Form not available for this step.</div>', status: :not_found
             end
@@ -2250,6 +2267,112 @@ class ProjectsController < ApplicationController
       Rails.logger.error("Error in restart_step: #{e.class} - #{e.message}")
       Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
       redirect_to project_path(@project, view: 'analysis'), alert: "Error restarting step: #{e.message}"
+    end
+  end
+
+  # POST /projects/:id/delete_all_runs_from_step
+  def delete_all_runs_from_step
+    begin
+      step_id = params[:step_id].to_i
+      @step = Step.find_by(id: step_id)
+      
+      if @step.nil?
+        redirect_to project_path(@project, view: 'analysis'), alert: 'Step not found.'
+        return
+      end
+      
+      # Get all runs for this step
+      runs = @project.runs.where(step_id: step_id).all
+      
+      if runs.empty?
+        redirect_to step_results_project_path(@project, step_id: step_id), notice: 'No runs to delete.'
+        return
+      end
+      
+      # Delete each run
+      runs.each do |run|
+        # Cancel SLURM job if it exists and is running/waiting
+        if run.slurm_job_id.present?
+          begin
+            slurm_service = SlurmService.new(logger: Rails.logger)
+            if slurm_service.cancel_job(run.slurm_job_id)
+              Rails.logger.info("Cancelled SLURM job #{run.slurm_job_id} for run #{run.id}")
+            else
+              Rails.logger.warn("Failed to cancel SLURM job #{run.slurm_job_id} for run #{run.id}")
+            end
+          rescue => e
+            Rails.logger.error("Error cancelling SLURM job for run #{run.id}: #{e.message}")
+          end
+        end
+        
+        # Properly destroy the run and clean up files/annotations
+        begin
+          # Clear any class-level instance variables that might pollute state
+          RunsController.instance_variable_set(:@log, nil)
+          RunsController.instance_variable_set(:@h_step_ids, nil)
+          
+          RunsController.destroy_run_call(@project, run)
+          
+          # Clear class-level instance variables after use to prevent state pollution
+          RunsController.instance_variable_set(:@log, nil)
+          RunsController.instance_variable_set(:@h_step_ids, nil)
+        rescue => e
+          Rails.logger.error("Error destroying run #{run.id}: #{e.message}")
+          Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
+          # Clear variables even on error
+          RunsController.instance_variable_set(:@log, nil)
+          RunsController.instance_variable_set(:@h_step_ids, nil)
+          # Fallback: just delete the run if destroy_run_call fails
+          begin
+            run.destroy
+          rescue => e2
+            Rails.logger.error("Error in fallback run destroy: #{e2.message}")
+          end
+        end
+      end
+      
+      # Update project step to reflect the deleted runs
+      project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
+      if project_step
+        project_step.update(status_id: nil, error_message: nil)
+        begin
+          Basic.upd_project_step(@project, step_id)
+          project_step.reload
+          if project_step.status_id != nil && runs.count == 0
+            Rails.logger.warn("upd_project_step set status to #{project_step.status_id} but there are no runs, forcing to nil")
+            project_step.update(status_id: nil)
+          end
+        rescue => e
+          Rails.logger.error("Error updating project step #{step_id}: #{e.message}")
+          project_step.reload
+          project_step.update(status_id: nil) if project_step.status_id != nil
+        end
+      end
+      
+      # Broadcast update for this step so websockets update the UI
+      begin
+        if @project.respond_to?(:broadcast)
+          @project.broadcast(step_id)
+          Rails.logger.info("Broadcast sent for step #{step_id}")
+        end
+      rescue => e
+        Rails.logger.error("Error broadcasting update for step #{step_id}: #{e.class} - #{e.message}")
+      end
+      
+      # Reload project to ensure fresh state
+      @project.reload
+      
+      # Check if there are no runs left and step has std_form - if so, show the form
+      remaining_runs = @project.runs.where(step_id: step_id).count
+      if remaining_runs == 0 && @step.has_std_form
+        redirect_to step_results_project_path(@project, step_id: step_id, show_form: 1), notice: "All runs deleted successfully."
+      else
+        redirect_to step_results_project_path(@project, step_id: step_id), notice: "All runs deleted successfully."
+      end
+    rescue => e
+      Rails.logger.error("Error in delete_all_runs_from_step: #{e.class} - #{e.message}")
+      Rails.logger.error("Error backtrace: #{e.backtrace.first(10).join("\n")}")
+      redirect_to project_path(@project, view: 'analysis'), alert: "Error deleting runs: #{e.message}"
     end
   end
 

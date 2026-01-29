@@ -192,6 +192,25 @@ export default class extends Controller {
     console.log('[StepSelectorController] data.h_nber_analyses:', data.h_nber_analyses)
     console.log('[StepSelectorController] Current step ID before update:', this.currentStepId)
     
+    // Check if right panel is displaying a form (new run form)
+    const hasFormInRightPanel = this.hasContentTarget && this.contentTarget.querySelector('.std-form') !== null
+    console.log('[StepSelectorController] Right panel has form?', hasFormInRightPanel)
+    
+    if (hasFormInRightPanel) {
+      console.log('[StepSelectorController] Right panel is displaying form - skipping refresh to avoid interrupting user')
+      // Still update the badge in the left panel
+      const updateStepId = data.step_id ? parseInt(data.step_id) : null
+      if (updateStepId && (data.h_nber_analyses || data.parsing_status)) {
+        this.refreshStepsPanel().then(() => {
+          this.updateStepStatusBadge(updateStepId.toString(), data)
+        }).catch((error) => {
+          console.error('[StepSelectorController] Error refreshing steps panel:', error)
+          this.updateStepStatusBadge(updateStepId.toString(), data)
+        })
+      }
+      return // Exit early - don't refresh right panel
+    }
+    
     // Check if any form is currently open
     const isFormOpen = this.isAnyFormOpen()
     console.log('[StepSelectorController] Is form open?', isFormOpen)
@@ -236,12 +255,9 @@ export default class extends Controller {
     console.log('[StepSelectorController] Update step ID:', updateStepId, 'Current step ID:', currentStepIdNum)
     console.log('[StepSelectorController] Comparison:', updateStepId, '===', currentStepIdNum, '?', updateStepId === currentStepIdNum)
     
-    // Only reload the right panel if:
-    // 1. The form is NOT open (user is not editing)
-    // 2. The finished run is from the same step as the one displayed
-    if (isFormOpen) {
-      console.log('[StepSelectorController] Form is open, skipping right panel refresh to avoid interrupting user')
-    } else if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
+    // Reload the right panel if the update is for the currently displayed step
+    // Note: Form card isolation logic will preserve the form card on top during refresh
+    if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
       // If the update is for the currently displayed step, reload it from server
       console.log(`[StepSelectorController] Status update for current step ${this.currentStepId}, reloading from server...`)
       const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
@@ -285,8 +301,7 @@ export default class extends Controller {
     
     // Also reload if parsing_status changed and we're viewing the parsing step
     // This handles the case where parsing_status is sent but step_id might not match exactly
-    // BUT: only if form is not open
-    if (!isFormOpen && data.parsing_status && this.currentStepId) {
+    if (data.parsing_status && this.currentStepId) {
       const currentStepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
       if (currentStepElement) {
         // If parsing status changed to complete or failed, reload the current step
@@ -298,35 +313,11 @@ export default class extends Controller {
           }, 500)
         }
       }
-    } else if (isFormOpen && data.parsing_status) {
-      console.log(`[StepSelectorController] Parsing status changed but form is open, skipping reload`)
     }
   }
 
   isAnyFormOpen() {
-    // Check if any slide-in form is currently open
-    // Find all slide-in-form controllers and check if any are open
-    if (!window.Stimulus) {
-      return false
-    }
-    
-    try {
-      // Find all elements with slide-in-form controller
-      const formElements = document.querySelectorAll('[data-controller*="slide-in-form"]')
-      
-      for (const element of formElements) {
-        const controller = window.Stimulus.getControllerForElementAndIdentifier(element, 'slide-in-form')
-        if (controller && typeof controller.isOpen === 'function') {
-          if (controller.isOpen()) {
-            console.log('[StepSelectorController] Found open form:', element)
-            return true
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('[StepSelectorController] Error checking if form is open:', error)
-    }
-    
+    // No longer using slide-in forms, so always return false
     return false
   }
 
@@ -334,7 +325,7 @@ export default class extends Controller {
     console.log('[StepSelectorController] ===== REFRESHING STEPS PANEL FROM SERVER =====')
     // Send selected_step_id so the server can render the blue border correctly
     const selectedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
-    let url = `/projects/${this.projectIdValue}/refresh_steps_panel`
+    let url = `/projects/${this.projectIdValue}/refresh_steps_panel.html`
     if (selectedStepId) {
       url += `?selected_step_id=${selectedStepId}`
     }
@@ -526,7 +517,7 @@ export default class extends Controller {
     let badgeElement = stepElement.querySelector('.inline-flex.items-center')
     if (!badgeElement) {
       // Create badge if it doesn't exist
-      const badgeContainer = stepElement.querySelector('.flex-grow .mt-2')
+      let badgeContainer = stepElement.querySelector('.flex-grow .mt-2')
       if (!badgeContainer) {
         // Create the container if it doesn't exist
         const flexGrow = stepElement.querySelector('.flex-grow')
@@ -762,7 +753,7 @@ export default class extends Controller {
     // Load step results via AJAX
     // Add cache-busting parameter to ensure fresh data on page reload
     const cacheBuster = new Date().getTime()
-    const url = `/projects/${this.projectIdValue}/step_results?step_id=${stepId}&_t=${cacheBuster}`
+    const url = `/projects/${this.projectIdValue}/step_results.html?step_id=${stepId}&_t=${cacheBuster}`
     console.log('[StepSelectorController] Fetching URL:', url)
     
     // Store controller reference and stepId to preserve in promise chain
@@ -857,54 +848,34 @@ export default class extends Controller {
         return
       }
       
+      // Simple approach: Just insert the HTML directly
+      console.log('[StepSelectorController] Inserting HTML into content target')
       controller.contentTarget.innerHTML = html
       
-      // Trigger Stimulus to scan for new controllers in the loaded content
-      // Stimulus should automatically detect via MutationObserver, but we'll also manually trigger
-      if (window.Stimulus) {
+      // Trigger Stimulus to scan for new controllers
+      if (window.Stimulus && window.Stimulus.router) {
         console.log('[StepSelectorController] Triggering Stimulus scan for new controllers...')
         try {
-          // Use setTimeout to ensure DOM is fully updated
-          // Multiple timeouts to ensure targets are found
           setTimeout(() => {
-            // Manually scan using Stimulus's router
             if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
               console.log('[StepSelectorController] Calling Stimulus router.scan()')
               window.Stimulus.router.scan()
             }
-            
-            // Scan again after a delay to catch any controllers that need targets
-            setTimeout(() => {
-              if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-                console.log('[StepSelectorController] Calling second Stimulus router.scan() to ensure all controllers connected')
-                window.Stimulus.router.scan()
-              }
-            }, 100)
-            
-            // Check for form-req controller after a short delay
-            setTimeout(() => {
-              const formReqElement = controller.contentTarget.querySelector('[data-controller*="form-req"]')
-              if (formReqElement) {
-                console.log('[StepSelectorController] Found form-req element')
-                const formReqController = window.Stimulus.getControllerForElementAndIdentifier(formReqElement, 'form-req')
-                if (!formReqController) {
-                  console.warn('[StepSelectorController] form-req controller NOT connected yet')
-                  // Try scanning again
-                  if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-                    window.Stimulus.router.scan()
-                  }
-                } else {
-                  console.log('[StepSelectorController] form-req controller IS connected')
-                }
-              } else {
-                console.log('[StepSelectorController] No form-req element found in loaded content')
-              }
-            }, 100)
           }, 0)
+          
+          setTimeout(() => {
+            if (window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+              console.log('[StepSelectorController] Calling second Stimulus router.scan()')
+              window.Stimulus.router.scan()
+            }
+          }, 100)
         } catch (e) {
           console.warn('[StepSelectorController] Error triggering Stimulus scan:', e)
         }
       }
+      
+      // UI updates
+      console.log('[StepSelectorController] Applying UI updates (showing content, hiding loading/empty states)')
       
       if (controller.hasLoadingStateTarget) {
         controller.loadingStateTarget.style.display = 'none'

@@ -25,6 +25,7 @@ Rails.application.routes.draw do
       get :get_attributes
       get :data_content
       post :restart_step
+      post :delete_all_runs_from_step
       get :reset_parsing
     end
   end

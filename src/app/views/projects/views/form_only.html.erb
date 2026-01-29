@@ -1,0 +1,10 @@
+<div class="container mx-auto px-4 py-8">
+  <div class="max-w-4xl mx-auto">
+    <div class="mb-4">
+      <h1 class="text-2xl font-bold text-gray-900">New <%= @step.label.presence || @step.name.humanize %></h1>
+      <p class="text-gray-600 mt-2">Project: <%= @project.name %></p>
+    </div>
+    <%= render 'projects/views/std_form' %>
+  </div>
+</div>
+

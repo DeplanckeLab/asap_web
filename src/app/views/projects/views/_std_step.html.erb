@@ -1,9 +1,5 @@
 <% if @step %>
   <div class="step-results h-full flex flex-col" 
-       data-controller="slide-in-form"
-       data-slide-in-form-form-url-value="<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>"
-       data-slide-in-form-step-id-value="<%= @step.id %>"
-       data-slide-in-form-project-id-value="<%= @project.id %>"
        data-step-id="<%= @step.id %>"
        data-project-id="<%= @project.id %>">
     <% unless @show_form %>
@@ -48,10 +44,23 @@
               <% if @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 
                         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                        data-action="click->slide-in-form#open"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
                         style="flex-shrink: 0;">
                   + New run
                 </button>
+              <% end %>
+              <!-- Delete All Button -->
+              <% if editable?(@project) && @runs && @runs.any? %>
+                <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
+                    method: :post,
+                    class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors cursor-pointer',
+                    style: 'flex-shrink: 0;',
+                    data: { 
+                      confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone.",
+                      turbo: false
+                    } do %>
+                  Delete all
+                <% end %>
               <% end %>
               <!-- Restart Button -->
               <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
@@ -86,8 +95,8 @@
       </div>
     <% end %>
 
-    <!-- Runs Section (fallback if no standard dashboard/view) -->
-    <% unless @show_dashboard || @show_view %>
+    <!-- Runs Section (fallback if no standard dashboard/view/form) -->
+    <% unless @show_dashboard || @show_view || @show_form || @show_custom_form %>
       <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
         <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
           <div class="flex items-center justify-between">
@@ -99,10 +108,23 @@
               <% if @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 
                         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer" 
-                        data-action="click->slide-in-form#open"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
                         style="flex-shrink: 0;">
                   + New run
                 </button>
+              <% end %>
+              <!-- Delete All Button -->
+              <% if editable?(@project) && @runs && @runs.any? %>
+                <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
+                    method: :post,
+                    class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors cursor-pointer',
+                    style: 'flex-shrink: 0;',
+                    data: { 
+                      confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone.",
+                      turbo: false
+                    } do %>
+                  Delete all
+                <% end %>
               <% end %>
             </div>
           </div>
@@ -386,30 +408,6 @@
       </div>
     <% end %>
     <% end %>
-    
-    <!-- Slide-in Form Panel -->
-    <div data-slide-in-form-target="overlay" 
-         class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden transition-opacity duration-300"
-         data-action="click->slide-in-form#overlayClick"
-         style="display: none;"></div>
-    
-    <div data-slide-in-form-target="panel" 
-         class="fixed top-0 right-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 hidden overflow-y-auto transition-transform duration-300 ease-out"
-         style="display: none; transform: translateX(100%);">
-      <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10 flex items-center justify-between" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
-        <h3 class="text-lg font-semibold text-gray-900">
-          New <%= @step.label.presence || @step.name.humanize %>
-        </h3>
-        <button type="button" 
-                class="text-gray-500 hover:text-gray-700 transition-colors"
-                data-action="click->slide-in-form#close">
-          <i class="fas fa-times text-xl"></i>
-        </button>
-      </div>
-      <div data-slide-in-form-target="content" class="p-6">
-        <!-- Form content will be loaded here -->
-      </div>
-    </div>
   </div>
 
 <% else %>

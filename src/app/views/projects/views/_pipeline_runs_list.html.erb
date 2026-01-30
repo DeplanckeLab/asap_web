@@ -1,0 +1,125 @@
+<% if @runs && @runs.any? %>
+  <div class="space-y-3">
+    <% @runs.each do |run| %>
+      <% run_status = case run.status_id
+                      when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
+                      when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
+                      when 3 then { name: 'complete', class: 'success', bg: 'bg-green-100', text: 'text-green-800' }
+                      when 4 then { name: 'failed', class: 'danger', bg: 'bg-red-100', text: 'text-red-800' }
+                      else { name: 'unknown', class: 'secondary', bg: 'bg-gray-100', text: 'text-gray-800' }
+                      end %>
+      <% step = @h_steps[run.step_id] if defined?(@h_steps) %>
+      <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
+      <% run_title = run_card_title(run, step, std_method) %>
+      
+      <%# Parse run attributes for parameters %>
+      <% h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
+      <% params_array = h_run_attrs.to_a %>
+      
+      <div class="border rounded-lg p-3 transition-colors cursor-pointer <%= run.id == @immediate_parent_run_id ? 'border-blue-500 bg-blue-50 hover:bg-blue-100' : 'border-gray-200 hover:bg-gray-50' %>"
+           onclick="event.preventDefault(); if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>'); } else { window.location.href = '<%= run_path(run) %>'; } return false;"
+           title="Click to view run details">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex-1">
+            <div class="font-semibold text-gray-900"><%= run_title %></div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
+              <%= run_status[:name].humanize %>
+            </span>
+            <% if run.created_at %>
+              <span class="text-xs text-gray-500"><%= run.created_at.strftime("%Y-%m-%d %H:%M") %></span>
+            <% end %>
+          </div>
+        </div>
+        
+        <%# Parameters section - same style as std_step %>
+        <% if params_array.any? %>
+          <div class="flex flex-wrap gap-1.5 items-center mt-2">
+            <% params_array.each do |key, value| %>
+              <%# Check if value is a dataset (annot object) or array of datasets %>
+              <% annot_id = nil %>
+              <% if value.is_a?(Hash) %>
+                <% annot_id = value['annot_id'] || value[:annot_id] %>
+              <% end %>
+              <% if annot_id.present? %>
+                <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+                <% if annot %>
+                  <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                  <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                  <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                  <% if ori_step && ori_step.multiple_runs && ori_run %>
+                    <% run_num = ori_run.num || ori_run.id %>
+                    <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
+                  <% else %>
+                    <% dataset_display = "#{step_name} #{annot.name}" %>
+                  <% end %>
+                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200" title="<%= dataset_display %>">
+                    <span class="font-semibold text-blue-800"><%= key %>:</span>
+                    <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                  </span>
+                <% else %>
+                  <% value_str = value.to_json %>
+                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200" title="<%= value_str %>">
+                    <span class="font-semibold text-gray-800"><%= key %>:</span>
+                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                  </span>
+                <% end %>
+              <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
+                <%# Array of datasets - show first dataset and count %>
+                <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
+                <% if first_annot_id.present? %>
+                  <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                  <% if first_annot %>
+                    <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
+                    <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
+                    <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                    <% if ori_step && ori_step.multiple_runs && ori_run %>
+                      <% run_num = ori_run.num || ori_run.id %>
+                      <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                    <% else %>
+                      <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                    <% end %>
+                    <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
+                    <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200" title="<%= array_display %>">
+                      <span class="font-semibold text-blue-800"><%= key %>:</span>
+                      <span class="ml-1 text-blue-600"><%= truncated_array %></span>
+                    </span>
+                  <% else %>
+                    <% value_str = "[#{value.size} datasets]" %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                      <span class="font-semibold text-gray-800"><%= key %>:</span>
+                      <span class="ml-1 text-gray-600"><%= value_str %></span>
+                    </span>
+                  <% end %>
+                <% else %>
+                  <% value_str = value.to_s %>
+                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200" title="<%= value_str %>">
+                    <span class="font-semibold text-gray-800"><%= key %>:</span>
+                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                  </span>
+                <% end %>
+              <% else %>
+                <% value_str = value.to_s %>
+                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200" title="<%= value_str %>">
+                  <span class="font-semibold text-gray-800"><%= key %>:</span>
+                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                </span>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% else %>
+  <div class="text-center text-gray-500 py-8">
+    <p>No runs found in this pipeline.</p>
+  </div>
+<% end %>
+

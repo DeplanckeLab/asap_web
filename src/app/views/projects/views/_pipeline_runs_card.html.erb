@@ -1,0 +1,18 @@
+<%# Floating card for displaying pipeline runs %>
+<div id="pipeline-runs-card" class="hidden fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200" 
+     style="max-width: 600px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
+  <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+    <h3 class="text-lg font-semibold text-gray-900">Pipeline Runs</h3>
+    <button type="button" 
+            class="text-gray-400 hover:text-gray-600 transition-colors"
+            onclick="document.getElementById('pipeline-runs-card').classList.add('hidden')">
+      <span class="text-xl">&times;</span>
+    </button>
+  </div>
+  <div class="flex-1 overflow-y-auto p-4" id="pipeline-runs-content">
+    <div class="text-center text-gray-500 py-8">
+      Click on an input matrix parameter to view its pipeline runs.
+    </div>
+  </div>
+</div>
+

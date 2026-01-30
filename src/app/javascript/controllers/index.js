@@ -107,6 +107,10 @@ import DataViewController from "controllers/data_view_controller"
 application.register("data-view", DataViewController)
 console.log('Data view controller registered')
 
+import PipelineRunsController from "controllers/pipeline_runs_controller"
+application.register("pipeline-runs", PipelineRunsController)
+console.log('Pipeline runs controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

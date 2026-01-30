@@ -29,6 +29,7 @@ Rails.application.routes.draw do
       get :reset_parsing
       get :run_status
       get :graph
+      get :pipeline_runs
     end
   end
   

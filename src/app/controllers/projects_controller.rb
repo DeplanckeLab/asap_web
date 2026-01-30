@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs]
 
   # GET /projects or /projects.json
   def index
@@ -1247,6 +1247,95 @@ class ProjectsController < ApplicationController
   def get_lineage
     # Placeholder for get_lineage action
     render plain: "Lineage for project #{@project.key}"
+  end
+
+  # GET /projects/1/pipeline_runs?annot_id=123
+  def pipeline_runs
+    annot_id = params[:annot_id]
+    
+    unless annot_id.present?
+      render json: { error: 'annot_id parameter is required' }, status: :bad_request
+      return
+    end
+    
+    # Get the annotation
+    annot = Annot.find_by(id: annot_id, project_id: @project.id)
+    unless annot
+      render json: { error: 'Annotation not found' }, status: :not_found
+      return
+    end
+    
+    # Get the original run that created this annotation
+    ori_run_id = annot.ori_run_id || annot.run_id
+    unless ori_run_id
+      render json: { error: 'No run found for this annotation' }, status: :not_found
+      return
+    end
+    
+    # Get all runs in the pipeline starting from ori_run_id
+    pipeline_run_ids = get_pipeline_run_ids(ori_run_id)
+    
+    # Get all runs with their steps and std_methods
+    runs = Run.where(id: pipeline_run_ids, project_id: @project.id)
+              .includes(:step, :std_method, :status)
+              .order(:step_id, :num, :id)
+              .to_a
+              .reverse
+    
+    # Get steps hash for display
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    @h_steps = {}
+    if asap_docker_image
+      Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+    end
+    
+    # Prepare data for the partial (similar to std_step)
+    @runs = runs
+    
+    # Identify the immediate parent run (the one that created the annotation)
+    @immediate_parent_run_id = ori_run_id
+    
+    # Get std_methods for runs
+    std_method_ids = runs.map(&:std_method_id).compact.uniq
+    @h_std_methods = {}
+    StdMethod.where(id: std_method_ids).each { |m| @h_std_methods[m.id] = m } if std_method_ids.any?
+    
+    # Pre-load annots and their associated runs/steps for dataset parameters
+    @h_annots_for_params = {}
+    @h_ori_runs_for_params = {}
+    @h_steps_for_params = {}
+    annot_ids = []
+    runs.each do |run|
+      h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+      h_attrs.each_value do |v|
+        if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?)
+          annot_ids << (v['annot_id'] || v[:annot_id])
+        elsif v.is_a?(Array)
+          v.each do |item|
+            if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?)
+              annot_ids << (item['annot_id'] || item[:annot_id])
+            end
+          end
+        end
+      end
+    end
+    if annot_ids.any?
+      Annot.where(id: annot_ids.uniq).each do |annot|
+        @h_annots_for_params[annot.id] = annot
+        if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
+          ori_run = Run.find_by(id: annot.ori_run_id)
+          if ori_run
+            @h_ori_runs_for_params[annot.ori_run_id] = ori_run
+            if ori_run.step_id.present? && !@h_steps_for_params[ori_run.step_id]
+              step = Step.find_by(id: ori_run.step_id)
+              @h_steps_for_params[ori_run.step_id] = step if step
+            end
+          end
+        end
+      end
+    end
+    
+    render partial: 'projects/views/pipeline_runs_list', layout: false
   end
 
   # GET /projects/1/tsv_from_json
@@ -2682,6 +2771,63 @@ class ProjectsController < ApplicationController
   end
 
   private
+
+  # Get all run IDs in the pipeline that created a given run
+  # This returns only the run itself and all its ancestors (the pipeline that produced it)
+  # It does NOT include descendants (runs that used this run as input)
+  def get_pipeline_run_ids(root_run_id)
+    require 'set'
+    
+    # Load ALL runs for this project
+    all_runs = Run.where(project_id: @project.id).to_a
+    runs_by_id = all_runs.index_by(&:id)
+    
+    # Get the root run
+    root_run = runs_by_id[root_run_id] || Run.find_by(id: root_run_id, project_id: @project.id)
+    return [root_run_id] unless root_run
+    
+    run_ids = Set.new([root_run_id])
+    
+    # Get all ancestors (parents, grandparents, etc.) - the pipeline that created this run
+    # lineage_run_ids contains all ancestor run IDs (but not the run itself)
+    if root_run.lineage_run_ids.present?
+      lineage_ids = root_run.lineage_run_ids.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+      lineage_ids.each { |id| run_ids.add(id) if id > 0 }
+    end
+    
+    # Also traverse run_parents_json to ensure we get all ancestors (in case lineage_run_ids is incomplete)
+    ancestor_visited = Set.new
+    ancestor_queue = [root_run_id]
+    
+    while ancestor_queue.any?
+      current_run_id = ancestor_queue.shift
+      next if ancestor_visited.include?(current_run_id)
+      ancestor_visited.add(current_run_id)
+      
+      current_run = runs_by_id[current_run_id] || Run.find_by(id: current_run_id, project_id: @project.id)
+      next unless current_run && current_run.run_parents_json.present?
+      
+      begin
+        parents = Basic.safe_parse_json(current_run.run_parents_json, [])
+        if parents.is_a?(Array) && parents.any?
+          parents.each do |parent|
+            parent_id = parent.is_a?(Hash) ? (parent[:run_id] || parent['run_id']) : parent
+            parent_id = parent_id.to_i if parent_id
+            
+            if parent_id && parent_id > 0 && !ancestor_visited.include?(parent_id)
+              run_ids.add(parent_id)
+              ancestor_queue << parent_id
+            end
+          end
+        end
+      rescue => e
+        Rails.logger.warn("Error parsing run_parents_json for run #{current_run_id}: #{e.message}")
+      end
+    end
+    
+    # Return only ancestors + the run itself (NOT descendants)
+    run_ids.to_a
+  end
 
     # Helper method to check if a step can be unlocked based on attrs_json requirements
     # This checks ONLY if required Annot instances are available, regardless of step completion status

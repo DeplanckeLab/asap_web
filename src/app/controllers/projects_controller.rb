@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph]
 
   # GET /projects or /projects.json
   def index
@@ -1218,6 +1218,29 @@ class ProjectsController < ApplicationController
   def get_run
     # Placeholder for get_run action
     render plain: "Run for project #{@project.key}"
+  end
+
+  # GET /projects/1/graph
+  def graph
+    # Get only successful (completed) runs for the project with step and std_method information
+    # status_id == 3 means completed/successful
+    @runs = @project.runs.includes(:step, :std_method, :annots)
+                      .where(status_id: 3)
+                      .order(:step_id, :num, :id)
+    
+    # Get steps hash
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    @h_steps = {}
+    if asap_docker_image
+      Step.where(docker_image_id: asap_docker_image.id).each do |step|
+        @h_steps[step.id] = step
+      end
+    end
+    
+    # Generate klay data for pipeline visualization (runs only)
+    @klay_data = generate_klay_data
+    
+    render partial: 'projects/views/graph', layout: false
   end
 
   # GET /projects/1/get_lineage
@@ -3527,34 +3550,144 @@ class ProjectsController < ApplicationController
       { data: binary_data, info: compression_info }
     end
     
-    # Generate klay data for pipeline visualization
+    # Generate klay data for pipeline visualization (runs only)
     def generate_klay_data
       data = []
       
-      # Add nodes for each step
-      @h_steps.each do |step_id, step|
+      # Only include runs that exist
+      return data if @runs.blank?
+      
+      # Group runs by step for better organization
+      runs_by_step = @runs.group_by(&:step_id)
+      
+      # Add nodes for each run
+      @runs.each do |run|
+        step = @h_steps[run.step_id]
+        
+        # Create label: #run_number std_method_name (only show #run_number if multiple_runs == true)
+        label_parts = []
+        
+        # Add run number only if step has multiple_runs enabled
+        if step && step.multiple_runs
+          if run.num
+            label_parts << "##{run.num}"
+          elsif run.id
+            label_parts << "##{run.id}"
+          end
+        end
+        
+        # Add std_method name
+        if run.std_method && run.std_method.name.present?
+          label_parts << run.std_method.name
+        elsif step
+          # Fallback to step name if no std_method
+          label_parts << (step.label.presence || step.name)
+        else
+          label_parts << "Run #{run.id}"
+        end
+        
+        label = label_parts.join(' ')
+        
         data << {
           data: {
-            id: step_id.to_s,
-            label: step.name || "Step #{step_id}",
-            color: get_step_color(step_id)
+            id: "run_#{run.id}",
+            label: label,
+            color: get_step_color(run.step_id),
+            run_id: run.id,
+            step_id: run.step_id
           }
         }
       end
       
-      # Add edges between steps (simplified - you may want to make this more sophisticated)
-      step_ids = @h_steps.keys.sort
-      step_ids.each_with_index do |step_id, index|
-        next if index == 0
+      # Create a hash of run IDs for quick lookup
+      run_ids_set = @runs.map(&:id).to_set
+      
+      # Add edges based on run_parents_json (most reliable source)
+      edges_added = false
+      @runs.each do |run|
+        next if run.run_parents_json.blank?
         
-        prev_step_id = step_ids[index - 1]
-        data << {
-          data: {
-            id: "edge_#{prev_step_id}_#{step_id}",
-            source: prev_step_id.to_s,
-            target: step_id.to_s
-          }
-        }
+        begin
+          parents = Basic.safe_parse_json(run.run_parents_json, [])
+          if parents.is_a?(Array) && parents.any?
+            parents.each do |parent|
+              parent_id = parent.is_a?(Hash) ? parent[:run_id] || parent['run_id'] : parent
+              parent_id = parent_id.to_i if parent_id
+              
+              # Check if parent run exists in our runs list
+              if parent_id && run_ids_set.include?(parent_id)
+                data << {
+                  data: {
+                    id: "edge_#{parent_id}_#{run.id}",
+                    source: "run_#{parent_id}",
+                    target: "run_#{run.id}"
+                  }
+                }
+                edges_added = true
+              end
+            end
+          end
+        rescue => e
+          Rails.logger.warn("Error parsing run_parents_json for run #{run.id}: #{e.message}")
+        end
+      end
+      
+      # Fallback to pipeline_parent_run_ids if run_parents_json didn't provide edges
+      if !edges_added
+        @runs.each do |run|
+          next if run.pipeline_parent_run_ids.blank?
+          
+          parent_ids = run.pipeline_parent_run_ids.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+          parent_ids.each do |parent_id|
+            # Check if parent run exists in our runs list
+            if run_ids_set.include?(parent_id)
+              data << {
+                data: {
+                  id: "edge_#{parent_id}_#{run.id}",
+                  source: "run_#{parent_id}",
+                  target: "run_#{run.id}"
+                }
+              }
+              edges_added = true
+            end
+          end
+        end
+      end
+      
+      # If still no edges, create edges based on step order and run creation time
+      if !edges_added
+        # Group runs by step and sort by step rank, then by creation time
+        runs_by_step_id = runs_by_step.keys.sort_by { |step_id| @h_steps[step_id]&.rank || 9999 }
+        
+        runs_by_step_id.each_with_index do |step_id, index|
+          next if index == 0
+          
+          prev_step_id = runs_by_step_id[index - 1]
+          prev_runs = (runs_by_step[prev_step_id] || []).sort_by { |r| [r.created_at || Time.at(0), r.id] }
+          current_runs = (runs_by_step[step_id] || []).sort_by { |r| [r.created_at || Time.at(0), r.id] }
+          
+          # Connect each run from previous step to corresponding run in current step
+          # If multiple runs, connect in order
+          max_runs = [prev_runs.length, current_runs.length].max
+          max_runs.times do |i|
+            prev_run = prev_runs[i] || prev_runs.last
+            current_run = current_runs[i] || current_runs.first
+            
+            if prev_run && current_run
+              edge_id = "edge_#{prev_run.id}_#{current_run.id}"
+              # Avoid duplicate edges
+              unless data.any? { |item| item[:data][:id] == edge_id }
+                data << {
+                  data: {
+                    id: edge_id,
+                    source: "run_#{prev_run.id}",
+                    target: "run_#{current_run.id}"
+                  }
+                }
+              end
+            end
+          end
+        end
       end
       
       data

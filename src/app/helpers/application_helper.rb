@@ -122,6 +122,11 @@ module ApplicationHelper
     ]
   end
 
+  def get_step_color(step_id)
+    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e']
+    colors[step_id % colors.length]
+  end
+
   def info_menu_links
     [
       {

@@ -1,0 +1,236 @@
+<div class="flex flex-col h-full p-6">
+  <div class="mb-4">
+    <h3 class="text-xl font-semibold text-gray-900 mb-2">Pipeline Graph</h3>
+    <p class="text-gray-600 text-sm">Visual representation of the analysis pipeline and runs</p>
+  </div>
+  
+  <div id="cy" class="cy flex-1" style="min-height: 400px; border: 1px solid #e5e7eb; border-radius: 0.5rem; background-color: #f9fafb; cursor: default;"></div>
+</div>
+
+<style>
+  #cy canvas {
+    cursor: default;
+  }
+  #cy .cy-node {
+    cursor: pointer !important;
+  }
+  /* Make nodes more visually distinct and clickable */
+  #cy {
+    cursor: default;
+  }
+  /* Add a visual indicator that nodes are interactive */
+  #cy::before {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+  }
+</style>
+
+<!-- Load Cytoscape.js -->
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+
+<%= javascript_tag do %>
+(function() {
+  function initializeGraph() {
+    // Check if container exists
+    var container = document.getElementById('cy');
+    if (!container) {
+      console.log('Waiting for graph container...');
+      setTimeout(initializeGraph, 100);
+      return;
+    }
+    
+    // Check if Cytoscape is loaded
+    if (typeof cytoscape === 'undefined') {
+      console.log('Waiting for Cytoscape.js to load...');
+      setTimeout(initializeGraph, 100);
+      return;
+    }
+    
+    var data = <%= raw @klay_data.to_json %>;
+
+    var style = [
+      {
+        selector: 'node',
+        style: {
+          label: 'data(label)',
+          'font-size': '20px',
+          'font-weight': '700',
+          'color': '#111827',
+          'text-outline-color': '#ffffff',
+          'text-outline-width': '3px',
+          'background-color': 'data(color)',
+          'width': 'label',
+          'height': 'label',
+          'shape': 'roundrectangle',
+          'padding': '16px 18px',
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'cursor': 'pointer',
+          'border-width': '2px',
+          'border-color': '#ffffff',
+          'border-opacity': '0.8',
+          'border-style': 'solid',
+          'opacity': '0.95'
+        }
+      },
+      {
+        selector: 'node:active',
+        style: {
+          'cursor': 'pointer'
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'curve-style': 'bezier',
+          'target-arrow-shape': 'triangle',
+          'line-color': '#aaa',
+          'target-arrow-color': '#aaa',
+          'opacity': 0.5,
+          'width': 2
+        }
+      }
+    ];
+
+    try {
+      // Use breadthfirst layout (built-in, no extension needed)
+      // This creates a hierarchical layout similar to klay
+      var cy = window.cy = cytoscape({
+        container: container,
+        layout: {
+          name: 'breadthfirst',
+          animate: true,
+          fit: true,
+          spacingFactor: 1.5,
+          directed: true,
+          roots: function(eles) {
+            // Find root nodes (nodes with no incoming edges)
+            var roots = [];
+            eles.nodes().forEach(function(node) {
+              var incoming = node.incomers('edge');
+              if (incoming.length === 0) {
+                roots.push(node);
+              }
+            });
+            return roots.length > 0 ? roots : eles.nodes().first();
+          }
+        },
+        style: style,
+        elements: data
+      });
+
+      // Store original dimensions for reset
+      cy.nodes().forEach(function(node) {
+        var renderedStyle = node.renderedStyle();
+        node.data('originalWidth', renderedStyle.width);
+        node.data('originalHeight', renderedStyle.height);
+      });
+      
+      // Add hover styles for better interactivity and clickability indication
+      cy.nodes().on('mouseover', function(e){
+        var node = e.target;
+        // Make border more prominent and change to bright blue
+        node.style('border-width', '4px');
+        node.style('border-color', '#2563eb');
+        node.style('border-opacity', '1');
+        // Enhance text outline for better readability
+        node.style('text-outline-width', '4px');
+        node.style('text-outline-color', '#ffffff');
+        // Increase opacity to full
+        node.style('opacity', '1');
+        // Scale up noticeably (10% larger)
+        var currentWidth = parseFloat(node.style('width')) || parseFloat(node.data('originalWidth') || 100);
+        var currentHeight = parseFloat(node.style('height')) || parseFloat(node.data('originalHeight') || 50);
+        node.style('width', (currentWidth * 1.1) + 'px');
+        node.style('height', (currentHeight * 1.1) + 'px');
+        // Make text slightly larger on hover
+        node.style('font-size', '22px');
+      });
+      
+      cy.nodes().on('mouseout', function(e){
+        var node = e.target;
+        // Reset to default styles
+        node.style('border-width', '2px');
+        node.style('border-color', '#ffffff');
+        node.style('border-opacity', '0.8');
+        node.style('text-outline-width', '3px');
+        node.style('opacity', '0.95');
+        node.style('font-size', '20px');
+        // Reset size to label-based
+        node.style('width', 'label');
+        node.style('height', 'label');
+      });
+      
+      // Set cursor to pointer for all nodes
+      cy.nodes().style('cursor', 'pointer');
+      
+      // Add click feedback animation
+      cy.nodes().on('tap', function(e){
+        var node = e.target;
+        // Brief scale animation on click for feedback
+        var currentWidth = parseFloat(node.style('width')) || 100;
+        var currentHeight = parseFloat(node.style('height')) || 50;
+        node.animate({
+          style: {
+            width: (currentWidth * 0.95) + 'px',
+            height: (currentHeight * 0.95) + 'px'
+          }
+        }, {
+          duration: 100,
+          complete: function() {
+            node.animate({
+              style: {
+                width: (currentWidth * 1.1) + 'px',
+                height: (currentHeight * 1.1) + 'px'
+              }
+            }, {
+              duration: 100
+            });
+          }
+        });
+      });
+      
+      cy.nodes().on('click', function(e){
+        var node = e.target;
+        var nodeData = node.data();
+        console.log('Clicked node:', node.id(), nodeData);
+        
+        // Check if this is a run node
+        if (nodeData.run_id) {
+          // Load the run in the right panel
+          var runUrl = '<%= runs_path %>/' + nodeData.run_id;
+          if (typeof loadRunInRightPanel === 'function') {
+            loadRunInRightPanel(runUrl);
+          } else {
+            // Fallback: select the step
+            const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]');
+            if (stepSelectorElement && window.Stimulus) {
+              const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector');
+              if (controller && typeof controller.selectStep === 'function' && nodeData.step_id) {
+                controller.selectStep({ params: { stepId: nodeData.step_id } });
+              }
+            }
+          }
+        } else if (nodeData.step_id) {
+          // Fallback for step nodes (shouldn't happen with new implementation, but just in case)
+          const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]');
+          if (stepSelectorElement && window.Stimulus) {
+            const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector');
+            if (controller && typeof controller.selectStep === 'function') {
+              controller.selectStep({ params: { stepId: nodeData.step_id } });
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error initializing Cytoscape graph:', error);
+      container.innerHTML = '<div class="p-4 text-red-600">Error loading graph visualization: ' + error.message + '</div>';
+    }
+  }
+
+  // Start initialization after a short delay to ensure DOM is ready
+  setTimeout(initializeGraph, 200);
+})();
+<% end %>
+

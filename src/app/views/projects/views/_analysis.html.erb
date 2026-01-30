@@ -1,13 +1,22 @@
 <div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>">
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
-    <div class="flex items-center gap-3 mb-2">
-      <h2 class="text-2xl font-bold text-gray-900">Analysis</h2>
-      <% if @project_type %>
-        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
-          <%= @project_type.name %>
-        </span>
-      <% end %>
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="flex items-center gap-3">
+        <h2 class="text-2xl font-bold text-gray-900">Analysis</h2>
+        <% if @project_type %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
+            <%= @project_type.name %>
+          </span>
+        <% end %>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <button type="button" 
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block"
+                onclick="loadFormInRightPanel('<%= graph_project_path(@project) %>')">
+          Graph
+        </button>
+      </div>
     </div>
    <!-- <p class="text-gray-600">Data analysis tools and pipelines for single-cell transcriptomics</p>-->
   </div>
@@ -300,7 +309,7 @@
   <!-- Two Column Layout: Steps Panel (Left) and Step Results (Right) -->
   <div class="flex flex-row gap-4 flex-1 min-h-0 w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
     <!-- Left Panel: Steps Navigation (Hidden on narrow screens) -->
-    <div class="hidden lg:flex w-64 flex-shrink-0 flex flex-col min-h-0">
+    <div class="hidden lg:flex w-75 flex-shrink-0 flex flex-col min-h-0">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
         <%= render partial: 'projects/views/steps_panel' %>
       </div>
@@ -379,24 +388,95 @@
     .then(html => {
       console.log('[loadFormInRightPanel] Form loaded, length:', html.length)
       
-      // Update content with form
-      controller.contentTarget.innerHTML = html
+      // Create a temporary container to parse HTML
+      const tempDiv = document.createElement('div')
+      tempDiv.innerHTML = html
+      
+      // Separate external scripts (with src) from inline scripts
+      const externalScripts = []
+      const inlineScripts = []
+      const scripts = tempDiv.querySelectorAll('script')
+      
+      scripts.forEach(script => {
+        if (script.src) {
+          externalScripts.push(script.src)
+        } else {
+          inlineScripts.push(script.textContent)
+        }
+        script.remove()
+      })
+      
+      // Update content with form (without script tags)
+      controller.contentTarget.innerHTML = tempDiv.innerHTML
       controller.contentTarget.style.display = 'block'
       
-      // Hide loading state
-      if (controller.hasLoadingStateTarget) {
-        controller.loadingStateTarget.style.display = 'none'
+      // Load external scripts first, then execute inline scripts
+      const loadScripts = (index) => {
+        if (index < externalScripts.length) {
+          const script = document.createElement('script')
+          script.src = externalScripts[index]
+          script.onload = () => {
+            console.log('[loadFormInRightPanel] External script loaded:', externalScripts[index])
+            loadScripts(index + 1)
+          }
+          script.onerror = () => {
+            console.error('[loadFormInRightPanel] Failed to load script:', externalScripts[index])
+            loadScripts(index + 1) // Continue even if one fails
+          }
+          document.head.appendChild(script)
+        } else {
+          // All external scripts loaded, now execute inline scripts
+          inlineScripts.forEach((scriptText, idx) => {
+            const script = document.createElement('script')
+            script.textContent = scriptText
+            document.head.appendChild(script)
+            document.head.removeChild(script) // Remove after execution
+            console.log('[loadFormInRightPanel] Inline script executed:', idx)
+          })
+          
+          // Hide loading state
+          if (controller.hasLoadingStateTarget) {
+            controller.loadingStateTarget.style.display = 'none'
+          }
+          
+          // Trigger Stimulus to scan for new controllers in the form
+          if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+            setTimeout(() => {
+              window.Stimulus.router.scan()
+            }, 0)
+            
+            setTimeout(() => {
+              window.Stimulus.router.scan()
+            }, 100)
+          }
+        }
       }
       
-      // Trigger Stimulus to scan for new controllers in the form
-      if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-        setTimeout(() => {
-          window.Stimulus.router.scan()
-        }, 0)
+      // Start loading scripts
+      if (externalScripts.length > 0) {
+        loadScripts(0)
+      } else {
+        // No external scripts, just execute inline scripts
+        inlineScripts.forEach((scriptText) => {
+          const script = document.createElement('script')
+          script.textContent = scriptText
+          document.head.appendChild(script)
+          document.head.removeChild(script)
+        })
         
-        setTimeout(() => {
-          window.Stimulus.router.scan()
-        }, 100)
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        
+        if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+          setTimeout(() => {
+            window.Stimulus.router.scan()
+          }, 0)
+          
+          setTimeout(() => {
+            window.Stimulus.router.scan()
+          }, 100)
+        }
       }
     })
     .catch(error => {

@@ -168,6 +168,9 @@
               <strong class="block"><%= step.label.presence || step.name %></strong>
             </div>
           </div>
+          <div class="flex-shrink-0 ml-3 flex items-center">
+            <div class="w-3 h-3 rounded-full" style="background-color: <%= get_step_color(step.id) %>;"></div>
+          </div>
         </div>
       <% end %>
     <% else %>

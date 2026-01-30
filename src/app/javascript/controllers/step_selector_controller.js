@@ -74,10 +74,39 @@ export default class extends Controller {
       // Border is already set correctly by server based on @selected_step_id, don't modify it
     })
     
-    // Check if step_id is in URL parameters
+    // Check if run_id is in URL (means we should load run panel directly, not step results)
     const urlParams = new URLSearchParams(window.location.search)
+    const runIdFromUrl = urlParams.get('run_id')
     const stepIdFromUrl = urlParams.get('step_id')
     
+    // If run_id is present, load the run panel directly instead of step results
+    if (runIdFromUrl) {
+      const runUrl = '/runs/' + runIdFromUrl
+      console.log('[StepSelectorController] Found run_id in URL, will load run panel directly:', runUrl)
+      
+      // Set current step ID if provided
+      if (stepIdFromUrl) {
+        this.currentStepId = stepIdFromUrl.toString()
+        this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+      }
+      
+      // Wait a bit for everything to be ready, then load run panel
+      setTimeout(() => {
+        if (typeof loadRunInRightPanel === 'function') {
+          console.log('[StepSelectorController] Loading run panel directly')
+          if (this.hasEmptyStateTarget) {
+            this.emptyStateTarget.style.display = 'none'
+          }
+          if (this.hasLoadingStateTarget) {
+            this.loadingStateTarget.style.display = 'none'
+          }
+          loadRunInRightPanel(runUrl)
+        }
+      }, 300)
+      return // Exit early, don't load step results
+    }
+    
+    // Normal flow: load step results
     // Wait for steps panel to be loaded before trying to select a step
     // The steps panel might be loaded asynchronously via refreshStepsPanel
     const controller = this

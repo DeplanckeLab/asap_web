@@ -7,6 +7,9 @@ class AnnotsController < ApplicationController
     @project_type = @project.project_type
     @run = @annot.run
     @view_type = 'data'
+    @from = params[:from] || 'data'
+    @back_run_id = params[:run_id]
+    @back_step_id = params[:step_id]
     
     # Get filepath info for loom_file_label helper
     if @annot.filepath.present?

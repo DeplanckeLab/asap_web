@@ -13,8 +13,19 @@
         </h3>
       </div>
       <div class="flex items-center gap-3">
-        <%= link_to project_path(@project, view: 'data', loom_file: @annot.filepath), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
-          <i class="fas fa-arrow-left mr-2"></i>Back
+        <% if @from == 'run' && @back_run_id && @back_step_id %>
+          <% back_url = project_path(@project, view: 'analysis', step_id: @back_step_id, run_id: @back_run_id) %>
+          <%= link_to back_url, class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-arrow-left mr-2"></i>Back
+          <% end %>
+        <% elsif @from == 'run' && @run %>
+          <%= link_to run_path(@run), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-arrow-left mr-2"></i>Back
+          <% end %>
+        <% else %>
+          <%= link_to project_path(@project, view: 'data', loom_file: @annot.filepath), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
+            <i class="fas fa-arrow-left mr-2"></i>Back
+          <% end %>
         <% end %>
       </div>
     </div>

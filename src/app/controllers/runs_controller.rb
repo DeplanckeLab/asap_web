@@ -148,6 +148,12 @@ class RunsController < ApplicationController
   def show
     # Prepare data for displaying the run
     prepare_run_show_data
+    
+    # If panel parameter is present, render panel partial instead of full page
+    if params[:panel] == '1'
+      render partial: 'panel', layout: false
+      return
+    end
   end
   
   def prepare_run_show_data

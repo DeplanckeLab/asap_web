@@ -1,9 +1,10 @@
-<!-- Fixed header for run - positioned below project header -->
-<div class="fixed top-16 left-0 right-0 z-40 flex-shrink-0 bg-white shadow-sm border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
-  <div class="px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center justify-between py-4">
-      <div class="flex items-center gap-3">
-        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+<!-- Run Results Card Container - matches parsing results page structure -->
+<div class="bg-white rounded-lg shadow-sm flex flex-col" id="run_result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; min-width: 0; width: 100% !important;">
+  <!-- Header with title and status - Sticky -->
+  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between min-w-0">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2 min-w-0 truncate">
           <% if @step %>
             <i class="fas fa-cog text-blue-600"></i>
             <%= @step.label.presence || @step.name.humanize %>
@@ -22,7 +23,7 @@
           </span>
         <% end %>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 flex-shrink-0">
         <% if @step %>
           <%= link_to project_path(@project, view: 'analysis', step_id: @step.id), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>
             <i class="fas fa-arrow-left mr-2"></i>Back
@@ -35,16 +36,39 @@
       </div>
     </div>
   </div>
-</div>
-
-<!-- Scrollable content area -->
-<div class="flex-1 overflow-y-auto">
-  <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24">
-    <!-- Run Metadata -->
-    <%# render partial: 'projects/views/run_metadata', locals: { run: @run, results: @h_res } %>
-    <div class="space-y-6">
-    <%# Always show our improved sections first %>
-    <%# render partial: 'runs/run_information', locals: { run: @run, step: @step, std_method: @std_method } %>
+  <div id="run_metadata_sticky_show" class="sticky top-[73px] z-10 flex-shrink-0 bg-white">
+    <%= render partial: 'projects/views/run_metadata', locals: { run: @run, results: @h_res } %>
+  </div>
+  <% if @run %>
+    <div id="run_information_sticky_show" class="px-6 pt-2 pb-2 sticky z-10 flex-shrink-0 bg-white border-b border-gray-200" style="top: 121px;">
+      <%= render partial: 'runs/run_information', locals: { run: @run, step: @step, std_method: @std_method } %>
+    </div>
+    <script>
+      // Dynamically calculate the top position for run_information based on actual heights
+      (function() {
+        const header = document.querySelector('#run_result_summary [class*="sticky top-0"]');
+        const metadata = document.querySelector('#run_metadata_sticky_show');
+        const runInfo = document.querySelector('#run_information_sticky_show');
+        
+        if (header && metadata && runInfo) {
+          const updateTop = () => {
+            const headerHeight = header.offsetHeight;
+            const metadataHeight = metadata.offsetHeight;
+            runInfo.style.top = (headerHeight + metadataHeight) + 'px';
+          };
+          
+          // Update on load and resize
+          updateTop();
+          window.addEventListener('resize', updateTop);
+          
+          // Also update after a short delay to account for dynamic content
+          setTimeout(updateTop, 100);
+        }
+      })();
+    </script>
+  <% end %>
+  <!-- Scrollable content area -->
+  <div class="px-6 py-5 space-y-6 flex-1 min-w-0 overflow-x-hidden">
 
     <!-- Error Display -->
     <% if @run.status_id == 4 && (@run.error.present? || (@h_res && @h_res['displayed_error'])) %>
@@ -752,6 +776,5 @@
         <% end %>
       </div>
     <% end %>
-    </div>
   </div>
 </div>

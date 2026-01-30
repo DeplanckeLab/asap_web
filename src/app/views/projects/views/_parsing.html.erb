@@ -175,7 +175,9 @@
         </div>
       </div>
     </div>
-    <%= render partial: 'projects/views/run_metadata', locals: { run: @parsing_run, results: @results, queue_position: @queue_position } %>
+    <div id="run_metadata_sticky_parsing" class="sticky z-10 flex-shrink-0 bg-white" style="top: 73px;">
+      <%= render partial: 'projects/views/run_metadata', locals: { run: @parsing_run, results: @results, queue_position: @queue_position } %>
+    </div>
     <% if @parsing_run %>
       <div class="px-6 pt-2">
         <%# render partial: 'runs/run_information', locals: { run: @parsing_run, step: @step, std_method: @std_method } %>

@@ -144,3 +144,4 @@ puts "=== SUMMARY ==="
 puts "HVG step should be unlocked if at least one std_method passes all requirements."
 puts "Check the results above to see which std_methods passed."
 
+

@@ -84,13 +84,16 @@ export default class extends Controller {
       const runUrl = '/runs/' + runIdFromUrl
       console.log('[StepSelectorController] Found run_id in URL, will load run panel directly:', runUrl)
       
-      // Set current step ID if provided
+      // Set current step ID if provided (for highlighting the step in the sidebar)
       if (stepIdFromUrl) {
         this.currentStepId = stepIdFromUrl.toString()
         this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+        // Refresh steps panel to show the border/highlight for the selected step
+        this.refreshStepsPanel()
       }
       
-      // Wait a bit for everything to be ready, then load run panel
+      // Wait longer for everything to be ready, then load run panel
+      // Use a longer timeout to ensure step results don't load first
       setTimeout(() => {
         if (typeof loadRunInRightPanel === 'function') {
           console.log('[StepSelectorController] Loading run panel directly')
@@ -102,7 +105,11 @@ export default class extends Controller {
           }
           loadRunInRightPanel(runUrl)
         }
-      }, 300)
+      }, 800)
+      
+      // Subscribe to websocket updates
+      this.subscribeToProject()
+      console.log('[StepSelectorController] Initial setup complete (run panel mode), currentStepId:', this.currentStepId)
       return // Exit early, don't load step results
     }
     

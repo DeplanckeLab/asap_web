@@ -147,7 +147,14 @@ if (typeof document !== 'undefined') {
             // Even if connected, check if we need to load step results
             const urlParams = new URLSearchParams(window.location.search)
             const stepIdFromUrl = urlParams.get('step_id')
-            console.log('[ManualScan] URL step_id:', stepIdFromUrl, 'Controller currentStepId:', controller.currentStepId)
+            const runIdFromUrl = urlParams.get('run_id')
+            console.log('[ManualScan] URL step_id:', stepIdFromUrl, 'run_id:', runIdFromUrl, 'Controller currentStepId:', controller.currentStepId)
+            
+            // If run_id is present, don't load step results - the run panel will be loaded by step_selector_controller
+            if (runIdFromUrl) {
+              console.log('[ManualScan] run_id found in URL, skipping step results load - run panel will be loaded by step_selector_controller')
+              return
+            }
             
             // Check if content target exists and is empty or hidden
             let contentTarget
@@ -170,14 +177,14 @@ if (typeof document !== 'undefined') {
               console.log('[ManualScan] Content target is null')
             }
             
-            // If content is hidden, always reload to show it
-            if (isHidden && controller.currentStepId) {
+            // If content is hidden, always reload to show it (unless we're loading a run panel)
+            if (isHidden && controller.currentStepId && !runIdFromUrl) {
               console.log('[ManualScan] Content is hidden, forcing reload for current step:', controller.currentStepId)
               const stepElement = stepSelectorElement.querySelector(`[data-step-id="${controller.currentStepId}"]`)
               if (stepElement && typeof controller.loadStepResults === 'function') {
                 controller.loadStepResults(controller.currentStepId, stepElement, true)
               }
-            } else if (stepIdFromUrl) {
+            } else if (stepIdFromUrl && !runIdFromUrl) {
               // Always reload if step_id is in URL (after restart, content should be refreshed)
               // Also reload if content is hidden (display: none)
               const shouldReload = !controller.currentStepId || controller.currentStepId !== stepIdFromUrl || isEmpty || isHidden
@@ -205,8 +212,8 @@ if (typeof document !== 'undefined') {
                   }, 500)
                 }
               }
-            } else if (isEmpty && controller.currentStepId) {
-              // No step_id in URL but content is empty - try to reload current step
+            } else if (isEmpty && controller.currentStepId && !runIdFromUrl) {
+              // No step_id in URL but content is empty - try to reload current step (unless we're loading a run panel)
               console.log('[ManualScan] No step_id in URL but content empty, reloading current step...')
               const stepElement = stepSelectorElement.querySelector(`[data-step-id="${controller.currentStepId}"]`)
               if (stepElement && typeof controller.loadStepResults === 'function') {

@@ -117,6 +117,16 @@ export default class extends Controller {
       return
     }
 
+    // Get selected run IDs from run-selection controller
+    let selectedRunIds = []
+    const tableElement = document.querySelector('[data-controller*="run-selection"]')
+    if (tableElement && window.Stimulus) {
+      const runSelectionController = window.Stimulus.getControllerForElementAndIdentifier(tableElement, 'run-selection')
+      if (runSelectionController && typeof runSelectionController.getSelectedRunIds === 'function') {
+        selectedRunIds = runSelectionController.getSelectedRunIds()
+      }
+    }
+
     // Show confirmation (data-confirm is already handled by Rails, but we'll double-check)
     const confirmMessage = form.getAttribute('data-confirm') || 'Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone.'
     if (!confirm(confirmMessage)) {
@@ -126,6 +136,12 @@ export default class extends Controller {
     // Make AJAX request
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 
+    // Prepare request body
+    const body = {}
+    if (selectedRunIds.length > 0) {
+      body.run_ids = selectedRunIds
+    }
+
     fetch(url, {
       method: 'POST',
       headers: {
@@ -134,6 +150,7 @@ export default class extends Controller {
         'X-CSRF-Token': csrfToken,
         'X-Requested-With': 'XMLHttpRequest'
       },
+      body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
       credentials: 'same-origin'
     })
     .then(response => {

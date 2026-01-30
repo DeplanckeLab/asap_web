@@ -2444,8 +2444,15 @@ class ProjectsController < ApplicationController
         return
       end
       
-      # Get all runs for this step
-      runs = @project.runs.where(step_id: step_id).all
+      # Get runs to delete - either selected runs or all runs
+      if params[:run_ids].present? && params[:run_ids].is_a?(Array)
+        # Delete selected runs only
+        run_ids = params[:run_ids].map(&:to_i).compact
+        runs = @project.runs.where(step_id: step_id, id: run_ids).all
+      else
+        # Delete all runs for this step
+        runs = @project.runs.where(step_id: step_id).all
+      end
       
       if runs.empty?
         redirect_to step_results_project_path(@project, step_id: step_id), notice: 'No runs to delete.'
@@ -2529,18 +2536,26 @@ class ProjectsController < ApplicationController
       remaining_runs = @project.runs.where(step_id: step_id).count
       show_form = remaining_runs == 0 && @step.has_std_form
       
+      # Determine success message
+      deleted_count = runs.count
+      if params[:run_ids].present? && params[:run_ids].is_a?(Array)
+        success_message = "#{deleted_count} run(s) deleted successfully."
+      else
+        success_message = "All runs deleted successfully."
+      end
+      
       respond_to do |format|
         format.html {
           if show_form
-            redirect_to step_results_project_path(@project, step_id: step_id, show_form: 1), notice: "All runs deleted successfully."
+            redirect_to step_results_project_path(@project, step_id: step_id, show_form: 1), notice: success_message
           else
-            redirect_to step_results_project_path(@project, step_id: step_id), notice: "All runs deleted successfully."
+            redirect_to step_results_project_path(@project, step_id: step_id), notice: success_message
           end
         }
         format.json {
           render json: {
             status: 'success',
-            message: 'All runs deleted successfully.',
+            message: success_message,
             show_form: show_form
           }
         }

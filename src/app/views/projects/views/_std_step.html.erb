@@ -49,7 +49,7 @@
                   + New run
                 </button>
               <% end %>
-              <!-- Delete All Button -->
+              <!-- Delete All / Delete Selected Button -->
               <% if editable?(@project) && @runs && @runs.any? %>
                 <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
                     method: :post,
@@ -58,15 +58,15 @@
                         controller: 'delete-all-runs',
                         action: 'submit->delete-all-runs#deleteAllRuns',
                         'delete-all-runs-step-id-value': @step.id,
-                        'delete-all-runs-project-id-value': @project.id
+                        'delete-all-runs-project-id-value': @project.id,
+                        'run-selection-target': 'deleteButton',
+                        confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
                       }
                     },
                     class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors cursor-pointer',
                     style: 'flex-shrink: 0;',
-                    data: { 
-                      confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
-                    } do %>
-                  Delete all
+                    id: 'delete-runs-button-top' do %>
+                  <span data-run-selection-target="deleteButtonText">Delete all</span>
                 <% end %>
               <% end %>
               <!-- Restart Button -->
@@ -104,7 +104,7 @@
 
     <!-- Runs Section (fallback if no standard dashboard/view/form) -->
     <% unless @show_dashboard || @show_view || @show_form || @show_custom_form %>
-      <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+      <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;" data-controller="run-selection">
         <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -120,7 +120,7 @@
                   + New run
                 </button>
               <% end %>
-              <!-- Delete All Button -->
+              <!-- Delete All / Delete Selected Button -->
               <% if editable?(@project) && @runs && @runs.any? %>
                 <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
                     method: :post,
@@ -129,15 +129,15 @@
                         controller: 'delete-all-runs',
                         action: 'submit->delete-all-runs#deleteAllRuns',
                         'delete-all-runs-step-id-value': @step.id,
-                        'delete-all-runs-project-id-value': @project.id
+                        'delete-all-runs-project-id-value': @project.id,
+                        'run-selection-target': 'deleteButton',
+                        confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
                       }
                     },
                     class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors cursor-pointer',
                     style: 'flex-shrink: 0;',
-                    data: { 
-                      confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
-                    } do %>
-                  Delete all
+                    id: 'delete-runs-button' do %>
+                  <span data-run-selection-target="deleteButtonText">Delete all</span>
                 <% end %>
               <% end %>
             </div>
@@ -194,6 +194,12 @@
             <table class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
               <thead class="bg-gray-50">
                 <tr>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                    <input type="checkbox" 
+                           class="rounded border-gray-300 text-red-600 focus:ring-red-500" 
+                           data-action="change->run-selection#toggleAll"
+                           data-run-selection-target="selectAll">
+                  </th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">#</th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameters</th>
@@ -221,6 +227,13 @@
                       data-run-id="<%= run.id %>"
                       onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>'); } else { window.location.href = '<%= run_path(run) %>'; }"
                       style="cursor: pointer;">
+                    <td class="px-3 py-4 whitespace-nowrap" onclick="event.stopPropagation();">
+                      <input type="checkbox" 
+                             class="rounded border-gray-300 text-red-600 focus:ring-red-500 run-checkbox" 
+                             value="<%= run.id %>"
+                             data-action="change->run-selection#updateSelection"
+                             data-run-selection-target="checkbox">
+                    </td>
                     <td class="px-3 py-4 whitespace-nowrap">
                       <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
                       <% if admin? %>

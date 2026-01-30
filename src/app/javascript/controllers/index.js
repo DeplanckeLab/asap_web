@@ -111,6 +111,10 @@ import PipelineRunsController from "controllers/pipeline_runs_controller"
 application.register("pipeline-runs", PipelineRunsController)
 console.log('Pipeline runs controller registered')
 
+import RunSelectionController from "controllers/run_selection_controller"
+application.register("run-selection", RunSelectionController)
+console.log('Run selection controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

@@ -217,7 +217,10 @@
                   <% h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
                   <% params_array = h_run_attrs.to_a %>
                   <% params_display = params_array.map { |k, v| "#{k}: #{v}" }.join(", ") %>
-                  <tr class="hover:bg-gray-50" data-run-id="<%= run.id %>">
+                  <tr class="hover:bg-gray-50 cursor-pointer" 
+                      data-run-id="<%= run.id %>"
+                      onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>'); } else { window.location.href = '<%= run_path(run) %>'; }"
+                      style="cursor: pointer;">
                     <td class="px-3 py-4 whitespace-nowrap">
                       <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
                       <% if admin? %>
@@ -258,6 +261,7 @@
                                         data-pipeline-runs-project-id-value="<%= @project.id %>"
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
+                                        onclick="event.stopPropagation();"
                                         title="<%= dataset_display %> - Click to view pipeline">
                                     <span class="font-semibold text-blue-800"><%= key %>:</span>
                                     <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
@@ -293,6 +297,7 @@
                                           data-pipeline-runs-project-id-value="<%= @project.id %>"
                                           data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                           data-action="click->pipeline-runs#showPipeline"
+                                          onclick="event.stopPropagation();"
                                           title="<%= array_display %> - Click to view pipeline">
                                       <span class="font-semibold text-blue-800"><%= key %>:</span>
                                       <span class="ml-1 text-blue-600"><%= truncated_array %></span>
@@ -326,7 +331,8 @@
                             <button type="button" 
                                     class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300 hover:bg-gray-300 cursor-pointer transition-colors run-params-more-btn" 
                                     data-run-id="<%= run.id %>"
-                                    data-action="click->run-params-toggle#toggle">
+                                    data-action="click->run-params-toggle#toggle"
+                                    onclick="event.stopPropagation();">
                               +<%= params_array.size - max_visible %> more
                             </button>
                           <% end %>
@@ -393,10 +399,7 @@
                       </div>
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div class="flex items-center justify-end gap-1.5">
-                        <%= link_to run_path(run), class: 'inline-flex items-center px-2 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500', title: 'View', onclick: 'event.preventDefault(); loadRunInRightPanel(this.href); return false;' do %>
-                          <i class="fas fa-eye"></i>
-                        <% end %>
+                      <div class="flex items-center justify-end gap-1.5" onclick="event.stopPropagation();">
                         <% if editable?(@project) %>
                           <%= button_to run_path(run, format: :json), 
                               method: :delete,

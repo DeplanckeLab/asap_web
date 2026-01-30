@@ -93,8 +93,23 @@ class ProjectsController < ApplicationController
         metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
       end
     end
-    @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
-    @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+    
+    # Check if a specific embedding_id was requested
+    if params[:embedding_id].present?
+      requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
+      if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
+        @default_embedding = requested_embedding
+        @default_embedding_loom_file = requested_embedding.filepath
+        @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
+      else
+        @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+        @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+      end
+    else
+      @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+      @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+    end
+    
     unless @default_embedding
       fallback_entry = @all_embeddings_by_loom.find { |_path, embeddings| embeddings.present? }
       if fallback_entry

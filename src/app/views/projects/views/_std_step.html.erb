@@ -400,6 +400,17 @@
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div class="flex items-center justify-end gap-1.5" onclick="event.stopPropagation();">
+                        <% if @step && @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) %>
+                          <%# Find 2D embedding annotation for this run %>
+                          <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: run.id, nber_rows: 2).order(:name).first %>
+                          <% if embedding_annot %>
+                            <%= link_to project_path(@project, view: 'visualization', embedding_id: embedding_annot.id), 
+                                class: 'inline-flex items-center px-3 py-2 border border-blue-300 shadow-sm text-sm font-medium rounded text-blue-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500', 
+                                title: 'Visualization' do %>
+                              <i class="fas fa-chart-line text-xs"></i>
+                            <% end %>
+                          <% end %>
+                        <% end %>
                         <% if editable?(@project) %>
                           <%= button_to run_path(run, format: :json), 
                               method: :delete,
@@ -412,9 +423,9 @@
                                   'delete-run-run-num-value': (run.num || run.id).to_s
                                 }
                               },
-                              class: 'inline-flex items-center px-2 py-1 border border-red-300 shadow-sm text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500', 
+                              class: 'inline-flex items-center px-3 py-2 border border-red-300 shadow-sm text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500', 
                               title: 'Delete' do %>
-                            <i class="fas fa-trash"></i>
+                            <i class="fas fa-trash text-xs"></i>
                           <% end %>
                         <% end %>
                       </div>

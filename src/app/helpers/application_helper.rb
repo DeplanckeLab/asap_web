@@ -352,4 +352,23 @@ module ApplicationHelper
       "<span id='show_run_#{run.id}' class='show_link show_run_link pointer'><b>##{run.num}</b> #{step_label}</span>"
     end
   end
+
+  # Build card title for run panel
+  # @param run [Run] The run object
+  # @param step [Step] The step object
+  # @param std_method [StdMethod, nil] The standard method object
+  # @return [String] The formatted card title
+  def run_card_title(run, step, std_method)
+    return 'N/A' unless run && step
+    
+    std_method_name = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A'
+    
+    if step.multiple_runs
+      step_name = step.label.presence || step.name.humanize
+      run_number = run.num || run.id
+      "#{step_name} ##{run_number} #{std_method_name}"
+    else
+      std_method_name
+    end
+  end
 end

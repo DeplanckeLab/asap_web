@@ -5,11 +5,7 @@
     <div class="flex items-center justify-between min-w-0">
       <div class="flex items-center gap-3 min-w-0 flex-1">
         <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2 min-w-0 truncate">
-          <% if @step %>
-            <i class="fas fa-cog text-blue-600"></i>
-            <%= @step.label.presence || @step.name.humanize %>
-          <% end %>
-          - Run #<%= @run.num || @run.id %>
+          <%= run_card_title(@run, @step, @std_method) %>
         </h3>
         <% if @status %>
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= case @run.status_id

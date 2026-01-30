@@ -217,6 +217,18 @@
                                     <% end %>
                                     <% break if matrix_annot %>
                                   <% end %>
+                                  <%# Fallback to first matrix (dim == 3) if /matrix not found %>
+                                  <% unless matrix_annot %>
+                                    <% @h_annots_by_dim.each_value do |annots| %>
+                                      <% annots.each do |annot| %>
+                                        <% if annot.dim == 3 %>
+                                          <% matrix_annot = annot %>
+                                          <% break %>
+                                        <% end %>
+                                      <% end %>
+                                      <% break if matrix_annot %>
+                                    <% end %>
+                                  <% end %>
 
                                   <% @h_annots_by_dim.each_value do |annots| %>
                                     <% if annots.any? && annots.first.filepath.present? %>
@@ -343,13 +355,12 @@
                                 <% matrices = [] %>
                                 <% @h_annots_by_dim.each_value do |annots| %>
                                   <% annots.each do |annot| %>
-                                    <% annot_name = annot.name || '' %>
-                                    <% if annot_name.start_with?('/row_attrs/') %>
-                                      <% row_attrs << annot %>
-                                    <% elsif annot_name.start_with?('/col_attrs/') %>
-                                      <% col_attrs << annot %>
-                                    <% elsif annot_name == '/matrix' %>
+                                    <% if annot.dim == 3 %>
                                       <% matrices << annot %>
+                                    <% elsif annot.dim == 1 %>
+                                      <% col_attrs << annot %>
+                                    <% elsif annot.dim == 2 %>
+                                      <% row_attrs << annot %>
                                     <% else %>
                                       <% global_attrs << annot %>
                                     <% end %>
@@ -364,8 +375,10 @@
                                       <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Expression Matrices</h6>
                                       <div class="flex flex-wrap gap-1.5">
                                         <% matrices.each do |annot| %>
+                                          <% annot_name = annot.name || '' %>
+                                          <% display_name = annot_name == '/matrix' ? 'matrix' : format_annot_name(annot_name) %>
                                           <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
-                                            <span>matrix</span>
+                                            <span><%= display_name %></span>
                                             <%= dimension_badge(annot.nber_rows, :row, @project) %>
                                             <%= dimension_badge(annot.nber_cols, :col, @project) %>
                                           <% end %>
@@ -575,6 +588,18 @@
                         <% end %>
                         <% break if matrix_annot %>
                       <% end %>
+                      <%# Fallback to first matrix (dim == 3) if /matrix not found %>
+                      <% unless matrix_annot %>
+                        <% @h_annots_by_dim.each_value do |annots| %>
+                          <% annots.each do |annot| %>
+                            <% if annot.dim == 3 %>
+                              <% matrix_annot = annot %>
+                              <% break %>
+                            <% end %>
+                          <% end %>
+                          <% break if matrix_annot %>
+                        <% end %>
+                      <% end %>
 
                       <% @h_annots_by_dim.each_value do |annots| %>
                         <% if annots.any? && annots.first.filepath.present? %>
@@ -622,13 +647,12 @@
                     <% matrices = [] %>
                     <% @h_annots_by_dim.each_value do |annots| %>
                       <% annots.each do |annot| %>
-                        <% annot_name = annot.name || '' %>
-                        <% if annot_name.start_with?('/row_attrs/') %>
-                          <% row_attrs << annot %>
-                        <% elsif annot_name.start_with?('/col_attrs/') %>
-                          <% col_attrs << annot %>
-                        <% elsif annot_name == '/matrix' %>
+                        <% if annot.dim == 3 %>
                           <% matrices << annot %>
+                        <% elsif annot.dim == 1 %>
+                          <% col_attrs << annot %>
+                        <% elsif annot.dim == 2 %>
+                          <% row_attrs << annot %>
                         <% else %>
                           <% global_attrs << annot %>
                         <% end %>
@@ -643,8 +667,10 @@
                           <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Expression Matrices</h6>
                           <div class="flex flex-wrap gap-1.5">
                             <% matrices.each do |annot| %>
+                              <% annot_name = annot.name || '' %>
+                              <% display_name = annot_name == '/matrix' ? 'matrix' : format_annot_name(annot_name) %>
                               <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
-                                <span>matrix</span>
+                                <span><%= display_name %></span>
                                 <%= dimension_badge(annot.nber_rows, :row, @project) %>
                                 <%= dimension_badge(annot.nber_cols, :col, @project) %>
                               <% end %>

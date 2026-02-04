@@ -1,0 +1,69 @@
+<%# User Icon Menu Partial
+   Parameters:
+   - show_signup: boolean, whether to show Sign Up link for guests (default: false)
+   - dark_mode: boolean, use dark mode styles for dropdown (default: false)
+   - button_classes: string, classes for the button (optional)
+   - wrapper_classes: string, classes for the wrapper div (optional)
+%>
+<% show_signup = local_assigns.fetch(:show_signup, false) %>
+<% dark_mode = local_assigns.fetch(:dark_mode, false) %>
+<% button_classes = local_assigns.fetch(:button_classes, "p-2 rounded-lg hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition") %>
+<% wrapper_classes = local_assigns.fetch(:wrapper_classes, "relative") %>
+
+<% user_icon_color = if !user_signed_in?
+                        'text-gray-400'
+                      elsif admin?
+                        'text-red-500'
+                      else
+                        'text-emerald-400'
+                      end %>
+
+<div class="<%= wrapper_classes %>"
+     id="user-nav-dropdown"
+     data-controller="nav-dropdown">
+  <button type="button"
+          class="<%= button_classes %>"
+          title="<%= user_signed_in? ? current_user.email : 'Guest' %>"
+          data-nav-dropdown-toggle>
+    <i class="fas fa-user-circle text-lg <%= user_icon_color %>"></i>
+  </button>
+  <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[1000] top-full <%= 'dark:bg-gray-800 dark:border-gray-700' if dark_mode %>"
+       data-nav-menu>
+    <div class="py-2">
+      <% if user_signed_in? %>
+        <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
+          <p class="text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Signed in as</p>
+          <p class="text-sm font-medium text-gray-900 truncate <%= 'dark:text-white' if dark_mode %>"><%= current_user.email %></p>
+        </div>
+        <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+           href="<%= edit_user_registration_path %>">
+          <i class="fas fa-user-cog mr-3 text-gray-400"></i>
+          My Account
+        </a>
+        <%= link_to destroy_user_session_path, method: :delete,
+            class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}",
+            data: { "turbo-method": :delete } do %>
+          <i class="fas fa-sign-out-alt mr-3 text-gray-400"></i>
+          Sign Out
+        <% end %>
+      <% else %>
+        <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
+          <p class="text-sm font-medium text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Guest Mode</p>
+        </div>
+        <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+           href="<%= new_user_session_path %>">
+          <i class="fas fa-sign-in-alt mr-3 text-gray-400"></i>
+          Sign In
+        </a>
+        <% if show_signup %>
+          <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+             href="<%= new_user_registration_path %>">
+            <i class="fas fa-user-plus mr-3 text-gray-400"></i>
+            Sign Up
+          </a>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+</div>
+

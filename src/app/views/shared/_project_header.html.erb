@@ -37,13 +37,6 @@
              'Clone' => clonable?(@project),
              'Export' => exportable?(@project)
            } %>
-        <% account_status = if user_signed_in?
-                              email = current_user.email.to_s
-                              email_part = email.split('@').first
-                              "Logged in as #{current_user.displayed_name.presence || email_part}"
-                            else
-                              'GUEST'
-                            end %>
         <div class="flex items-center space-x-4">
             <div>
             <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
@@ -76,10 +69,6 @@
                        title="<%= label %>: <%= allowed ? 'Allowed' : 'Not allowed' %>"></i>
                   <% end %>
                 </div>
-              </div>
-              <div class="w-px h-10 bg-gray-700 self-center"></div>
-              <div class="flex flex-col justify-center">
-                <span class="text-xs text-gray-300"><%= account_status %></span>
               </div>
             </div>
           </div>
@@ -184,6 +173,10 @@
             
             <div class="border-t border-gray-200 my-1"></div>
             
+            <%= render "shared/user_menu_mobile" %>
+            
+            <div class="border-t border-gray-200 my-1"></div>
+            
             <!-- Back to Projects -->
             <%= link_to projects_path, 
                 class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
@@ -262,9 +255,11 @@
         </div>
         <% end %>
         
+        <%= render "shared/user_menu", wrapper_classes: "relative ml-4" %>
+        
         <!-- Back to Projects -->
         <%= link_to projects_path, 
-            class: "ml-4 p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
           <i class="fas fa-arrow-left text-lg"></i>
         <% end %>
       </div>

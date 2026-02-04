@@ -1,0 +1,51 @@
+<%# Mobile User Menu Section Partial
+   Parameters:
+   - show_signup: boolean, whether to show Sign Up link for guests (default: false)
+   - dark_mode: boolean, use dark mode styles (default: false)
+%>
+<% show_signup = local_assigns.fetch(:show_signup, false) %>
+<% dark_mode = local_assigns.fetch(:dark_mode, false) %>
+
+<% user_icon_color = if !user_signed_in?
+                        'text-gray-400'
+                      elsif admin?
+                        'text-red-500'
+                      else
+                        'text-emerald-400'
+                      end %>
+
+<!-- User Account Section -->
+<% if user_signed_in? %>
+  <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
+    <p class="text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Signed in as</p>
+    <p class="text-sm font-medium text-gray-900 truncate <%= 'dark:text-white' if dark_mode %>"><%= current_user.email %></p>
+  </div>
+  <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+     href="<%= edit_user_registration_path %>">
+    <i class="fas fa-user-cog text-lg mr-3 <%= user_icon_color %>"></i>
+    My Account
+  </a>
+  <%= link_to destroy_user_session_path, method: :delete,
+      class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}",
+      data: { "turbo-method": :delete } do %>
+    <i class="fas fa-sign-out-alt text-lg mr-3 <%= user_icon_color %>"></i>
+    Sign Out
+  <% end %>
+<% else %>
+  <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
+    <p class="text-sm font-medium text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Guest Mode</p>
+  </div>
+  <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+     href="<%= new_user_session_path %>">
+    <i class="fas fa-sign-in-alt text-lg mr-3 <%= user_icon_color %>"></i>
+    Sign In
+  </a>
+  <% if show_signup %>
+    <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+       href="<%= new_user_registration_path %>">
+      <i class="fas fa-user-plus text-lg mr-3 <%= user_icon_color %>"></i>
+      Sign Up
+    </a>
+  <% end %>
+<% end %>
+

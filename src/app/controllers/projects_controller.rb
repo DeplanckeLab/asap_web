@@ -160,6 +160,8 @@ class ProjectsController < ApplicationController
       # Set selected step ID from URL parameter (for step selector on narrow screens)
       # This allows linking directly to a specific step from the run show page
       @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
+      # Set selected run ID from URL parameter (to auto-load a specific run)
+      @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
     end
     
     # Variables specific to data view
@@ -2244,6 +2246,39 @@ class ProjectsController < ApplicationController
       submitted_at: run.submitted_at ? run.submitted_at.iso8601 : nil,
       waiting_duration: run.waiting_duration ? run.waiting_duration.to_i : nil
     }
+  end
+
+  # GET /projects/:id/run_counts
+  # Returns run counts by status for header updates
+  def run_counts
+    unless readable?(@project)
+      render json: { error: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    # Aggregate run counts from project_steps' nber_runs_json
+    # Each project_step has nber_runs_json like {"3": 1, "4": 2} where key is status_id
+    totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    
+    @project.project_steps.each do |ps|
+      next if ps.nber_runs_json.blank?
+      
+      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
+      json_data.each do |status_id, count|
+        status_key = status_id.to_i
+        totals[status_key] = (totals[status_key] || 0) + count.to_i if totals.key?(status_key)
+      end
+    end
+    
+    # Map to canonical keys
+    counts = {
+      waiting: totals[1],
+      running: totals[2],
+      completed: totals[3],
+      failed: totals[4]
+    }
+
+    render json: counts
   end
 
   # POST /projects/:id/restart_step

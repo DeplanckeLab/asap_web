@@ -37,8 +37,31 @@
              'Clone' => clonable?(@project),
              'Export' => exportable?(@project)
            } %>
-        <div class="flex items-center space-x-4">
-            <div>
+        <%
+          # Get run counts from project_steps (more efficient than counting runs)
+          run_counts = project_run_counts(@project)
+          
+          # Only load actual runs for statuses that have runs (for dropdown lists)
+          runs_by_status = {}
+          [:waiting, :running, :completed, :failed].each do |key|
+            status_id = { waiting: 1, running: 2, completed: 3, failed: 4 }[key]
+            if run_counts[key] > 0
+              runs_by_status[key] = @project.runs.includes(:step).where(status_id: status_id).order(created_at: :desc)
+            else
+              runs_by_status[key] = []
+            end
+          end
+          
+          # Get status icons from database with header-specific inactive color
+          run_status_icons = [:waiting, :running, :completed, :failed].map do |key|
+            config = status_icons_by_key[key].dup
+            config[:inactive_color] = 'text-gray-500'
+            config[:count] = run_counts[key]
+            config
+          end
+        %>
+        <div class="flex items-stretch space-x-4">
+            <div class="flex flex-col justify-center">
             <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
               <span class="truncate max-w-[14rem] sm:max-w-sm lg:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>
               <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide uppercase text-gray-100 bg-gray-700 rounded-full border border-gray-600">
@@ -50,12 +73,71 @@
                 </span>
               <% end %>
             </h1>
-              <div class="flex items-center space-x-4 text-sm text-gray-300">
-                <span><i class="fas fa-circle text-gray-400 mr-1"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
-                <span><i class="fas fa-dna text-gray-400 mr-1"></i><%= formatted_organism_name(@project) %></span>
+              <div class="flex items-center space-x-4 text-sm text-gray-300 min-w-0">
+                <span class="flex items-center whitespace-nowrap"><i class="fas fa-circle text-gray-400 mr-1 flex-shrink-0"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
+                <span class="flex items-center min-w-0"><i class="fas fa-dna text-gray-400 mr-1 flex-shrink-0"></i><span class="truncate"><%= formatted_organism_name(@project) %></span></span>
               </div>
             </div>
-            <div class="hidden lg:flex items-stretch space-x-6 border-l border-gray-700 pl-6 text-sm text-gray-300">
+            <!-- Run Status Icons Section -->
+            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300"
+                 data-controller="header-run-status"
+                 data-header-run-status-project-id-value="<%= @project.id %>"
+                 data-header-run-status-status-icons-value="<%= status_icons_json %>">
+              <div class="flex items-center gap-3">
+                  <% run_status_icons.each do |status_icon| %>
+                    <% 
+                      runs_list = runs_by_status[status_icon[:key]]
+                      count = status_icon[:count]
+                      is_active = count > 0
+                      icon_class = status_icon[:icon_base]
+                      icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
+                      color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
+                    %>
+                    <div class="relative" data-controller="nav-dropdown" data-status-key="<%= status_icon[:key] %>">
+                      <button type="button"
+                              class="flex flex-col items-center cursor-pointer hover:opacity-80 transition-opacity <%= is_active ? '' : 'cursor-default' %>"
+                              data-nav-dropdown-toggle
+                              data-header-run-status-target="statusButton"
+                              data-status-key="<%= status_icon[:key] %>"
+                              title="<%= status_icon[:label] %> (<%= count %>)"
+                              <%= 'disabled' unless is_active %>>
+                        <i class="<%= icon_class %> text-base <%= color_class %>" data-header-run-status-target="statusIcon" data-status-key="<%= status_icon[:key] %>"></i>
+                        <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
+                      </button>
+                      <% if is_active %>
+                        <div class="hidden absolute left-1/2 -translate-x-1/2 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50 max-h-64 overflow-y-auto"
+                             data-nav-menu>
+                          <div class="py-1">
+                            <div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100">
+                              <%= status_icon[:label] %> Runs (<%= count %>)
+                            </div>
+                            <% runs_list.limit(20).each do |run| %>
+                              <%= link_to project_path(@project, view: 'analysis', step_id: run.step_id, run_id: run.id), 
+                                  class: "block px-3 py-2 text-sm hover:bg-gray-100 transition-colors",
+                                  data: { turbo: false } do %>
+                                <div class="flex items-center justify-between">
+                                  <span class="font-medium text-gray-700">
+                                    <%= run.step&.label.presence || run.step&.name.presence || "Run" %> #<%= run.num || run.id %>
+                                  </span>
+                                  <span class="text-xs text-gray-400">
+                                    <%= time_ago_in_words(run.created_at) %> ago
+                                  </span>
+                                </div>
+                              <% end %>
+                            <% end %>
+                            <% if count > 20 %>
+                              <div class="px-3 py-2 text-xs text-gray-400 text-center border-t border-gray-100">
+                                ... and <%= count - 20 %> more
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% end %>
+              </div>
+            </div>
+            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300">
               <div class="flex flex-col justify-center">
                 <span class="text-xs text-gray-300"><%= project_status_label %></span>
                 <div class="flex items-center gap-3 mt-1">
@@ -80,7 +162,7 @@
       
       <!-- Right side: Navigation Icons -->
       <!-- Hamburger Menu Button (Mobile) -->
-      <div class="md:hidden relative" data-controller="mobile-menu">
+      <div class="lg:hidden relative" data-controller="mobile-menu">
         <button type="button" 
                 class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition"
                 aria-expanded="false" 
@@ -189,39 +271,18 @@
       <!-- End Hamburger Menu Button -->
       
       <!-- Desktop Menu Items -->
-      <div class="hidden md:flex items-center space-x-2">
-        <!-- Summary Icon -->
+      <div class="hidden lg:flex items-stretch gap-1">
         <%= link_to project_path(@project, view: 'summary'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
-          <i class="fas fa-info-circle text-lg"></i>
-        <% end %>
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Summary" do %><i class="fas fa-info-circle text-lg"></i><% end %><%= link_to project_path(@project, view: 'visualization'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Analysis" do %><i class="fas fa-microscope text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
+            class: "p-2 rounded-lg bg-gray-700 text-white", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %>
         
-        <!-- Visualization Icon -->
-        <%= link_to project_path(@project, view: 'visualization'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
-          <i class="fas fa-chart-line text-lg"></i>
-        <% end %>
-        
-        <!-- Analysis Icon -->
-        <%= link_to project_path(@project, view: 'analysis'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
-          <i class="fas fa-microscope text-lg"></i>
-        <% end %>
-        
-        <!-- Data Icon -->
-        <%= link_to project_path(@project, view: 'data'), 
-            class: "p-2 rounded-lg bg-gray-700 text-white" do %>
-          <i class="fas fa-database text-lg"></i>
-        <% end %>
-        
-        <!-- Settings Icon -->
-        <%= link_to project_path(@project, view: 'settings'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
-          <i class="fas fa-cog text-lg"></i>
-        <% end %>
+        <%= header_separator %>
         
         <!-- Info Dropdown -->
-        <div class="relative ml-4"
+        <div class="relative"
              id="info-nav-dropdown"
              data-controller="nav-dropdown">
           <button type="button"
@@ -238,7 +299,7 @@
         </div>
         
       <% if admin? %>
-        <div class="relative ml-4"
+        <div class="relative"
              id="admin-tools-dropdown"
              data-controller="nav-dropdown">
           <button id="admin-tools-button"
@@ -259,7 +320,8 @@
         
         <!-- Back to Projects -->
         <%= link_to projects_path, 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700" do %>
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",
+            title: "Back to Projects" do %>
           <i class="fas fa-arrow-left text-lg"></i>
         <% end %>
       </div>

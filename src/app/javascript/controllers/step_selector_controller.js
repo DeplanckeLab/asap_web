@@ -29,7 +29,7 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content"]
-  static values = { projectId: Number }
+  static values = { projectId: Number, statusIcons: Array }
 
   connect() {
     console.log('[StepSelectorController] CONNECT METHOD CALLED!')
@@ -576,11 +576,13 @@ export default class extends Controller {
     // Update the icon
     const iconElement = stepElement.querySelector('.flex-shrink-0 i')
     if (iconElement) {
-      iconElement.className = 'fas ' + (status === 'complete' ? 'fa-check-circle text-lg text-green-500' :
-                                        status === 'running' ? 'fa-spinner fa-spin text-lg text-blue-500' :
-                                        status === 'waiting' ? 'fa-clock text-lg text-yellow-500' :
-                                        status === 'failed' ? 'fa-exclamation-circle text-lg text-red-500' :
-                                        'far fa-circle text-lg opacity-30')
+      const statusConfig = this.getStatusIconConfig(status === 'complete' ? 'completed' : status)
+      if (statusConfig) {
+        const spinClass = status === 'running' && statusConfig.icon_spin ? ' ' + statusConfig.icon_spin : ''
+        iconElement.className = statusConfig.icon_base + spinClass + ' text-lg ' + statusConfig.active_color
+      } else {
+        iconElement.className = 'far fa-circle text-lg opacity-30'
+      }
     }
 
     // Update the status badge
@@ -1277,6 +1279,15 @@ export default class extends Controller {
     } else {
       return `${minutes}:${String(secs).padStart(2, '0')}`
     }
+  }
+
+  // Get status icon configuration by status name
+  getStatusIconConfig(statusName) {
+    if (!this.hasStatusIconsValue || !this.statusIconsValue) {
+      console.error('[StepSelectorController] Status icons config not available - run the migration')
+      return null
+    }
+    return this.statusIconsValue.find(s => s.key === statusName)
   }
 
   // Note: updateActiveStep is no longer needed - the server renders the border

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_28_181623) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_04_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1033,9 +1033,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_28_181623) do
   end
 
   create_table "statuses", id: :serial, force: :cascade do |t|
+    t.text "active_color"
     t.text "color"
     t.text "icon_class"
+    t.text "icon_spin"
     t.text "img_extension"
+    t.text "inactive_color"
     t.text "label"
     t.text "name"
     t.integer "rank"

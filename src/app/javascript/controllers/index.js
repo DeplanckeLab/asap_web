@@ -115,6 +115,10 @@ import RunSelectionController from "controllers/run_selection_controller"
 application.register("run-selection", RunSelectionController)
 console.log('Run selection controller registered')
 
+import HeaderRunStatusController from "controllers/header_run_status_controller"
+application.register("header-run-status", HeaderRunStatusController)
+console.log('Header run status controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

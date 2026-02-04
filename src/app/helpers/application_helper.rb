@@ -371,4 +371,93 @@ module ApplicationHelper
       std_method_name
     end
   end
+
+  # Returns status icons configuration from database
+  # Each status includes: key, icon_base, icon_spin, active_color, inactive_color, label
+  def status_icons_config
+    @status_icons_config ||= begin
+      # Map status IDs to canonical keys used in views
+      # Views use status_id 1,2,3,4 and reference them as waiting/running/completed/failed
+      id_to_key = {
+        1 => :waiting,   # DB name: pending
+        2 => :running,   # DB name: running
+        3 => :completed, # DB name: success
+        4 => :failed     # DB name: failed
+      }
+      
+      # Build configuration from database statuses (all styling now comes from DB)
+      Status.order(:rank, :id).map do |status|
+        key = id_to_key[status.id] || status.name.downcase.to_sym
+        
+        # Use the canonical key for display labels (Waiting, Running, Completed, Failed)
+        display_label = key.to_s.humanize
+        
+        {
+          id: status.id,
+          key: key,
+          icon_base: status.icon_class.presence || 'fas fa-circle',
+          icon_spin: status.icon_spin.presence || '',
+          active_color: status.active_color.presence || 'text-gray-500',
+          inactive_color: status.inactive_color.presence || 'text-gray-300',
+          label: display_label,
+          tooltip_label: display_label
+        }
+      end
+    end
+  end
+
+  # Returns a hash of status icons keyed by canonical key (symbol)
+  # This allows views to use :waiting, :running, :completed, :failed regardless of database names
+  def status_icons_by_key
+    @status_icons_by_key ||= status_icons_config.index_by { |s| s[:key] }
+  end
+
+  # Returns a hash of status icons keyed by status ID
+  def status_icons_by_id
+    @status_icons_by_id ||= status_icons_config.index_by { |s| s[:id] }
+  end
+
+  # Get icon class for a specific status (by name or ID)
+  def status_icon_class(status_identifier)
+    config = if status_identifier.is_a?(Integer)
+               status_icons_by_id[status_identifier]
+             else
+               status_icons_by_key[status_identifier.to_s.downcase.to_sym]
+             end
+    config&.dig(:icon_base) || 'fas fa-circle'
+  end
+
+  # Returns status icons config as JSON for JavaScript consumption
+  def status_icons_json
+    status_icons_config.to_json.html_safe
+  end
+
+  # Renders a vertical separator line for the header navigation
+  def header_separator
+    content_tag(:div, nil, class: "border-l border-gray-700 h-12 ml-3 mr-2")
+  end
+
+  # Returns run counts by status from project_steps' nber_runs_json
+  # More efficient than counting runs directly
+  # Returns { waiting: N, running: N, completed: N, failed: N }
+  def project_run_counts(project)
+    totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    
+    project.project_steps.each do |ps|
+      next if ps.nber_runs_json.blank?
+      
+      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
+      json_data.each do |status_id, count|
+        status_key = status_id.to_i
+        totals[status_key] = (totals[status_key] || 0) + count.to_i if totals.key?(status_key)
+      end
+    end
+    
+    {
+      waiting: totals[1],
+      running: totals[2],
+      completed: totals[3],
+      failed: totals[4]
+    }
+  end
 end

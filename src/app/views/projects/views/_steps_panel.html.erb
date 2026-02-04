@@ -86,13 +86,17 @@
               %>
               <div class="relative group">
                 <% if is_complete %>
-                  <i class="fas fa-check-circle text-sm text-green-500"></i>
+                  <% completed_config = status_icons_by_key[:completed] %>
+                  <i class="<%= completed_config[:icon_base] %> text-sm <%= completed_config[:active_color] %>"></i>
                 <% elsif status == 'running' %>
-                  <i class="fas fa-spinner fa-spin text-sm text-blue-500"></i>
+                  <% running_config = status_icons_by_key[:running] %>
+                  <i class="<%= running_config[:icon_base] %> <%= running_config[:icon_spin] %> text-sm <%= running_config[:active_color] %>"></i>
                 <% elsif status == 'waiting' %>
-                  <i class="fas fa-clock text-sm text-yellow-500"></i>
+                  <% waiting_config = status_icons_by_key[:waiting] %>
+                  <i class="<%= waiting_config[:icon_base] %> text-sm <%= waiting_config[:active_color] %>"></i>
                 <% elsif status == 'failed' %>
-                  <i class="fas fa-exclamation-circle text-sm text-red-500"></i>
+                  <% failed_config = status_icons_by_key[:failed] %>
+                  <i class="<%= failed_config[:icon_base] %> text-sm <%= failed_config[:active_color] %>"></i>
                 <% else %>
                   <i class="far fa-circle text-sm text-gray-400"></i>
                 <% end %>
@@ -104,47 +108,13 @@
             <% else %>
               <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%; align-content: center;">
                 <% 
-                  # Define status icons with their properties in 2x2 grid order
-                  status_icons = [
-                    { 
-                      key: :waiting, 
-                      icon_base: 'fas fa-clock', 
-                      icon_spin: '',
-                      active_color: 'text-yellow-500',
-                      inactive_color: 'text-gray-300',
-                      count: status_counts[:waiting],
-                      tooltip_label: 'Waiting'
-                    },
-                    { 
-                      key: :running, 
-                      icon_base: 'fas fa-spinner', 
-                      icon_spin: 'fa-spin',
-                      active_color: 'text-blue-500',
-                      inactive_color: 'text-gray-300',
-                      count: status_counts[:running],
-                      tooltip_label: 'Running'
-                    },
-                    { 
-                      key: :completed, 
-                      icon_base: 'fas fa-check-circle', 
-                      icon_spin: '',
-                      active_color: 'text-green-500',
-                      inactive_color: 'text-gray-300',
-                      count: status_counts[:completed],
-                      tooltip_label: 'Completed'
-                    },
-                    { 
-                      key: :failed, 
-                      icon_base: 'fas fa-exclamation-circle', 
-                      icon_spin: '',
-                      active_color: 'text-red-500',
-                      inactive_color: 'text-gray-300',
-                      count: status_counts[:failed],
-                      tooltip_label: 'Failed'
-                    }
-                  ]
+                  # Get status icons from database, add counts
+                  grid_status_icons = [:waiting, :running, :completed, :failed].map do |key|
+                    config = status_icons_by_key[key]
+                    config.merge(count: status_counts[key] || 0)
+                  end
                 %>
-                <% status_icons.each do |status_icon| %>
+                <% grid_status_icons.each do |status_icon| %>
                   <% 
                     is_active = status_icon[:count] > 0
                     icon_class = status_icon[:icon_base]

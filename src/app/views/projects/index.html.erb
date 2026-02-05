@@ -217,19 +217,19 @@
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technology</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cells</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Genes</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th scope="col" class="relative px-6 py-3"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <% @projects.each do |project| %>
-                <tr class="hover:bg-gray-50">
+                <tr class="hover:bg-gray-100 cursor-pointer transition-colors" onclick="window.location='<%= project_path(project) %>'">
                   <td class="px-6 py-4">
                     <div class="flex items-center">
                       <div>
                         <div class="text-sm font-medium text-gray-900">
-                          <%= link_to project.display_name, project_path(project), class: "hover:text-blue-600" %>
+                          <%= project.display_name %>
                         </div>
                         <% if project.description.present? %>
                           <div class="text-sm text-gray-500 truncate max-w-xs"><%= truncate(project.description, length: 60) %></div>
@@ -249,6 +249,25 @@
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <%= number_with_delimiter(project.gene_count) %>
                   </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <% run_counts = project_run_counts(project) %>
+                    <div class="flex items-center gap-2">
+                      <% [:waiting, :running, :completed, :failed].each do |key| %>
+                        <% 
+                          config = status_icons_by_key[key]
+                          count = run_counts[key]
+                          is_active = count > 0
+                          icon_class = config[:icon_base]
+                          icon_class += " #{config[:icon_spin]}" if is_active && config[:icon_spin].present?
+                          color_class = is_active ? config[:active_color] : 'text-gray-300'
+                        %>
+                        <div class="flex flex-col items-center" title="<%= config[:label] %>">
+                          <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
+                          <span class="text-[9px] leading-tight text-gray-400 mt-0.5"><%= count %></span>
+                        </div>
+                      <% end %>
+                    </div>
+                  </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <%= project.created_at&.strftime("%b %d, %Y") %>
                   </td>
@@ -258,9 +277,6 @@
                     <% else %>
                       <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Private</span>
                     <% end %>
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <%= link_to "View", project_path(project), class: "text-blue-600 hover:text-blue-900" %>
                   </td>
                 </tr>
               <% end %>

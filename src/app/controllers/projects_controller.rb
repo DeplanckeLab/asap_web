@@ -24,8 +24,8 @@ class ProjectsController < ApplicationController
     # Use Elasticsearch for search
     search_results = Project.search(@query, @filters)
     
-    # Extract projects from search results
-    @projects = search_results.records
+    # Extract projects from search results with preloaded project_steps for run counts
+    @projects = search_results.records.includes(:project_steps)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
@@ -1277,26 +1277,40 @@ class ProjectsController < ApplicationController
     render plain: "Lineage for project #{@project.key}"
   end
 
-  # GET /projects/1/pipeline_runs?annot_id=123
+  # GET /projects/1/pipeline_runs?annot_id=123 or ?run_id=456
   def pipeline_runs
     annot_id = params[:annot_id]
+    run_id = params[:run_id]
     
-    unless annot_id.present?
-      render json: { error: 'annot_id parameter is required' }, status: :bad_request
+    unless annot_id.present? || run_id.present?
+      render json: { error: 'annot_id or run_id parameter is required' }, status: :bad_request
       return
     end
     
-    # Get the annotation
-    annot = Annot.find_by(id: annot_id, project_id: @project.id)
-    unless annot
-      render json: { error: 'Annotation not found' }, status: :not_found
-      return
+    ori_run_id = nil
+    
+    if annot_id.present?
+      # Get the annotation
+      annot = Annot.find_by(id: annot_id, project_id: @project.id)
+      unless annot
+        render json: { error: 'Annotation not found' }, status: :not_found
+        return
+      end
+      
+      # Get the original run that created this annotation
+      ori_run_id = annot.ori_run_id || annot.run_id
+    else
+      # Use run_id directly
+      run = Run.find_by(id: run_id, project_id: @project.id)
+      unless run
+        render json: { error: 'Run not found' }, status: :not_found
+        return
+      end
+      ori_run_id = run.id
     end
     
-    # Get the original run that created this annotation
-    ori_run_id = annot.ori_run_id || annot.run_id
     unless ori_run_id
-      render json: { error: 'No run found for this annotation' }, status: :not_found
+      render json: { error: 'No run found' }, status: :not_found
       return
     end
     
@@ -1304,11 +1318,11 @@ class ProjectsController < ApplicationController
     pipeline_run_ids = get_pipeline_run_ids(ori_run_id)
     
     # Get all runs with their steps and std_methods
+    # Order by ID descending (most recent first, oldest last) for proper lineage display
     runs = Run.where(id: pipeline_run_ids, project_id: @project.id)
               .includes(:step, :std_method, :status)
-              .order(:step_id, :num, :id)
+              .order(id: :desc)
               .to_a
-              .reverse
     
     # Get steps hash for display
     asap_docker_image = Basic.get_asap_docker(@project.version)
@@ -1333,15 +1347,24 @@ class ProjectsController < ApplicationController
     @h_ori_runs_for_params = {}
     @h_steps_for_params = {}
     annot_ids = []
+    direct_run_ids = []
     runs.each do |run|
       h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
       h_attrs.each_value do |v|
-        if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?)
-          annot_ids << (v['annot_id'] || v[:annot_id])
+        if v.is_a?(Hash)
+          if v['annot_id'].present? || v[:annot_id].present?
+            annot_ids << (v['annot_id'] || v[:annot_id])
+          elsif v['run_id'].present? || v[:run_id].present?
+            direct_run_ids << (v['run_id'] || v[:run_id])
+          end
         elsif v.is_a?(Array)
           v.each do |item|
-            if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?)
-              annot_ids << (item['annot_id'] || item[:annot_id])
+            if item.is_a?(Hash)
+              if item['annot_id'].present? || item[:annot_id].present?
+                annot_ids << (item['annot_id'] || item[:annot_id])
+              elsif item['run_id'].present? || item[:run_id].present?
+                direct_run_ids << (item['run_id'] || item[:run_id])
+              end
             end
           end
         end
@@ -1359,6 +1382,16 @@ class ProjectsController < ApplicationController
               @h_steps_for_params[ori_run.step_id] = step if step
             end
           end
+        end
+      end
+    end
+    # Also load runs that are directly referenced by run_id without annot_id
+    if direct_run_ids.any?
+      Run.where(id: direct_run_ids.uniq).each do |direct_run|
+        @h_ori_runs_for_params[direct_run.id] = direct_run unless @h_ori_runs_for_params[direct_run.id]
+        if direct_run.step_id.present? && !@h_steps_for_params[direct_run.step_id]
+          step = Step.find_by(id: direct_run.step_id)
+          @h_steps_for_params[direct_run.step_id] = step if step
         end
       end
     end
@@ -2850,6 +2883,7 @@ class ProjectsController < ApplicationController
   # Get all run IDs in the pipeline that created a given run
   # This returns only the run itself and all its ancestors (the pipeline that produced it)
   # It does NOT include descendants (runs that used this run as input)
+  # Returns runs in lineage order: [oldest_ancestor, ..., parent, root_run]
   def get_pipeline_run_ids(root_run_id)
     require 'set'
     
@@ -2861,18 +2895,25 @@ class ProjectsController < ApplicationController
     root_run = runs_by_id[root_run_id] || Run.find_by(id: root_run_id, project_id: @project.id)
     return [root_run_id] unless root_run
     
-    run_ids = Set.new([root_run_id])
+    run_ids_set = Set.new([root_run_id])
+    ordered_run_ids = []
     
     # Get all ancestors (parents, grandparents, etc.) - the pipeline that created this run
-    # lineage_run_ids contains all ancestor run IDs (but not the run itself)
+    # lineage_run_ids contains all ancestor run IDs in order (oldest first)
     if root_run.lineage_run_ids.present?
       lineage_ids = root_run.lineage_run_ids.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
-      lineage_ids.each { |id| run_ids.add(id) if id > 0 }
+      lineage_ids.each do |id|
+        if id > 0 && !run_ids_set.include?(id)
+          run_ids_set.add(id)
+          ordered_run_ids << id
+        end
+      end
     end
     
     # Also traverse run_parents_json to ensure we get all ancestors (in case lineage_run_ids is incomplete)
     ancestor_visited = Set.new
     ancestor_queue = [root_run_id]
+    additional_ancestors = []
     
     while ancestor_queue.any?
       current_run_id = ancestor_queue.shift
@@ -2890,7 +2931,10 @@ class ProjectsController < ApplicationController
             parent_id = parent_id.to_i if parent_id
             
             if parent_id && parent_id > 0 && !ancestor_visited.include?(parent_id)
-              run_ids.add(parent_id)
+              if !run_ids_set.include?(parent_id)
+                run_ids_set.add(parent_id)
+                additional_ancestors << parent_id
+              end
               ancestor_queue << parent_id
             end
           end
@@ -2900,8 +2944,14 @@ class ProjectsController < ApplicationController
       end
     end
     
-    # Return only ancestors + the run itself (NOT descendants)
-    run_ids.to_a
+    # Combine: lineage order first, then any additional ancestors (sorted by id), then root run
+    # Sort additional ancestors by id to maintain some order
+    additional_ancestors.sort!
+    
+    # Final order: ancestors from lineage (oldest first) + additional ancestors + root run
+    result = ordered_run_ids + additional_ancestors
+    result << root_run_id unless result.include?(root_run_id)
+    result.uniq
   end
 
     # Helper method to check if a step can be unlocked based on attrs_json requirements

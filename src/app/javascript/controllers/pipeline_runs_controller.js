@@ -3,6 +3,7 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static values = {
     annotId: Number,
+    runId: Number,
     projectId: Number,
     url: String
   }
@@ -10,6 +11,7 @@ export default class extends Controller {
   connect() {
     console.log('Pipeline runs controller connected', {
       annotId: this.annotIdValue,
+      runId: this.runIdValue,
       url: this.urlValue
     })
     
@@ -176,7 +178,16 @@ export default class extends Controller {
     card.classList.remove('hidden')
     
     // Fetch pipeline runs (render as HTML partial)
-    const url = `${this.urlValue}?annot_id=${this.annotIdValue}`
+    // Use annot_id if available, otherwise use run_id
+    let url
+    if (this.annotIdValue) {
+      url = `${this.urlValue}?annot_id=${this.annotIdValue}`
+    } else if (this.runIdValue) {
+      url = `${this.urlValue}?run_id=${this.runIdValue}`
+    } else {
+      console.error('No annotId or runId provided')
+      return
+    }
     
     fetch(url, {
       headers: {

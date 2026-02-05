@@ -43,7 +43,7 @@
                 <% annot_id = value['annot_id'] || value[:annot_id] %>
               <% end %>
               <% if annot_id.present? %>
-                <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+                <% annot = @h_annots_for_params[annot_id.to_i] if defined?(@h_annots_for_params) %>
                 <% if annot %>
                   <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
                   <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
@@ -53,6 +53,62 @@
                     <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
                   <% else %>
                     <% dataset_display = "#{step_name} #{annot.name}" %>
+                  <% end %>
+                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200" title="<%= dataset_display %>">
+                    <span class="font-semibold text-blue-800"><%= key %>:</span>
+                    <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                  </span>
+                <% else %>
+                  <%# annot_id present but annot not found - check if run_id is available %>
+                  <% direct_run_id = value['run_id'] || value[:run_id] %>
+                  <% if direct_run_id.present? %>
+                    <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
+                    <% if direct_run %>
+                      <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
+                      <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
+                      <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                      <% if direct_step && direct_step.multiple_runs %>
+                        <% run_num = direct_run.num || direct_run.id %>
+                        <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                      <% else %>
+                        <% dataset_display = "#{step_name} #{dataset_name}" %>
+                      <% end %>
+                      <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200" title="<%= dataset_display %>">
+                        <span class="font-semibold text-blue-800"><%= key %>:</span>
+                        <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                      </span>
+                    <% else %>
+                      <% value_str = value.to_json %>
+                      <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200" title="<%= value_str %>">
+                        <span class="font-semibold text-gray-800"><%= key %>:</span>
+                        <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                      </span>
+                    <% end %>
+                  <% else %>
+                    <% value_str = value.to_json %>
+                    <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200" title="<%= value_str %>">
+                      <span class="font-semibold text-gray-800"><%= key %>:</span>
+                      <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                    </span>
+                  <% end %>
+                <% end %>
+              <% elsif value.is_a?(Hash) && (value['run_id'].present? || value[:run_id].present?) %>
+                <%# Hash with run_id but no annot_id %>
+                <% direct_run_id = value['run_id'] || value[:run_id] %>
+                <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
+                <% if direct_run %>
+                  <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
+                  <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
+                  <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                  <% if direct_step && direct_step.multiple_runs %>
+                    <% run_num = direct_run.num || direct_run.id %>
+                    <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                  <% else %>
+                    <% dataset_display = "#{step_name} #{dataset_name}" %>
                   <% end %>
                   <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200" title="<%= dataset_display %>">
@@ -71,7 +127,7 @@
                 <%# Array of datasets - show first dataset and count %>
                 <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
                 <% if first_annot_id.present? %>
-                  <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                  <% first_annot = @h_annots_for_params[first_annot_id.to_i] if defined?(@h_annots_for_params) %>
                   <% if first_annot %>
                     <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
                     <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>

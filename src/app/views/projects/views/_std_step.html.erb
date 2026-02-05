@@ -159,15 +159,24 @@
             <% @h_ori_runs_for_params = {} %>
             <% @h_steps_for_params = {} %>
             <% annot_ids = [] %>
+            <% direct_run_ids = [] %>
             <% @runs.each do |run| %>
               <% h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
               <% h_attrs.each_value do |v| %>
-                <% if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?) %>
-                  <% annot_ids << (v['annot_id'] || v[:annot_id]) %>
+                <% if v.is_a?(Hash) %>
+                  <% if v['annot_id'].present? || v[:annot_id].present? %>
+                    <% annot_ids << (v['annot_id'] || v[:annot_id]) %>
+                  <% elsif v['run_id'].present? || v[:run_id].present? %>
+                    <% direct_run_ids << (v['run_id'] || v[:run_id]) %>
+                  <% end %>
                 <% elsif v.is_a?(Array) %>
                   <% v.each do |item| %>
-                    <% if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?) %>
-                      <% annot_ids << (item['annot_id'] || item[:annot_id]) %>
+                    <% if item.is_a?(Hash) %>
+                      <% if item['annot_id'].present? || item[:annot_id].present? %>
+                        <% annot_ids << (item['annot_id'] || item[:annot_id]) %>
+                      <% elsif item['run_id'].present? || item[:run_id].present? %>
+                        <% direct_run_ids << (item['run_id'] || item[:run_id]) %>
+                      <% end %>
                     <% end %>
                   <% end %>
                 <% end %>
@@ -185,6 +194,16 @@
                       <% @h_steps_for_params[ori_run.step_id] = step if step %>
                     <% end %>
                   <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+            <%# Also load runs that are directly referenced by run_id without annot_id %>
+            <% if direct_run_ids.any? %>
+              <% Run.where(id: direct_run_ids.uniq).each do |direct_run| %>
+                <% @h_ori_runs_for_params[direct_run.id] = direct_run unless @h_ori_runs_for_params[direct_run.id] %>
+                <% if direct_run.step_id.present? && !@h_steps_for_params[direct_run.step_id] %>
+                  <% step = Step.find_by(id: direct_run.step_id) %>
+                  <% @h_steps_for_params[direct_run.step_id] = step if step %>
                 <% end %>
               <% end %>
             <% end %>
@@ -256,7 +275,7 @@
                                 <% annot_id = value['annot_id'] || value[:annot_id] %>
                               <% end %>
                               <% if annot_id.present? %>
-                                <% annot = @h_annots_for_params[annot_id] if defined?(@h_annots_for_params) %>
+                                <% annot = @h_annots_for_params[annot_id.to_i] if defined?(@h_annots_for_params) %>
                                 <% if annot %>
                                   <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
                                   <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
@@ -280,6 +299,76 @@
                                     <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                                   </span>
                                 <% else %>
+                                  <%# annot_id present but annot not found - check if run_id is available %>
+                                  <% direct_run_id = value['run_id'] || value[:run_id] %>
+                                  <% if direct_run_id.present? %>
+                                    <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
+                                    <% if direct_run %>
+                                      <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
+                                      <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
+                                      <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                                      <% if direct_step && direct_step.multiple_runs %>
+                                        <% run_num = direct_run.num || direct_run.id %>
+                                        <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                                      <% else %>
+                                        <% dataset_display = "#{step_name} #{dataset_name}" %>
+                                      <% end %>
+                                      <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                            data-controller="pipeline-runs"
+                                            data-pipeline-runs-run-id-value="<%= direct_run_id %>"
+                                            data-pipeline-runs-project-id-value="<%= @project.id %>"
+                                            data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                                            data-action="click->pipeline-runs#showPipeline"
+                                            onclick="event.stopPropagation();"
+                                            title="<%= dataset_display %> - Click to view pipeline">
+                                        <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                        <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                                      </span>
+                                    <% else %>
+                                      <% value_str = value.to_json %>
+                                      <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                        <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                        <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                      </span>
+                                    <% end %>
+                                  <% else %>
+                                    <% value_str = value.to_json %>
+                                    <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                      <span class="font-semibold text-gray-800"><%= key %>:</span>
+                                      <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                    </span>
+                                  <% end %>
+                                <% end %>
+                              <% elsif value.is_a?(Hash) && (value['run_id'].present? || value[:run_id].present?) %>
+                                <%# Hash with run_id but no annot_id %>
+                                <% direct_run_id = value['run_id'] || value[:run_id] %>
+                                <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
+                                <% if direct_run %>
+                                  <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
+                                  <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
+                                  <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                                  <% if direct_step && direct_step.multiple_runs %>
+                                    <% run_num = direct_run.num || direct_run.id %>
+                                    <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                                  <% else %>
+                                    <% dataset_display = "#{step_name} #{dataset_name}" %>
+                                  <% end %>
+                                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                        data-controller="pipeline-runs"
+                                        data-pipeline-runs-run-id-value="<%= direct_run_id %>"
+                                        data-pipeline-runs-project-id-value="<%= @project.id %>"
+                                        data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                                        data-action="click->pipeline-runs#showPipeline"
+                                        onclick="event.stopPropagation();"
+                                        title="<%= dataset_display %> - Click to view pipeline">
+                                    <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                    <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                                  </span>
+                                <% else %>
                                   <% value_str = value.to_json %>
                                   <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
@@ -291,7 +380,7 @@
                                 <%# Array of datasets - show first dataset and count %>
                                 <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
                                 <% if first_annot_id.present? %>
-                                  <% first_annot = @h_annots_for_params[first_annot_id] if defined?(@h_annots_for_params) %>
+                                  <% first_annot = @h_annots_for_params[first_annot_id.to_i] if defined?(@h_annots_for_params) %>
                                   <% if first_annot %>
                                     <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
                                     <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>

@@ -321,14 +321,23 @@ class RunsController < ApplicationController
     @h_ori_runs_for_params = {}
     @h_steps_for_params = {}
     annot_ids = []
+    direct_run_ids = []
     h_attrs = @run.attrs_json.present? ? Basic.safe_parse_json(@run.attrs_json, {}) : {}
     h_attrs.each_value do |v|
-      if v.is_a?(Hash) && (v['annot_id'].present? || v[:annot_id].present?)
-        annot_ids << (v['annot_id'] || v[:annot_id])
+      if v.is_a?(Hash)
+        if v['annot_id'].present? || v[:annot_id].present?
+          annot_ids << (v['annot_id'] || v[:annot_id])
+        elsif v['run_id'].present? || v[:run_id].present?
+          direct_run_ids << (v['run_id'] || v[:run_id])
+        end
       elsif v.is_a?(Array)
         v.each do |item|
-          if item.is_a?(Hash) && (item['annot_id'].present? || item[:annot_id].present?)
-            annot_ids << (item['annot_id'] || item[:annot_id])
+          if item.is_a?(Hash)
+            if item['annot_id'].present? || item[:annot_id].present?
+              annot_ids << (item['annot_id'] || item[:annot_id])
+            elsif item['run_id'].present? || item[:run_id].present?
+              direct_run_ids << (item['run_id'] || item[:run_id])
+            end
           end
         end
       end
@@ -345,6 +354,16 @@ class RunsController < ApplicationController
               @h_steps_for_params[ori_run.step_id] = step if step
             end
           end
+        end
+      end
+    end
+    # Also load runs that are directly referenced by run_id without annot_id
+    if direct_run_ids.any?
+      Run.where(id: direct_run_ids.uniq).each do |direct_run|
+        @h_ori_runs_for_params[direct_run.id] = direct_run unless @h_ori_runs_for_params[direct_run.id]
+        if direct_run.step_id.present? && !@h_steps_for_params[direct_run.step_id]
+          step = Step.find_by(id: direct_run.step_id)
+          @h_steps_for_params[direct_run.step_id] = step if step
         end
       end
     end

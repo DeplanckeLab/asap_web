@@ -43,6 +43,8 @@ class Project < ApplicationRecord
       indexes :nber_views, type: 'integer'
       indexes :nber_cloned, type: 'integer'
       indexes :disk_size, type: 'long'
+      indexes :user_id, type: 'integer'
+      indexes :shared_user_ids, type: 'integer'
     end
   end
 
@@ -140,6 +142,31 @@ class Project < ApplicationRecord
       term: { being_deleted: false }
     }
 
+    # User permission filtering
+    # - Admin: can see all projects (no filter)
+    # - Logged in user: can see public projects OR owned projects OR shared projects
+    # - Not logged in: can see only public projects
+    unless filters[:is_admin]
+      if filters[:current_user_id].present?
+        # User is logged in - can see public, owned, or shared projects
+        search_definition[:query][:bool][:filter] << {
+          bool: {
+            should: [
+              { term: { public: true } },
+              { term: { user_id: filters[:current_user_id] } },
+              { terms: { shared_user_ids: [filters[:current_user_id]] } }
+            ],
+            minimum_should_match: 1
+          }
+        }
+      else
+        # Not logged in - can only see public projects
+        search_definition[:query][:bool][:filter] << {
+          term: { public: true }
+        }
+      end
+    end
+
     # Sorting
     case filters[:sort]
     when 'name'
@@ -187,7 +214,9 @@ class Project < ApplicationRecord
       nber_rows: respond_to?(:nber_rows) ? (nber_rows || 0) : 0,
       nber_views: respond_to?(:nber_views) ? (nber_views || 0) : 0,
       nber_cloned: respond_to?(:nber_cloned) ? (nber_cloned || 0) : 0,
-      disk_size: respond_to?(:disk_size) ? (disk_size || 0) : 0
+      disk_size: respond_to?(:disk_size) ? (disk_size || 0) : 0,
+      user_id: user_id,
+      shared_user_ids: shares.pluck(:user_id).compact
     }
   end
 

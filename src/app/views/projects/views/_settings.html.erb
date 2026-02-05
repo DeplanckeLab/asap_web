@@ -6,82 +6,6 @@
 
   <!-- Settings Sections -->
   <div class="space-y-6">
-    <!-- General Settings -->
-    <div class="bg-gray-50 rounded-lg p-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">General Settings</h3>
-      
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Project Name -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Project Name</label>
-          <input type="text" value="<%= @project.display_name %>" 
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        
-        <!-- Project Key -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Project Key</label>
-          <input type="text" value="<%= @project.key || '' %>" 
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        
-        <!-- Description -->
-        <div class="lg:col-span-2">
-          <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-          <textarea rows="3" 
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"><%= @project.description || '' %></textarea>
-        </div>
-      </div>
-    </div>
-
-    <!-- Data Settings -->
-    <div class="bg-gray-50 rounded-lg p-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">Data Settings</h3>
-      
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Technology -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Technology</label>
-          <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="10x" <%= 'selected' if @project.technology == '10x' %>>10x Genomics</option>
-            <option value="smart-seq" <%= 'selected' if @project.technology == 'smart-seq' %>>Smart-seq2</option>
-            <option value="drop-seq" <%= 'selected' if @project.technology == 'drop-seq' %>>Drop-seq</option>
-            <option value="other" <%= 'selected' if @project.technology == 'other' %>>Other</option>
-          </select>
-        </div>
-        
-        <!-- Tissue -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Tissue</label>
-          <input type="text" value="<%= @project.tissue || '' %>" 
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        
-        <!-- Organism -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Organism</label>
-          <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">Select organism...</option>
-            <option value="human" <%= 'selected' if @project.organism&.name == 'Human' %>>Human</option>
-            <option value="mouse" <%= 'selected' if @project.organism&.name == 'Mouse' %>>Mouse</option>
-            <option value="drosophila" <%= 'selected' if @project.organism&.name == 'Drosophila' %>>Drosophila</option>
-            <option value="zebrafish" <%= 'selected' if @project.organism&.name == 'Zebrafish' %>>Zebrafish</option>
-          </select>
-        </div>
-        
-        <!-- Status -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
-          <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">Select status...</option>
-            <option value="active" <%= 'selected' if @project.status&.name == 'Active' %>>Active</option>
-            <option value="archived" <%= 'selected' if @project.status&.name == 'Archived' %>>Archived</option>
-            <option value="processing" <%= 'selected' if @project.status&.name == 'Processing' %>>Processing</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
     <!-- Privacy Settings -->
     <div class="bg-gray-50 rounded-lg p-6">
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Privacy Settings</h3>
@@ -98,49 +22,130 @@
             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
           </label>
         </div>
-        
-        <!-- Download Access -->
-        <div class="flex items-center justify-between">
-          <div>
-            <h4 class="text-sm font-medium text-gray-900">Download Access</h4>
-            <p class="text-sm text-gray-600">Allow public users to download project data</p>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" class="sr-only peer">
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
-        </div>
       </div>
     </div>
 
-    <!-- Advanced Settings -->
+    <!-- User Rights -->
     <div class="bg-gray-50 rounded-lg p-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">Advanced Settings</h3>
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">User Rights</h3>
       
-      <div class="space-y-4">
-        <!-- Auto-processing -->
-        <div class="flex items-center justify-between">
-          <div>
-            <h4 class="text-sm font-medium text-gray-900">Auto-processing</h4>
-            <p class="text-sm text-gray-600">Automatically process new data files</p>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" checked class="sr-only peer">
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+      <div class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+        <p class="text-sm text-amber-800">Please be aware that you have to comply with the usual ethical and legal rules for sharing this dataset. In the case of human data, you must ensure that the underlying personal data is not accessible.</p>
+      </div>
+
+      <!-- Batch Add Users -->
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Batch Add Users</label>
+        <textarea id="batch_emails" rows="3" placeholder="Enter email addresses (one per line)" 
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"></textarea>
+        <div class="flex items-center gap-4 mt-2">
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" id="batch_analyze_perm" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            Analyze
           </label>
-        </div>
-        
-        <!-- Backup -->
-        <div class="flex items-center justify-between">
-          <div>
-            <h4 class="text-sm font-medium text-gray-900">Automatic Backup</h4>
-            <p class="text-sm text-gray-600">Create daily backups of project data</p>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" checked class="sr-only peer">
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" id="batch_export_perm" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            Export
           </label>
+          <button id="batch_upd_btn" class="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
+            Batch Add
+          </button>
         </div>
+      </div>
+
+      <!-- Users Table -->
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">View</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Analyze</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Export</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <!-- Owner Row -->
+            <tr class="bg-blue-50">
+              <td class="px-4 py-3 text-sm font-medium text-gray-900">
+                Me (Owner)
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <span class="text-xs text-gray-400">Owner</span>
+              </td>
+            </tr>
+            
+            <!-- Shared Users -->
+            <% if @shares.present? %>
+              <% @shares.each do |share| %>
+                <tr id="share_row_<%= share.id %>" class="hover:bg-gray-50">
+                  <td class="px-4 py-3 text-sm text-gray-900">
+                    <%= share.user&.email || share.email %>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <input type="checkbox" <%= 'checked' if share.view_perm? %> disabled 
+                           class="rounded border-gray-300 text-blue-600">
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <input type="checkbox" name="shares[<%= share.id %>][analyze_perm]" <%= 'checked' if share.analyze_perm? %> 
+                           class="share-perm rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                           data-share-id="<%= share.id %>" data-perm-type="analyze">
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <input type="checkbox" name="shares[<%= share.id %>][export_perm]" <%= 'checked' if share.export_perm? %> 
+                           class="share-perm rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                           data-share-id="<%= share.id %>" data-perm-type="export">
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <button type="button" class="delete-share text-red-600 hover:text-red-800 text-sm"
+                            data-share-id="<%= share.id %>">
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              <% end %>
+            <% end %>
+            
+            <!-- Add New User Row -->
+            <tr id="new_user_row" class="hidden bg-green-50">
+              <td class="px-4 py-3">
+                <input type="email" id="new_user_email" placeholder="Enter email address"
+                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" id="new_user_view_perm" checked disabled class="rounded border-gray-300 text-blue-600">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" id="new_user_analyze_perm" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <input type="checkbox" id="new_user_export_perm" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+              </td>
+              <td class="px-4 py-3 text-center">
+                <button type="button" id="invite_user_btn" class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">
+                  Invite
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Add User Button -->
+      <div class="mt-4">
+        <button type="button" id="add_user_btn" class="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300">
+          Add New User
+        </button>
       </div>
     </div>
   </div>
@@ -166,3 +171,171 @@
     </div>
   </div>
 </div>
+
+<%= javascript_tag do %>
+document.addEventListener('DOMContentLoaded', function() {
+  // Add New User Button
+  const addUserBtn = document.getElementById('add_user_btn');
+  const newUserRow = document.getElementById('new_user_row');
+  
+  if (addUserBtn && newUserRow) {
+    addUserBtn.addEventListener('click', function() {
+      newUserRow.classList.remove('hidden');
+      addUserBtn.classList.add('hidden');
+      document.getElementById('new_user_email').focus();
+    });
+  }
+  
+  // Invite User Button
+  const inviteUserBtn = document.getElementById('invite_user_btn');
+  if (inviteUserBtn) {
+    inviteUserBtn.addEventListener('click', function() {
+      const email = document.getElementById('new_user_email').value.trim().toLowerCase();
+      const analyzePerm = document.getElementById('new_user_analyze_perm').checked;
+      const exportPerm = document.getElementById('new_user_export_perm').checked;
+      
+      if (!validateEmail(email)) {
+        alert('Please enter a valid email address.');
+        return;
+      }
+      
+      // Send AJAX request to create share
+      fetch('<%= shares_path %>', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: JSON.stringify({
+          share: {
+            email: email,
+            view_perm: true,
+            analyze_perm: analyzePerm,
+            export_perm: exportPerm
+          },
+          project_key: '<%= @project.key %>'
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          location.reload();
+        } else {
+          alert(data.error || 'Failed to add user.');
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to add user.');
+      });
+    });
+  }
+  
+  // Batch Add Users Button
+  const batchUpdBtn = document.getElementById('batch_upd_btn');
+  if (batchUpdBtn) {
+    batchUpdBtn.addEventListener('click', function() {
+      const emails = document.getElementById('batch_emails').value.trim().toLowerCase();
+      const analyzePerm = document.getElementById('batch_analyze_perm').checked;
+      const exportPerm = document.getElementById('batch_export_perm').checked;
+      
+      if (!emails) {
+        alert('Please enter at least one email address.');
+        return;
+      }
+      
+      fetch('<%= batch_add_shares_path %>', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: JSON.stringify({
+          batch_emails: emails,
+          batch_analyze_perm: analyzePerm,
+          batch_export_perm: exportPerm,
+          project_key: '<%= @project.key %>'
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          location.reload();
+        } else {
+          alert(data.error || 'Failed to add users.');
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to add users.');
+      });
+    });
+  }
+  
+  // Delete Share Buttons
+  document.querySelectorAll('.delete-share').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const shareId = this.dataset.shareId;
+      if (confirm('Are you sure you want to remove this user?')) {
+        fetch('<%= shares_path %>/' + shareId, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content
+          }
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            document.getElementById('share_row_' + shareId).remove();
+          } else {
+            alert(data.error || 'Failed to remove user.');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Failed to remove user.');
+        });
+      }
+    });
+  });
+  
+  // Update Share Permissions
+  document.querySelectorAll('.share-perm').forEach(function(checkbox) {
+    checkbox.addEventListener('change', function() {
+      const shareId = this.dataset.shareId;
+      const permType = this.dataset.permType;
+      const value = this.checked;
+      
+      fetch('<%= shares_path %>/' + shareId, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: JSON.stringify({
+          share: {
+            [permType + '_perm']: value
+          }
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          alert(data.error || 'Failed to update permission.');
+          this.checked = !value;
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to update permission.');
+        this.checked = !value;
+      });
+    });
+  });
+  
+  function validateEmail(email) {
+    const re = /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+    return re.test(email);
+  }
+});
+<% end %>

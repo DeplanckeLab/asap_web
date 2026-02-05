@@ -119,6 +119,10 @@ import HeaderRunStatusController from "controllers/header_run_status_controller"
 application.register("header-run-status", HeaderRunStatusController)
 console.log('Header run status controller registered')
 
+import ViewToggleController from "controllers/view_toggle_controller"
+application.register("view-toggle", ViewToggleController)
+console.log('View toggle controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

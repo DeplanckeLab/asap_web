@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs]
+  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json]
 
   # GET /projects or /projects.json
   def index
@@ -15,7 +15,10 @@ class ProjectsController < ApplicationController
       status_id: params[:status_id],
       public_only: params[:public_only],
       sort: params[:sort] || 'created_at',
-      page: params[:page] || 1
+      page: params[:page] || 1,
+      # User permission context for filtering
+      current_user_id: current_user&.id,
+      is_admin: admin?
     }
     
     # Use Elasticsearch for search
@@ -272,6 +275,12 @@ class ProjectsController < ApplicationController
       
       # Get selected data type from params or default to matrices
       @selected_data_type = params[:data_type].presence || 'matrices'
+    end
+    
+    # Variables specific to settings view
+    if @view_type == 'settings'
+      # Load shares for user rights management
+      @shares = @project.shares.includes(:user).to_a
     end
     
     # Variables specific to summary view

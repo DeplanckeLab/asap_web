@@ -72,6 +72,12 @@ Rails.application.routes.draw do
   resources :std_methods
   resources :statuses
   
+  resources :shares, only: [:create, :update, :destroy] do
+    collection do
+      post :batch_add
+    end
+  end
+  
   resources :versions do
     collection do
       get :last_version

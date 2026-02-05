@@ -352,17 +352,16 @@ class ProjectsController < ApplicationController
         end
       end
       
-      # Get experimental entries and identifier types
-      @h_exp_entries = {}
+      # Get all identifier types (needed for displaying other identifiers from identifiers_json)
       @h_identifier_types = {}
+      IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
+      
+      # Get experimental entries grouped by identifier type
+      @h_exp_entries = {}
       @project.exp_entries.includes(:identifier_type).each do |exp_entry|
         type_id = exp_entry.identifier_type_id
         @h_exp_entries[type_id] ||= []
         @h_exp_entries[type_id] << exp_entry
-        
-        if exp_entry.identifier_type
-          @h_identifier_types[type_id] = exp_entry.identifier_type
-        end
       end
       
       # Get project type
@@ -1417,17 +1416,16 @@ class ProjectsController < ApplicationController
       end
     end
     
-    # Get experimental entries and identifier types
-    @h_exp_entries = {}
+    # Get all identifier types (needed for displaying other identifiers from identifiers_json)
     @h_identifier_types = {}
+    IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
+    
+    # Get experimental entries grouped by identifier type
+    @h_exp_entries = {}
     @project.exp_entries.includes(:identifier_type).each do |exp_entry|
       type_id = exp_entry.identifier_type_id
       @h_exp_entries[type_id] ||= []
       @h_exp_entries[type_id] << exp_entry
-      
-      if exp_entry.identifier_type
-        @h_identifier_types[type_id] = exp_entry.identifier_type
-      end
     end
     
     # Get project type

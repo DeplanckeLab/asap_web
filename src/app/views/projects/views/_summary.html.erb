@@ -15,11 +15,179 @@
           <p class="text-gray-900 font-medium"><%= @project.display_name %></p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-500 mb-1">Description</label>
-          <p class="text-gray-900"><%= @project.description.presence || 'No description provided' %></p>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Project Key</label>
+          <p class="text-gray-900"><span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"><%= @project.key %></span></p>
         </div>
+        <% if @project.public? %>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Public ID</label>
+          <p class="text-gray-900"><span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">ASAP<%= @project.public_id %></span></p>
+        </div>
+        <% end %>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Views</label>
+          <p class="text-gray-900"><%= number_with_delimiter(@project.nber_views || 0) %></p>
+        </div>
+        <% if @project.nber_cloned && @project.nber_cloned > 0 %>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Times Cloned</label>
+          <p class="text-gray-900"><%= number_with_delimiter(@project.nber_cloned) %></p>
+        </div>
+        <% end %>
+        <% if @project_type %>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Project Type</label>
+          <p class="text-gray-900"><%= @project_type.name %></p>
+        </div>
+        <% end %>
       </div>
     </div>
+
+    <% if @project.cloned_project_id %>
+      <% cloned_project = Project.find_by(id: @project.cloned_project_id) %>
+      <% if cloned_project %>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p class="text-blue-800">This project has been cloned from <%= link_to "#{cloned_project.name} [#{cloned_project.key}]", project_path(cloned_project), class: "font-medium underline hover:text-blue-600" %></p>
+        </div>
+      <% else %>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p class="text-red-800">This project has been cloned from a deleted project</p>
+        </div>
+      <% end %>
+    <% end %>
+
+    <% if @project.replaced_by_project_key.present? %>
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p class="text-red-800 font-medium">This project is obsolete and replaced by 
+          <%
+            # replaced_by_project_key can be either a project key or "ASAPX" format (public_id)
+            replacement_key = @project.replaced_by_project_key
+            if replacement_key.match?(/^ASAP(\d+)$/i)
+              public_id = replacement_key.gsub(/^ASAP/i, '').to_i
+              replacement_project = Project.find_by(public_id: public_id)
+            else
+              replacement_project = Project.find_by(key: replacement_key)
+            end
+          %>
+          <% if replacement_project %>
+            <%= link_to replacement_key, project_path(replacement_project), class: "underline hover:text-red-600" %>
+          <% else %>
+            <span class="underline"><%= replacement_key %></span>
+          <% end %>
+        </p>
+        <% if @project.replaced_by_comment.present? %>
+          <p class="text-red-700 text-sm mt-2"><strong>Comment:</strong> <%= @project.replaced_by_comment %></p>
+        <% end %>
+      </div>
+    <% end %>
+
+    <!-- Experimental Data -->
+    <% if @h_exp_entries && @h_exp_entries.keys.any? %>
+      <div class="bg-gray-50 rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Experimental Data</h3>
+        
+        <% @h_exp_entries.each do |type_id, exp_entries| %>
+          <% next if exp_entries.empty? %>
+          <% identifier_type = @h_identifier_types[type_id] %>
+          
+          <div class="mb-6 last:mb-0">
+            <h4 class="text-sm font-medium text-gray-700 mb-3"><%= identifier_type&.name || 'Unknown Type' %></h4>
+            
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-100">
+                  <tr>
+                    <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Identifier</th>
+                    <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Other Identifiers</th>
+                    <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Publication</th>
+                    <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contributors</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <% exp_entries.each do |exp_entry| %>
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-4 py-3 whitespace-nowrap">
+                        <% if identifier_type&.url_mask.present? %>
+                          <%= link_to exp_entry.identifier, 
+                              identifier_type.url_mask.gsub('#{id}', exp_entry.identifier.to_s), 
+                              target: '_blank', 
+                              class: "inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-gray-800 text-white hover:bg-gray-700" %>
+                        <% else %>
+                          <span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-gray-800 text-white"><%= exp_entry.identifier %></span>
+                        <% end %>
+                      </td>
+                      <td class="px-4 py-3">
+                        <% h_ids = exp_entry.parsed_identifiers %>
+                        <% if h_ids.any? %>
+                          <div class="flex flex-wrap gap-1">
+                            <% h_ids.each do |id_type_id, ids| %>
+                              <% id_type = @h_identifier_types[id_type_id.to_i] %>
+                              <% ids.each do |id| %>
+                                <% if id_type&.url_mask.present? %>
+                                  <%= link_to id, id_type.url_mask.gsub('#{id}', id.to_s), target: '_blank', class: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" %>
+                                <% else %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"><%= id %></span>
+                                <% end %>
+                              <% end %>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400 text-sm">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-4 py-3">
+                        <% if exp_entry.doi.present? %>
+                          <% exp_entry.doi.split(";").each do |doi| %>
+                            <%= link_to "DOI", "https://doi.org/#{doi.strip}", target: '_blank', class: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200" %>
+                          <% end %>
+                        <% else %>
+                          <span class="text-gray-400 text-sm">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-4 py-3">
+                        <% if exp_entry.contributors.present? %>
+                          <div class="flex flex-wrap gap-1">
+                            <% exp_entry.contributors.split(";").each do |contributor| %>
+                              <% name = contributor.split(",").reject(&:blank?).join(" ") %>
+                              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"><%= name %></span>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400 text-sm">-</span>
+                        <% end %>
+                      </td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <!-- Data Downloaded From (Provider Projects) -->
+    <% if @project.provider_projects.any? %>
+      <div class="bg-gray-50 rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Data Downloaded From</h3>
+        
+        <div class="space-y-3">
+          <% @project.provider_projects.each do |pp| %>
+            <% provider = pp.provider %>
+            <% if provider %>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-700"><%= provider.name %>:</span>
+                <% if provider.url_mask.present? %>
+                  <%= link_to pp.key, provider.url_mask.gsub('#{id}', pp.key.to_s), target: '_blank', class: "text-blue-600 hover:text-blue-800 hover:underline" %>
+                <% else %>
+                  <span class="text-gray-900"><%= pp.key %></span>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
 
     <!-- Reproducibility -->
     <div class="bg-gray-50 rounded-lg p-6">
@@ -40,6 +208,17 @@
           <%= link_to get_file_project_path(@project.key, step: 'parsing', filename: 'output.loom'), target: "_blank", class: "inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors" do %>
             Initial Loom File
           <% end %>
+        <% end %>
+      </div>
+    </div>
+
+    <!-- Programmatic Access -->
+    <div class="bg-gray-50 rounded-lg p-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Programmatic Access & Downloads</h3>
+      
+      <div class="flex flex-wrap gap-3">
+        <%= link_to get_loom_files_json_project_path(@project.key, download: 1), class: "inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors" do %>
+          List of Loom files (JSON)
         <% end %>
       </div>
     </div>

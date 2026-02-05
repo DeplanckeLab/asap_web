@@ -41,6 +41,9 @@ class ProjectsController < ApplicationController
     @current_page = (params[:page] || 1).to_i
     @per_page = 20
     
+    # Store the current browse URL for "back to projects" links
+    session[:projects_browse_url] = request.fullpath
+    
     respond_to do |format|
       format.html
       format.json { render json: @projects }

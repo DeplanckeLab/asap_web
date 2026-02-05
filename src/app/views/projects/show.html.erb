@@ -21,7 +21,7 @@
         <div class="flex items-center space-x-6">
           <!-- ASAP Logo -->
           <div class="flex-shrink-0">
-            <%= link_to projects_path,
+            <%= link_to projects_browse_url,
                   class: "inline-block rounded focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" do %>
               <%= image_tag "ASAP_sansTagline_White.svg", 
                   class: 'h-8 w-32 object-contain', 
@@ -276,7 +276,7 @@
               <div class="border-t border-gray-200 my-1"></div>
               
               <!-- Back to Projects -->
-              <%= link_to projects_path, 
+              <%= link_to projects_browse_url, 
                   class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
                 <i class="fas fa-arrow-left text-lg mr-3"></i>
                 Back to Projects
@@ -335,7 +335,7 @@
           <%= render "shared/user_menu", wrapper_classes: "relative ml-4" %>
           
           <!-- Back to Projects -->
-          <%= link_to projects_path, 
+          <%= link_to projects_browse_url, 
               class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",
               title: "Back to Projects" do %>
             <i class="fas fa-arrow-left text-lg"></i>

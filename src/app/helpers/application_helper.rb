@@ -460,4 +460,10 @@ module ApplicationHelper
       failed: totals[4]
     }
   end
+
+  # Returns the URL to go back to the projects browse page
+  # Preserves search query, filters, and pagination from the last visit
+  def projects_browse_url
+    session[:projects_browse_url].presence || projects_path
+  end
 end

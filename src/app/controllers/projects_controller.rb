@@ -343,15 +343,6 @@ class ProjectsController < ApplicationController
       @step = @project.step || Step.first
       @disable_filter = false
       
-      # Get articles hash for DOI references
-      @h_articles = {}
-      if @project.doi.present?
-        dois = @project.doi.split(/\s*,\s*/)
-        Article.where(doi: dois).each do |article|
-          @h_articles[article.doi] = article
-        end
-      end
-      
       # Get all identifier types (needed for displaying other identifiers from identifiers_json)
       @h_identifier_types = {}
       IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
@@ -362,6 +353,15 @@ class ProjectsController < ApplicationController
         type_id = exp_entry.identifier_type_id
         @h_exp_entries[type_id] ||= []
         @h_exp_entries[type_id] << exp_entry
+      end
+
+      # Get articles hash for project DOI references (for Publications section)
+      @h_articles = {}
+      if @project.doi.present?
+        dois = @project.doi.split(/\s*,\s*/).map(&:strip).reject(&:blank?)
+        Article.where(doi: dois).each do |article|
+          @h_articles[article.doi] = article
+        end
       end
       
       # Get project type
@@ -1407,15 +1407,6 @@ class ProjectsController < ApplicationController
     @step = @project.step || Step.first
     @disable_filter = false
     
-    # Get articles hash for DOI references
-    @h_articles = {}
-    if @project.doi.present?
-      dois = @project.doi.split(/\s*,\s*/)
-      Article.where(doi: dois).each do |article|
-        @h_articles[article.doi] = article
-      end
-    end
-    
     # Get all identifier types (needed for displaying other identifiers from identifiers_json)
     @h_identifier_types = {}
     IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
@@ -1426,6 +1417,15 @@ class ProjectsController < ApplicationController
       type_id = exp_entry.identifier_type_id
       @h_exp_entries[type_id] ||= []
       @h_exp_entries[type_id] << exp_entry
+    end
+
+    # Get articles hash for project DOI references (for Publications section)
+    @h_articles = {}
+    if @project.doi.present?
+      dois = @project.doi.split(/\s*,\s*/).map(&:strip).reject(&:blank?)
+      Article.where(doi: dois).each do |article|
+        @h_articles[article.doi] = article
+      end
     end
     
     # Get project type

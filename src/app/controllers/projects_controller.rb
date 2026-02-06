@@ -168,6 +168,29 @@ class ProjectsController < ApplicationController
       @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
       # Set selected run ID from URL parameter (to auto-load a specific run)
       @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
+      
+      # Determine if we should load the run panel
+      # If a step-specific partial exists (like _parsing.html.erb), we don't load the run panel
+      # because step_results will render the custom partial instead
+      # This matches the behavior of clicking on a step in the left panel
+      @load_run_panel = false
+      if @selected_run_id.present?
+        selected_run = Run.find_by(id: @selected_run_id)
+        selected_step = selected_run&.step
+        Rails.logger.info("[show] run_panel_logic: selected_run_id=#{@selected_run_id}, selected_run=#{selected_run&.id}, selected_step=#{selected_step&.name}")
+        if selected_step
+          # Check if there's a step-specific partial
+          step_partial_path = "projects/views/#{selected_step.name}"
+          partial_exists = lookup_context.template_exists?(step_partial_path, [], true)
+          Rails.logger.info("[show] run_panel_logic: step_partial_path=#{step_partial_path}, partial_exists=#{partial_exists}, has_std_view=#{selected_step.has_std_view}")
+          
+          # Only load run panel if no step-specific partial exists and step has std_view
+          if !partial_exists && selected_step.has_std_view
+            @load_run_panel = true
+          end
+          Rails.logger.info("[show] run_panel_logic: @load_run_panel=#{@load_run_panel}")
+        end
+      end
     end
     
     # Variables specific to data view

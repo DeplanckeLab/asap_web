@@ -261,11 +261,17 @@ module ApplicationHelper
       else
         std_method_attr = (h_std_method_attrs && h_std_method_attrs[run.std_method_id]) ? h_std_method_attrs[run.std_method_id][attr] : nil
         if std_method_attr
-          txt = "<span class='badge badge-light cursor-help wrap' data-toggle='tooltip' data-placement='bottom' title=\"" +
-            [std_method_attr['label'], (std_method_attr['description_text'] || std_method_attr['description'] || 'No description')].select { |e| e && !e.empty? }.join(": ") +
-            "\">#{attr}:#{v.to_s}</span>"
+          tooltip_text = [std_method_attr['label'], (std_method_attr['description_text'] || std_method_attr['description'] || 'No description')].select { |e| e && !e.empty? }.join(": ")
+          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' " \
+            "title=\"#{tooltip_text}\">" \
+            "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
+            "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
+            "</span>"
         else
-          txt = "<span class='badge badge-light'>#{attr}:#{v.to_s}</span>"
+          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>" \
+            "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
+            "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
+            "</span>"
         end
       end
       
@@ -285,20 +291,50 @@ module ApplicationHelper
             tmp_run = (defined?(Run) && v['run_id']) ? Run.find_by(id: v['run_id']) : nil
             tmp_step = (tmp_run && @h_steps) ? @h_steps[tmp_run.step_id] : nil
             if tmp_run && tmp_step
-              additional_classes = input_lineage_class + ' pointer'
               displayed_val = ''
               if v['output_dataset'] && m = v['output_dataset'].match(/^\/.{3}_attrs\/(.+)/)
                 displayed_val = m[1]
               else
                 displayed_val = "#{tmp_step.name}" + ((tmp_step.multiple_runs) ? " ##{tmp_run.num}" : "")
               end
-              array_dataset.push "<span id='input_lineage_#{tmp_run.id}' class='badge badge-dark #{additional_classes}'>#{attr}:#{displayed_val}</span>"
+              # Use Tailwind-style clickable badge with pipeline-runs Stimulus controller
+              project_id = run.project_id
+              pipeline_url = "/projects/#{project_id}/pipeline_runs"
+              annot_id = v['annot_id']
+              
+              if annot_id.present?
+                # Use annot_id for pipeline lookup
+                array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
+                  "data-controller='pipeline-runs' " \
+                  "data-pipeline-runs-annot-id-value='#{annot_id}' " \
+                  "data-pipeline-runs-project-id-value='#{project_id}' " \
+                  "data-pipeline-runs-url-value='#{pipeline_url}' " \
+                  "data-action='click->pipeline-runs#showPipeline' " \
+                  "onclick='event.stopPropagation();' " \
+                  "title='#{displayed_val} - Click to view pipeline'>" \
+                  "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
+                  "<span class='ml-1 text-blue-600'>#{displayed_val}</span>" \
+                  "</span>"
+              else
+                # Use run_id for pipeline lookup
+                array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
+                  "data-controller='pipeline-runs' " \
+                  "data-pipeline-runs-run-id-value='#{tmp_run.id}' " \
+                  "data-pipeline-runs-project-id-value='#{project_id}' " \
+                  "data-pipeline-runs-url-value='#{pipeline_url}' " \
+                  "data-action='click->pipeline-runs#showPipeline' " \
+                  "onclick='event.stopPropagation();' " \
+                  "title='#{displayed_val} - Click to view pipeline'>" \
+                  "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
+                  "<span class='ml-1 text-blue-600'>#{displayed_val}</span>" \
+                  "</span>"
+              end
             else
-              array_dataset.push "<span class='badge badge-secondary'>#{attr}:NA</span>"
+              array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>#{attr}:NA</span>"
             end
           end
         else
-          array_dataset.push "<span class='badge badge-secondary'>#{attr}:#{list_datasets_by_attr_name[attr_name].size} datasets</span>"
+          array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>#{attr}:#{list_datasets_by_attr_name[attr_name].size} datasets</span>"
         end
       end
       
@@ -310,7 +346,9 @@ module ApplicationHelper
   
   def display_run_attrs(run, h_attrs, h_std_method_attrs, opt)
     h = display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
-    '<p>' + h[:datasets].join(" ") + " " + h[:attrs].join(" ") + "</p>"
+    all_badges = h[:datasets] + h[:attrs]
+    return '' if all_badges.empty?
+    "<div class='flex flex-wrap gap-1.5 items-center'>" + all_badges.join("") + "</div>"
   end
   
   def display_download_btn(run, h_file)
@@ -465,5 +503,21 @@ module ApplicationHelper
   # Preserves search query, filters, and pagination from the last visit
   def projects_browse_url
     session[:projects_browse_url].presence || projects_path
+  end
+
+  # Returns the URL for viewing a run in the analysis view
+  # Always navigates to the project analysis view with the run selected
+  # The analysis view will show standard view or custom view based on step.has_std_view
+  # @param run [Run] The run object
+  # @param project [Project] The project object
+  # @param step [Step, nil] Optional step object (fetched from run if not provided)
+  # @return [String] The URL to the analysis view for this run
+  def run_view_url(run, project, step = nil)
+    return '#' unless run && project
+
+    step ||= run.step
+    return '#' unless step
+
+    project_path(project, view: 'analysis', step_id: step.id, run_id: run.id)
   end
 end

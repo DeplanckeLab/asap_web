@@ -127,7 +127,7 @@
                               <%= status_icon[:label] %> Runs (<%= count %>)
                             </div>
                             <% runs_list.limit(20).each do |run| %>
-                              <%= link_to project_path(@project, view: 'analysis', step_id: run.step_id, run_id: run.id), 
+                              <%= link_to run_view_url(run, @project, run.step), 
                                   class: "block px-3 py-2 text-sm hover:bg-gray-100 transition-colors",
                                   data: { turbo: false } do %>
                                 <div class="flex items-center justify-between">

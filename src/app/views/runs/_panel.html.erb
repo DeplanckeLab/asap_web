@@ -290,9 +290,16 @@
                                           <% dataset_display = "#{step_name} #{annot.name}" %>
                                         <% end %>
                                         <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                              data-controller="pipeline-runs"
+                                              data-pipeline-runs-annot-id-value="<%= annot_id %>"
+                                              data-pipeline-runs-project-id-value="<%= @project.id %>"
+                                              data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                                              data-action="click->pipeline-runs#showPipeline"
+                                              onclick="event.stopPropagation();"
+                                              title="<%= dataset_display %> - Click to view pipeline">
                                           <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                          <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
+                                          <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                                         </span>
                                       <% else %>
                                         <%# annot_id present but annot not found - check if run_id is available %>
@@ -574,9 +581,16 @@
                               <% dataset_display = "#{step_name} #{annot.name}" %>
                             <% end %>
                             <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                  data-controller="pipeline-runs"
+                                  data-pipeline-runs-annot-id-value="<%= annot_id %>"
+                                  data-pipeline-runs-project-id-value="<%= @project.id %>"
+                                  data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                                  data-action="click->pipeline-runs#showPipeline"
+                                  onclick="event.stopPropagation();"
+                                  title="<%= dataset_display %> - Click to view pipeline">
                               <span class="font-semibold text-blue-800"><%= key %>:</span>
-                              <span class="ml-1 text-blue-600" title="<%= dataset_display %>"><%= truncated_dataset %></span>
+                              <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                             </span>
                           <% else %>
                             <%# annot_id present but annot not found - check if run_id is available %>

@@ -29,7 +29,7 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content"]
-  static values = { projectId: Number, statusIcons: Array }
+  static values = { projectId: Number, statusIcons: Array, loadRunPanel: Boolean }
 
   connect() {
     console.log('[StepSelectorController] CONNECT METHOD CALLED!')
@@ -74,17 +74,22 @@ export default class extends Controller {
       // Border is already set correctly by server based on @selected_step_id, don't modify it
     })
     
-    // Check if run_id is in URL (means we should load run panel directly, not step results)
+    // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search)
     const runIdFromUrl = urlParams.get('run_id')
     const stepIdFromUrl = urlParams.get('step_id')
     
-    // If run_id is present, load the run panel directly instead of step results
-    if (runIdFromUrl) {
-      const runUrl = '/runs/' + runIdFromUrl
-      console.log('[StepSelectorController] Found run_id in URL, will load run panel directly:', runUrl)
+    // Check if server says to load run panel (false when step has a custom partial like _parsing.html.erb)
+    const shouldLoadRunPanel = this.hasLoadRunPanelValue ? this.loadRunPanelValue : false
+    console.log('[StepSelectorController] loadRunPanelValue from server:', shouldLoadRunPanel)
+    console.log('[StepSelectorController] runIdFromUrl:', runIdFromUrl, 'stepIdFromUrl:', stepIdFromUrl)
+    
+    // If run_id is in URL and server says to load run panel, skip loading step results
+    // The auto-load script in _analysis.html.erb will load the run panel directly
+    if (runIdFromUrl && shouldLoadRunPanel) {
+      console.log('[StepSelectorController] Skipping step results - will load run panel directly')
       
-      // Set current step ID if provided (for highlighting the step in the sidebar)
+      // Set current step ID for highlighting the step in the sidebar
       if (stepIdFromUrl) {
         this.currentStepId = stepIdFromUrl.toString()
         this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
@@ -92,20 +97,13 @@ export default class extends Controller {
         this.refreshStepsPanel()
       }
       
-      // Wait longer for everything to be ready, then load run panel
-      // Use a longer timeout to ensure step results don't load first
-      setTimeout(() => {
-        if (typeof loadRunInRightPanel === 'function') {
-          console.log('[StepSelectorController] Loading run panel directly')
-          if (this.hasEmptyStateTarget) {
-            this.emptyStateTarget.style.display = 'none'
-          }
-          if (this.hasLoadingStateTarget) {
-            this.loadingStateTarget.style.display = 'none'
-          }
-          loadRunInRightPanel(runUrl)
-        }
-      }, 800)
+      // Hide empty state and loading state
+      if (this.hasEmptyStateTarget) {
+        this.emptyStateTarget.style.display = 'none'
+      }
+      if (this.hasLoadingStateTarget) {
+        this.loadingStateTarget.style.display = 'none'
+      }
       
       // Subscribe to websocket updates
       this.subscribeToProject()

@@ -1,4 +1,4 @@
-<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>" data-step-selector-status-icons-value="<%= status_icons_json %>">
+<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>" data-step-selector-status-icons-value="<%= status_icons_json %>" data-step-selector-load-run-panel-value="<%= @load_run_panel %>">
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-2">
@@ -527,16 +527,36 @@
         controller.loadingStateTarget.style.display = 'none'
       }
       
-      // Trigger Stimulus to scan for new controllers in the run content
-      if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-        setTimeout(() => {
-          window.Stimulus.router.scan()
-        }, 0)
-        
-        setTimeout(() => {
-          window.Stimulus.router.scan()
-        }, 100)
-      }
+      // Trigger Stimulus to connect new controllers in the dynamically loaded content
+      console.log('[loadRunInRightPanel] Triggering Stimulus to connect new controllers...')
+      
+      // Log what controllers are in the new content
+      const newControllerElements = controller.contentTarget.querySelectorAll('[data-controller]')
+      console.log('[loadRunInRightPanel] Found elements with data-controller:', newControllerElements.length)
+      newControllerElements.forEach(el => {
+        console.log('[loadRunInRightPanel] Controller element:', el.getAttribute('data-controller'), el)
+      })
+      
+      // The MutationObserver in Stimulus should automatically detect new elements
+      // But let's also try forcing a reconnection by temporarily removing and re-adding
+      // the content to trigger the mutation
+      setTimeout(() => {
+        // Check if controllers are connected
+        const pipelineRunsElements = controller.contentTarget.querySelectorAll('[data-controller*="pipeline-runs"]')
+        console.log('[loadRunInRightPanel] pipeline-runs elements:', pipelineRunsElements.length)
+        pipelineRunsElements.forEach(el => {
+          if (window.Stimulus) {
+            const ctrl = window.Stimulus.getControllerForElementAndIdentifier(el, 'pipeline-runs')
+            console.log('[loadRunInRightPanel] pipeline-runs controller connected:', !!ctrl, el)
+            if (!ctrl) {
+              // Controller not connected - try to force it by cloning
+              console.log('[loadRunInRightPanel] Attempting to force controller connection...')
+              const clone = el.cloneNode(true)
+              el.parentNode.replaceChild(clone, el)
+            }
+          }
+        })
+      }, 200)
     })
     .catch(error => {
       console.error('[loadRunInRightPanel] Error loading run:', error)
@@ -554,15 +574,45 @@
   }
 
   // Auto-load selected run if run_id is provided in URL
-  <% if @selected_run_id.present? %>
+  // Only load in panel if the step uses standard view (has_std_view == true)
+  // For custom view steps (has_std_view == false), the step_results partial shows the custom partial
+  console.log('[Analysis] Debug: @selected_run_id=<%= @selected_run_id.inspect %>, @selected_step_id=<%= @selected_step_id.inspect %>, @load_run_panel=<%= @load_run_panel.inspect %>')
+  
+  // Debug: Check step selector state after DOM is ready
+  document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+      const stepSelectorEl = document.querySelector('[data-controller*="step-selector"]')
+      console.log('[Analysis] Step selector element:', stepSelectorEl)
+      console.log('[Analysis] Step selector data-current-step-id:', stepSelectorEl?.getAttribute('data-current-step-id'))
+      
+      const stepElements = document.querySelectorAll('[data-step-id]')
+      console.log('[Analysis] Found step elements:', stepElements.length)
+      stepElements.forEach(el => {
+        console.log('[Analysis] Step element:', el.getAttribute('data-step-id'), el.textContent.trim().substring(0, 30))
+      })
+      
+      const targetStepEl = document.querySelector('[data-step-id="<%= @selected_step_id %>"]')
+      console.log('[Analysis] Target step element (step_id=<%= @selected_step_id %>):', targetStepEl)
+      
+      const contentTarget = document.querySelector('[data-step-selector-target="content"]')
+      console.log('[Analysis] Content target innerHTML length:', contentTarget?.innerHTML?.length)
+      console.log('[Analysis] Content target preview:', contentTarget?.innerHTML?.substring(0, 200))
+    }, 500)
+  })
+  
+  <% if @load_run_panel %>
+  console.log('[Analysis] @load_run_panel is TRUE - will auto-load run panel directly')
+  // Load run panel directly - step_selector_controller is skipping step results for this case
   document.addEventListener('DOMContentLoaded', function() {
     // Small delay to ensure Stimulus controller is initialized
     setTimeout(function() {
       const runUrl = '<%= run_path(@selected_run_id) %>'
-      console.log('[Auto-load] Loading run from URL parameter:', runUrl)
+      console.log('[Auto-load] Loading run panel directly:', runUrl)
       loadRunInRightPanel(runUrl)
     }, 100)
   })
+  <% else %>
+  console.log('[Analysis] @load_run_panel is FALSE - will NOT auto-load run panel, step_results will show custom partial')
   <% end %>
 
 </script>

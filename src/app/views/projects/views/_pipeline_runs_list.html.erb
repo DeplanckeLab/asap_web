@@ -17,7 +17,7 @@
       <% params_array = h_run_attrs.to_a %>
       
       <div class="border rounded-lg p-3 transition-colors cursor-pointer <%= run.id == @immediate_parent_run_id ? 'border-blue-500 bg-blue-50 hover:bg-blue-100' : 'border-gray-200 hover:bg-gray-50' %>"
-           onclick="event.preventDefault(); if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>'); } else { window.location.href = '<%= run_path(run) %>'; } return false;"
+           onclick="event.preventDefault(); window.location.href = '<%= run_view_url(run, @project, step) %>'; return false;"
            title="Click to view run details">
         <div class="flex items-center justify-between mb-2">
           <div class="flex-1">

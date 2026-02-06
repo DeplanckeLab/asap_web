@@ -411,7 +411,7 @@ class ProjectsController < ApplicationController
     #end
     
     respond_to do |format|
-      format.html { render layout: false }
+      format.html # Use application layout
       format.json { render json: @project }
     end
   end

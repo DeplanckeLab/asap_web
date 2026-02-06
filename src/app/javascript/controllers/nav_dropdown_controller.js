@@ -54,8 +54,44 @@ export default class extends Controller {
   }
 
   openMenu() {
+    // Reset positioning before showing to get accurate dimensions
+    this.menu.style.position = 'fixed'
+    this.menu.style.left = '0px'
+    this.menu.style.top = '0px'
+    this.menu.style.visibility = 'hidden'
     this.menu.classList.remove(this.hiddenClassValue)
-    this.toggleButton.setAttribute("aria-expanded", "true")
+    
+    // Use requestAnimationFrame to ensure layout is calculated
+    requestAnimationFrame(() => {
+      this.repositionMenu()
+      this.menu.style.visibility = 'visible'
+      this.toggleButton.setAttribute("aria-expanded", "true")
+    })
+  }
+
+  repositionMenu() {
+    // Get button and menu positions
+    const buttonRect = this.toggleButton.getBoundingClientRect()
+    const menuRect = this.menu.getBoundingClientRect()
+    const viewportWidth = window.innerWidth
+    
+    // Calculate desired position (centered below button)
+    const buttonCenterX = buttonRect.left + buttonRect.width / 2
+    let menuLeft = buttonCenterX - menuRect.width / 2
+    
+    // Constrain to viewport with 8px padding
+    const minLeft = 8
+    const maxLeft = viewportWidth - menuRect.width - 8
+    
+    if (menuLeft < minLeft) {
+      menuLeft = minLeft
+    } else if (menuLeft > maxLeft) {
+      menuLeft = maxLeft
+    }
+    
+    // Position the menu just below the button
+    this.menu.style.left = menuLeft + 'px'
+    this.menu.style.top = (buttonRect.bottom + 4) + 'px'
   }
 
   closeMenu() {

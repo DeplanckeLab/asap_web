@@ -1,9 +1,9 @@
 <!-- Top Bar -->
-<div class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-50">
-  <div class="px-4 sm:px-6 lg:px-8 w-full">
-    <div class="flex items-center justify-between h-16">
+<div class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-50 overflow-visible">
+  <div class="px-4 sm:px-6 lg:px-8 w-full overflow-visible">
+    <div class="flex items-center justify-between h-16 overflow-visible">
       <!-- Left side: Logo and Project Info -->
-      <div class="flex items-center space-x-6">
+      <div class="flex items-center space-x-6 overflow-visible">
         <!-- ASAP Logo -->
         <div class="flex-shrink-0">
           <%= link_to projects_browse_url,
@@ -46,9 +46,49 @@
           [:waiting, :running, :completed, :failed].each do |key|
             status_id = { waiting: 1, running: 2, completed: 3, failed: 4 }[key]
             if run_counts[key] > 0
-              runs_by_status[key] = @project.runs.includes(:step).where(status_id: status_id).order(created_at: :desc)
+              runs_by_status[key] = @project.runs.includes(:step, :std_method).where(status_id: status_id).order(created_at: :desc)
             else
               runs_by_status[key] = []
+            end
+          end
+          
+          # Pre-load data for dataset parameter display
+          # Collect all run_ids and annot_ids from attrs_json of all runs
+          all_runs = runs_by_status.values.flatten
+          header_annot_ids = []
+          header_run_ids = []
+          all_runs.each do |run|
+            next unless run.attrs_json.present?
+            h_attrs = Basic.safe_parse_json(run.attrs_json, {})
+            h_attrs.each_value do |v|
+              if v.is_a?(Hash)
+                header_annot_ids << v['annot_id'] if v['annot_id']
+                header_run_ids << v['run_id'] if v['run_id']
+              elsif v.is_a?(Array)
+                v.each do |item|
+                  if item.is_a?(Hash)
+                    header_annot_ids << item['annot_id'] if item['annot_id']
+                    header_run_ids << item['run_id'] if item['run_id']
+                  end
+                end
+              end
+            end
+          end
+          
+          # Load annots and their origin runs
+          header_h_annots = {}
+          header_h_ori_runs = {}
+          header_h_steps = {}
+          if header_annot_ids.any?
+            Annot.where(id: header_annot_ids.uniq).each do |a|
+              header_h_annots[a.id] = a
+              header_run_ids << a.ori_run_id if a.ori_run_id
+            end
+          end
+          if header_run_ids.any?
+            Run.includes(:step).where(id: header_run_ids.uniq).each do |r|
+              header_h_ori_runs[r.id] = r
+              header_h_steps[r.step_id] = r.step if r.step
             end
           end
           
@@ -79,11 +119,11 @@
               </div>
             </div>
             <!-- Run Status Icons Section -->
-            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300"
+            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300 overflow-visible"
                  data-controller="header-run-status"
                  data-header-run-status-project-id-value="<%= @project.id %>"
                  data-header-run-status-status-icons-value="<%= status_icons_json %>">
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 overflow-visible">
                   <% run_status_icons.each do |status_icon| %>
                     <% 
                       runs_list = runs_by_status[status_icon[:key]]
@@ -93,7 +133,7 @@
                       icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
                       color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
                     %>
-                    <div class="relative" data-controller="nav-dropdown" data-status-key="<%= status_icon[:key] %>">
+                    <div class="relative overflow-visible" data-controller="nav-dropdown" data-status-key="<%= status_icon[:key] %>">
                       <button type="button"
                               class="flex flex-col items-center cursor-pointer hover:opacity-80 transition-opacity <%= is_active ? '' : 'cursor-default' %>"
                               data-nav-dropdown-toggle
@@ -105,24 +145,127 @@
                         <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
                       </button>
                       <% if is_active %>
-                        <div class="hidden absolute left-1/2 -translate-x-1/2 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50 max-h-64 overflow-y-auto"
+                        <div class="hidden w-max max-h-96 flex flex-col bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[9999]"
                              data-nav-menu>
-                          <div class="py-1">
-                            <div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100">
-                              <%= status_icon[:label] %> Runs (<%= count %>)
-                            </div>
+                          <div class="sticky top-0 bg-white rounded-t-lg px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 flex items-center justify-between z-10">
+                            <span><%= status_icon[:label] %> Runs (<%= count %>)</span>
+                            <button type="button" 
+                                    class="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
+                                    data-action="click->nav-dropdown#closeMenu"
+                                    title="Close">
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                              </svg>
+                            </button>
+                          </div>
+                          <div class="py-1 overflow-y-auto flex-1">
                             <% runs_list.limit(20).each do |run| %>
-                              <%= link_to project_path(@project, view: 'analysis', step_id: run.step_id, run_id: run.id), 
+                              <% 
+                                step = run.step
+                                step_label = step&.label.presence || step&.name.presence || "Run"
+                                method_label = run.std_method ? (run.std_method.label.presence || run.std_method.name.presence) : nil
+                                # Build display title based on multiple_runs flag
+                                if step&.multiple_runs
+                                  # multiple_runs true: Step - Method #N
+                                  display_title = step_label
+                                  display_title += " - #{method_label}" if method_label
+                                  display_title += " ##{run.num || run.id}"
+                                else
+                                  # multiple_runs false: just Method label, no run number
+                                  display_title = method_label || step_label
+                                end
+                                # Parse run attributes for parameters display
+                                h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+                                params_array = h_run_attrs.to_a
+                              %>
+                              <%= link_to run_view_url(run, @project, step), 
                                   class: "block px-3 py-2 text-sm hover:bg-gray-100 transition-colors",
                                   data: { turbo: false } do %>
                                 <div class="flex items-center justify-between">
                                   <span class="font-medium text-gray-700">
-                                    <%= run.step&.label.presence || run.step&.name.presence || "Run" %> #<%= run.num || run.id %>
+                                    <%= display_title %>
                                   </span>
-                                  <span class="text-xs text-gray-400">
+                                  <span class="text-xs text-gray-400 whitespace-nowrap ml-2">
                                     <%= time_ago_in_words(run.created_at) %> ago
                                   </span>
                                 </div>
+                                <% if params_array.any? %>
+                                  <div class="flex flex-nowrap gap-1 mt-1">
+                                    <% params_array.each do |key, value| %>
+                                      <% 
+                                        # Check if value is a dataset reference
+                                        annot_id = nil
+                                        direct_run_id = nil
+                                        if value.is_a?(Hash)
+                                          annot_id = value['annot_id'] || value[:annot_id]
+                                          direct_run_id = value['run_id'] || value[:run_id]
+                                        end
+                                      %>
+                                      <% if annot_id.present? %>
+                                        <% annot = header_h_annots[annot_id.to_i] %>
+                                        <% if annot %>
+                                          <% ori_run = header_h_ori_runs[annot.ori_run_id] if annot.ori_run_id.present? %>
+                                          <% ori_step = ori_run ? header_h_steps[ori_run.step_id] : nil %>
+                                          <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
+                                          <% if ori_step && ori_step.multiple_runs && ori_run %>
+                                            <% run_num = ori_run.num || ori_run.id %>
+                                            <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
+                                          <% else %>
+                                            <% dataset_display = "#{step_name} #{annot.name}" %>
+                                          <% end %>
+                                          <% truncated_dataset = dataset_display.length > 20 ? dataset_display[0..16] + "..." : dataset_display %>
+                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap"
+                                                title="<%= dataset_display %>">
+                                            <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                            <span class="ml-0.5 text-blue-600"><%= truncated_dataset %></span>
+                                          </span>
+                                        <% else %>
+                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap">
+                                            <span class="font-semibold"><%= key %>:</span>
+                                            <span class="ml-0.5">dataset</span>
+                                          </span>
+                                        <% end %>
+                                      <% elsif direct_run_id.present? %>
+                                        <% direct_run = header_h_ori_runs[direct_run_id.to_i] %>
+                                        <% if direct_run %>
+                                          <% direct_step = header_h_steps[direct_run.step_id] %>
+                                          <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
+                                          <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                                          <% if direct_step && direct_step.multiple_runs %>
+                                            <% run_num = direct_run.num || direct_run.id %>
+                                            <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                                          <% else %>
+                                            <% dataset_display = "#{step_name} #{dataset_name}" %>
+                                          <% end %>
+                                          <% truncated_dataset = dataset_display.length > 20 ? dataset_display[0..16] + "..." : dataset_display %>
+                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap"
+                                                title="<%= dataset_display %>">
+                                            <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                            <span class="ml-0.5 text-blue-600"><%= truncated_dataset %></span>
+                                          </span>
+                                        <% else %>
+                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap">
+                                            <span class="font-semibold"><%= key %>:</span>
+                                            <span class="ml-0.5">dataset</span>
+                                          </span>
+                                        <% end %>
+                                      <% elsif value.is_a?(Array) && value.first.is_a?(Hash) %>
+                                        <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">
+                                          <span class="font-semibold text-blue-800"><%= key %>:</span>
+                                          <span class="ml-0.5 text-blue-600"><%= value.size %> datasets</span>
+                                        </span>
+                                      <% else %>
+                                        <% display_value = value.to_s %>
+                                        <% display_value = display_value[0..10] + "..." if display_value.length > 13 %>
+                                        <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap"
+                                              title="<%= value.to_s %>">
+                                          <span class="font-semibold"><%= key %>:</span>
+                                          <span class="ml-0.5"><%= display_value %></span>
+                                        </span>
+                                      <% end %>
+                                    <% end %>
+                                  </div>
+                                <% end %>
                               <% end %>
                             <% end %>
                             <% if count > 20 %>
@@ -182,35 +325,35 @@
           <div class="py-2">
             <!-- Summary -->
             <%= link_to project_path(@project, view: 'summary'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'summary' ? 'bg-gray-100 font-medium' : ''}" do %>
               <i class="fas fa-info-circle text-lg mr-3"></i>
               Summary
             <% end %>
             
             <!-- Visualization -->
             <%= link_to project_path(@project, view: 'visualization'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'visualization' ? 'bg-gray-100 font-medium' : ''}" do %>
               <i class="fas fa-chart-line text-lg mr-3"></i>
               Visualization
             <% end %>
             
             <!-- Analysis -->
             <%= link_to project_path(@project, view: 'analysis'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'analysis' ? 'bg-gray-100 font-medium' : ''}" do %>
               <i class="fas fa-microscope text-lg mr-3"></i>
               Analysis
             <% end %>
             
             <!-- Data -->
             <%= link_to project_path(@project, view: 'data'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'data' ? 'bg-gray-100 font-medium' : ''}" do %>
               <i class="fas fa-database text-lg mr-3"></i>
               Data
             <% end %>
             
             <!-- Settings -->
             <%= link_to project_path(@project, view: 'settings'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'settings' ? 'bg-gray-100 font-medium' : ''}" do %>
               <i class="fas fa-cog text-lg mr-3"></i>
               Settings
             <% end %>
@@ -273,11 +416,11 @@
       <!-- Desktop Menu Items -->
       <div class="hidden lg:flex items-stretch gap-1">
         <%= link_to project_path(@project, view: 'summary'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Summary" do %><i class="fas fa-info-circle text-lg"></i><% end %><%= link_to project_path(@project, view: 'visualization'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Analysis" do %><i class="fas fa-microscope text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
-            class: "p-2 rounded-lg bg-gray-700 text-white", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
-            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %>
+            class: "p-2 rounded-lg #{@view_type == 'summary' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Summary" do %><i class="fas fa-info-circle text-lg"></i><% end %><%= link_to project_path(@project, view: 'visualization'), 
+            class: "p-2 rounded-lg #{@view_type == 'visualization' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
+            class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Analysis" do %><i class="fas fa-microscope text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
+            class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
+            class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %>
         
         <%= header_separator %>
         

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_04_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_06_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -302,7 +302,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_04_000001) do
   end
 
   create_table "data_classes", id: :serial, force: :cascade do |t|
+    t.string "category"
     t.datetime "created_at", precision: nil
+    t.string "label_template"
     t.text "name"
     t.datetime "updated_at", precision: nil
   end

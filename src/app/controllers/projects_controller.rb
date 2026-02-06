@@ -3093,8 +3093,15 @@ class ProjectsController < ApplicationController
                        step_obj ? (step_obj.label.presence || step_obj.name.humanize) : step_name.humanize
                      end.uniq.join(" or ")
                      
-                     type_label = format_data_type_label(req[:types])
-                     "#{type_label} from #{step_names}"
+                     # Use format_valid_types which applies DataClass templates and filters out 'dataset'
+                     type_label = format_valid_types(req[:valid_types])
+                     
+                     if type_label.present?
+                       "#{type_label} from #{step_names}"
+                     else
+                       # If all types were filtered out (e.g., only 'dataset'), just show the step name
+                       "data from #{step_names}"
+                     end
                    end.uniq
                    
                    "Requires: #{requirement_messages.join('; ')}"
@@ -3157,27 +3164,37 @@ class ProjectsController < ApplicationController
     end
     
     # Format data type names into human-readable labels
+    # Format a single data type name to a user-friendly label
+    # Uses DataClass.label_template and replaces {row_label}/{col_label} with project type values
     def format_data_type_label(types_str)
       return types_str if types_str.blank?
       
-      # Map technical names to user-friendly labels
-      type_mappings = {
-        'num_matrix' => 'numeric matrix',
-        'int_matrix' => 'integer matrix',
-        'sparse_matrix' => 'sparse matrix',
-        'dataset' => 'dataset',
-        'embedding' => 'embedding',
-        'clustering' => 'clustering',
-        'annotation' => 'annotation',
-        'diff_expr' => 'differential expression',
-        'gene_list' => 'gene list',
-        'cell_list' => 'cell list',
-        'hvg' => 'highly variable genes'
-      }
+      # Build data class cache if not already cached
+      @data_class_cache ||= begin
+        cache = {}
+        DataClass.all.each do |dc|
+          cache[dc.name] = { template: dc.label_template, category: dc.category }
+        end
+        cache
+      end
       
-      # Replace technical names with friendly labels
+      # Get project type labels for template substitution
+      row_label = @project&.project_type&.row_label || 'rows'
+      col_label = @project&.project_type&.col_label || 'columns'
+      row_label_singular = row_label.singularize
+      col_label_singular = col_label.singularize
+      
+      # Replace technical names with friendly labels from templates
       result = types_str.dup
-      type_mappings.each do |tech_name, friendly_name|
+      @data_class_cache.each do |tech_name, dc_info|
+        template = dc_info[:template]
+        next if template.nil?  # Skip types with nil template (like 'dataset')
+        
+        # Replace template placeholders with actual labels
+        friendly_name = template.gsub('{row_label}', row_label)
+                                .gsub('{col_label}', col_label)
+                                .gsub('{row_label_singular}', row_label_singular)
+                                .gsub('{col_label_singular}', col_label_singular)
         result.gsub!(tech_name, friendly_name)
       end
       
@@ -3188,18 +3205,100 @@ class ProjectsController < ApplicationController
     # valid_types is like [["dataset"], ["num_matrix", "int_matrix"]]
     # - outer array = AND conditions (all must be present)
     # - inner arrays = OR conditions (any one of these types satisfies this requirement)
+    # Uses DataClass categories to intelligently combine base types and value types
+    # Example output: "gene metadata (float or integer values)" instead of "row_mdata AND (numeric_mdata or discrete_mdata)"
     def format_valid_types(valid_types)
       return nil if valid_types.blank?
       
-      formatted = valid_types.map do |or_group|
-        if or_group.size == 1
-          or_group.first
-        else
-          "(#{or_group.join(' or ')})"
+      # Build data class cache if not already cached
+      @data_class_cache ||= begin
+        cache = {}
+        DataClass.all.each do |dc|
+          cache[dc.name] = { template: dc.label_template, category: dc.category }
         end
-      end.join(" AND ")
+        cache
+      end
       
-      format_data_type_label(formatted)
+      # Get project type labels for template substitution (singularized for metadata)
+      row_label = @project&.project_type&.row_label || 'rows'
+      col_label = @project&.project_type&.col_label || 'columns'
+      row_label_singular = row_label.singularize
+      col_label_singular = col_label.singularize
+      
+      # Flatten all types and categorize them
+      all_types = valid_types.flatten.uniq
+      
+      base_types = []      # e.g., row_mdata, col_mdata
+      value_types = []     # e.g., numeric_mdata, string_mdata
+      matrix_types = []    # e.g., num_matrix, int_matrix
+      other_types = []     # everything else
+      
+      all_types.each do |type|
+        dc_info = @data_class_cache[type]
+        next if dc_info.nil? || dc_info[:category] == 'skip'
+        
+        case dc_info[:category]
+        when 'base'
+          base_types << type
+        when 'value_type'
+          value_types << type
+        when 'matrix'
+          matrix_types << type
+        else
+          other_types << type
+        end
+      end
+      
+      result_parts = []
+      
+      # Format base types with value types combined
+      # e.g., "gene metadata (float values)" or "gene metadata (float or integer values)"
+      if base_types.any?
+        base_labels = base_types.map do |type|
+          template = @data_class_cache[type][:template]
+          template.gsub('{row_label_singular}', row_label_singular)
+                  .gsub('{col_label_singular}', col_label_singular)
+                  .gsub('{row_label}', row_label)
+                  .gsub('{col_label}', col_label)
+        end
+        
+        base_str = base_labels.size == 1 ? base_labels.first : "(#{base_labels.join(' or ')})"
+        
+        if value_types.any?
+          value_labels = value_types.map { |type| @data_class_cache[type][:template] }
+          value_str = value_labels.size == 1 ? value_labels.first : value_labels.join(' or ')
+          result_parts << "#{base_str} (#{value_str} values)"
+        else
+          result_parts << base_str
+        end
+      elsif value_types.any?
+        # Value types without base type (shouldn't happen often)
+        value_labels = value_types.map { |type| @data_class_cache[type][:template] }
+        value_str = value_labels.size == 1 ? value_labels.first : value_labels.join(' or ')
+        result_parts << "metadata (#{value_str} values)"
+      end
+      
+      # Format matrix types
+      if matrix_types.any?
+        matrix_labels = matrix_types.map { |type| @data_class_cache[type][:template] }
+        matrix_str = matrix_labels.size == 1 ? matrix_labels.first : "(#{matrix_labels.join(' or ')})"
+        result_parts << matrix_str
+      end
+      
+      # Format other types
+      other_types.each do |type|
+        template = @data_class_cache[type][:template]
+        if template
+          result_parts << template.gsub('{row_label_singular}', row_label_singular)
+                                  .gsub('{col_label_singular}', col_label_singular)
+                                  .gsub('{row_label}', row_label)
+                                  .gsub('{col_label}', col_label)
+        end
+      end
+      
+      return nil if result_parts.empty?
+      
+      result_parts.join(' AND ')
     end
     
     # Get all available annotations in the project
@@ -3388,21 +3487,9 @@ class ProjectsController < ApplicationController
         
         # If source steps don't exist, this is a missing requirement
         if source_step_ids.empty?
-          required_types = if valid_types.present?
-                             valid_types.map do |or_group|
-                               if or_group.size == 1
-                                 or_group.first
-                               else
-                                 "(#{or_group.join(' or ')})"
-                               end
-                             end.join(" AND ")
-                           else
-                             "data"
-                           end
-          
           missing_requirements << {
             steps: source_steps,
-            types: required_types
+            valid_types: valid_types  # Store raw array for later formatting with templates
           }
           next
         end
@@ -3430,7 +3517,7 @@ class ProjectsController < ApplicationController
           unless source_annots.any?
             missing_requirements << {
               steps: source_steps,
-              types: "data"
+              valid_types: []  # Empty array means any data
             }
           end
           next
@@ -3451,21 +3538,9 @@ class ProjectsController < ApplicationController
         
         # If this required parameter doesn't have a matching dataset, track the missing requirement
         unless has_valid_dataset
-          # Format valid_types into a readable string
-          # valid_types is like [["dataset"], ["num_matrix", "int_matrix"]]
-          # - outer array = AND conditions (all must be present)
-          # - inner arrays = OR conditions (any one of these types satisfies this requirement)
-          required_types = valid_types.map do |or_group|
-            if or_group.size == 1
-              or_group.first
-            else
-              "(#{or_group.join(' or ')})"
-            end
-          end.join(" AND ")
-          
           missing_requirements << {
             steps: source_steps,
-            types: required_types
+            valid_types: valid_types  # Store raw array for later formatting with templates
           }
         end
       end

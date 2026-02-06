@@ -3198,6 +3198,10 @@ class ProjectsController < ApplicationController
         @h_steps[step.id] = step
       end
       
+      # Get statuses hash for looking up status names
+      @h_statuses ||= {}
+      Status.all.each { |s| @h_statuses[s.id] = s } if @h_statuses.empty?
+      
       # Get project steps for availability checking
       @project_steps_hash = {}
       ProjectStep.where(project_id: @project.id).each do |ps|
@@ -3340,13 +3344,7 @@ class ProjectsController < ApplicationController
           step: step,
           project_step: project_step,
           status_id: status_id,
-          status: case status_id
-                  when 1 then 'waiting'
-                  when 2 then 'running'
-                  when 3 then 'complete'
-                  when 4 then 'failed'
-                  else 'not_started'
-                  end,
+          status: status_id.present? && @h_statuses[status_id] ? @h_statuses[status_id].name : 'not_started',
           is_available: is_available,
           is_current: is_current,
           is_complete: (status_id == 3),

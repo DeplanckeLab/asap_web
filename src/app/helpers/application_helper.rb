@@ -427,8 +427,8 @@ module ApplicationHelper
       Status.order(:rank, :id).map do |status|
         key = id_to_key[status.id] || status.name.downcase.to_sym
         
-        # Use the canonical key for display labels (Waiting, Running, Completed, Failed)
-        display_label = key.to_s.humanize
+        # Use the database status name for display labels
+        display_label = status.name.humanize
         
         {
           id: status.id,
@@ -446,8 +446,15 @@ module ApplicationHelper
 
   # Returns a hash of status icons keyed by canonical key (symbol)
   # This allows views to use :waiting, :running, :completed, :failed regardless of database names
+  # Also includes DB name aliases (:pending, :success) for compatibility
   def status_icons_by_key
-    @status_icons_by_key ||= status_icons_config.index_by { |s| s[:key] }
+    @status_icons_by_key ||= begin
+      config = status_icons_config.index_by { |s| s[:key] }
+      # Add DB name aliases for views that use database status names
+      config[:pending] = config[:waiting] if config[:waiting]
+      config[:success] = config[:completed] if config[:completed]
+      config
+    end
   end
 
   # Returns a hash of status icons keyed by status ID

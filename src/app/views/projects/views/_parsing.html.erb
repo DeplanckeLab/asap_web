@@ -132,13 +132,7 @@
             Parsing results
           </h3>
           <% if @parsing_run && @parsing_run.status_id %>
-            <% status_name = case @parsing_run.status_id
-                             when 1 then 'Waiting'
-                             when 2 then 'Running'
-                             when 3 then 'Completed'
-                             when 4 then 'Failed'
-                             else 'Unknown'
-                             end %>
+            <% status_name = @parsing_run.status&.name&.humanize || 'Unknown' %>
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= case @parsing_run.status_id
                                                                                                         when 1 then 'bg-yellow-100 text-yellow-800'
                                                                                                         when 2 then 'bg-blue-100 text-blue-800'

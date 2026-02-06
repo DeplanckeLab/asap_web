@@ -48,8 +48,8 @@
             <% elsif selected_status == 'running' %>
               <% running_config = status_icons_by_key[:running] %>
               <i class="<%= running_config[:icon_base] %> <%= running_config[:icon_spin] %> text-base <%= running_config[:active_color] %>"></i>
-            <% elsif selected_status == 'waiting' %>
-              <% waiting_config = status_icons_by_key[:waiting] %>
+            <% elsif selected_status == 'pending' %>
+              <% waiting_config = status_icons_by_key[:pending] %>
               <i class="<%= waiting_config[:icon_base] %> text-base <%= waiting_config[:active_color] %>"></i>
             <% elsif selected_status == 'failed' %>
               <% failed_config = status_icons_by_key[:failed] %>
@@ -137,14 +137,9 @@
                 <% elsif !step.multiple_runs %>
                   <% 
                     # Single icon for steps with multiple_runs = false
-                    tooltip_text = if is_complete
-                                     status.present? ? status.humanize : "Complete"
-                                   elsif status == 'running'
-                                     "Running"
-                                   elsif status == 'waiting'
-                                     "Waiting"
-                                   elsif status == 'failed'
-                                     "Failed"
+                    # Use status.humanize to display the database value directly
+                    tooltip_text = if status.present?
+                                     status.humanize
                                    else
                                      "Not started"
                                    end
@@ -156,8 +151,8 @@
                     <% elsif status == 'running' %>
                       <% running_config = status_icons_by_key[:running] %>
                       <i class="<%= running_config[:icon_base] %> <%= running_config[:icon_spin] %> text-sm <%= running_config[:active_color] %>"></i>
-                    <% elsif status == 'waiting' %>
-                      <% waiting_config = status_icons_by_key[:waiting] %>
+                    <% elsif status == 'pending' %>
+                      <% waiting_config = status_icons_by_key[:pending] %>
                       <i class="<%= waiting_config[:icon_base] %> text-sm <%= waiting_config[:active_color] %>"></i>
                     <% elsif status == 'failed' %>
                       <% failed_config = status_icons_by_key[:failed] %>

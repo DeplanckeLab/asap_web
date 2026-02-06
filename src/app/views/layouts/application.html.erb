@@ -51,7 +51,7 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
+  <body class="<%= (controller_name == 'runs' || controller_name == 'annots' || (controller_name == 'projects' && action_name == 'show')) ? 'h-screen flex flex-col overflow-hidden' : '' %>">
 
     <% if controller_name == 'runs' || controller_name == 'annots' || (controller_name == 'projects' && action_name == 'show') %>
       <%= render :partial => 'shared/project_header' %>

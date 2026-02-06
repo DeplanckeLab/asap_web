@@ -31,7 +31,7 @@
           <button type="button"
                   class="p-2 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
                   title="Refresh"
-                  onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(@run) %>'); }">
+                  onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(@run) %>', '<%= @step&.id %>'); }">
             <i class="fas fa-sync text-lg"></i>
           </button>
         <% end %>

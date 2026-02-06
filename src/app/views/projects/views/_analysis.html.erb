@@ -276,9 +276,9 @@
   </script>
 
   <!-- Two Column Layout: Steps Panel (Left) and Step Results (Right) -->
-  <div class="flex flex-row gap-4 flex-1 min-h-0 w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
+  <div class="flex flex-row gap-4 flex-1 min-h-0 w-full overflow-hidden" style="width: 100%; max-width: 100%; min-width: 0;">
     <!-- Left Panel: Steps Navigation (Hidden on narrow screens) -->
-    <div class="hidden lg:flex w-75 flex-shrink-0 flex flex-col min-h-0" data-step-selector-target="stepsPanel">
+    <div class="hidden lg:flex w-75 flex-shrink-0 flex flex-col min-h-0 h-full overflow-hidden" data-step-selector-target="stepsPanel">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
         <%= render partial: 'projects/views/steps_panel' %>
       </div>
@@ -470,8 +470,8 @@
     })
   }
 
-  function loadRunInRightPanel(runUrl) {
-    console.log('[loadRunInRightPanel] Loading run from:', runUrl)
+  function loadRunInRightPanel(runUrl, stepId) {
+    console.log('[loadRunInRightPanel] Loading run from:', runUrl, 'stepId:', stepId)
     
     // Find the step-selector controller and its content target
     const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
@@ -496,10 +496,23 @@
     const runIdMatch = runUrl.match(/\/runs\/(\d+)/)
     const runId = runIdMatch ? runIdMatch[1] : null
     
+    // Update the current step ID if provided (for highlighting in left panel)
+    if (stepId) {
+      controller.currentStepId = stepId.toString()
+      controller.element.setAttribute('data-current-step-id', stepId.toString())
+      console.log('[loadRunInRightPanel] Updated currentStepId to:', stepId)
+    }
+    
     // Save state to localStorage for when user returns from visualization view
-    if (runId && controller.currentStepId && typeof controller.saveState === 'function') {
-      controller.saveState(controller.currentStepId, 'run', runId)
-      console.log('[loadRunInRightPanel] State saved for run:', runId, 'step:', controller.currentStepId)
+    const effectiveStepId = stepId || controller.currentStepId
+    if (runId && effectiveStepId && typeof controller.saveState === 'function') {
+      controller.saveState(effectiveStepId, 'run', runId)
+      console.log('[loadRunInRightPanel] State saved for run:', runId, 'step:', effectiveStepId)
+    }
+    
+    // Refresh the steps panel to update the highlighting
+    if (stepId && typeof controller.refreshStepsPanel === 'function') {
+      controller.refreshStepsPanel()
     }
     
     // Hide empty state and loading state, show content
@@ -619,8 +632,9 @@
     // Small delay to ensure Stimulus controller is initialized
     setTimeout(function() {
       const runUrl = '<%= run_path(@selected_run_id) %>'
-      console.log('[Auto-load] Loading run panel directly:', runUrl)
-      loadRunInRightPanel(runUrl)
+      const stepId = '<%= @selected_step_id %>'
+      console.log('[Auto-load] Loading run panel directly:', runUrl, 'stepId:', stepId)
+      loadRunInRightPanel(runUrl, stepId)
     }, 100)
   })
   <% else %>

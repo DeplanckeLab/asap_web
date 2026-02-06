@@ -223,7 +223,7 @@ export default class extends Controller {
             // Load run panel - use global function from _analysis.html.erb
             setTimeout(() => {
               if (typeof loadRunInRightPanel === 'function') {
-                loadRunInRightPanel(`/runs/${savedState.runId}`)
+                loadRunInRightPanel(`/runs/${savedState.runId}`, stepId)
               } else {
                 // Fallback to loading step results
                 controller.loadStepResults(stepId, stepElement, true)

@@ -201,7 +201,7 @@
           // Load the run in the right panel
           var runUrl = '<%= runs_path %>/' + nodeData.run_id;
           if (typeof loadRunInRightPanel === 'function') {
-            loadRunInRightPanel(runUrl);
+            loadRunInRightPanel(runUrl, nodeData.step_id);
           } else {
             // Fallback: select the step
             const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]');

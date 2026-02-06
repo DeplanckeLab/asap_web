@@ -166,10 +166,10 @@
                                 method_label = run.std_method ? (run.std_method.label.presence || run.std_method.name.presence) : nil
                                 # Build display title based on multiple_runs flag
                                 if step&.multiple_runs
-                                  # multiple_runs true: Step - Method #N
+                                  # multiple_runs true: Step #N - Method
                                   display_title = step_label
-                                  display_title += " - #{method_label}" if method_label
                                   display_title += " ##{run.num || run.id}"
+                                  display_title += " - #{method_label}" if method_label
                                 else
                                   # multiple_runs false: just Method label, no run number
                                   display_title = method_label || step_label

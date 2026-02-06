@@ -278,7 +278,7 @@
   <!-- Two Column Layout: Steps Panel (Left) and Step Results (Right) -->
   <div class="flex flex-row gap-4 flex-1 min-h-0 w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
     <!-- Left Panel: Steps Navigation (Hidden on narrow screens) -->
-    <div class="hidden lg:flex w-75 flex-shrink-0 flex flex-col min-h-0">
+    <div class="hidden lg:flex w-75 flex-shrink-0 flex flex-col min-h-0" data-step-selector-target="stepsPanel">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
         <%= render partial: 'projects/views/steps_panel' %>
       </div>
@@ -328,6 +328,13 @@
     if (!controller || !controller.hasContentTarget) {
       console.error('[loadFormInRightPanel] Step selector controller or content target not found')
       return
+    }
+    
+    // Save state to localStorage - for forms we save step state (not form state)
+    // When user comes back, they'll see the step results, which includes the form if no runs exist
+    if (controller.currentStepId && typeof controller.saveState === 'function') {
+      controller.saveState(controller.currentStepId, 'step', null)
+      console.log('[loadFormInRightPanel] State saved for step:', controller.currentStepId)
     }
     
     // Hide empty state and loading state, show content
@@ -483,6 +490,16 @@
     if (!controller || !controller.hasContentTarget) {
       console.error('[loadRunInRightPanel] Step selector controller or content target not found')
       return
+    }
+    
+    // Extract run ID from URL for state persistence
+    const runIdMatch = runUrl.match(/\/runs\/(\d+)/)
+    const runId = runIdMatch ? runIdMatch[1] : null
+    
+    // Save state to localStorage for when user returns from visualization view
+    if (runId && controller.currentStepId && typeof controller.saveState === 'function') {
+      controller.saveState(controller.currentStepId, 'run', runId)
+      console.log('[loadRunInRightPanel] State saved for run:', runId, 'step:', controller.currentStepId)
     }
     
     // Hide empty state and loading state, show content

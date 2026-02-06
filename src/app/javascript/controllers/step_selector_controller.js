@@ -28,8 +28,49 @@ if (typeof document !== 'undefined') {
 }
 
 export default class extends Controller {
-  static targets = ["resultsContainer", "emptyState", "loadingState", "content"]
+  static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
   static values = { projectId: Number, statusIcons: Array, loadRunPanel: Boolean }
+
+  // LocalStorage key helpers for state persistence
+  getStorageKey(suffix) {
+    return `project_${this.projectIdValue}_analysis_${suffix}`
+  }
+
+  saveState(stepId, contentType = 'step', runId = null) {
+    try {
+      const state = {
+        stepId: stepId ? stepId.toString() : null,
+        contentType: contentType, // 'step', 'run', 'form'
+        runId: runId ? runId.toString() : null,
+        timestamp: Date.now()
+      }
+      localStorage.setItem(this.getStorageKey('state'), JSON.stringify(state))
+      console.log('[StepSelectorController] State saved:', state)
+    } catch (e) {
+      console.warn('[StepSelectorController] Failed to save state to localStorage:', e)
+    }
+  }
+
+  loadState() {
+    try {
+      const stateJson = localStorage.getItem(this.getStorageKey('state'))
+      if (stateJson) {
+        const state = JSON.parse(stateJson)
+        // Check if state is not too old (24 hours)
+        const maxAge = 24 * 60 * 60 * 1000
+        if (state.timestamp && (Date.now() - state.timestamp) < maxAge) {
+          console.log('[StepSelectorController] State loaded:', state)
+          return state
+        } else {
+          console.log('[StepSelectorController] State expired, clearing')
+          localStorage.removeItem(this.getStorageKey('state'))
+        }
+      }
+    } catch (e) {
+      console.warn('[StepSelectorController] Failed to load state from localStorage:', e)
+    }
+    return null
+  }
 
   connect() {
     console.log('[StepSelectorController] CONNECT METHOD CALLED!')
@@ -51,6 +92,11 @@ export default class extends Controller {
       }
       if (!this.hasResultsContainerTarget) {
         console.warn('[StepSelectorController] resultsContainer target not found')
+      }
+      if (!this.hasStepsPanelTarget) {
+        console.warn('[StepSelectorController] stepsPanel target not found')
+      } else {
+        console.log('[StepSelectorController] stepsPanel target found:', this.stepsPanelTarget)
       }
     // Track currently displayed step
     this.currentStepId = null
@@ -93,6 +139,8 @@ export default class extends Controller {
       if (stepIdFromUrl) {
         this.currentStepId = stepIdFromUrl.toString()
         this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+        // Save state for when user returns from visualization view
+        this.saveState(stepIdFromUrl, 'run', runIdFromUrl)
         // Refresh steps panel to show the border/highlight for the selected step
         this.refreshStepsPanel()
       }
@@ -115,7 +163,14 @@ export default class extends Controller {
     // Wait for steps panel to be loaded before trying to select a step
     // The steps panel might be loaded asynchronously via refreshStepsPanel
     const controller = this
+    
+    // Check if we should restore state from localStorage (no URL params)
+    const savedState = this.loadState()
+    const shouldRestoreState = !stepIdFromUrl && !runIdFromUrl && savedState && savedState.stepId
+    console.log('[StepSelectorController] Should restore state:', shouldRestoreState, savedState)
+    
     const trySelectStep = function() {
+      // Priority 1: URL params
       if (stepIdFromUrl) {
         // Select the step from URL parameter
         console.log('[StepSelectorController] Found step_id in URL:', stepIdFromUrl)
@@ -133,10 +188,63 @@ export default class extends Controller {
           console.log('[StepSelectorController] Available step elements:', Array.from(controller.element.querySelectorAll('[data-step-id]')).map(el => el.getAttribute('data-step-id')))
           return false
         }
-      } else {
-        console.log('[StepSelectorController] No step_id in URL, selecting first available step')
-        return controller.selectFirstAvailableStep()
       }
+      
+      // Priority 2: Restore from localStorage
+      if (shouldRestoreState) {
+        console.log('[StepSelectorController] Restoring state from localStorage:', savedState)
+        const stepElement = controller.element.querySelector(`[data-step-id="${savedState.stepId}"]`)
+        if (stepElement) {
+          const stepId = savedState.stepId
+          console.log('[StepSelectorController] Restoring step_id from localStorage:', stepId)
+          controller.currentStepId = stepId.toString()
+          controller.element.setAttribute('data-current-step-id', stepId.toString())
+          
+          // If saved state was showing a run, load the run directly
+          if (savedState.contentType === 'run' && savedState.runId) {
+            console.log('[StepSelectorController] Restoring run panel for run_id:', savedState.runId)
+            // Update URL to reflect restored state (without page reload)
+            const newUrl = new URL(window.location.href)
+            newUrl.searchParams.set('step_id', stepId)
+            newUrl.searchParams.set('run_id', savedState.runId)
+            window.history.replaceState({}, '', newUrl.toString())
+            
+            // Hide empty state and loading state, show loading
+            if (controller.hasEmptyStateTarget) {
+              controller.emptyStateTarget.style.display = 'none'
+            }
+            if (controller.hasLoadingStateTarget) {
+              controller.loadingStateTarget.style.display = 'block'
+            }
+            
+            // Refresh steps panel to show the border
+            controller.refreshStepsPanel()
+            
+            // Load run panel - use global function from _analysis.html.erb
+            setTimeout(() => {
+              if (typeof loadRunInRightPanel === 'function') {
+                loadRunInRightPanel(`/runs/${savedState.runId}`)
+              } else {
+                // Fallback to loading step results
+                controller.loadStepResults(stepId, stepElement, true)
+              }
+            }, 100)
+            return true
+          }
+          
+          // Regular step load
+          controller.loadStepResults(stepId, stepElement, true)
+          return true
+        } else {
+          console.warn('[StepSelectorController] Saved step element not found for step_id:', savedState.stepId)
+          // Clear invalid saved state
+          localStorage.removeItem(controller.getStorageKey('state'))
+        }
+      }
+      
+      // Priority 3: First available step
+      console.log('[StepSelectorController] No step_id in URL or localStorage, selecting first available step')
+      return controller.selectFirstAvailableStep()
     }
     
     // Try immediately, then retry after a short delay if steps panel isn't ready
@@ -431,11 +539,15 @@ export default class extends Controller {
         }
       }
       
-      // Find the steps panel container - it's the left panel div (using w-64 on larger screens)
-      const stepsPanelContainer = controller.element.querySelector('.w-64') || controller.element.querySelector('.w-1\\/4') // Left panel
+      // Find the steps panel container using the target or fallback to class selectors
+      const stepsPanelContainer = controller.hasStepsPanelTarget 
+        ? controller.stepsPanelTarget 
+        : (controller.element.querySelector('.w-75') || controller.element.querySelector('.w-64') || controller.element.querySelector('.w-1\\/4'))
+      console.log('[StepSelectorController] Steps panel container found:', !!stepsPanelContainer)
       if (stepsPanelContainer) {
         // The steps panel is rendered inside a div with specific classes
         const panelWrapper = stepsPanelContainer.querySelector('.bg-white.rounded-lg.shadow-sm.border')
+        console.log('[StepSelectorController] Panel wrapper found:', !!panelWrapper)
         if (panelWrapper) {
           // Replace the steps panel content with fresh HTML from server
           panelWrapper.innerHTML = html
@@ -648,6 +760,8 @@ export default class extends Controller {
       // Set currentStepId before loading
       this.currentStepId = stepId.toString()
       this.element.setAttribute('data-current-step-id', stepId.toString())
+      // Save state to localStorage for when user returns from visualization view
+      this.saveState(stepId, 'step', null)
       // Refresh steps panel to show the border (server will render it)
       this.refreshStepsPanel()
       // Load step results
@@ -671,6 +785,9 @@ export default class extends Controller {
     // Update currentStepId
     this.currentStepId = stepId.toString()
     this.element.setAttribute('data-current-step-id', stepId.toString())
+    
+    // Save state to localStorage for when user returns from visualization view
+    this.saveState(stepId, 'step', null)
     
     // Update dropdown element's data-selected-step-id attribute
     const dropdownElement = document.querySelector('[data-controller~="dropdown"]')
@@ -701,6 +818,9 @@ export default class extends Controller {
     // Update currentStepId
     this.currentStepId = stepId.toString()
     this.element.setAttribute('data-current-step-id', stepId.toString())
+    
+    // Save state to localStorage for when user returns from visualization view
+    this.saveState(stepId, 'step', null)
     
     // Update dropdown element's data-selected-step-id attribute
     const dropdownElement = document.querySelector('[data-controller~="dropdown"]')
@@ -799,6 +919,9 @@ export default class extends Controller {
     this.element.setAttribute('data-current-step-id', stepIdString)
     console.log('[StepSelectorController] New currentStepId:', this.currentStepId, 'type:', typeof this.currentStepId)
     console.log('[StepSelectorController] Stored stepIdString:', stepIdString)
+    
+    // Save state to localStorage for when user returns from visualization view
+    this.saveState(stepId, 'step', null)
     
     // Refresh steps panel to show the border (server will render it)
     // Only refresh if we're not already in the middle of a refresh (to avoid infinite loops)

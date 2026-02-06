@@ -264,7 +264,7 @@
                     </td>
                     <td class="px-3 py-4">
                       <% if params_array.any? %>
-                        <div class="flex flex-wrap gap-1.5 items-center" title="<%= params_display %>" data-run-params-container="<%= run.id %>" data-controller="run-params-toggle">
+                        <div class="flex flex-wrap gap-1.5 items-center" data-run-params-container="<%= run.id %>" data-controller="run-params-toggle">
                           <% max_visible = 3 %>
                           <% params_array.each_with_index do |(key, value), index| %>
                             <% is_hidden = index >= max_visible %>
@@ -286,7 +286,8 @@
                                   <% else %>
                                     <% dataset_display = "#{step_name} #{annot.name}" %>
                                   <% end %>
-                                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                  <% is_truncated = dataset_display.length > 30 %>
+                                  <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
                                         data-controller="pipeline-runs"
                                         data-pipeline-runs-annot-id-value="<%= annot_id %>"
@@ -294,7 +295,7 @@
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        title="<%= dataset_display %> - Click to view pipeline">
+                                        <%= "title=\"#{dataset_display}\"" if is_truncated %>>
                                     <span class="font-semibold text-blue-800"><%= key %>:</span>
                                     <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                                   </span>
@@ -313,7 +314,8 @@
                                       <% else %>
                                         <% dataset_display = "#{step_name} #{dataset_name}" %>
                                       <% end %>
-                                      <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                      <% is_truncated = dataset_display.length > 30 %>
+                                      <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
                                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
                                             data-controller="pipeline-runs"
                                             data-pipeline-runs-run-id-value="<%= direct_run_id %>"
@@ -321,7 +323,7 @@
                                             data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                             data-action="click->pipeline-runs#showPipeline"
                                             onclick="event.stopPropagation();"
-                                            title="<%= dataset_display %> - Click to view pipeline">
+                                            <%= "title=\"#{dataset_display}\"" if is_truncated %>>
                                         <span class="font-semibold text-blue-800"><%= key %>:</span>
                                         <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                                       </span>
@@ -356,7 +358,8 @@
                                   <% else %>
                                     <% dataset_display = "#{step_name} #{dataset_name}" %>
                                   <% end %>
-                                  <% truncated_dataset = dataset_display.length > 30 ? dataset_display[0..26] + "..." : dataset_display %>
+                                  <% is_truncated = dataset_display.length > 30 %>
+                                  <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
                                         data-controller="pipeline-runs"
                                         data-pipeline-runs-run-id-value="<%= direct_run_id %>"
@@ -364,7 +367,7 @@
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        title="<%= dataset_display %> - Click to view pipeline">
+                                        <%= "title=\"#{dataset_display}\"" if is_truncated %>>
                                     <span class="font-semibold text-blue-800"><%= key %>:</span>
                                     <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
                                   </span>
@@ -392,7 +395,8 @@
                                       <% dataset_display = "#{step_name} #{first_annot.name}" %>
                                     <% end %>
                                     <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
-                                    <% truncated_array = array_display.length > 30 ? array_display[0..26] + "..." : array_display %>
+                                    <% is_truncated = array_display.length > 30 %>
+                                    <% truncated_array = is_truncated ? array_display[0..26] + "..." : array_display %>
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
                                           data-controller="pipeline-runs"
                                           data-pipeline-runs-annot-id-value="<%= first_annot_id %>"
@@ -400,7 +404,7 @@
                                           data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                           data-action="click->pipeline-runs#showPipeline"
                                           onclick="event.stopPropagation();"
-                                          title="<%= array_display %> - Click to view pipeline">
+                                          <%= "title=\"#{array_display}\"" if is_truncated %>>
                                       <span class="font-semibold text-blue-800"><%= key %>:</span>
                                       <span class="ml-1 text-blue-600"><%= truncated_array %></span>
                                     </span>

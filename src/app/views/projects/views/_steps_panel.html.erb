@@ -13,6 +13,7 @@
         <% is_complete = step_info[:is_complete] %>
         <% status = step_info[:status] %>
         <% status_counts = step_info[:status_counts] || { waiting: 0, running: 0, completed: 0, failed: 0 } %>
+        <% lock_reason = step_info[:lock_reason] %>
         
         <% 
           # Determine if this step is selected (shown in right panel)
@@ -25,7 +26,7 @@
           item_style = is_selected ? 'border-left: 4px solid #007bff;' : 'border-left: 4px solid transparent;'
           
           if !is_available
-            item_classes += ' opacity-50 cursor-not-allowed disabled'
+            item_classes += ' opacity-50 cursor-not-allowed'
           else
             item_classes += ' step-item-hover'
           end
@@ -57,18 +58,13 @@
                data-step-selector-step-id-param="<%= step.id %>"
              <% else %>
                data-step-locked="true"
+               title="<%= lock_reason.present? ? lock_reason : 'Locked' %>"
                onclick="event.preventDefault(); event.stopPropagation(); return false;"
              <% end %>
              data-step-id="<%= step.id %>">
           <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; align-self: center;">
             <% if !is_available %>
-              <div class="relative group">
-                <i class="fas fa-lock text-sm text-gray-400"></i>
-                <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
-                  Locked
-                  <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
-                </div>
-              </div>
+              <i class="fas fa-lock text-sm text-gray-400"></i>
             <% elsif !step.multiple_runs %>
               <% 
                 # Single icon for steps with multiple_runs = false

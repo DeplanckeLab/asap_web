@@ -74,7 +74,7 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <!-- Public Only Filter -->
           <div class="flex items-center">
-            <%= form.check_box :public_only, { checked: @filters[:public_only] == 'true', class: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" } %>
+            <%= form.check_box :public_only, { checked: @filters[:public_only] == 'true', class: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" }, 'true', 'false' %>
             <label for="public_only" class="ml-2 block text-sm text-gray-900">Public projects only</label>
           </div>
 

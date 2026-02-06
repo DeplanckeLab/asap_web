@@ -31,6 +31,7 @@ Rails.application.routes.draw do
       get :run_counts
       get :graph
       get :pipeline_runs
+      post :clone
     end
   end
   

@@ -50,6 +50,50 @@ if default_embedding_record.nil? && embedding_groups.present?
   default_embedding_record = fallback_embeddings&.first
 end
 
+# Check if we have any data to visualize
+has_visualization_data = @default_loom_file.present? && (
+  embedding_groups.any? { |_path, embeddings| embeddings.present? } ||
+  @h_metadata.any? { |_path, dims| dims&.dig('cell', 'DISCRETE').present? || dims&.dig('cell', 'NUMERIC').present? }
+)
+%>
+
+<% unless has_visualization_data %>
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100%; background-color: #f9fafb; padding: 40px;">
+    <div style="max-width: 600px; text-align: center;">
+      <div style="font-size: 64px; color: #d1d5db; margin-bottom: 24px;">
+        <i class="fas fa-chart-scatter"></i>
+      </div>
+      <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin-bottom: 16px;">No Visualization Data Available</h2>
+      <p style="font-size: 16px; color: #6b7280; margin-bottom: 24px; line-height: 1.6;">
+        The visualization view requires processed data files that are not yet available for this project.
+        This can happen if:
+      </p>
+      <ul style="text-align: left; font-size: 14px; color: #6b7280; margin-bottom: 24px; line-height: 1.8;">
+        <li>The parsing step has not been completed yet</li>
+        <li>The parsing step encountered an error</li>
+        <li>No embedding coordinates (UMAP/tSNE) are available</li>
+      </ul>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <a href="<%= project_path(@project, view: 'summary') %>" 
+           style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; background-color: #3b82f6; color: white; border-radius: 8px; text-decoration: none; font-weight: 500; transition: background-color 0.2s;"
+           onmouseover="this.style.backgroundColor='#2563eb'"
+           onmouseout="this.style.backgroundColor='#3b82f6'">
+          <i class="fas fa-list"></i>
+          View Summary
+        </a>
+        <a href="<%= project_path(@project, view: 'analysis') %>" 
+           style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; background-color: #10b981; color: white; border-radius: 8px; text-decoration: none; font-weight: 500; transition: background-color 0.2s;"
+           onmouseover="this.style.backgroundColor='#059669'"
+           onmouseout="this.style.backgroundColor='#10b981'">
+          <i class="fas fa-flask"></i>
+          View Analysis
+        </a>
+      </div>
+    </div>
+  </div>
+<% else %>
+
+<%
 default_embedding_id = default_embedding_record&.id
 
 possible_names = []
@@ -1867,4 +1911,5 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
        onmouseout="this.style.backgroundColor='transparent'"></div>
 </div>
 
+<% end %>
 

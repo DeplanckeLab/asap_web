@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json]
 
   # GET /projects or /projects.json
   def index
@@ -75,21 +75,37 @@ class ProjectsController < ApplicationController
     all_loom_files = Annot.available_loom_files(@project.id)
     available_metadata = Annot.available_metadata(@project.id)
     
-    @h_metadata = organize_metadata(available_metadata)
+    # Build project directory path for file existence checks
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    
+    # Filter loom files to only include those that actually exist on disk
+    existing_loom_files = all_loom_files.select do |filepath|
+      full_path = @project_dir + filepath
+      exists = File.exist?(full_path)
+      Rails.logger.debug "[show] Checking loom file existence: #{full_path} -> #{exists}"
+      exists
+    end
+    
+    # Filter metadata to only include files that exist
+    existing_metadata = available_metadata.select do |metadata|
+      existing_loom_files.include?(metadata.filepath)
+    end
+    
+    @h_metadata = organize_metadata(existing_metadata)
 
     # Filter loom files to only include those with 2D/3D visualizations (UMAP/tSNE with 2 or 3 rows)
-    @available_loom_files = all_loom_files.select do |filepath|
+    @available_loom_files = existing_loom_files.select do |filepath|
       @h_metadata[filepath] && 
       @h_metadata[filepath]['cell'] && 
       @h_metadata[filepath]['cell']['NUMERIC'] &&
       @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) } # limit to 2D for now
     end
     
-    # Get default loom file - use the first loom file with visualizations
-    Rails.logger.debug "🔍 [DEBUG] Available loom files: #{@available_loom_files.inspect}"
-    Rails.logger.debug "🔍 [DEBUG] All loom files: #{all_loom_files.inspect}"
-    @default_loom_file = @available_loom_files.first || all_loom_files.first || 'parsing/output.loom'
-    Rails.logger.debug "🔍 [DEBUG] Default loom file set to: #{@default_loom_file}"
+    # Get default loom file - use the first loom file with visualizations (only from existing files)
+    Rails.logger.debug "[show] Existing loom files: #{existing_loom_files.inspect}"
+    Rails.logger.debug "[show] Available loom files with visualizations: #{@available_loom_files.inspect}"
+    @default_loom_file = @available_loom_files.first || existing_loom_files.first
+    Rails.logger.debug "[show] Default loom file set to: #{@default_loom_file.inspect}"
 
     # Build embedding metadata (2D/3D coordinate sets) grouped by loom file
     @all_embeddings_by_loom = {}
@@ -976,6 +992,34 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # POST /projects/1/clone
+  # Clones the project and redirects to the new project
+  def clone
+    unless clonable?(@project)
+      respond_to do |format|
+        format.html { redirect_to project_path(@project), alert: "You don't have permission to clone this project." }
+        format.json { render json: { error: "Permission denied" }, status: :forbidden }
+      end
+      return
+    end
+
+    clone_service = ProjectCloneService.new(@project, user: current_user, session: session)
+    new_project = clone_service.call
+
+    if new_project
+      respond_to do |format|
+        format.html { redirect_to project_path(new_project), notice: "Project successfully cloned." }
+        format.json { render json: { project_key: new_project.key, redirect_url: project_path(new_project) }, status: :created }
+      end
+    else
+      error_message = clone_service.errors.first || "Failed to clone project"
+      respond_to do |format|
+        format.html { redirect_to project_path(@project), alert: error_message }
+        format.json { render json: { error: error_message }, status: :unprocessable_entity }
+      end
+    end
+  end
+
   # GET /projects/1/instructions
   def instructions
     # Placeholder for instructions action
@@ -1518,6 +1562,13 @@ class ProjectsController < ApplicationController
     # Get the full path to the loom file
     loom_path = @project_dir + loom_file
     
+    # Check if the loom file exists before trying to extract metadata
+    unless File.exist?(loom_path)
+      Rails.logger.warn "Loom file does not exist: #{loom_path}"
+      render json: { error: "Data file not found: #{loom_file}" }, status: 404
+      return
+    end
+    
     begin
       # Extract metadata coordinates using the service
       Rails.logger.info "Extracting metadata coordinates for: #{metadata.name}"
@@ -1579,6 +1630,13 @@ class ProjectsController < ApplicationController
         # Use the metadata's own filepath to find the correct loom file
         loom_file = params[:loom_file] || metadata.filepath
         loom_path = @project_dir + loom_file
+        
+        # Check if the loom file exists before trying to extract metadata
+        unless File.exist?(loom_path)
+          Rails.logger.warn "Loom file does not exist: #{loom_path} - skipping metadata #{metadata_id}"
+          next
+        end
+        
         loom_files_used << loom_file unless loom_files_used.include?(loom_file)
         
         Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"

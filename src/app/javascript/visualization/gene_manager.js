@@ -602,23 +602,15 @@ export class GeneManager {
             const contentType = response.headers.get('content-type')
             // console.log('GeneManager: Parsing content-type:', contentType)
             
-            // Try to parse as JSON first
+            // Read response as text first, then parse as JSON
+            // This avoids "Body has already been consumed" error
+            const text = await response.text()
             try {
-              data = await response.json()
+              data = JSON.parse(text)
               // console.log('GeneManager: Parsing data loaded as JSON, has search:', !!data.search, 'search length:', data.search?.length)
             } catch (jsonError) {
-              // If JSON parsing fails, try as text
-              console.warn('GeneManager: Failed to parse as JSON, trying as text:', jsonError)
-              const text = await response.text()
+              console.warn('GeneManager: Failed to parse response as JSON:', jsonError)
               // console.log('GeneManager: Parsing response text (first 500 chars):', text.substring(0, 500))
-              
-              // Try to parse the text as JSON
-              try {
-                data = JSON.parse(text)
-                // console.log('GeneManager: Successfully parsed text as JSON')
-              } catch (parseError) {
-                console.error('GeneManager: Failed to parse response text as JSON:', parseError)
-              }
             }
             
             // Check if content-type was not JSON but we got JSON data

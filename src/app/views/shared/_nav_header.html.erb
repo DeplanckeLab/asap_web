@@ -36,26 +36,29 @@
              data-mobile-menu-target="menu">
           <div class="py-2">
             <!-- New Project -->
-            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                href="<%= raw(new_project_path) %>"
                data-controller="nav-item"
                data-action="click->nav-item#navigate">
+              <i class="fas fa-plus w-4 text-center"></i>
               New project
             </a>
             
-            <!-- Browse Projects -->
-            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+            <!-- Search Projects -->
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                href="<%= projects_path %>"
                data-controller="nav-item"
                data-action="click->nav-item#navigate">
-              Browse projects
+              <i class="fas fa-search w-4 text-center"></i>
+              Search projects
             </a>
             
             <!-- Tutorials -->
-            <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                href="<%= tutorial_home_index_path %>"
                data-controller="nav-item"
                data-action="click->nav-item#navigate">
+              <i class="fas fa-graduation-cap w-4 text-center"></i>
               Tutorials
             </a>
             
@@ -125,6 +128,7 @@
                   title="Open access resources"
                   aria-expanded="false"
                   data-nav-dropdown-toggle>
+            <i class="fas fa-file-alt me-1.5"></i>
             Info
             <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m6 9 6 6 6-6"/>
@@ -149,6 +153,7 @@
                     title="Admin tools"
                     aria-expanded="false"
                     data-nav-dropdown-toggle>
+              <i class="fas fa-tools me-1.5"></i>
               Admin
               <svg class="duration-300 shrink-0 size-4 ms-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="m6 9 6 6 6-6"/>
@@ -195,7 +200,7 @@
 
               <a class="<%= tw_menu_item %>" 
                  href="<%= raw(new_project_path) %>">
-                <!-- <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg> -->
+                <i class="fas fa-plus me-1.5"></i>
                 New project
               </a>
 
@@ -203,15 +208,15 @@
                  href="<%= projects_path %>"
                  data-controller="nav-item"              
                  data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
-                Browse projects
+                <i class="fas fa-search me-1.5"></i>
+                Search projects
               </a>
 
               <a class="<%= tw_menu_item %>" 
                  href="<%= tutorial_home_index_path %>"
                  data-controller="nav-item"              
                  data-action="click->nav-item#navigate">
-                <svg class="shrink-0 size-4 me-3 md:me-2 block md:hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6m-3-3v6"/></svg>
+                <i class="fas fa-graduation-cap me-1.5"></i>
                 Tutorials
               </a>
 

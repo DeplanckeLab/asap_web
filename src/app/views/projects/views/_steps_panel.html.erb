@@ -126,7 +126,15 @@
           </div>
           <div class="flex-grow">
             <div>
-              <strong class="block"><%= step.label.presence || step.name %></strong>
+              <strong class="block"><%
+                display_name = step.label.presence || step.name
+                if !step.multiple_runs
+                  run_for_step = Run.where(project_id: @project.id, step_id: step.id).includes(:std_method).first
+                  if run_for_step&.std_method
+                    display_name = run_for_step.std_method.label.presence || run_for_step.std_method.name.titleize
+                  end
+                end
+              %><%= display_name %></strong>
             </div>
           </div>
           <div class="flex-shrink-0 ml-3 flex items-center">

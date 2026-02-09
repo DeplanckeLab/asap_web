@@ -228,6 +228,103 @@ class Project < ApplicationRecord
   def broadcast(step_id)
     ProjectBroadcastJob.perform_later(id, step_id)
   end
+
+  def integrate
+    logger = Rails.logger
+    v = self.version
+    unless v
+      logger.error("[Project#integrate] Project #{self.id} has no version")
+      return
+    end
+
+    h_env = Basic.safe_parse_json(v.env_json, {})
+    asap_docker_image = Basic.get_asap_docker(v)
+    unless asap_docker_image
+      logger.error("[Project#integrate] Could not find ASAP docker image for version #{v.id}")
+      return
+    end
+
+    parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    unless parsing_step
+      logger.error("[Project#integrate] Could not find parsing step for docker image #{asap_docker_image.id}")
+      return
+    end
+
+    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'integration').first
+
+    project_step = ProjectStep.find_or_create_by(project_id: self.id, step_id: parsing_step.id)
+
+    start_time = Time.now
+
+    user_data_dir = ENV.fetch('USER_DATA_DIR')
+    project_dir = Pathname.new(user_data_dir) + self.user_id.to_s + self.key
+    tmp_dir = project_dir + 'parsing'
+    FileUtils.mkdir_p(tmp_dir, mode: 0777) unless File.exist?(tmp_dir)
+    begin
+      FileUtils.chmod(0777, tmp_dir)
+    rescue => e
+      logger.warn("[Project#integrate] Could not set permissions on #{tmp_dir}: #{e.message}")
+    end
+
+    # Update project step and project status to waiting
+    project_step.update(status_id: 1)
+    self.update(status_id: 1)
+
+    # Build command hash matching the format used by ProjectParsingJob
+    asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
+    h_env_docker_image = h_env['docker_images']['asap_run']
+    image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+
+    h_cmd = {
+      'host_name' => 'localhost',
+      'container_name' => asap_instance_name + "_temp_#{self.id}",
+      'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
+      'program' => "rails integrate[#{self.key}]",
+      'opts' => [],
+      'args' => []
+    }
+
+    h_outputs = {
+      output_matrix: { "parsing/output.loom" => { types: ["num_matrix"], dataset: "matrix", row_filter: nil, col_filter: nil } },
+      output_json: { "parsing/output.json" => { types: ["json_file"] } }
+    }
+
+    h_run = {
+      project_id: self.id,
+      step_id: parsing_step.id,
+      std_method_id: parsing_std_method&.id,
+      status_id: 1,
+      num: 1,
+      user_id: self.user_id,
+      command_json: h_cmd.to_json,
+      attrs_json: self.parsing_attrs_json,
+      output_json: h_outputs.to_json,
+      submitted_at: start_time,
+      async: true
+    }
+
+    run = Run.where(project_id: self.id, step_id: parsing_step.id).first
+    if run
+      run.update(h_run)
+    else
+      run = Run.create(h_run)
+    end
+
+    # Update container_name with actual run ID
+    h_cmd['container_name'] = asap_instance_name + "_" + run.id.to_s
+    run.update(command_json: h_cmd.to_json)
+
+    # Update project step details
+    h_project_step = Basic.get_project_step_details(self, parsing_step.id)
+    project_step.update(h_project_step)
+
+    # Execute run through SLURM
+    logger.info("[Project#integrate] Executing Run##{run.id} through SLURM via exec_run")
+    Basic.exec_run(logger, run)
+
+    logger.info("[Project#integrate] Integration Run##{run.id} queued for execution")
+    self.broadcast(run.step_id)
+  end
   
   def is_public?
     public?

@@ -16,8 +16,6 @@ class RunExecutionJob < ApplicationJob
     end
 
     begin
-      slurm_service = SlurmService.new(logger: Rails.logger)
-      
       project = run.project
       version = project.version
       step = run.step
@@ -36,32 +34,12 @@ class RunExecutionJob < ApplicationJob
       core_cmd = build_core_command(h_cmd)
       docker_cmd = Basic.build_docker_cmd(h_cmd, core_cmd)
       
-      Rails.logger.info("[RunExecutionJob] Submitting Run##{run_id} to SLURM")
-      Rails.logger.debug("[RunExecutionJob] Command: #{docker_cmd}")
-      
-      slurm_job_id = slurm_service.submit_job(
-        run,
-        docker_cmd,
-        cores: run.nber_cores,
-        memory_mb: run.pred_max_ram || run.max_ram,
-        time_limit: run.pred_process_duration
-      )
-      
-      start_time = Time.now
-      
-      run.update(
-        status_id: 2,
-        start_time: start_time,
-        waiting_duration: start_time - (run.submitted_at || run.created_at),
-        pid: slurm_job_id.to_i,
-        slurm_job_id: slurm_job_id.to_i
-      )
-      
-      project.broadcast(step.id) if project.respond_to?(:broadcast)
-      
-      Rails.logger.info("[RunExecutionJob] Run##{run_id} submitted to SLURM with job ID: #{slurm_job_id}")
-      
-      SlurmJobMonitorJob.set(wait: 30.seconds).perform_later(run_id, slurm_job_id)
+      if slurm_available?
+        execute_via_slurm(run, project, step, docker_cmd)
+      else
+        Rails.logger.warn("[RunExecutionJob] SLURM controller unavailable, falling back to direct execution for Run##{run_id}")
+        execute_directly(run, project, step, h_cmd)
+      end
       
     rescue StandardError => e
       Rails.logger.error("[RunExecutionJob] Error executing Run##{run_id}: #{e.class} - #{e.message}")
@@ -91,6 +69,107 @@ class RunExecutionJob < ApplicationJob
   end
 
   private
+
+  def slurm_available?
+    result = `scontrol ping 2>&1`
+    $?.success? && result.include?('UP')
+  rescue
+    false
+  end
+
+  def execute_via_slurm(run, project, step, docker_cmd)
+    slurm_service = SlurmService.new(logger: Rails.logger)
+
+    Rails.logger.info("[RunExecutionJob] Submitting Run##{run.id} to SLURM")
+    Rails.logger.debug("[RunExecutionJob] Command: #{docker_cmd}")
+    
+    slurm_job_id = slurm_service.submit_job(
+      run,
+      docker_cmd,
+      cores: run.nber_cores,
+      memory_mb: run.pred_max_ram || run.max_ram,
+      time_limit: run.pred_process_duration
+    )
+    
+    start_time = Time.now
+    
+    run.update(
+      status_id: 2,
+      start_time: start_time,
+      waiting_duration: start_time - (run.submitted_at || run.created_at),
+      pid: slurm_job_id.to_i,
+      slurm_job_id: slurm_job_id.to_i
+    )
+    
+    # Update project_step nber_runs_json so header shows correct running count
+    Basic.upd_project_step(project, step.id)
+    project.update(status_id: 2)
+    project.broadcast(step.id) if project.respond_to?(:broadcast)
+    
+    Rails.logger.info("[RunExecutionJob] Run##{run.id} submitted to SLURM with job ID: #{slurm_job_id}")
+    
+    SlurmJobMonitorJob.set(wait: 30.seconds).perform_later(run.id, slurm_job_id)
+  end
+
+  def execute_directly(run, project, step, h_cmd)
+    start_time = Time.now
+
+    run.update(
+      status_id: 2,
+      start_time: start_time,
+      waiting_duration: start_time - (run.submitted_at || run.created_at)
+    )
+
+    # Update project_step nber_runs_json so header shows correct running count
+    Basic.upd_project_step(project, step.id)
+    project.update(status_id: 2)
+    project.broadcast(step.id) if project.respond_to?(:broadcast)
+
+    # Build the full command via Basic.build_cmd (handles rails prefix, docker wrapping, etc.)
+    cmd = Basic.build_cmd(h_cmd)
+    Rails.logger.info("[RunExecutionJob] Direct execution for Run##{run.id}: #{cmd}")
+
+    pid = spawn(cmd)
+    Rails.logger.info("[RunExecutionJob] Run##{run.id} started with PID #{pid}")
+
+    run.update(pid: pid)
+
+    # Wait for completion in a separate thread so this job can finish
+    Thread.new do
+      begin
+        _pid, status = Process.waitpid2(pid)
+        end_time = Time.now
+        process_duration = (end_time - start_time).to_f
+
+        # Read output.json if available
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        output_json = output_dir + 'output.json'
+
+        h_results = {}
+        if File.exist?(output_json)
+          h_results = Basic.safe_parse_json(File.read(output_json), {})
+        end
+
+        if status.success?
+          Rails.logger.info("[RunExecutionJob] Run##{run.id} completed successfully in #{process_duration}s")
+          Basic.finish_run(Rails.logger, run, h_results)
+        else
+          Rails.logger.error("[RunExecutionJob] Run##{run.id} failed with exit code #{status.exitstatus}")
+          h_results['displayed_error'] ||= ["Process exited with code #{status.exitstatus}"]
+          Basic.finish_run(Rails.logger, run, h_results)
+        end
+      rescue => e
+        Rails.logger.error("[RunExecutionJob] Error monitoring Run##{run.id}: #{e.class} - #{e.message}")
+        run.reload
+        run.update(status_id: 4, error: e.message)
+        Basic.upd_project_step(project, step.id)
+        project.update(status_id: 4)
+        project.broadcast(step.id) if project.respond_to?(:broadcast)
+      end
+    end
+  end
 
   def build_core_command(h_cmd)
     h_cmd['opts'] ||= []

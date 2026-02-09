@@ -1989,10 +1989,9 @@ export default class extends Controller {
   checkSubmitButton() {
     if (!this.hasSubmitButtonTarget) return
 
-    // Check if all required conditions are met:
-    // 1. File uploaded
-    // 2. Preparsing completed AND has actual matrix/dataset data
-    const hasValidPreparsing = this.isPreparsingComplete && this.hasMatrixData
+    // In integrate mode, only check project metadata fields (no file upload needed)
+    const integrateField = this.form?.querySelector('[name="integrate"]')
+    const isIntegrateMode = integrateField && integrateField.value === '1'
 
     // 3. Organism is selected
     const organismField = this.form?.querySelector('[name="project[organism_id]"]')
@@ -2006,9 +2005,15 @@ export default class extends Controller {
     const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
     const hasProjectType = projectTypeField && projectTypeField.value && projectTypeField.value !== ''
 
-    // Enable button only if all conditions are met
-    const shouldEnable = this.isUploadComplete && hasValidPreparsing && hasOrganism && hasVersion && hasProjectType
-    this.submitButtonTarget.disabled = !shouldEnable
+    if (isIntegrateMode) {
+      // In integrate mode, enable if organism, version, and project type are set
+      this.submitButtonTarget.disabled = !(hasOrganism && hasVersion && hasProjectType)
+    } else {
+      // Normal mode: also require file upload and preparsing
+      const hasValidPreparsing = this.isPreparsingComplete && this.hasMatrixData
+      const shouldEnable = this.isUploadComplete && hasValidPreparsing && hasOrganism && hasVersion && hasProjectType
+      this.submitButtonTarget.disabled = !shouldEnable
+    }
   }
 
   updateResetButtonState() {

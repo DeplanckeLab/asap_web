@@ -2943,16 +2943,21 @@ puts "TEST RUN"
       ### check if it might be a problem of memory
       #puts "BLA"
       if status_id == 4
-        d = `free top`
-      #  puts "FREE TOP: " + d
-        free_mem = d.split(/\n/)[1].split(/\s+/)[6]
-        puts "FREE MEM: " + free_mem
-        if free_mem 
-          diff =  free_mem.to_i - h_time_info['M'].to_i
-          if diff < 10000000 #and (!h_results["displayed_error"] or h_results["displayed_error"].size == 0)
-            h_results["displayed_error"].push 'Probably out of RAM. The method you are using is probably not scalable to high dimensional datasets. Please try another more scalable method (using RAM prediction tool.'
+        begin
+          d = `free -b 2>/dev/null`
+          lines = d.to_s.split(/\n/)
+          if lines.size > 1
+            free_mem = lines[1].to_s.split(/\s+/)[6]
+            if free_mem
+              diff = free_mem.to_i - h_time_info['M'].to_i
+              if diff < 10000000
+                h_results["displayed_error"] ||= []
+                h_results["displayed_error"].push 'Probably out of RAM. The method you are using is probably not scalable to high dimensional datasets. Please try another more scalable method (using RAM prediction tool.'
+              end
+            end
           end
-       #   puts "MEM: #{free_mem.to_i} - #{h_time_info['M'].to_i} = " + (diff).to_s
+        rescue => e
+          logger.warn("[Basic.finish_run] Could not check free memory: #{e.message}")
         end
       end
 

@@ -3,6 +3,8 @@ Rails.application.routes.draw do
   resources :projects do
     collection do
       get :organisms_for_version
+      post :bulk_destroy
+      post :prepare_integrate
     end
     member do
       get :instructions

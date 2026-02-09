@@ -123,6 +123,18 @@ import ViewToggleController from "controllers/view_toggle_controller"
 application.register("view-toggle", ViewToggleController)
 console.log('View toggle controller registered')
 
+import ProjectSelectionController from "controllers/project_selection_controller"
+application.register("project-selection", ProjectSelectionController)
+console.log('Project selection controller registered')
+
+import DeleteProjectsController from "controllers/delete_projects_controller"
+application.register("delete-projects", DeleteProjectsController)
+console.log('Delete projects controller registered')
+
+import IntegrateProjectsController from "controllers/integrate_projects_controller"
+application.register("integrate-projects", IntegrateProjectsController)
+console.log('Integrate projects controller registered')
+
 import ComplianceValidatorController from "controllers/compliance_validator_controller"
 application.register("compliance-validator", ComplianceValidatorController)
 console.log('Compliance validator controller registered')

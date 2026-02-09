@@ -25,13 +25,14 @@ class ProjectsController < ApplicationController
     search_results = Project.search(@query, @filters)
     
     # Extract projects from search results with preloaded project_steps for run counts
-    @projects = search_results.records.includes(:project_steps)
+    @projects = search_results.records.includes(:project_steps, :project_type)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
     
     # For filter dropdowns (fallback to database if no aggregations)
     @organisms = Organism.order(:name)
+    @grouped_organisms = group_organisms(@organisms)
     @statuses = Status.order(:name)
     @technologies = @aggregations&.dig('technologies', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:technology).compact.sort
     @tissues = @aggregations&.dig('tissues', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:tissue).compact.sort
@@ -466,6 +467,29 @@ class ProjectsController < ApplicationController
     # Fetch organisms based on selected version (default to latest)
     @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
     @grouped_organisms = group_organisms(@organisms)
+
+    # Handle integration mode
+    @integrate_mode = params[:integrate] == '1' && session[:integrate_project_keys].present?
+    if @integrate_mode
+      @integrate_projects = Project.where(key: session[:integrate_project_keys]).includes(:organism).to_a
+      if @integrate_projects.any?
+        # Pre-fill organism from the integration projects
+        @project.organism_id = @integrate_projects.first.organism_id
+        # Pre-fill project type (single-cell transcriptomics by default)
+        sc_type = @project_types.find { |pt| pt.tag == 'scRNA' } || @project_types.first
+        @project.project_type_id = sc_type&.id
+
+        # Load categorical annotations for each integration project
+        @integrate_annots = {}
+        @integrate_projects.each do |p|
+          # Get categorical cell-level metadata (dim=1 means cell-level, nber_cats > 0 means categorical)
+          annots = Annot.where(project_id: p.id, dim: 1)
+                        .where('nber_cats > 0')
+                        .order(:name)
+          @integrate_annots[p.id] = annots.to_a
+        end
+      end
+    end
   end
 
   # GET /projects/1/edit
@@ -502,7 +526,7 @@ class ProjectsController < ApplicationController
     tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
     
     # Collect parsing attributes from params
-    [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
+    [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_batch_paths, :integrate_n_pcs].each do |k|
       if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
         tmp_attrs[k] = params[k]
       end
@@ -650,7 +674,10 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
       Rails.logger.info("[ProjectsController#create] input_file.upload_file_name: #{input_file&.upload_file_name.inspect}")
       
-      # Require an input file for project creation
+      # Check if this is an integration request (no file upload needed)
+      is_integrate = params[:integrate_batch_paths].present?
+      
+      # Require an input file for project creation (unless integrating)
       # Check if we have either a Fu record OR a valid session path
       # Rails sessions serialize hash keys as strings, so we need to use string keys
       has_input_file = input_file.present? && input_file.upload_file_name.present?
@@ -658,12 +685,13 @@ class ProjectsController < ApplicationController
       session_path_check = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
       has_session_path = session_path_check && File.exist?(session_path_check)
       
+      Rails.logger.info("[ProjectsController#create] is_integrate: #{is_integrate}")
       Rails.logger.info("[ProjectsController#create] has_input_file: #{has_input_file}")
       Rails.logger.info("[ProjectsController#create] session[:file_upload][:path]: #{session_path_check.inspect}")
       Rails.logger.info("[ProjectsController#create] File.exist?(session_path): #{session_path_check && File.exist?(session_path_check)}")
       Rails.logger.info("[ProjectsController#create] has_session_path: #{has_session_path}")
       
-      unless has_input_file || has_session_path
+      unless is_integrate || has_input_file || has_session_path
         Rails.logger.warn("[ProjectsController#create] ===== VALIDATION FAILED =====")
         Rails.logger.warn("[ProjectsController#create] Input file validation failed - input_file: #{input_file.inspect}, session_path exists: #{has_session_path}")
         @organisms = Organism.order(:name)
@@ -698,6 +726,32 @@ class ProjectsController < ApplicationController
       if @project.save
         Rails.logger.info("[ProjectsController#create] ===== PROJECT SAVED SUCCESSFULLY =====")
         Rails.logger.info("[ProjectsController#create] Project saved successfully with ID: #{@project.id}, key: #{@project.key}")
+        
+        # === INTEGRATION PATH ===
+        if is_integrate
+          Rails.logger.info("[ProjectsController#create] ===== INTEGRATION MODE =====")
+          
+          # Create project directory
+          user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+          project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+          FileUtils.mkdir_p(project_dir)
+          
+          # Initialize project steps
+          init_project_steps()
+          
+          # Launch integration process
+          @project.integrate()
+          
+          # Clean up session
+          session.delete(:integrate_project_keys)
+          
+          format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Integrated project was successfully created." }
+          format.turbo_stream { redirect_to project_path(@project, view: 'analysis'), status: :see_other, notice: "Integrated project was successfully created." }
+          format.json { render :show, status: :created, location: @project }
+          next
+        end
+        
+        # === NORMAL FILE UPLOAD PATH ===
         Rails.logger.info("[ProjectsController#create] input_file after save: #{input_file.inspect}")
         Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
         
@@ -989,6 +1043,107 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { redirect_to projects_path, status: :see_other, notice: "Project was successfully destroyed." }
       format.json { head :no_content }
+    end
+  end
+
+  # POST /projects/bulk_destroy
+  def bulk_destroy
+    project_ids = params[:project_ids]
+
+    unless project_ids.is_a?(Array) && project_ids.any?
+      respond_to do |format|
+        format.html { redirect_to projects_path, alert: "No projects selected." }
+        format.json { render json: { success: false, error: "No projects selected." }, status: :unprocessable_entity }
+      end
+      return
+    end
+
+    project_ids = project_ids.map(&:to_i).compact
+    projects = Project.where(id: project_ids)
+
+    deleted_count = 0
+    skipped_count = 0
+    skipped_names = []
+
+    projects.each do |project|
+      if deletable?(project)
+        project.destroy
+        deleted_count += 1
+      else
+        skipped_count += 1
+        skipped_names << project.display_name
+      end
+    end
+
+    message = "#{deleted_count} project(s) deleted."
+    if skipped_count > 0
+      message += " #{skipped_count} project(s) skipped (no permission): #{skipped_names.join(', ')}."
+    end
+
+    respond_to do |format|
+      format.html { redirect_to projects_path, notice: message }
+      format.json { render json: { success: true, deleted: deleted_count, skipped: skipped_count, skipped_names: skipped_names, message: message } }
+    end
+  end
+
+  # POST /projects/prepare_integrate
+  # Validates selected projects and stores them in session for integration
+  def prepare_integrate
+    project_ids = params[:project_ids]
+    # If organism_id is passed, filter to only projects of that species
+    selected_organism_id = params[:organism_id]
+
+    unless project_ids.is_a?(Array) && project_ids.size >= 2
+      render json: { success: false, error: "Please select at least 2 projects to integrate." }, status: :unprocessable_entity
+      return
+    end
+
+    project_ids = project_ids.map(&:to_i).compact
+    projects = Project.where(id: project_ids).includes(:organism)
+
+    if projects.size < 2
+      render json: { success: false, error: "Could not find the selected projects." }, status: :unprocessable_entity
+      return
+    end
+
+    # Group projects by organism
+    groups = projects.group_by(&:organism_id)
+
+    # If a specific organism was selected (from the modal), filter to that group
+    if selected_organism_id.present?
+      organism_id = selected_organism_id.to_i
+      group_projects = groups[organism_id]
+      unless group_projects && group_projects.size >= 2
+        render json: { success: false, error: "Not enough projects for the selected organism." }, status: :unprocessable_entity
+        return
+      end
+      session[:integrate_project_keys] = group_projects.map(&:key).compact
+      render json: { success: true, redirect_url: new_project_path(integrate: 1) }
+      return
+    end
+
+    # Check if all projects share the same species
+    if groups.size == 1
+      session[:integrate_project_keys] = projects.map(&:key).compact
+      render json: { success: true, redirect_url: new_project_path(integrate: 1) }
+    else
+      # Multiple species: return groups so the JS can show a modal
+      species_groups = groups.map do |organism_id, group_projects|
+        organism = group_projects.first.organism
+        {
+          organism_id: organism_id,
+          organism_name: organism&.display_name || 'Unknown',
+          project_count: group_projects.size,
+          projects: group_projects.map { |p| { id: p.id, name: p.display_name } }
+        }
+      end.select { |g| g[:project_count] >= 2 }
+        .sort_by { |g| -g[:project_count] }
+
+      if species_groups.empty?
+        render json: { success: false, error: "No species has 2 or more selected projects. Integration requires at least 2 projects from the same species." }, status: :unprocessable_entity
+      else
+        render json: { success: false, species_selection_required: true, species_groups: species_groups }
+      end
     end
   end
 

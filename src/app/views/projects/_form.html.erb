@@ -156,6 +156,11 @@
       </div>
     </div>
 
+    <% if @integrate_mode && @integrate_projects&.any? %>
+      <!-- Integration Section (replaces file upload) -->
+      <%= render 'integrate_form' %>
+      <%= hidden_field_tag 'integrate', '1' %>
+    <% else %>
     <!-- File Upload Section -->
     <div class="mb-8 pt-6 border-t border-gray-200 dark:border-gray-700">
       <div class="flex items-center justify-between mb-4">
@@ -257,6 +262,7 @@
         </div>
       </div>
     </div>
+    <% end %>
 
     <!-- Hidden Fields -->
     <%= form.hidden_field :key, value: project.key || '' %>
@@ -272,7 +278,9 @@
       <% else %>
         <%= link_to "Back to projects", projects_browse_url, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
       <% end %>
-      <%= form.submit (@is_resetting_parsing ? "Recreate project" : "Create project"), id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: true %>
+      <% submit_label = @is_resetting_parsing ? "Recreate project" : (@integrate_mode ? "Create integrated project" : "Create project") %>
+      <% submit_disabled = @integrate_mode ? false : true %>
+      <%= form.submit submit_label, id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: submit_disabled %>
     </div>
   </div>
 <% end %>

@@ -6,6 +6,12 @@
   <%# Always show something when there are no results %>
   <%# Use ONLY the run's status_id, matching the left panel logic %>
   <% status_id = @parsing_run&.status_id %>
+  <%# Determine display name: use std_method label if available (e.g. "Integration"), otherwise "Parsing" %>
+  <% step_display_name = if @parsing_run&.std_method
+       @parsing_run.std_method.label.presence || @parsing_run.std_method.name.titleize
+     else
+       "Parsing"
+     end %>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
     <div class="px-6 py-8 text-center">
       <% if status_id.nil? || status_id == 1 %>
@@ -20,8 +26,8 @@
                <% end %>
              <% end %>>
           <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
-          <p class="text-gray-600 mb-4">The parsing job is queued and will start shortly.</p>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
+          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job is queued and will start shortly.</p>
           <% if @parsing_run && @parsing_run.slurm_job_id %>
             <% if @parsing_run.submitted_at %>
               <div class="text-sm text-gray-600 mb-3">
@@ -50,8 +56,8 @@
                data-parsing-timer-expected-duration-value="<%= @parsing_run.pred_process_duration %>"
              <% end %>>
           <i class="fas fa-spinner fa-spin text-blue-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is running</h3>
-          <p class="text-gray-600 mb-4">The parsing job is currently processing your data. Results will appear here when complete.</p>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is running</h3>
+          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job is currently processing your data. Results will appear here when complete.</p>
           
           <%# Time counter section %>
           <div class="mt-4 space-y-2">
@@ -71,14 +77,14 @@
         <%# Status says complete but no results - likely after restart %>
         <div class="flex flex-col items-center justify-center">
           <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
-          <p class="text-gray-600 mb-4">The parsing job has been restarted and is queued. Results will appear here when complete.</p>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
+          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job has been restarted and is queued. Results will appear here when complete.</p>
         </div>
       <% elsif status_id == 4 %>
         <%# Parsing failed - show error message %>
         <div class="flex flex-col items-center justify-center">
           <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-red-900 mb-2">Parsing Failed</h3>
+          <h3 class="text-xl font-semibold text-red-900 mb-2"><%= step_display_name %> Failed</h3>
           <p class="text-gray-600 mb-4">
             <% if @results && @results['displayed_error'] %>
               <%# Show error from output.json if available %>
@@ -98,8 +104,8 @@
         <%# Fallback for any other status (including nil project_step) %>
         <div class="flex flex-col items-center justify-center">
           <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2">Parsing is waiting</h3>
-          <p class="text-gray-600 mb-4">The parsing step is being initialized. Results will appear here when ready.</p>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
+          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> step is being initialized. Results will appear here when ready.</p>
         </div>
       <% end %>
     </div>

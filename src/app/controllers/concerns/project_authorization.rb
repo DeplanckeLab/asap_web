@@ -120,6 +120,14 @@ module ProjectAuthorization
     false
   end
 
+  # Check if user can delete a project (only owners and admins)
+  def deletable?(project)
+    return false unless project
+    return true if admin?
+    return true if owner?(project)
+    false
+  end
+
   # Check if user owns a project
   def owner?(project)
     return false unless project

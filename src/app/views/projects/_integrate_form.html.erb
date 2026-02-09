@@ -1,0 +1,73 @@
+<div class="mb-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+  <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Integration Parameters</h2>
+  <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+    Configure the integration of <%= @integrate_projects.size %> projects. Each project can optionally use a categorical metadata column as the batch variable for batch effect correction.
+  </p>
+
+  <!-- Number of PCs -->
+  <div class="mb-6">
+    <label for="integrate_n_pcs" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+      Number of Principal Components (PCs)
+    </label>
+    <input type="number"
+           name="integrate_n_pcs"
+           id="integrate_n_pcs"
+           min="1"
+           max="200"
+           value="30"
+           class="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+           required>
+    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Number of principal components to use for the integration (typically 20-50).</p>
+  </div>
+
+  <!-- Projects to Integrate -->
+  <div>
+    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+      Projects to integrate
+    </label>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <thead class="bg-gray-50 dark:bg-gray-800">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Project</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Key</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cells</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Genes</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Batch Metadata</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+          <% @integrate_projects.each do |p| %>
+            <% annots = @integrate_annots[p.id] || [] %>
+            <tr>
+              <td class="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">
+                <%= p.display_name %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
+                <%= p.key %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                <%= number_with_delimiter(p.cell_count) %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                <%= number_with_delimiter(p.gene_count) %>
+              </td>
+              <td class="px-4 py-3 text-sm">
+                <% if annots.any? %>
+                  <% options = [['None', 'null']] + annots.map { |a| [a.display_name, a.name] } %>
+                  <%= select_tag "integrate_batch_paths[#{p.key}]",
+                        options_for_select(options),
+                        class: "w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" %>
+                <% else %>
+                  <span class="text-gray-400 dark:text-gray-500 italic">No categorical metadata</span>
+                  <input type="hidden" name="integrate_batch_paths[<%= p.key %>]" value="null">
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

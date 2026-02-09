@@ -3,7 +3,7 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json toggle_public]
 
   # GET /projects or /projects.json
   def index
@@ -1016,6 +1016,63 @@ class ProjectsController < ApplicationController
       respond_to do |format|
         format.html { redirect_to project_path(@project), alert: error_message }
         format.json { render json: { error: error_message }, status: :unprocessable_entity }
+      end
+    end
+  end
+
+  # POST /projects/:id/toggle_public
+  # Toggle the public status of a project
+  # Requires compliance validation (as configured in Version env_json) to make public
+  def toggle_public
+    # Check permissions - only owner or admin can change public status
+    unless @project.user_id == current_user&.id || admin?
+      respond_to do |format|
+        format.html { redirect_to project_path(@project), alert: "You don't have permission to change this project's public status." }
+        format.json { render json: { success: false, error: "Permission denied" }, status: :forbidden }
+      end
+      return
+    end
+
+    # Determine the desired new state
+    new_public_state = params[:public] == 'true' || params[:public] == true
+    
+    # If trying to make public, check compliance requirements
+    if new_public_state && !@project.public?
+      can_publish, reason = @project.can_be_public?
+      unless can_publish
+        respond_to do |format|
+          format.html { redirect_to project_path(@project, view: 'summary'), alert: reason }
+          format.json { render json: { success: false, error: reason, requires_validation: true }, status: :unprocessable_entity }
+        end
+        return
+      end
+    end
+
+    # Update the public status
+    if new_public_state && !@project.public?
+      # Making public - set public_id if not already set
+      if @project.public_id.nil?
+        max_public_id = Project.maximum(:public_id) || 0
+        @project.public_id = max_public_id + 1
+      end
+      @project.public = true
+      @project.public_at = Time.current
+    elsif !new_public_state && @project.public?
+      # Making private
+      @project.public = false
+      # Keep public_id and public_at for record keeping
+    end
+
+    if @project.save
+      status_text = @project.public? ? 'public' : 'private'
+      respond_to do |format|
+        format.html { redirect_to project_path(@project, view: 'summary'), notice: "Project is now #{status_text}." }
+        format.json { render json: { success: true, public: @project.public?, public_id: @project.public_id, message: "Project is now #{status_text}." } }
+      end
+    else
+      respond_to do |format|
+        format.html { redirect_to project_path(@project, view: 'summary'), alert: "Failed to update project status." }
+        format.json { render json: { success: false, error: @project.errors.full_messages.join(', ') }, status: :unprocessable_entity }
       end
     end
   end

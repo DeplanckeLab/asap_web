@@ -32,6 +32,7 @@ Rails.application.routes.draw do
       get :graph
       get :pipeline_runs
       post :clone
+      post :toggle_public
     end
   end
   
@@ -102,6 +103,21 @@ Rails.application.routes.draw do
   resources :identifier_types, only: :show
 
   resources :organisms, only: :index
+
+  # CXG Schema Compliance routes
+  scope '/compliance', controller: :compliance do
+    get '/', action: :index, as: :compliance_index
+    get 'schema/:version', action: :schema_docs, as: :compliance_schema, constraints: { version: /[^\/]+/ }
+    post 'validate', action: :validate, as: :compliance_validate
+    post 'validate_file', action: :validate_file, as: :compliance_validate_file
+    
+    # Project-specific compliance routes
+    scope '/projects/:id' do
+      post 'validate', action: :validate_project, as: :compliance_project_validate
+      get 'result', action: :show_project_result, as: :compliance_project_result
+      get 'status', action: :project_status, as: :compliance_project_status
+    end
+  end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

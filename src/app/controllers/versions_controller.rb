@@ -42,6 +42,7 @@ class VersionsController < ApplicationController
 
   def create
     @version = Version.new(version_params)
+    merge_compliance_schemas(@version)
     if @version.save
       redirect_to @version, notice: 'Version was successfully created.'
     else
@@ -50,7 +51,9 @@ class VersionsController < ApplicationController
   end
 
   def update
-    if @version.update(version_params)
+    @version.assign_attributes(version_params)
+    merge_compliance_schemas(@version)
+    if @version.save
       redirect_to @version, notice: 'Version was successfully updated.'
     else
       render :edit, status: :unprocessable_entity
@@ -105,6 +108,50 @@ class VersionsController < ApplicationController
     Basic.safe_parse_json(version.env_json, {})
   rescue StandardError
     {}
+  end
+
+  # Merge compliance schema form fields into env_json['compliance']
+  # Structure: { "compliance": { "<project_type_id>": [ { schema_object }, ... ] } }
+  def merge_compliance_schemas(version)
+    env_data = Basic.safe_parse_json(version.env_json, {})
+    env_data['compliance'] ||= {}
+
+    # Single-cell transcriptomics (project_type_id = 1)
+    sc_name = params[:compliance_sc_name]&.strip.presence
+    sc_version = params[:compliance_sc_version]&.strip.presence
+    sc_source_schema_name = params[:compliance_sc_source_schema_name]&.strip.presence
+    sc_description = params[:compliance_sc_description]&.strip.presence
+    sc_source_url = params[:compliance_sc_source_url]&.strip.presence
+    sc_url = params[:compliance_sc_url]&.strip.presence
+    sc_compliant_icon = params[:compliance_sc_compliant_icon]&.strip.presence
+    sc_not_compliant_icon = params[:compliance_sc_not_compliant_icon]&.strip.presence
+
+    if sc_name || sc_version || sc_source_url
+      schema_entry = {
+        'name' => sc_name,
+        'version' => sc_version,
+        'source_schema_name' => sc_source_schema_name,
+        'description' => sc_description,
+        'source_url' => sc_source_url,
+        'url' => sc_url,
+        'compliant_icon' => sc_compliant_icon,
+        'not_compliant_icon' => sc_not_compliant_icon,
+        'if_compliant' => ['allow_public']
+      }.compact
+      # Replace the array for project_type_id "1" (single schema for now)
+      env_data['compliance']['1'] = [schema_entry]
+    end
+
+    # Clean up empty compliance hash
+    env_data.delete('compliance') if env_data['compliance'].empty?
+
+    # Remove old structures if present
+    env_data.delete('validation')
+    env_data.delete('cxg_schema_version')
+
+    version.env_json = JSON.generate(env_data)
+  rescue StandardError => e
+    Rails.logger.error("Failed to merge compliance schemas: #{e.message}")
   end
 
   def load_tool_metadata

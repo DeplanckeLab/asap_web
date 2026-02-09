@@ -153,6 +153,185 @@ namespace :db do
   end
 end
 
+namespace :versions do
+  desc "Set default CxG schema version (7.1.0) for all versions that don't have it set"
+  task set_cxg_schema_version: :environment do
+    default_version = ENV.fetch('CXG_VERSION', '7.1.0')
+    
+    puts "Setting cxg_schema_version to '#{default_version}' for versions that don't have it..."
+    
+    updated_count = 0
+    skipped_count = 0
+    error_count = 0
+    
+    Version.find_each do |version|
+      begin
+        env_data = Basic.safe_parse_json(version.env_json, {})
+        
+        if env_data['cxg_schema_version'].present?
+          puts "  Version ##{version.id}: Already has cxg_schema_version='#{env_data['cxg_schema_version']}', skipping"
+          skipped_count += 1
+          next
+        end
+        
+        env_data['cxg_schema_version'] = default_version
+        version.update!(env_json: JSON.generate(env_data))
+        
+        puts "  Version ##{version.id}: Set cxg_schema_version='#{default_version}'"
+        updated_count += 1
+        
+      rescue StandardError => e
+        puts "  Version ##{version.id}: ERROR - #{e.message}"
+        error_count += 1
+      end
+    end
+    
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated_count}"
+    puts "  Skipped: #{skipped_count}"
+    puts "  Errors:  #{error_count}"
+    puts "  Total:   #{Version.count}"
+  end
 
+  desc "Migrate env_json to new compliance structure"
+  task migrate_compliance_structure: :environment do
+    puts "Migrating env_json to new compliance structure..."
+    puts ""
 
+    updated_count = 0
+    skipped_count = 0
+    error_count = 0
 
+    Version.find_each do |version|
+      begin
+        env_data = JSON.parse(version.env_json.presence || '{}')
+
+        # Check if already migrated to new compliance structure
+        existing_schemas = env_data.dig('compliance', '1')
+        if existing_schemas.is_a?(Array) && existing_schemas.any?
+          # Backfill new fields and clean up deprecated ones
+          changed = false
+          existing_schemas.each do |schema|
+            unless schema.key?('url')
+              schema['url'] = 'https://sc-fair.org'
+              changed = true
+            end
+            if schema['name'] == 'CELLxGENE cell metadata schema'
+              schema['name'] = 'scFAIR'
+              schema['source_schema_name'] = 'CELLxGENE schema'
+              schema['description'] = 'scFAIR is using the CELLxGENE cell metadata schema to validate single-cell transcriptomics datasets'
+              changed = true
+            end
+            unless schema.key?('source_schema_name')
+              schema['source_schema_name'] ||= 'CELLxGENE schema'
+              changed = true
+            end
+            unless schema.key?('description')
+              schema['description'] ||= 'scFAIR is using the CELLxGENE cell metadata schema to validate single-cell transcriptomics datasets'
+              changed = true
+            end
+            if schema.key?('not_validated_icon')
+              schema.delete('not_validated_icon')
+              changed = true
+            end
+          end
+          if changed
+            version.update!(env_json: JSON.generate(env_data))
+            puts "  Version ##{version.id}: Updated fields"
+            updated_count += 1
+          else
+            puts "  Version ##{version.id}: Already up to date, skipping"
+            skipped_count += 1
+          end
+          next
+        end
+
+        # Determine version from old structures
+        cxg_version = env_data.dig('validation', 'single_cell', 'version') ||
+                      env_data['cxg_schema_version'] ||
+                      '7.1.0'
+        source_url = env_data.dig('validation', 'single_cell', 'schema_url') ||
+                     "https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/#{cxg_version}/schema.md"
+
+        # Create new compliance structure
+        env_data['compliance'] = {
+          '1' => [
+            {
+              'name' => 'scFAIR',
+              'version' => cxg_version,
+              'source_schema_name' => 'CELLxGENE schema',
+              'description' => 'scFAIR is using the CELLxGENE cell metadata schema to validate single-cell transcriptomics datasets',
+              'source_url' => source_url,
+              'url' => 'https://sc-fair.org',
+              'compliant_icon' => 'scfair_badge_compliant.svg',
+              'not_compliant_icon' => 'scfair_badge_noncompliant.svg',
+              'if_compliant' => ['allow_public']
+            }
+          ]
+        }
+
+        # Remove old structures
+        env_data.delete('validation')
+        env_data.delete('cxg_schema_version')
+
+        version.update!(env_json: JSON.generate(env_data))
+        puts "  Version ##{version.id}: Migrated to compliance structure (version: #{cxg_version})"
+        updated_count += 1
+
+      rescue StandardError => e
+        puts "  Version ##{version.id}: ERROR - #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated_count}"
+    puts "  Skipped: #{skipped_count}"
+    puts "  Errors:  #{error_count}"
+    puts "  Total:   #{Version.count}"
+  end
+
+end
+
+namespace :projects do
+  desc "Set project_type to Single-cell transcriptomics for public projects with > 100 cols"
+  task set_single_cell_for_public: :environment do
+    single_cell_type_id = 1
+    min_cols = 100
+
+    puts "Setting project_type_id=#{single_cell_type_id} (Single-cell transcriptomics)"
+    puts "for public projects with more than #{min_cols} cols..."
+    puts ""
+
+    projects = Project.where(public: true)
+                      .where('nber_cols > ?', min_cols)
+                      .where('project_type_id IS NULL OR project_type_id != ?', single_cell_type_id)
+
+    total = projects.count
+    puts "Found #{total} project(s) to update."
+    puts ""
+
+    updated_count = 0
+    error_count = 0
+
+    projects.find_each do |project|
+      begin
+        old_type = project.project_type_id
+        project.update!(project_type_id: single_cell_type_id)
+        puts "  Project ##{project.id} (#{project.nber_cols} cols): project_type_id #{old_type.inspect} -> #{single_cell_type_id}"
+        updated_count += 1
+      rescue StandardError => e
+        puts "  Project ##{project.id}: ERROR - #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated_count}"
+    puts "  Errors:  #{error_count}"
+    puts "  Total candidates: #{total}"
+  end
+end

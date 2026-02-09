@@ -257,6 +257,159 @@
       </div>
     </div>
 
+    <!-- Compliance section (driven entirely by compliance schemas in env_json and validation results) -->
+    <% if @project.compliance_requires_public? %>
+    <%
+      # All display data comes from the validation result (if available) or from the compliance config
+      validation_result = @project.cxg_validation_result
+      schema_config = @project.compliance_schemas.first || {}
+
+      # Schema metadata: prefer what was stored in the result at validation time, fall back to current config
+      c_name = validation_result&.dig('schema_name') || schema_config['name']
+      c_version = validation_result&.dig('schema_version') || schema_config['version']
+      c_url = validation_result&.dig('url') || schema_config['url']
+      c_source_url = validation_result&.dig('source_url') || schema_config['source_url']
+      c_source_schema_name = validation_result&.dig('source_schema_name') || schema_config['source_schema_name']
+      c_description = validation_result&.dig('description') || schema_config['description']
+      c_compliant_icon = validation_result&.dig('compliant_icon') || schema_config['compliant_icon']
+      c_not_compliant_icon = validation_result&.dig('not_compliant_icon') || schema_config['not_compliant_icon']
+    %>
+    <div class="bg-gray-50 rounded-lg p-6" 
+         data-controller="metadata-validation" 
+         data-metadata-validation-project-id-value="<%= @project.id %>"
+         data-metadata-validation-status-url-value="<%= compliance_project_status_path(@project.id) %>"
+         data-metadata-validation-validate-url-value="<%= compliance_project_validate_path(@project.id) %>">
+
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Compliance to external data schemas</h3>
+
+      <!-- Schema header with badge -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-semibold text-gray-800"><%= c_name %><%= " v#{c_version}" if c_version.present? %></span>
+          <% if c_source_schema_name.present? && c_source_url.present? %>
+            <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:text-blue-800 hover:underline">(<%= c_source_schema_name %><%= " v#{c_version}" if c_version.present? %>)</a>
+          <% elsif c_source_url.present? %>
+            <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:text-blue-800 hover:underline">(source schema)</a>
+          <% end %>
+        </div>
+        <% badge_link = c_url %>
+        <% if validation_result && validation_result['valid'] && c_compliant_icon.present? %>
+          <% if badge_link.present? %>
+            <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+              <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-8' %>
+            </a>
+          <% else %>
+            <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-8' %>
+          <% end %>
+        <% elsif validation_result && !validation_result['valid'] && c_not_compliant_icon.present? %>
+          <% if badge_link.present? %>
+            <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+              <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-8' %>
+            </a>
+          <% else %>
+            <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-8' %>
+          <% end %>
+        <% end %>
+      </div>
+
+      <% if c_description.present? %>
+        <p class="text-sm text-gray-600 mb-4"><%= c_description %></p>
+      <% end %>
+
+      <!-- Validation Result Display -->
+      <div data-metadata-validation-target="result">
+        <% if validation_result %>
+          <div class="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <% if validation_result['valid'] %>
+                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    Compliant
+                  </span>
+                <% else %>
+                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                    Non-Compliant
+                  </span>
+                <% end %>
+              </div>
+              <% if validation_result['validated_at'] %>
+                <span class="text-xs text-gray-500">
+                  Last validated: <%= Time.parse(validation_result['validated_at']).strftime("%B %d, %Y at %H:%M") rescue validation_result['validated_at'] %>
+                </span>
+              <% end %>
+            </div>
+            
+            <% if validation_result['error'] %>
+              <!-- Job-level error (e.g., no loom file found) -->
+              <div class="bg-red-50 border border-red-200 rounded p-3 mb-3">
+                <div class="text-sm text-red-800"><%= validation_result['error'] %></div>
+              </div>
+            <% else %>
+              <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-red-50 rounded p-2">
+                  <div class="text-2xl font-bold text-red-600"><%= validation_result['errors_count'] || validation_result['errors']&.count || 0 %></div>
+                  <div class="text-xs text-red-700">Errors</div>
+                </div>
+                <div class="bg-yellow-50 rounded p-2">
+                  <div class="text-2xl font-bold text-yellow-600"><%= validation_result['warnings_count'] || validation_result['warnings']&.count || 0 %></div>
+                  <div class="text-xs text-yellow-700">Warnings</div>
+                </div>
+                <div class="bg-blue-50 rounded p-2">
+                  <div class="text-2xl font-bold text-blue-600"><%= validation_result['info_count'] || validation_result['info']&.count || 0 %></div>
+                  <div class="text-xs text-blue-700">Info</div>
+                </div>
+              </div>
+
+              <% if validation_result['loom_file'] || validation_result['loom_path'] %>
+                <div class="mt-3 text-xs text-gray-500">
+                  File: <%= File.basename((validation_result['loom_file'] || validation_result['loom_path']).to_s) %>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+
+          <div class="flex flex-wrap gap-3">
+            <%= link_to compliance_project_result_path(@project.id), 
+                class: "inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors" do %>
+              View Full Report
+            <% end %>
+            
+            <button type="button" 
+                    data-action="click->metadata-validation#runValidation"
+                    data-metadata-validation-target="validateButton"
+                    class="inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors">
+              Re-run Validation
+            </button>
+          </div>
+        <% else %>
+          <div class="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <p class="text-gray-500 text-sm">No validation has been performed yet.</p>
+          </div>
+          
+          <button type="button" 
+                  data-action="click->metadata-validation#runValidation"
+                  data-metadata-validation-target="validateButton"
+                  class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">
+            Run Validation
+          </button>
+        <% end %>
+      </div>
+
+      <!-- Loading State -->
+      <div data-metadata-validation-target="loading" class="hidden">
+        <div class="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+          <div class="flex items-center gap-3">
+            <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-gray-600">Validation in progress...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <% end %>
+
     <!-- Programmatic Access -->
     <div class="bg-gray-50 rounded-lg p-6">
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Programmatic Access & Downloads</h3>

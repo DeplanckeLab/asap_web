@@ -123,6 +123,18 @@ import ViewToggleController from "controllers/view_toggle_controller"
 application.register("view-toggle", ViewToggleController)
 console.log('View toggle controller registered')
 
+import ComplianceValidatorController from "controllers/compliance_validator_controller"
+application.register("compliance-validator", ComplianceValidatorController)
+console.log('Compliance validator controller registered')
+
+import MetadataValidationController from "controllers/metadata_validation_controller"
+application.register("metadata-validation", MetadataValidationController)
+console.log('Metadata validation controller registered')
+
+import PublicToggleController from "controllers/public_toggle_controller"
+application.register("public-toggle", PublicToggleController)
+console.log('Public toggle controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

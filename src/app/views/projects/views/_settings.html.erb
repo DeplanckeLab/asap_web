@@ -7,7 +7,9 @@
   <!-- Settings Sections -->
   <div class="space-y-6">
     <!-- Privacy Settings -->
-    <div class="bg-gray-50 rounded-lg p-6">
+    <div class="bg-gray-50 rounded-lg p-6" data-controller="public-toggle" 
+         data-public-toggle-url-value="<%= toggle_public_project_path(@project) %>"
+         data-public-toggle-current-value="<%= @project.is_public? %>">
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Privacy Settings</h3>
       
       <div class="space-y-4">
@@ -16,12 +18,43 @@
           <div>
             <h4 class="text-sm font-medium text-gray-900">Public Access</h4>
             <p class="text-sm text-gray-600">Allow other users to view and clone this project</p>
+            <% unless @project.compliance_valid? %>
+              <%
+                schema_label = @project.compliance_schemas.first&.dig('name') || 'compliance'
+              %>
+              <p class="text-xs text-amber-600 mt-1">
+                <% if @project.cxg_validation_result.nil? %>
+                  Requires <%= schema_label %> check before making public.
+                <% else %>
+                  Project must pass <%= schema_label %> check before making public.
+                <% end %>
+              </p>
+            <% end %>
           </div>
           <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" <%= 'checked' if @project.is_public? %> class="sr-only peer">
+            <input type="checkbox" 
+                   id="public_toggle" 
+                   <%= 'checked' if @project.is_public? %> 
+                   data-action="change->public-toggle#toggle"
+                   data-public-toggle-target="checkbox"
+                   class="sr-only peer">
             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
           </label>
         </div>
+        
+        <!-- Status message -->
+        <div data-public-toggle-target="message" class="hidden">
+          <p class="text-sm px-3 py-2 rounded" data-public-toggle-target="messageText"></p>
+        </div>
+
+        <% if @project.is_public? %>
+          <div class="text-sm text-gray-600">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 mr-2">
+              ASAP<%= @project.public_id %>
+            </span>
+            Published on <%= @project.public_at&.strftime("%B %d, %Y") %>
+          </div>
+        <% end %>
       </div>
     </div>
 

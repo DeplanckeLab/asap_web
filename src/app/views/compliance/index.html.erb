@@ -1,0 +1,197 @@
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-900">CELLxGENE Schema Compliance</h1>
+    <p class="mt-2 text-gray-600">
+      Validate your Loom files against the CELLxGENE Discover schema to ensure compatibility.
+    </p>
+  </div>
+
+  <!-- Schema Documentation Links -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+    <h2 class="text-xl font-semibold text-gray-900 mb-4">Schema Documentation</h2>
+    
+    <div class="grid md:grid-cols-2 gap-4">
+      <% @schema_versions.each do |version| %>
+        <a href="<%= compliance_schema_path(version: version) %>" 
+           class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-blue-50 border border-gray-200 hover:border-blue-300 transition-colors">
+          <div>
+            <div class="font-medium text-gray-900">Schema Version <%= version %></div>
+            <div class="text-sm text-gray-500">Loom path translations</div>
+          </div>
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
+      <% end %>
+      
+      <% if @schema_versions.empty? %>
+        <a href="/cxg_7.1.0_loom_paths.html" target="_blank"
+           class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-blue-50 border border-gray-200 hover:border-blue-300 transition-colors">
+          <div>
+            <div class="font-medium text-gray-900">Schema Version 7.1.0</div>
+            <div class="text-sm text-gray-500">Loom path translations (HTML)</div>
+          </div>
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      <% end %>
+    </div>
+
+    <div class="mt-4 pt-4 border-t border-gray-200">
+      <a href="https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/schema.md" 
+         target="_blank" 
+         class="text-blue-600 hover:text-blue-800 text-sm inline-flex items-center">
+        View original CELLxGENE Schema on GitHub
+        <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </a>
+    </div>
+  </div>
+
+  <!-- Validation Section -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+    <h2 class="text-xl font-semibold text-gray-900 mb-4">Validate a File</h2>
+    
+    <% if current_user %>
+      <!-- File Upload Form -->
+      <%= form_with url: compliance_validate_path, method: :post, multipart: true, 
+                    data: { controller: "compliance-validator", action: "submit->compliance-validator#validate" },
+                    class: "space-y-4" do |f| %>
+        
+        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors"
+             data-compliance-validator-target="dropzone">
+          <div class="space-y-2">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <div class="text-gray-600">
+              <label for="loom_file" class="cursor-pointer text-blue-600 hover:text-blue-700 font-medium">
+                Choose a .loom file
+              </label>
+              <span class="text-gray-500"> or drag and drop</span>
+            </div>
+            <p class="text-xs text-gray-500">Loom files up to 2GB</p>
+          </div>
+          <%= f.file_field :loom_file, accept: ".loom", class: "hidden", id: "loom_file",
+                           data: { compliance_validator_target: "fileInput", action: "change->compliance-validator#fileSelected" } %>
+        </div>
+
+        <div class="hidden" data-compliance-validator-target="fileInfo">
+          <div class="flex items-center justify-between bg-blue-50 rounded-lg p-4">
+            <div class="flex items-center">
+              <svg class="h-6 w-6 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <div>
+                <div class="font-medium text-gray-900" data-compliance-validator-target="fileName">-</div>
+                <div class="text-sm text-gray-500" data-compliance-validator-target="fileSize">-</div>
+              </div>
+            </div>
+            <button type="button" class="text-gray-400 hover:text-gray-600" data-action="click->compliance-validator#clearFile">
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex justify-end">
+          <%= f.submit "Validate File", 
+                       class: "px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                       data: { compliance_validator_target: "submitBtn" },
+                       disabled: true %>
+        </div>
+      <% end %>
+
+      <!-- Results Area -->
+      <div class="hidden mt-6" data-compliance-validator-target="results">
+        <div class="border-t border-gray-200 pt-6">
+          <h3 class="text-lg font-medium text-gray-900 mb-4">Validation Results</h3>
+          <div data-compliance-validator-target="resultsContent"></div>
+        </div>
+      </div>
+    <% else %>
+      <div class="bg-gray-50 rounded-lg p-6 text-center">
+        <p class="text-gray-600 mb-4">Please log in to validate files.</p>
+        <%= link_to "Log In", new_user_session_path, class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Recent Validations (for logged-in users) -->
+  <% if current_user && @recent_validations&.any? %>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <h2 class="text-xl font-semibold text-gray-900 mb-4">Recent Project Validations</h2>
+      
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Warnings</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validated</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <% @recent_validations.each do |item| %>
+              <tr>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <%= link_to item[:project].name || "Project #{item[:project].id}", 
+                              project_path(item[:project]), 
+                              class: "text-blue-600 hover:text-blue-800" %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <% if item[:validation][:valid] %>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Compliant
+                    </span>
+                  <% else %>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      Non-compliant
+                    </span>
+                  <% end %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                  <%= item[:validation][:errors_count] || item[:validation][:errors]&.count || 0 %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                  <%= item[:validation][:warnings_count] || item[:validation][:warnings]&.count || 0 %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                  <%= item[:validation][:validated_at] ? Time.parse(item[:validation][:validated_at]).strftime("%b %d, %Y %H:%M") : "-" %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm">
+                  <%= link_to "View Details", compliance_project_result_path(item[:project]), 
+                              class: "text-blue-600 hover:text-blue-800" %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Quick Links -->
+  <div class="mt-8 grid md:grid-cols-3 gap-4">
+    <div class="bg-blue-50 rounded-lg p-4 border border-blue-200">
+      <h3 class="font-medium text-blue-900 mb-2">Required Cell Metadata</h3>
+      <p class="text-sm text-blue-700">assay_ontology_term_id, cell_type_ontology_term_id, disease_ontology_term_id, donor_id, and more.</p>
+    </div>
+    <div class="bg-green-50 rounded-lg p-4 border border-green-200">
+      <h3 class="font-medium text-green-900 mb-2">Required Gene Metadata</h3>
+      <p class="text-sm text-green-700">ENSEMBL gene IDs (without version), feature_is_filtered flag.</p>
+    </div>
+    <div class="bg-purple-50 rounded-lg p-4 border border-purple-200">
+      <h3 class="font-medium text-purple-900 mb-2">Required Global Attributes</h3>
+      <p class="text-sm text-purple-700">title, organism_ontology_term_id, and auto-generated schema fields.</p>
+    </div>
+  </div>
+</div>

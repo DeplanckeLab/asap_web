@@ -41,6 +41,90 @@
       </div>
     <% end %>
 
+    <!-- Compliance Schemas -->
+    <div>
+      <h2 class="text-sm font-semibold text-gray-800 mb-2">Compliance Schemas</h2>
+      
+      <% compliance_data = version.env_data.fetch('compliance', {}) %>
+      <% if compliance_data.any? %>
+        <% compliance_data.each do |type_id, schemas| %>
+          <% next unless schemas.is_a?(Array) && schemas.any? %>
+          <% type_label = case type_id
+               when '1' then 'Single-cell transcriptomics'
+               when '2' then 'Bulk transcriptomics'
+               else "Project type #{type_id}"
+             end %>
+          <div class="mb-4">
+            <div class="text-xs text-gray-500 mb-2"><%= type_label %> (type <%= type_id %>)</div>
+            <% schemas.each do |schema| %>
+              <div class="flex flex-wrap items-center gap-3 mb-2">
+                <span class="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
+                  <%= schema['name'] %><%= " v#{schema['version']}" if schema['version'].present? %>
+                </span>
+                <% if schema['source_schema_name'].present? %>
+                  <span class="text-xs text-gray-500">(<%= schema['source_schema_name'] %><%= " v#{schema['version']}" if schema['version'].present? %>)</span>
+                <% end %>
+                <% if schema['source_url'].present? %>
+                  <%= link_to schema['source_url'],
+                              target: "_blank", rel: "noopener",
+                              class: "inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800" do %>
+                    Schema reference
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  <% end %>
+                <% end %>
+                <% if schema['url'].present? %>
+                  <%= link_to schema['url'],
+                              target: "_blank", rel: "noopener",
+                              class: "inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800" do %>
+                    Website
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  <% end %>
+                <% end %>
+                <% if schema['version'].present? %>
+                  <%= link_to compliance_schema_path(version: schema['version']), 
+                              class: "inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800" do %>
+                    Loom Path Translation
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  <% end %>
+                <% end %>
+                <% if schema['if_compliant']&.include?('allow_public') %>
+                  <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                    Required for publishing
+                  </span>
+                <% end %>
+              </div>
+              <% if schema['description'].present? %>
+                <div class="text-xs text-gray-500 mb-2 ml-2"><%= schema['description'] %></div>
+              <% end %>
+              <% if schema['compliant_icon'].present? || schema['not_compliant_icon'].present? %>
+                <div class="flex items-center gap-2 mb-2 ml-2">
+                  <span class="text-xs text-gray-400">Badges:</span>
+                  <% [schema['compliant_icon'], schema['not_compliant_icon']].compact.each do |icon| %>
+                    <%= image_tag icon, alt: icon, class: 'h-5' rescue nil %>
+                  <% end %>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      <% else %>
+        <p class="text-sm text-gray-500 italic">No compliance schemas configured.</p>
+      <% end %>
+
+      <div class="mt-2">
+        <%= link_to compliance_index_path, 
+                    class: "inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-800" do %>
+          Validate Files
+        <% end %>
+      </div>
+    </div>
+
     <% if tool_versions.present? %>
     
       <div>

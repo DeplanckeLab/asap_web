@@ -1,0 +1,38 @@
+<div class="max-w-7xl mx-auto px-4 py-8">
+  <div class="mb-6 flex items-center justify-between">
+    <div>
+      <%= link_to compliance_index_path, class: "inline-flex items-center text-gray-600 hover:text-gray-900" do %>
+        <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+        Back to Compliance
+      <% end %>
+    </div>
+    <div>
+      <a href="/cxg_<%= @version.gsub('.', '_') %>_loom_paths.html" target="_blank"
+         class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+        Open in New Tab
+        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </a>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="bg-gray-50 border-b border-gray-200 px-6 py-4">
+      <h1 class="text-xl font-semibold text-gray-900">
+        CELLxGENE Schema <%= @version %> - Loom Path Translations
+      </h1>
+      <p class="text-sm text-gray-600 mt-1">
+        Documentation showing how H5AD/AnnData paths translate to Loom file format
+      </p>
+    </div>
+    
+    <iframe src="/cxg_<%= @version.gsub('.', '_') %>_loom_paths.html" 
+            class="w-full border-0" 
+            style="height: calc(100vh - 200px); min-height: 600px;"
+            title="Schema Documentation">
+    </iframe>
+  </div>
+</div>

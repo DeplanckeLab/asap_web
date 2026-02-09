@@ -1,0 +1,266 @@
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <%
+    # All display data comes from the validation result -- no hardcoded schema names, URLs, or icons
+    c_name = @validation_result&.dig(:schema_name)
+    c_version = @validation_result&.dig(:schema_version)
+    c_url = @validation_result&.dig(:url)
+    c_source_url = @validation_result&.dig(:source_url)
+    c_source_schema_name = @validation_result&.dig(:source_schema_name)
+    c_description = @validation_result&.dig(:description)
+    c_compliant_icon = @validation_result&.dig(:compliant_icon)
+    c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon)
+
+    # If validation result has no schema info (legacy data), try the compliance config
+    if c_name.blank?
+      schema_config = @project.compliance_schemas.first || {}
+      c_name ||= schema_config['name']
+      c_version ||= schema_config['version']
+      c_url ||= schema_config['url']
+      c_source_url ||= schema_config['source_url']
+      c_source_schema_name ||= schema_config['source_schema_name']
+      c_description ||= schema_config['description']
+      c_compliant_icon ||= schema_config['compliant_icon']
+      c_not_compliant_icon ||= schema_config['not_compliant_icon']
+    end
+
+    display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
+  %>
+
+  <!-- Header -->
+  <div class="mb-6">
+    <%= link_to project_path(@project.key, view: 'summary'), class: "inline-flex items-center text-gray-600 hover:text-gray-900 mb-4" do %>
+      <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+      </svg>
+      Back to project <%= @project.respond_to?(:name) ? @project.name : @project.key %>
+    <% end %>
+    
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">
+          <% if display_title.present? %>
+            <%= display_title %>: <%= @project.respond_to?(:name) ? @project.name : "Project #{@project.id}" %>
+          <% else %>
+            Compliance Report: <%= @project.respond_to?(:name) ? @project.name : "Project #{@project.id}" %>
+          <% end %>
+        </h1>
+        <% if c_description.present? %>
+          <p class="text-gray-600 mt-1"><%= c_description %></p>
+        <% end %>
+        <% if c_source_schema_name.present? && c_source_url.present? %>
+          <p class="text-gray-500 mt-1 text-sm">
+            Source schema: <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 hover:underline"><%= c_source_schema_name %><%= " v#{c_version}" if c_version.present? %></a>
+          </p>
+        <% elsif c_source_url.present? %>
+          <p class="text-gray-500 mt-1 text-sm">
+            Schema reference: <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 hover:underline"><%= c_source_url.truncate(80) %></a>
+          </p>
+        <% end %>
+      </div>
+      
+      <div class="flex items-center gap-4">
+        <% if @validation_result %>
+          <% badge_link = c_url %>
+          <% if @validation_result[:valid] && c_compliant_icon.present? %>
+            <% if badge_link.present? %>
+              <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+                <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-10' %>
+              </a>
+            <% else %>
+              <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-10' %>
+            <% end %>
+          <% elsif !@validation_result[:valid] && c_not_compliant_icon.present? %>
+            <% if badge_link.present? %>
+              <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+                <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-10' %>
+              </a>
+            <% else %>
+              <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-10' %>
+            <% end %>
+          <% end %>
+        <% end %>
+        <%= button_to "Re-run Validation", 
+                      compliance_project_validate_path(@project), 
+                      method: :post,
+                      class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
+      </div>
+    </div>
+  </div>
+
+  <% if @validation_result %>
+    <!-- Summary Card -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">Validation Summary</h2>
+        <% if @validation_result[:valid] %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            Compliant
+          </span>
+        <% else %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Non-compliant
+          </span>
+        <% end %>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <% if c_version.present? %>
+          <div class="bg-gray-50 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-gray-900">
+              <%= c_version %>
+            </div>
+            <div class="text-sm text-gray-500">Schema Version</div>
+          </div>
+        <% end %>
+        
+        <div class="<%= @validation_result[:errors]&.any? ? 'bg-red-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= @validation_result[:errors]&.any? ? 'text-red-600' : 'text-gray-900' %>">
+            <%= @validation_result[:errors_count] || @validation_result[:errors]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Errors</div>
+        </div>
+        
+        <div class="<%= @validation_result[:warnings]&.any? ? 'bg-yellow-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= @validation_result[:warnings]&.any? ? 'text-yellow-600' : 'text-gray-900' %>">
+            <%= @validation_result[:warnings_count] || @validation_result[:warnings]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Warnings</div>
+        </div>
+        
+        <div class="bg-gray-50 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-gray-900">
+            <%= @validation_result[:info]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Info</div>
+        </div>
+      </div>
+
+      <% if @validation_result[:validated_at] %>
+        <div class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
+          Validated: <%= Time.parse(@validation_result[:validated_at]).strftime("%B %d, %Y at %H:%M:%S UTC") %>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Errors Section -->
+    <% if @validation_result[:errors]&.any? %>
+      <div class="bg-white rounded-lg shadow-sm border border-red-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-red-800 mb-4 flex items-center">
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Errors (<%= @validation_result[:errors].count %>)
+        </h2>
+        
+        <div class="space-y-3">
+          <% @validation_result[:errors].each do |error| %>
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg class="w-5 h-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <div class="font-medium text-red-800">
+                    <code class="text-sm bg-red-100 px-1 rounded"><%= error[:field] || error['field'] %></code>
+                  </div>
+                  <div class="text-red-700 mt-1"><%= error[:message] || error['message'] %></div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Warnings Section -->
+    <% if @validation_result[:warnings]&.any? %>
+      <div class="bg-white rounded-lg shadow-sm border border-yellow-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-yellow-800 mb-4 flex items-center">
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          Warnings (<%= @validation_result[:warnings].count %>)
+        </h2>
+        
+        <div class="space-y-3">
+          <% @validation_result[:warnings].each do |warning| %>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg class="w-5 h-5 text-yellow-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <div class="font-medium text-yellow-800">
+                    <code class="text-sm bg-yellow-100 px-1 rounded"><%= warning[:field] || warning['field'] %></code>
+                  </div>
+                  <div class="text-yellow-700 mt-1"><%= warning[:message] || warning['message'] %></div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Info Section -->
+    <% if @validation_result[:info]&.any? %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <details class="group">
+          <summary class="text-lg font-semibold text-gray-900 cursor-pointer flex items-center justify-between">
+            <span class="flex items-center">
+              <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Information (<%= @validation_result[:info].count %>)
+            </span>
+            <svg class="w-5 h-5 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </summary>
+          
+          <div class="mt-4 space-y-2">
+            <% @validation_result[:info].each do |info| %>
+              <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <div class="flex items-start">
+                  <div class="ml-1">
+                    <span class="text-sm font-medium text-blue-800">
+                      <code class="bg-blue-100 px-1 rounded"><%= info[:field] || info['field'] %></code>
+                    </span>
+                    <span class="text-blue-700 ml-2"><%= info[:message] || info['message'] %></span>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </details>
+      </div>
+    <% end %>
+
+  <% else %>
+    <!-- No Validation Result -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
+      <h3 class="mt-4 text-lg font-medium text-gray-900">No Validation Results</h3>
+      <p class="mt-2 text-gray-500">This project has not been validated yet, or validation is in progress.</p>
+      
+      <div class="mt-6">
+        <%= button_to "Start Validation", 
+                      compliance_project_validate_path(@project), 
+                      method: :post,
+                      class: "px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700" %>
+      </div>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="44" viewBox="0 0 240 44">
+  <defs>
+    <linearGradient id="bg-left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f1f3d"/>
+      <stop offset="100%" stop-color="#0a1628"/>
+    </linearGradient>
+    <linearGradient id="bg-right-ok" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+  </defs>
+  <!-- Left panel: scFAIR branding -->
+  <rect x="0" y="0" width="120" height="44" rx="6" ry="6" fill="url(#bg-left)"/>
+  <rect x="114" y="0" width="6" height="44" fill="url(#bg-left)"/>
+  <!-- Right panel: COMPLIANT -->
+  <rect x="120" y="0" width="120" height="44" rx="6" ry="6" fill="url(#bg-right-ok)"/>
+  <rect x="120" y="0" width="6" height="44" fill="url(#bg-right-ok)"/>
+  <!-- Simplified cell network icon -->
+  <!-- Large circles -->
+  <circle cx="22" cy="22" r="5" fill="#5cc8e8" opacity="0.9"/>
+  <circle cx="36" cy="14" r="4" fill="#5cc8e8" opacity="0.85"/>
+  <circle cx="36" cy="30" r="3.5" fill="#f06868" opacity="0.85"/>
+  <circle cx="48" cy="22" r="3" fill="#5cc8e8" opacity="0.8"/>
+  <circle cx="14" cy="14" r="3" fill="#f06868" opacity="0.8"/>
+  <circle cx="14" cy="30" r="2.5" fill="#5cc8e8" opacity="0.75"/>
+  <!-- Connection lines -->
+  <line x1="22" y1="22" x2="36" y2="14" stroke="#5cc8e8" stroke-width="1.2" opacity="0.5"/>
+  <line x1="22" y1="22" x2="36" y2="30" stroke="#f06868" stroke-width="1.2" opacity="0.5"/>
+  <line x1="22" y1="22" x2="48" y2="22" stroke="#5cc8e8" stroke-width="1.2" opacity="0.4"/>
+  <line x1="22" y1="22" x2="14" y2="14" stroke="#f06868" stroke-width="1.2" opacity="0.4"/>
+  <line x1="22" y1="22" x2="14" y2="30" stroke="#5cc8e8" stroke-width="1.2" opacity="0.4"/>
+  <line x1="36" y1="14" x2="48" y2="22" stroke="#5cc8e8" stroke-width="1" opacity="0.35"/>
+  <!-- scFAIR text -->
+  <text x="72" y="28" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="white" text-anchor="middle">
+    <tspan fill="#a0d0e0">sc</tspan><tspan fill="white">FAIR</tspan>
+  </text>
+  <!-- COMPLIANT text -->
+  <text x="180" y="28" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="0.5">COMPLIANT</text>
+  <!-- Outer border -->
+  <rect x="0.5" y="0.5" width="239" height="43" rx="6" ry="6" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+</svg>

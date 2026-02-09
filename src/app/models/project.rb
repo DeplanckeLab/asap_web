@@ -290,6 +290,96 @@ class Project < ApplicationRecord
     ProjectParsingJob.perform_later(id, h_data)
   end
   
+  # Check if this is a single-cell transcriptomics project
+  def single_cell?
+    return false unless project_type.present?
+    project_type.name&.downcase&.include?('single') || 
+      project_type.tag&.downcase&.include?('single') ||
+      project_type_id == 1  # ID 1 is Single-cell transcriptomics
+  end
+
+  # Check if the project passes all compliance schemas that gate publishing
+  # Returns true if validation has been run and passed, or if no compliance is required
+  def compliance_valid?
+    return true unless compliance_requires_public?
+
+    validation = cxg_validation_result
+    return false unless validation.present?
+    validation['valid'] == true || validation[:valid] == true
+  end
+
+  # Check whether the project's version has compliance schemas with "allow_public" for this project type
+  def compliance_requires_public?
+    return false unless version.present? && project_type_id.present?
+    version.compliance_requires_public?(project_type_id)
+  rescue StandardError
+    # Backward compatibility: if no compliance config, single-cell projects still require it
+    single_cell?
+  end
+
+  # Get the compliance schemas configured for this project's type
+  def compliance_schemas
+    return [] unless version.present? && project_type_id.present?
+    version.compliance_schemas_for(project_type_id)
+  rescue StandardError
+    []
+  end
+
+  # Get the CXG validation result
+  # Checks multiple storage locations in order of preference
+  def cxg_validation_result
+    # Try project directory first (primary storage)
+    if respond_to?(:key) && respond_to?(:user_id) && key.present? && user_id.present?
+      project_validation_path = File.join(
+        ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'),
+        user_id.to_s,
+        key,
+        'cxg_validation_result.json'
+      )
+      
+      if File.exist?(project_validation_path)
+        begin
+          return JSON.parse(File.read(project_validation_path))
+        rescue JSON::ParserError => e
+          Rails.logger.warn("[Project] Could not parse validation result: #{e.message}")
+        end
+      end
+    end
+    
+    # Fall back to upload directory
+    validation_path = File.join(
+      ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
+      id.to_s,
+      'cxg_validation_result.json'
+    )
+    
+    if File.exist?(validation_path)
+      begin
+        return JSON.parse(File.read(validation_path))
+      rescue JSON::ParserError => e
+        Rails.logger.warn("[Project] Could not parse validation result: #{e.message}")
+      end
+    end
+    
+    nil
+  end
+
+  # Check if the project can be made public
+  # Returns [can_publish, reason] tuple
+  def can_be_public?
+    unless compliance_valid?
+      validation = cxg_validation_result
+      schema_name = validation&.dig('schema_name') || compliance_schemas.first&.dig('name') || 'compliance'
+      if validation.nil?
+        return [false, "#{schema_name} check has not been run. Please validate your project before making it public."]
+      else
+        error_count = validation['errors_count'] || validation['errors']&.count || 0
+        return [false, "Project does not pass #{schema_name}. Validation found #{error_count} error(s). Please fix the errors and re-validate before making it public."]
+      end
+    end
+    [true, nil]
+  end
+
   # Ensure ProjectStep records exist for all steps associated with this project's docker image
   # Called lazily when needed for display (show, step_results, refresh_steps_panel)
   # Only creates ProjectStep records for steps that match the project's project type

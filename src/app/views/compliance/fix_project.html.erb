@@ -1,0 +1,107 @@
+<div class="max-w-6xl mx-auto px-4 py-8"
+     data-controller="compliance-fix"
+     data-compliance-fix-metadata-url-value="<%= compliance_project_metadata_fields_path(@project.id) %>"
+     data-compliance-fix-autocomplete-url-value="<%= compliance_ontology_autocomplete_path %>"
+     data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>">
+  <%
+    c_name = @schema_config['name'] || @validation_result&.dig(:schema_name)
+    c_version = @validation_result&.dig(:schema_version) || @schema_config['version']
+    display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
+  %>
+
+  <!-- Header -->
+  <div class="mb-6">
+    <%= link_to compliance_project_result_path(@project.id), class: "inline-flex items-center text-gray-600 hover:text-gray-900 mb-4" do %>
+      <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+      </svg>
+      Back to validation report
+    <% end %>
+
+    <h1 class="text-2xl font-bold text-gray-900">
+      Fix Compliance Issues: <%= @project.respond_to?(:name) ? @project.name : "Project #{@project.id}" %>
+    </h1>
+    <p class="text-gray-600 mt-1">
+      Map existing metadata or assign fixed values to resolve compliance errors for <strong><%= display_title %></strong>.
+    </p>
+    <p class="text-sm text-gray-500 mt-1">
+      Fixed values will be applied to <strong>all cells</strong> in the dataset.
+      For fields where values differ per cell, map from an existing metadata annotation instead.
+    </p>
+    <p class="text-sm text-gray-500 mt-1">
+      Ontology term ID fields and their human-readable label counterparts are grouped together.
+      Filling either one will set both fields consistently when applied.
+    </p>
+  </div>
+
+  <% if @fixable_groups.empty? %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+      <p class="text-green-800 font-medium">No fixable compliance errors found.</p>
+      <p class="text-green-700 text-sm mt-2">The validation errors may require manual data preparation outside of this tool.</p>
+      <%= link_to 'Back to Report', compliance_project_result_path(@project.id),
+          class: 'inline-flex items-center mt-4 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors' %>
+    </div>
+  <% else %>
+    <%= form_tag compliance_project_apply_fix_path(@project.id), method: :post, class: 'space-y-4' do %>
+
+      <!-- Global Attributes Section -->
+      <% global_groups = @fixable_groups.select { |fg| fg[:group][:type] == :global_attr } %>
+      <% if global_groups.any? %>
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 class="text-lg font-semibold text-gray-900 mb-1">Global Attributes</h2>
+          <p class="text-sm text-gray-500 mb-4">These attributes apply to the entire dataset.</p>
+
+          <div class="space-y-4">
+            <% global_groups.each do |fg| %>
+              <%= render partial: 'compliance/fix_field_group', locals: {
+                fg: fg,
+                available_attrs: @available_global_attrs,
+                organism_info: @organism_info,
+                project_title: @project_title
+              } %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Cell Metadata Section -->
+      <% cell_groups = @fixable_groups.select { |fg| fg[:group][:type] == :col_attr } %>
+      <% if cell_groups.any? %>
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 class="text-lg font-semibold text-gray-900 mb-1">Cell Metadata</h2>
+          <p class="text-sm text-gray-500 mb-4">
+            These fields are stored per cell. You can map from an existing metadata annotation or set a fixed value that will be applied to all cells.
+          </p>
+
+          <div class="space-y-4">
+            <% cell_groups.each do |fg| %>
+              <%= render partial: 'compliance/fix_field_group', locals: {
+                fg: fg,
+                available_attrs: @available_col_attrs,
+                organism_info: @organism_info,
+                project_title: @project_title
+              } %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Submit -->
+      <div class="flex items-center justify-between bg-white rounded-lg border border-gray-200 p-5">
+        <div>
+          <p class="text-sm text-gray-600">
+            After applying, validation will be re-run automatically to check the updated file.
+          </p>
+        </div>
+        <div class="flex gap-3">
+          <%= link_to 'Cancel', compliance_project_result_path(@project.id),
+              class: 'inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors' %>
+          <button type="submit"
+                  class="inline-flex items-center px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">
+            Apply to the LOOM file
+          </button>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+</div>

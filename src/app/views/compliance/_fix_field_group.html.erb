@@ -1,0 +1,444 @@
+<%
+  group = fg[:group]
+  group_id = group[:id]
+  is_paired = group[:label_path].present?
+  is_auto_organism = group[:auto_from_project] == true && organism_info.present?
+  is_auto_title = group[:auto_from_project] == :title && project_title.present?
+  has_valid_values = group[:term_valid_values].present?
+  has_ontology = group[:term_ontology_prefixes].present?
+%>
+
+<div class="border border-gray-200 rounded-lg p-4"
+     data-compliance-fix-target="fieldRow"
+     data-group-id="<%= group_id %>">
+
+  <!-- Group header -->
+  <div class="flex items-start justify-between mb-3">
+    <div>
+      <span class="text-sm font-semibold text-gray-900"><%= group[:label] %></span>
+      <p class="text-xs text-gray-500 mt-0.5"><%= group[:description] %></p>
+    </div>
+    <div class="flex items-center gap-2">
+      <% if group[:multi_value] %>
+        <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full whitespace-nowrap">multi-value (|| separator)</span>
+      <% end %>
+      <% if is_paired %>
+        <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full whitespace-nowrap">paired fields</span>
+      <% end %>
+    </div>
+  </div>
+
+  <!-- Show which paths have errors -->
+  <div class="mb-3 space-y-1">
+    <% if fg[:term_has_error] %>
+      <div class="flex items-center gap-2">
+        <code class="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"><%= group[:term_path] %></code>
+        <span class="text-xs text-red-600"><%= fg[:term_error] %></span>
+      </div>
+    <% end %>
+    <% if fg[:label_has_error] %>
+      <div class="flex items-center gap-2">
+        <code class="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"><%= group[:label_path] %></code>
+        <span class="text-xs text-red-600"><%= fg[:label_error] %></span>
+      </div>
+    <% end %>
+  </div>
+
+  <% if is_auto_organism %>
+    <%# ── Organism: auto-fill from project ── %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project organism</p>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <span class="text-xs font-medium text-gray-600">organism_ontology_term_id</span>
+          <p class="text-sm font-mono text-gray-900"><%= organism_info[:ontology_term_id] %></p>
+        </div>
+        <div>
+          <span class="text-xs font-medium text-gray-600">organism</span>
+          <p class="text-sm text-gray-900"><%= organism_info[:name] %></p>
+        </div>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= organism_info[:ontology_term_id] %>">
+      <% if group[:label_path] %>
+        <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="set_value">
+        <input type="hidden" name="fixes[<%= group[:label_path] %>][value]" value="<%= organism_info[:name] %>">
+      <% end %>
+    </div>
+
+  <% elsif is_auto_title %>
+    <%# ── Title: auto-fill from project name ── %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project name</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">title</span>
+        <p class="text-sm text-gray-900"><%= project_title %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= project_title %>">
+    </div>
+
+  <% else %>
+    <%# ── Regular field group ── %>
+    <div class="space-y-3">
+      <!-- Action selector -->
+      <div class="flex items-center gap-4">
+        <label class="inline-flex items-center gap-1.5 text-sm">
+          <input type="radio"
+                 name="group_action_<%= group_id %>"
+                 value="skip"
+                 checked
+                 data-action="change->compliance-fix#toggleGroupAction"
+                 data-group-id="<%= group_id %>"
+                 class="text-gray-400 focus:ring-gray-400">
+          <span class="text-gray-500">Skip</span>
+        </label>
+
+        <% if available_attrs.any? %>
+          <label class="inline-flex items-center gap-1.5 text-sm">
+            <input type="radio"
+                   name="group_action_<%= group_id %>"
+                   value="map_from"
+                   data-action="change->compliance-fix#toggleGroupAction"
+                   data-group-id="<%= group_id %>"
+                   class="text-blue-600 focus:ring-blue-500">
+            <span class="text-gray-700">Map from existing metadata</span>
+          </label>
+        <% end %>
+
+        <label class="inline-flex items-center gap-1.5 text-sm">
+          <input type="radio"
+                 name="group_action_<%= group_id %>"
+                 value="set_value"
+                 data-action="change->compliance-fix#toggleGroupAction"
+                 data-group-id="<%= group_id %>"
+                 class="text-blue-600 focus:ring-blue-500">
+          <span class="text-gray-700">Set fixed value</span>
+        </label>
+      </div>
+
+      <%# ── Map from existing metadata ── %>
+      <% if available_attrs.any? %>
+        <div id="map_from_<%= group_id %>" class="hidden pl-6 space-y-3">
+          <% prefix = group[:type] == :col_attr ? '/col_attrs/' : '/attrs/' %>
+
+          <% if is_paired && has_ontology %>
+            <%# ── Paired ontology field: select one source, show values, auto-resolve the other ── %>
+            <p class="text-xs text-gray-500 mb-1">
+              Select a source metadata for either field. The unique values will be shown as badges and the paired field will be resolved automatically from the ontology database.
+            </p>
+
+            <div class="grid grid-cols-2 gap-4">
+              <%# Left: term ID side %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                </label>
+                <% if fg[:term_has_error] %>
+                  <select data-action="change->compliance-fix#onMapSourceSelect"
+                          data-group-id="<%= group_id %>"
+                          data-role="term"
+                          data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                          data-compliance-fix-target="mapSelect"
+                          name="fixes[<%= group[:term_path] %>][source]"
+                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">-- select source metadata --</option>
+                    <% available_attrs.each do |attr| %>
+                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                    <% end %>
+                  </select>
+                <% else %>
+                  <p class="text-xs text-green-600 mt-1">Already present in LOOM file</p>
+                <% end %>
+                <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="term"
+                     data-field-path="<%= group[:term_path] %>" data-has-error="<%= fg[:term_has_error] %>"
+                     class="flex flex-wrap gap-1 mt-2 max-h-32 overflow-y-auto"></div>
+              </div>
+
+              <%# Right: label side %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                </label>
+                <% if fg[:label_has_error] %>
+                  <select data-action="change->compliance-fix#onMapSourceSelect"
+                          data-group-id="<%= group_id %>"
+                          data-role="label"
+                          data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                          data-compliance-fix-target="mapSelect"
+                          name="fixes[<%= group[:label_path] %>][source]"
+                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">-- select source metadata --</option>
+                    <% available_attrs.each do |attr| %>
+                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                    <% end %>
+                  </select>
+                <% else %>
+                  <p class="text-xs text-green-600 mt-1">Already present in LOOM file</p>
+                <% end %>
+                <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="label"
+                     data-field-path="<%= group[:label_path] %>" data-has-error="<%= fg[:label_has_error] %>"
+                     class="flex flex-wrap gap-1 mt-2 max-h-32 overflow-y-auto"></div>
+              </div>
+            </div>
+
+            <%# Inline autocomplete for fixing unresolved values %>
+            <div data-compliance-fix-target="mapFixPanel" data-group-id="<%= group_id %>"
+                 class="hidden mt-2 p-3 bg-amber-50 border border-amber-200 rounded-md">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium text-amber-800">
+                  Replace unresolved term: <code data-compliance-fix-target="mapFixOriginal"
+                  data-group-id="<%= group_id %>" class="bg-amber-100 px-1 rounded"></code>
+                </span>
+                <button type="button" data-action="click->compliance-fix#closeMapFix"
+                        data-group-id="<%= group_id %>"
+                        class="text-xs text-amber-600 hover:text-amber-800">close</button>
+              </div>
+              <div class="relative">
+                <input type="text" placeholder="Search ontology terms..."
+                       data-compliance-fix-target="mapFixInput"
+                       data-group-id="<%= group_id %>"
+                       data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                       data-action="input->compliance-fix#onMapFixAutocomplete keydown->compliance-fix#onMapFixKeydown"
+                       class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                <div data-compliance-fix-target="mapFixResults"
+                     data-group-id="<%= group_id %>"
+                     class="hidden absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto"></div>
+              </div>
+            </div>
+
+            <div data-compliance-fix-target="mapStatus" data-group-id="<%= group_id %>"
+                 class="text-xs text-gray-500 italic hidden"></div>
+
+          <% else %>
+            <%# ── Non-paired or non-ontology field: simple source selector ── %>
+            <% if fg[:term_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                  -- select source metadata:
+                </label>
+                <div class="flex items-center gap-3">
+                  <select name="fixes[<%= group[:term_path] %>][source]"
+                          data-action="change->compliance-fix#previewSource"
+                          data-group-id="<%= group_id %>"
+                          data-role="term"
+                          class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">-- select --</option>
+                    <% available_attrs.each do |attr| %>
+                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                    <% end %>
+                  </select>
+                  <span data-compliance-fix-target="preview"
+                        data-preview-for="<%= group_id %>_term"
+                        class="text-xs text-gray-500 italic"></span>
+                </div>
+              </div>
+            <% end %>
+
+            <% if is_paired && fg[:label_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                  -- select source metadata:
+                </label>
+                <div class="flex items-center gap-3">
+                  <select name="fixes[<%= group[:label_path] %>][source]"
+                          data-action="change->compliance-fix#previewSource"
+                          data-group-id="<%= group_id %>"
+                          data-role="label"
+                          class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">-- select --</option>
+                    <% available_attrs.each do |attr| %>
+                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                    <% end %>
+                  </select>
+                  <span data-compliance-fix-target="preview"
+                        data-preview-for="<%= group_id %>_label"
+                        class="text-xs text-gray-500 italic"></span>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+
+          <%# Hidden inputs to set action=map_from when this panel is active %>
+          <% if fg[:term_has_error] %>
+            <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="skip"
+                   data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="term_action">
+          <% end %>
+          <% if is_paired && fg[:label_has_error] %>
+            <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="skip"
+                   data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action">
+          <% end %>
+        </div>
+      <% end %>
+
+      <%# ── Set fixed value ── %>
+      <div id="set_value_<%= group_id %>" class="hidden pl-6 space-y-3">
+        <% if is_paired && has_ontology %>
+          <%# Paired ontology field: autocomplete that fills both term ID and label %>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
+            <div class="relative" data-compliance-fix-target="autocompleteWrapper">
+              <input type="text"
+                     placeholder="Type to search (e.g., <%= group[:term_format_hint] %>)"
+                     autocomplete="off"
+                     data-compliance-fix-target="autocompleteInput"
+                     data-group-id="<%= group_id %>"
+                     data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                     data-action="input->compliance-fix#onAutocompleteInput keydown->compliance-fix#onAutocompleteKeydown"
+                     class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+              <div data-compliance-fix-target="autocompleteResults"
+                   data-group-id="<%= group_id %>"
+                   class="hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"></div>
+            </div>
+            <% if group[:multi_value] %>
+              <p class="text-xs text-gray-400 mt-1">For multiple values, select one at a time. Values are separated with <code>||</code>.</p>
+            <% end %>
+          </div>
+
+          <%# Selected terms display + hidden inputs %>
+          <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2"></div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <%# Term ID (filled by autocomplete) %>
+            <% if fg[:term_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                  <span class="text-gray-400 ml-1">(auto-filled)</span>
+                </label>
+                <input type="text"
+                       name="fixes[<%= group[:term_path] %>][value]"
+                       data-compliance-fix-target="termValue"
+                       data-group-id="<%= group_id %>"
+                       readonly
+                       placeholder="Filled by autocomplete selection"
+                       class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+              </div>
+            <% end %>
+
+            <%# Label (filled by autocomplete) %>
+            <% if fg[:label_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                  <span class="text-gray-400 ml-1">(auto-filled)</span>
+                </label>
+                <input type="text"
+                       name="fixes[<%= group[:label_path] %>][value]"
+                       data-compliance-fix-target="labelValue"
+                       data-group-id="<%= group_id %>"
+                       readonly
+                       placeholder="Filled by autocomplete selection"
+                       class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+              </div>
+            <% end %>
+          </div>
+
+          <p class="text-xs text-gray-400">
+            Select a term from the autocomplete to fill both fields coherently.
+            You can also edit the values manually if needed.
+          </p>
+
+        <% elsif is_paired %>
+          <%# Paired non-ontology field: side by side inputs %>
+          <div class="grid grid-cols-2 gap-4">
+            <% if fg[:term_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                  <span class="text-gray-400 ml-1">(ontology term ID)</span>
+                </label>
+                <% if has_valid_values %>
+                  <select name="fixes[<%= group[:term_path] %>][value]"
+                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">-- select --</option>
+                    <% group[:term_valid_values].each do |val| %>
+                      <option value="<%= val %>"><%= val %></option>
+                    <% end %>
+                  </select>
+                <% else %>
+                  <input type="text"
+                         name="fixes[<%= group[:term_path] %>][value]"
+                         placeholder="Enter value..."
+                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                <% end %>
+              </div>
+            <% end %>
+            <% if fg[:label_has_error] %>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                  <span class="text-gray-400 ml-1">(human-readable label)</span>
+                </label>
+                <input type="text"
+                       name="fixes[<%= group[:label_path] %>][value]"
+                       placeholder="e.g., human-readable name"
+                       class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+              </div>
+            <% end %>
+          </div>
+          <p class="text-xs text-gray-400">
+            Both fields must be coherent: the label should be the human-readable name for the ontology term ID.
+          </p>
+
+        <% else %>
+          <%# Standalone field (no pair) %>
+          <% if has_valid_values %>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Select value:</label>
+            <select name="fixes[<%= group[:term_path] %>][value]"
+                    class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+              <option value="">-- select --</option>
+              <% group[:term_valid_values].each do |val| %>
+                <option value="<%= val %>"><%= val %></option>
+              <% end %>
+            </select>
+          <% elsif has_ontology %>
+            <%# Standalone ontology field with autocomplete %>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
+            <div class="relative" data-compliance-fix-target="autocompleteWrapper">
+              <input type="text"
+                     placeholder="Type to search (e.g., <%= group[:term_format_hint] %>)"
+                     autocomplete="off"
+                     data-compliance-fix-target="autocompleteInput"
+                     data-group-id="<%= group_id %>"
+                     data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                     data-action="input->compliance-fix#onAutocompleteInput keydown->compliance-fix#onAutocompleteKeydown"
+                     class="block w-80 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+              <div data-compliance-fix-target="autocompleteResults"
+                   data-group-id="<%= group_id %>"
+                   class="hidden absolute z-50 w-80 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"></div>
+            </div>
+            <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2 mt-2"></div>
+            <input type="text"
+                   name="fixes[<%= group[:term_path] %>][value]"
+                   data-compliance-fix-target="termValue"
+                   data-group-id="<%= group_id %>"
+                   readonly
+                   placeholder="Filled by autocomplete selection"
+                   class="block w-80 mt-2 rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+          <% else %>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Enter value:</label>
+            <input type="text"
+                   name="fixes[<%= group[:term_path] %>][value]"
+                   placeholder="Enter value..."
+                   class="block w-80 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+          <% end %>
+        <% end %>
+
+        <%# Hidden inputs to set action=set_value when this panel is active %>
+        <% if fg[:term_has_error] %>
+          <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="skip"
+                 data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="term_action_sv">
+        <% end %>
+        <% if is_paired && fg[:label_has_error] %>
+          <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="skip"
+                 data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action_sv">
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>

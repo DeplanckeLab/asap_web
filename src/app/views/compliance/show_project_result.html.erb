@@ -1,27 +1,16 @@
 <div class="max-w-6xl mx-auto px-4 py-8">
   <%
-    # All display data comes from the validation result -- no hardcoded schema names, URLs, or icons
-    c_name = @validation_result&.dig(:schema_name)
-    c_version = @validation_result&.dig(:schema_version)
-    c_url = @validation_result&.dig(:url)
-    c_source_url = @validation_result&.dig(:source_url)
-    c_source_schema_name = @validation_result&.dig(:source_schema_name)
-    c_description = @validation_result&.dig(:description)
-    c_compliant_icon = @validation_result&.dig(:compliant_icon)
-    c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon)
+    # Display data: current config takes priority for name (branding), rest from validation result with config fallback
+    schema_config = @project.compliance_schemas.first || {}
 
-    # If validation result has no schema info (legacy data), try the compliance config
-    if c_name.blank?
-      schema_config = @project.compliance_schemas.first || {}
-      c_name ||= schema_config['name']
-      c_version ||= schema_config['version']
-      c_url ||= schema_config['url']
-      c_source_url ||= schema_config['source_url']
-      c_source_schema_name ||= schema_config['source_schema_name']
-      c_description ||= schema_config['description']
-      c_compliant_icon ||= schema_config['compliant_icon']
-      c_not_compliant_icon ||= schema_config['not_compliant_icon']
-    end
+    c_name = schema_config['name'] || @validation_result&.dig(:schema_name)
+    c_version = @validation_result&.dig(:schema_version) || schema_config['version']
+    c_url = @validation_result&.dig(:url) || schema_config['url']
+    c_source_url = @validation_result&.dig(:source_url) || schema_config['source_url']
+    c_source_schema_name = @validation_result&.dig(:source_schema_name) || schema_config['source_schema_name']
+    c_description = @validation_result&.dig(:description) || schema_config['description']
+    c_compliant_icon = @validation_result&.dig(:compliant_icon) || schema_config['compliant_icon']
+    c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon) || schema_config['not_compliant_icon']
 
     display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
   %>
@@ -83,6 +72,11 @@
                       compliance_project_validate_path(@project), 
                       method: :post,
                       class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
+        <% if @validation_result && !@validation_result[:valid] %>
+          <%= link_to "Fix Compliance Issues",
+                      compliance_project_fix_path(@project),
+                      class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
+        <% end %>
       </div>
     </div>
   </div>

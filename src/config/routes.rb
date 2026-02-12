@@ -118,7 +118,12 @@ Rails.application.routes.draw do
       post 'validate', action: :validate_project, as: :compliance_project_validate
       get 'result', action: :show_project_result, as: :compliance_project_result
       get 'status', action: :project_status, as: :compliance_project_status
+      get 'fix', action: :fix_project, as: :compliance_project_fix
+      post 'apply_fix', action: :apply_project_fix, as: :compliance_project_apply_fix
+      get 'metadata_fields', action: :project_metadata_fields, as: :compliance_project_metadata_fields
     end
+    get 'ontology_autocomplete', action: :ontology_autocomplete, as: :compliance_ontology_autocomplete
+    post 'resolve_ontology_terms', action: :resolve_ontology_terms, as: :compliance_resolve_ontology_terms
   end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 

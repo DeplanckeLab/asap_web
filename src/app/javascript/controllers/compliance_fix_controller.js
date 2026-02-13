@@ -1,22 +1,27 @@
 import { Controller } from "@hotwired/stimulus"
+import consumer from "channels/consumer"
 
 // Handles the compliance fix form:
 // - Toggling field group actions (skip / map_from / set_value)
 // - Updating hidden action inputs so the backend knows which action to apply
 // - Previewing metadata values when selecting a source annotation
 // - Ontology term autocomplete with paired field auto-fill
+// - AJAX form submission with loading overlay and websocket updates
 export default class extends Controller {
   static targets = [
     "fieldRow", "preview", "hiddenAction",
     "autocompleteInput", "autocompleteResults", "autocompleteWrapper",
     "selectedTerms", "termValue", "labelValue",
     "mapSelect", "mapBadges", "mapStatus",
-    "mapFixPanel", "mapFixOriginal", "mapFixInput", "mapFixResults"
+    "mapFixPanel", "mapFixOriginal", "mapFixInput", "mapFixResults",
+    "submitButton"
   ]
   static values = {
     metadataUrl: String,
     autocompleteUrl: String,
-    resolveUrl: String
+    resolveUrl: String,
+    projectId: Number,
+    resultUrl: String
   }
 
   connect() {
@@ -27,6 +32,8 @@ export default class extends Controller {
     // { groupId: { selectedRole, pairedRole, sourcePath, prefixes, values, resolved } }
     this.mapResolveState = {}
     this.mapFixHighlight = -1
+    this.subscription = null
+    this.overlay = null
 
     // Close autocomplete and map fix dropdowns when clicking outside
     this.outsideClickHandler = (e) => {
@@ -38,11 +45,210 @@ export default class extends Controller {
       }
     }
     document.addEventListener('click', this.outsideClickHandler)
+
+    // Auto-trigger map source selects that are pre-selected (from prefill data)
+    requestAnimationFrame(() => this.triggerPreselectedMapSources())
+  }
+
+  triggerPreselectedMapSources() {
+    this.mapSelectTargets.forEach(select => {
+      if (select.value) {
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    })
   }
 
   disconnect() {
     document.removeEventListener('click', this.outsideClickHandler)
     Object.values(this.debounceTimers).forEach(t => clearTimeout(t))
+    if (this.subscription) {
+      this.subscription.unsubscribe()
+      this.subscription = null
+    }
+    this.removeOverlay()
+  }
+
+  // ── Form submission with loading overlay ──
+
+  async submitForm(event) {
+    event.preventDefault()
+
+    const form = event.target
+    if (!form) return
+
+    // Disable submit button
+    if (this.hasSubmitButtonTarget) {
+      this.submitButtonTarget.disabled = true
+      this.submitButtonTarget.textContent = 'Applying...'
+    }
+
+    // Show loading overlay
+    this.showOverlay('Applying fixes to LOOM files...')
+
+    // Subscribe to websocket for real-time updates
+    if (this.hasProjectIdValue && this.projectIdValue) {
+      this.subscribeToCompliance(this.projectIdValue)
+    }
+
+    try {
+      const formData = new FormData(form)
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
+
+      const response = await fetch(form.action, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          'Accept': 'application/json'
+        },
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (data.status === 'error') {
+        this.removeOverlay()
+        if (this.hasSubmitButtonTarget) {
+          this.submitButtonTarget.disabled = false
+          this.submitButtonTarget.textContent = 'Apply to the LOOM file'
+        }
+        alert(data.message || 'An error occurred while applying fixes.')
+        return
+      }
+
+      // Fixes applied, now waiting for validation via websocket
+      this.updateOverlay(data.message || 'Fixes applied. Running validation...')
+
+      // If the backend didn't trigger async validation and returned a redirect,
+      // go there directly
+      if (data.redirect_url && !data.validating) {
+        window.location.href = data.redirect_url
+      }
+
+    } catch (error) {
+      console.error('[ComplianceFix] Form submission error:', error)
+      this.removeOverlay()
+      if (this.hasSubmitButtonTarget) {
+        this.submitButtonTarget.disabled = false
+        this.submitButtonTarget.textContent = 'Apply to the LOOM file'
+      }
+      alert('An error occurred while applying fixes. Please try again.')
+    }
+  }
+
+  subscribeToCompliance(projectId) {
+    if (this.subscription) {
+      this.subscription.unsubscribe()
+    }
+
+    if (!consumer || !consumer.subscriptions) {
+      console.error('[ComplianceFix] ActionCable consumer not available')
+      return
+    }
+
+    try {
+      this.subscription = consumer.subscriptions.create(
+        { channel: "ComplianceChannel", project_id: projectId },
+        {
+          connected: () => {
+            console.log(`[ComplianceFix] Connected to ComplianceChannel for project ${projectId}`)
+          },
+          disconnected: () => {
+            console.warn('[ComplianceFix] Disconnected from ComplianceChannel')
+          },
+          received: (data) => {
+            console.log('[ComplianceFix] Received:', data)
+            this.handleComplianceUpdate(data)
+          }
+        }
+      )
+    } catch (error) {
+      console.error('[ComplianceFix] Error subscribing:', error)
+    }
+  }
+
+  handleComplianceUpdate(data) {
+    if (!data) return
+
+    switch (data.status) {
+      case 'applying':
+        this.updateOverlay(data.message || 'Applying fixes...')
+        break
+      case 'validating':
+        this.updateOverlay(data.message || 'Running compliance validation...')
+        break
+      case 'completed': {
+        const resultUrl = this.hasResultUrlValue ? this.resultUrlValue : null
+        if (data.valid) {
+          this.updateOverlay('Validation passed. Redirecting...')
+        } else {
+          const count = data.errors_count || 0
+          this.updateOverlay(`Validation complete (${count} error(s)). Redirecting...`)
+        }
+        // Redirect to the compliance result page
+        setTimeout(() => {
+          if (data.redirect_url) {
+            window.location.href = data.redirect_url
+          } else if (resultUrl) {
+            window.location.href = resultUrl
+          } else {
+            window.location.reload()
+          }
+        }, 800)
+        break
+      }
+      case 'failed':
+        this.updateOverlay(`Validation failed: ${data.message || 'Unknown error'}. Redirecting...`)
+        setTimeout(() => {
+          const resultUrl = this.hasResultUrlValue ? this.resultUrlValue : null
+          if (resultUrl) {
+            window.location.href = resultUrl
+          } else {
+            window.location.reload()
+          }
+        }, 2000)
+        break
+    }
+  }
+
+  showOverlay(message) {
+    this.removeOverlay()
+
+    const overlay = document.createElement('div')
+    overlay.id = 'compliance-fix-overlay'
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(0,0,0,0.5);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;'
+    overlay.innerHTML = `
+      <div style="background:white;border-radius:12px;padding:32px 48px;text-align:center;max-width:480px;">
+        <svg style="width:48px;height:48px;margin:0 auto 16px;color:#3b82f6;" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" opacity="0.2"/>
+          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
+          </path>
+        </svg>
+        <p id="compliance-fix-overlay-msg" style="font-size:16px;font-weight:500;color:#1f2937;margin:0;">${this.escapeHtml(message)}</p>
+        <p style="font-size:13px;color:#6b7280;margin-top:8px;">Please wait, this may take a few minutes for large datasets.</p>
+      </div>
+    `
+    document.body.appendChild(overlay)
+    this.overlay = overlay
+  }
+
+  updateOverlay(message) {
+    const msgEl = document.getElementById('compliance-fix-overlay-msg')
+    if (msgEl) {
+      msgEl.textContent = message
+    } else {
+      // Overlay might not exist yet (e.g., websocket arrived before overlay was created)
+      this.showOverlay(message)
+    }
+  }
+
+  removeOverlay() {
+    if (this.overlay) {
+      this.overlay.remove()
+      this.overlay = null
+    }
+    const existing = document.getElementById('compliance-fix-overlay')
+    if (existing) existing.remove()
   }
 
   // ── Group action toggling ──
@@ -75,14 +281,13 @@ export default class extends Controller {
 
     this.hiddenActionTargets.forEach(input => {
       if (input.dataset.groupId !== groupId) return
-      const role = input.dataset.role
 
       if (action === 'skip') {
         input.value = 'skip'
       } else if (action === 'map_from') {
-        input.value = role.endsWith('_sv') ? 'skip' : 'map_from'
+        input.value = 'map_from'
       } else if (action === 'set_value') {
-        input.value = role.endsWith('_sv') ? 'set_value' : 'skip'
+        input.value = 'set_value'
       }
     })
   }
@@ -218,12 +423,21 @@ export default class extends Controller {
 
       const resolveData = await resolveResponse.json()
       const resolved = resolveData.resolved || {}
+      const multiTermMap = resolveData.multi_term_map || {}
+
+      // For array-formatted values that were resolved, auto-populate sourceRenames
+      // so the source field will be rewritten from "['a','b']" to "a || b"
+      const sourceRenames = {}
+      for (const [original, joinedSource] of Object.entries(multiTermMap)) {
+        sourceRenames[original] = joinedSource
+      }
 
       // Store state for this group so the fix autocomplete can update it
-      // sourceRenames tracks corrections to the source field itself (e.g., "T-cell" -> "T cell")
+      // sourceRenames tracks corrections to the source field itself (e.g., "T-cell" -> "T cell",
+      // or "['FBbt:001','FBbt:002']" -> "FBbt:001 || FBbt:002")
       this.mapResolveState[groupId] = {
         selectedRole, pairedRole, sourcePath, prefixes, values, resolved,
-        sourceRenames: {}
+        sourceRenames
       }
 
       // Render badges on both sides
@@ -231,6 +445,12 @@ export default class extends Controller {
 
       // Store the resolve map in a hidden input for form submission
       this.setResolveMapInput(groupId, pairedRole, sourcePath, resolved)
+
+      // If array-formatted values were auto-converted, the source field also needs
+      // a resolve_paired action to rewrite "['a','b']" -> "a || b"
+      if (Object.keys(sourceRenames).length > 0) {
+        this.updateSourceFieldAction(groupId)
+      }
 
     } catch (error) {
       if (statusEl) {
@@ -246,9 +466,6 @@ export default class extends Controller {
       el => el.dataset.groupId === groupId && el.dataset.role === pairedRole
     )
     if (!pairedBadgeEl) return
-
-    const hasError = pairedBadgeEl.dataset.hasError === 'true'
-    if (!hasError) return // No fix needed for this field
 
     const fieldPath = pairedBadgeEl.dataset.fieldPath
     if (!fieldPath) return
@@ -292,9 +509,6 @@ export default class extends Controller {
       el => el.dataset.groupId === groupId && el.dataset.role === selectedRole
     )
     if (!sourceBadgeEl) return
-
-    const sourceHasError = sourceBadgeEl.dataset.hasError === 'true'
-    if (!sourceHasError) return // Source field has no error, nothing to submit
 
     const sourceFieldPath = sourceBadgeEl.dataset.fieldPath
     if (!sourceFieldPath) return
@@ -357,31 +571,46 @@ export default class extends Controller {
     const resolvedCount = values.filter(v => resolved[v]).length
     const unresolvedValues = values.filter(v => !resolved[v])
 
+    // Sort values: unresolved first, then resolved
+    const sortedValues = [...unresolvedValues, ...values.filter(v => resolved[v])]
+
     // Display source values as badges
+    // All badges are clickable (to allow replacing any term, even resolved ones)
     // - Gray: auto-resolved with no rename needed (source value matches ontology)
+    // - Green/purple: resolved from array format (shows || separated values)
     // - Green: manually fixed (source value was renamed to the correct ontology term)
-    // - Red + clickable: unresolved
+    // - Red: unresolved
     if (thisBadgeEl) {
-      values.forEach(val => {
+      sortedValues.forEach(val => {
         const badge = document.createElement('span')
         const isResolved = !!resolved[val]
         const hasRename = !!sourceRenames[val]
+        const isArrayFormat = val.startsWith('[') && val.endsWith(']')
 
-        if (isResolved && hasRename) {
+        // All badges are clickable to allow corrections
+        badge.dataset.action = 'click->compliance-fix#openMapFix'
+        badge.dataset.groupId = groupId
+        badge.dataset.originalValue = val
+
+        if (isResolved && isArrayFormat) {
+          // Multi-term value resolved from array format: show the || joined version in purple
+          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          badge.innerHTML = `<s class="text-gray-400 text-[10px]">[...]</s> ${this.escapeHtml(sourceRenames[val])}`
+          badge.title = `Original: ${val} -- click to change`
+        } else if (isResolved && hasRename) {
           // Manually fixed: show the corrected value in green
-          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200'
+          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
           badge.innerHTML = `<s class="text-red-400 text-[10px]">${this.escapeHtml(val)}</s> ${this.escapeHtml(sourceRenames[val])}`
+          badge.title = 'Click to change'
         } else if (isResolved) {
-          // Auto-resolved: original value is valid
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700 border border-gray-200'
+          // Auto-resolved: original value is valid, still clickable for corrections
+          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700 border border-gray-200 cursor-pointer hover:bg-gray-200'
           badge.textContent = val
+          badge.title = 'Click to change'
         } else {
           // Unresolved: red + clickable
           badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
           badge.title = 'Click to fix this unresolved term'
-          badge.dataset.action = 'click->compliance-fix#openMapFix'
-          badge.dataset.groupId = groupId
-          badge.dataset.originalValue = val
           badge.textContent = val
         }
         badge.dataset.mapBadgeValue = val
@@ -390,19 +619,30 @@ export default class extends Controller {
       })
     }
 
-    // Display paired values as badges (blue if resolved, red if unresolved)
+    // Display paired values as badges (blue/purple if resolved, red if unresolved)
+    // All badges are clickable to allow corrections
     if (pairedBadgeEl) {
-      values.forEach(val => {
+      sortedValues.forEach(val => {
         const badge = document.createElement('span')
+        const isArrayFormat = val.startsWith('[') && val.endsWith(']')
+
+        // All paired badges are clickable
+        badge.dataset.action = 'click->compliance-fix#openMapFix'
+        badge.dataset.groupId = groupId
+        badge.dataset.originalValue = val
+
         if (resolved[val]) {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200'
+          if (isArrayFormat) {
+            // Multi-term resolved: purple badge with || separated names
+            badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          } else {
+            badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200'
+          }
           badge.textContent = resolved[val]
+          badge.title = 'Click to change'
         } else {
           badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
           badge.title = 'Click to fix this unresolved term'
-          badge.dataset.action = 'click->compliance-fix#openMapFix'
-          badge.dataset.groupId = groupId
-          badge.dataset.originalValue = val
           badge.textContent = `? (${val})`
         }
         badge.dataset.mapBadgeValue = val
@@ -414,8 +654,8 @@ export default class extends Controller {
     // Show resolution status
     if (statusEl) {
       if (unresolvedValues.length > 0) {
-        statusEl.textContent = `Resolved ${resolvedCount}/${values.length} values. Click on red badges to fix unresolved terms.`
-        statusEl.className = 'text-xs text-amber-600 italic'
+        statusEl.textContent = `Resolved ${resolvedCount}/${values.length} values. ${unresolvedValues.length} unresolved (shown first in red). Click on red badges to fix them.`
+        statusEl.className = 'text-xs text-amber-600 font-medium'
       } else {
         statusEl.textContent = `All ${resolvedCount} values resolved successfully.`
         statusEl.className = 'text-xs text-green-600 italic'

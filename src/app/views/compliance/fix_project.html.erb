@@ -2,7 +2,9 @@
      data-controller="compliance-fix"
      data-compliance-fix-metadata-url-value="<%= compliance_project_metadata_fields_path(@project.id) %>"
      data-compliance-fix-autocomplete-url-value="<%= compliance_ontology_autocomplete_path %>"
-     data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>">
+     data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>"
+     data-compliance-fix-project-id-value="<%= @project.id %>"
+     data-compliance-fix-result-url-value="<%= compliance_project_result_path(@project.id) %>">
   <%
     c_name = @schema_config['name'] || @validation_result&.dig(:schema_name)
     c_version = @validation_result&.dig(:schema_version) || @schema_config['version']
@@ -42,7 +44,8 @@
           class: 'inline-flex items-center mt-4 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors' %>
     </div>
   <% else %>
-    <%= form_tag compliance_project_apply_fix_path(@project.id), method: :post, class: 'space-y-4' do %>
+    <%= form_tag compliance_project_apply_fix_path(@project.id), method: :post, class: 'space-y-4',
+        data: { action: 'submit->compliance-fix#submitForm' } do %>
 
       <!-- Global Attributes Section -->
       <% global_groups = @fixable_groups.select { |fg| fg[:group][:type] == :global_attr } %>
@@ -57,7 +60,8 @@
                 fg: fg,
                 available_attrs: @available_global_attrs,
                 organism_info: @organism_info,
-                project_title: @project_title
+                project_title: @project_title,
+                prefill: @prefill_data[fg[:group][:id]]
               } %>
             <% end %>
           </div>
@@ -79,7 +83,8 @@
                 fg: fg,
                 available_attrs: @available_col_attrs,
                 organism_info: @organism_info,
-                project_title: @project_title
+                project_title: @project_title,
+                prefill: @prefill_data[fg[:group][:id]]
               } %>
             <% end %>
           </div>
@@ -97,7 +102,8 @@
           <%= link_to 'Cancel', compliance_project_result_path(@project.id),
               class: 'inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors' %>
           <button type="submit"
-                  class="inline-flex items-center px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">
+                  data-compliance-fix-target="submitButton"
+                  class="inline-flex items-center px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             Apply to the LOOM file
           </button>
         </div>

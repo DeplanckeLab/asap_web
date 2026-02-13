@@ -13,6 +13,9 @@ class Project < ApplicationRecord
   belongs_to :archive_status, optional: true
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
   has_many :annots, dependent: :destroy
+  has_many :ot_projects, dependent: :destroy
+  has_many :ott_projects, dependent: :destroy
+  has_many :compliance_mappings, dependent: :destroy
   has_many :reqs, dependent: :destroy
   has_many :runs, dependent: :destroy
   has_many :project_steps, dependent: :destroy

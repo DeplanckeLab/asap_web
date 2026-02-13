@@ -78,6 +78,7 @@ development:
   asap2_data:
     <<: *asap2_remote
     database: <%= ENV.fetch("ASAP2_REMOTE_DB", "asap2_data_v8") %>
+    migrations_paths: db/asap2_data_migrate
 
 <%
   asap2_data_versions = ENV.fetch("ASAP2_DATA_VERSIONS", "asap2_data_v4,asap2_data_v5,asap2_data_v6,asap2_data_v8").split(",").map(&:strip).reject(&:empty?)

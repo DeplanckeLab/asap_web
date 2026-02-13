@@ -10,12 +10,39 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_06_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_12_173146) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
   create_table "bla", id: false, force: :cascade do |t|
     t.integer "a"
+  end
+
+  create_table "compliance_mappings", force: :cascade do |t|
+    t.string "action_type", null: false
+    t.datetime "applied_at", null: false
+    t.datetime "created_at", null: false
+    t.string "field_group_id", null: false
+    t.integer "project_id", null: false
+    t.text "resolve_map_json"
+    t.string "set_value"
+    t.integer "source_annot_id"
+    t.string "source_path"
+    t.string "target_path", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id", "field_group_id"], name: "index_compliance_mappings_on_project_id_and_field_group_id"
+  end
+
+  create_table "compliance_term_replacements", force: :cascade do |t|
+    t.integer "cell_ontology_term_id"
+    t.bigint "compliance_mapping_id", null: false
+    t.datetime "created_at", null: false
+    t.string "original_value", null: false
+    t.string "replacement_identifier"
+    t.string "replacement_name"
+    t.datetime "updated_at", null: false
+    t.index ["compliance_mapping_id"], name: "index_compliance_term_replacements_on_compliance_mapping_id"
+    t.index ["original_value"], name: "index_compliance_term_replacements_on_original_value"
   end
 
   create_table "db_sets", id: :serial, force: :cascade do |t|
@@ -135,6 +162,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_06_000001) do
     t.datetime "updated_at", precision: nil
   end
 
+  add_foreign_key "compliance_term_replacements", "compliance_mappings"
   add_foreign_key "gene_names", "genes", name: "gene_names_gene_id_fkey2"
   add_foreign_key "gene_names", "organisms", name: "gene_names_organism_id_fkey2"
   add_foreign_key "gene_set_items", "gene_sets", name: "gene_set_items_gene_set_id_fkey1"

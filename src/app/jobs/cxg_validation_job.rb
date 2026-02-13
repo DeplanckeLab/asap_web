@@ -40,6 +40,13 @@ class CxgValidationJob < ApplicationJob
     # Save results
     save_validation_result(project, result, loom_path)
 
+    # Build redirect URL for the compliance result page
+    redirect_url = begin
+      Rails.application.routes.url_helpers.compliance_project_result_path(project_id)
+    rescue StandardError
+      nil
+    end
+
     # Broadcast completion
     if result.valid?
       broadcast(project_id, 
@@ -48,7 +55,8 @@ class CxgValidationJob < ApplicationJob
         message: 'Validation passed! File is compliant with CELLxGENE schema 7.1.0',
         errors_count: 0,
         warnings_count: result.warnings.count,
-        info_count: result.info.count
+        info_count: result.info.count,
+        redirect_url: redirect_url
       )
     else
       broadcast(project_id, 
@@ -58,7 +66,8 @@ class CxgValidationJob < ApplicationJob
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
         info_count: result.info.count,
-        errors: result.errors.first(5) # Send first 5 errors for quick preview
+        errors: result.errors.first(5), # Send first 5 errors for quick preview
+        redirect_url: redirect_url
       )
     end
 

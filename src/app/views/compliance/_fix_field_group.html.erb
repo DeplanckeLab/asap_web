@@ -28,19 +28,31 @@
     </div>
   </div>
 
-  <!-- Show which paths have errors -->
+  <!-- Show which paths have errors or pass validation -->
   <div class="mb-3 space-y-1">
     <% if fg[:term_has_error] %>
       <div class="flex items-center gap-2">
         <code class="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"><%= group[:term_path] %></code>
         <span class="text-xs text-red-600"><%= fg[:term_error] %></span>
       </div>
-    <% end %>
-    <% if fg[:label_has_error] %>
+    <% else %>
       <div class="flex items-center gap-2">
-        <code class="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"><%= group[:label_path] %></code>
-        <span class="text-xs text-red-600"><%= fg[:label_error] %></span>
+        <code class="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded"><%= group[:term_path] %></code>
+        <span class="text-xs text-green-600">OK</span>
       </div>
+    <% end %>
+    <% if group[:label_path].present? %>
+      <% if fg[:label_has_error] %>
+        <div class="flex items-center gap-2">
+          <code class="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"><%= group[:label_path] %></code>
+          <span class="text-xs text-red-600"><%= fg[:label_error] %></span>
+        </div>
+      <% else %>
+        <div class="flex items-center gap-2">
+          <code class="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded"><%= group[:label_path] %></code>
+          <span class="text-xs text-green-600">OK</span>
+        </div>
+      <% end %>
     <% end %>
   </div>
 
@@ -82,6 +94,50 @@
 
   <% else %>
     <%# ── Regular field group ── %>
+    <%
+      # Determine prefill state
+      pf = prefill || {}
+      pf_source = pf[:source_annot_name]
+      pf_terms = pf[:terms] || []
+      pf_has_source = pf_source.present? && available_attrs.include?(pf_source.sub(%r{\A/col_attrs/}, '').sub(%r{\A/attrs/}, ''))
+      pf_has_terms = pf_terms.any?
+      pf_single_term = pf_terms.size == 1 && pf_terms.first[:identifier].present?
+      # Pre-select action:
+      # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
+      # - If source annotation with multiple terms: map_from
+      # - If terms but no source: set_value
+      pf_action = if pf_single_term then 'set_value'
+                  elsif pf_has_source then 'map_from'
+                  elsif pf_has_terms then 'set_value'
+                  else 'skip'
+                  end
+    %>
+
+    <% if pf_has_source || pf_has_terms %>
+      <div class="bg-blue-50 border border-blue-200 rounded-md p-3 mb-3">
+        <p class="text-xs font-medium text-blue-800 mb-1">Previous assignment found</p>
+        <% if pf_has_source %>
+          <p class="text-xs text-blue-700">Source metadata: <code class="bg-blue-100 px-1 rounded"><%= pf_source %></code></p>
+        <% end %>
+        <% if pf_has_terms %>
+          <div class="flex flex-wrap gap-1 mt-1">
+            <% pf_terms.first(10).each do |t| %>
+              <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                <% if t[:identifier] %>
+                  <span class="font-mono"><%= t[:identifier] %></span> - <%= t[:name] %>
+                <% else %>
+                  <%= t[:name] %>
+                <% end %>
+              </span>
+            <% end %>
+            <% if pf_terms.size > 10 %>
+              <span class="text-[10px] text-blue-500">... and <%= pf_terms.size - 10 %> more</span>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
     <div class="space-y-3">
       <!-- Action selector -->
       <div class="flex items-center gap-4">
@@ -89,7 +145,7 @@
           <input type="radio"
                  name="group_action_<%= group_id %>"
                  value="skip"
-                 checked
+                 <%= 'checked' if pf_action == 'skip' %>
                  data-action="change->compliance-fix#toggleGroupAction"
                  data-group-id="<%= group_id %>"
                  class="text-gray-400 focus:ring-gray-400">
@@ -101,6 +157,7 @@
             <input type="radio"
                    name="group_action_<%= group_id %>"
                    value="map_from"
+                   <%= 'checked' if pf_action == 'map_from' %>
                    data-action="change->compliance-fix#toggleGroupAction"
                    data-group-id="<%= group_id %>"
                    class="text-blue-600 focus:ring-blue-500">
@@ -112,6 +169,7 @@
           <input type="radio"
                  name="group_action_<%= group_id %>"
                  value="set_value"
+                 <%= 'checked' if pf_action == 'set_value' %>
                  data-action="change->compliance-fix#toggleGroupAction"
                  data-group-id="<%= group_id %>"
                  class="text-blue-600 focus:ring-blue-500">
@@ -121,7 +179,7 @@
 
       <%# ── Map from existing metadata ── %>
       <% if available_attrs.any? %>
-        <div id="map_from_<%= group_id %>" class="hidden pl-6 space-y-3">
+        <div id="map_from_<%= group_id %>" class="<%= pf_action == 'map_from' ? '' : 'hidden' %> pl-6 space-y-3">
           <% prefix = group[:type] == :col_attr ? '/col_attrs/' : '/attrs/' %>
 
           <% if is_paired && has_ontology %>
@@ -135,52 +193,50 @@
               <div>
                 <label class="block text-xs font-medium text-gray-700 mb-1">
                   <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                  <% unless fg[:term_has_error] %>
+                    <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                  <% end %>
                 </label>
-                <% if fg[:term_has_error] %>
-                  <select data-action="change->compliance-fix#onMapSourceSelect"
-                          data-group-id="<%= group_id %>"
-                          data-role="term"
-                          data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
-                          data-compliance-fix-target="mapSelect"
-                          name="fixes[<%= group[:term_path] %>][source]"
-                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
-                    <option value="">-- select source metadata --</option>
-                    <% available_attrs.each do |attr| %>
-                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
-                    <% end %>
-                  </select>
-                <% else %>
-                  <p class="text-xs text-green-600 mt-1">Already present in LOOM file</p>
-                <% end %>
+                <select data-action="change->compliance-fix#onMapSourceSelect"
+                        data-group-id="<%= group_id %>"
+                        data-role="term"
+                        data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                        data-compliance-fix-target="mapSelect"
+                        name="fixes[<%= group[:term_path] %>][source]"
+                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">-- select source metadata --</option>
+                  <% available_attrs.each do |attr| %>
+                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                  <% end %>
+                </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="term"
                      data-field-path="<%= group[:term_path] %>" data-has-error="<%= fg[:term_has_error] %>"
-                     class="flex flex-wrap gap-1 mt-2 max-h-32 overflow-y-auto"></div>
+                     class="flex flex-wrap gap-1 mt-2 max-h-60 overflow-y-auto"></div>
               </div>
 
               <%# Right: label side %>
               <div>
                 <label class="block text-xs font-medium text-gray-700 mb-1">
                   <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                  <% unless fg[:label_has_error] %>
+                    <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                  <% end %>
                 </label>
-                <% if fg[:label_has_error] %>
-                  <select data-action="change->compliance-fix#onMapSourceSelect"
-                          data-group-id="<%= group_id %>"
-                          data-role="label"
-                          data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
-                          data-compliance-fix-target="mapSelect"
-                          name="fixes[<%= group[:label_path] %>][source]"
-                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
-                    <option value="">-- select source metadata --</option>
-                    <% available_attrs.each do |attr| %>
-                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
-                    <% end %>
-                  </select>
-                <% else %>
-                  <p class="text-xs text-green-600 mt-1">Already present in LOOM file</p>
-                <% end %>
+                <select data-action="change->compliance-fix#onMapSourceSelect"
+                        data-group-id="<%= group_id %>"
+                        data-role="label"
+                        data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                        data-compliance-fix-target="mapSelect"
+                        name="fixes[<%= group[:label_path] %>][source]"
+                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">-- select source metadata --</option>
+                  <% available_attrs.each do |attr| %>
+                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                  <% end %>
+                </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="label"
                      data-field-path="<%= group[:label_path] %>" data-has-error="<%= fg[:label_has_error] %>"
-                     class="flex flex-wrap gap-1 mt-2 max-h-32 overflow-y-auto"></div>
+                     class="flex flex-wrap gap-1 mt-2 max-h-60 overflow-y-auto"></div>
               </div>
             </div>
 
@@ -263,22 +319,19 @@
             <% end %>
           <% end %>
 
-          <%# Hidden inputs to set action=map_from when this panel is active %>
-          <% if fg[:term_has_error] %>
-            <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="skip"
-                   data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="term_action">
-          <% end %>
-          <% if is_paired && fg[:label_has_error] %>
-            <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="skip"
-                   data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action">
-          <% end %>
         </div>
       <% end %>
 
       <%# ── Set fixed value ── %>
-      <div id="set_value_<%= group_id %>" class="hidden pl-6 space-y-3">
+      <div id="set_value_<%= group_id %>" class="<%= pf_action == 'set_value' ? '' : 'hidden' %> pl-6 space-y-3">
         <% if is_paired && has_ontology %>
           <%# Paired ontology field: autocomplete that fills both term ID and label %>
+          <%
+            # Prefill values for single-term assignment
+            sv_term_prefill = pf_single_term ? pf_terms.first[:identifier] : ''
+            sv_label_prefill = pf_single_term ? pf_terms.first[:name] : ''
+          %>
+
           <div>
             <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
             <div class="relative" data-compliance-fix-target="autocompleteWrapper">
@@ -300,42 +353,52 @@
           </div>
 
           <%# Selected terms display + hidden inputs %>
-          <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2"></div>
+          <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2">
+            <% if pf_single_term %>
+              <span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                <span class="font-mono"><%= sv_term_prefill %></span> - <%= sv_label_prefill %>
+              </span>
+            <% end %>
+          </div>
 
           <div class="grid grid-cols-2 gap-4">
-            <%# Term ID (filled by autocomplete) %>
-            <% if fg[:term_has_error] %>
-              <div>
-                <label class="block text-xs font-medium text-gray-700 mb-1">
-                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
-                  <span class="text-gray-400 ml-1">(auto-filled)</span>
-                </label>
-                <input type="text"
-                       name="fixes[<%= group[:term_path] %>][value]"
-                       data-compliance-fix-target="termValue"
-                       data-group-id="<%= group_id %>"
-                       readonly
-                       placeholder="Filled by autocomplete selection"
-                       class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
-              </div>
-            <% end %>
+            <%# Term ID (filled by autocomplete or prefill) %>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(auto-filled)</span>
+                <% unless fg[:term_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+              </label>
+              <input type="text"
+                     name="fixes[<%= group[:term_path] %>][value]"
+                     data-compliance-fix-target="termValue"
+                     data-group-id="<%= group_id %>"
+                     value="<%= sv_term_prefill %>"
+                     readonly
+                     placeholder="Filled by autocomplete selection"
+                     class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+            </div>
 
-            <%# Label (filled by autocomplete) %>
-            <% if fg[:label_has_error] %>
-              <div>
-                <label class="block text-xs font-medium text-gray-700 mb-1">
-                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
-                  <span class="text-gray-400 ml-1">(auto-filled)</span>
-                </label>
-                <input type="text"
-                       name="fixes[<%= group[:label_path] %>][value]"
-                       data-compliance-fix-target="labelValue"
-                       data-group-id="<%= group_id %>"
-                       readonly
-                       placeholder="Filled by autocomplete selection"
-                       class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
-              </div>
-            <% end %>
+            <%# Label (filled by autocomplete or prefill) %>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(auto-filled)</span>
+                <% unless fg[:label_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+              </label>
+              <input type="text"
+                     name="fixes[<%= group[:label_path] %>][value]"
+                     data-compliance-fix-target="labelValue"
+                     data-group-id="<%= group_id %>"
+                     value="<%= sv_label_prefill %>"
+                     readonly
+                     placeholder="Filled by autocomplete selection"
+                     class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+            </div>
           </div>
 
           <p class="text-xs text-gray-400">
@@ -429,16 +492,30 @@
           <% end %>
         <% end %>
 
-        <%# Hidden inputs to set action=set_value when this panel is active %>
-        <% if fg[:term_has_error] %>
-          <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="skip"
-                 data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="term_action_sv">
-        <% end %>
-        <% if is_paired && fg[:label_has_error] %>
-          <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="skip"
-                 data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action_sv">
-        <% end %>
       </div>
+
+      <%# Single set of hidden action inputs (outside both panels to avoid duplicates) %>
+      <%# Always emit for both fields so overrides of existing fields are possible %>
+      <%
+        term_initial_action = case pf_action
+                              when 'map_from' then 'map_from'
+                              when 'set_value' then 'set_value'
+                              else 'skip'
+                              end
+      %>
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="<%= term_initial_action %>"
+             data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="term_action">
+      <% if is_paired %>
+        <%
+          label_initial_action = case pf_action
+                                 when 'map_from' then 'map_from'
+                                 when 'set_value' then 'set_value'
+                                 else 'skip'
+                                 end
+        %>
+        <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="<%= label_initial_action %>"
+               data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action">
+      <% end %>
     </div>
   <% end %>
 </div>

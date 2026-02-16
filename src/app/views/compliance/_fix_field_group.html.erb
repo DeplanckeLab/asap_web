@@ -56,6 +56,72 @@
     <% end %>
   </div>
 
+  <%# Show current values for compliant fields that were fixed by the compliance tool %>
+  <% cfv = compliant_field_values || {} %>
+  <% cfr = compliant_field_resolved || {} %>
+  <% term_vals = cfv[group[:term_path]] %>
+  <% term_resolved = cfr[group[:term_path]] || {} %>
+  <% label_vals = is_paired ? cfv[group[:label_path]] : nil %>
+  <% label_resolved = is_paired ? (cfr[group[:label_path]] || {}) : {} %>
+  <% if term_vals.present? || label_vals.present? %>
+    <%
+      term_ok = term_vals.present? ? term_vals.count { |v| term_resolved[v] != false } : 0
+      term_bad = (term_vals&.size || 0) - term_ok
+      label_ok = label_vals.present? ? label_vals.count { |v| label_resolved[v] != false } : 0
+      label_bad = (label_vals&.size || 0) - label_ok
+      has_issues = term_bad > 0 || label_bad > 0
+      box_border = has_issues ? 'border-amber-200' : 'border-green-200'
+      box_bg = has_issues ? 'bg-amber-50' : 'bg-green-50'
+    %>
+    <div class="<%= box_bg %> border <%= box_border %> rounded-md p-3 mb-3">
+      <p class="text-xs font-medium <%= has_issues ? 'text-amber-800' : 'text-green-800' %> mb-2">
+        Current field content
+        <% if has_issues %>
+          <span class="text-[10px] font-normal text-amber-600 ml-1">(<%= is_paired ? [term_bad, label_bad].max : term_bad %> unresolved)</span>
+        <% end %>
+      </p>
+      <% if is_paired %>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code> (<%= term_vals&.size || 0 %> unique)</p>
+            <% if term_vals.present? %>
+              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
+                <% term_vals.each do |v| %>
+                  <% is_ok = term_resolved[v] != false %>
+                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full font-mono
+                    <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+          <div>
+            <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code> (<%= label_vals&.size || 0 %> unique)</p>
+            <% if label_vals.present? %>
+              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
+                <% label_vals.each do |v| %>
+                  <% is_ok = label_resolved[v] != false %>
+                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full
+                    <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% else %>
+        <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code> (<%= term_vals&.size || 0 %> unique)</p>
+        <% if term_vals.present? %>
+          <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
+            <% term_vals.each do |v| %>
+              <% is_ok = term_resolved[v] != false %>
+              <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full
+                <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
   <% if is_auto_organism %>
     <%# ── Organism: auto-fill from project ── %>
     <div class="bg-green-50 border border-green-200 rounded-lg p-3">
@@ -102,11 +168,18 @@
       pf_has_source = pf_source.present? && available_attrs.include?(pf_source.sub(%r{\A/col_attrs/}, '').sub(%r{\A/attrs/}, ''))
       pf_has_terms = pf_terms.any?
       pf_single_term = pf_terms.size == 1 && pf_terms.first[:identifier].present?
+      # If neither field has a validation error the group is already compliant;
+      # default to "skip" so it won't be re-processed (and won't accidentally
+      # overwrite a previously applied fix with stale archived source data).
+      group_has_no_errors = !fg[:term_has_error] && (!is_paired || !fg[:label_has_error])
+
       # Pre-select action:
+      # - If already compliant: skip (don't re-process)
       # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
       # - If source annotation with multiple terms: map_from
       # - If terms but no source: set_value
-      pf_action = if pf_single_term then 'set_value'
+      pf_action = if group_has_no_errors then 'skip'
+                  elsif pf_single_term then 'set_value'
                   elsif pf_has_source then 'map_from'
                   elsif pf_has_terms then 'set_value'
                   else 'skip'
@@ -206,7 +279,7 @@
                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                   <option value="">-- select source metadata --</option>
                   <% available_attrs.each do |attr| %>
-                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
                   <% end %>
                 </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="term"
@@ -231,7 +304,7 @@
                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                   <option value="">-- select source metadata --</option>
                   <% available_attrs.each do |attr| %>
-                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
                   <% end %>
                 </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="label"

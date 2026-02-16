@@ -61,7 +61,9 @@
                 available_attrs: @available_global_attrs,
                 organism_info: @organism_info,
                 project_title: @project_title,
-                prefill: @prefill_data[fg[:group][:id]]
+                prefill: @prefill_data[fg[:group][:id]],
+                compliant_field_values: @compliant_field_values,
+                compliant_field_resolved: @compliant_field_resolved
               } %>
             <% end %>
           </div>
@@ -84,7 +86,9 @@
                 available_attrs: @available_col_attrs,
                 organism_info: @organism_info,
                 project_title: @project_title,
-                prefill: @prefill_data[fg[:group][:id]]
+                prefill: @prefill_data[fg[:group][:id]],
+                compliant_field_values: @compliant_field_values,
+                compliant_field_resolved: @compliant_field_resolved
               } %>
             <% end %>
           </div>

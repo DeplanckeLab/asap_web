@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_12_173655) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_16_121220) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -73,6 +73,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_12_173655) do
     t.text "headers_json"
     t.boolean "imported", default: false
     t.text "label"
+    t.boolean "latest_version", default: true
     t.text "list_cat_json"
     t.float "max_val"
     t.float "mean_val"
@@ -95,6 +96,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_12_173655) do
     t.integer "store_run_id"
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
+    t.integer "version_nber", default: 1
   end
 
   create_table "archive_statuses", id: :serial, force: :cascade do |t|
@@ -744,15 +746,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_12_173655) do
   end
 
   create_table "ontology_term_types", id: :serial, force: :cascade do |t|
+    t.string "auto_from_project"
     t.text "cell_ontology_ids"
     t.datetime "created_at", precision: nil
+    t.text "description"
+    t.integer "display_order", default: 99
     t.string "field_group_id"
+    t.string "field_type", default: "col_attr"
     t.text "free_text_json"
     t.text "in_lineage_term_ids"
     t.text "label"
+    t.string "label_path"
+    t.boolean "multi_value", default: false
     t.text "name"
     t.integer "rank"
+    t.string "term_format_hint"
     t.text "term_ids"
+    t.string "term_path"
+    t.text "term_valid_values_json"
     t.datetime "updated_at", precision: nil
   end
 

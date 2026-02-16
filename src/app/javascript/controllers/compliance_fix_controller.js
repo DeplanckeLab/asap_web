@@ -51,11 +51,32 @@ export default class extends Controller {
   }
 
   triggerPreselectedMapSources() {
+    // Group pre-selected dropdowns by groupId. When both the term and label
+    // dropdowns in a paired field have the same source selected, only fire
+    // the label side (which uses by_name resolve mode). If only one is
+    // selected, fire that one.
+    const byGroup = {}
     this.mapSelectTargets.forEach(select => {
       if (select.value) {
-        select.dispatchEvent(new Event('change', { bubbles: true }))
+        const gid = select.dataset.groupId
+        if (!byGroup[gid]) byGroup[gid] = []
+        byGroup[gid].push(select)
       }
     })
+    for (const selects of Object.values(byGroup)) {
+      if (selects.length > 1) {
+        const labelSelect = selects.find(s => s.dataset.role === 'label')
+        const termSelect = selects.find(s => s.dataset.role === 'term')
+        if (labelSelect && termSelect && labelSelect.value === termSelect.value) {
+          termSelect.value = ''
+          labelSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        } else {
+          selects.forEach(s => s.dispatchEvent(new Event('change', { bubbles: true })))
+        }
+      } else {
+        selects[0].dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    }
   }
 
   disconnect() {
@@ -366,16 +387,6 @@ export default class extends Controller {
 
     if (!sourcePath) return
 
-    // Update hidden action inputs
-    this.hiddenActionTargets.forEach(input => {
-      if (input.dataset.groupId !== groupId) return
-      if (input.dataset.role === `${selectedRole}_action`) {
-        input.value = 'map_from'
-      } else if (input.dataset.role === `${pairedRole}_action`) {
-        input.value = 'resolve_paired'
-      }
-    })
-
     // Fetch unique values from the selected source metadata
     if (statusEl) {
       statusEl.textContent = 'Loading values...'
@@ -401,7 +412,35 @@ export default class extends Controller {
       // Resolve paired values via ontology lookup
       if (statusEl) statusEl.textContent = 'Resolving paired values...'
 
-      const resolveMode = selectedRole === 'term' ? 'by_identifier' : 'by_name'
+      // Auto-detect whether source values are identifiers or names by checking
+      // the first few non-array values for an ontology ID pattern (e.g. "CL:0000123").
+      const idPattern = /^[A-Za-z][A-Za-z0-9]*:[0-9]+$/
+      const sampleVals = values.filter(v => !v.startsWith('[')).slice(0, 5)
+      const looksLikeIds = sampleVals.length > 0 && sampleVals.every(v => idPattern.test(v.trim()))
+
+      // If auto-detection disagrees with the dropdown role, swap the effective roles
+      // so identifiers always go to the term side and names to the label side.
+      let effectiveSelectedRole = selectedRole
+      let effectivePairedRole = pairedRole
+      if (looksLikeIds && selectedRole === 'label') {
+        effectiveSelectedRole = 'term'
+        effectivePairedRole = 'label'
+      } else if (!looksLikeIds && selectedRole === 'term') {
+        effectiveSelectedRole = 'label'
+        effectivePairedRole = 'term'
+      }
+
+      // If roles were swapped, also swap the dropdown UI so the source appears
+      // under the correct field and the other dropdown is cleared.
+      if (effectiveSelectedRole !== selectedRole) {
+        const correctSelect = this.mapSelectTargets.find(
+          el => el.dataset.groupId === groupId && el.dataset.role === effectiveSelectedRole
+        )
+        if (correctSelect) correctSelect.value = sourcePath
+        select.value = ''
+      }
+
+      const resolveMode = effectiveSelectedRole === 'term' ? 'by_identifier' : 'by_name'
       const resolveResponse = await fetch(this.resolveUrlValue, {
         method: 'POST',
         headers: {
@@ -412,7 +451,8 @@ export default class extends Controller {
         body: new URLSearchParams({
           values: JSON.stringify(values),
           prefixes: prefixes,
-          mode: resolveMode
+          mode: resolveMode,
+          project_id: this.projectIdValue
         })
       })
 
@@ -424,30 +464,51 @@ export default class extends Controller {
       const resolveData = await resolveResponse.json()
       const resolved = resolveData.resolved || {}
       const multiTermMap = resolveData.multi_term_map || {}
+      const canonicalNames = resolveData.canonical_names || {}
 
-      // For array-formatted values that were resolved, auto-populate sourceRenames
-      // so the source field will be rewritten from "['a','b']" to "a || b"
+      // Auto-populate sourceRenames for values whose source text doesn't match
+      // the canonical ontology name (e.g. "fat_body" -> "fat body",
+      // "malpighian_tubule" -> "Malpighian tubule") and for array-formatted
+      // values that need rewriting ("['a','b']" -> "a || b").
       const sourceRenames = {}
       for (const [original, joinedSource] of Object.entries(multiTermMap)) {
         sourceRenames[original] = joinedSource
+      }
+      for (const [original, canonical] of Object.entries(canonicalNames)) {
+        if (!sourceRenames[original]) {
+          sourceRenames[original] = canonical
+        }
       }
 
       // Store state for this group so the fix autocomplete can update it
       // sourceRenames tracks corrections to the source field itself (e.g., "T-cell" -> "T cell",
       // or "['FBbt:001','FBbt:002']" -> "FBbt:001 || FBbt:002")
+      // Use the effective roles (auto-detected from value content) not the dropdown roles.
       this.mapResolveState[groupId] = {
-        selectedRole, pairedRole, sourcePath, prefixes, values, resolved,
+        selectedRole: effectiveSelectedRole,
+        pairedRole: effectivePairedRole,
+        sourcePath, prefixes, values, resolved,
         sourceRenames
       }
+
+      // Update hidden action inputs to match effective roles
+      this.hiddenActionTargets.forEach(input => {
+        if (input.dataset.groupId !== groupId) return
+        if (input.dataset.role === `${effectiveSelectedRole}_action`) {
+          input.value = 'map_from'
+        } else if (input.dataset.role === `${effectivePairedRole}_action`) {
+          input.value = 'resolve_paired'
+        }
+      })
 
       // Render badges on both sides
       this.renderMapBadges(groupId)
 
       // Store the resolve map in a hidden input for form submission
-      this.setResolveMapInput(groupId, pairedRole, sourcePath, resolved)
+      this.setResolveMapInput(groupId, effectivePairedRole, sourcePath, resolved)
 
-      // If array-formatted values were auto-converted, the source field also needs
-      // a resolve_paired action to rewrite "['a','b']" -> "a || b"
+      // If any source values need renaming (canonical name mismatch or array
+      // rewrite), the source field also needs a resolve_paired action
       if (Object.keys(sourceRenames).length > 0) {
         this.updateSourceFieldAction(groupId)
       }
@@ -555,18 +616,7 @@ export default class extends Controller {
     if (!state) return
 
     const { selectedRole, pairedRole, values, resolved, sourceRenames } = state
-
-    const thisBadgeEl = this.mapBadgesTargets.find(
-      el => el.dataset.groupId === groupId && el.dataset.role === selectedRole
-    )
-    const pairedBadgeEl = this.mapBadgesTargets.find(
-      el => el.dataset.groupId === groupId && el.dataset.role === pairedRole
-    )
     const statusEl = this.mapStatusTargets.find(el => el.dataset.groupId === groupId)
-
-    // Clear current badges
-    if (thisBadgeEl) thisBadgeEl.innerHTML = ''
-    if (pairedBadgeEl) pairedBadgeEl.innerHTML = ''
 
     const resolvedCount = values.filter(v => resolved[v]).length
     const unresolvedValues = values.filter(v => !resolved[v])
@@ -574,80 +624,97 @@ export default class extends Controller {
     // Sort values: unresolved first, then resolved
     const sortedValues = [...unresolvedValues, ...values.filter(v => resolved[v])]
 
-    // Display source values as badges
-    // All badges are clickable (to allow replacing any term, even resolved ones)
-    // - Gray: auto-resolved with no rename needed (source value matches ontology)
-    // - Green/purple: resolved from array format (shows || separated values)
-    // - Green: manually fixed (source value was renamed to the correct ontology term)
-    // - Red: unresolved
-    if (thisBadgeEl) {
+    // Determine which badge container holds identifiers vs names.
+    // Term side always shows identifiers (blue/mono), label side shows names (grey/green).
+    const termBadgeEl = this.mapBadgesTargets.find(
+      el => el.dataset.groupId === groupId && el.dataset.role === 'term'
+    )
+    const labelBadgeEl = this.mapBadgesTargets.find(
+      el => el.dataset.groupId === groupId && el.dataset.role === 'label'
+    )
+    if (termBadgeEl) termBadgeEl.innerHTML = ''
+    if (labelBadgeEl) labelBadgeEl.innerHTML = ''
+
+    // The source values go on the selectedRole side; resolved values on the pairedRole side.
+    // Figure out which content (source vs resolved) goes to term vs label.
+    const termIsSource = selectedRole === 'term'
+
+    // Color convention: source side (directly from metadata) = blue,
+    // derived side (resolved via ontology) = grey, font-mono on term side always.
+    const sourceStyle = 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200'
+    const derivedStyle = 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
+
+    // Render term side (identifiers): font-mono always
+    if (termBadgeEl) {
+      const termStyle = termIsSource ? sourceStyle : derivedStyle
       sortedValues.forEach(val => {
         const badge = document.createElement('span')
         const isResolved = !!resolved[val]
-        const hasRename = !!sourceRenames[val]
         const isArrayFormat = val.startsWith('[') && val.endsWith(']')
+        const displayValue = termIsSource ? val : resolved[val]
+        const hasRename = termIsSource && !!sourceRenames[val]
 
-        // All badges are clickable to allow corrections
         badge.dataset.action = 'click->compliance-fix#openMapFix'
         badge.dataset.groupId = groupId
         badge.dataset.originalValue = val
+        badge.dataset.mapBadgeValue = val
+        badge.dataset.mapBadgeRole = 'term'
 
-        if (isResolved && isArrayFormat) {
-          // Multi-term value resolved from array format: show the || joined version in purple
-          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
-          badge.innerHTML = `<s class="text-gray-400 text-[10px]">[...]</s> ${this.escapeHtml(sourceRenames[val])}`
-          badge.title = `Original: ${val} -- click to change`
-        } else if (isResolved && hasRename) {
-          // Manually fixed: show the corrected value in green
-          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
+        if (!isResolved) {
+          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
+          badge.textContent = termIsSource ? val : `? (${val})`
+          badge.title = 'Click to fix this unresolved term'
+        } else if (isArrayFormat) {
+          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          badge.textContent = termIsSource ? (sourceRenames[val] || val) : resolved[val]
+          badge.title = 'Click to change'
+        } else if (hasRename) {
+          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-mono bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
           badge.innerHTML = `<s class="text-red-400 text-[10px]">${this.escapeHtml(val)}</s> ${this.escapeHtml(sourceRenames[val])}`
           badge.title = 'Click to change'
-        } else if (isResolved) {
-          // Auto-resolved: original value is valid, still clickable for corrections
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700 border border-gray-200 cursor-pointer hover:bg-gray-200'
-          badge.textContent = val
-          badge.title = 'Click to change'
         } else {
-          // Unresolved: red + clickable
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
-          badge.title = 'Click to fix this unresolved term'
-          badge.textContent = val
+          badge.className = `inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono ${termStyle} cursor-pointer`
+          badge.textContent = displayValue || val
+          badge.title = 'Click to change'
         }
-        badge.dataset.mapBadgeValue = val
-        badge.dataset.mapBadgeRole = selectedRole
-        thisBadgeEl.appendChild(badge)
+        termBadgeEl.appendChild(badge)
       })
     }
 
-    // Display paired values as badges (blue/purple if resolved, red if unresolved)
-    // All badges are clickable to allow corrections
-    if (pairedBadgeEl) {
+    // Render label side (names): no font-mono
+    if (labelBadgeEl) {
+      const labelStyle = termIsSource ? derivedStyle : sourceStyle
       sortedValues.forEach(val => {
         const badge = document.createElement('span')
+        const isResolved = !!resolved[val]
         const isArrayFormat = val.startsWith('[') && val.endsWith(']')
+        const displayValue = termIsSource ? resolved[val] : val
+        const hasRename = !termIsSource && !!sourceRenames[val]
 
-        // All paired badges are clickable
         badge.dataset.action = 'click->compliance-fix#openMapFix'
         badge.dataset.groupId = groupId
         badge.dataset.originalValue = val
+        badge.dataset.mapBadgeValue = val
+        badge.dataset.mapBadgeRole = 'label'
 
-        if (resolved[val]) {
-          if (isArrayFormat) {
-            // Multi-term resolved: purple badge with || separated names
-            badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
-          } else {
-            badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200'
-          }
-          badge.textContent = resolved[val]
+        if (!isResolved) {
+          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
+          badge.textContent = termIsSource ? `? (${val})` : val
+          badge.title = 'Click to fix this unresolved term'
+        } else if (isArrayFormat) {
+          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          badge.textContent = termIsSource ? resolved[val] : (sourceRenames[val] || val)
+          badge.title = 'Click to change'
+        } else if (hasRename) {
+          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
+          badge.innerHTML = `<s class="text-red-400 text-[10px]">${this.escapeHtml(val)}</s> ${this.escapeHtml(sourceRenames[val])}`
           badge.title = 'Click to change'
         } else {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
-          badge.title = 'Click to fix this unresolved term'
-          badge.textContent = `? (${val})`
+          badge.className = `inline-flex items-center px-2 py-0.5 text-xs rounded-full ${labelStyle} cursor-pointer`
+          badge.textContent = displayValue || val
+          badge.title = 'Click to change'
         }
-        badge.dataset.mapBadgeValue = val
-        badge.dataset.mapBadgeRole = pairedRole
-        pairedBadgeEl.appendChild(badge)
+        labelBadgeEl.appendChild(badge)
       })
     }
 
@@ -748,7 +815,7 @@ export default class extends Controller {
   }
 
   async fetchMapFixAutocomplete(groupId, query, prefixes) {
-    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}`
+    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return
@@ -893,7 +960,7 @@ export default class extends Controller {
   }
 
   async fetchAutocomplete(groupId, query, prefixes) {
-    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}`
+    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return

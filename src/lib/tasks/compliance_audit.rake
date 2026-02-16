@@ -2,51 +2,60 @@ require 'json'
 
 namespace :compliance do
   desc "Audit all projects for Annot records with scFAIR canonical names whose content is not compliant. " \
-       "Reports which projects have non-compliant canonical fields and whether those fields are used in runs. " \
+       "Reports which projects have non-compliant fields and whether those fields are used in runs. " \
        "Usage: rake compliance:audit_canonical_fields [PROJECT_ID=123] [LIMIT=100]"
   task audit_canonical_fields: :environment do
     project_id = ENV['PROJECT_ID']
     limit      = ENV['LIMIT']&.to_i
 
-    # ── Canonical scFAIR field definitions ──
+    # ── Load field definitions from the database ──
 
-    ontology_rules = {
-      'assay_ontology_term_id'                   => { prefixes: %w[EFO],                                special: [] },
-      'cell_type_ontology_term_id'               => { prefixes: %w[CL WBbt ZFA FBbt],                   special: %w[unknown na] },
-      'development_stage_ontology_term_id'       => { prefixes: %w[HsapDv MmusDv WBls ZFS FBdv UBERON], special: %w[unknown na] },
-      'disease_ontology_term_id'                 => { prefixes: %w[MONDO PATO],                         special: [] },
-      'self_reported_ethnicity_ontology_term_id' => { prefixes: %w[HANCESTRO AfPO],                     special: %w[unknown na] },
-      'sex_ontology_term_id'                     => { prefixes: %w[PATO],                                special: %w[unknown na] },
-      'tissue_ontology_term_id'                  => { prefixes: %w[UBERON CVCL WBbt ZFA FBbt],           special: [] }
-    }
+    co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
+    ontology_id_by_tag = co_id_to_tag.invert
 
-    enum_rules = {
-      'tissue_type'     => %w[tissue organoid] + ['cell line', 'primary cell culture'],
-      'suspension_type' => %w[cell nucleus na],
-      'is_primary_data' => %w[True False true false]
-    }
+    ontology_rules = {}
+    enum_rules = {}
+    label_rules = {}
+    free_text_fields = []
 
-    # Label fields: each maps to the same ontology prefixes as its paired _ontology_term_id field.
-    # Values must exactly match an ontology term name (case-sensitive) in one of the authorized ontologies.
-    label_rules = {
-      'assay'                    => { prefixes: %w[EFO],                                special: [] },
-      'cell_type'                => { prefixes: %w[CL WBbt ZFA FBbt],                   special: %w[unknown na] },
-      'development_stage'        => { prefixes: %w[HsapDv MmusDv WBls ZFS FBdv UBERON], special: %w[unknown na] },
-      'disease'                  => { prefixes: %w[MONDO PATO],                         special: %w[normal] },
-      'self_reported_ethnicity'  => { prefixes: %w[HANCESTRO AfPO],                     special: %w[unknown na] },
-      'sex'                      => { prefixes: %w[PATO],                                special: %w[unknown na] },
-      'tissue'                   => { prefixes: %w[UBERON CVCL WBbt ZFA FBbt],           special: [] }
-    }
+    OntologyTermType.compliance_field_groups.each do |ott|
+      fg = ott.to_field_group(co_id_to_tag)
+      next if fg[:auto_from_project] # skip organism/title
+
+      # Extract field name from term_path (e.g. "/col_attrs/tissue_ontology_term_id" -> "tissue_ontology_term_id")
+      term_name = fg[:term_path].to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/attrs/}, '')
+      next if term_name.blank?
+
+      prefixes = fg[:term_ontology_prefixes] || []
+      valid_values = fg[:term_valid_values] || []
+
+      if valid_values.any?
+        # Enum field (tissue_type, suspension_type, is_primary_data)
+        enum_rules[term_name] = valid_values
+      elsif prefixes.any?
+        # Ontology term ID field -- special accepted values depend on the field
+        special = %w[unknown na]
+        special = [] if %w[assay_ontology_term_id disease_ontology_term_id tissue_ontology_term_id].include?(term_name)
+        ontology_rules[term_name] = { prefixes: prefixes, special: special }
+
+        # Paired label field
+        if fg[:label_path].present?
+          label_name = fg[:label_path].to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/attrs/}, '')
+          label_special = special.dup
+          label_special = %w[normal] if label_name == 'disease'
+          label_rules[label_name] = { prefixes: prefixes, special: label_special }
+        end
+      else
+        # Free text field (donor_id)
+        free_text_fields << term_name
+      end
+    end
+
     label_fields = label_rules.keys
 
     # Build the full list of canonical col_attrs paths
-    all_canonical_names = ontology_rules.keys + enum_rules.keys + label_fields + %w[donor_id]
+    all_canonical_names = ontology_rules.keys + enum_rules.keys + label_fields + free_text_fields
     canonical_paths = all_canonical_names.map { |n| "/col_attrs/#{n}" }
-
-    # ── Pre-load ontology ID -> CellOntology mapping for label checks ──
-    # Maps ontology prefix tag -> cell_ontology_id
-    ontology_id_by_tag = {}
-    CellOntology.all.each { |co| ontology_id_by_tag[co.tag] = co.id }
 
     # Cache of known valid ontology term names per prefix set (to avoid repeated queries)
     # Key: frozen sorted prefix array, Value: Set of known valid names
@@ -65,8 +74,6 @@ namespace :compliance do
         next true if part.empty?
         next true if special_values.include?(part)
 
-        # Look up in cell_ontology_terms: exact case-sensitive name match
-        # within the authorized ontologies for this field
         cache_key = prefixes.sort.freeze
         unless valid_names_cache.key?(cache_key)
           valid_names_cache[cache_key] = Set.new
@@ -108,10 +115,9 @@ namespace :compliance do
     end
 
     # ── Query all Annot records with canonical scFAIR names ──
-    scope = Annot.where(name: canonical_paths)
+    # Only consider the latest version of each field (excludes archived .v{N} copies).
+    scope = Annot.where(name: canonical_paths, latest_version: true)
     scope = scope.where(project_id: project_id) if project_id
-    # Exclude _original backups (they are renamed copies)
-    # Already excluded since canonical_paths don't include _original suffixes
 
     # Group by project
     annots_by_project = scope.includes(:project).group_by(&:project_id)
@@ -166,7 +172,6 @@ namespace :compliance do
         if ontology_rules.key?(field_name)
           rule = ontology_rules[field_name]
           unless categories
-            # No categories available -- skip (cannot verify compliance)
             total_no_categories += 1
             next
           end
@@ -223,8 +228,8 @@ namespace :compliance do
             }
           end
 
-        # ── donor_id: always compliant (free text) ──
-        elsif field_name == 'donor_id'
+        # ── Free text fields (donor_id): always compliant ──
+        elsif free_text_fields.include?(field_name)
           next
         end
       end

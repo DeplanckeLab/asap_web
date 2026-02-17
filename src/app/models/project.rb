@@ -28,13 +28,23 @@ class Project < ApplicationRecord
   has_many :exp_entries, through: :exp_entries_projects
   
   # Elasticsearch settings
-  settings index: { number_of_shards: 1 } do
+  settings index: {
+    number_of_shards: 1,
+    analysis: {
+      normalizer: {
+        lowercase_normalizer: {
+          type: 'custom',
+          filter: ['lowercase']
+        }
+      }
+    }
+  } do
     mappings dynamic: 'false' do
       indexes :name, type: 'text', analyzer: 'english'
       indexes :key, type: 'text', analyzer: 'english'
       indexes :description, type: 'text', analyzer: 'english'
-      indexes :technology, type: 'keyword'
-      indexes :tissue, type: 'keyword'
+      indexes :technology, type: 'keyword', normalizer: 'lowercase_normalizer'
+      indexes :tissue, type: 'keyword', normalizer: 'lowercase_normalizer'
       indexes :organism_name, type: 'keyword'
       indexes :status_name, type: 'keyword'
       indexes :public, type: 'boolean'
@@ -72,10 +82,10 @@ class Project < ApplicationRecord
       },
       sort: [],
       aggs: {
-        organisms: { terms: { field: 'organism_name' } },
-        technologies: { terms: { field: 'technology' } },
-        tissues: { terms: { field: 'tissue' } },
-        statuses: { terms: { field: 'status_name' } }
+        organisms: { terms: { field: 'organism_name', size: 500 } },
+        technologies: { terms: { field: 'technology', size: 500 } },
+        tissues: { terms: { field: 'tissue', size: 2000 } },
+        statuses: { terms: { field: 'status_name', size: 50 } }
       },
       size: 20,
       from: 0
@@ -199,14 +209,16 @@ class Project < ApplicationRecord
     end
   end
 
-  # Index data for Elasticsearch
+  # Index data for Elasticsearch.
+  # Technology and tissue are pulled from ComplianceMapping / ComplianceTermReplacement
+  # records (the actively maintained resolved terms) rather than the legacy Project columns.
   def as_indexed_json(options = {})
     {
       name: respond_to?(:name) ? (name || '') : '',
       key: respond_to?(:key) ? (key || '') : '',
       description: respond_to?(:description) ? (description || '') : '',
-      technology: respond_to?(:technology) ? (technology || '') : '',
-      tissue: respond_to?(:tissue) ? (tissue || '') : '',
+      technology: compliance_term_names_for('technology'),
+      tissue: compliance_term_names_for('tissue'),
       organism_name: organism&.name || '',
       status_name: status&.name || '',
       public: respond_to?(:public) ? (public || false) : false,
@@ -221,6 +233,45 @@ class Project < ApplicationRecord
       user_id: user_id,
       shared_user_ids: shares.pluck(:user_id).compact
     }
+  end
+
+  # Collect distinct term names for a given OntologyTermType name
+  # (e.g. 'technology', 'tissue') by reading the Annot record whose name
+  # matches the label_path (human-readable values, e.g. '/col_attrs/assay').
+  # The Annot's list_cat_json contains the final distinct values in the loom.
+  # Returns an array of strings suitable for Elasticsearch keyword fields.
+  def compliance_term_names_for(ott_name)
+    ott = OntologyTermType.find_by(name: ott_name)
+    return [] unless ott
+
+    path = ott.label_path.presence || ott.term_path
+    return [] unless path
+
+    annot = if annots.loaded?
+      annots.select { |a| a.name == path && a.latest_version }
+            .max_by { |a| a.version_nber || 0 }
+    else
+      annots.where(name: path, latest_version: true)
+            .order(version_nber: :desc)
+            .first
+    end
+    return [] unless annot&.list_cat_json.present?
+
+    parsed = JSON.parse(annot.list_cat_json)
+    Array(parsed).map { |v| normalize_term(v.to_s) }.reject(&:blank?).uniq
+  rescue JSON::ParserError
+    []
+  end
+
+  # Normalize a term value for consistent indexing.
+  # Replaces underscores with spaces so that legacy snake_case values
+  # (e.g. "malpighian_tubule") align with compliance-fixed values
+  # (e.g. "Malpighian tubule").
+  # Discards purely numeric values (e.g. "0") that are data artifacts.
+  def normalize_term(value)
+    normalized = value.tr('_', ' ')
+    return '' if normalized.match?(/\A\d+(\.\d+)?\z/)
+    normalized
   end
 
   # Instance methods
@@ -350,11 +401,13 @@ class Project < ApplicationRecord
   end
   
   def technology_display
-    technology.presence || "Unknown"
+    terms = compliance_term_names_for('technology')
+    terms.any? ? terms.join(', ') : "Unknown"
   end
-  
+
   def tissue_display
-    tissue.presence || "Unknown"
+    terms = compliance_term_names_for('tissue')
+    terms.any? ? terms.join(', ') : "Unknown"
   end
   
   def organism_display

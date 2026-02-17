@@ -53,6 +53,7 @@ class OntologyTermType < ApplicationRecord
   def to_field_group(co_id_to_tag = nil)
     h = {
       id: field_group_id,
+      ontology_term_type_id: self.id,
       label: label,
       description: description,
       type: field_type&.to_sym || :col_attr,

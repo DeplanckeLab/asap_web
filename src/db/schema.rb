@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_17_060145) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_17_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -284,6 +284,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_060145) do
     t.datetime "applied_at", null: false
     t.datetime "created_at", null: false
     t.string "field_group_id", null: false
+    t.integer "ontology_term_type_id"
     t.bigint "project_id", null: false
     t.text "resolve_map_json"
     t.string "set_value"
@@ -291,6 +292,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_060145) do
     t.string "source_path"
     t.string "target_path", null: false
     t.datetime "updated_at", null: false
+    t.index ["ontology_term_type_id"], name: "index_compliance_mappings_on_ontology_term_type_id"
     t.index ["project_id", "field_group_id"], name: "index_compliance_mappings_on_project_id_and_field_group_id"
     t.index ["project_id"], name: "index_compliance_mappings_on_project_id"
     t.index ["source_annot_id"], name: "index_compliance_mappings_on_source_annot_id"
@@ -1345,6 +1347,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_060145) do
   add_foreign_key "clusters", "steps", name: "clusters_step_id_fkey"
   add_foreign_key "clusters", "users", name: "clusters_user_id_fkey"
   add_foreign_key "compliance_mappings", "annots", column: "source_annot_id"
+  add_foreign_key "compliance_mappings", "ontology_term_types", name: "compliance_mappings_ontology_term_type_id_fkey"
   add_foreign_key "compliance_mappings", "projects"
   add_foreign_key "compliance_term_replacements", "cell_ontology_terms"
   add_foreign_key "compliance_term_replacements", "compliance_mappings"

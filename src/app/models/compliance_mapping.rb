@@ -1,6 +1,7 @@
 class ComplianceMapping < ApplicationRecord
   belongs_to :project
   belongs_to :source_annot, class_name: 'Annot', optional: true
+  belongs_to :ontology_term_type, optional: true
 
   has_many :compliance_term_replacements, dependent: :destroy
 

@@ -9,7 +9,9 @@ class Annot < ApplicationRecord
   has_many :annot_cell_sets, dependent: :destroy
   has_many :cell_sets, through: :annot_cell_sets
   has_many :clas, class_name: 'Cla', dependent: :destroy
-  
+
+  after_commit :reindex_project, if: :list_cat_json_previously_changed?
+
   # Scopes for different types of annotations
   scope :embeddings, -> { where(data_type_id: DataType.where(name: ['umap', 'tsne', 'pca']).pluck(:id)) }
   scope :metadata, -> { where(data_type_id: DataType.where(name: 'metadata').pluck(:id)) }
@@ -132,5 +134,13 @@ class Annot < ApplicationRecord
     else
       'continuous'
     end
+  end
+
+  private
+
+  def reindex_project
+    project&.__elasticsearch__&.index_document
+  rescue => e
+    Rails.logger.warn("[Annot] Reindex failed for project #{project_id}: #{e.message}")
   end
 end

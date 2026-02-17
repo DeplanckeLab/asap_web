@@ -26,8 +26,8 @@ class ProjectsController < ApplicationController
     # Use Elasticsearch for search
     search_results = Project.search(@query, @filters)
     
-    # Extract projects from search results with preloaded project_steps for run counts
-    @projects = search_results.records.includes(:project_steps, :project_type)
+    # Extract projects from search results with preloaded associations
+    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
@@ -36,8 +36,11 @@ class ProjectsController < ApplicationController
     @organisms = Organism.order(:name)
     @grouped_organisms = group_organisms(@organisms)
     @statuses = Status.order(:name)
-    @technologies = @aggregations&.dig('technologies', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:technology).compact.sort
-    @tissues = @aggregations&.dig('tissues', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:tissue).compact.sort
+    raw_technologies = @aggregations&.dig('technologies', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:technology).compact
+    @technologies = raw_technologies.map { |v| [v.sub(/\A./) { |c| c.upcase }, v] }.sort_by { |label, _| label.downcase }
+
+    raw_tissues = @aggregations&.dig('tissues', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:tissue).compact
+    @tissues = raw_tissues.map { |v| [v.sub(/\A./) { |c| c.upcase }, v] }.sort_by { |label, _| label.downcase }
     
     # Pagination - extract total count from Elasticsearch response
     @total_count = search_results.response['hits']['total']['value']

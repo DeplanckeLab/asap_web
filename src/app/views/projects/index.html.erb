@@ -115,7 +115,7 @@
           <div>
             <label for="technology" class="block text-sm font-medium text-gray-700 mb-2">Technology</label>
             <%= form.select :technology, 
-                options_for_select(@technologies.map { |t| [t, t] }, @filters[:technology]), 
+                options_for_select(@technologies, @filters[:technology]), 
                 { prompt: "All technologies" }, 
                 { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
           </div>
@@ -124,7 +124,7 @@
           <div>
             <label for="tissue" class="block text-sm font-medium text-gray-700 mb-2">Tissue</label>
             <%= form.select :tissue, 
-                options_for_select(@tissues.map { |t| [t, t] }, @filters[:tissue]), 
+                options_for_select(@tissues, @filters[:tissue]), 
                 { prompt: "All tissues" }, 
                 { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
           </div>

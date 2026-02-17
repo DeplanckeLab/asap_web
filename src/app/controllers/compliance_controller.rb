@@ -1499,13 +1499,26 @@ class ComplianceController < ApplicationController
       }
     end
 
-    # Also load most recent ComplianceMapping records to show resolve_map history
+    # Also load most recent ComplianceMapping records to show resolve_map history.
+    # Group by ontology_term_type_id (integer FK) and resolve to field_group_id
+    # for the prefill hash key.
+    ott_id_to_fg = otts.each_with_object({}) { |ott, h| h[ott.id] = ott.field_group_id }
+
     recent_mappings = ComplianceMapping.where(project_id: project.id)
       .order(applied_at: :desc)
       .to_a
-      .group_by(&:field_group_id)
 
-    recent_mappings.each do |fg_id, mappings|
+    grouped = if recent_mappings.any? { |cm| cm.ontology_term_type_id.present? }
+      by_ott_id = recent_mappings.group_by(&:ontology_term_type_id)
+      by_ott_id.each_with_object({}) do |(ott_id, cms), h|
+        fg_id = ott_id_to_fg[ott_id] || cms.first.field_group_id
+        h[fg_id] = cms
+      end
+    else
+      recent_mappings.group_by(&:field_group_id)
+    end
+
+    grouped.each do |fg_id, mappings|
       latest = mappings.first
       prefill[fg_id] ||= { source_annot_id: nil, source_annot_name: nil, terms: [] }
       prefill[fg_id][:last_mapping] = {
@@ -2524,11 +2537,18 @@ class ComplianceController < ApplicationController
   def record_compliance_mappings(project, applied, fixes)
     now = Time.current
 
-    # Identify which field_group each applied field_path belongs to
+    # Identify which field_group (and its OntologyTermType PK) each applied field_path belongs to
     field_group_map = {}
+    ott_id_map = {}
     load_field_groups.each do |fg|
-      field_group_map[fg[:term_path]] = fg[:id] if fg[:term_path]
-      field_group_map[fg[:label_path]] = fg[:id] if fg[:label_path]
+      if fg[:term_path]
+        field_group_map[fg[:term_path]] = fg[:id]
+        ott_id_map[fg[:term_path]] = fg[:ontology_term_type_id]
+      end
+      if fg[:label_path]
+        field_group_map[fg[:label_path]] = fg[:id]
+        ott_id_map[fg[:label_path]] = fg[:ontology_term_type_id]
+      end
     end
 
     # Pre-load source Annots in one batch query
@@ -2575,6 +2595,7 @@ class ComplianceController < ApplicationController
       mapping = ComplianceMapping.create!(
         project_id: project.id,
         field_group_id: field_group_id,
+        ontology_term_type_id: ott_id_map[field_path],
         target_path: field_path,
         action_type: action_type,
         source_annot_id: source_annot&.id,

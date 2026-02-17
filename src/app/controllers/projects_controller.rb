@@ -3,7 +3,9 @@ require 'zlib'
 require 'base64'
 
 class ProjectsController < ApplicationController
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status graph pipeline_runs instructions get_commands get_loom_files_json toggle_public]
+  include ComplianceHelpers
+
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public]
 
   # GET /projects or /projects.json
   def index
@@ -325,6 +327,60 @@ class ProjectsController < ApplicationController
       # Load shares for user rights management
       @shares = @project.shares.includes(:user).to_a
     end
+
+    # Variables specific to compliance view
+    if @view_type == 'compliance'
+      @validation_result = load_validation_result(@project)
+
+      # Load field group definitions for structured display
+      co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
+      @compliance_field_groups = OntologyTermType.where.not(field_group_id: [nil, ''])
+                                                  .order(:display_order)
+                                                  .map { |ott| ott.to_field_group(co_id_to_tag) }
+
+      # Load current metadata values (categories) for each field from Annot records.
+      # Also load co-occurrence pairs for paired fields (term <-> label matching).
+      @compliance_field_values = {}
+      all_paths = @compliance_field_groups.flat_map { |fg| [fg[:term_path], fg[:label_path]].compact }
+      paired_paths = @compliance_field_groups
+                       .select { |fg| fg[:label_path].present? }
+                       .map { |fg| [fg[:term_path], fg[:label_path]] }
+
+      loom_path = find_project_loom_path(@project)
+      if loom_path.present?
+        raw = batch_read_field_values(loom_path, all_paths, paired_paths: paired_paths)
+        raw.each { |k, v| @compliance_field_values[k] = v if v.present? }
+      else
+        annots_by_name = @project.annots.where(name: all_paths, latest_version: true).index_by(&:name)
+        all_paths.each do |path|
+          annot = annots_by_name[path]
+          next unless annot
+          if annot.list_cat_json.present?
+            begin
+              vals = JSON.parse(annot.list_cat_json)
+              @compliance_field_values[path] = vals if vals.is_a?(Array) && vals.any?
+            rescue JSON::ParserError; end
+          elsif annot.categories_json.present?
+            begin
+              cats = JSON.parse(annot.categories_json)
+              @compliance_field_values[path] = cats.keys if cats.is_a?(Hash) && cats.any?
+            rescue JSON::ParserError; end
+          end
+        end
+      end
+
+      # Read per-value resolution from the validation result (computed during validation).
+      # Fall back to on-the-fly resolution if no validation result is available.
+      if @validation_result&.dig(:field_resolutions).present?
+        @compliance_resolved = @validation_result[:field_resolutions].transform_keys(&:to_s)
+        @compliance_resolved.each do |path, val_map|
+          next unless val_map.is_a?(Hash)
+          @compliance_resolved[path] = val_map.transform_keys(&:to_s)
+        end
+      else
+        @compliance_resolved = resolve_field_values(@compliance_field_groups, @compliance_field_values)
+      end
+    end
     
     # Variables specific to summary view
     if @view_type == 'summary'
@@ -469,9 +525,19 @@ class ProjectsController < ApplicationController
     @grouped_organisms = group_organisms(@organisms)
 
     # Handle integration mode
-    @integrate_mode = params[:integrate] == '1' && session[:integrate_project_keys].present?
+    # Source keys can arrive via URL params (from reset_parsing redirect) or session
+    # (from prepare_integrate). URL params take precedence because session cookies
+    # are not always reliably set during Turbo Drive fetch-based redirects.
+    @integrate_mode = params[:integrate] == '1'
     if @integrate_mode
-      @integrate_projects = Project.where(key: session[:integrate_project_keys]).includes(:organism).to_a
+      integrate_keys = if params[:source_keys].present?
+                         params[:source_keys].split(',')
+                       elsif session[:integrate_project_keys].present?
+                         session[:integrate_project_keys]
+                       end
+      # Persist in session so a page refresh of the form still works
+      session[:integrate_project_keys] = integrate_keys if integrate_keys.present?
+      @integrate_projects = integrate_keys.present? ? Project.where(key: integrate_keys).includes(:organism).to_a : []
       if @integrate_projects.any?
         # Pre-fill organism from the integration projects
         @project.organism_id = @integrate_projects.first.organism_id
@@ -2611,7 +2677,9 @@ class ProjectsController < ApplicationController
       waiting: totals[1],
       running: totals[2],
       completed: totals[3],
-      failed: totals[4]
+      failed: totals[4],
+      cell_count: @project.cell_count,
+      col_label: helpers.col_label(@project)
     }
 
     render json: counts
@@ -2942,6 +3010,18 @@ class ProjectsController < ApplicationController
   def reset_parsing
     @original_project = Project.find(params[:id])
     
+    # Check if this is an integration project (no file upload, source projects instead)
+    h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
+    if h_attrs['integrate_batch_paths'].present?
+      source_keys = h_attrs['integrate_batch_paths'].keys
+      session[:integrate_project_keys] = source_keys
+      # Pass source_keys in URL params so the new action does not depend solely
+      # on the session cookie surviving the redirect (Turbo Drive + fetch can
+      # occasionally lose the Set-Cookie from the intermediate 302 response).
+      redirect_to new_project_path(integrate: 1, source_keys: source_keys.join(','))
+      return
+    end
+
     # Find the Fu (file upload) associated with this project
     fu = if @original_project.fu_id
            Fu.find_by(id: @original_project.fu_id)

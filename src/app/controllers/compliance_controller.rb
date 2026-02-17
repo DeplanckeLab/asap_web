@@ -7,6 +7,9 @@ require 'shellwords'
 # Provides endpoints to validate cell metadata in loom files
 # and view validation results
 class ComplianceController < ApplicationController
+  include CxgSchemaRules
+  include ComplianceHelpers
+
   before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields]
   skip_before_action :authenticate_user!, only: %i[index schema_docs], raise: false
 
@@ -83,7 +86,7 @@ class ComplianceController < ApplicationController
       save_validation_result(@project, error_result)
       
       respond_to do |format|
-        format.html { redirect_to compliance_project_result_path(@project), alert: 'No loom file found' }
+        format.html { redirect_to project_path(@project, view: 'compliance'), alert: 'No loom file found' }
         format.json { render json: { status: 'error', message: 'No loom file found', project_id: @project.id } }
       end
       return
@@ -109,43 +112,45 @@ class ComplianceController < ApplicationController
       errors: result.errors,
       warnings: result.warnings,
       info: result.info,
+      valid_checks: result.valid_checks,
       errors_count: result.errors.count,
       warnings_count: result.warnings.count,
-      info_count: result.info.count
+      info_count: result.info.count,
+      valid_checks_count: result.valid_checks.count,
+      field_resolutions: result.field_resolutions || {}
     }
     save_validation_result(@project, validation_data)
 
     respond_to do |format|
       format.html do
         if result.valid?
-          redirect_to compliance_project_result_path(@project), notice: 'Validation passed!'
+          redirect_to project_path(@project, view: 'compliance'), notice: 'Validation passed!'
         else
-          redirect_to compliance_project_result_path(@project), alert: "Validation found #{result.errors.count} error(s)"
+          redirect_to project_path(@project, view: 'compliance'), alert: "Validation found #{result.errors.count} #{result.errors.count == 1 ? 'error' : 'errors'}"
         end
       end
       format.json do
-        render json: { 
+        render json: {
           status: 'completed',
           valid: result.valid?,
           errors_count: result.errors.count,
           warnings_count: result.warnings.count,
-          info_count: result.info.count,
-          project_id: @project.id 
+          valid_checks_count: result.valid_checks.count,
+          project_id: @project.id
         }
       end
     end
   end
 
   # GET /compliance/projects/:id/result
-  # Show validation result for a specific project
+  # Redirect to the project compliance view (moved to projects/:key?view=compliance)
   def show_project_result
     unless @project
       redirect_to compliance_index_path, alert: 'Project not found'
       return
     end
 
-    @validation_result = load_validation_result(@project)
-    @loom_files = find_project_loom_files(@project)
+    redirect_to project_path(@project, view: 'compliance'), status: :moved_permanently
   end
 
   # GET /compliance/projects/:id/status
@@ -191,10 +196,12 @@ class ComplianceController < ApplicationController
       errors: result.errors,
       warnings: result.warnings,
       info: result.info,
+      valid_checks: result.valid_checks,
       summary: {
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
-        info_count: result.info.count
+        info_count: result.info.count,
+        valid_checks_count: result.valid_checks.count
       }
     }
   end
@@ -209,13 +216,13 @@ class ComplianceController < ApplicationController
 
     @validation_result = load_validation_result(@project)
     unless @validation_result
-      redirect_to compliance_project_result_path(@project), alert: 'No validation result found. Please run validation first.'
+      redirect_to project_path(@project, view: 'compliance'), alert: 'No validation result found. Please run validation first.'
       return
     end
 
     @loom_path = find_project_loom_path(@project)
     unless @loom_path && File.exist?(@loom_path)
-      redirect_to compliance_project_result_path(@project), alert: 'No loom file found.'
+      redirect_to project_path(@project, view: 'compliance'), alert: 'No loom file found.'
       return
     end
 
@@ -237,6 +244,9 @@ class ComplianceController < ApplicationController
       g[:term_ontology_prefixes] = filter_prefixes_for_organism(g[:term_ontology_prefixes], @project)
     end
 
+    # Compute CXG schema constraints (e.g. non-human -> ethnicity = "na")
+    @schema_constraints = compute_schema_constraints(@project, @fixable_groups)
+
     # Load existing OtProject records for prefilling the form
     @prefill_data = build_prefill_data(@project)
 
@@ -244,6 +254,7 @@ class ComplianceController < ApplicationController
     # current unique values from the LOOM so we can display them in the form.
     compliant_paths = []
     compliant_groups = []
+    paired_paths = []
     @fixable_groups.each do |fg|
       g = fg[:group]
       next if fg[:term_has_error]
@@ -252,13 +263,85 @@ class ComplianceController < ApplicationController
       compliant_paths << g[:term_path]
       compliant_paths << g[:label_path] if g[:label_path].present?
       compliant_groups << g
+      # For paired fields, also request co-occurrence pairs so we can display
+      # them in matching order (term and label side-by-side).
+      if g[:label_path].present?
+        paired_paths << [g[:term_path], g[:label_path]]
+      end
     end
-    raw_values = compliant_paths.any? ? batch_read_field_values(@loom_path, compliant_paths) : {}
+    raw_values = compliant_paths.any? ? batch_read_field_values(@loom_path, compliant_paths, paired_paths: paired_paths) : {}
 
     # Resolve each value against the ontology to detect unresolved terms.
     # Result: { "/col_attrs/tissue" => { "fat body" => true, "body" => false }, ... }
     @compliant_field_values = raw_values
     @compliant_field_resolved = resolve_compliant_field_values(compliant_groups, raw_values)
+
+    # Merge cached field_resolutions from the validation result so that any
+    # path/value not covered by resolve_compliant_field_values still gets
+    # correct resolution data (e.g. the validator already knows "mix" is
+    # invalid for sex even if the fresh resolution skipped that group).
+    # Keys are converted to strings because the cached JSON is loaded with
+    # symbolize_names while resolve_compliant_field_values uses string keys.
+    cached_fr = @validation_result[:field_resolutions] || @validation_result['field_resolutions']
+    if cached_fr.is_a?(Hash)
+      cached_fr.each do |path, vals|
+        next unless vals.is_a?(Hash)
+        path_s = path.to_s
+        @compliant_field_resolved[path_s] ||= {}
+        vals.each do |v, status|
+          v_s = v.to_s
+          @compliant_field_resolved[path_s][v_s] = status unless @compliant_field_resolved[path_s].key?(v_s)
+        end
+      end
+    end
+
+    # Extract current values of fields that have cross-field impact so the
+    # frontend can evaluate constraints at page load (not only on change).
+    @current_trigger_values = {}
+    assay_vals = raw_values['/col_attrs/assay_ontology_term_id']
+    if assay_vals.present?
+      @current_trigger_values['assay_ontology_term_ids'] = assay_vals
+      # Compute the union of allowed suspension types across ALL assay terms.
+      # If the project has multiple assays, the user may need any of the
+      # suspension types allowed by any of them.
+      all_allowed = assay_vals.each_with_object(Set.new) do |assay_id, set|
+        per_assay = resolve_suspension_type_for_assay(assay_id)
+        set.merge(per_assay) if per_assay
+      end
+      @current_trigger_values['assay_allowed_suspension'] = all_allowed.to_a if all_allowed.any?
+    end
+    tissue_type_vals = raw_values['/col_attrs/tissue_type']
+    if tissue_type_vals.present? && tissue_type_vals.size == 1
+      @current_trigger_values['tissue_type'] = tissue_type_vals.first
+    end
+
+    # Read current unique values for ALL fields that could be targets of
+    # cross-field constraints. The JS uses this to determine whether a
+    # constrained field already has the correct value (=> skip) or needs
+    # to be set (=> set_value + lock).  Merge with raw_values to avoid
+    # a redundant LOOM read for fields already loaded above.
+    constraint_target_paths = %w[
+      /col_attrs/suspension_type
+      /col_attrs/self_reported_ethnicity_ontology_term_id
+      /col_attrs/self_reported_ethnicity
+      /col_attrs/sex_ontology_term_id
+      /col_attrs/sex
+      /col_attrs/development_stage_ontology_term_id
+      /col_attrs/development_stage
+      /col_attrs/donor_id
+      /col_attrs/tissue_ontology_term_id
+    ]
+    missing_paths = constraint_target_paths - raw_values.keys
+    if missing_paths.any? && @loom_path.present?
+      extra_values = batch_read_field_values(@loom_path, missing_paths)
+      raw_values.merge!(extra_values)
+    end
+    field_values = {}
+    constraint_target_paths.each do |path|
+      vals = raw_values[path]
+      field_values[path] = vals if vals.present?
+    end
+    @current_trigger_values['field_values'] = field_values
   end
 
   # POST /compliance/projects/:id/apply_fix
@@ -285,9 +368,12 @@ class ComplianceController < ApplicationController
     applied = []
     errors = []
 
-    # Track which paths have been versioned in this batch to avoid double-archives
-    # and to adjust source paths that point to a just-archived field.
-    versioned_paths = {} # { original_path => archive_path }
+    # ── Phase 1: Plan all LOOM operations and DB changes ──
+    # Build a list of batched LOOM operations and corresponding DB change descriptors,
+    # without executing any Python/Docker calls yet.
+    loom_ops = []          # Array of hashes for execute_batch_loom_operations
+    db_changes = []        # Array of { field_path:, action:, ... } describing DB work
+    versioned_paths = {}   # { original_path => archive_path }
 
     fixes.each do |field_path, fix_data|
       next if fix_data[:action].blank? || fix_data[:action] == 'skip'
@@ -296,52 +382,78 @@ class ComplianceController < ApplicationController
       field_path = field_path.to_s
 
       begin
-        if action == 'map_from'
-          source_path = fix_data[:source].to_s.strip
-          next if source_path.blank?
+        plan = plan_field_fix(@project, loom_path, field_path, action, fix_data, versioned_paths)
+        next unless plan
 
-          new_annot = version_and_replace_metadata(@project, loom_path, field_path, versioned_paths, rename_annot: true) do |lp, fp|
-            actual_source = adjust_source_if_versioned(source_path, versioned_paths)
-            success = copy_metadata_in_loom(lp, actual_source, fp)
-            unless success
-              raise "Failed to copy from #{actual_source}"
-            end
-          end
-          applied << { field: field_path, action: 'mapped', source: source_path }
-
-        elsif action == 'resolve_paired'
-          source_path = fix_data[:source].to_s.strip
-          resolve_map_json = fix_data[:resolve_map].to_s.strip
-          next if source_path.blank? || resolve_map_json.blank?
-
-          new_annot = version_and_replace_metadata(@project, loom_path, field_path, versioned_paths, rename_annot: true) do |lp, fp|
-            actual_source = adjust_source_if_versioned(source_path, versioned_paths)
-            success = resolve_paired_in_loom(lp, actual_source, fp, resolve_map_json)
-            unless success
-              raise "Failed to resolve paired values from #{actual_source}"
-            end
-          end
-          applied << { field: field_path, action: 'resolve_paired', source: source_path }
-
-        elsif action == 'set_value'
-          value = fix_data[:value].to_s.strip
-          next if value.blank?
-
-          new_annot = version_and_replace_metadata(@project, loom_path, field_path, versioned_paths, rename_annot: true) do |lp, fp|
-            if fp.start_with?('/attrs/')
-              success = write_global_attr_to_loom(lp, fp, value)
-            else
-              success = write_constant_to_loom(lp, fp, value)
-            end
-            unless success
-              raise "Failed to write value '#{value}'"
-            end
-          end
-          applied << { field: field_path, action: 'set_value', value: value }
-        end
+        loom_ops.concat(plan[:loom_ops])
+        db_changes << plan[:db_change]
       rescue StandardError => e
-        Rails.logger.error("[Compliance Fix] Error fixing #{field_path}: #{e.message}")
+        Rails.logger.error("[Compliance Fix] Error planning #{field_path}: #{e.message}")
         errors << { field: field_path, message: e.message }
+      end
+    end
+
+    result_url = project_path(@project, view: 'compliance')
+
+    if loom_ops.blank?
+      respond_to do |format|
+        format.json { render json: { status: 'error', message: 'No changes were applied.', redirect_url: result_url } }
+        format.html { redirect_to compliance_project_fix_path(@project), alert: 'No changes were applied.' }
+      end
+      return
+    end
+
+    # Append read_categories ops so we can read back freshly written data
+    # in the same Docker call (saves a separate Python invocation).
+    written_field_paths = db_changes.map { |c| c[:field_path] }.uniq
+    cat_op_start = loom_ops.size
+    written_field_paths.each do |fp|
+      loom_ops << { op: 'read_categories', field: strip_leading_slash(fp), field_path: fp }
+    end
+
+    # ── Phase 2: Execute all LOOM operations in one batch ──
+    Rails.logger.info("[Compliance Fix] Executing #{loom_ops.size} LOOM operations in a single batch (#{cat_op_start} writes + #{written_field_paths.size} category reads)")
+    batch_results = execute_batch_loom_operations(loom_path, loom_ops)
+
+    unless batch_results
+      respond_to do |format|
+        format.json { render json: { status: 'error', message: 'LOOM batch operation failed.', redirect_url: result_url } }
+        format.html { redirect_to compliance_project_fix_path(@project), alert: 'LOOM batch operation failed.' }
+      end
+      return
+    end
+
+    # Check for per-operation errors (write ops only)
+    batch_results.each do |idx, result|
+      next if idx >= cat_op_start
+      if result['status'] == 'error'
+        op = loom_ops[idx]
+        Rails.logger.error("[Compliance Fix] Batch op ##{idx} (#{op[:op]}) failed: #{result['reason']}")
+      end
+    end
+
+    # ── Phase 2b: Extract categories from batch results ──
+    field_categories = {}
+    written_field_paths.each_with_index do |fp, i|
+      cat_result = batch_results[cat_op_start + i]
+      next unless cat_result && cat_result['status'] == 'ok' && cat_result['categories']
+      field_categories[fp] = {
+        categories_json: cat_result['categories'].to_json,
+        list_cat_json: cat_result['list_cats'].to_json,
+        nber_cats: cat_result['nber_cats']
+      }
+    end
+
+    # ── Phase 3: Apply DB changes ──
+    relative_path = loom_path.sub(%r{\A.*/#{@project.user_id}/#{@project.key}/}, '')
+
+    db_changes.each do |change|
+      begin
+        apply_db_changes_for_field(@project, relative_path, change, field_categories)
+        applied << change[:applied_entry]
+      rescue StandardError => e
+        Rails.logger.error("[Compliance Fix] DB error for #{change[:field_path]}: #{e.message}")
+        errors << { field: change[:field_path], message: e.message }
       end
     end
 
@@ -349,8 +461,6 @@ class ComplianceController < ApplicationController
     if applied.any?
       record_compliance_mappings(@project, applied, fixes)
     end
-
-    result_url = compliance_project_result_path(@project)
 
     unless applied.any?
       respond_to do |format|
@@ -368,7 +478,7 @@ class ComplianceController < ApplicationController
     ActionCable.server.broadcast("compliance_#{@project.id}", {
       project_id: @project.id,
       status: 'applying',
-      message: "Applied #{applied.count} fix(es) to #{count_loom_variants(@project, loom_path)} LOOM file(s). Running validation...",
+      message: "Applied #{applied.count} #{applied.count == 1 ? 'fix' : 'fixes'} to #{count_loom_variants(@project, loom_path)} LOOM #{count_loom_variants(@project, loom_path) == 1 ? 'file' : 'files'}. Running validation...",
       timestamp: Time.current.iso8601
     })
 
@@ -377,10 +487,10 @@ class ComplianceController < ApplicationController
 
     respond_to do |format|
       format.json do
-        error_summary = errors.any? ? " (#{errors.count} error(s): #{errors.map { |e| e[:message] }.first(3).join(', ')})" : ''
+        error_summary = errors.any? ? " (#{errors.count} #{errors.count == 1 ? 'error' : 'errors'}: #{errors.map { |e| e[:message] }.first(3).join(', ')})" : ''
         render json: {
           status: 'ok',
-          message: "Applied #{applied.count} fix(es)#{error_summary}. Running validation...",
+          message: "Applied #{applied.count} #{applied.count == 1 ? 'fix' : 'fixes'}#{error_summary}. Running validation...",
           applied_count: applied.count,
           errors_count: errors.count,
           validating: true,
@@ -655,56 +765,74 @@ class ComplianceController < ApplicationController
   # Apply the same fixes to all LOOM file variants (cell-filtered, gene-filtered).
   # The main loom_path has already been fixed; this replicates fixes to variants.
   # DB updates (Annot records, Run JSON) were already done for the main file,
-  # so rename_annot: false is used here -- only the LOOM files are modified.
+  # so only LOOM operations are performed here -- one batch per variant file.
   def apply_fixes_to_loom_variants(project, main_loom_path, applied, fixes, main_versioned_paths)
     all_loom_files = find_project_loom_files(project)
     variant_files = all_loom_files.reject { |f| File.realpath(f) == File.realpath(main_loom_path) }
 
     return if variant_files.empty?
 
-    Rails.logger.info("[Compliance Fix] Applying fixes to #{variant_files.size} LOOM variant(s)")
+    Rails.logger.info("[Compliance Fix] Applying fixes to #{variant_files.size} LOOM #{variant_files.size == 1 ? 'variant' : 'variants'} in batch mode")
 
     variant_files.each do |variant_path|
       Rails.logger.info("[Compliance Fix] Processing variant: #{variant_path}")
       variant_versioned = {}
+      ops = []
 
       applied.each do |entry|
         field_path = entry[:field]
         action = entry[:action]
+        fix_data = fixes[field_path] || {}
+        field_hdf5 = strip_leading_slash(field_path)
 
-        begin
-          fix_data = fixes[field_path] || {}
+        # Determine archiving from main_versioned_paths
+        archive_path = main_versioned_paths[field_path]
+        if archive_path && !variant_versioned[field_path]
+          ops << { op: 'rename', from: field_hdf5, to: strip_leading_slash(archive_path) }
+          variant_versioned[field_path] = archive_path
+        end
 
-          if action == 'mapped'
-            source_path = entry[:source] || fix_data[:source].to_s.strip
-            next if source_path.blank?
-            version_and_replace_metadata(project, variant_path, field_path, variant_versioned, rename_annot: false, expected_archive_paths: main_versioned_paths) do |lp, fp|
-              actual_source = adjust_source_if_versioned(source_path, variant_versioned)
-              copy_metadata_in_loom(lp, actual_source, fp)
-            end
+        if action == 'mapped'
+          source_path = entry[:source] || fix_data[:source].to_s.strip
+          next if source_path.blank?
+          actual_source = adjust_source_if_versioned(source_path, variant_versioned)
+          ops << { op: 'copy', source: strip_leading_slash(actual_source), target: field_hdf5 }
 
-          elsif action == 'resolve_paired'
-            source_path = entry[:source] || fix_data[:source].to_s.strip
-            resolve_map_json = fix_data[:resolve_map].to_s.strip
-            next if source_path.blank? || resolve_map_json.blank?
-            version_and_replace_metadata(project, variant_path, field_path, variant_versioned, rename_annot: false, expected_archive_paths: main_versioned_paths) do |lp, fp|
-              actual_source = adjust_source_if_versioned(source_path, variant_versioned)
-              resolve_paired_in_loom(lp, actual_source, fp, resolve_map_json)
-            end
+        elsif action == 'resolve_paired'
+          source_path = entry[:source] || fix_data[:source].to_s.strip
+          resolve_map_json = fix_data[:resolve_map].to_s.strip
+          next if source_path.blank? || resolve_map_json.blank?
+          actual_source = adjust_source_if_versioned(source_path, variant_versioned)
+          resolve_map = begin
+            JSON.parse(resolve_map_json)
+          rescue JSON::ParserError
+            {}
+          end
+          ops << { op: 'resolve_paired', source: strip_leading_slash(actual_source), target: field_hdf5, map: resolve_map }
 
-          elsif action == 'set_value'
-            value = entry[:value] || fix_data[:value].to_s.strip
-            next if value.blank?
-            version_and_replace_metadata(project, variant_path, field_path, variant_versioned, rename_annot: false, expected_archive_paths: main_versioned_paths) do |lp, fp|
-              if fp.start_with?('/attrs/')
-                write_global_attr_to_loom(lp, fp, value)
-              else
-                write_constant_to_loom(lp, fp, value)
-              end
+        elsif action == 'set_value'
+          value = entry[:value] || fix_data[:value].to_s.strip
+          next if value.blank?
+          if field_path.start_with?('/attrs/')
+            attr_name = field_path.sub(%r{\A/attrs/}, '')
+            ops << { op: 'set_global_attr', attr_name: attr_name, value: value }
+          else
+            ops << { op: 'set_value', target: field_hdf5, value: value }
+          end
+        end
+      end
+
+      if ops.any?
+        Rails.logger.info("[Compliance Fix] Executing #{ops.size} ops for variant #{variant_path}")
+        results = execute_batch_loom_operations(variant_path, ops)
+        if results
+          results.each do |idx, result|
+            if result['status'] == 'error'
+              Rails.logger.error("[Compliance Fix] Variant op ##{idx} (#{ops[idx]&.dig(:op)}) failed on #{variant_path}: #{result['reason']}")
             end
           end
-        rescue StandardError => e
-          Rails.logger.error("[Compliance Fix] Error applying #{action} to variant #{variant_path} field #{field_path}: #{e.message}")
+        else
+          Rails.logger.error("[Compliance Fix] Batch failed entirely for variant #{variant_path}")
         end
       end
     end
@@ -802,56 +930,7 @@ class ComplianceController < ApplicationController
     }
   end
 
-  def load_validation_result(project)
-    # Try loading from project.cxg_validation_result method
-    # This method returns a Hash (already parsed), so we just need to symbolize keys
-    if project.respond_to?(:cxg_validation_result)
-      result = project.cxg_validation_result
-      if result.present?
-        # The model method returns a Hash with string keys, convert to symbol keys
-        return result.deep_symbolize_keys
-      end
-    end
-
-    if project.respond_to?(:metadata) && project.metadata&.dig('cxg_validation')
-      return project.metadata['cxg_validation'].deep_symbolize_keys
-    end
-
-    # Try loading from project directory first (primary location)
-    if project.respond_to?(:key) && project.respond_to?(:user_id) && project.key.present? && project.user_id.present?
-      project_validation_path = File.join(
-        ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'),
-        project.user_id.to_s,
-        project.key,
-        'cxg_validation_result.json'
-      )
-      
-      if File.exist?(project_validation_path)
-        begin
-          return JSON.parse(File.read(project_validation_path), symbolize_names: true)
-        rescue JSON::ParserError
-          nil
-        end
-      end
-    end
-
-    # Fall back to upload directory
-    validation_path = File.join(
-      ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
-      project.id.to_s,
-      'cxg_validation_result.json'
-    )
-
-    if File.exist?(validation_path)
-      begin
-        return JSON.parse(File.read(validation_path), symbolize_names: true)
-      rescue JSON::ParserError
-        nil
-      end
-    end
-
-    nil
-  end
+  # load_validation_result is provided by ComplianceHelpers concern
 
   def find_project_loom_files(project)
     loom_files = []
@@ -1012,6 +1091,9 @@ class ComplianceController < ApplicationController
   def resolve_compliant_field_values(groups, raw_values)
     result = {}
 
+    # Schema-allowed free-text values per field path (e.g. "unknown", "na").
+    allowed_specials = CxgLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
+
     groups.each do |g|
       valid_values = g[:term_valid_values]
       prefixes = g[:term_ontology_prefixes]
@@ -1034,19 +1116,58 @@ class ComplianceController < ApplicationController
 
       scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
 
-      # Check the term path (identifiers like PATO:0000383)
-      term_vals = raw_values[g[:term_path]] || []
-      if term_vals.any?
-        known_ids = scope.where(identifier: term_vals).pluck(:identifier).to_set
-        result[g[:term_path]] = term_vals.index_with { |v| known_ids.include?(v) }
+      # Build a set of allowed free-text values for this field (from schema
+      # constants and from the OntologyTermType free_text_json config).
+      free_text_set = Set.new
+      specials = allowed_specials[g[:term_path]]
+      free_text_set.merge(specials) if specials
+      if g[:id].present?
+        ott = OntologyTermType.find_by(field_group_id: g[:id])
+        free_text_set.merge(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s }) if ott
       end
 
-      # Check the label path (names like "fat body") using batch resolution
+      # Check the term path (identifiers like PATO:0000383 or multi-values
+      # like "CL:0000540 || CL:0000127").
+      term_vals = raw_values[g[:term_path]] || []
+      if term_vals.any?
+        # Expand multi-value entries into individual sub-terms for batch lookup
+        all_sub_terms = Set.new
+        term_vals.each do |v|
+          v.to_s.split(' || ').each { |t| all_sub_terms << t.strip }
+        end
+        all_sub_terms.reject!(&:blank?)
+
+        # Remove free-text values before querying the DB
+        ontology_sub_terms = all_sub_terms.reject { |t| free_text_set.include?(t) }
+        known_ids = ontology_sub_terms.any? ? scope.where(identifier: ontology_sub_terms.to_a).pluck(:identifier).to_set : Set.new
+        known_ids.merge(free_text_set)
+
+        result[g[:term_path]] = term_vals.index_with do |v|
+          parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
+          parts.all? { |p| known_ids.include?(p) }
+        end
+      end
+
+      # Check the label path (names like "fat body" or multi-values like
+      # "neuron || microglial cell").
       if g[:label_path].present?
         label_vals = raw_values[g[:label_path]] || []
         if label_vals.any?
-          name_to_term = batch_find_ontology_terms_by_name(scope, label_vals)
-          result[g[:label_path]] = label_vals.index_with { |v| name_to_term.key?(v) }
+          # Expand multi-value label entries
+          all_sub_names = Set.new
+          label_vals.each do |v|
+            v.to_s.split(' || ').each { |t| all_sub_names << t.strip }
+          end
+          all_sub_names.reject!(&:blank?)
+
+          # Remove free-text values before name resolution
+          ontology_sub_names = all_sub_names.reject { |t| free_text_set.include?(t) }
+          name_to_term = ontology_sub_names.any? ? batch_find_ontology_terms_by_name(scope, ontology_sub_names.to_a) : {}
+
+          result[g[:label_path]] = label_vals.index_with do |v|
+            parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
+            parts.all? { |p| free_text_set.include?(p) || name_to_term.key?(p) }
+          end
         end
       end
     end
@@ -1056,17 +1177,35 @@ class ComplianceController < ApplicationController
 
   # Read unique values for multiple metadata fields from the LOOM in a single call.
   # Returns a hash { "/col_attrs/sex" => ["female", "male", "mixed sex"], ... }
-  def batch_read_field_values(loom_path, field_paths)
+  # Read unique values from LOOM fields.  For paired fields, also build a
+  # co-occurrence mapping so both sides can be displayed in the same order.
+  #
+  # field_paths  - array of HDF5 paths to read independently
+  # paired_paths - array of [term_path, label_path] pairs whose values should
+  #                be read together and returned as an ordered list of
+  #                [term_value, label_value] tuples (unique combinations).
+  #
+  # Returns { path => [unique_values], ... } for individual fields.
+  # For paired fields, additionally stores under the key
+  #   "#{term_path}||#{label_path}" => [[term_val, label_val], ...]
+  def batch_read_field_values(loom_path, field_paths, paired_paths: [])
     return {} if field_paths.blank? || loom_path.blank?
 
     container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
     fields_json = field_paths.to_json
+    pairs_json = paired_paths.to_json
 
     script = <<~PY
       import h5py, sys, json
+
+      def decode(v):
+          return v.decode() if hasattr(v, 'decode') else str(v)
+
       f = h5py.File(sys.argv[1], 'r')
       fields = json.loads(sys.argv[2])
+      pairs = json.loads(sys.argv[3])
       result = {}
+
       for fp in fields:
           parts = fp.lstrip('/').split('/')
           try:
@@ -1074,10 +1213,102 @@ class ComplianceController < ApplicationController
               for p in parts:
                   ds = ds[p]
               vals = ds[:]
-              unique = sorted(set(v.decode() if hasattr(v, 'decode') else str(v) for v in vals))
+              unique = sorted(set(decode(v) for v in vals))
               result[fp] = unique
           except Exception:
               result[fp] = []
+
+      for term_fp, label_fp in pairs:
+          tp = term_fp.lstrip('/').split('/')
+          lp = label_fp.lstrip('/').split('/')
+          try:
+              tds = f
+              for p in tp:
+                  tds = tds[p]
+              lds = f
+              for p in lp:
+                  lds = lds[p]
+              tvals = tds[:]
+              lvals = lds[:]
+              seen = set()
+              ordered_pairs = []
+              for tv, lv in zip(tvals, lvals):
+                  tv_s = decode(tv)
+                  lv_s = decode(lv)
+                  key = (tv_s, lv_s)
+                  if key not in seen:
+                      seen.add(key)
+                      ordered_pairs.append([tv_s, lv_s])
+              ordered_pairs.sort(key=lambda x: x[1])
+              result[term_fp + '||' + label_fp] = ordered_pairs
+          except Exception:
+              pass
+
+      f.close()
+      print(json.dumps(result))
+    PY
+
+    stdout, _stderr, status = Open3.capture3(
+      'docker', 'exec', container, 'python3', '-c', script, loom_path, fields_json, pairs_json
+    )
+    return {} unless status.success?
+
+    JSON.parse(stdout) rescue {}
+  end
+
+  # Read category counts for a list of field paths from a LOOM file.
+  # Returns { field_path => { categories_json:, list_cat_json:, nber_cats: } }
+  # matching the format expected by Annot records.
+  def read_field_categories(loom_path, field_paths)
+    return {} if field_paths.blank? || loom_path.blank?
+
+    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    fields_json = field_paths.to_json
+
+    script = <<~PY
+      import h5py, sys, json
+      from collections import Counter
+
+      def decode(v):
+          return v.decode() if hasattr(v, 'decode') else str(v)
+
+      f = h5py.File(sys.argv[1], 'r')
+      fields = json.loads(sys.argv[2])
+      result = {}
+
+      for fp in fields:
+          parts = fp.lstrip('/').split('/')
+          try:
+              ds = f
+              for p in parts:
+                  ds = ds[p]
+              vals = ds[:]
+              counts = Counter(decode(v) for v in vals)
+              categories = {k: int(c) for k, c in counts.items()}
+              keys = list(categories.keys())
+              nber_int = sum(1 for k in keys if k.lstrip('-').isdigit())
+              nber_float = 0
+              if nber_int != len(keys):
+                  for k in keys:
+                      try:
+                          float(k)
+                          nber_float += 1
+                      except ValueError:
+                          pass
+              if nber_int == len(keys):
+                  list_cats = sorted(keys, key=lambda x: int(x))
+              elif nber_float == len(keys):
+                  list_cats = sorted(keys, key=lambda x: float(x))
+              else:
+                  list_cats = sorted(keys)
+              result[fp] = {
+                  'categories': categories,
+                  'list_cats': list_cats,
+                  'nber_cats': len(categories)
+              }
+          except Exception:
+              pass
+
       f.close()
       print(json.dumps(result))
     PY
@@ -1087,7 +1318,14 @@ class ComplianceController < ApplicationController
     )
     return {} unless status.success?
 
-    JSON.parse(stdout) rescue {}
+    raw = JSON.parse(stdout) rescue {}
+    raw.transform_values do |v|
+      {
+        categories_json: v['categories']&.to_json,
+        list_cat_json: v['list_cats']&.to_json,
+        nber_cats: v['nber_cats']
+      }
+    end
   end
 
   # Load compliance field group definitions from the database.
@@ -1137,6 +1375,45 @@ class ComplianceController < ApplicationController
       ontology_term_id: "NCBITaxon:#{organism.tax_id}"
     }
   end
+
+  # Compute CXG schema constraints that force certain fields to specific values
+  # based on the project's organism, tissue_type, or assay.
+  # Returns a hash: { field_group_id => { forced_value:, reason:, dependent_on: } }
+  #
+  # Rules implemented (from CELLxGENE schema):
+  # 1. If organism != Homo sapiens -> self_reported_ethnicity* MUST be "na"
+  # 2. If tissue_type == "cell line" -> self_reported_ethnicity* MUST be "na",
+  #    donor_id SHOULD be the cell line name
+  # 3. suspension_type is determined by assay_ontology_term_id
+  def compute_schema_constraints(project, fixable_groups)
+    constraints = {}
+    organism = project.organism
+    is_human = organism && organism.tax_id.to_s == '9606'
+
+    # Rule 1: non-human -> ethnicity = "na"
+    unless is_human
+      reason = organism ? "Organism is #{organism.name} (not Homo sapiens)" : 'Organism is not Homo sapiens'
+      constraints['self_reported_ethnicity'] = {
+        forced_term_value: 'na',
+        forced_label_value: 'na',
+        reason: "#{reason} -- self_reported_ethnicity MUST be \"na\" per CXG schema.",
+        dependent_on: 'organism'
+      }
+    end
+
+    # Rule 2: tissue_type == "cell line" -> ethnicity = "na"
+    # (This is checked dynamically on the frontend when tissue_type changes.)
+    # We also provide the rule definition so the frontend knows about it.
+
+    # Build the assay-to-suspension_type mapping from the CXG schema.
+    # Each entry maps an EFO term (or ancestor) to its allowed suspension_type values.
+    # The frontend will use this to auto-set suspension_type when assay changes.
+
+    constraints
+  end
+
+  # ASSAY_SUSPENSION_TYPE_MAP, ASSAY_ANCESTOR_TERMS, and
+  # resolve_suspension_type_for_assay are provided by CxgSchemaRules.
 
   # Filter ontology prefixes to only those applicable for the project's organism.
   # An ontology is applicable if its tax_ids is blank (universal) or contains
@@ -1330,6 +1607,224 @@ class ComplianceController < ApplicationController
     PYTHON
 
     run_python_in_container(python_script, loom_path, source_field, target_field, resolve_map_json)
+  end
+
+  # Plan LOOM operations and DB changes for a single field fix.
+  # Returns { loom_ops: [...], db_change: { ... } } or nil if nothing to do.
+  # Does NOT execute any Python calls -- only builds the operations list.
+  #
+  # If the existing Annot is not referenced by any process (Cla, AnnotCellSet,
+  # OtProject, Run JSON), the field is overwritten in place without creating
+  # a .vX backup -- there is nothing that depends on the old data.
+  def plan_field_fix(project, loom_path, field_path, action, fix_data, versioned_paths)
+    ops = []
+
+    # -- Determine versioning / archiving needs --
+    current_annot = project.annots.find_by(name: field_path, latest_version: true)
+    field_hdf5 = strip_leading_slash(field_path)
+
+    archive_path = nil
+    next_version = 1
+    skip_versioning = false
+
+    if current_annot
+      needs_backup = annot_referenced_by_processes?(current_annot, project)
+
+      if needs_backup
+        current_version = current_annot.version_nber || 0
+        next_version = current_version + 1
+        archive_path = "#{field_path}.v#{current_version}"
+
+        unless versioned_paths[field_path]
+          ops << { op: 'rename', from: field_hdf5, to: strip_leading_slash(archive_path) }
+          versioned_paths[field_path] = archive_path
+        else
+          archive_path = versioned_paths[field_path]
+        end
+      else
+        # Not referenced: overwrite in place, no .vX backup needed
+        skip_versioning = true
+        next_version = current_annot.version_nber || 1
+        Rails.logger.info("[Compliance Fix] #{field_path} not referenced by any process, overwriting in place")
+      end
+    end
+
+    # -- Build the write operation --
+    if action == 'map_from'
+      source_path = fix_data[:source].to_s.strip
+      return nil if source_path.blank?
+      actual_source = adjust_source_if_versioned(source_path, versioned_paths)
+      ops << { op: 'copy', source: strip_leading_slash(actual_source), target: field_hdf5 }
+
+      # Store the actual source path (which may be .vX after versioning) so the
+      # recorded mapping points to where the original data really lives.
+      applied_entry = { field: field_path, action: 'mapped', source: actual_source }
+
+    elsif action == 'resolve_paired'
+      source_path = fix_data[:source].to_s.strip
+      resolve_map_json = fix_data[:resolve_map].to_s.strip
+      return nil if source_path.blank? || resolve_map_json.blank?
+      actual_source = adjust_source_if_versioned(source_path, versioned_paths)
+      resolve_map = begin
+        JSON.parse(resolve_map_json)
+      rescue JSON::ParserError
+        {}
+      end
+      ops << { op: 'resolve_paired', source: strip_leading_slash(actual_source), target: field_hdf5, map: resolve_map }
+
+      applied_entry = { field: field_path, action: 'resolve_paired', source: actual_source }
+
+    elsif action == 'set_value'
+      value = fix_data[:value].to_s.strip
+      return nil if value.blank?
+
+      if field_path.start_with?('/attrs/')
+        attr_name = field_path.sub(%r{\A/attrs/}, '')
+        ops << { op: 'set_global_attr', attr_name: attr_name, value: value }
+      else
+        ops << { op: 'set_value', target: field_hdf5, value: value }
+      end
+
+      applied_entry = { field: field_path, action: 'set_value', value: value }
+
+    else
+      return nil
+    end
+
+    {
+      loom_ops: ops,
+      db_change: {
+        field_path: field_path,
+        action: action,
+        current_annot: current_annot,
+        archive_path: archive_path,
+        next_version: next_version,
+        skip_versioning: skip_versioning,
+        applied_entry: applied_entry
+      }
+    }
+  end
+
+  # Check whether an Annot record is referenced by any process that would break
+  # if the metadata were simply overwritten.  Returns true if the annot is used
+  # by Cla, AnnotCellSet, OtProject, or appears in any Run's attrs_json/output_json.
+  def annot_referenced_by_processes?(annot, project)
+    return false unless annot
+
+    # Direct foreign-key references
+    return true if Cla.where(annot_id: annot.id).exists?
+    return true if AnnotCellSet.where(annot_id: annot.id).exists?
+    return true if OtProject.where(annot_id: annot.id).exists?
+
+    # Path-based references in Run JSON columns.
+    # Use quoted path to avoid false positives (e.g. /col_attrs/tissue matching
+    # /col_attrs/tissue_type or /col_attrs/tissue_ontology_term_id).
+    path = annot.name
+    quoted_path = "\"#{path}\""
+    return true if Run.where(project_id: project.id)
+                      .where("attrs_json LIKE ?", "%#{quoted_path}%")
+                      .exists?
+    return true if Run.where(project_id: project.id)
+                      .where("output_json LIKE ?", "%#{quoted_path}%")
+                      .exists?
+
+    false
+  end
+
+  # Apply the DB-side changes for a single field after the LOOM batch has succeeded.
+  # This handles Annot archiving, Run JSON updates, and new Annot creation.
+  # When skip_versioning is true the existing Annot is kept as-is (the LOOM data
+  # was overwritten in place without a .vX backup).
+  def apply_db_changes_for_field(project, relative_path, change, field_categories = {})
+    field_path = change[:field_path]
+    current_annot = change[:current_annot]
+    archive_path = change[:archive_path]
+    next_version = change[:next_version]
+    cats = field_categories[field_path]
+
+    if change[:skip_versioning]
+      # Annot not referenced by anything: data was overwritten in place.
+      # Update categories from the freshly written LOOM data.
+      if current_annot
+        update_attrs = {}
+        if cats
+          update_attrs[:categories_json] = cats[:categories_json]
+          update_attrs[:list_cat_json] = cats[:list_cat_json]
+          update_attrs[:nber_cats] = cats[:nber_cats]
+        else
+          update_attrs[:categories_json] = nil
+          update_attrs[:list_cat_json] = nil
+          update_attrs[:nber_cats] = nil
+        end
+        current_annot.update!(update_attrs)
+        Rails.logger.info("[Compliance Fix] Overwritten #{field_path} in place (Annot ##{current_annot.id}, no backup needed)")
+      else
+        # No existing Annot -- create one
+        create_annot_for_field(project, relative_path, field_path, next_version, cats)
+      end
+      return
+    end
+
+    # Archive old Annot record and update references
+    if current_annot && archive_path
+      current_annot.update!(
+        name: archive_path,
+        label: archive_path.split('/').last,
+        latest_version: false
+      )
+      Rails.logger.info("[Compliance Fix] Archived Annot ##{current_annot.id}: #{field_path} -> #{archive_path}")
+
+      update_run_attrs_json(project, field_path, archive_path)
+      update_run_output_json(project, field_path, archive_path)
+      update_project_json_files(project, field_path, archive_path)
+
+      ComplianceMapping.where(project_id: project.id, source_path: field_path)
+                       .update_all(source_path: archive_path)
+    end
+
+    # Create new Annot record for the replacement
+    create_annot_for_field(project, relative_path, field_path, next_version, cats)
+  end
+
+  # Create a new Annot record for a compliance-fixed metadata field.
+  # +cats+ is an optional hash with :categories_json, :list_cat_json, :nber_cats
+  # read from the LOOM file after writing.
+  def create_annot_for_field(project, relative_path, field_path, version_nber, cats = nil)
+    dim = if field_path.start_with?('/col_attrs/')
+            1
+          elsif field_path.start_with?('/row_attrs/')
+            2
+          else
+            4
+          end
+    data_type_id = (dim == 4) ? (DataType.find_by(name: 'STRING')&.id || 2) : (DataType.find_by(name: 'DISCRETE')&.id || 3)
+
+    attrs = {
+      name: field_path,
+      filepath: relative_path,
+      label: field_path.split('/').last,
+      dim: dim,
+      data_type_id: data_type_id,
+      nber_cols: project.nber_cols,
+      version_nber: version_nber,
+      latest_version: true,
+      user_id: project.user_id
+    }
+
+    if cats
+      attrs[:categories_json] = cats[:categories_json]
+      attrs[:list_cat_json] = cats[:list_cat_json]
+      attrs[:nber_cats] = cats[:nber_cats]
+    end
+
+    annot = project.annots.create!(attrs)
+    Rails.logger.info("[Compliance Fix] Created Annot for #{field_path} (v#{version_nber})")
+    annot
+  end
+
+  # Strip leading slash for HDF5 path usage
+  def strip_leading_slash(path)
+    path.start_with?('/') ? path[1..] : path
   end
 
   # Adjust source_path if the source field was versioned earlier in the same batch.
@@ -1528,12 +2023,7 @@ class ComplianceController < ApplicationController
     runs.find_each do |run|
       begin
         attrs = JSON.parse(run.attrs_json)
-        changed = false
-        attrs.each do |_key, val|
-          next unless val.is_a?(Hash) && val['output_dataset'] == old_name
-          val['output_dataset'] = new_name
-          changed = true
-        end
+        changed = replace_path_in_json(attrs, old_name, new_name)
         if changed
           run.update!(attrs_json: attrs.to_json)
           Rails.logger.info("[Compliance Fix] Updated attrs_json for Run ##{run.id}: #{old_name} -> #{new_name}")
@@ -1542,6 +2032,34 @@ class ComplianceController < ApplicationController
         Rails.logger.error("[Compliance Fix] Error updating attrs_json for Run ##{run.id}: #{e.message}")
       end
     end
+  end
+
+  # Recursively replace exact string matches of old_path with new_path
+  # in all values of a parsed JSON structure.  Returns true if any
+  # replacement was made.
+  def replace_path_in_json(obj, old_path, new_path)
+    changed = false
+    case obj
+    when Hash
+      obj.each do |k, v|
+        if v.is_a?(String) && v == old_path
+          obj[k] = new_path
+          changed = true
+        else
+          changed = true if replace_path_in_json(v, old_path, new_path)
+        end
+      end
+    when Array
+      obj.each_with_index do |v, i|
+        if v.is_a?(String) && v == old_path
+          obj[i] = new_path
+          changed = true
+        else
+          changed = true if replace_path_in_json(v, old_path, new_path)
+        end
+      end
+    end
+    changed
   end
 
   # Find runs for this project whose output_json contains the old annotation
@@ -1691,6 +2209,175 @@ class ComplianceController < ApplicationController
     rescue StandardError => e
       Rails.logger.error("[Compliance Fix] Error running Python: #{e.message}")
       false
+    end
+  end
+
+  # Execute a batch of LOOM operations in a single Docker/Python invocation.
+  # All operations share one h5py.File open, one Python startup, and one Docker exec.
+  #
+  # operations: array of hashes, each with an 'op' key and operation-specific fields:
+  #   { op: 'check_exists', field: 'col_attrs/tissue' }
+  #   { op: 'rename', from: 'col_attrs/tissue', to: 'col_attrs/tissue.v1' }
+  #   { op: 'copy', source: 'col_attrs/tissue.v1', target: 'col_attrs/tissue' }
+  #   { op: 'resolve_paired', source: 'col_attrs/X', target: 'col_attrs/Y', map: { ... } }
+  #   { op: 'set_value', target: 'col_attrs/sex', value: 'female' }
+  #   { op: 'set_global_attr', attr_name: 'title', value: 'My Dataset' }
+  #
+  # Returns a hash with results per operation index: { 0 => { "status" => "ok" }, ... }
+  # On total failure returns nil.
+  def execute_batch_loom_operations(loom_path, operations)
+    return {} if operations.blank?
+
+    # Embed the operations JSON as a base64-encoded string in the script
+    # to avoid escaping issues with quotes, backslashes, etc.
+    ops_b64 = Base64.strict_encode64(operations.to_json)
+
+    python_script = <<~PYTHON
+      import h5py
+      import numpy as np
+      import json
+      import sys
+      import base64
+      from collections import Counter
+
+      def decode(v):
+          return v.decode() if hasattr(v, 'decode') else str(v)
+
+      loom_path = sys.argv[1]
+      ops = json.loads(base64.b64decode(sys.argv[2]).decode('utf-8'))
+      results = {}
+
+      with h5py.File(loom_path, 'r+') as f:
+          n_cells = f['matrix'].shape[1]
+          for i, op in enumerate(ops):
+              key = str(i)
+              try:
+                  kind = op['op']
+
+                  if kind == 'check_exists':
+                      field = op['field']
+                      exists = field in f
+                      results[key] = {'status': 'ok', 'exists': exists}
+
+                  elif kind == 'rename':
+                      old = op['from']
+                      new = op['to']
+                      if old not in f:
+                          results[key] = {'status': 'skip', 'reason': 'source not found'}
+                      else:
+                          if new in f:
+                              del f[new]
+                          f[new] = f[old][:]
+                          del f[old]
+                          results[key] = {'status': 'ok'}
+
+                  elif kind == 'copy':
+                      source = op['source']
+                      target = op['target']
+                      if source not in f:
+                          results[key] = {'status': 'error', 'reason': 'source not found: ' + source}
+                      else:
+                          data = f[source][:]
+                          if target in f:
+                              del f[target]
+                          f.create_dataset(target, data=data)
+                          results[key] = {'status': 'ok'}
+
+                  elif kind == 'resolve_paired':
+                      source = op['source']
+                      target = op['target']
+                      resolve_map = op['map']
+                      if source not in f:
+                          results[key] = {'status': 'error', 'reason': 'source not found: ' + source}
+                      else:
+                          src_data = f[source][:]
+                          if src_data.dtype.kind in ('S', 'O'):
+                              src_data = np.array([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in src_data])
+                          else:
+                              src_data = np.array([str(v) for v in src_data])
+                          resolved = np.array([resolve_map.get(val, val) for val in src_data], dtype=h5py.special_dtype(vlen=str))
+                          if target in f:
+                              del f[target]
+                          f.create_dataset(target, data=resolved)
+                          results[key] = {'status': 'ok'}
+
+                  elif kind == 'set_value':
+                      target = op['target']
+                      value = op['value']
+                      if target in f:
+                          del f[target]
+                      f.create_dataset(target, data=np.array([value] * n_cells, dtype=h5py.special_dtype(vlen=str)))
+                      results[key] = {'status': 'ok'}
+
+                  elif kind == 'set_global_attr':
+                      attr_name = op['attr_name']
+                      value = op['value']
+                      f.attrs[attr_name] = value
+                      attrs_path = 'attrs/' + attr_name
+                      if attrs_path in f:
+                          del f[attrs_path]
+                      f.create_dataset(attrs_path, data=np.array([value], dtype=h5py.special_dtype(vlen=str)))
+                      results[key] = {'status': 'ok'}
+
+                  elif kind == 'read_categories':
+                      field = op['field']
+                      if field not in f:
+                          results[key] = {'status': 'skip', 'reason': 'field not found'}
+                      else:
+                          vals = f[field][:]
+                          counts = Counter(decode(v) for v in vals)
+                          categories = {k: int(c) for k, c in counts.items()}
+                          keys = list(categories.keys())
+                          nber_int = sum(1 for k in keys if k.lstrip('-').isdigit())
+                          nber_float = 0
+                          if nber_int != len(keys):
+                              for k in keys:
+                                  try:
+                                      float(k)
+                                      nber_float += 1
+                                  except ValueError:
+                                      pass
+                          if nber_int == len(keys):
+                              list_cats = sorted(keys, key=lambda x: int(x))
+                          elif nber_float == len(keys):
+                              list_cats = sorted(keys, key=lambda x: float(x))
+                          else:
+                              list_cats = sorted(keys)
+                          results[key] = {
+                              'status': 'ok',
+                              'categories': categories,
+                              'list_cats': list_cats,
+                              'nber_cats': len(categories)
+                          }
+
+                  else:
+                      results[key] = {'status': 'error', 'reason': 'unknown op: ' + kind}
+
+              except Exception as e:
+                  results[key] = {'status': 'error', 'reason': str(e)}
+
+      print(json.dumps(results))
+    PYTHON
+
+    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-', loom_path, ops_b64]
+
+    begin
+      stdout, stderr, status = Open3.capture3(*cmd_parts, stdin_data: python_script)
+
+      unless status.success?
+        Rails.logger.error("[Compliance Fix] Batch Python failed: #{stderr}")
+        return nil
+      end
+
+      results = JSON.parse(stdout.strip)
+      results.transform_keys(&:to_i)
+    rescue JSON::ParserError => e
+      Rails.logger.error("[Compliance Fix] Batch result parse error: #{e.message} -- stdout: #{stdout}")
+      nil
+    rescue StandardError => e
+      Rails.logger.error("[Compliance Fix] Batch execution error: #{e.message}")
+      nil
     end
   end
 

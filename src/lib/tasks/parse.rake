@@ -153,10 +153,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
-      # Broadcast after reading prediction file and before parsing starts
-      # This ensures the UI is updated with prediction data
-      project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-
       ### get parameters (potentially updated by get_loom_from_hca)
       puts project.id
 
@@ -411,9 +407,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
       logger.info("[ParseRake] Calling Basic.finish_run to create annotations for run #{run.id}")
       logger.info("[ParseRake] h_parsing has nber_rows=#{h_parsing['nber_rows']}, nber_cols=#{h_parsing['nber_cols']}")
       
-      # Call finish_run with h_parsing as h_results
-      # finish_run will build h_output_files from step.output_json and create annotations
-      Basic.finish_run(logger, run, h_parsing)
+      # Call finish_run with h_parsing as h_results.
+      # skip_broadcast: true because finish_run broadcasts before we update project.status_id,
+      # so we do a single broadcast below with the correct project status.
+      Basic.finish_run(logger, run, h_parsing, skip_broadcast: true)
       
       # Reload run to get updated status and metrics from finish_run
       run.reload
@@ -427,11 +424,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
       annot_count = Annot.where(run_id: run.id).count
       logger.info("[ParseRake] finish_run completed for run #{run.id}, status_id=#{run.status_id}, annotations created: #{annot_count}")
       
-      # Update project_step based on run status (this will set it to 3 since run is now complete)
-      Basic.upd_project_step(project, parsing_step.id) if project_step
+      # finish_run already called upd_project_step via upd_run, so only set project status here
       project.update(status_id: 3)
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-      logger.info("[ParseRake] Parsing completed, updated run and project_step status, broadcasting update")
+      logger.info("[ParseRake] Parsing completed, broadcasting update")
 
       ## 
       puts "Define project cell set"

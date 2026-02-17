@@ -473,8 +473,10 @@ module ApplicationHelper
   end
 
   # Returns status icons config as JSON for JavaScript consumption
+  # Do NOT use .html_safe here: the JSON must be HTML-encoded when placed
+  # inside data-*-value="..." attributes. Stimulus decodes entities automatically.
   def status_icons_json
-    status_icons_config.to_json.html_safe
+    status_icons_config.to_json
   end
 
   # Renders a vertical separator line for the header navigation

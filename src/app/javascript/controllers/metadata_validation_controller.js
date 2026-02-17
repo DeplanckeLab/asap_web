@@ -101,11 +101,11 @@ export default class extends Controller {
 
   showError(message) {
     this.stopPolling()
-    
-    if (this.hasLoadingTarget) {
-      this.loadingTarget.classList.add('hidden')
-    }
+
     if (this.hasResultTarget) {
+      if (this.hasLoadingTarget) {
+        this.loadingTarget.classList.add('hidden')
+      }
       this.resultTarget.classList.remove('hidden')
       this.resultTarget.innerHTML = `
         <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
@@ -117,10 +117,35 @@ export default class extends Controller {
           Try Again
         </button>
       `
+    } else if (this.hasLoadingTarget) {
+      // Modal overlay mode (compliance page): show error inside the modal
+      var modal = this.loadingTarget.querySelector('.relative')
+      if (modal) {
+        modal.innerHTML = `
+          <div class="text-center">
+            <svg class="mx-auto h-8 w-8 text-red-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <p class="text-red-700 font-medium mb-1">Validation failed</p>
+            <p class="text-red-600 text-sm mb-4">${message}</p>
+            <button type="button"
+                    data-action="click->metadata-validation#dismissModal"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+              Close
+            </button>
+          </div>
+        `
+      }
     }
     if (this.hasValidateButtonTarget) {
       this.validateButtonTarget.disabled = false
       this.validateButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
+    }
+  }
+
+  dismissModal() {
+    if (this.hasLoadingTarget) {
+      this.loadingTarget.classList.add('hidden')
     }
   }
 

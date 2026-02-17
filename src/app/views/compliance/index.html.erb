@@ -168,7 +168,7 @@
                   <%= item[:validation][:validated_at] ? Time.parse(item[:validation][:validated_at]).strftime("%b %d, %Y %H:%M") : "-" %>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-sm">
-                  <%= link_to "View Details", compliance_project_result_path(item[:project]), 
+                  <%= link_to "View Details", project_path(item[:project], view: 'compliance'), 
                               class: "text-blue-600 hover:text-blue-800" %>
                 </td>
               </tr>

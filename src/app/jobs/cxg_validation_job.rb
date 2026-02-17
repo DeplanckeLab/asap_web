@@ -40,33 +40,33 @@ class CxgValidationJob < ApplicationJob
     # Save results
     save_validation_result(project, result, loom_path)
 
-    # Build redirect URL for the compliance result page
+    # Build redirect URL for the compliance view on the project page
     redirect_url = begin
-      Rails.application.routes.url_helpers.compliance_project_result_path(project_id)
+      Rails.application.routes.url_helpers.project_path(project, view: 'compliance')
     rescue StandardError
       nil
     end
 
     # Broadcast completion
     if result.valid?
-      broadcast(project_id, 
-        status: 'completed', 
+      broadcast(project_id,
+        status: 'completed',
         valid: true,
         message: 'Validation passed! File is compliant with CELLxGENE schema 7.1.0',
         errors_count: 0,
         warnings_count: result.warnings.count,
-        info_count: result.info.count,
+        valid_checks_count: result.valid_checks.count,
         redirect_url: redirect_url
       )
     else
-      broadcast(project_id, 
-        status: 'completed', 
+      broadcast(project_id,
+        status: 'completed',
         valid: false,
         message: "Validation found #{result.errors.count} error(s)",
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
-        info_count: result.info.count,
-        errors: result.errors.first(5), # Send first 5 errors for quick preview
+        valid_checks_count: result.valid_checks.count,
+        errors: result.errors.first(5),
         redirect_url: redirect_url
       )
     end
@@ -147,8 +147,11 @@ class CxgValidationJob < ApplicationJob
         errors: result.errors,
         warnings: result.warnings,
         info: result.info,
+        valid_checks: result.valid_checks,
         errors_count: result.errors.count,
-        warnings_count: result.warnings.count
+        warnings_count: result.warnings.count,
+        valid_checks_count: result.valid_checks.count,
+        field_resolutions: result.field_resolutions || {}
       }
     else
       {

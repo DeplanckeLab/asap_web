@@ -236,12 +236,13 @@
       <ul>
         <li><a href="#overview">Overview</a></li>
         <li><a href="#location-mapping">Location Mapping Summary</a></li>
-        <li><a href="#cell-metadata">Cell Metadata (obs to /col_attrs/)</a></li>
-        <li><a href="#gene-metadata">Gene Metadata (var to /row_attrs/)</a></li>
-        <li><a href="#embeddings">Embeddings (obsm)</a></li>
-        <li><a href="#global-attrs">Global Attributes (uns)</a></li>
+        <li><a href="#cell-metadata">Cell Metadata (/obs/ to /col_attrs/)</a></li>
+        <li><a href="#gene-metadata">Gene Metadata (/var/ to /row_attrs/)</a></li>
+        <li><a href="#embeddings">Embeddings (/obsm/)</a></li>
+        <li><a href="#global-attrs">Global Attributes (/uns/ to /attrs/)</a></li>
         <li><a href="#matrix-layers">Matrix Layers</a></li>
         <li><a href="#special-handling">Features Requiring Special Handling</a></li>
+        <li><a href="#asap-extensions">ASAP Schema Extensions</a></li>
         <li><a href="#validation">Validation Requirements</a></li>
       </ul>
     </div>
@@ -260,8 +261,8 @@
         <strong>Key Differences:</strong>
         <ul>
           <li>In ASAP, cell metadata is in <code>/col_attrs/</code> (cells are columns in ASAP's genes x cells matrix)</li>
-          <li>Loom stores gene metadata in <code>/col_attrs/</code> (AnnData uses <code>var</code>)</li>
-          <li>Loom uses global attributes at root level (AnnData uses <code>uns</code>)</li>
+          <li>Loom stores gene metadata in <code>/row_attrs/</code> (AnnData uses <code>/var/</code>)</li>
+          <li>Loom stores dataset-level metadata in <code>/attrs/</code> (AnnData uses <code>/uns/</code>)</li>
           <li>Loom does not have native categorical support - use string arrays</li>
         </ul>
       </div>
@@ -269,8 +270,8 @@
       <div class="note">
         <strong>ASAP-specific Note:</strong> In ASAP, the <code>/matrix</code> can contain either raw count data 
         or already processed/normalized data, depending on what the user uploads. Additional processed matrices 
-        are stored in <code>/layers/</code>. This differs from CELLxGENE's expectation where <code>X</code> is 
-        normalized and <code>raw.X</code> contains raw counts. See the <a href="#matrix-layers">Matrix Layers</a> 
+        are stored in <code>/layers/</code>. This differs from CELLxGENE's expectation where <code>/X</code> is 
+        normalized and <code>/raw/X</code> contains raw counts. See the <a href="#matrix-layers">Matrix Layers</a> 
         section for details.
       </div>
 
@@ -287,81 +288,81 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD / AnnData Path</th>
+            <th>H5AD Path</th>
             <th>Purpose</th>
-            <th>Loom Equivalent</th>
+            <th>Loom Path</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>X</code></td>
+            <td><code>/X</code></td>
             <td>Primary matrix</td>
             <td><code>/matrix</code></td>
             <td>Shape: (n_cells, n_genes). In ASAP, this can be either raw counts or normalized data depending on user input.</td>
           </tr>
           <tr>
-            <td><code>raw.X</code> or <code>layers</code></td>
+            <td><code>/raw.X</code> or <code>/layers/{name}</code></td>
             <td>Additional matrices</td>
             <td><code>/layers/{name}</code></td>
             <td>In ASAP, additional processed/normalized matrices are stored in /layers/. Same shape as /matrix.</td>
           </tr>
           <tr>
-            <td><code>obs[field]</code></td>
+            <td><code>/obs/{field}</code></td>
             <td>Cell metadata columns</td>
             <td><code>/col_attrs/{field}</code></td>
             <td>1-D array, length n_cells. In ASAP: cells are columns.</td>
           </tr>
           <tr>
-            <td><code>var[field]</code></td>
+            <td><code>/var/{field}</code></td>
             <td>Gene metadata columns</td>
             <td><code>/row_attrs/{field}</code></td>
             <td>1-D array, length n_genes. In ASAP: genes are rows.</td>
           </tr>
           <tr>
-            <td><code>raw.var[field]</code></td>
+            <td><code>/raw.var/{field}</code></td>
             <td>Raw gene metadata</td>
             <td><code>/col_attrs/{field}</code></td>
             <td>Duplicate or use layer attrs</td>
           </tr>
           <tr>
-            <td><code>obsm[key]</code></td>
+            <td><code>/obsm/{key}</code></td>
             <td>Embeddings (UMAP, tSNE, etc.)</td>
             <td><code>/col_attrs/{key}</code></td>
             <td>2-D arrays (n_cells, m)</td>
           </tr>
           <tr>
-            <td><code>obsp[key]</code></td>
+            <td><code>/obsp/{key}</code></td>
             <td>Pairwise cell matrices</td>
             <td><code>/pairwise/{key}</code></td>
             <td>No direct support</td>
           </tr>
           <tr>
-            <td><code>varm[key]</code></td>
+            <td><code>/varm/{key}</code></td>
             <td>Multi-dim gene annotations</td>
             <td><code>/col_attrs/{key}</code></td>
             <td>2-D arrays (n_genes, m)</td>
           </tr>
           <tr>
-            <td><code>varp[key]</code></td>
+            <td><code>/varp/{key}</code></td>
             <td>Pairwise gene matrices</td>
             <td><code>/pairwise/{key}</code></td>
             <td>No direct support</td>
           </tr>
           <tr>
-            <td><code>uns[key]</code></td>
+            <td><code>/uns/{key}</code></td>
             <td>Dataset-level metadata</td>
-            <td>Global attributes (root)</td>
+            <td><code>/attrs/{key}</code></td>
             <td>Flatten nested dicts</td>
           </tr>
           <tr>
-            <td><code>.obs.index</code></td>
+            <td><code>/obs/index</code></td>
             <td>Cell identifiers</td>
             <td><code>/col_attrs/CellID</code></td>
             <td>Unique identifiers. In ASAP: cells are columns.</td>
           </tr>
           <tr>
-            <td><code>.var.index</code></td>
+            <td><code>/var/index</code></td>
             <td>Gene identifiers</td>
             <td><code>/row_attrs/_StableID</code></td>
             <td>ENSEMBL IDs (no version). In ASAP: genes are rows.</td>
@@ -371,22 +372,23 @@
     </section>
 
     <section id="cell-metadata" class="card">
-      <h2>Cell Metadata (obs to /col_attrs/)</h2>
-      <p>All cell-level metadata from <code>obs</code> maps to <code>/col_attrs/</code> in ASAP Loom files (because ASAP uses cells as columns).</p>
+      <h2>Cell Metadata (/obs/ to /col_attrs/)</h2>
+      <p>All cell-level metadata from <code>/obs/</code> maps to <code>/col_attrs/</code> in ASAP Loom files (because ASAP uses cells as columns).</p>
       
       <div class="note">
         <strong>Multi-Value Fields:</strong> Some fields can contain multiple ontology terms separated by 
-        the pipe character <code>|</code>. These are marked with <span class="multi-value">MULTI-VALUE</span>. 
-        For example: <code>"MONDO:0005015|MONDO:0004975"</code> for multiple diseases, or 
-        <code>"HANCESTRO:0005|HANCESTRO:0014"</code> for multiple ethnicities. The corresponding 
-        auto-generated name fields will also contain multiple names separated by <code>|</code>.
+        <code> || </code> (space-pipe-pipe-space). These are marked with <span class="multi-value">MULTI-VALUE</span>. 
+        For example: <code>"MONDO:0005015 || MONDO:0004975"</code> for multiple diseases. 
+        Fields marked with <span class="multi-value">MULTI-VALUE *</span> are ASAP extensions to fields that are 
+        single-value in the standard CELLxGENE schema. See the <a href="#asap-extensions">ASAP Schema Extensions</a> 
+        section for details.
       </div>
 
       <h3>Required Fields (Curator Must Annotate)</h3>
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
+            <th>H5AD Path</th>
             <th>Loom Path</th>
             <th>Type</th>
             <th>Description</th>
@@ -394,79 +396,83 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>obs.index</code></td>
+            <td><code>/obs/index</code></td>
             <td><code>/col_attrs/CellID</code></td>
             <td>str</td>
             <td class="required">REQUIRED. Unique cell identifiers</td>
           </tr>
           <tr>
-            <td><code>obs['assay_ontology_term_id']</code></td>
+            <td><code>/obs/assay_ontology_term_id</code></td>
             <td><code>/col_attrs/assay_ontology_term_id</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. EFO assay term</td>
           </tr>
           <tr>
-            <td><code>obs['cell_type_ontology_term_id']</code></td>
+            <td><code>/obs/cell_type_ontology_term_id</code></td>
             <td><code>/col_attrs/cell_type_ontology_term_id</code></td>
             <td>categorical str</td>
-            <td class="required">REQUIRED (if not pre-analysis). CL term or "unknown"</td>
+            <td class="required">REQUIRED (if not pre-analysis). CL term or "unknown" <span class="multi-value">MULTI-VALUE *</span></td>
           </tr>
           <tr>
-            <td><code>obs['development_stage_ontology_term_id']</code></td>
+            <td><code>/obs/development_stage_ontology_term_id</code></td>
             <td><code>/col_attrs/development_stage_ontology_term_id</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. Development stage term</td>
           </tr>
           <tr>
-            <td><code>obs['disease_ontology_term_id']</code></td>
+            <td><code>/obs/disease_ontology_term_id</code></td>
             <td><code>/col_attrs/disease_ontology_term_id</code></td>
             <td>categorical str</td>
-            <td class="required">REQUIRED. MONDO term(s) or "PATO:0000461" <span class="multi-value">MULTI-VALUE</span><br><small>Multiple terms separated by "|" (e.g., "MONDO:0005015|MONDO:0004975")</small></td>
+            <td class="required">REQUIRED. MONDO term(s) or "PATO:0000461" <span class="multi-value">MULTI-VALUE</span><br><small>Multiple terms separated by " || " (e.g., "MONDO:0005015 || MONDO:0004975")</small></td>
           </tr>
           <tr>
-            <td><code>obs['donor_id']</code></td>
+            <td><code>/obs/donor_id</code></td>
             <td><code>/col_attrs/donor_id</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. Unique donor identifier</td>
           </tr>
           <tr>
-            <td><code>obs['is_primary_data']</code></td>
+            <td><code>/obs/is_primary_data</code></td>
             <td><code>/col_attrs/is_primary_data</code></td>
             <td>bool</td>
             <td class="required">REQUIRED. True if canonical instance</td>
           </tr>
           <tr>
-            <td><code>obs['self_reported_ethnicity_ontology_term_id']</code></td>
+            <td><code>/obs/self_reported_ethnicity_ontology_term_id</code></td>
             <td><code>/col_attrs/self_reported_ethnicity_ontology_term_id</code></td>
             <td>categorical str</td>
-            <td class="required">REQUIRED. HANCESTRO term(s) <span class="multi-value">MULTI-VALUE</span><br><small>Multiple terms separated by "|" (e.g., "HANCESTRO:0005|HANCESTRO:0014")</small></td>
+            <td class="required">REQUIRED. HANCESTRO term(s) <span class="multi-value">MULTI-VALUE</span><br><small>Multiple terms separated by " || " (e.g., "HANCESTRO:0005 || HANCESTRO:0014")</small></td>
           </tr>
           <tr>
-            <td><code>obs['sex_ontology_term_id']</code></td>
+            <td><code>/obs/sex_ontology_term_id</code></td>
             <td><code>/col_attrs/sex_ontology_term_id</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. PATO term</td>
           </tr>
           <tr>
-            <td><code>obs['suspension_type']</code></td>
+            <td><code>/obs/suspension_type</code></td>
             <td><code>/col_attrs/suspension_type</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. "cell", "nucleus", or "na"</td>
           </tr>
           <tr>
-            <td><code>obs['tissue_ontology_term_id']</code></td>
+            <td><code>/obs/tissue_ontology_term_id</code></td>
             <td><code>/col_attrs/tissue_ontology_term_id</code></td>
             <td>categorical str</td>
-            <td class="required">REQUIRED. UBERON or Cellosaurus term</td>
+            <td class="required">REQUIRED. UBERON or Cellosaurus term <span class="multi-value">MULTI-VALUE *</span></td>
           </tr>
           <tr>
-            <td><code>obs['tissue_type']</code></td>
+            <td><code>/obs/tissue_type</code></td>
             <td><code>/col_attrs/tissue_type</code></td>
             <td>categorical str</td>
             <td class="required">REQUIRED. "tissue", "organoid", "cell line", or "primary cell culture"</td>
           </tr>
         </tbody>
       </table>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+        * ASAP extension: these fields are single-value in the standard CELLxGENE schema but support multiple 
+        ontology terms in ASAP. See <a href="#asap-extensions">ASAP Schema Extensions</a> for details.
+      </p>
 
       <h3>Auto-Generated Fields (CELLxGENE Annotates)</h3>
       <div class="info">
@@ -478,7 +484,7 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
+            <th>H5AD Path</th>
             <th>Loom Path</th>
             <th>Source Field</th>
             <th>Description</th>
@@ -486,80 +492,84 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>obs['assay']</code></td>
+            <td><code>/obs/assay</code></td>
             <td><code>/col_attrs/assay</code></td>
             <td><code>assay_ontology_term_id</code></td>
             <td class="auto">Ontology term name for the assay</td>
           </tr>
           <tr>
-            <td><code>obs['cell_type']</code></td>
+            <td><code>/obs/cell_type</code></td>
             <td><code>/col_attrs/cell_type</code></td>
             <td><code>cell_type_ontology_term_id</code></td>
-            <td class="auto">Ontology term name for the cell type</td>
+            <td class="auto">Ontology term name(s) for the cell type <span class="multi-value">MULTI-VALUE *</span></td>
           </tr>
           <tr>
-            <td><code>obs['development_stage']</code></td>
+            <td><code>/obs/development_stage</code></td>
             <td><code>/col_attrs/development_stage</code></td>
             <td><code>development_stage_ontology_term_id</code></td>
             <td class="auto">Ontology term name for the development stage</td>
           </tr>
           <tr>
-            <td><code>obs['disease']</code></td>
+            <td><code>/obs/disease</code></td>
             <td><code>/col_attrs/disease</code></td>
             <td><code>disease_ontology_term_id</code></td>
             <td class="auto">Ontology term name(s) for the disease <span class="multi-value">MULTI-VALUE</span></td>
           </tr>
           <tr>
-            <td><code>obs['self_reported_ethnicity']</code></td>
+            <td><code>/obs/self_reported_ethnicity</code></td>
             <td><code>/col_attrs/self_reported_ethnicity</code></td>
             <td><code>self_reported_ethnicity_ontology_term_id</code></td>
             <td class="auto">Ontology term name(s) for ethnicity <span class="multi-value">MULTI-VALUE</span></td>
           </tr>
           <tr>
-            <td><code>obs['sex']</code></td>
+            <td><code>/obs/sex</code></td>
             <td><code>/col_attrs/sex</code></td>
             <td><code>sex_ontology_term_id</code></td>
             <td class="auto">Ontology term name for sex</td>
           </tr>
           <tr>
-            <td><code>obs['tissue']</code></td>
+            <td><code>/obs/tissue</code></td>
             <td><code>/col_attrs/tissue</code></td>
             <td><code>tissue_ontology_term_id</code></td>
-            <td class="auto">Ontology term name for the tissue</td>
+            <td class="auto">Ontology term name(s) for the tissue <span class="multi-value">MULTI-VALUE *</span></td>
           </tr>
           <tr>
-            <td><code>obs['observation_joinid']</code></td>
+            <td><code>/obs/observation_joinid</code></td>
             <td><code>/col_attrs/observation_joinid</code></td>
             <td>-</td>
             <td class="auto">Unique observation identifier (not from ontology)</td>
           </tr>
         </tbody>
       </table>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+        * ASAP extension: these fields are single-value in the standard CELLxGENE schema but support multiple 
+        ontology term names in ASAP. See <a href="#asap-extensions">ASAP Schema Extensions</a> for details.
+      </p>
 
       <h3>Conditional Fields (Visium/Spatial)</h3>
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
+            <th>H5AD Path</th>
             <th>Loom Path</th>
             <th>Condition</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>obs['array_col']</code></td>
+            <td><code>/obs/array_col</code></td>
             <td><code>/col_attrs/array_col</code></td>
-            <td>Visium with spatial/is_single=True</td>
+            <td>Visium with /uns/spatial/is_single=True</td>
           </tr>
           <tr>
-            <td><code>obs['array_row']</code></td>
+            <td><code>/obs/array_row</code></td>
             <td><code>/col_attrs/array_row</code></td>
-            <td>Visium with spatial/is_single=True</td>
+            <td>Visium with /uns/spatial/is_single=True</td>
           </tr>
           <tr>
-            <td><code>obs['in_tissue']</code></td>
+            <td><code>/obs/in_tissue</code></td>
             <td><code>/col_attrs/in_tissue</code></td>
-            <td>Visium with spatial/is_single=True</td>
+            <td>Visium with /uns/spatial/is_single=True</td>
           </tr>
         </tbody>
       </table>
@@ -568,34 +578,34 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
+            <th>H5AD Path</th>
             <th>Loom Path</th>
             <th>Condition</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>obs['genetic_perturbation_id']</code></td>
+            <td><code>/obs/genetic_perturbation_id</code></td>
             <td><code>/col_attrs/genetic_perturbation_id</code></td>
-            <td>If uns['genetic_perturbations'] present</td>
+            <td>If /uns/genetic_perturbations present</td>
           </tr>
           <tr>
-            <td><code>obs['genetic_perturbation_strategy']</code></td>
+            <td><code>/obs/genetic_perturbation_strategy</code></td>
             <td><code>/col_attrs/genetic_perturbation_strategy</code></td>
-            <td>If genetic_perturbation_id present</td>
+            <td>If /obs/genetic_perturbation_id present</td>
           </tr>
           <tr>
-            <td><code>obs['experimental_condition_ontology_term_id']</code></td>
+            <td><code>/obs/experimental_condition_ontology_term_id</code></td>
             <td><code>/col_attrs/experimental_condition_ontology_term_id</code></td>
             <td>Optional for perturbation experiments</td>
           </tr>
           <tr>
-            <td><code>obs['experimental_condition']</code></td>
+            <td><code>/obs/experimental_condition</code></td>
             <td><code>/col_attrs/experimental_condition</code></td>
             <td class="auto">Auto-generated if ontology term present</td>
           </tr>
           <tr>
-            <td><code>obs['perturbation_types']</code></td>
+            <td><code>/obs/perturbation_types</code></td>
             <td><code>/col_attrs/perturbation_types</code></td>
             <td class="auto">Auto-generated from perturbation data</td>
           </tr>
@@ -604,8 +614,8 @@
     </section>
 
     <section id="gene-metadata" class="card">
-      <h2>Gene Metadata (var to /row_attrs/)</h2>
-      <p>All gene-level metadata from <code>var</code> maps to <code>/row_attrs/</code> in ASAP Loom files.</p>
+      <h2>Gene Metadata (/var/ to /row_attrs/)</h2>
+      <p>All gene-level metadata from <code>/var/</code> maps to <code>/row_attrs/</code> in ASAP Loom files.</p>
       
       <div class="info">
         <strong>ASAP Matrix Orientation:</strong> ASAP uses a <strong>genes x cells</strong> matrix orientation 
@@ -621,8 +631,7 @@
       <table>
         <thead>
           <tr>
-            <th>CELLxGENE Field</th>
-            <th>ASAP Field</th>
+            <th>H5AD Path</th>
             <th>ASAP Loom Path</th>
             <th>Status</th>
             <th>Description</th>
@@ -630,57 +639,43 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>var.index</code> / <code>GeneID</code></td>
-            <td><code>_StableID</code></td>
+            <td><code>/var/index</code></td>
             <td><code>/row_attrs/_StableID</code></td>
             <td class="required">REQUIRED</td>
             <td>ENSEMBL gene IDs (no version suffix)</td>
           </tr>
           <tr>
-            <td><code>GeneID</code> (alt)</td>
-            <td><code>Accession</code></td>
-            <td><code>/row_attrs/Accession</code></td>
-            <td>Available</td>
-            <td>Alternative gene accession identifiers</td>
-          </tr>
-          <tr>
-            <td><code>feature_name</code></td>
-            <td><code>Gene</code></td>
+            <td><code>/var/feature_name</code></td>
             <td><code>/row_attrs/Gene</code></td>
             <td>Available</td>
             <td>Gene symbol/name</td>
           </tr>
           <tr>
-            <td><code>feature_biotype</code></td>
-            <td><code>_Biotypes</code></td>
+            <td><code>/var/feature_biotype</code></td>
             <td><code>/row_attrs/_Biotypes</code></td>
             <td>Available</td>
             <td>Gene biotype (e.g., "protein_coding", "lncRNA")</td>
           </tr>
           <tr>
-            <td><code>feature_length</code></td>
-            <td><code>_SumExonLength</code></td>
+            <td><code>/var/feature_length</code></td>
             <td><code>/row_attrs/_SumExonLength</code></td>
             <td>Available</td>
             <td>Sum of exon lengths (bps)</td>
           </tr>
           <tr>
-            <td><code>feature_type</code></td>
-            <td><em>(not available)</em></td>
+            <td><code>/var/feature_type</code></td>
             <td>-</td>
             <td class="auto">CELLxGENE auto</td>
             <td>Gene type from GENCODE/ENSEMBL. Added by CELLxGENE on upload.</td>
           </tr>
           <tr>
-            <td><code>feature_is_filtered</code></td>
-            <td><em>(not available)</em></td>
+            <td><code>/var/feature_is_filtered</code></td>
             <td>-</td>
             <td class="required">REQUIRED*</td>
             <td>REQUIRED for CELLxGENE. Must be added manually before submission.</td>
           </tr>
           <tr>
-            <td><code>feature_reference</code></td>
-            <td><em>(not available)</em></td>
+            <td><code>/var/feature_reference</code></td>
             <td>-</td>
             <td class="auto">CELLxGENE auto</td>
             <td>NCBITaxon term for reference organism. ASAP does not have multi-species projects.</td>
@@ -689,51 +684,37 @@
       </table>
 
       <h3>ASAP-Specific Gene Metadata</h3>
-      <p>These fields are generated by ASAP during parsing:</p>
+      <p>These fields are generated by ASAP during parsing and have no equivalent in H5AD files:</p>
       <table>
         <thead>
           <tr>
-            <th>ASAP Field</th>
             <th>Loom Path</th>
-            <th>CELLxGENE Equivalent</th>
             <th>Description</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>_StableID</code></td>
             <td><code>/row_attrs/_StableID</code></td>
-            <td><code>var.index</code> / <code>GeneID</code></td>
-            <td>ENSEMBL gene identifiers (stable IDs, no version suffix)</td>
+            <td>ENSEMBL gene identifiers (stable IDs, no version suffix). Used as the gene index in ASAP.</td>
           </tr>
           <tr>
-            <td><code>Accession</code></td>
             <td><code>/row_attrs/Accession</code></td>
-            <td><code>GeneID</code></td>
             <td>Alternative gene accession identifiers</td>
           </tr>
           <tr>
-            <td><code>Gene</code></td>
             <td><code>/row_attrs/Gene</code></td>
-            <td><code>feature_name</code></td>
             <td>Gene symbols/names</td>
           </tr>
           <tr>
-            <td><code>_Biotypes</code></td>
             <td><code>/row_attrs/_Biotypes</code></td>
-            <td><code>feature_biotype</code></td>
             <td>Gene biotype (e.g., "protein_coding", "lncRNA", "miRNA")</td>
           </tr>
           <tr>
-            <td><code>_SumExonLength</code></td>
             <td><code>/row_attrs/_SumExonLength</code></td>
-            <td><code>feature_length</code></td>
             <td>Sum of exon lengths in base pairs</td>
           </tr>
           <tr>
-            <td><code>_Sum</code></td>
             <td><code>/row_attrs/_Sum</code></td>
-            <td>-</td>
             <td>Total expression per gene (QC metric)</td>
           </tr>
         </tbody>
@@ -751,13 +732,13 @@
     </section>
 
     <section id="embeddings" class="card">
-      <h2>Embeddings (obsm)</h2>
-      <p>Embeddings from <code>obsm</code> are stored as 2-D arrays in <code>/col_attrs/</code> in ASAP (since cells are columns).</p>
+      <h2>Embeddings (/obsm/)</h2>
+      <p>Embeddings from <code>/obsm/</code> are stored as 2-D arrays in <code>/col_attrs/</code> in ASAP (since cells are columns).</p>
       
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
+            <th>H5AD Path</th>
             <th>Loom Path</th>
             <th>Shape</th>
             <th>Notes</th>
@@ -765,13 +746,13 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>obsm['spatial']</code></td>
+            <td><code>/obsm/spatial</code></td>
             <td><code>/col_attrs/spatial</code></td>
             <td>(n_cells, 2+)</td>
-            <td>Required for Visium/Slide-seq when spatial/is_single=True</td>
+            <td>Required for Visium/Slide-seq when /uns/spatial/is_single=True</td>
           </tr>
           <tr>
-            <td><code>obsm['X_{suffix}']</code></td>
+            <td><code>/obsm/X_{suffix}</code></td>
             <td><code>/col_attrs/X_{suffix}</code></td>
             <td>(n_cells, 2+)</td>
             <td>UMAP, tSNE, PCA embeddings. {suffix} cannot be "spatial"</td>
@@ -791,59 +772,59 @@
     </section>
 
     <section id="global-attrs" class="card">
-      <h2>Global Attributes (uns)</h2>
-      <p>Dataset-level metadata from <code>uns</code> becomes global attributes at the Loom file root.</p>
+      <h2>Global Attributes (/uns/ to /attrs/)</h2>
+      <p>Dataset-level metadata from <code>/uns/</code> maps to <code>/attrs/</code> in ASAP Loom files.</p>
       
       <h3>Required Global Attributes</h3>
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
-            <th>Loom Global Attribute</th>
+            <th>H5AD Path</th>
+            <th>Loom Path</th>
             <th>Annotator</th>
             <th>Description</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>uns['title']</code></td>
-            <td><code>title</code></td>
+            <td><code>/uns/title</code></td>
+            <td><code>/attrs/title</code></td>
             <td class="required">Curator</td>
             <td>Dataset title</td>
           </tr>
           <tr>
-            <td><code>uns['organism_ontology_term_id']</code></td>
-            <td><code>organism_ontology_term_id</code></td>
+            <td><code>/uns/organism_ontology_term_id</code></td>
+            <td><code>/attrs/organism_ontology_term_id</code></td>
             <td class="required">Curator</td>
             <td>NCBITaxon term for organism</td>
           </tr>
           <tr>
-            <td><code>uns['schema_version']</code></td>
-            <td><code>schema_version</code></td>
+            <td><code>/uns/schema_version</code></td>
+            <td><code>/attrs/schema_version</code></td>
             <td class="auto">CELLxGENE</td>
             <td>Must be "7.1.0"</td>
           </tr>
           <tr>
-            <td><code>uns['schema_reference']</code></td>
-            <td><code>schema_reference</code></td>
+            <td><code>/uns/schema_reference</code></td>
+            <td><code>/attrs/schema_reference</code></td>
             <td class="auto">CELLxGENE</td>
             <td>URL to schema document</td>
           </tr>
           <tr>
-            <td><code>uns['organism']</code></td>
-            <td><code>organism</code></td>
+            <td><code>/uns/organism</code></td>
+            <td><code>/attrs/organism</code></td>
             <td class="auto">CELLxGENE</td>
             <td>Human-readable organism name</td>
           </tr>
           <tr>
-            <td><code>uns['citation']</code></td>
-            <td><code>citation</code></td>
+            <td><code>/uns/citation</code></td>
+            <td><code>/attrs/citation</code></td>
             <td class="auto">CELLxGENE</td>
             <td>Citation string</td>
           </tr>
           <tr>
-            <td><code>uns['is_pre_analysis']</code></td>
-            <td><code>is_pre_analysis</code></td>
+            <td><code>/uns/is_pre_analysis</code></td>
+            <td><code>/attrs/is_pre_analysis</code></td>
             <td class="auto">CELLxGENE</td>
             <td>True for pre-analysis collections</td>
           </tr>
@@ -854,60 +835,60 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
-            <th>Loom Global Attribute</th>
+            <th>H5AD Path</th>
+            <th>Loom Path</th>
             <th>Description</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>uns['batch_condition']</code></td>
-            <td><code>batch_condition</code></td>
+            <td><code>/uns/batch_condition</code></td>
+            <td><code>/attrs/batch_condition</code></td>
             <td>JSON array of batch keys</td>
           </tr>
           <tr>
-            <td><code>uns['default_embedding']</code></td>
-            <td><code>default_embedding</code></td>
+            <td><code>/uns/default_embedding</code></td>
+            <td><code>/attrs/default_embedding</code></td>
             <td>Key of default embedding to display</td>
           </tr>
           <tr>
-            <td><code>uns['X_approximate_distribution']</code></td>
-            <td><code>X_approximate_distribution</code></td>
+            <td><code>/uns/X_approximate_distribution</code></td>
+            <td><code>/attrs/X_approximate_distribution</code></td>
             <td>"count" or "normal"</td>
           </tr>
           <tr>
-            <td><code>uns['{column}_colors']</code></td>
-            <td><code>{column}_colors</code></td>
+            <td><code>/uns/{column}_colors</code></td>
+            <td><code>/attrs/{column}_colors</code></td>
             <td>Color palette array (hex or named colors)</td>
           </tr>
         </tbody>
       </table>
 
       <h3>Spatial Metadata (Visium)</h3>
-      <p>Nested spatial metadata must be flattened using slash or dot notation:</p>
+      <p>Nested spatial metadata must be flattened using slash notation:</p>
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
-            <th>Loom Global Attribute</th>
+            <th>H5AD Path</th>
+            <th>Loom Path</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>uns['spatial']['is_single']</code></td>
-            <td><code>spatial/is_single</code></td>
+            <td><code>/uns/spatial/is_single</code></td>
+            <td><code>/attrs/spatial/is_single</code></td>
           </tr>
           <tr>
-            <td><code>uns['spatial'][library_id]['images']['hires']</code></td>
-            <td><code>spatial/{library_id}/images/hires</code> (as base64 or separate file)</td>
+            <td><code>/uns/spatial/{library_id}/images/hires</code></td>
+            <td><code>/attrs/spatial/{library_id}/images/hires</code> (as base64 or separate file)</td>
           </tr>
           <tr>
-            <td><code>uns['spatial'][library_id]['scalefactors']['spot_diameter_fullres']</code></td>
-            <td><code>spatial/{library_id}/scalefactors/spot_diameter_fullres</code></td>
+            <td><code>/uns/spatial/{library_id}/scalefactors/spot_diameter_fullres</code></td>
+            <td><code>/attrs/spatial/{library_id}/scalefactors/spot_diameter_fullres</code></td>
           </tr>
           <tr>
-            <td><code>uns['spatial'][library_id]['scalefactors']['tissue_hires_scalef']</code></td>
-            <td><code>spatial/{library_id}/scalefactors/tissue_hires_scalef</code></td>
+            <td><code>/uns/spatial/{library_id}/scalefactors/tissue_hires_scalef</code></td>
+            <td><code>/attrs/spatial/{library_id}/scalefactors/tissue_hires_scalef</code></td>
           </tr>
         </tbody>
       </table>
@@ -917,25 +898,25 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD Field</th>
-            <th>Loom Global Attribute</th>
+            <th>H5AD Path</th>
+            <th>Loom Path</th>
             <th>Format</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>uns['genetic_perturbations']</code></td>
-            <td><code>genetic_perturbations</code></td>
+            <td><code>/uns/genetic_perturbations</code></td>
+            <td><code>/attrs/genetic_perturbations</code></td>
             <td>JSON string</td>
           </tr>
           <tr>
-            <td><code>uns['genetic_perturbations'][id]['role']</code></td>
-            <td><code>genetic_perturbations/{id}/role</code></td>
+            <td><code>/uns/genetic_perturbations/{id}/role</code></td>
+            <td><code>/attrs/genetic_perturbations/{id}/role</code></td>
             <td>Or flatten keys</td>
           </tr>
           <tr>
-            <td><code>uns['genetic_perturbations'][id]['protospacer_sequence']</code></td>
-            <td><code>genetic_perturbations/{id}/protospacer_sequence</code></td>
+            <td><code>/uns/genetic_perturbations/{id}/protospacer_sequence</code></td>
+            <td><code>/attrs/genetic_perturbations/{id}/protospacer_sequence</code></td>
             <td>DNA sequence (A/C/G/T)</td>
           </tr>
         </tbody>
@@ -955,7 +936,7 @@
       <table>
         <thead>
           <tr>
-            <th>H5AD Location</th>
+            <th>H5AD Path</th>
             <th>CELLxGENE Loom</th>
             <th>ASAP Loom</th>
             <th>Purpose</th>
@@ -963,19 +944,19 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>X</code></td>
+            <td><code>/X</code></td>
             <td><code>/matrix</code></td>
             <td><code>/matrix</code></td>
             <td>Primary matrix. In ASAP: contains raw counts OR normalized data depending on user input.</td>
           </tr>
           <tr>
-            <td><code>raw.X</code></td>
+            <td><code>/raw/X</code></td>
             <td><code>/layers/raw</code></td>
             <td><em>N/A - see note</em></td>
             <td>CELLxGENE expects raw counts here. ASAP does not create <code>/layers/raw</code>.</td>
           </tr>
           <tr>
-            <td><code>layers['name']</code></td>
+            <td><code>/layers/{name}</code></td>
             <td><code>/layers/{name}</code></td>
             <td><code>/layers/{name}</code></td>
             <td>Additional processed matrices (normalized, scaled, log-transformed, etc.)</td>
@@ -990,7 +971,7 @@
           <li><strong>ASAP behavior:</strong> <code>/matrix</code> contains what the user uploads (typically raw counts). <code>/layers/raw</code> does NOT exist in ASAP.</li>
           <li>If the user submits raw counts, they are stored directly in <code>/matrix</code>.</li>
           <li>If the user submits already-normalized data, it is also stored in <code>/matrix</code> (with no separate raw layer).</li>
-          <li><strong>For CELLxGENE compliance:</strong> If <code>/matrix</code> already contains raw counts, no additional layer is needed. If <code>/matrix</code> contains normalized data, raw counts should be added to <code>/layers/raw</code> before submission.</li>
+          <li><strong>For CELLxGENE compliance:</strong> If <code>/matrix</code> already contains raw counts, no additional layer is needed. If <code>/matrix</code> contains normalized data, raw counts should be added to <code>/layers/raw</code> before submission (??)</li>
         </ul>
       </div>
 
@@ -1014,14 +995,14 @@
         </thead>
         <tbody>
           <tr>
-            <td>obsp / varp (pairwise matrices)</td>
+            <td>/obsp/ and /varp/ (pairwise matrices)</td>
             <td>No native Loom support</td>
             <td>Store in <code>/pairwise/{key}</code> or as external .npz file referenced by global attribute</td>
           </tr>
           <tr>
-            <td>Hierarchical uns dictionaries</td>
+            <td>Hierarchical /uns/ dictionaries</td>
             <td>Loom attributes are flat</td>
-            <td>Flatten with slash keys (e.g., <code>spatial/is_single</code>) or store as JSON string</td>
+            <td>Flatten with slash keys (e.g., <code>/attrs/spatial/is_single</code>) or store as JSON string</td>
           </tr>
           <tr>
             <td>pandas CategoricalDtype</td>
@@ -1034,17 +1015,93 @@
             <td>Cast to string, use sentinel values ("na", "unknown")</td>
           </tr>
           <tr>
-            <td>raw.var distinct from var</td>
+            <td>/raw/var/ distinct from /var/</td>
             <td>Loom has no second gene table</td>
             <td>Duplicate columns in <code>/col_attrs/</code> and document in global attribute</td>
           </tr>
           <tr>
-            <td>Neighbor graphs (uns['neighbors'])</td>
+            <td>Neighbor graphs (/uns/neighbors)</td>
             <td>No canonical storage</td>
             <td>Store as <code>/col_attrs/neighbors_indices</code> + <code>/col_attrs/neighbors_distances</code></td>
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <section id="asap-extensions" class="card">
+      <h2>ASAP Schema Extensions and Processes</h2>
+      <p>
+        ASAP extends the standard CELLxGENE schema in specific ways to better support annotation workflows. 
+        These extensions are backward-compatible: fields that follow the standard schema remain valid. 
+        The extensions are documented here so that downstream tools processing ASAP Loom files are aware of them.
+      </p>
+
+      <h3>Multi-Value Extension for Cell Type and Tissue</h3>
+      <p>
+        In the standard CELLxGENE schema, the <code>cell_type_ontology_term_id</code> and <code>tissue_ontology_term_id</code> 
+        fields accept a single ontology term per cell. ASAP extends these fields to support <strong>multiple ontology terms</strong> 
+        for cases where a cell is associated with more than one cell type or tissue annotation.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Field Pair</th>
+            <th>Loom Paths</th>
+            <th>Standard Schema</th>
+            <th>ASAP Extension</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Cell Type</td>
+            <td><code>/col_attrs/cell_type_ontology_term_id</code><br><code>/col_attrs/cell_type</code></td>
+            <td>Single CL term (e.g., <code>CL:0000540</code>)</td>
+            <td>Multiple CL terms separated by <code> || </code><br>(e.g., <code>CL:0000540 || CL:0000127</code>)</td>
+          </tr>
+          <tr>
+            <td>Tissue</td>
+            <td><code>/col_attrs/tissue_ontology_term_id</code><br><code>/col_attrs/tissue</code></td>
+            <td>Single UBERON term (e.g., <code>UBERON:0002371</code>)</td>
+            <td>Multiple UBERON terms separated by <code> || </code><br>(e.g., <code>UBERON:0002371 || UBERON:0001264</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="info">
+        <strong>Multi-Value Separator:</strong> Multi-value fields use <code> || </code> (space-pipe-pipe-space) as the 
+        separator, consistent with the standard CELLxGENE convention used for fields like 
+        <code>disease_ontology_term_id</code> and <code>self_reported_ethnicity_ontology_term_id</code>. 
+        The corresponding name fields (<code>cell_type</code>, <code>tissue</code>) also contain multiple names 
+        separated by <code> || </code>, in the same order as their ontology term IDs.
+      </div>
+
+      <div class="note">
+        <strong>Compatibility Note:</strong> When submitting to CELLxGENE Discover, multi-value cell type and tissue 
+        fields may need to be resolved to single values, as CELLxGENE does not currently support multi-value for these fields. 
+        Tools reading ASAP Loom files should be prepared to handle both single-value and multi-value formats for these fields.
+      </div>
+
+      <h3>Automatic Paired Metadata Generation</h3>
+      <p>
+        The CELLxGENE schema defines paired cell metadata fields: an <strong>ontology term identifier</strong> field 
+        (e.g., <code>cell_type_ontology_term_id</code>) and its corresponding <strong>ontology term name</strong> field 
+        (e.g., <code>cell_type</code>). In ASAP, users can populate either side of the pair from existing metadata, 
+        and the other side is generated automatically:
+      </p>
+      <ul>
+        <li>If the source metadata contains <strong>ontology term identifiers</strong> (e.g., <code>CL:0000540</code>), 
+          ASAP resolves each identifier against its ontology database and automatically creates the corresponding 
+          name field (e.g., <code>neuron</code>).</li>
+        <li>If the source metadata contains <strong>ontology term names</strong> (e.g., <code>neuron</code>), 
+          ASAP looks up the matching ontology term and automatically creates the corresponding 
+          identifier field (e.g., <code>CL:0000540</code>).</li>
+      </ul>
+      <p>
+        Values that cannot be resolved against the ontology (mismatches, typos, or terms not present in the 
+        ontology version used by ASAP) are flagged as unresolved and can be corrected manually through the 
+        compliance fix interface.
+      </p>
     </section>
 
     <section id="validation" class="card">

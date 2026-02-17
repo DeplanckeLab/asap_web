@@ -4,7 +4,12 @@
      data-compliance-fix-autocomplete-url-value="<%= compliance_ontology_autocomplete_path %>"
      data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>"
      data-compliance-fix-project-id-value="<%= @project.id %>"
-     data-compliance-fix-result-url-value="<%= compliance_project_result_path(@project.id) %>">
+     data-compliance-fix-result-url-value="<%= project_path(@project, view: 'compliance') %>"
+     data-compliance-fix-schema-constraints-value="<%= @schema_constraints.to_json %>"
+     data-compliance-fix-assay-suspension-map-value="<%= CxgSchemaRules::ASSAY_SUSPENSION_TYPE_MAP.to_json %>"
+     data-compliance-fix-assay-ancestor-terms-value="<%= CxgSchemaRules::ASSAY_ANCESTOR_TERMS.to_json %>"
+     data-compliance-fix-organism-is-human-value="<%= @organism_info && @organism_info[:tax_id].to_s == '9606' %>"
+     data-compliance-fix-current-trigger-values-value="<%= (@current_trigger_values || {}).to_json %>">
   <%
     c_name = @schema_config['name'] || @validation_result&.dig(:schema_name)
     c_version = @validation_result&.dig(:schema_version) || @schema_config['version']
@@ -13,7 +18,7 @@
 
   <!-- Header -->
   <div class="mb-6">
-    <%= link_to compliance_project_result_path(@project.id), class: "inline-flex items-center text-gray-600 hover:text-gray-900 mb-4" do %>
+    <%= link_to project_path(@project, view: 'compliance'), class: "inline-flex items-center text-gray-600 hover:text-gray-900 mb-4" do %>
       <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
       </svg>
@@ -40,7 +45,7 @@
     <div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
       <p class="text-green-800 font-medium">No fixable compliance errors found.</p>
       <p class="text-green-700 text-sm mt-2">The validation errors may require manual data preparation outside of this tool.</p>
-      <%= link_to 'Back to Report', compliance_project_result_path(@project.id),
+      <%= link_to 'Back to Report', project_path(@project, view: 'compliance'),
           class: 'inline-flex items-center mt-4 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors' %>
     </div>
   <% else %>
@@ -63,7 +68,8 @@
                 project_title: @project_title,
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,
-                compliant_field_resolved: @compliant_field_resolved
+                compliant_field_resolved: @compliant_field_resolved,
+                schema_constraints: @schema_constraints
               } %>
             <% end %>
           </div>
@@ -88,7 +94,8 @@
                 project_title: @project_title,
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,
-                compliant_field_resolved: @compliant_field_resolved
+                compliant_field_resolved: @compliant_field_resolved,
+                schema_constraints: @schema_constraints
               } %>
             <% end %>
           </div>
@@ -103,7 +110,7 @@
           </p>
         </div>
         <div class="flex gap-3">
-          <%= link_to 'Cancel', compliance_project_result_path(@project.id),
+          <%= link_to 'Cancel', project_path(@project, view: 'compliance'),
               class: 'inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors' %>
           <button type="submit"
                   data-compliance-fix-target="submitButton"

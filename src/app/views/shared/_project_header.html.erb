@@ -100,7 +100,9 @@
             config
           end
         %>
-        <div class="flex items-stretch space-x-4 min-w-0">
+        <div class="flex items-stretch space-x-4 min-w-0"
+             data-controller="header-run-status"
+             data-header-run-status-project-id-value="<%= @project.id %>">
             <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2 min-w-0">
               <span class="block truncate max-w-[10rem] sm:max-w-[14rem] md:max-w-xs lg:max-w-sm xl:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>
@@ -114,15 +116,12 @@
               <% end %>
             </h1>
               <div class="flex items-center space-x-4 text-sm text-gray-300 min-w-0">
-                <span class="flex items-center whitespace-nowrap"><i class="fas fa-circle text-gray-400 mr-1 flex-shrink-0"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
+                <span class="flex items-center whitespace-nowrap" data-header-run-status-target="cellCount"><i class="fas fa-circle text-gray-400 mr-1 flex-shrink-0"></i><%= number_with_delimiter(@project.cell_count) %> <%= col_label(@project) %></span>
                 <span class="flex items-center min-w-0"><i class="fas fa-dna text-gray-400 mr-1 flex-shrink-0"></i><span class="truncate"><%= formatted_organism_name(@project) %></span></span>
               </div>
             </div>
             <!-- Run Status Icons Section -->
-            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300 overflow-visible"
-                 data-controller="header-run-status"
-                 data-header-run-status-project-id-value="<%= @project.id %>"
-                 data-header-run-status-status-icons-value="<%= status_icons_json %>">
+            <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300 overflow-visible">
               <div class="flex items-center gap-3 overflow-visible">
                   <% run_status_icons.each do |status_icon| %>
                     <% 
@@ -141,7 +140,14 @@
                               data-status-key="<%= status_icon[:key] %>"
                               title="<%= status_icon[:label] %> (<%= count %>)"
                               <%= 'disabled' unless is_active %>>
-                        <i class="<%= icon_class %> text-base <%= color_class %>" data-header-run-status-target="statusIcon" data-status-key="<%= status_icon[:key] %>"></i>
+                        <i class="<%= icon_class %> text-base <%= color_class %>"
+                           data-header-run-status-target="statusIcon"
+                           data-status-key="<%= status_icon[:key] %>"
+                           data-icon-base="<%= status_icon[:icon_base] %>"
+                           data-icon-spin="<%= status_icon[:icon_spin] %>"
+                           data-active-color="<%= status_icon[:active_color] %>"
+                           data-inactive-color="<%= status_icon[:inactive_color] %>"
+                           data-label="<%= status_icon[:label] %>"></i>
                         <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
                       </button>
                       <% if is_active %>
@@ -358,6 +364,15 @@
               Settings
             <% end %>
             
+            <!-- Compliance -->
+            <% if @project.compliance_schemas.any? %>
+              <%= link_to project_path(@project, view: 'compliance'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'compliance' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-check-circle text-lg mr-3"></i>
+                Compliance
+              <% end %>
+            <% end %>
+            
             <% if clonable?(@project) %>
               <!-- Clone -->
               <%= button_to clone_project_path(@project), 
@@ -431,7 +446,8 @@
             class: "p-2 rounded-lg #{@view_type == 'visualization' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
             class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Analysis" do %><i class="fas fa-microscope text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
             class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
-            class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %><% if clonable?(@project) %><%= button_to clone_project_path(@project), 
+            class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %><% if @project.compliance_schemas.any? %><%= link_to project_path(@project, view: 'compliance'),
+            class: "p-2 rounded-lg #{@view_type == 'compliance' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Compliance" do %><i class="fas fa-check-circle text-lg"></i><% end %><% end %><% if clonable?(@project) %><%= button_to clone_project_path(@project), 
             method: :post,
             class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",
             title: "Clone Project",

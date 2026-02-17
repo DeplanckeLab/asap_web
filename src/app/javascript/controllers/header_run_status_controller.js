@@ -2,11 +2,13 @@ import { Controller } from "@hotwired/stimulus"
 import consumer from "channels/consumer"
 
 export default class extends Controller {
-  static targets = ["statusButton", "statusIcon", "statusCount"]
-  static values = { projectId: Number, statusIcons: Array }
+  static targets = ["statusCount", "statusIcon", "statusButton", "cellCount"]
+  static values = { projectId: Number }
 
   connect() {
     console.log('[HeaderRunStatus] Connected, project ID:', this.projectIdValue)
+    console.log('[HeaderRunStatus] Has cellCount target:', this.hasCellCountTarget)
+    console.log('[HeaderRunStatus] statusCount targets:', this.statusCountTargets.length)
     this.subscribeToProject()
   }
 
@@ -32,8 +34,11 @@ export default class extends Controller {
         disconnected: () => {
           console.log(`[HeaderRunStatus] Disconnected from ProjectChannel`)
         },
+        rejected: () => {
+          console.error('[HeaderRunStatus] Subscription REJECTED for project', this.projectIdValue)
+        },
         received: (data) => {
-          console.log('[HeaderRunStatus] Received data:', data)
+          console.log('[HeaderRunStatus] Received broadcast:', JSON.stringify(data))
           this.handleStatusUpdate(data)
         }
       }
@@ -49,86 +54,68 @@ export default class extends Controller {
   }
 
   handleStatusUpdate(data) {
-    // Fetch updated run counts from server
-    console.log('[HeaderRunStatus] Fetching updated run counts...')
-    
-    fetch(`/projects/${this.projectIdValue}/run_counts`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      credentials: 'same-origin'
-    })
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      return response.json()
-    })
-    .then(counts => {
-      console.log('[HeaderRunStatus] Received run counts:', counts)
-      this.updateCounts(counts)
-    })
-    .catch(error => {
-      console.error('[HeaderRunStatus] Error fetching run counts:', error)
-    })
+    console.log('[HeaderRunStatus] handleStatusUpdate with broadcast data')
+    this.updateFromBroadcast(data)
   }
 
-  updateCounts(counts) {
-    // counts is expected to be { waiting: N, running: N, completed: N, failed: N }
-    const statusIconsConfig = this.statusIconsValue || []
-    
-    // Build a map of status key to config
-    const configByKey = {}
-    statusIconsConfig.forEach(config => {
-      configByKey[config.key] = config
-    })
+  updateFromBroadcast(data) {
+    // Update cell count from broadcast data
+    if (this.hasCellCountTarget && data.cell_count !== undefined) {
+      const cellCount = parseInt(data.cell_count) || 0
+      const formatted = cellCount.toLocaleString()
+      const colLabel = data.col_label || 'cells'
+      console.log(`[HeaderRunStatus] Updating cell count: ${formatted} ${colLabel}`)
+      this.cellCountTarget.innerHTML = `<i class="fas fa-circle text-gray-400 mr-1 flex-shrink-0"></i>${formatted} ${colLabel}`
+    }
 
-    // Update each status count
+    // Update run status counts from broadcast project_run_totals
+    // project_run_totals is { waiting: N, running: N, completed: N, failed: N }
+    const totals = data.project_run_totals
+    if (!totals) {
+      console.log('[HeaderRunStatus] No project_run_totals in broadcast, skipping status update')
+      return
+    }
+
     this.statusCountTargets.forEach(countEl => {
       const statusKey = countEl.dataset.statusKey
-      const newCount = counts[statusKey] || 0
+      const newCount = parseInt(totals[statusKey]) || 0
       const oldCount = parseInt(countEl.textContent) || 0
-      
+
       if (newCount !== oldCount) {
         console.log(`[HeaderRunStatus] Updating ${statusKey}: ${oldCount} -> ${newCount}`)
         countEl.textContent = newCount
-        
-        // Update the corresponding button and icon
-        const button = this.statusButtonTargets.find(b => b.dataset.statusKey === statusKey)
-        const icon = this.statusIconTargets.find(i => i.dataset.statusKey === statusKey)
-        const config = configByKey[statusKey]
-        
-        if (button && config) {
-          const isActive = newCount > 0
-          button.title = `${config.label} (${newCount})`
-          button.disabled = !isActive
-          
-          if (isActive) {
-            button.classList.remove('cursor-default')
-          } else {
-            button.classList.add('cursor-default')
-          }
-        }
-        
-        if (icon && config) {
-          const isActive = newCount > 0
-          // Update icon color
-          icon.classList.remove(config.active_color, config.inactive_color)
-          icon.classList.add(isActive ? config.active_color : config.inactive_color)
-          
-          // Update spin class for running status
-          if (config.icon_spin) {
-            if (isActive) {
-              icon.classList.add(config.icon_spin)
-            } else {
-              icon.classList.remove(config.icon_spin)
-            }
-          }
-        }
+        this.updateIconState(statusKey, newCount)
       }
     })
+  }
+
+  updateIconState(statusKey, count) {
+    const isActive = count > 0
+
+    // Update icon classes (color + spin)
+    const iconEl = this.statusIconTargets.find(el => el.dataset.statusKey === statusKey)
+    if (iconEl) {
+      const iconBase = iconEl.dataset.iconBase || ''
+      const iconSpin = iconEl.dataset.iconSpin || ''
+      const activeColor = iconEl.dataset.activeColor || ''
+      const inactiveColor = iconEl.dataset.inactiveColor || ''
+      const colorClass = isActive ? activeColor : inactiveColor
+      const spinClass = isActive && iconSpin ? ` ${iconSpin}` : ''
+      iconEl.className = `${iconBase}${spinClass} text-base ${colorClass}`
+    }
+
+    // Update button disabled state and title
+    const btnEl = this.statusButtonTargets.find(el => el.dataset.statusKey === statusKey)
+    if (btnEl) {
+      const label = iconEl?.dataset.label || statusKey
+      btnEl.title = `${label} (${count})`
+      btnEl.disabled = !isActive
+      if (isActive) {
+        btnEl.classList.remove('cursor-default')
+      } else {
+        btnEl.classList.add('cursor-default')
+      }
+    }
   }
 }
 

@@ -2360,7 +2360,7 @@ module Basic
 
     end
     
-    def finish_run logger, run, h_results
+    def finish_run logger, run, h_results, skip_broadcast: false
       
       logger.info("[Basic.finish_run] Starting for Run##{run.id}, Project##{run.project_id}")
       logger.debug("[Basic.finish_run] h_results keys: #{h_results.keys.inspect}")
@@ -3004,10 +3004,7 @@ puts "TEST RUN"
         Rails.logger.info("[Basic.finish_run] Run##{run.id} status after update: #{run.status_id}")
       end
       upd_project_size project
-      #   puts project.to_json
-      #puts broadcast
-      project.broadcast run.step_id if run
-      #    puts "broadcast done"
+      project.broadcast(run.step_id) if run && !skip_broadcast
       return h_results
     end
     

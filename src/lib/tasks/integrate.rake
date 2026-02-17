@@ -86,14 +86,33 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     puts h_attrs.to_json
 
     project_keys = h_attrs['integrate_batch_paths'].keys
-    projects = Project.where(key: project_keys).all
+    source_projects = Project.where(key: project_keys).all
 
-    file_paths = projects.map { |p|
+    # Carry over references (articles) and accessions (exp_entries) from source projects
+    source_projects.each do |src|
+      src.articles.each do |article|
+        ArticlesProject.find_or_create_by(article_id: article.id, project_id: project.id)
+      end
+      src.exp_entries.each do |exp_entry|
+        ExpEntriesProject.find_or_create_by(exp_entry_id: exp_entry.id, project_id: project.id)
+      end
+    end
+
+    # Aggregate PMIDs and DOIs from source projects
+    source_pmids = source_projects.filter_map(&:pmid).uniq
+    source_dois = source_projects.filter_map(&:doi).flat_map { |d| d.split(",").map(&:strip) }.reject(&:empty?).uniq
+    project.update_columns(
+      pmid: source_pmids.first,
+      doi: source_dois.any? ? source_dois.join(", ") : nil
+    ) if project.pmid.nil? && project.doi.nil?
+    logger.info("[IntegrateRake] Carried over #{project.articles.count} article(s) and #{project.exp_entries.count} accession(s) from source projects")
+
+    file_paths = source_projects.map { |p|
       p_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       p_dir + 'parsing' + 'output.loom'
     }.join(",")
 
-    batch_paths = projects.map { |p|
+    batch_paths = source_projects.map { |p|
       h_attrs['integrate_batch_paths'][p.key]
     }.join(",")
 
@@ -120,18 +139,29 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     puts "CMD_R: #{cmd}"
     `#{cmd}`
 
+    unless File.exist?(rds_file)
+      raise "[IntegrateRake] R integration failed: output RDS file not found at #{rds_file}"
+    end
+    logger.info("[IntegrateRake] R integration produced #{rds_file} (#{File.size(rds_file)} bytes)")
+
     # Step 2: Convert RDS to Loom
     input_loom_file = project_dir + 'input.loom'
-    docker_call_convert = h_env_docker_image['call'].gsub(/\#image_name/, image_name)
-    # Use the same docker image but with entrypoint override for conversion
-    convert_docker_call = docker_call_convert.gsub(/--entrypoint\s+'[^']*'/, "--entrypoint '/bin/sh'")
-    if convert_docker_call == docker_call_convert
-      # If no --entrypoint was in the original call, just use sh -c
-      convert_docker_call = docker_call_convert.sub(image_name, "--entrypoint '/bin/sh' #{image_name}")
-    end
-    cmd = "#{convert_docker_call} -c 'Rscript --vanilla /srv/convert_seurat.R #{rds_file} #{input_loom_file}'"
+    h_cmd_convert = {
+      'host_name' => "localhost",
+      'container_name' => ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev') + "_convert_" + run.id.to_s,
+      'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
+      'program' => "Rscript --vanilla /srv/convert_seurat.R #{rds_file} #{input_loom_file}",
+      'opts' => [],
+      'args' => []
+    }
+    cmd = Basic.build_cmd(h_cmd_convert)
     puts "CMD_CONVERT: #{cmd}"
     `#{cmd}`
+
+    unless File.exist?(input_loom_file)
+      raise "[IntegrateRake] RDS-to-Loom conversion failed: #{input_loom_file} was not created"
+    end
+    logger.info("[IntegrateRake] Conversion produced #{input_loom_file} (#{File.size(input_loom_file)} bytes)")
 
     # Step 3: Preparse the integrated loom file
     output_dir = project_dir + 'parsing'
@@ -184,32 +214,46 @@ task :integrate, [:project_key] => [:environment] do |t, args|
 
     # Update project with parsing results
     output_json_parse = tmp_dir + "output.json"
+    h_parsing = {}
     if File.exist?(output_json_parse)
       h_parsing = Basic.safe_parse_json(File.read(output_json_parse), {})
-      project.update_columns(
-        nber_cols: h_parsing["nber_cols"],
-        nber_rows: h_parsing["nber_rows"],
-        extension: 'loom'
-      )
+      if h_parsing["nber_cols"] && h_parsing["nber_rows"]
+        project.update_columns(
+          nber_cols: h_parsing["nber_cols"],
+          nber_rows: h_parsing["nber_rows"],
+          extension: 'loom'
+        )
+        logger.info("[IntegrateRake] Set counts from parsing: #{h_parsing["nber_cols"]} cells, #{h_parsing["nber_rows"]} genes")
+      else
+        logger.warn("[IntegrateRake] Parsing output.json missing nber_cols/nber_rows, computing from source projects")
+        total_cols = source_projects.sum { |p| p.nber_cols.to_i }
+        total_rows = source_projects.map { |p| p.nber_rows.to_i }.max || 0
+        project.update_columns(nber_cols: total_cols, nber_rows: total_rows, extension: 'loom')
+        logger.info("[IntegrateRake] Set counts from source projects: #{total_cols} cells, #{total_rows} genes")
+      end
     else
-      logger.error("[IntegrateRake] Parsing output.json not found at #{output_json_parse}")
+      logger.error("[IntegrateRake] Parsing output.json not found at #{output_json_parse}, computing from source projects")
+      total_cols = source_projects.sum { |p| p.nber_cols.to_i }
+      total_rows = source_projects.map { |p| p.nber_rows.to_i }.max || 0
+      project.update_columns(nber_cols: total_cols, nber_rows: total_rows, extension: 'loom')
+      logger.info("[IntegrateRake] Set counts from source projects: #{total_cols} cells, #{total_rows} genes")
     end
 
-    # Update run and project status to completed
-    end_time = Time.now
-    process_duration = (end_time - start_time).to_f
+    # Call finish_run to create annotations, set run status, and update project step.
+    # skip_broadcast: true because finish_run broadcasts before we update project.status_id,
+    # so we do a single broadcast below with the correct project status.
+    logger.info("[IntegrateRake] Calling Basic.finish_run to create annotations for run #{run.id}")
+    Basic.finish_run(logger, run, h_parsing, skip_broadcast: true)
 
-    run.update(
-      status_id: 3,
-      process_duration: process_duration
-    )
+    # Reload run to get updated status from finish_run
+    run.reload
+    logger.info("[IntegrateRake] finish_run completed for run #{run.id}, status_id=#{run.status_id}, annotations: #{Annot.where(run_id: run.id).count}")
 
-    # Update project_step nber_runs_json + status, and project nber_runs_json
-    Basic.upd_project_step(project, parsing_step.id)
+    # finish_run already called upd_project_step via upd_run, so only set project status here
     project.update(status_id: 3)
 
     project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
-    logger.info("[IntegrateRake] Integration completed for project #{project_key} in #{process_duration}s")
+    logger.info("[IntegrateRake] Integration completed for project #{project_key}")
 
   rescue => e
     logger.error("[IntegrateRake] Error during integration for project #{project_key}: #{e.class} - #{e.message}")
@@ -217,7 +261,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
 
     # Update status to failed
     run.update(status_id: 4) if run
-    Basic.upd_project_step(project, parsing_step.id)
+    Basic.upd_project_step(project, parsing_step.id) if project_step
     project.update(status_id: 4)
     project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
 

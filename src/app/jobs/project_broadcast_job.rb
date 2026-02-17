@@ -10,11 +10,30 @@ class ProjectBroadcastJob < ApplicationJob
     parsing_step = Step.where(name: 'parsing').first
     stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
     
+    # Aggregate run counts across all project steps for header display
+    run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    project.project_steps.each do |ps|
+      next if ps.nber_runs_json.blank?
+      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
+      json_data.each do |sid, count|
+        k = sid.to_i
+        run_totals[k] = (run_totals[k] || 0) + count.to_i if run_totals.key?(k)
+      end
+    end
+
     h_data.merge!({
       project_id: project.id,
       step_id: step_id,
       new_status: project.status_id,
-      stage: stage
+      stage: stage,
+      cell_count: project.cell_count,
+      gene_count: project.gene_count,
+      project_run_totals: {
+        waiting: run_totals[1],
+        running: run_totals[2],
+        completed: run_totals[3],
+        failed: run_totals[4]
+      }
     })
     
     # Always include parsing status information (useful for summary page)

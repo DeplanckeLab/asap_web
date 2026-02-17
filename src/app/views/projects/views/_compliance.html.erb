@@ -1,0 +1,555 @@
+<%
+  # Display data: current config takes priority for name (branding), rest from validation result with config fallback
+  schema_config = @project.compliance_schemas.first || {}
+
+  c_name = schema_config['name'] || @validation_result&.dig(:schema_name)
+  c_version = @validation_result&.dig(:schema_version) || schema_config['version']
+  c_url = @validation_result&.dig(:url) || schema_config['url']
+  c_source_url = @validation_result&.dig(:source_url) || schema_config['source_url']
+  c_source_schema_name = @validation_result&.dig(:source_schema_name) || schema_config['source_schema_name']
+  c_description = @validation_result&.dig(:description) || schema_config['description']
+  c_compliant_icon = @validation_result&.dig(:compliant_icon) || schema_config['compliant_icon']
+  c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon) || schema_config['not_compliant_icon']
+
+  display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
+%>
+
+<div class="max-w-6xl mx-auto"
+     data-controller="metadata-validation"
+     data-metadata-validation-project-id-value="<%= @project.id %>"
+     data-metadata-validation-status-url-value="<%= compliance_project_status_path(@project.id) %>"
+     data-metadata-validation-validate-url-value="<%= compliance_project_validate_path(@project.id) %>">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">
+          <% if display_title.present? %>
+            <%= display_title %>
+          <% else %>
+            Compliance Report
+          <% end %>
+        </h1>
+        <% if c_description.present? %>
+          <p class="text-gray-600 mt-1"><%= c_description %></p>
+        <% end %>
+        <% if c_source_schema_name.present? && c_source_url.present? %>
+          <p class="text-gray-500 mt-1 text-sm">
+            Source schema: <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 hover:underline"><%= c_source_schema_name %><%= " v#{c_version}" if c_version.present? %></a>
+          </p>
+        <% elsif c_source_url.present? %>
+          <p class="text-gray-500 mt-1 text-sm">
+            Schema reference: <a href="<%= c_source_url %>" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 hover:underline"><%= c_source_url.truncate(80) %></a>
+          </p>
+        <% end %>
+      </div>
+      
+      <div class="flex items-center gap-4">
+        <% if @validation_result %>
+          <% badge_link = c_url %>
+          <% if @validation_result[:valid] && c_compliant_icon.present? %>
+            <% if badge_link.present? %>
+              <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+                <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-10' %>
+              </a>
+            <% else %>
+              <%= image_tag c_compliant_icon, alt: 'Compliant', class: 'h-10' %>
+            <% end %>
+          <% elsif !@validation_result[:valid] && c_not_compliant_icon.present? %>
+            <% if badge_link.present? %>
+              <a href="<%= badge_link %>" target="_blank" rel="noopener noreferrer">
+                <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-10' %>
+              </a>
+            <% else %>
+              <%= image_tag c_not_compliant_icon, alt: 'Non-Compliant', class: 'h-10' %>
+            <% end %>
+          <% end %>
+        <% end %>
+        <button type="button"
+                data-action="click->metadata-validation#runValidation"
+                data-metadata-validation-target="validateButton"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Re-run Validation</button>
+        <% if !@project.is_public? || admin? %>
+          <% if @validation_result && @validation_result[:valid] %>
+            <%= link_to "Edit Metadata",
+                        compliance_project_fix_path(@project),
+                        class: "px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700" %>
+          <% else %>
+            <%= link_to "Fix Compliance Issues",
+                        compliance_project_fix_path(@project),
+                        class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <% if @validation_result %>
+    <!-- Summary Card -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">Validation Summary</h2>
+        <% if @validation_result[:valid] %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            Compliant
+          </span>
+        <% else %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Non-compliant
+          </span>
+        <% end %>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <% if c_version.present? %>
+          <div class="bg-gray-50 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-gray-900">
+              <%= c_version %>
+            </div>
+            <div class="text-sm text-gray-500">Schema Version</div>
+          </div>
+        <% end %>
+        
+        <div class="<%= @validation_result[:errors]&.any? ? 'bg-red-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= @validation_result[:errors]&.any? ? 'text-red-600' : 'text-gray-900' %>">
+            <%= @validation_result[:errors_count] || @validation_result[:errors]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Errors</div>
+        </div>
+        
+        <div class="<%= @validation_result[:warnings]&.any? ? 'bg-yellow-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= @validation_result[:warnings]&.any? ? 'text-yellow-600' : 'text-gray-900' %>">
+            <%= @validation_result[:warnings_count] || @validation_result[:warnings]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Warnings</div>
+        </div>
+        
+        <div class="bg-green-50 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-green-600">
+            <%= @validation_result[:valid_checks_count] || @validation_result[:valid_checks]&.count || 0 %>
+          </div>
+          <div class="text-sm text-gray-500">Passed</div>
+        </div>
+      </div>
+
+      <% if @validation_result[:validated_at] %>
+        <div class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
+          Validated: <%= Time.parse(@validation_result[:validated_at]).strftime("%B %d, %Y at %H:%M:%S UTC") %>
+        </div>
+      <% end %>
+    </div>
+
+    <%
+      # Index all validation messages by field path for grouping
+      all_errors   = @validation_result[:errors]       || []
+      all_warnings = @validation_result[:warnings]     || []
+      all_valid    = @validation_result[:valid_checks]  || []
+
+      errors_by_field   = all_errors.group_by   { |e| (e[:field] || e['field']).to_s }
+      warnings_by_field = all_warnings.group_by { |w| (w[:field] || w['field']).to_s }
+      valid_by_field    = all_valid.group_by    { |v| (v[:field] || v['field']).to_s }
+
+      # Track which messages get claimed by a field group so we can show the rest
+      claimed_fields = Set.new
+
+      field_groups = @compliance_field_groups || []
+      cfv = @compliance_field_values || {}
+
+      global_groups = field_groups.select { |fg| fg[:type] == :global_attr }
+      cell_groups   = field_groups.select { |fg| fg[:type] != :global_attr }
+    %>
+
+    <!-- Detailed Checks -->
+    <% [
+      ['Global Attributes', 'These attributes apply to the entire dataset.', global_groups],
+      ['Cell Metadata', 'Per-cell metadata fields validated against the schema.', cell_groups]
+    ].each do |section_title, section_desc, groups| %>
+      <% next if groups.empty? %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1"><%= section_title %></h2>
+        <p class="text-sm text-gray-500 mb-4"><%= section_desc %></p>
+
+        <div class="space-y-4">
+          <% groups.each do |fg| %>
+            <%
+              term_path  = fg[:term_path]
+              label_path = fg[:label_path]
+              is_paired  = label_path.present?
+
+              # Collect matching paths for this group
+              match_paths = [term_path, label_path].compact
+              match_paths.each { |p| claimed_fields << p }
+
+              fg_errors   = match_paths.flat_map { |p| errors_by_field[p]   || [] }
+              fg_warnings = match_paths.flat_map { |p| warnings_by_field[p] || [] }
+              fg_valid    = match_paths.flat_map { |p| valid_by_field[p]     || [] }
+
+              has_errors   = fg_errors.any?
+              has_warnings = fg_warnings.any?
+              has_valid    = fg_valid.any?
+
+              border_color = has_errors ? 'border-red-200' : (has_warnings ? 'border-yellow-200' : 'border-green-200')
+            %>
+            <div class="border <%= border_color %> rounded-lg p-4">
+              <!-- Group header -->
+              <div class="flex items-start justify-between mb-2">
+                <div>
+                  <span class="text-sm font-semibold text-gray-900"><%= fg[:label] %></span>
+                  <% if fg[:description].present? %>
+                    <p class="text-xs text-gray-500 mt-0.5"><%= fg[:description] %></p>
+                  <% end %>
+                </div>
+                <div class="flex items-center gap-2">
+                  <% if fg[:multi_value] %>
+                    <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full whitespace-nowrap">multi-value</span>
+                  <% end %>
+                  <% if is_paired %>
+                    <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full whitespace-nowrap">paired fields</span>
+                  <% end %>
+                  <% if has_errors %>
+                    <span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full whitespace-nowrap"><%= fg_errors.size %> error<%= 's' if fg_errors.size > 1 %></span>
+                  <% end %>
+                  <% if has_warnings %>
+                    <span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full whitespace-nowrap"><%= fg_warnings.size %> warning<%= 's' if fg_warnings.size > 1 %></span>
+                  <% end %>
+                  <% unless has_errors || has_warnings %>
+                    <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full whitespace-nowrap">OK</span>
+                  <% end %>
+                </div>
+              </div>
+
+              <!-- Field paths with inline messages (presence first, then other validations) -->
+              <%
+                # Helper: build an ordered list of messages for a given path.
+                # Presence messages (check_type == 'presence') come first,
+                # then errors, then warnings, then remaining valid checks.
+                build_ordered_msgs = lambda do |path|
+                  errs   = errors_by_field[path]   || []
+                  warns  = warnings_by_field[path]  || []
+                  valids = valid_by_field[path]     || []
+                  presence_msgs = []
+                  other_msgs    = []
+                  errs.each do |e|
+                    ct = e[:check_type] || e['check_type']
+                    item = { msg: e[:message] || e['message'], kind: 'error' }
+                    ct == 'presence' ? presence_msgs << item : other_msgs << item
+                  end
+                  warns.each do |w|
+                    other_msgs << { msg: w[:message] || w['message'], kind: 'warning' }
+                  end
+                  valids.each do |v|
+                    ct = v[:check_type] || v['check_type']
+                    item = { msg: v[:message] || v['message'], kind: 'valid' }
+                    ct == 'presence' ? presence_msgs << item : other_msgs << item
+                  end
+                  { items: presence_msgs + other_msgs, ok: errs.empty? && warns.empty? }
+                end
+              %>
+              <div class="mb-2 space-y-1">
+                <% term_data = build_ordered_msgs.call(term_path) %>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <%
+                      term_has_errors = !(errors_by_field[term_path] || []).empty?
+                      term_has_warnings = term_data[:items].any? { |i| i[:kind] == 'warning' }
+                      term_path_css = if term_has_errors
+                        'bg-red-50 text-red-700'
+                      elsif term_has_warnings
+                        'bg-orange-50 text-orange-700'
+                      else
+                        'bg-green-50 text-green-700'
+                      end
+                    %>
+                    <code class="text-xs <%= term_path_css %> px-1.5 py-0.5 rounded"><%= term_path %></code>
+                    <% if term_data[:ok] && term_data[:items].empty? %>
+                      <span class="text-xs text-green-600">OK</span>
+                    <% end %>
+                  </div>
+                  <% term_data[:items].each do |item| %>
+                    <div class="flex items-start gap-2 ml-2 mt-0.5">
+                      <% if item[:kind] == 'error' %>
+                        <svg class="w-3 h-3 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        <span class="text-xs text-red-700"><%= item[:msg] %></span>
+                      <% elsif item[:kind] == 'warning' %>
+                        <svg class="w-3 h-3 text-orange-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        <span class="text-xs text-orange-700"><%= item[:msg] %></span>
+                      <% else %>
+                        <svg class="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                        <span class="text-xs text-green-700"><%= item[:msg] %></span>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+                <% if is_paired %>
+                  <% label_data = build_ordered_msgs.call(label_path) %>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <%
+                        label_has_warnings = label_data[:items].any? { |i| i[:kind] == 'warning' }
+                        label_path_css = if !(errors_by_field[label_path] || []).empty?
+                          'bg-red-50 text-red-700'
+                        elsif label_has_warnings
+                          'bg-orange-50 text-orange-700'
+                        else
+                          'bg-green-50 text-green-700'
+                        end
+                      %>
+                      <code class="text-xs <%= label_path_css %> px-1.5 py-0.5 rounded"><%= label_path %></code>
+                      <% if label_data[:ok] && label_data[:items].empty? %>
+                        <span class="text-xs text-green-600">OK</span>
+                      <% end %>
+                    </div>
+                    <% label_data[:items].each do |item| %>
+                      <div class="flex items-start gap-2 ml-2 mt-0.5">
+                        <% if item[:kind] == 'error' %>
+                          <svg class="w-3 h-3 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                          <span class="text-xs text-red-700"><%= item[:msg] %></span>
+                        <% elsif item[:kind] == 'warning' %>
+                          <svg class="w-3 h-3 text-orange-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                          <span class="text-xs text-orange-700"><%= item[:msg] %></span>
+                        <% else %>
+                          <svg class="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                          <span class="text-xs text-green-700"><%= item[:msg] %></span>
+                        <% end %>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
+              </div>
+
+              <!-- Current metadata values -->
+              <%
+                resolved = @compliance_resolved || {}
+                term_resolved = resolved[term_path] || {}
+                label_resolved = is_paired ? (resolved[label_path] || {}) : {}
+
+                # Badge CSS helper: true=green, 'mappable'=orange, false/nil=red
+                badge_css = lambda do |status|
+                  case status.to_s
+                  when 'true'     then 'bg-green-100 text-green-800 border border-green-200'
+                  when 'mappable' then 'bg-orange-100 text-orange-800 border border-orange-300'
+                  else                 'bg-red-100 text-red-800 border border-red-200'
+                  end
+                end
+
+                term_vals  = cfv[term_path]
+                label_vals = is_paired ? cfv[label_path] : nil
+                pair_key   = is_paired ? "#{term_path}||#{label_path}" : nil
+                co_pairs   = pair_key ? (cfv[pair_key] || []) : []
+                term_to_idx  = {}
+                label_to_idx = {}
+                co_pairs.each_with_index do |pair, idx|
+                  term_to_idx[pair[0]]  ||= idx
+                  label_to_idx[pair[1]] ||= idx
+                end
+                group_id = fg[:id].to_s.gsub(/[^a-zA-Z0-9_]/, '_')
+                pair_group = "crpt_#{group_id}"
+              %>
+              <% if term_vals.present? || label_vals.present? %>
+                <div class="bg-gray-50 border border-gray-200 rounded-md p-3 mb-2">
+                  <p class="text-xs font-medium text-gray-700 mb-2">Current content</p>
+                  <% if is_paired && term_vals.present? && label_vals.present? %>
+                    <div class="grid grid-cols-2 gap-4" data-pair-group="<%= pair_group %>">
+                      <div>
+                        <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= term_path.split('/').last %></code> (<%= term_vals.size %> unique)</p>
+                        <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                          <% sorted_term = co_pairs.any? ? term_vals.sort_by { |v| term_to_idx[v] || 9999 } : term_vals %>
+                          <% sorted_term.each do |v| %>
+                            <% status = term_resolved.key?(v) ? term_resolved[v] : true %>
+                            <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full font-mono crpt-pair-badge <%= badge_css.call(status) %>"
+                              data-pair-group="<%= pair_group %>"
+                              data-pair-idx="<%= term_to_idx[v] %>"
+                              ><%= v.to_s.truncate(40) %></span>
+                          <% end %>
+                        </div>
+                      </div>
+                      <div>
+                        <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= label_path.split('/').last %></code> (<%= label_vals.size %> unique)</p>
+                        <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                          <% sorted_label = co_pairs.any? ? label_vals.sort_by { |v| label_to_idx[v] || 9999 } : label_vals %>
+                          <% sorted_label.each do |v| %>
+                            <% status = label_resolved.key?(v) ? label_resolved[v] : true %>
+                            <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full crpt-pair-badge <%= badge_css.call(status) %>"
+                              data-pair-group="<%= pair_group %>"
+                              data-pair-idx="<%= label_to_idx[v] %>"
+                              ><%= v.to_s.truncate(40) %></span>
+                          <% end %>
+                        </div>
+                      </div>
+                    </div>
+                  <% elsif term_vals.present? %>
+                    <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= term_path.split('/').last %></code> (<%= term_vals.size %> unique)</p>
+                    <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                      <% term_vals.each do |v| %>
+                        <% status = term_resolved.key?(v) ? term_resolved[v] : true %>
+                        <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full font-mono <%= badge_css.call(status) %>"
+                          ><%= v.to_s.truncate(40) %></span>
+                      <% end %>
+                    </div>
+                  <% elsif label_vals.present? %>
+                    <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= label_path.split('/').last %></code> (<%= label_vals.size %> unique)</p>
+                    <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                      <% label_vals.each do |v| %>
+                        <% status = label_resolved.key?(v) ? label_resolved[v] : true %>
+                        <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full <%= badge_css.call(status) %>"
+                          ><%= v.to_s.truncate(40) %></span>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+
+              <!-- Additional validation messages (excluding those already shown inline per path) -->
+              <%
+                inline_paths = [term_path, label_path].compact.to_set
+                extra_errors   = fg_errors.reject   { |e| inline_paths.include?((e[:field] || e['field']).to_s) }
+                extra_warnings = fg_warnings.reject  { |w| inline_paths.include?((w[:field] || w['field']).to_s) }
+                extra_valid    = fg_valid.reject     { |e| inline_paths.include?((e[:field] || e['field']).to_s) }
+              %>
+              <% if extra_errors.any? || extra_warnings.any? || extra_valid.any? %>
+                <div class="space-y-1">
+                  <% extra_errors.each do |err| %>
+                    <div class="flex items-start gap-2">
+                      <svg class="w-3.5 h-3.5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span class="text-xs text-red-700"><%= err[:message] || err['message'] %></span>
+                    </div>
+                  <% end %>
+                  <% extra_warnings.each do |warn| %>
+                    <div class="flex items-start gap-2">
+                      <svg class="w-3.5 h-3.5 text-orange-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span class="text-xs text-orange-700"><%= warn[:message] || warn['message'] %></span>
+                    </div>
+                  <% end %>
+                  <% extra_valid.each do |chk| %>
+                    <div class="flex items-start gap-2">
+                      <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span class="text-xs text-green-700"><%= chk[:message] || chk['message'] %></span>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- General Checks (not tied to a specific field group) -->
+    <%
+      unclaimed_errors   = all_errors.select   { |e| !claimed_fields.include?((e[:field] || e['field']).to_s) }
+      unclaimed_warnings = all_warnings.select { |w| !claimed_fields.include?((w[:field] || w['field']).to_s) }
+      unclaimed_valid    = all_valid.select    { |v| !claimed_fields.include?((v[:field] || v['field']).to_s) }
+    %>
+    <% if unclaimed_errors.any? || unclaimed_warnings.any? || unclaimed_valid.any? %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">General Checks</h2>
+        <p class="text-sm text-gray-500 mb-4">File structure, cross-field constraints, and other validations.</p>
+
+        <div class="space-y-2">
+          <% unclaimed_errors.each do |err| %>
+            <div class="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg p-3">
+              <svg class="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <div>
+                <code class="text-xs bg-red-100 text-red-800 px-1 rounded"><%= err[:field] || err['field'] %></code>
+                <span class="text-xs text-red-700 ml-1"><%= err[:message] || err['message'] %></span>
+              </div>
+            </div>
+          <% end %>
+          <% unclaimed_warnings.each do |warn| %>
+            <div class="flex items-start gap-2 bg-yellow-50 border border-yellow-100 rounded-lg p-3">
+              <svg class="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01" />
+              </svg>
+              <div>
+                <code class="text-xs bg-yellow-100 text-yellow-800 px-1 rounded"><%= warn[:field] || warn['field'] %></code>
+                <span class="text-xs text-yellow-700 ml-1"><%= warn[:message] || warn['message'] %></span>
+              </div>
+            </div>
+          <% end %>
+          <% unclaimed_valid.each do |chk| %>
+            <div class="flex items-start gap-2 bg-green-50 border border-green-100 rounded-lg p-3">
+              <svg class="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <div>
+                <code class="text-xs bg-green-100 text-green-800 px-1 rounded"><%= chk[:field] || chk['field'] %></code>
+                <span class="text-xs text-green-700 ml-1"><%= chk[:message] || chk['message'] %></span>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+  <% else %>
+    <!-- No Validation Result -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
+      <h3 class="mt-4 text-lg font-medium text-gray-900">No Validation Results</h3>
+      <p class="mt-2 text-gray-500">This project has not been validated yet, or validation is in progress.</p>
+      
+      <div class="mt-6">
+        <button type="button"
+                data-action="click->metadata-validation#runValidation"
+                data-metadata-validation-target="validateButton"
+                class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">Start Validation</button>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Validation loading modal overlay -->
+  <div data-metadata-validation-target="loading" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-gray-900 bg-opacity-50"></div>
+    <div class="relative bg-white rounded-xl shadow-xl px-8 py-6 flex flex-col items-center gap-4">
+      <svg class="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span class="text-gray-700 font-medium">Validation in progress...</span>
+      <span class="text-gray-400 text-sm">The page will reload when complete.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Hover-highlight paired badges (same pattern as the fix form)
+  document.addEventListener('mouseover', function(e) {
+    var badge = e.target.closest('.crpt-pair-badge');
+    if (!badge) return;
+    var group = badge.dataset.pairGroup;
+    var idx = badge.dataset.pairIdx;
+    if (!group || idx == null) return;
+    document.querySelectorAll('.crpt-pair-badge[data-pair-group="' + group + '"][data-pair-idx="' + idx + '"]').forEach(function(el) {
+      el.classList.add('ring-2', 'ring-blue-400');
+    });
+  });
+  document.addEventListener('mouseout', function(e) {
+    var badge = e.target.closest('.crpt-pair-badge');
+    if (!badge) return;
+    var group = badge.dataset.pairGroup;
+    var idx = badge.dataset.pairIdx;
+    if (!group || idx == null) return;
+    document.querySelectorAll('.crpt-pair-badge[data-pair-group="' + group + '"][data-pair-idx="' + idx + '"]').forEach(function(el) {
+      el.classList.remove('ring-2', 'ring-blue-400');
+    });
+  });
+
+})();
+</script>

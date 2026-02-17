@@ -6,11 +6,18 @@
   is_auto_title = group[:auto_from_project] == :title && project_title.present?
   has_valid_values = group[:term_valid_values].present?
   has_ontology = group[:term_ontology_prefixes].present?
+
+  # Check if this field group has a schema constraint forcing its value
+  constraint = schema_constraints[group_id]
+  is_constrained = constraint.present?
 %>
 
 <div class="border border-gray-200 rounded-lg p-4"
      data-compliance-fix-target="fieldRow"
-     data-group-id="<%= group_id %>">
+     data-group-id="<%= group_id %>"
+     data-term-has-error="<%= fg[:term_has_error] ? 'true' : 'false' %>"
+     data-label-has-error="<%= (is_paired && fg[:label_has_error]) ? 'true' : 'false' %>"
+     data-is-auto="<%= (is_auto_organism || is_auto_title || is_constrained) ? 'true' : 'false' %>">
 
   <!-- Group header -->
   <div class="flex items-start justify-between mb-3">
@@ -25,7 +32,28 @@
       <% if is_paired %>
         <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full whitespace-nowrap">paired fields</span>
       <% end %>
+      <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full whitespace-nowrap hidden"
+            data-compliance-fix-target="fixedBadge"
+            data-group-id="<%= group_id %>">Fixed</span>
     </div>
+  </div>
+
+  <% if is_constrained %>
+    <div class="mb-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-md"
+         data-constraint-group="<%= group_id %>">
+      <p class="text-xs text-indigo-700 font-medium">
+        Schema constraint: <%= constraint[:reason] %>
+      </p>
+      <p class="text-xs text-indigo-600 mt-0.5">
+        Value will be set to "<%= constraint[:forced_term_value] %>" automatically.
+      </p>
+    </div>
+  <% end %>
+
+  <!-- Constraint messages set dynamically by the frontend -->
+  <div data-constraint-dynamic="<%= group_id %>" class="hidden mb-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-md">
+    <p class="text-xs text-indigo-700 font-medium" data-constraint-message="<%= group_id %>"></p>
+    <p class="text-xs text-indigo-600 mt-0.5" data-constraint-detail="<%= group_id %>"></p>
   </div>
 
   <!-- Show which paths have errors or pass validation -->
@@ -65,9 +93,30 @@
   <% label_resolved = is_paired ? (cfr[group[:label_path]] || {}) : {} %>
   <% if term_vals.present? || label_vals.present? %>
     <%
-      term_ok = term_vals.present? ? term_vals.count { |v| term_resolved[v] != false } : 0
+      # Resolution status: true=valid, 'mappable'=auto-mappable, false=invalid.
+      # When the map is empty we have no data at all -> assume green (valid).
+      # When the map is non-empty and the value is present -> use the status.
+      # When the map is non-empty but the value is absent -> treat as invalid (red).
+      badge_css_fix = lambda do |resolved_map, v|
+        if resolved_map.empty?
+          'bg-green-100 text-green-800 border border-green-200'
+        elsif resolved_map.key?(v)
+          case resolved_map[v].to_s
+          when 'true'     then 'bg-green-100 text-green-800 border border-green-200'
+          when 'mappable' then 'bg-orange-100 text-orange-800 border border-orange-300'
+          else                 'bg-red-100 text-red-800 border border-red-300'
+          end
+        else
+          'bg-red-100 text-red-800 border border-red-300'
+        end
+      end
+      is_valid = lambda do |resolved_map, v|
+        resolved_map.empty? || resolved_map[v] == true || resolved_map[v] == 'mappable'
+      end
+
+      term_ok = term_vals.present? ? term_vals.count { |v| is_valid.call(term_resolved, v) } : 0
       term_bad = (term_vals&.size || 0) - term_ok
-      label_ok = label_vals.present? ? label_vals.count { |v| label_resolved[v] != false } : 0
+      label_ok = label_vals.present? ? label_vals.count { |v| is_valid.call(label_resolved, v) } : 0
       label_bad = (label_vals&.size || 0) - label_ok
       has_issues = term_bad > 0 || label_bad > 0
       box_border = has_issues ? 'border-amber-200' : 'border-green-200'
@@ -81,15 +130,30 @@
         <% end %>
       </p>
       <% if is_paired %>
-        <div class="grid grid-cols-2 gap-4">
+        <%
+          # Build a term->label mapping from co-occurrence pairs so we can assign
+          # matching pair indices for hover-highlight.
+          pair_key = "#{group[:term_path]}||#{group[:label_path]}"
+          co_pairs = cfv[pair_key] || []
+          term_to_idx = {}
+          label_to_idx = {}
+          co_pairs.each_with_index do |pair, idx|
+            term_to_idx[pair[0]] ||= idx
+            label_to_idx[pair[1]] ||= idx
+          end
+          pair_group = "cfv_#{group_id}"
+        %>
+        <div class="grid grid-cols-2 gap-4" data-pair-group="<%= pair_group %>">
           <div>
             <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code> (<%= term_vals&.size || 0 %> unique)</p>
             <% if term_vals.present? %>
-              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
-                <% term_vals.each do |v| %>
-                  <% is_ok = term_resolved[v] != false %>
-                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full font-mono
-                    <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                <% term_vals.sort_by { |v| co_pairs.any? ? (term_to_idx[v] || 9999) : v }.each do |v| %>
+                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full font-mono cfv-pair-badge
+                    <%= badge_css_fix.call(term_resolved, v) %>"
+                    data-pair-group="<%= pair_group %>"
+                    data-pair-idx="<%= term_to_idx[v] %>"
+                    ><%= v %></span>
                 <% end %>
               </div>
             <% end %>
@@ -97,11 +161,13 @@
           <div>
             <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code> (<%= label_vals&.size || 0 %> unique)</p>
             <% if label_vals.present? %>
-              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
-                <% label_vals.each do |v| %>
-                  <% is_ok = label_resolved[v] != false %>
-                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full
-                    <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+              <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
+                <% label_vals.sort_by { |v| co_pairs.any? ? (label_to_idx[v] || 9999) : v }.each do |v| %>
+                  <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full cfv-pair-badge
+                    <%= badge_css_fix.call(label_resolved, v) %>"
+                    data-pair-group="<%= pair_group %>"
+                    data-pair-idx="<%= label_to_idx[v] %>"
+                    ><%= v %></span>
                 <% end %>
               </div>
             <% end %>
@@ -110,11 +176,10 @@
       <% else %>
         <p class="text-[10px] text-gray-600 mb-1"><code class="bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code> (<%= term_vals&.size || 0 %> unique)</p>
         <% if term_vals.present? %>
-          <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
+          <div class="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2">
             <% term_vals.each do |v| %>
-              <% is_ok = term_resolved[v] != false %>
               <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full
-                <%= is_ok ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-300' %>"><%= v %></span>
+                <%= badge_css_fix.call(term_resolved, v) %>"><%= v %></span>
             <% end %>
           </div>
         <% end %>
@@ -178,7 +243,9 @@
       # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
       # - If source annotation with multiple terms: map_from
       # - If terms but no source: set_value
-      pf_action = if group_has_no_errors then 'skip'
+      pf_action = if is_constrained && group_has_no_errors then 'skip'
+                  elsif is_constrained then 'set_value'
+                  elsif group_has_no_errors then 'skip'
                   elsif pf_single_term then 'set_value'
                   elsif pf_has_source then 'map_from'
                   elsif pf_has_terms then 'set_value'
@@ -212,43 +279,54 @@
     <% end %>
 
     <div class="space-y-3">
-      <!-- Action selector -->
-      <div class="flex items-center gap-4">
-        <label class="inline-flex items-center gap-1.5 text-sm">
-          <input type="radio"
-                 name="group_action_<%= group_id %>"
-                 value="skip"
-                 <%= 'checked' if pf_action == 'skip' %>
-                 data-action="change->compliance-fix#toggleGroupAction"
-                 data-group-id="<%= group_id %>"
-                 class="text-gray-400 focus:ring-gray-400">
-          <span class="text-gray-500">Skip</span>
-        </label>
-
-        <% if available_attrs.any? %>
+      <% if is_constrained %>
+        <!-- Constrained field: locked -->
+        <div class="flex items-center gap-4">
+          <% if group_has_no_errors %>
+            <span class="text-sm text-green-700 font-medium">Value is already "<%= constraint[:forced_term_value] %>" -- no change needed.</span>
+          <% else %>
+            <span class="text-sm text-indigo-700 font-medium">Fixed by schema constraint: "<%= constraint[:forced_term_value] %>"</span>
+          <% end %>
+        </div>
+      <% else %>
+        <!-- Action selector -->
+        <div class="flex items-center gap-4">
           <label class="inline-flex items-center gap-1.5 text-sm">
             <input type="radio"
                    name="group_action_<%= group_id %>"
-                   value="map_from"
-                   <%= 'checked' if pf_action == 'map_from' %>
+                   value="skip"
+                   <%= 'checked' if pf_action == 'skip' %>
+                   data-action="change->compliance-fix#toggleGroupAction"
+                   data-group-id="<%= group_id %>"
+                   class="text-gray-400 focus:ring-gray-400">
+            <span class="text-gray-500">Skip</span>
+          </label>
+
+          <% if available_attrs.any? %>
+            <label class="inline-flex items-center gap-1.5 text-sm">
+              <input type="radio"
+                     name="group_action_<%= group_id %>"
+                     value="map_from"
+                     <%= 'checked' if pf_action == 'map_from' %>
+                     data-action="change->compliance-fix#toggleGroupAction"
+                     data-group-id="<%= group_id %>"
+                     class="text-blue-600 focus:ring-blue-500">
+              <span class="text-gray-700">Map from existing metadata</span>
+            </label>
+          <% end %>
+
+          <label class="inline-flex items-center gap-1.5 text-sm">
+            <input type="radio"
+                   name="group_action_<%= group_id %>"
+                   value="set_value"
+                   <%= 'checked' if pf_action == 'set_value' %>
                    data-action="change->compliance-fix#toggleGroupAction"
                    data-group-id="<%= group_id %>"
                    class="text-blue-600 focus:ring-blue-500">
-            <span class="text-gray-700">Map from existing metadata</span>
+            <span class="text-gray-700">Set fixed value</span>
           </label>
-        <% end %>
-
-        <label class="inline-flex items-center gap-1.5 text-sm">
-          <input type="radio"
-                 name="group_action_<%= group_id %>"
-                 value="set_value"
-                 <%= 'checked' if pf_action == 'set_value' %>
-                 data-action="change->compliance-fix#toggleGroupAction"
-                 data-group-id="<%= group_id %>"
-                 class="text-blue-600 focus:ring-blue-500">
-          <span class="text-gray-700">Set fixed value</span>
-        </label>
-      </div>
+        </div>
+      <% end %>
 
       <%# ── Map from existing metadata ── %>
       <% if available_attrs.any? %>
@@ -313,7 +391,7 @@
               </div>
             </div>
 
-            <%# Inline autocomplete for fixing unresolved values %>
+            <%# Inline autocomplete for fixing unresolved values (supports multiple terms) %>
             <div data-compliance-fix-target="mapFixPanel" data-group-id="<%= group_id %>"
                  class="hidden mt-2 p-3 bg-amber-50 border border-amber-200 rounded-md">
               <div class="flex items-center justify-between mb-2">
@@ -325,6 +403,9 @@
                         data-group-id="<%= group_id %>"
                         class="text-xs text-amber-600 hover:text-amber-800">close</button>
               </div>
+              <%# Accumulated selected terms shown as removable badges %>
+              <div data-compliance-fix-target="mapFixSelected" data-group-id="<%= group_id %>"
+                   class="hidden flex flex-wrap gap-1 mb-2"></div>
               <div class="relative">
                 <input type="text" placeholder="Search ontology terms..."
                        data-compliance-fix-target="mapFixInput"
@@ -335,6 +416,15 @@
                 <div data-compliance-fix-target="mapFixResults"
                      data-group-id="<%= group_id %>"
                      class="hidden absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto"></div>
+              </div>
+              <div class="flex items-center gap-2 mt-2">
+                <button type="button" data-action="click->compliance-fix#confirmMapFix"
+                        data-compliance-fix-target="mapFixConfirm" data-group-id="<%= group_id %>"
+                        class="hidden px-3 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700">
+                  Confirm
+                </button>
+                <span data-compliance-fix-target="mapFixHint" data-group-id="<%= group_id %>"
+                      class="text-[10px] text-gray-400">Select one or more ontology terms, then confirm.</span>
               </div>
             </div>
 
@@ -396,7 +486,7 @@
       <% end %>
 
       <%# ── Set fixed value ── %>
-      <div id="set_value_<%= group_id %>" class="<%= pf_action == 'set_value' ? '' : 'hidden' %> pl-6 space-y-3">
+      <div id="set_value_<%= group_id %>" class="<%= (pf_action == 'set_value' && !is_constrained) ? '' : 'hidden' %> pl-6 space-y-3">
         <% if is_paired && has_ontology %>
           <%# Paired ontology field: autocomplete that fills both term ID and label %>
           <%
@@ -532,6 +622,17 @@
                 <option value="<%= val %>"><%= val %></option>
               <% end %>
             </select>
+            <% if group_id == 'is_primary_data' %>
+              <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+                <p class="text-xs text-gray-600">
+                  Per the CELLxGENE schema, this MUST be <strong>True</strong> if this is the canonical instance of this cellular observation
+                  and <strong>False</strong> if not.
+                </p>
+                <p class="text-xs text-gray-600 mt-1">
+                  This is commonly <strong>False</strong> for meta-analyses reusing data or for secondary views of data.
+                </p>
+              </div>
+            <% end %>
           <% elsif has_ontology %>
             <%# Standalone ontology field with autocomplete %>
             <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
@@ -562,10 +663,33 @@
                    name="fixes[<%= group[:term_path] %>][value]"
                    placeholder="Enter value..."
                    class="block w-80 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+            <% if group_id == 'donor_id' %>
+              <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+                <p class="text-xs text-gray-600">
+                  Per the CELLxGENE schema, this MUST be free-text that identifies a unique individual that data were derived from.
+                  If <code class="bg-gray-100 px-0.5 rounded">tissue_type</code> is "cell line", this MUST be "na".
+                </p>
+                <p class="text-xs text-gray-600 mt-1">
+                  It is STRONGLY RECOMMENDED that <strong>"pooled"</strong> be used for observations from a sample of multiple individuals
+                  that were not confidently assigned to a single individual through demultiplexing.
+                </p>
+                <p class="text-xs text-gray-600 mt-1">
+                  It is STRONGLY RECOMMENDED that <strong>"unknown"</strong> ONLY be used when it is not known which observations are from the same individual.
+                </p>
+              </div>
+            <% end %>
           <% end %>
         <% end %>
 
       </div>
+
+      <%# For constrained fields, emit hidden value inputs with the forced value %>
+      <% if is_constrained %>
+        <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= constraint[:forced_term_value] %>">
+        <% if is_paired && constraint[:forced_label_value] %>
+          <input type="hidden" name="fixes[<%= group[:label_path] %>][value]" value="<%= constraint[:forced_label_value] %>">
+        <% end %>
+      <% end %>
 
       <%# Single set of hidden action inputs (outside both panels to avoid duplicates) %>
       <%# Always emit for both fields so overrides of existing fields are possible %>

@@ -13,15 +13,20 @@ export default class extends Controller {
     "autocompleteInput", "autocompleteResults", "autocompleteWrapper",
     "selectedTerms", "termValue", "labelValue",
     "mapSelect", "mapBadges", "mapStatus",
-    "mapFixPanel", "mapFixOriginal", "mapFixInput", "mapFixResults",
-    "submitButton"
+    "mapFixPanel", "mapFixOriginal", "mapFixInput", "mapFixResults", "mapFixSelected", "mapFixConfirm", "mapFixHint",
+    "submitButton", "fixedBadge"
   ]
   static values = {
     metadataUrl: String,
     autocompleteUrl: String,
     resolveUrl: String,
     projectId: Number,
-    resultUrl: String
+    resultUrl: String,
+    schemaConstraints: Object,
+    assaySuspensionMap: Object,
+    assayAncestorTerms: Array,
+    organismIsHuman: Boolean,
+    currentTriggerValues: Object
   }
 
   connect() {
@@ -32,8 +37,13 @@ export default class extends Controller {
     // { groupId: { selectedRole, pairedRole, sourcePath, prefixes, values, resolved } }
     this.mapResolveState = {}
     this.mapFixHighlight = -1
+    // Accumulated terms for the currently open map-fix panel: { groupId: [{ identifier, name }, ...] }
+    this.mapFixAccumulated = {}
     this.subscription = null
     this.overlay = null
+    // Track the current assay-based suspension constraint so it can be
+    // re-applied when tissue_type unlocks suspension_type.
+    this.activeAssaySuspension = null
 
     // Close autocomplete and map fix dropdowns when clicking outside
     this.outsideClickHandler = (e) => {
@@ -46,8 +56,62 @@ export default class extends Controller {
     }
     document.addEventListener('click', this.outsideClickHandler)
 
+    // Hover-highlight for paired "Current field content" badges:
+    // when hovering a badge, highlight its counterpart on the other side.
+    this.pairHoverIn = (e) => {
+      const badge = e.target.closest('.cfv-pair-badge')
+      if (!badge) return
+      const group = badge.dataset.pairGroup
+      const idx = badge.dataset.pairIdx
+      if (!group || idx == null) return
+      this.element.querySelectorAll(`.cfv-pair-badge[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
+        el.classList.add('ring-2', 'ring-blue-400')
+      })
+    }
+    this.pairHoverOut = (e) => {
+      const badge = e.target.closest('.cfv-pair-badge')
+      if (!badge) return
+      const group = badge.dataset.pairGroup
+      const idx = badge.dataset.pairIdx
+      if (!group || idx == null) return
+      this.element.querySelectorAll(`.cfv-pair-badge[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
+        el.classList.remove('ring-2', 'ring-blue-400')
+      })
+    }
+    this.element.addEventListener('mouseover', this.pairHoverIn)
+    this.element.addEventListener('mouseout', this.pairHoverOut)
+
     // Auto-trigger map source selects that are pre-selected (from prefill data)
     requestAnimationFrame(() => this.triggerPreselectedMapSources())
+
+    // Listen for changes on set_value fields that trigger cross-field constraints.
+    // - assay_ontology_term_id -> determines suspension_type
+    // - tissue_type -> if "cell line", ethnicity must be "na"
+    this.element.addEventListener('change', (e) => {
+      const input = e.target
+      const name = input.name || ''
+      if (name.includes('assay_ontology_term_id') && name.includes('[value]')) {
+        this.onAssayChanged(input.value)
+      }
+      if (name.includes('tissue_type') && name.includes('[value]')) {
+        this.onTissueTypeChanged(input.value)
+      }
+      // Re-evaluate "Fixed" badge when any value input changes
+      if (name.includes('[value]') || name.includes('[source]')) {
+        const row = input.closest('[data-compliance-fix-target="fieldRow"]')
+        if (row) this.updateFixedBadge(row.dataset.groupId)
+      }
+    })
+
+    // Evaluate cross-field constraints for values already present in the LOOM
+    // (compliant fields whose values were set in a previous fix). Without this,
+    // constraints like assay -> suspension_type would not trigger for fields
+    // that are already compliant and therefore not actively changed.
+    requestAnimationFrame(() => this.evaluateInitialTriggers())
+
+    // Initial evaluation of "Fixed" badges (after a short delay to allow
+    // pre-selected map sources to trigger their resolution).
+    setTimeout(() => this.updateFixedBadges(), 500)
   }
 
   triggerPreselectedMapSources() {
@@ -81,12 +145,293 @@ export default class extends Controller {
 
   disconnect() {
     document.removeEventListener('click', this.outsideClickHandler)
+    this.element.removeEventListener('mouseover', this.pairHoverIn)
+    this.element.removeEventListener('mouseout', this.pairHoverOut)
     Object.values(this.debounceTimers).forEach(t => clearTimeout(t))
     if (this.subscription) {
       this.subscription.unsubscribe()
       this.subscription = null
     }
     this.removeOverlay()
+  }
+
+  // ── Cross-field schema constraints ──
+
+  // Get the current unique LOOM values for a field path.
+  // Returns an array of unique values, or null if unknown.
+  getCurrentFieldValues(fieldPath) {
+    const triggers = this.currentTriggerValuesValue || {}
+    const fv = triggers.field_values || {}
+    return fv[fieldPath] || null
+  }
+
+  // Check whether a field currently has a single uniform value matching the required one.
+  fieldAlreadyHasValue(fieldPath, requiredValue) {
+    const vals = this.getCurrentFieldValues(fieldPath)
+    if (!vals || vals.length === 0) return false
+    return vals.length === 1 && vals[0] === requiredValue
+  }
+
+  // Lock a field: disable all radio buttons and inputs, select skip or set_value.
+  // If the field already has the correct value, select "skip". Otherwise "set_value".
+  // reason: string to show in the constraint message.
+  // fields: { termPath, termValue, labelPath?, labelValue? }
+  lockField(groupId, reason, fields) {
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (!row) return
+
+    // Skip if this field has a static backend constraint already
+    const staticConstraint = row.querySelector(`[data-constraint-group="${groupId}"]`)
+    if (staticConstraint) return
+
+    const alreadyCorrect = this.fieldAlreadyHasValue(fields.termPath, fields.termValue)
+    const action = alreadyCorrect ? 'skip' : 'set_value'
+
+    // Set hidden action inputs
+    this.hiddenActionTargets.forEach(input => {
+      if (input.dataset.groupId === groupId) input.value = action
+    })
+
+    // Select and disable all radio buttons
+    const radios = row.querySelectorAll(`input[type="radio"][name="group_action_${groupId}"]`)
+    radios.forEach(r => {
+      r.checked = (r.value === action)
+      r.disabled = true
+    })
+
+    const valuePanel = document.getElementById(`set_value_${groupId}`)
+    const mapPanel = document.getElementById(`map_from_${groupId}`)
+
+    if (action === 'skip') {
+      if (valuePanel) valuePanel.classList.add('hidden')
+      if (mapPanel) mapPanel.classList.add('hidden')
+    } else {
+      if (valuePanel) valuePanel.classList.remove('hidden')
+      if (mapPanel) mapPanel.classList.add('hidden')
+
+      // Set the value inputs
+      const selectInput = row.querySelector(`select[name="fixes[${fields.termPath}][value]"]`)
+      const textInput = row.querySelector(`input[name="fixes[${fields.termPath}][value]"]`)
+      if (selectInput) { selectInput.value = fields.termValue; selectInput.disabled = true }
+      if (textInput) { textInput.value = fields.termValue; textInput.disabled = true }
+
+      if (fields.labelPath) {
+        const labelSelect = row.querySelector(`select[name="fixes[${fields.labelPath}][value]"]`)
+        const labelText = row.querySelector(`input[name="fixes[${fields.labelPath}][value]"]`)
+        if (labelSelect) { labelSelect.value = fields.labelValue; labelSelect.disabled = true }
+        if (labelText) { labelText.value = fields.labelValue; labelText.disabled = true }
+      }
+    }
+
+    // Disable map-from dropdowns too
+    row.querySelectorAll('select[data-compliance-fix-target="mapSelect"]').forEach(s => { s.disabled = true })
+
+    // Show constraint message
+    const dynMsg = row.querySelector(`[data-constraint-dynamic="${groupId}"]`)
+    const msgEl = row.querySelector(`[data-constraint-message="${groupId}"]`)
+    const detailEl = row.querySelector(`[data-constraint-detail="${groupId}"]`)
+    if (dynMsg && msgEl && detailEl) {
+      msgEl.textContent = `Schema constraint: ${reason}`
+      if (alreadyCorrect) {
+        detailEl.textContent = `Value is already "${fields.termValue}" -- no change needed.`
+      } else {
+        detailEl.textContent = `Value will be set to "${fields.termValue}".`
+      }
+      dynMsg.classList.remove('hidden')
+    }
+
+    this.updateFixedBadge(groupId)
+  }
+
+  // Unlock a field: re-enable radio buttons and inputs, hide constraint message.
+  unlockField(groupId) {
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (!row) return
+
+    // Re-enable radio buttons
+    const radios = row.querySelectorAll(`input[type="radio"][name="group_action_${groupId}"]`)
+    radios.forEach(r => { r.disabled = false })
+
+    // Re-enable inputs in set_value panel
+    const valuePanel = document.getElementById(`set_value_${groupId}`)
+    if (valuePanel) {
+      valuePanel.querySelectorAll('select, input[type="text"]').forEach(el => { el.disabled = false })
+    }
+
+    // Re-enable map-from dropdowns
+    row.querySelectorAll('select[data-compliance-fix-target="mapSelect"]').forEach(s => { s.disabled = false })
+
+    // Hide constraint message
+    const dynMsg = row.querySelector(`[data-constraint-dynamic="${groupId}"]`)
+    if (dynMsg) dynMsg.classList.add('hidden')
+
+    this.updateFixedBadge(groupId)
+  }
+
+  evaluateInitialTriggers() {
+    const triggers = this.currentTriggerValuesValue || {}
+    // The backend pre-computes the union of allowed suspension types across
+    // all assay terms in the project.
+    if (triggers.assay_allowed_suspension) {
+      const assayIds = triggers.assay_ontology_term_ids || []
+      const label = assayIds.length === 1 ? assayIds[0] : `${assayIds.length} assays`
+      this.applySuspensionConstraint(label, triggers.assay_allowed_suspension)
+    } else if (triggers.assay_ontology_term_ids && triggers.assay_ontology_term_ids.length > 0) {
+      // Fallback: compute union on the frontend from the exact-match map
+      this.computeAndApplySuspensionFromAssays(triggers.assay_ontology_term_ids)
+    }
+    if (triggers.tissue_type) {
+      this.onTissueTypeChanged(triggers.tissue_type)
+    }
+  }
+
+  // Compute the union of allowed suspension types for a set of assay term IDs
+  // using the frontend exact-match map. Used when backend didn't resolve.
+  computeAndApplySuspensionFromAssays(assayIds) {
+    const map = this.assaySuspensionMapValue || {}
+    const unionSet = new Set()
+    assayIds.forEach(id => {
+      const perAssay = map[id]
+      if (perAssay) perAssay.forEach(v => unionSet.add(v))
+    })
+    if (unionSet.size === 0) return
+    const allowed = Array.from(unionSet)
+    const label = assayIds.length === 1 ? assayIds[0] : `${assayIds.length} assays`
+    this.applySuspensionConstraint(label, allowed)
+  }
+
+  onAssayChanged(assayTermId) {
+    if (!assayTermId) {
+      this.activeAssaySuspension = null
+      this.unlockField('suspension_type')
+      return
+    }
+
+    // Clear any previous suspension_type constraint
+    this.unlockField('suspension_type')
+
+    // Get all assay term IDs from the current LOOM values and combine with
+    // the newly selected one, then compute the union.
+    const triggers = this.currentTriggerValuesValue || {}
+    const existingAssays = triggers.assay_ontology_term_ids || []
+    const allAssays = [...new Set([...existingAssays, assayTermId])]
+    this.computeAndApplySuspensionFromAssays(allAssays)
+  }
+
+  applySuspensionConstraint(assayLabel, allowed) {
+    this.activeAssaySuspension = { assayLabel, allowed }
+    const suspRow = this.fieldRowTargets.find(el => el.dataset.groupId === 'suspension_type')
+    if (!suspRow) return
+
+    if (allowed.length === 1) {
+      this.lockField('suspension_type', `suspension_type is determined by assay (${assayLabel}).`, {
+        termPath: '/col_attrs/suspension_type',
+        termValue: allowed[0]
+      })
+    } else {
+      // Multiple allowed values: do NOT lock the field -- the user must choose.
+      // Just restrict dropdown options and show an informational message.
+      const selectEl = suspRow.querySelector('select[name="fixes[/col_attrs/suspension_type][value]"]')
+      if (selectEl) {
+        Array.from(selectEl.options).forEach(opt => {
+          if (opt.value === '') return
+          opt.disabled = !allowed.includes(opt.value)
+        })
+        if (selectEl.value && !allowed.includes(selectEl.value)) {
+          selectEl.value = allowed[0]
+        }
+      }
+
+      const dynMsg = suspRow.querySelector('[data-constraint-dynamic="suspension_type"]')
+      const msgEl = suspRow.querySelector('[data-constraint-message="suspension_type"]')
+      const detailEl = suspRow.querySelector('[data-constraint-detail="suspension_type"]')
+      if (dynMsg && msgEl && detailEl) {
+        msgEl.textContent = `Schema constraint: suspension_type is restricted by assay (${assayLabel}).`
+        detailEl.textContent = `Allowed values: ${allowed.join(', ')}. Please select one.`
+        dynMsg.classList.remove('hidden')
+      }
+    }
+  }
+
+  onTissueTypeChanged(value) {
+    if (!value) return
+    const isCellLine = (value === 'cell line')
+
+    // Fields to force when tissue_type = "cell line"
+    const cellLineForcedFields = [
+      { groupId: 'self_reported_ethnicity', termPath: '/col_attrs/self_reported_ethnicity_ontology_term_id', termValue: 'na', labelPath: '/col_attrs/self_reported_ethnicity', labelValue: 'na' },
+      { groupId: 'sex', termPath: '/col_attrs/sex_ontology_term_id', termValue: 'na', labelPath: '/col_attrs/sex', labelValue: 'na' },
+      { groupId: 'development_stage', termPath: '/col_attrs/development_stage_ontology_term_id', termValue: 'unknown', labelPath: '/col_attrs/development_stage', labelValue: 'unknown' },
+      { groupId: 'donor_id', termPath: '/col_attrs/donor_id', termValue: 'na' },
+      { groupId: 'suspension_type', termPath: '/col_attrs/suspension_type', termValue: 'na' }
+    ]
+
+    const affectedGroups = ['self_reported_ethnicity', 'sex', 'development_stage', 'donor_id', 'suspension_type', 'tissue']
+
+    if (isCellLine) {
+      cellLineForcedFields.forEach(field => {
+        this.lockField(field.groupId, 'tissue_type is "cell line".', field)
+      })
+
+      // Informational message for tissue_ontology_term_id (not locked, just a note)
+      const tissueRow = this.fieldRowTargets.find(el => el.dataset.groupId === 'tissue')
+      if (tissueRow) {
+        const dynMsg = tissueRow.querySelector('[data-constraint-dynamic="tissue"]')
+        const msgEl = tissueRow.querySelector('[data-constraint-message="tissue"]')
+        const detailEl = tissueRow.querySelector('[data-constraint-detail="tissue"]')
+        if (dynMsg && msgEl && detailEl) {
+          msgEl.textContent = 'Note: tissue_type is "cell line".'
+          detailEl.textContent = 'tissue_ontology_term_id MUST be a Cellosaurus (CVCL_) term.'
+          dynMsg.classList.remove('hidden')
+        }
+      }
+    } else {
+      // Unlock all fields that were constrained by cell line
+      affectedGroups.forEach(gid => {
+        this.unlockField(gid)
+      })
+      // Re-apply assay-based suspension_type constraint if one was active
+      // (the cell line unlock above would have cleared it)
+      if (this.activeAssaySuspension) {
+        this.applySuspensionConstraint(this.activeAssaySuspension.assayLabel, this.activeAssaySuspension.allowed)
+      }
+    }
+  }
+
+  // Force a field group to a specific value: switch to set_value, fill the value input.
+  // Used for non-locking constraints or intermediate operations.
+  forceFieldValue(groupId, fieldPath, value) {
+    this.hiddenActionTargets.forEach(input => {
+      if (input.dataset.groupId === groupId) input.value = 'set_value'
+    })
+
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (row) {
+      const radios = row.querySelectorAll(`input[type="radio"][name="group_action_${groupId}"]`)
+      radios.forEach(r => { r.checked = (r.value === 'set_value') })
+    }
+
+    const valuePanel = document.getElementById(`set_value_${groupId}`)
+    const mapPanel = document.getElementById(`map_from_${groupId}`)
+    if (valuePanel) valuePanel.classList.remove('hidden')
+    if (mapPanel) mapPanel.classList.add('hidden')
+
+    if (row) {
+      const selectInput = row.querySelector(`select[name="fixes[${fieldPath}][value]"]`)
+      const textInput = row.querySelector(`input[name="fixes[${fieldPath}][value]"]`)
+      if (selectInput) selectInput.value = value
+      if (textInput) textInput.value = value
+    }
+  }
+
+  // Force the label side of a paired field group to a specific value
+  forceFieldLabelValue(groupId, labelPath, value) {
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (!row) return
+    const selectInput = row.querySelector(`select[name="fixes[${labelPath}][value]"]`)
+    const textInput = row.querySelector(`input[name="fixes[${labelPath}][value]"]`)
+    if (selectInput) selectInput.value = value
+    if (textInput) textInput.value = value
   }
 
   // ── Form submission with loading overlay ──
@@ -311,6 +656,8 @@ export default class extends Controller {
         input.value = 'set_value'
       }
     })
+
+    this.updateFixedBadge(groupId)
   }
 
   // ── Metadata preview ──
@@ -721,14 +1068,57 @@ export default class extends Controller {
     // Show resolution status
     if (statusEl) {
       if (unresolvedValues.length > 0) {
-        statusEl.textContent = `Resolved ${resolvedCount}/${values.length} values. ${unresolvedValues.length} unresolved (shown first in red). Click on red badges to fix them.`
+        statusEl.innerHTML = ''
+        const msg = document.createElement('span')
+        msg.textContent = `Resolved ${resolvedCount}/${values.length} values. ${unresolvedValues.length} unresolved (shown first in red). Click on red badges to fix them. `
+        statusEl.appendChild(msg)
+
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.textContent = `Set ${unresolvedValues.length} unresolved to "unknown"`
+        btn.className = 'ml-2 px-2 py-0.5 text-[10px] rounded bg-amber-200 text-amber-800 hover:bg-amber-300 border border-amber-300'
+        btn.dataset.action = 'click->compliance-fix#setUnresolvedToUnknown'
+        btn.dataset.groupId = groupId
+        statusEl.appendChild(btn)
+
         statusEl.className = 'text-xs text-amber-600 font-medium'
       } else {
+        statusEl.innerHTML = ''
         statusEl.textContent = `All ${resolvedCount} values resolved successfully.`
         statusEl.className = 'text-xs text-green-600 italic'
       }
       statusEl.classList.remove('hidden')
     }
+
+    this.updateFixedBadge(groupId)
+  }
+
+  setUnresolvedToUnknown(event) {
+    const groupId = event.currentTarget.dataset.groupId
+    const state = this.mapResolveState[groupId]
+    if (!state) return
+
+    const { values, resolved, selectedRole, pairedRole, sourcePath, sourceRenames } = state
+
+    // Map every unresolved value to "unknown"
+    values.forEach(val => {
+      if (!resolved[val]) {
+        resolved[val] = 'unknown'
+      }
+    })
+
+    // Also rename the source side for unresolved values so the source field
+    // itself gets "unknown" written (the original value is replaced).
+    values.forEach(val => {
+      if (!sourceRenames[val] && resolved[val] === 'unknown') {
+        sourceRenames[val] = 'unknown'
+      }
+    })
+
+    // Re-render badges and update the hidden form inputs
+    this.renderMapBadges(groupId)
+    this.setResolveMapInput(groupId, pairedRole, sourcePath, resolved)
+    this.updateSourceFieldAction(groupId)
   }
 
   // ── Inline fix autocomplete for unresolved map-from badges ──
@@ -746,6 +1136,28 @@ export default class extends Controller {
 
     // Store which value we're fixing
     fixPanel.dataset.fixingValue = originalValue
+
+    // Pre-populate accumulated terms if this value was already resolved
+    // (allows editing an existing multi-term assignment)
+    const state = this.mapResolveState[groupId]
+    this.mapFixAccumulated[groupId] = []
+    if (state && state.resolved[originalValue]) {
+      const existingResolved = state.resolved[originalValue]
+      const existingSource = state.sourceRenames[originalValue] || ''
+      const resolvedParts = existingResolved.split(' || ')
+      const sourceParts = existingSource.split(' || ')
+      resolvedParts.forEach((part, idx) => {
+        const srcPart = sourceParts[idx] || ''
+        if (state.selectedRole === 'term') {
+          // paired = names, source = identifiers
+          this.mapFixAccumulated[groupId].push({ identifier: srcPart, name: part })
+        } else {
+          // paired = identifiers, source = names
+          this.mapFixAccumulated[groupId].push({ identifier: part, name: srcPart })
+        }
+      })
+    }
+    this.renderMapFixSelected(groupId)
 
     // Show the panel with the original value
     if (fixOriginal) fixOriginal.textContent = originalValue
@@ -870,32 +1282,97 @@ export default class extends Controller {
     const identifier = item.dataset.identifier
     const name = item.dataset.name
 
+    // Accumulate this term (avoid duplicates)
+    if (!this.mapFixAccumulated[groupId]) this.mapFixAccumulated[groupId] = []
+    const already = this.mapFixAccumulated[groupId].some(t => t.identifier === identifier)
+    if (!already) {
+      this.mapFixAccumulated[groupId].push({ identifier, name })
+    }
+
+    // Re-render the selected terms area, show Confirm button
+    this.renderMapFixSelected(groupId)
+
+    // Clear search input so user can add another term
+    const fixInput = this.mapFixInputTargets.find(el => el.dataset.groupId === groupId)
+    if (fixInput) { fixInput.value = ''; fixInput.focus() }
+    this.hideMapFixResults(groupId)
+  }
+
+  removeMapFixTerm(event) {
+    const groupId = event.currentTarget.dataset.groupId
+    const identifier = event.currentTarget.dataset.identifier
+    if (!this.mapFixAccumulated[groupId]) return
+    this.mapFixAccumulated[groupId] = this.mapFixAccumulated[groupId].filter(t => t.identifier !== identifier)
+    this.renderMapFixSelected(groupId)
+  }
+
+  renderMapFixSelected(groupId) {
+    const selectedEl = this.mapFixSelectedTargets.find(el => el.dataset.groupId === groupId)
+    const confirmBtn = this.mapFixConfirmTargets.find(el => el.dataset.groupId === groupId)
+    const hintEl = this.mapFixHintTargets.find(el => el.dataset.groupId === groupId)
+    const terms = this.mapFixAccumulated[groupId] || []
+
+    if (selectedEl) {
+      if (terms.length === 0) {
+        selectedEl.innerHTML = ''
+        selectedEl.classList.add('hidden')
+      } else {
+        selectedEl.classList.remove('hidden')
+        selectedEl.innerHTML = terms.map(t =>
+          `<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200">` +
+            `<span class="font-mono">${this.escapeHtml(t.identifier)}</span>` +
+            `<span class="text-gray-400">-</span> ${this.escapeHtml(t.name)}` +
+            `<button type="button" data-action="click->compliance-fix#removeMapFixTerm" ` +
+              `data-group-id="${groupId}" data-identifier="${this.escapeHtml(t.identifier)}" ` +
+              `class="ml-1 text-red-400 hover:text-red-600 leading-none" title="Remove">x</button>` +
+          `</span>`
+        ).join('')
+      }
+    }
+    if (confirmBtn) {
+      if (terms.length > 0) {
+        confirmBtn.classList.remove('hidden')
+        confirmBtn.textContent = terms.length === 1 ? 'Confirm' : `Confirm (${terms.length} terms, joined with ||)`
+      } else {
+        confirmBtn.classList.add('hidden')
+      }
+    }
+    if (hintEl) {
+      hintEl.classList.toggle('hidden', terms.length > 0)
+    }
+  }
+
+  confirmMapFix(event) {
+    const groupId = event.currentTarget.dataset.groupId
     const state = this.mapResolveState[groupId]
     if (!state) return
 
-    // Find which original value we are fixing
+    const terms = this.mapFixAccumulated[groupId] || []
+    if (terms.length === 0) return
+
     const fixPanel = this.mapFixPanelTargets.find(el => el.dataset.groupId === groupId)
     if (!fixPanel) return
     const originalValue = fixPanel.dataset.fixingValue
 
+    // Join multiple terms with || separator
+    const joinedIdentifiers = terms.map(t => t.identifier).join(' || ')
+    const joinedNames = terms.map(t => t.name).join(' || ')
+
     // Update both maps: the paired resolve map AND the source-side rename map
-    // Both sides must be coherent with the selected ontology term
     if (state.selectedRole === 'term') {
       // Source has identifiers -> paired gets names
-      state.resolved[originalValue] = name
-      // Source identifier also needs correcting to the selected identifier
-      state.sourceRenames[originalValue] = identifier
+      state.resolved[originalValue] = joinedNames
+      state.sourceRenames[originalValue] = joinedIdentifiers
     } else {
       // Source has names -> paired gets identifiers
-      state.resolved[originalValue] = identifier
-      // Source name also needs correcting to the selected ontology name
-      state.sourceRenames[originalValue] = name
+      state.resolved[originalValue] = joinedIdentifiers
+      state.sourceRenames[originalValue] = joinedNames
     }
 
-    // Re-render badges (will show corrected values on both sides)
+    // Re-render badges
     this.renderMapBadges(groupId)
 
-    // Update hidden inputs for both the paired field and the source field
+    // Update hidden inputs
     this.setResolveMapInput(groupId, state.pairedRole, state.sourcePath, state.resolved)
     this.updateSourceFieldAction(groupId)
 
@@ -1051,9 +1528,14 @@ export default class extends Controller {
     // Add visual badge for selected term
     this.addSelectedBadge(groupId, identifier, name, isMulti)
 
+    // Trigger cross-field constraint checks (e.g. assay -> suspension_type)
+    if (termInput) termInput.dispatchEvent(new Event('change', { bubbles: true }))
+
     // Clear autocomplete input and hide results
     if (input) input.value = ''
     this.hideResults(groupId)
+
+    this.updateFixedBadge(groupId)
   }
 
   addSelectedBadge(groupId, identifier, name, isMulti) {
@@ -1095,12 +1577,95 @@ export default class extends Controller {
 
     // Remove badge element
     btn.closest('span').remove()
+
+    this.updateFixedBadge(groupId)
   }
 
   // ── Helpers ──
 
   getResultsEl(groupId) {
     return this.autocompleteResultsTargets.find(el => el.dataset.groupId === groupId)
+  }
+
+  // Evaluate all field groups and update their "Fixed" badges
+  updateFixedBadges() {
+    this.fieldRowTargets.forEach(row => {
+      const groupId = row.dataset.groupId
+      if (groupId) this.updateFixedBadge(groupId)
+    })
+  }
+
+  // Evaluate whether a single field group is fully fixed and toggle its badge
+  updateFixedBadge(groupId) {
+    const badge = this.fixedBadgeTargets.find(el => el.dataset.groupId === groupId)
+    if (!badge) return
+
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (!row) return
+
+    const termHasError = row.dataset.termHasError === 'true'
+    const labelHasError = row.dataset.labelHasError === 'true'
+    const isAuto = row.dataset.isAuto === 'true'
+
+    // Auto-filled or constrained groups are always fixed
+    if (isAuto) {
+      badge.classList.remove('hidden')
+      return
+    }
+
+    // If neither path has a validation error, the group is already compliant
+    if (!termHasError && !labelHasError) {
+      badge.classList.remove('hidden')
+      return
+    }
+
+    // Determine the currently selected action
+    const actionInput = this.hiddenActionTargets.find(
+      el => el.dataset.groupId === groupId && el.dataset.role === 'term_action'
+    )
+    const action = actionInput ? actionInput.value : 'skip'
+
+    if (action === 'skip') {
+      badge.classList.add('hidden')
+      return
+    }
+
+    if (action === 'set_value') {
+      // Fixed if the term value input is filled (and label too if paired & has error)
+      const termInput = this.termValueTargets.find(el => el.dataset.groupId === groupId)
+      const labelInput = this.labelValueTargets.find(el => el.dataset.groupId === groupId)
+
+      // Also check for select or plain text inputs in the set_value panel
+      const valuePanel = document.getElementById(`set_value_${groupId}`)
+      let termFilled = termInput && termInput.value.trim() !== ''
+      let labelFilled = labelInput && labelInput.value.trim() !== ''
+
+      if (!termFilled && valuePanel) {
+        const sel = valuePanel.querySelector('select[name*="[value]"]')
+        const txt = valuePanel.querySelector('input[name*="[value]"]:not([readonly])')
+        if (sel && sel.value) termFilled = true
+        if (txt && txt.value.trim()) termFilled = true
+      }
+
+      const termOk = !termHasError || termFilled
+      const labelOk = !labelHasError || labelFilled
+      badge.classList.toggle('hidden', !(termOk && labelOk))
+      return
+    }
+
+    if (action === 'map_from' || action === 'resolve_paired') {
+      // Fixed if all values in the map are resolved
+      const state = this.mapResolveState[groupId]
+      if (!state || !state.values || state.values.length === 0) {
+        badge.classList.add('hidden')
+        return
+      }
+      const allResolved = state.values.every(v => !!state.resolved[v])
+      badge.classList.toggle('hidden', !allResolved)
+      return
+    }
+
+    badge.classList.add('hidden')
   }
 
   escapeHtml(str) {

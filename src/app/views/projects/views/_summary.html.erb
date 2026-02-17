@@ -327,18 +327,23 @@
                 <div class="text-sm text-red-800"><%= validation_result['error'] %></div>
               </div>
             <% else %>
+              <%
+                s_errors_count   = validation_result['errors_count']       || validation_result['errors']&.count       || 0
+                s_warnings_count = validation_result['warnings_count']     || validation_result['warnings']&.count     || 0
+                s_valid_count    = validation_result['valid_checks_count'] || validation_result['valid_checks']&.count || 0
+              %>
               <div class="grid grid-cols-3 gap-4 text-center mb-3">
-                <div class="bg-red-50 rounded p-2">
-                  <div class="text-2xl font-bold text-red-600"><%= validation_result['errors_count'] || validation_result['errors']&.count || 0 %></div>
-                  <div class="text-xs text-red-700">Errors</div>
+                <div class="<%= s_errors_count > 0 ? 'bg-red-50' : 'bg-gray-50' %> rounded-lg p-4">
+                  <div class="text-2xl font-bold <%= s_errors_count > 0 ? 'text-red-600' : 'text-gray-900' %>"><%= s_errors_count %></div>
+                  <div class="text-sm text-gray-500">Errors</div>
                 </div>
-                <div class="bg-yellow-50 rounded p-2">
-                  <div class="text-2xl font-bold text-yellow-600"><%= validation_result['warnings_count'] || validation_result['warnings']&.count || 0 %></div>
-                  <div class="text-xs text-yellow-700">Warnings</div>
+                <div class="<%= s_warnings_count > 0 ? 'bg-yellow-50' : 'bg-gray-50' %> rounded-lg p-4">
+                  <div class="text-2xl font-bold <%= s_warnings_count > 0 ? 'text-yellow-600' : 'text-gray-900' %>"><%= s_warnings_count %></div>
+                  <div class="text-sm text-gray-500">Warnings</div>
                 </div>
-                <div class="bg-blue-50 rounded p-2">
-                  <div class="text-2xl font-bold text-blue-600"><%= validation_result['info_count'] || validation_result['info']&.count || 0 %></div>
-                  <div class="text-xs text-blue-700">Info</div>
+                <div class="bg-green-50 rounded-lg p-4">
+                  <div class="text-2xl font-bold text-green-600"><%= s_valid_count %></div>
+                  <div class="text-sm text-gray-500">Passed</div>
                 </div>
               </div>
 
@@ -351,7 +356,7 @@
 
             <div class="flex items-center justify-between">
               <div class="flex flex-wrap gap-3">
-                <%= link_to compliance_project_result_path(@project.id),
+                <%= link_to project_path(@project, view: 'compliance'),
                     class: "inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors" do %>
                   View Full Report
                 <% end %>

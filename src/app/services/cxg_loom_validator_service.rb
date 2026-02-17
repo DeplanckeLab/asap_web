@@ -29,6 +29,8 @@ require 'shellwords'
 # ASAP version. The specific versions pinned by CELLxGENE are NOT enforced.
 # This validator checks ontology term FORMAT (PREFIX:ID) but not specific versions.
 class CxgLoomValidatorService
+  include CxgSchemaRules
+
   SCHEMA_VERSION = '7.1.0'
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run').freeze
 
@@ -47,6 +49,19 @@ class CxgLoomValidatorService
   # Valid values for enumerated fields
   VALID_TISSUE_TYPES = ['tissue', 'organoid', 'cell line', 'primary cell culture'].freeze
   VALID_SUSPENSION_TYPES = ['cell', 'nucleus', 'na'].freeze
+
+  # Schema-allowed special (non-ontology) values per ontology field.
+  # These are free-text values that the CELLxGENE schema explicitly permits
+  # alongside ontology term identifiers.
+  ALLOWED_SPECIAL_VALUES = {
+    '/col_attrs/cell_type_ontology_term_id'                     => %w[unknown na].freeze,
+    '/col_attrs/sex_ontology_term_id'                           => %w[unknown na].freeze,
+    '/col_attrs/development_stage_ontology_term_id'             => %w[unknown na].freeze,
+    '/col_attrs/self_reported_ethnicity_ontology_term_id'       => %w[unknown na multiethnic].freeze,
+    '/col_attrs/disease_ontology_term_id'                       => %w[].freeze,
+    '/col_attrs/tissue_ontology_term_id'                        => %w[].freeze,
+    '/col_attrs/assay_ontology_term_id'                         => %w[].freeze,
+  }.freeze
   # Required cell metadata fields (curator must annotate)
   REQUIRED_CELL_METADATA = %w[
     assay_ontology_term_id
@@ -75,7 +90,7 @@ class CxgLoomValidatorService
   # Ontology label for global attrs
   ONTOLOGY_LABEL_GLOBAL_ATTRS = %w[organism].freeze
 
-  Result = Struct.new(:valid?, :errors, :warnings, :info, :schema_version, :validated_at, keyword_init: true)
+  Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :schema_version, :validated_at, :field_resolutions, keyword_init: true)
 
   def initialize(loom_path, options = {})
     @loom_path = loom_path
@@ -85,7 +100,20 @@ class CxgLoomValidatorService
     @errors = []
     @warnings = []
     @info = []
+    @valid_checks = []
+    @field_resolutions = {}
     @metadata_cache = {}
+
+    # Pre-load all latest-version Annot records keyed by name for fast lookups.
+    # This avoids N+1 queries when get_metadata_sample / get_global_attr /
+    # annot_unique_values are called for each field during validation.
+    if @project
+      @annots_by_name = @project.annots
+        .where(latest_version: true)
+        .index_by(&:name)
+    else
+      @annots_by_name = {}
+    end
   end
 
   def validate
@@ -105,6 +133,8 @@ class CxgLoomValidatorService
       validate_required_global_attributes
       validate_ontology_terms
       validate_organism_specific_requirements
+      validate_cross_field_constraints
+      validate_ontology_values_in_database
 
       @logger.info("[CxgLoomValidatorService] scFAIR cell metadata compliance complete. Errors: #{@errors.count}, Warnings: #{@warnings.count}")
     rescue StandardError => e
@@ -124,19 +154,19 @@ class CxgLoomValidatorService
       errors: @errors,
       warnings: @warnings,
       info: @info,
+      valid_checks: @valid_checks,
       schema_version: SCHEMA_VERSION,
-      validated_at: Time.current.iso8601
+      validated_at: Time.current.iso8601,
+      field_resolutions: @field_resolutions
     )
   end
 
   def gather_file_info
     @file_info = extract_file_structure
-    @info << { field: 'file', message: "File: #{File.basename(@loom_path)}, Size: #{format_size(File.size(@loom_path))}" }
-    
+    @valid_checks << { field: 'file', message: "File readable: #{File.basename(@loom_path)}, Size: #{format_size(File.size(@loom_path))}" }
+
     if @file_info
-      @info << { field: 'dimensions', message: "Cells: #{@file_info[:n_cells]}, Genes: #{@file_info[:n_genes]}" }
-      @info << { field: 'col_attrs', message: "Cell metadata fields: #{@file_info[:col_attrs]&.join(', ') || 'none'}" }
-      @info << { field: 'global_attrs', message: "Global attributes: #{@file_info[:global_attrs]&.join(', ') || 'none'}" }
+      @valid_checks << { field: 'dimensions', message: "Matrix dimensions: #{@file_info[:n_cells]} cells, #{@file_info[:n_genes]} genes" }
     end
   end
 
@@ -150,7 +180,7 @@ class CxgLoomValidatorService
 
   # Use Annot records from the project database (fast, no external process)
   def extract_from_annots
-    annot_names = @project.annots.pluck(:name).compact
+    annot_names = @annots_by_name.keys
 
     if annot_names.empty?
       @warnings << { field: 'file_info', message: 'No annotations found for this project' }
@@ -254,28 +284,35 @@ class CxgLoomValidatorService
     col_attrs = @file_info[:col_attrs] || []
 
     # Check for CellID (required unique identifier)
-    unless col_attrs.include?('CellID') || col_attrs.include?('cell_id') || col_attrs.include?('obs_names')
-      @errors << { field: '/col_attrs/CellID', message: 'Cell identifiers not found. REQUIRED: unique cell identifiers in /col_attrs/CellID' }
+    if col_attrs.include?('CellID') || col_attrs.include?('cell_id') || col_attrs.include?('obs_names')
+      @valid_checks << { field: '/col_attrs/CellID', message: 'Found /col_attrs/CellID metadata', check_type: 'presence' }
+    else
+      @errors << { field: '/col_attrs/CellID', message: 'Missing /col_attrs/CellID metadata (unique cell identifiers required)', check_type: 'presence' }
     end
 
     # Check required cell metadata fields
     REQUIRED_CELL_METADATA.each do |field|
-      unless col_attrs.include?(field)
+      if col_attrs.include?(field)
+        @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
+      else
         # cell_type_ontology_term_id is conditionally required
         if field == 'cell_type_ontology_term_id'
           is_pre_analysis = get_global_attr('is_pre_analysis')
           if is_pre_analysis == true || is_pre_analysis == 'true'
-            @info << { field: "/col_attrs/#{field}", message: 'Skipped (pre-analysis dataset)' }
+            @valid_checks << { field: "/col_attrs/#{field}", message: 'Skipped (pre-analysis dataset)', check_type: 'presence' }
             next
           end
         end
-        @errors << { field: "/col_attrs/#{field}", message: "REQUIRED field '#{field}' not found in cell metadata" }
+        @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required by schema)", check_type: 'presence' }
       end
     end
 
     # Check for ontology label fields (required alongside their _ontology_term_id counterpart)
     ONTOLOGY_LABEL_CELL_METADATA.each do |field|
-      next if col_attrs.include?(field)
+      if col_attrs.include?(field)
+        @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
+        next
+      end
 
       # cell_type follows the same conditional rule as cell_type_ontology_term_id
       if field == 'cell_type'
@@ -283,8 +320,7 @@ class CxgLoomValidatorService
         next if is_pre_analysis == true || is_pre_analysis == 'true'
       end
 
-      ontology_field = "#{field}_ontology_term_id"
-      @errors << { field: "/col_attrs/#{field}", message: "REQUIRED field '#{field}' not found. This is the human-readable label for '#{ontology_field}'." }
+      @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required by schema)", check_type: 'presence' }
     end
 
     # Validate tissue_type values if present
@@ -303,8 +339,10 @@ class CxgLoomValidatorService
       is_single = get_global_attr('spatial/is_single') || get_global_attr('spatial_is_single')
       if is_single == true || is_single == 'true'
         %w[array_row array_col in_tissue].each do |field|
-          unless col_attrs.include?(field)
-            @errors << { field: "/col_attrs/#{field}", message: "REQUIRED for Visium spatial data with is_single=true" }
+          if col_attrs.include?(field)
+            @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
+          else
+            @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required for Visium spatial data with is_single=true)", check_type: 'presence' }
           end
         end
       end
@@ -313,11 +351,15 @@ class CxgLoomValidatorService
     # Check for genetic perturbation fields
     has_perturbations = get_global_attr('genetic_perturbations').present?
     if has_perturbations
-      unless col_attrs.include?('genetic_perturbation_id')
-        @errors << { field: '/col_attrs/genetic_perturbation_id', message: 'REQUIRED when uns["genetic_perturbations"] is present' }
+      if col_attrs.include?('genetic_perturbation_id')
+        @valid_checks << { field: '/col_attrs/genetic_perturbation_id', message: 'Found /col_attrs/genetic_perturbation_id metadata', check_type: 'presence' }
+      else
+        @errors << { field: '/col_attrs/genetic_perturbation_id', message: 'Missing /col_attrs/genetic_perturbation_id metadata (required when genetic_perturbations is present)', check_type: 'presence' }
       end
-      unless col_attrs.include?('genetic_perturbation_strategy')
-        @errors << { field: '/col_attrs/genetic_perturbation_strategy', message: 'REQUIRED when genetic_perturbation_id is present' }
+      if col_attrs.include?('genetic_perturbation_strategy')
+        @valid_checks << { field: '/col_attrs/genetic_perturbation_strategy', message: 'Found /col_attrs/genetic_perturbation_strategy metadata', check_type: 'presence' }
+      else
+        @errors << { field: '/col_attrs/genetic_perturbation_strategy', message: 'Missing /col_attrs/genetic_perturbation_strategy metadata (required when genetic_perturbation_id is present)', check_type: 'presence' }
       end
     end
   end
@@ -327,15 +369,19 @@ class CxgLoomValidatorService
 
     # Check required global attributes
     REQUIRED_GLOBAL_ATTRS.each do |attr|
-      unless global_attrs.include?(attr)
-        @errors << { field: "/attrs/#{attr}", message: "REQUIRED global attribute '#{attr}' not found" }
+      if global_attrs.include?(attr)
+        @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
+      else
+        @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
       end
     end
 
     # Check for ontology label global attributes (required alongside their _ontology_term_id)
     ONTOLOGY_LABEL_GLOBAL_ATTRS.each do |attr|
-      unless global_attrs.include?(attr)
-        @errors << { field: "/attrs/#{attr}", message: "REQUIRED global attribute '#{attr}' not found. This is the human-readable label for '#{attr}_ontology_term_id'." }
+      if global_attrs.include?(attr)
+        @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
+      else
+        @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
       end
     end
 
@@ -375,10 +421,11 @@ class CxgLoomValidatorService
     sample = get_metadata_sample(path)
     return unless sample
 
+    errors_before = @errors.size + @warnings.size
     values = sample.is_a?(Array) ? sample.first(10) : [sample]
     values.compact.each do |value|
       next if value.to_s.strip.empty?
-      
+
       # Handle multiple terms separated by " || "
       terms = value.to_s.split(' || ')
       terms.each do |term|
@@ -387,17 +434,21 @@ class CxgLoomValidatorService
         validate_ontology_term_format(term, path, valid_prefixes)
       end
     end
+    errors_after = @errors.size + @warnings.size
+    if errors_after == errors_before
+      field_name = path.split('/').last
+      @valid_checks << { field: path, message: "Ontology terms in '#{field_name}' have valid format" }
+    end
   end
 
   def validate_ontology_term_format(term, field, valid_prefixes)
     # OBO format: PREFIX:ID (e.g., "CL:0000540")
     # Cellosaurus uses underscore: CVCL_XXXX
-    
+
     if term.start_with?('CVCL_')
-      # Cellosaurus format is valid
       return
     end
-    
+
     unless term.match?(/^[A-Za-z]+:\d+$/)
       @errors << { field: field, message: "Invalid ontology term format: '#{term}'. Expected OBO format (PREFIX:ID) like 'CL:0000540'" }
       return
@@ -416,21 +467,296 @@ class CxgLoomValidatorService
     # Cell metadata (including development_stage) is in /col_attrs/ in ASAP
     case organism
     when 'NCBITaxon:9606' # Human
-      @info << { field: 'organism', message: 'Homo sapiens detected. Checking human-specific requirements.' }
-      # Human-specific: HsapDv for development stages, HANCESTRO for ethnicity
+      @valid_checks << { field: '/attrs/organism_ontology_term_id', message: 'Organism: Homo sapiens -- human-specific requirements checked' }
       validate_ontology_field('/col_attrs/development_stage_ontology_term_id', ['HsapDv', 'UBERON'], allow_special: %w[unknown na])
     when 'NCBITaxon:10090' # Mouse
-      @info << { field: 'organism', message: 'Mus musculus detected. Checking mouse-specific requirements.' }
+      @valid_checks << { field: '/attrs/organism_ontology_term_id', message: 'Organism: Mus musculus -- mouse-specific requirements checked' }
       validate_ontology_field('/col_attrs/development_stage_ontology_term_id', ['MmusDv', 'UBERON'], allow_special: %w[unknown na])
     when 'NCBITaxon:6239' # C. elegans
-      @info << { field: 'organism', message: 'C. elegans detected. Checking C. elegans-specific requirements.' }
+      @valid_checks << { field: '/attrs/organism_ontology_term_id', message: 'Organism: C. elegans -- C. elegans-specific requirements checked' }
       validate_ontology_field('/col_attrs/development_stage_ontology_term_id', ['WBls'], allow_special: %w[unknown na])
     when 'NCBITaxon:7955' # Zebrafish
-      @info << { field: 'organism', message: 'Danio rerio detected. Checking zebrafish-specific requirements.' }
+      @valid_checks << { field: '/attrs/organism_ontology_term_id', message: 'Organism: Danio rerio -- zebrafish-specific requirements checked' }
       validate_ontology_field('/col_attrs/development_stage_ontology_term_id', ['ZFS', 'UBERON'], allow_special: %w[unknown na])
     when 'NCBITaxon:7227' # Drosophila
-      @info << { field: 'organism', message: 'Drosophila melanogaster detected. Checking fly-specific requirements.' }
+      @valid_checks << { field: '/attrs/organism_ontology_term_id', message: 'Organism: Drosophila melanogaster -- fly-specific requirements checked' }
       validate_ontology_field('/col_attrs/development_stage_ontology_term_id', ['FBdv', 'UBERON'], allow_special: %w[unknown na])
+    end
+  end
+
+  # Cross-field constraint checks using the shared CxgSchemaRules module.
+  # These rules enforce dependencies between fields (e.g. assay determines
+  # suspension_type, tissue_type="cell line" forces several fields to "na").
+  def validate_cross_field_constraints
+    return unless @file_info
+
+    col_attrs = @file_info[:col_attrs] || []
+
+    # Read the actual values from the LOOM (first unique value per field).
+    # For cell-level fields, get_metadata_sample returns the first N values;
+    # we collect all unique values to check.
+    organism = get_global_attr('organism_ontology_term_id')
+
+    assay_sample = get_metadata_sample('/col_attrs/assay_ontology_term_id')
+    assay_values = assay_sample.is_a?(Array) ? assay_sample.uniq : [assay_sample].compact
+
+    tissue_type_sample = get_metadata_sample('/col_attrs/tissue_type')
+    tissue_type_values = tissue_type_sample.is_a?(Array) ? tissue_type_sample.uniq : [tissue_type_sample].compact
+
+    suspension_sample = get_metadata_sample('/col_attrs/suspension_type')
+    suspension_values = suspension_sample.is_a?(Array) ? suspension_sample.uniq : [suspension_sample].compact
+
+    ethnicity_sample = get_metadata_sample('/col_attrs/self_reported_ethnicity_ontology_term_id')
+    ethnicity_values = ethnicity_sample.is_a?(Array) ? ethnicity_sample.uniq : [ethnicity_sample].compact
+
+    sex_sample = get_metadata_sample('/col_attrs/sex_ontology_term_id')
+    sex_values = sex_sample.is_a?(Array) ? sex_sample.uniq : [sex_sample].compact
+
+    dev_stage_sample = get_metadata_sample('/col_attrs/development_stage_ontology_term_id')
+    dev_stage_values = dev_stage_sample.is_a?(Array) ? dev_stage_sample.uniq : [dev_stage_sample].compact
+
+    donor_sample = get_metadata_sample('/col_attrs/donor_id')
+    donor_values = donor_sample.is_a?(Array) ? donor_sample.uniq : [donor_sample].compact
+
+    tissue_sample = get_metadata_sample('/col_attrs/tissue_ontology_term_id')
+    tissue_values = tissue_sample.is_a?(Array) ? tissue_sample.uniq : [tissue_sample].compact
+
+    # Check all combinations of unique values for violations.
+    # For most datasets, each field has a single unique value (uniform metadata),
+    # so we check each unique value against the constraints.
+    assay_id = assay_values.first
+    tissue_type = tissue_type_values.first
+
+    # Check each unique suspension_type value against the assay constraint
+    cross_field_errors_before = @errors.size + @warnings.size
+    suspension_values.each do |susp|
+      violations = check_cross_field_constraints(
+        organism_tax_id: organism,
+        assay_term_id: assay_id,
+        tissue_type: tissue_type,
+        suspension_type: susp,
+        ethnicity_term_id: nil,
+        sex_term_id: nil,
+        dev_stage_term_id: nil,
+        donor_id_val: nil,
+        tissue_term_id: nil
+      )
+      violations.each do |v|
+        if v[:severity] == :error
+          @errors << { field: v[:field], message: v[:message] }
+        else
+          @warnings << { field: v[:field], message: v[:message] }
+        end
+      end
+    end
+
+    # Check ethnicity, sex, dev_stage, donor_id, tissue constraints
+    # (organism-dependent and tissue_type-dependent rules)
+    ethnicity_values.each do |eth|
+      sex_values.each do |sx|
+        dev_stage_values.each do |ds|
+          donor_values.each do |dn|
+            tissue_values.each do |ts|
+              violations = check_cross_field_constraints(
+                organism_tax_id: organism,
+                assay_term_id: nil,
+                tissue_type: tissue_type,
+                suspension_type: nil,
+                ethnicity_term_id: eth,
+                sex_term_id: sx,
+                dev_stage_term_id: ds,
+                donor_id_val: dn,
+                tissue_term_id: ts
+              )
+              violations.each do |v|
+                if v[:severity] == :error
+                  @errors << { field: v[:field], message: v[:message] }
+                else
+                  @warnings << { field: v[:field], message: v[:message] }
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
+    # Deduplicate: the cartesian product above may produce duplicate messages
+    @errors.uniq!
+    @warnings.uniq!
+
+    cross_field_errors_after = @errors.size + @warnings.size
+    if cross_field_errors_after == cross_field_errors_before
+      @valid_checks << { field: 'cross-field', message: 'All cross-field schema constraints satisfied' }
+    end
+  end
+
+  # Validate that all ontology term values present in the metadata actually
+  # exist in the database and belong to ontologies authorised for their field
+  # and for the project's organism.  Only runs when @project is available
+  # (so that Annot records and organism info can be used).
+  def validate_ontology_values_in_database
+    return unless @project
+
+    organism = @project.organism
+    tax_id_str = organism&.tax_id&.to_s
+
+    # Load OntologyTermType records that define which ontologies are valid per field
+    otts = OntologyTermType.where.not(field_group_id: [nil, ''])
+                           .to_a
+    return if otts.empty?
+
+    co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
+    # Pre-load CellOntology id/tag/tax_ids for filtering
+    all_co_ids = otts.flat_map(&:cell_ontology_ids_list).uniq
+    ontologies = CellOntology.where(id: all_co_ids).index_by(&:id)
+
+    otts.each do |ott|
+      term_path = ott.term_path
+      next if term_path.blank?
+
+      # Build field group info for label_path
+      label_path = ott.respond_to?(:label_path) ? ott.label_path : nil
+      label_path = nil if label_path.blank?
+      fg = ott.to_field_group(co_id_to_tag)
+      label_path ||= fg[:label_path]
+
+      # Determine which ontology IDs are valid for this field + organism
+      valid_co_ids = ott.cell_ontology_ids_list.select do |co_id|
+        co = ontologies[co_id]
+        next false unless co
+        co.tax_ids.blank? || (tax_id_str.present? && co.tax_ids.to_s.split(',').map(&:strip).include?(tax_id_str))
+      end
+
+      # Collect allowed free-text values (e.g. "unknown", "na")
+      allowed_free_text = Set.new(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s })
+      schema_specials = ALLOWED_SPECIAL_VALUES[term_path]
+      allowed_free_text.merge(schema_specials) if schema_specials
+
+      # Fields with fixed valid-values list (e.g. tissue_type, suspension_type)
+      valid_values = fg[:term_valid_values]
+      if valid_values.present?
+        unique_values = annot_unique_values(term_path)
+        if unique_values.present?
+          valid_set = valid_values.map(&:downcase).to_set
+          resolution = unique_values.index_with { |v| valid_set.include?(v.downcase) }
+          @field_resolutions[term_path] = resolution
+          invalid = resolution.count { |_v, ok| ok == false }
+          field_name = term_path.split('/').last
+          if invalid > 0
+            @errors << { field: term_path, message: "#{invalid} of #{unique_values.size} #{unique_values.size == 1 ? 'value' : 'values'} in '#{field_name}' not valid (allowed: #{valid_values.join(', ')})" }
+          else
+            @valid_checks << { field: term_path, message: "All #{unique_values.size} #{unique_values.size == 1 ? 'value' : 'values'} in '#{field_name}' #{unique_values.size == 1 ? 'is' : 'are'} valid" }
+          end
+        end
+        next
+      end
+
+      # Ontology-based fields: skip if no ontology config
+      next if valid_co_ids.empty?
+
+      scope = CellOntologyTerm.where(original: true, cell_ontology_id: valid_co_ids)
+      valid_tags = valid_co_ids.filter_map { |cid| ontologies[cid]&.tag }
+
+      # --- Resolve term path (identifiers) ---
+      unique_values = annot_unique_values(term_path)
+      if unique_values.present?
+        all_terms = Set.new
+        unique_values.each { |val| val.to_s.split(' || ').each { |t| all_terms << t.strip } }
+        all_terms.reject!(&:blank?)
+
+        ontology_terms = all_terms.reject { |t| allowed_free_text.include?(t) }
+        existing_ids = ontology_terms.any? ? scope.where(identifier: ontology_terms.to_a).pluck(:identifier).to_set : Set.new
+        known = existing_ids | allowed_free_text
+
+        resolution = unique_values.index_with do |v|
+          parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
+          parts.all? { |p| known.include?(p) }
+        end
+        @field_resolutions[term_path] = resolution
+
+        unresolved_count = resolution.count { |_v, ok| ok == false }
+        field_name = term_path.split('/').last
+        if unresolved_count > 0
+          missing = ontology_terms.reject { |t| existing_ids.include?(t) }
+          @errors << {
+            field: term_path,
+            message: "#{unresolved_count} of #{unique_values.size} #{field_name} #{unique_values.size == 1 ? 'identifier' : 'identifiers'} not found in authorised ontologies (#{valid_tags.join(', ')}): #{missing.first(5).join(', ')}#{missing.size > 5 ? ', ...' : ''}"
+          }
+        else
+          @valid_checks << { field: term_path, message: "All #{unique_values.size} #{field_name} #{unique_values.size == 1 ? 'identifier' : 'identifiers'} found in authorised ontologies" }
+        end
+      end
+
+      # --- Resolve label path (names) ---
+      next unless label_path.present?
+
+      label_values = annot_unique_values(label_path)
+      next unless label_values.present?
+
+      all_names = Set.new
+      label_values.each { |val| val.to_s.split(' || ').each { |t| all_names << t.strip } }
+      all_names.reject!(&:blank?)
+
+      ontology_names = all_names.reject { |t| allowed_free_text.include?(t) }
+      exact_names = Set.new(allowed_free_text)
+      mappable_names = Set.new
+
+      if ontology_names.any?
+        # Exact match (case-insensitive)
+        lower_map = {}
+        ontology_names.each { |n| lower_map[n.downcase] = n }
+        scope.where('LOWER(name) IN (?)', lower_map.keys)
+             .pluck(:name).each { |n| exact_names << lower_map[n.downcase] if lower_map[n.downcase] }
+
+        # Retry unresolved with underscores replaced by spaces
+        remaining = ontology_names.reject { |n| exact_names.include?(n) }
+        if remaining.any?
+          space_map = {}
+          remaining.select { |n| n.include?('_') }.each { |n| space_map[n.tr('_', ' ').downcase] = n }
+          if space_map.any?
+            scope.where('LOWER(name) IN (?)', space_map.keys)
+                 .pluck(:name).each { |n| mappable_names << space_map[n.downcase] if space_map[n.downcase] }
+          end
+        end
+      end
+
+      # Resolution: true = exact match, 'mappable' = matched after transformation, false = unresolved
+      resolution = label_values.index_with do |v|
+        parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
+        if parts.all? { |p| exact_names.include?(p) }
+          true
+        elsif parts.all? { |p| exact_names.include?(p) || mappable_names.include?(p) }
+          'mappable'
+        else
+          false
+        end
+      end
+      @field_resolutions[label_path] = resolution
+
+      unresolved_count = resolution.count { |_v, ok| ok == false }
+      mappable_count = resolution.count { |_v, ok| ok == 'mappable' }
+      label_name = label_path.split('/').last
+      if unresolved_count > 0
+        missing_names = ontology_names.reject { |t| exact_names.include?(t) || mappable_names.include?(t) }
+        @errors << {
+          field: label_path,
+          message: "#{unresolved_count} of #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} not found in authorised ontologies (#{valid_tags.join(', ')}): #{missing_names.first(5).join(', ')}#{missing_names.size > 5 ? ', ...' : ''}"
+        }
+      end
+      if mappable_count > 0
+        mappable_list = ontology_names.select { |t| mappable_names.include?(t) }
+        @warnings << {
+          field: label_path,
+          message: "#{mappable_count} #{label_name} #{mappable_count == 1 ? 'name' : 'names'} can be auto-mapped to correct ontology #{mappable_count == 1 ? 'label' : 'labels'}: #{mappable_list.first(5).join(', ')}#{mappable_list.size > 5 ? ', ...' : ''}"
+        }
+      end
+      if unresolved_count == 0 && mappable_count == 0
+        @valid_checks << { field: label_path, message: "All #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} found in authorised ontologies" }
+      elsif unresolved_count == 0 && mappable_count > 0
+        exact_count = label_values.size - mappable_count
+        @valid_checks << { field: label_path, message: "#{exact_count} of #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} found in authorised ontologies" }
+      end
     end
   end
 
@@ -440,16 +766,48 @@ class CxgLoomValidatorService
 
     values = sample.is_a?(Array) ? sample : [sample]
     invalid_values = values.uniq.reject { |v| valid_values.include?(v) }
-    
+
     if invalid_values.any?
-      @errors << { 
-        field: "#{prefix}/#{field}", 
-        message: "Invalid values found: #{invalid_values.first(3).join(', ')}. Must be one of: #{valid_values.join(', ')}" 
+      @errors << {
+        field: "#{prefix}/#{field}",
+        message: "Invalid values found: #{invalid_values.first(3).join(', ')}. Must be one of: #{valid_values.join(', ')}"
       }
+    else
+      @valid_checks << { field: "#{prefix}/#{field}", message: "All '#{field}' values are valid (#{valid_values.join(', ')})" }
     end
   end
 
   # Helper methods
+
+  # Get unique values for a field path from the Annot record's list_cat_json.
+  # Returns an array of unique string values, or nil if not available.
+  # Uses the pre-loaded @annots_by_name cache for O(1) lookup.
+  def annot_unique_values(field_path)
+    return nil unless @project
+
+    annot = @annots_by_name[field_path]
+    return nil unless annot
+
+    if annot.list_cat_json.present?
+      begin
+        vals = JSON.parse(annot.list_cat_json)
+        return vals if vals.is_a?(Array) && vals.any?
+      rescue JSON::ParserError
+        # fall through
+      end
+    end
+
+    if annot.categories_json.present?
+      begin
+        cats = JSON.parse(annot.categories_json)
+        return cats.keys if cats.is_a?(Hash) && cats.any?
+      rescue JSON::ParserError
+        # fall through
+      end
+    end
+
+    nil
+  end
 
   def is_visium_assay?(assay_term)
     # EFO:0010961 is Visium Spatial Gene Expression and descendants
@@ -463,36 +821,68 @@ class CxgLoomValidatorService
   end
 
   def get_global_attr(key)
-    @metadata_cache["global:#{key}"] ||= begin
-      cmd = asap_command('-T', 'ExtractGlobalAttr', '-attr', key, '-loom', @loom_path)
-      stdout, stderr, status = Open3.capture3(*cmd)
-      
-      if status.success?
-        value = stdout.strip
-        value.empty? ? nil : value
-      else
+    cache_key = "global:#{key}"
+    return @metadata_cache[cache_key] if @metadata_cache.key?(cache_key)
+
+    @metadata_cache[cache_key] = if @project
+      # Read from Annot records -- no Docker/Java overhead
+      annot = @annots_by_name["/attrs/#{key}"]
+      extract_single_value_from_annot(annot)
+    else
+      # External process: Docker+Java (slow, only used without @project)
+      begin
+        cmd = asap_command('-T', 'ExtractGlobalAttr', '-attr', key, '-loom', @loom_path)
+        stdout, _stderr, status = Open3.capture3(*cmd)
+        if status.success?
+          value = stdout.strip
+          value.empty? ? nil : value
+        end
+      rescue StandardError
         nil
       end
-    rescue StandardError
-      nil
     end
   end
 
   def get_metadata_sample(path, limit: 10)
-    @metadata_cache[path] ||= begin
-      cmd = asap_command('-T', 'ExtractMetadata', '-meta', path, '-loom', @loom_path)
-      stdout, stderr, status = Open3.capture3(*cmd)
-      
-      if status.success?
-        result = JSON.parse(stdout)
-        values = result['values']
-        values.is_a?(Array) ? values.first(limit) : values
-      else
+    cache_key = path
+    return @metadata_cache[cache_key] if @metadata_cache.key?(cache_key)
+
+    @metadata_cache[cache_key] = if @project
+      # Read unique values from Annot records -- no Docker/Java overhead.
+      # Returns all unique values (more thorough than a random sample).
+      vals = annot_unique_values(path)
+      vals&.first(limit)
+    else
+      # External process: Docker+Java (slow, only used without @project)
+      begin
+        cmd = asap_command('-T', 'ExtractMetadata', '-meta', path, '-loom', @loom_path)
+        stdout, _stderr, status = Open3.capture3(*cmd)
+        if status.success?
+          result = JSON.parse(stdout)
+          values = result['values']
+          values.is_a?(Array) ? values.first(limit) : values
+        end
+      rescue StandardError
         nil
       end
-    rescue StandardError
-      nil
     end
+  end
+
+  # Extract a single value from an Annot record (for global attributes).
+  def extract_single_value_from_annot(annot)
+    return nil unless annot
+
+    if annot.list_cat_json.present?
+      vals = JSON.parse(annot.list_cat_json) rescue nil
+      return vals.first if vals.is_a?(Array) && vals.any?
+    end
+
+    if annot.categories_json.present?
+      cats = JSON.parse(annot.categories_json) rescue nil
+      return cats.keys.first if cats.is_a?(Hash) && cats.any?
+    end
+
+    nil
   end
 
   def asap_command(*args)

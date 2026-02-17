@@ -24,6 +24,10 @@
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/settings' %>
   </div>
+<% when 'compliance' %>
+  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+    <%= render 'projects/views/compliance' %>
+  </div>
 <% else %>
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/summary' %>

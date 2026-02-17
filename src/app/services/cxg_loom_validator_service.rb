@@ -664,7 +664,8 @@ class CxgLoomValidatorService
           if invalid > 0
             @errors << { field: term_path, message: "#{invalid} of #{unique_values.size} #{unique_values.size == 1 ? 'value' : 'values'} in '#{field_name}' not valid (allowed: #{valid_values.join(', ')})" }
           else
-            @valid_checks << { field: term_path, message: "All #{unique_values.size} #{unique_values.size == 1 ? 'value' : 'values'} in '#{field_name}' #{unique_values.size == 1 ? 'is' : 'are'} valid" }
+            n = unique_values.size
+            @valid_checks << { field: term_path, message: "#{n <= 2 ? 'The' : 'All'} #{n} #{n == 1 ? 'value' : 'values'} in '#{field_name}' #{n == 1 ? 'is' : 'are'} valid" }
           end
         end
         next
@@ -702,7 +703,8 @@ class CxgLoomValidatorService
             message: "#{unresolved_count} of #{unique_values.size} #{field_name} #{unique_values.size == 1 ? 'identifier' : 'identifiers'} not found in authorised ontologies (#{valid_tags.join(', ')}): #{missing.first(5).join(', ')}#{missing.size > 5 ? ', ...' : ''}"
           }
         else
-          @valid_checks << { field: term_path, message: "All #{unique_values.size} #{field_name} #{unique_values.size == 1 ? 'identifier' : 'identifiers'} found in authorised ontologies" }
+          n = unique_values.size
+          @valid_checks << { field: term_path, message: "#{n <= 2 ? 'The' : 'All'} #{n} #{field_name} #{n == 1 ? 'identifier' : 'identifiers'} found in authorised ontologies" }
         end
       end
 
@@ -770,7 +772,7 @@ class CxgLoomValidatorService
         }
       end
       if unresolved_count == 0 && mappable_count == 0
-        @valid_checks << { field: label_path, message: "All #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} found in authorised ontologies" }
+        @valid_checks << { field: label_path, message: "#{label_values.size <= 2 ? 'The' : 'All'} #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} found in authorised ontologies" }
       elsif unresolved_count == 0 && mappable_count > 0
         exact_count = label_values.size - mappable_count
         @valid_checks << { field: label_path, message: "#{exact_count} of #{label_values.size} #{label_name} #{label_values.size == 1 ? 'name' : 'names'} found in authorised ontologies" }

@@ -93,8 +93,10 @@ class ComplianceController < ApplicationController
     end
 
     # Run validation synchronously
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     validator = CxgLoomValidatorService.new(loom_path, project: @project, logger: Rails.logger)
     result = validator.validate
+    Rails.logger.info("[Compliance TIMING] Synchronous validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
     
     # Save result with schema metadata from compliance config
     validation_data = {
@@ -367,10 +369,12 @@ class ComplianceController < ApplicationController
     fixes = params[:fixes] || {}
     applied = []
     errors = []
+    t_total = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     # ── Phase 1: Plan all LOOM operations and DB changes ──
     # Build a list of batched LOOM operations and corresponding DB change descriptors,
     # without executing any Python/Docker calls yet.
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     loom_ops = []          # Array of hashes for execute_batch_loom_operations
     db_changes = []        # Array of { field_path:, action:, ... } describing DB work
     versioned_paths = {}   # { original_path => archive_path }
@@ -392,6 +396,7 @@ class ComplianceController < ApplicationController
         errors << { field: field_path, message: e.message }
       end
     end
+    Rails.logger.info("[Compliance Fix TIMING] Phase 1 (planning): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s -- #{db_changes.size} fields planned, #{loom_ops.size} LOOM ops")
 
     result_url = project_path(@project, view: 'compliance')
 
@@ -412,8 +417,10 @@ class ComplianceController < ApplicationController
     end
 
     # ── Phase 2: Execute all LOOM operations in one batch ──
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     Rails.logger.info("[Compliance Fix] Executing #{loom_ops.size} LOOM operations in a single batch (#{cat_op_start} writes + #{written_field_paths.size} category reads)")
     batch_results = execute_batch_loom_operations(loom_path, loom_ops)
+    Rails.logger.info("[Compliance Fix TIMING] Phase 2 (LOOM batch Docker+Python): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     unless batch_results
       respond_to do |format|
@@ -445,6 +452,7 @@ class ComplianceController < ApplicationController
     end
 
     # ── Phase 3: Apply DB changes ──
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     relative_path = loom_path.sub(%r{\A.*/#{@project.user_id}/#{@project.key}/}, '')
 
     db_changes.each do |change|
@@ -456,11 +464,14 @@ class ComplianceController < ApplicationController
         errors << { field: change[:field_path], message: e.message }
       end
     end
+    Rails.logger.info("[Compliance Fix TIMING] Phase 3 (DB changes): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s -- #{applied.size} applied")
 
     # Record compliance mappings for tracking how metadata vectors are generated
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     if applied.any?
       record_compliance_mappings(@project, applied, fixes)
     end
+    Rails.logger.info("[Compliance Fix TIMING] Phase 4 (compliance mappings): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     unless applied.any?
       respond_to do |format|
@@ -472,7 +483,10 @@ class ComplianceController < ApplicationController
 
     # Apply fixes to all LOOM file variants (cell-filtered, gene-filtered).
     # Pass versioned_paths from the main pass so variants use the same archive paths.
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     apply_fixes_to_loom_variants(@project, loom_path, applied, fixes, versioned_paths)
+    Rails.logger.info("[Compliance Fix TIMING] Phase 5 (LOOM variants): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
+    Rails.logger.info("[Compliance Fix TIMING] TOTAL (apply_project_fix): #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_total).round(2)}s")
 
     # Broadcast progress via websocket
     ActionCable.server.broadcast("compliance_#{@project.id}", {
@@ -772,10 +786,11 @@ class ComplianceController < ApplicationController
 
     return if variant_files.empty?
 
-    Rails.logger.info("[Compliance Fix] Applying fixes to #{variant_files.size} LOOM #{variant_files.size == 1 ? 'variant' : 'variants'} in batch mode")
+    Rails.logger.info("[Compliance Fix] Applying fixes to #{variant_files.size} LOOM #{variant_files.size == 1 ? 'variant' : 'variants'} in a single batch")
 
+    # Build operations list for each variant (identical ops, different files)
+    file_ops = {}
     variant_files.each do |variant_path|
-      Rails.logger.info("[Compliance Fix] Processing variant: #{variant_path}")
       variant_versioned = {}
       ops = []
 
@@ -785,7 +800,6 @@ class ComplianceController < ApplicationController
         fix_data = fixes[field_path] || {}
         field_hdf5 = strip_leading_slash(field_path)
 
-        # Determine archiving from main_versioned_paths
         archive_path = main_versioned_paths[field_path]
         if archive_path && !variant_versioned[field_path]
           ops << { op: 'rename', from: field_hdf5, to: strip_leading_slash(archive_path) }
@@ -822,19 +836,23 @@ class ComplianceController < ApplicationController
         end
       end
 
-      if ops.any?
-        Rails.logger.info("[Compliance Fix] Executing #{ops.size} ops for variant #{variant_path}")
-        results = execute_batch_loom_operations(variant_path, ops)
-        if results
-          results.each do |idx, result|
-            if result['status'] == 'error'
-              Rails.logger.error("[Compliance Fix] Variant op ##{idx} (#{ops[idx]&.dig(:op)}) failed on #{variant_path}: #{result['reason']}")
-            end
+      file_ops[variant_path] = ops if ops.any?
+    end
+
+    return if file_ops.empty?
+
+    # Execute all variant files in a single Docker+Python call
+    results = execute_multi_file_loom_operations(file_ops)
+    if results
+      results.each do |path, file_results|
+        file_results.each do |idx, result|
+          if result['status'] == 'error'
+            Rails.logger.error("[Compliance Fix] Variant op ##{idx} failed on #{path}: #{result['reason']}")
           end
-        else
-          Rails.logger.error("[Compliance Fix] Batch failed entirely for variant #{variant_path}")
         end
       end
+    else
+      Rails.logger.error("[Compliance Fix] Multi-file batch failed entirely")
     end
   end
 
@@ -935,27 +953,15 @@ class ComplianceController < ApplicationController
   def find_project_loom_files(project)
     loom_files = []
 
-    # Check project directory
-    if project.respond_to?(:key) && project.respond_to?(:user_id)
-      project_dir = File.join(
-        ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'),
-        project.user_id.to_s,
-        project.key
-      )
-      
-      if File.directory?(project_dir)
-        loom_files += Dir.glob(File.join(project_dir, '**', '*.loom'))
-      end
-    end
+    # Use Fo records to find LOOM files that belong to this project.
+    # This avoids picking up source files (input.loom, fus/ uploads)
+    # that must not be modified by compliance fixes.
+    user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/projects')
+    project_dir = File.join(user_data_dir, project.user_id.to_s, project.key)
 
-    # Check upload directory
-    upload_dir = File.join(
-      ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
-      project.id.to_s
-    )
-    
-    if File.directory?(upload_dir)
-      loom_files += Dir.glob(File.join(upload_dir, '**', '*.loom'))
+    Fo.where(project_id: project.id, ext: 'loom').pluck(:filepath).each do |rel_path|
+      full_path = File.join(project_dir, rel_path)
+      loom_files << full_path if File.exist?(full_path)
     end
 
     loom_files.uniq
@@ -2381,6 +2387,138 @@ class ComplianceController < ApplicationController
     end
   end
 
+  # Execute LOOM operations across multiple files in a single Docker+Python call.
+  # file_ops is a hash: { "/path/to/variant1.loom" => [ops], "/path/to/variant2.loom" => [ops] }
+  # Returns a hash: { "/path/to/variant1.loom" => { 0 => {status:...}, ... }, ... }
+  def execute_multi_file_loom_operations(file_ops)
+    return {} if file_ops.blank?
+
+    payload_b64 = Base64.strict_encode64(file_ops.to_json)
+
+    python_script = <<~PYTHON
+      import h5py
+      import numpy as np
+      import json
+      import sys
+      import base64
+
+      def decode(v):
+          return v.decode() if hasattr(v, 'decode') else str(v)
+
+      payload = json.loads(base64.b64decode(sys.argv[1]).decode('utf-8'))
+      all_results = {}
+
+      for loom_path, ops in payload.items():
+          file_results = {}
+          try:
+              with h5py.File(loom_path, 'r+') as f:
+                  n_cells = f['matrix'].shape[1]
+                  for i, op in enumerate(ops):
+                      key = str(i)
+                      try:
+                          kind = op['op']
+
+                          if kind == 'rename':
+                              old = op['from']
+                              new = op['to']
+                              if old not in f:
+                                  file_results[key] = {'status': 'skip', 'reason': 'source not found'}
+                              else:
+                                  if new in f:
+                                      del f[new]
+                                  f[new] = f[old][:]
+                                  del f[old]
+                                  file_results[key] = {'status': 'ok'}
+
+                          elif kind == 'copy':
+                              source = op['source']
+                              target = op['target']
+                              if source not in f:
+                                  file_results[key] = {'status': 'error', 'reason': 'source not found: ' + source}
+                              else:
+                                  data = f[source][:]
+                                  if target in f:
+                                      del f[target]
+                                  f.create_dataset(target, data=data)
+                                  file_results[key] = {'status': 'ok'}
+
+                          elif kind == 'resolve_paired':
+                              source = op['source']
+                              target = op['target']
+                              resolve_map = op['map']
+                              if source not in f:
+                                  file_results[key] = {'status': 'error', 'reason': 'source not found: ' + source}
+                              else:
+                                  src_data = f[source][:]
+                                  if src_data.dtype.kind in ('S', 'O'):
+                                      src_data = np.array([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in src_data])
+                                  else:
+                                      src_data = np.array([str(v) for v in src_data])
+                                  resolved = np.array([resolve_map.get(val, val) for val in src_data], dtype=h5py.special_dtype(vlen=str))
+                                  if target in f:
+                                      del f[target]
+                                  f.create_dataset(target, data=resolved)
+                                  file_results[key] = {'status': 'ok'}
+
+                          elif kind == 'set_value':
+                              target = op['target']
+                              value = op['value']
+                              if target in f:
+                                  del f[target]
+                              f.create_dataset(target, data=np.array([value] * n_cells, dtype=h5py.special_dtype(vlen=str)))
+                              file_results[key] = {'status': 'ok'}
+
+                          elif kind == 'set_global_attr':
+                              attr_name = op['attr_name']
+                              value = op['value']
+                              f.attrs[attr_name] = value
+                              attrs_path = 'attrs/' + attr_name
+                              if attrs_path in f:
+                                  del f[attrs_path]
+                              f.create_dataset(attrs_path, data=np.array([value], dtype=h5py.special_dtype(vlen=str)))
+                              file_results[key] = {'status': 'ok'}
+
+                          else:
+                              file_results[key] = {'status': 'error', 'reason': 'unknown op: ' + kind}
+
+                      except Exception as e:
+                          file_results[key] = {'status': 'error', 'reason': str(e)}
+
+          except Exception as e:
+              file_results['_error'] = {'status': 'error', 'reason': str(e)}
+
+          all_results[loom_path] = file_results
+
+      print(json.dumps(all_results))
+    PYTHON
+
+    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-', payload_b64]
+
+    total_ops = file_ops.values.sum(&:size)
+    Rails.logger.info("[Compliance Fix] Multi-file batch: #{file_ops.size} files, #{total_ops} total ops")
+
+    begin
+      stdout, stderr, status = Open3.capture3(*cmd_parts, stdin_data: python_script)
+
+      unless status.success?
+        Rails.logger.error("[Compliance Fix] Multi-file batch Python failed: #{stderr}")
+        return nil
+      end
+
+      results = JSON.parse(stdout.strip)
+      # Convert inner keys to integers
+      results.transform_values! { |file_res| file_res.transform_keys { |k| k == '_error' ? k : k.to_i } }
+      results
+    rescue JSON::ParserError => e
+      Rails.logger.error("[Compliance Fix] Multi-file batch parse error: #{e.message}")
+      nil
+    rescue StandardError => e
+      Rails.logger.error("[Compliance Fix] Multi-file batch execution error: #{e.message}")
+      nil
+    end
+  end
+
   # Record compliance mappings for tracking how scFAIR/CELLxGENE metadata vectors were generated.
   # Each applied fix is recorded with its action type, source, and resolve map.
   def record_compliance_mappings(project, applied, fixes)
@@ -2393,6 +2531,35 @@ class ComplianceController < ApplicationController
       field_group_map[fg[:label_path]] = fg[:id] if fg[:label_path]
     end
 
+    # Pre-load source Annots in one batch query
+    source_paths = applied.filter_map { |e| e[:source] || fixes[e[:field]]&.dig(:source).to_s.presence }.uniq
+    source_annots = source_paths.any? ? Annot.where(project_id: project.id, name: source_paths).index_by(&:name) : {}
+
+    # Pre-collect all replacement identifiers and names across all resolve maps
+    # so we can batch-query CellOntologyTerm once instead of per-term.
+    all_identifiers = Set.new
+    all_names = Set.new
+    applied.each do |entry|
+      fix_data = fixes[entry[:field]] || {}
+      next unless entry[:action] == 'resolve_paired' && fix_data[:resolve_map].present?
+      is_term_id_path = entry[:field].include?('ontology_term_id')
+      resolve_map = JSON.parse(fix_data[:resolve_map]) rescue next
+      resolve_map.each_value do |replacement_value|
+        parts = replacement_value.to_s.include?(' || ') ? replacement_value.split(' || ').map(&:strip) : [replacement_value]
+        parts.each { |p| is_term_id_path ? all_identifiers.add(p) : all_names.add(p) }
+      end
+    end
+
+    # Batch queries: 1 for identifiers, 1 for names (instead of N individual queries)
+    cot_by_identifier = all_identifiers.any? ?
+      CellOntologyTerm.where(original: true, identifier: all_identifiers.to_a).index_by(&:identifier) : {}
+    cot_by_name = {}
+    if all_names.any?
+      lower_map = all_names.each_with_object({}) { |n, h| h[n.downcase] = n }
+      CellOntologyTerm.where(original: true).where('LOWER(name) IN (?)', lower_map.keys)
+        .each { |cot| orig = lower_map[cot.name.downcase]; cot_by_name[orig] = cot if orig && !cot_by_name.key?(orig) }
+    end
+
     applied.each do |entry|
       field_path = entry[:field]
       field_group_id = field_group_map[field_path]
@@ -2402,9 +2569,8 @@ class ComplianceController < ApplicationController
       action_type = entry[:action]
       action_type = 'map_from' if action_type == 'mapped'
 
-      # Find the source annot if available
       source_path = entry[:source] || fix_data[:source].to_s
-      source_annot = source_path.present? ? Annot.find_by(project_id: project.id, name: source_path) : nil
+      source_annot = source_annots[source_path]
 
       mapping = ComplianceMapping.create!(
         project_id: project.id,
@@ -2426,34 +2592,27 @@ class ComplianceController < ApplicationController
           {}
         end
 
-        resolve_map.each do |original_value, replacement_value|
-          # Determine if the replacement is an identifier or a name based on the target path
-          is_term_id_path = field_path.include?('ontology_term_id')
+        is_term_id_path = field_path.include?('ontology_term_id')
 
-          # Handle multi-term values (|| separated) by recording each sub-term individually
+        replacements_to_insert = []
+        resolve_map.each do |original_value, replacement_value|
           replacement_parts = replacement_value.to_s.include?(' || ') ? replacement_value.split(' || ').map(&:strip) : [replacement_value]
 
           replacement_parts.each do |part|
-            replacement_identifier = is_term_id_path ? part : nil
-            replacement_name = is_term_id_path ? nil : part
+            cot = is_term_id_path ? cot_by_identifier[part] : cot_by_name[part]
 
-            # Try to find the cell_ontology_term record
-            cot = nil
-            if replacement_identifier
-              cot = CellOntologyTerm.find_by(identifier: replacement_identifier, original: true)
-            elsif replacement_name
-              cot = CellOntologyTerm.where(original: true).where('name ILIKE ?', replacement_name).first
-            end
-
-            ComplianceTermReplacement.create!(
+            replacements_to_insert << {
               compliance_mapping_id: mapping.id,
               original_value: original_value,
-              replacement_identifier: cot&.identifier || replacement_identifier,
-              replacement_name: cot&.name || replacement_name,
+              replacement_identifier: cot&.identifier || (is_term_id_path ? part : nil),
+              replacement_name: cot&.name || (is_term_id_path ? nil : part),
               cell_ontology_term_id: cot&.id
-            )
+            }
           end
         end
+
+        # Bulk insert all replacements for this mapping
+        ComplianceTermReplacement.insert_all!(replacements_to_insert) if replacements_to_insert.any?
       end
     rescue StandardError => e
       Rails.logger.error("[Compliance Mapping] Error recording mapping for #{entry[:field]}: #{e.message}")

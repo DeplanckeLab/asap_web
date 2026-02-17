@@ -117,7 +117,8 @@ class CxgLoomValidatorService
   end
 
   def validate
-    @logger.info("[CxgLoomValidatorService] Starting validation for: #{@loom_path}")
+    t_total = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @logger.info("[CxgLoomValidatorService] Starting validation for: #{@loom_path} (project: #{@project&.id || 'none'})")
     
     unless File.exist?(@loom_path)
       @errors << { field: 'file', message: "File not found: #{@loom_path}" }
@@ -125,18 +126,35 @@ class CxgLoomValidatorService
     end
 
     begin
-      # Gather file structure info
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       gather_file_info
+      @logger.info("[Validator TIMING] gather_file_info: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
 
-      # scFAIR cell metadata compliance checks only
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       validate_cell_metadata
-      validate_required_global_attributes
-      validate_ontology_terms
-      validate_organism_specific_requirements
-      validate_cross_field_constraints
-      validate_ontology_values_in_database
+      @logger.info("[Validator TIMING] validate_cell_metadata: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
 
-      @logger.info("[CxgLoomValidatorService] scFAIR cell metadata compliance complete. Errors: #{@errors.count}, Warnings: #{@warnings.count}")
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_required_global_attributes
+      @logger.info("[Validator TIMING] validate_required_global_attributes: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_ontology_terms
+      @logger.info("[Validator TIMING] validate_ontology_terms: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_organism_specific_requirements
+      @logger.info("[Validator TIMING] validate_organism_specific_requirements: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_cross_field_constraints
+      @logger.info("[Validator TIMING] validate_cross_field_constraints: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_ontology_values_in_database
+      @logger.info("[Validator TIMING] validate_ontology_values_in_database: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      @logger.info("[Validator TIMING] TOTAL validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_total).round(3)}s -- Errors: #{@errors.count}, Warnings: #{@warnings.count}")
     rescue StandardError => e
       @errors << { field: 'validation', message: "Validation failed with error: #{e.message}" }
       @logger.error("[CxgLoomValidatorService] Validation error: #{e.message}")

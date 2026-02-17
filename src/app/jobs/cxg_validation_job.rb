@@ -34,11 +34,15 @@ class CxgValidationJob < ApplicationJob
     broadcast(project_id, status: 'validating', message: "Validating #{File.basename(loom_path)}...")
 
     # Run validation
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     validator = CxgLoomValidatorService.new(loom_path, project: project, logger: Rails.logger)
     result = validator.validate
+    Rails.logger.info("[CxgValidationJob TIMING] Validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Save results
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     save_validation_result(project, result, loom_path)
+    Rails.logger.info("[CxgValidationJob TIMING] Save result: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Build redirect URL for the compliance view on the project page
     redirect_url = begin

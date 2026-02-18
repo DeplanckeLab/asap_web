@@ -4,7 +4,7 @@ export default class extends Controller {
   static values = {
     runId: Number,
     slurmJobId: String,
-    projectId: Number,
+    projectId: String,
     submittedAt: String
   }
 

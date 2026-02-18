@@ -20,7 +20,7 @@
                data-controller="queue-position"
                data-queue-position-run-id-value="<%= @parsing_run.id %>"
                data-queue-position-slurm-job-id-value="<%= @parsing_run.slurm_job_id %>"
-               data-queue-position-project-id-value="<%= @project.id %>"
+               data-queue-position-project-id-value="<%= @project.key %>"
                <% if @parsing_run.submitted_at %>
                  data-queue-position-submitted-at-value="<%= @parsing_run.submitted_at.iso8601 %>"
                <% end %>

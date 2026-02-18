@@ -298,8 +298,7 @@ module ApplicationHelper
                 displayed_val = "#{tmp_step.name}" + ((tmp_step.multiple_runs) ? " ##{tmp_run.num}" : "")
               end
               # Use Tailwind-style clickable badge with pipeline-runs Stimulus controller
-              project_id = run.project_id
-              pipeline_url = "/projects/#{project_id}/pipeline_runs"
+              pipeline_url = pipeline_runs_project_path(run.project)
               annot_id = v['annot_id']
               
               if annot_id.present?
@@ -307,7 +306,6 @@ module ApplicationHelper
                 array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
                   "data-controller='pipeline-runs' " \
                   "data-pipeline-runs-annot-id-value='#{annot_id}' " \
-                  "data-pipeline-runs-project-id-value='#{project_id}' " \
                   "data-pipeline-runs-url-value='#{pipeline_url}' " \
                   "data-action='click->pipeline-runs#showPipeline' " \
                   "onclick='event.stopPropagation();' " \
@@ -320,7 +318,6 @@ module ApplicationHelper
                 array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
                   "data-controller='pipeline-runs' " \
                   "data-pipeline-runs-run-id-value='#{tmp_run.id}' " \
-                  "data-pipeline-runs-project-id-value='#{project_id}' " \
                   "data-pipeline-runs-url-value='#{pipeline_url}' " \
                   "data-action='click->pipeline-runs#showPipeline' " \
                   "onclick='event.stopPropagation();' " \

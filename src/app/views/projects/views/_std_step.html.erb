@@ -58,7 +58,7 @@
                         controller: 'delete-all-runs',
                         action: 'submit->delete-all-runs#deleteAllRuns',
                         'delete-all-runs-step-id-value': @step.id,
-                        'delete-all-runs-project-id-value': @project.id,
+                        'delete-all-runs-project-id-value': @project.key,
                         'run-selection-target': 'deleteButton',
                         confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
                       }
@@ -129,7 +129,7 @@
                         controller: 'delete-all-runs',
                         action: 'submit->delete-all-runs#deleteAllRuns',
                         'delete-all-runs-step-id-value': @step.id,
-                        'delete-all-runs-project-id-value': @project.id,
+                        'delete-all-runs-project-id-value': @project.key,
                         'run-selection-target': 'deleteButton',
                         confirm: "Are you sure you want to delete all runs from this step? This will delete all subsequent analyses down the pipeline. This action cannot be undone."
                       }
@@ -481,7 +481,7 @@
                               <div data-controller="queue-position"
                                    data-queue-position-run-id-value="<%= run.id %>"
                                    data-queue-position-slurm-job-id-value="<%= run.slurm_job_id %>"
-                                   data-queue-position-project-id-value="<%= @project.id %>"
+                                   data-queue-position-project-id-value="<%= @project.key %>"
                                    <% if run.submitted_at %>
                                      data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
                                    <% end %>>

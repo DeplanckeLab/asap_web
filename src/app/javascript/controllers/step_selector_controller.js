@@ -29,7 +29,11 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
-  static values = { projectId: Number, statusIcons: Array, loadRunPanel: Boolean }
+  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean }
+
+  get projectIdentifier() {
+    return this.projectKeyValue || this.projectIdValue
+  }
 
   // LocalStorage key helpers for state persistence
   getStorageKey(suffix) {
@@ -492,7 +496,7 @@ export default class extends Controller {
     console.log('[StepSelectorController] ===== REFRESHING STEPS PANEL FROM SERVER =====')
     // Send selected_step_id so the server can render the blue border correctly
     const selectedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
-    let url = `/projects/${this.projectIdValue}/refresh_steps_panel.html`
+    let url = `/projects/${this.projectIdentifier}/refresh_steps_panel.html`
     if (selectedStepId) {
       url += `?selected_step_id=${selectedStepId}`
     }
@@ -937,7 +941,7 @@ export default class extends Controller {
     // Load step results via AJAX
     // Add cache-busting parameter to ensure fresh data on page reload
     const cacheBuster = new Date().getTime()
-    const url = `/projects/${this.projectIdValue}/step_results.html?step_id=${stepId}&_t=${cacheBuster}`
+    const url = `/projects/${this.projectIdentifier}/step_results.html?step_id=${stepId}&_t=${cacheBuster}`
     console.log('[StepSelectorController] Fetching URL:', url)
     
     // Store controller reference and stepId to preserve in promise chain
@@ -1215,7 +1219,7 @@ export default class extends Controller {
     }
     
     // Fetch updated run status from server
-    fetch(`/projects/${this.projectIdValue}/run_status?run_id=${runId}`, {
+    fetch(`/projects/${this.projectIdentifier}/run_status?run_id=${runId}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',

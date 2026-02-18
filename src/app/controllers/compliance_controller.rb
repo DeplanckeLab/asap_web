@@ -863,7 +863,18 @@ class ComplianceController < ApplicationController
   end
 
   def set_project
-    @project = Project.find_by(id: params[:id] || params[:project_id])
+    identifier = params[:id] || params[:project_id]
+
+    if identifier.present? && identifier.to_s.match?(/^\d+$/)
+      @project = Project.find_by(id: identifier.to_i)
+    end
+
+    @project ||= Project.find_by(key: identifier) if identifier.present?
+
+    if @project.nil? && identifier.to_s.match?(/^ASAP\d+$/i)
+      numeric_part = identifier.match(/\d+$/).to_s.to_i
+      @project = Project.find_by(public_id: numeric_part)
+    end
   end
 
   def validate_uploaded_file
@@ -899,8 +910,13 @@ class ComplianceController < ApplicationController
   end
 
   def validate_existing_project
-    project = Project.find_by(id: params[:project_id])
-    
+    identifier = params[:project_id]
+    project = if identifier.to_s.match?(/^\d+$/)
+                Project.find_by(id: identifier.to_i)
+              else
+                Project.find_by(key: identifier)
+              end
+
     unless project
       render json: { error: 'Project not found' }, status: :not_found
       return
@@ -1438,11 +1454,15 @@ class ComplianceController < ApplicationController
 
   # Filter CellOntology IDs from the given prefix tags by organism applicability.
   # Returns ontology IDs that are either universal or match the given tax_id.
-  def organism_scoped_ontology_ids(prefixes, project_id)
+  def organism_scoped_ontology_ids(prefixes, project_identifier)
     ontology_ids = CellOntology.where(tag: prefixes).pluck(:id, :tag, :tax_ids)
-    return ontology_ids.map(&:first) unless project_id.present?
+    return ontology_ids.map(&:first) unless project_identifier.present?
 
-    project = Project.find_by(id: project_id)
+    project = if project_identifier.to_s.match?(/^\d+$/)
+                Project.find_by(id: project_identifier.to_i)
+              else
+                Project.find_by(key: project_identifier)
+              end
     return ontology_ids.map(&:first) unless project&.organism&.tax_id.present?
 
     tax_id_str = project.organism.tax_id.to_s

@@ -278,6 +278,12 @@ class Project < ApplicationRecord
     normalized
   end
 
+  # Use the project key in all generated URLs (e.g. /projects/my_key instead of /projects/123).
+  # The controller's set_project already resolves by key, numeric ID, or public_id.
+  def to_param
+    key.presence || id.to_s
+  end
+
   # Instance methods
   def display_name
     name.presence || key.presence || "Project #{id}"

@@ -277,8 +277,8 @@
     <div class="bg-gray-50 rounded-lg p-6" 
          data-controller="metadata-validation" 
          data-metadata-validation-project-id-value="<%= @project.id %>"
-         data-metadata-validation-status-url-value="<%= compliance_project_status_path(@project.id) %>"
-         data-metadata-validation-validate-url-value="<%= compliance_project_validate_path(@project.id) %>">
+         data-metadata-validation-status-url-value="<%= compliance_project_status_path(@project) %>"
+         data-metadata-validation-validate-url-value="<%= compliance_project_validate_path(@project) %>">
 
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Compliance to external data schemas</h3>
 
@@ -369,7 +369,7 @@
                 </button>
 
                 <% unless validation_result['valid'] %>
-                  <%= link_to compliance_project_fix_path(@project.id),
+                  <%= link_to compliance_project_fix_path(@project),
                       class: "inline-flex items-center px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-md hover:bg-amber-600 transition-colors" do %>
                     Fix Compliance Issues
                   <% end %>

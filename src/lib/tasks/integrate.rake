@@ -144,53 +144,9 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     end
     logger.info("[IntegrateRake] R integration produced #{rds_file} (#{File.size(rds_file)} bytes)")
 
-    # Step 2: Convert RDS to Loom
-    input_loom_file = project_dir + 'input.loom'
-    h_cmd_convert = {
-      'host_name' => "localhost",
-      'container_name' => ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev') + "_convert_" + run.id.to_s,
-      'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
-      'program' => "Rscript --vanilla /srv/convert_seurat.R #{rds_file} #{input_loom_file}",
-      'opts' => [],
-      'args' => []
-    }
-    cmd = Basic.build_cmd(h_cmd_convert)
-    puts "CMD_CONVERT: #{cmd}"
-    `#{cmd}`
-
-    unless File.exist?(input_loom_file)
-      raise "[IntegrateRake] RDS-to-Loom conversion failed: #{input_loom_file} was not created"
-    end
-    logger.info("[IntegrateRake] Conversion produced #{input_loom_file} (#{File.size(input_loom_file)} bytes)")
-
-    # Step 3: Preparse the integrated loom file
-    output_dir = project_dir + 'parsing'
-    asap_run_dir = ENV.fetch('LOCAL_ASAP_RUN_DIR', '/srv/asap_run')
-    cmd = "java -jar #{asap_run_dir}/ASAP.jar -T Preparsing -organism #{project.organism_id} -f \"#{input_loom_file}\" -o #{output_dir} -h #{db_conn} 2> #{output_dir + 'preparsing_output.err'}"
-    puts "CMD_PREPARSE: #{cmd}"
-    `#{cmd}`
-
-    output_json = output_dir + 'output.json'
-    if File.exist?(output_json)
-      h_preparsing = Basic.safe_parse_json(File.read(output_json), {})
-      puts "h_preparsing: #{h_preparsing.to_json}"
-
-      parsing_attrs = Basic.safe_parse_json(project.parsing_attrs_json, {})
-      if h_preparsing['list_groups'] && h_preparsing['list_groups'][0]
-        ['nber_cols', 'nber_rows', 'file_type'].each do |e|
-          parsing_attrs[e] = h_preparsing['list_groups'][0][e]
-        end
-      end
-      project.update_column(:parsing_attrs_json, parsing_attrs.to_json)
-    else
-      logger.error("[IntegrateRake] Preparsing output.json not found at #{output_json}")
-    end
-
-    # Step 4: Parse the integrated file
+    # Step 2: Parse the integrated file
     opts = [
-      { 'opt' => "-ncells", 'value' => (Basic.safe_parse_json(project.reload.parsing_attrs_json, {})["nber_cols"] || 0).to_s },
-      { 'opt' => "-ngenes", 'value' => (Basic.safe_parse_json(project.parsing_attrs_json, {})["nber_rows"] || 0).to_s },
-      { 'opt' => "-type", 'value' => 'LOOM' },
+      { 'opt' => "-type", 'value' => 'RDS' },
       { 'opt' => '-T', 'value' => "Parsing" },
       { 'opt' => "-organism", 'value' => project.organism_id.to_s },
       { 'opt' => "-o", 'value' => tmp_dir.to_s },

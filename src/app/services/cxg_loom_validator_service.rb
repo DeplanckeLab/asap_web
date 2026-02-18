@@ -351,6 +351,11 @@ class CxgLoomValidatorService
       validate_categorical_values('suspension_type', VALID_SUSPENSION_TYPES, '/col_attrs')
     end
 
+    # Validate sex_ontology_term_id restricted values
+    if col_attrs.include?('sex_ontology_term_id')
+      validate_sex_ontology_term_values
+    end
+
     # Check for Visium-specific fields
     assay = get_metadata_sample('/col_attrs/assay_ontology_term_id')
     if assay && is_visium_assay?(assay)
@@ -794,6 +799,29 @@ class CxgLoomValidatorService
       }
     else
       @valid_checks << { field: "#{prefix}/#{field}", message: "All '#{field}' values are valid (#{valid_values.join(', ')})" }
+    end
+  end
+
+  def validate_sex_ontology_term_values
+    sample = get_metadata_sample('/col_attrs/sex_ontology_term_id')
+    return unless sample
+
+    values = sample.is_a?(Array) ? sample : [sample]
+    allowed_special = ALLOWED_SPECIAL_VALUES['/col_attrs/sex_ontology_term_id'] || []
+
+    invalid = values.uniq.reject { |v| VALID_SEX_TERMS.key?(v) || allowed_special.include?(v) }
+
+    if invalid.any?
+      allowed_desc = VALID_SEX_TERMS.map { |id, name| "#{id} (#{name})" }.join(', ')
+      @errors << {
+        field: '/col_attrs/sex_ontology_term_id',
+        message: "Invalid sex_ontology_term_id: #{invalid.first(5).join(', ')}. Must be one of: #{allowed_desc}, unknown, or na."
+      }
+    else
+      @valid_checks << {
+        field: '/col_attrs/sex_ontology_term_id',
+        message: "All sex_ontology_term_id values are from the allowed set (#{VALID_SEX_TERMS.values.join(', ')}, unknown, na)"
+      }
     end
   end
 

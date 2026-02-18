@@ -545,7 +545,7 @@ class ProjectsController < ApplicationController
         # Pre-fill organism from the integration projects
         @project.organism_id = @integrate_projects.first.organism_id
         # Pre-fill project type (single-cell transcriptomics by default)
-        sc_type = @project_types.find { |pt| pt.tag == 'scRNA' } || @project_types.first
+        sc_type = @project_types.find { |pt| pt.name&.downcase&.include?('single') } || @project_types.first
         @project.project_type_id = sc_type&.id
 
         # Load categorical annotations for each integration project

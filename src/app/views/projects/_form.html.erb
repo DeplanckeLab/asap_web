@@ -51,10 +51,18 @@
         <!-- Project Type -->
         <div>
           <%= form.label :project_type_id, "Project Type", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <%= form.select :project_type_id,
-                options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
-                { prompt: "Select project type" },
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton change->file-upload#updateProjectTypeLabels" } } %>
+          <% if @integrate_mode %>
+            <%= form.select :project_type_id,
+                  options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
+                  {},
+                  { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed", disabled: true } %>
+            <%= form.hidden_field :project_type_id %>
+          <% else %>
+            <%= form.select :project_type_id,
+                  options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
+                  { prompt: "Select project type" },
+                  { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton change->file-upload#updateProjectTypeLabels" } } %>
+          <% end %>
           <p class="mt-1 text-xs text-red-600 dark:text-red-400">Mandatory</p>
         </div>
 
@@ -72,15 +80,16 @@
           <%= form.label :organism_id, "Organism", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="relative" data-test="organism-selector-container">
             <% 
-              # Treat organism_id of 1 (database default) as nil for new projects
-              effective_organism_id = (project.new_record? && project.organism_id == 1) ? nil : project.organism_id
+              # Treat organism_id of 1 (database default) as nil for new projects, except in integration mode
+              effective_organism_id = (project.new_record? && project.organism_id == 1 && !@integrate_mode) ? nil : project.organism_id
             %>
             <%= form.hidden_field :organism_id, value: effective_organism_id || "", data: { organism_selector_target: "hiddenInput", action: "change->file-upload#checkSubmitButton" } %>
             
             <!-- Dropdown button -->
             <button type="button"
-                    class="w-full px-3 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between"
+                    class="w-full px-3 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-md <%= @integrate_mode ? 'bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' %> flex items-center justify-between"
                     data-organism-selector-target="dropdownButton"
+                    <%= 'disabled' if @integrate_mode %>
                     data-action="click->organism-selector#toggleDropdown">
               <span data-organism-selector-target="selectedText">
                 <% if effective_organism_id.present? %>

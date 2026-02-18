@@ -246,6 +246,13 @@ class ComplianceController < ApplicationController
       g[:term_ontology_prefixes] = filter_prefixes_for_organism(g[:term_ontology_prefixes], @project)
     end
 
+    # Inject allowed_terms for fields with restricted ontology values
+    @fixable_groups.each do |fg|
+      if fg[:group][:id] == 'sex'
+        fg[:group][:allowed_terms] = CxgSchemaRules::VALID_SEX_TERMS.map { |id, name| { identifier: id, name: name } }
+      end
+    end
+
     # Compute CXG schema constraints (e.g. non-human -> ethnicity = "na")
     @schema_constraints = compute_schema_constraints(@project, @fixable_groups)
 
@@ -541,6 +548,12 @@ class ComplianceController < ApplicationController
     end
 
     scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
+
+    # Restrict to specific allowed terms when provided (e.g. sex field)
+    if params[:allowed_terms].present?
+      allowed_ids = params[:allowed_terms].split(',').map(&:strip).reject(&:blank?)
+      scope = scope.where(identifier: allowed_ids)
+    end
 
     # Search by identifier or name
     search_pattern = "%#{query}%"

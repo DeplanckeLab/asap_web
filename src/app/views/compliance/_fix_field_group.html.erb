@@ -6,6 +6,8 @@
   is_auto_title = group[:auto_from_project] == :title && project_title.present?
   has_valid_values = group[:term_valid_values].present?
   has_ontology = group[:term_ontology_prefixes].present?
+  has_allowed_terms = group[:allowed_terms].present?
+  allowed_terms_csv = has_allowed_terms ? group[:allowed_terms].map { |t| t[:identifier] }.join(',') : ''
 
   # Check if this field group has a schema constraint forcing its value
   constraint = schema_constraints[group_id]
@@ -411,6 +413,7 @@
                        data-compliance-fix-target="mapFixInput"
                        data-group-id="<%= group_id %>"
                        data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                       <% if has_allowed_terms %>data-allowed-terms="<%= allowed_terms_csv %>"<% end %>
                        data-action="input->compliance-fix#onMapFixAutocomplete keydown->compliance-fix#onMapFixKeydown"
                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                 <div data-compliance-fix-target="mapFixResults"
@@ -487,7 +490,68 @@
 
       <%# ── Set fixed value ── %>
       <div id="set_value_<%= group_id %>" class="<%= (pf_action == 'set_value' && !is_constrained) ? '' : 'hidden' %> pl-6 space-y-3">
-        <% if is_paired && has_ontology %>
+        <% if is_paired && has_ontology && has_allowed_terms %>
+          <%# Paired ontology field with restricted values: dropdown instead of autocomplete %>
+          <%
+            sv_term_prefill = pf_single_term ? pf_terms.first[:identifier] : ''
+            sv_label_prefill = pf_single_term ? pf_terms.first[:name] : ''
+          %>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Select value:</label>
+            <select data-action="change->compliance-fix#onRestrictedTermSelect"
+                    data-group-id="<%= group_id %>"
+                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+              <option value="">-- select --</option>
+              <% group[:allowed_terms].each do |term| %>
+                <option value="<%= term[:identifier] %>"
+                        data-name="<%= term[:name] %>"
+                        <%= 'selected' if sv_term_prefill == term[:identifier] %>
+                ><%= term[:identifier] %> - <%= term[:name] %></option>
+              <% end %>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 mt-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(auto-filled)</span>
+                <% unless fg[:term_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+              </label>
+              <input type="text"
+                     name="fixes[<%= group[:term_path] %>][value]"
+                     data-compliance-fix-target="termValue"
+                     data-group-id="<%= group_id %>"
+                     value="<%= sv_term_prefill %>"
+                     readonly
+                     class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(auto-filled)</span>
+                <% unless fg[:label_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+              </label>
+              <input type="text"
+                     name="fixes[<%= group[:label_path] %>][value]"
+                     data-compliance-fix-target="labelValue"
+                     data-group-id="<%= group_id %>"
+                     value="<%= sv_label_prefill %>"
+                     readonly
+                     class="block w-full rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
+            </div>
+          </div>
+
+          <p class="text-xs text-gray-400">
+            Only the above values are allowed by the scFAIR schema for this field.
+          </p>
+
+        <% elsif is_paired && has_ontology %>
           <%# Paired ontology field: autocomplete that fills both term ID and label %>
           <%
             # Prefill values for single-term assignment

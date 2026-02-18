@@ -69,6 +69,17 @@ module CxgSchemaRules
     EFO:0030080 EFO:0007045 EFO:0002761 EFO:0008919 EFO:0010184 EFO:0008994
   ].freeze
 
+  # ── Allowed sex_ontology_term_id values ──────────────────────────────
+  #
+  # The CELLxGENE / scFAIR schema restricts sex_ontology_term_id to
+  # exactly these three PATO terms (plus the special values "unknown"
+  # and "na" handled separately).
+  VALID_SEX_TERMS = {
+    'PATO:0000383' => 'female',
+    'PATO:0000384' => 'male',
+    'PATO:0001340' => 'hermaphrodite'
+  }.freeze
+
   # ── tissue_type = "cell line" forced fields ───────────────────────────
   #
   # When tissue_type is "cell line", the following fields are forced.

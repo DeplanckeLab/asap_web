@@ -434,6 +434,25 @@ export default class extends Controller {
     if (textInput) textInput.value = value
   }
 
+  // ── Restricted-terms dropdown (e.g. sex field) ──
+
+  onRestrictedTermSelect(event) {
+    const select = event.target
+    const groupId = select.dataset.groupId
+    const selectedOption = select.options[select.selectedIndex]
+    const identifier = select.value
+    const name = selectedOption ? (selectedOption.dataset.name || '') : ''
+
+    const termInput = this.termValueTargets.find(el => el.dataset.groupId === groupId)
+    const labelInput = this.labelValueTargets.find(el => el.dataset.groupId === groupId)
+
+    if (termInput) termInput.value = identifier
+    if (labelInput) labelInput.value = name
+
+    if (termInput) termInput.dispatchEvent(new Event('change', { bubbles: true }))
+    this.updateFixedBadge(groupId)
+  }
+
   // ── Form submission with loading overlay ──
 
   async submitForm(event) {
@@ -1187,7 +1206,7 @@ export default class extends Controller {
     }
 
     this.debounceTimers[timerKey] = setTimeout(() => {
-      this.fetchMapFixAutocomplete(groupId, query, input.dataset.prefixes)
+      this.fetchMapFixAutocomplete(groupId, query, input.dataset.prefixes, input.dataset.allowedTerms)
     }, 250)
   }
 
@@ -1226,8 +1245,9 @@ export default class extends Controller {
     }
   }
 
-  async fetchMapFixAutocomplete(groupId, query, prefixes) {
-    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+  async fetchMapFixAutocomplete(groupId, query, prefixes, allowedTerms) {
+    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+    if (allowedTerms) url += `&allowed_terms=${encodeURIComponent(allowedTerms)}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return

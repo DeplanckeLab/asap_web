@@ -258,7 +258,11 @@ class Project < ApplicationRecord
     return [] unless annot&.list_cat_json.present?
 
     parsed = JSON.parse(annot.list_cat_json)
-    Array(parsed).map { |v| normalize_term(v.to_s) }.reject(&:blank?).uniq
+    Array(parsed)
+      .flat_map { |v| v.to_s.split(' || ') }
+      .map { |v| normalize_term(v.strip) }
+      .reject(&:blank?)
+      .uniq
   rescue JSON::ParserError
     []
   end
@@ -377,7 +381,6 @@ class Project < ApplicationRecord
     Basic.exec_run(logger, run)
 
     logger.info("[Project#integrate] Integration Run##{run.id} queued for execution")
-    self.broadcast(run.step_id)
   end
   
   def is_public?

@@ -402,46 +402,37 @@ export default class extends Controller {
     if (updateStepId && currentStepIdNum && updateStepId === currentStepIdNum) {
       console.log(`[StepSelectorController] Status update for current step ${this.currentStepId}, updating specific runs...`)
       
-      // Find all run rows in the current view and update those that are waiting, running, or might have just finished
-      if (this.hasContentTarget) {
+      // For the parsing step (identified by parsing_status in the broadcast data),
+      // don't reload the content panel on every broadcast. The parsing view has no
+      // run rows and would trigger an unnecessary full reload each time.
+      // The parsing_status check further below handles the complete/failed transitions.
+      if (data.parsing_status && data.parsing_status !== 'complete' && data.parsing_status !== 'failed') {
+        console.log(`[StepSelectorController] Parsing step in progress (${data.parsing_status}), skipping content reload`)
+      } else if (this.hasContentTarget) {
         // Search for run rows - they might be in a table or nested in the content
         const runRows = this.contentTarget.querySelectorAll('tr[data-run-id]')
         console.log(`[StepSelectorController] Found ${runRows.length} run rows in content target`)
-        
-        if (runRows.length === 0) {
-          console.log(`[StepSelectorController] No run rows found. Content target HTML preview:`, this.contentTarget.innerHTML.substring(0, 500))
-        }
         
         const runsToUpdate = []
         
         runRows.forEach(row => {
           const runId = parseInt(row.getAttribute('data-run-id'))
-          console.log(`[StepSelectorController] Checking run row with ID: ${runId}`)
-          
-          // Update all runs - we don't know which ones changed, so update all to be safe
-          // This is still more efficient than reloading the whole panel
           runsToUpdate.push(runId)
-          console.log(`[StepSelectorController] Adding run ${runId} to update list`)
         })
         
         if (runsToUpdate.length > 0) {
           console.log(`[StepSelectorController] Found ${runsToUpdate.length} runs to update:`, runsToUpdate)
-          // Update each run's status/time
           runsToUpdate.forEach(runId => {
             this.updateRunStatus(runId)
           })
-        } else {
-          console.log(`[StepSelectorController] No runs found to update (checked ${runRows.length} rows)`)
-          // Fallback: if no runs found but we have content, try reloading the whole panel
-          if (runRows.length === 0 && this.hasContentTarget && this.contentTarget.innerHTML.trim().length > 0) {
-            console.log(`[StepSelectorController] No run rows found but content exists, falling back to full reload`)
-            const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
-            if (stepElement) {
-              clearTimeout(this.reloadTimeout)
-              this.reloadTimeout = setTimeout(() => {
-                this.loadStepResults(this.currentStepId, stepElement, false)
-              }, 500)
-            }
+        } else if (runRows.length === 0 && this.contentTarget.innerHTML.trim().length > 0) {
+          console.log(`[StepSelectorController] No run rows found but content exists, falling back to full reload`)
+          const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
+          if (stepElement) {
+            clearTimeout(this.reloadTimeout)
+            this.reloadTimeout = setTimeout(() => {
+              this.loadStepResults(this.currentStepId, stepElement, false)
+            }, 500)
           }
         }
       } else {

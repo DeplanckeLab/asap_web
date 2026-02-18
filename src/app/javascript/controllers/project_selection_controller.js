@@ -1,12 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
 
 const STORAGE_KEY = 'selectedProjectIds'
+const SC_STORAGE_KEY = 'selectedSingleCellProjectIds'
 
 export default class extends Controller {
   static targets = ["checkbox", "selectAll", "deleteButton", "deleteButtonText", "selectedCount", "clearButton", "integrateButton", "integrateButtonText"]
 
   connect() {
-    // Restore checkbox state from sessionStorage
     const stored = this.getStoredIds()
     this.checkboxTargets.forEach(checkbox => {
       if (stored.includes(checkbox.value)) {
@@ -35,6 +35,7 @@ export default class extends Controller {
 
   clearSelection() {
     sessionStorage.removeItem(STORAGE_KEY)
+    sessionStorage.removeItem(SC_STORAGE_KEY)
     this.checkboxTargets.forEach(checkbox => {
       checkbox.checked = false
     })
@@ -55,6 +56,7 @@ export default class extends Controller {
 
   updateUI() {
     const totalSelected = this.getStoredIds().length
+    const scSelected = this.getStoredSingleCellIds().length
     const pageSelected = this.checkboxTargets.filter(cb => cb.checked).length
     const otherPages = totalSelected - pageSelected
 
@@ -77,12 +79,12 @@ export default class extends Controller {
     }
 
     this.integrateButtonTargets.forEach(btn => {
-      btn.disabled = totalSelected < 2
+      btn.disabled = scSelected < 2
     })
 
     if (this.hasIntegrateButtonTextTarget) {
-      this.integrateButtonTextTarget.textContent = totalSelected >= 2
-        ? `Integrate selected (${totalSelected})`
+      this.integrateButtonTextTarget.textContent = scSelected >= 2
+        ? `Integrate selected (${scSelected})`
         : 'Integrate selected'
     }
 
@@ -99,18 +101,23 @@ export default class extends Controller {
     }
   }
 
-  // Sync current page checkboxes into sessionStorage
   syncToStorage() {
     const stored = new Set(this.getStoredIds())
-    // Update stored set based on current page checkboxes
+    const scStored = new Set(this.getStoredSingleCellIds())
+
     this.checkboxTargets.forEach(checkbox => {
+      const isSingleCell = checkbox.dataset.singleCell === 'true'
       if (checkbox.checked) {
         stored.add(checkbox.value)
+        if (isSingleCell) scStored.add(checkbox.value)
       } else {
         stored.delete(checkbox.value)
+        scStored.delete(checkbox.value)
       }
     })
+
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...stored]))
+    sessionStorage.setItem(SC_STORAGE_KEY, JSON.stringify([...scStored]))
   }
 
   getStoredIds() {
@@ -124,13 +131,27 @@ export default class extends Controller {
     }
   }
 
-  // Public method used by delete-projects controller
+  getStoredSingleCellIds() {
+    try {
+      const raw = sessionStorage.getItem(SC_STORAGE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
   getSelectedProjectIds() {
     return this.getStoredIds()
   }
 
-  // Called after successful deletion to clear storage
+  getSingleCellSelectedProjectIds() {
+    return this.getStoredSingleCellIds()
+  }
+
   clearStorage() {
     sessionStorage.removeItem(STORAGE_KEY)
+    sessionStorage.removeItem(SC_STORAGE_KEY)
   }
 }

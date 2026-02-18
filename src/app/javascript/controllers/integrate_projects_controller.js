@@ -9,9 +9,9 @@ export default class extends Controller {
     const selectionController = this.getSelectionController()
     if (!selectionController) return
 
-    const selectedIds = selectionController.getSelectedProjectIds()
+    const selectedIds = selectionController.getSingleCellSelectedProjectIds()
     if (selectedIds.length < 2) {
-      alert('Please select at least 2 projects to integrate.')
+      alert('Integration requires at least 2 single-cell transcriptomics projects.')
       return
     }
 

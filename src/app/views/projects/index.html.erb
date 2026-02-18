@@ -349,6 +349,7 @@
                     <input type="checkbox"
                            class="rounded border-gray-300 text-red-600 focus:ring-red-500"
                            value="<%= project.id %>"
+                           data-single-cell="<%= project.single_cell? %>"
                            data-action="change->project-selection#updateSelection"
                            data-project-selection-target="checkbox">
                   </td>

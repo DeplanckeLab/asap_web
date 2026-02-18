@@ -1156,27 +1156,27 @@ class ProjectsController < ApplicationController
   end
 
   # POST /projects/prepare_integrate
-  # Validates selected projects and stores them in session for integration
+  # Validates selected projects and stores them in session for integration.
+  # Only single-cell transcriptomics projects are eligible for integration.
   def prepare_integrate
     project_ids = params[:project_ids]
-    # If organism_id is passed, filter to only projects of that species
     selected_organism_id = params[:organism_id]
 
     unless project_ids.is_a?(Array) && project_ids.size >= 2
-      render json: { success: false, error: "Please select at least 2 projects to integrate." }, status: :unprocessable_entity
+      render json: { success: false, error: "Please select at least 2 single-cell transcriptomics projects to integrate." }, status: :unprocessable_entity
       return
     end
 
     project_ids = project_ids.map(&:to_i).compact
-    projects = Project.where(id: project_ids).includes(:organism)
+    projects = Project.where(id: project_ids).includes(:organism, :project_type)
 
-    if projects.size < 2
-      render json: { success: false, error: "Could not find the selected projects." }, status: :unprocessable_entity
+    sc_projects = projects.select(&:single_cell?)
+    if sc_projects.size < 2
+      render json: { success: false, error: "Integration requires at least 2 single-cell transcriptomics projects. Found #{sc_projects.size}." }, status: :unprocessable_entity
       return
     end
 
-    # Group projects by organism
-    groups = projects.group_by(&:organism_id)
+    groups = sc_projects.group_by(&:organism_id)
 
     # If a specific organism was selected (from the modal), filter to that group
     if selected_organism_id.present?
@@ -1191,9 +1191,9 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Check if all projects share the same species
+    # Check if all single-cell projects share the same species
     if groups.size == 1
-      session[:integrate_project_keys] = projects.map(&:key).compact
+      session[:integrate_project_keys] = sc_projects.map(&:key).compact
       render json: { success: true, redirect_url: new_project_path(integrate: 1) }
     else
       # Multiple species: return groups so the JS can show a modal

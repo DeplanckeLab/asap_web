@@ -333,7 +333,12 @@ class ProjectsController < ApplicationController
 
     # Variables specific to compliance view
     if @view_type == 'compliance'
-      @validation_result = load_validation_result(@project)
+      if params[:validation_id].present?
+        cv = ComplianceValidation.find_by(id: params[:validation_id], project_id: @project.id)
+        @validation_result = cv&.result_data
+        @viewing_historical = cv if @validation_result
+      end
+      @validation_result ||= load_validation_result(@project)
 
       # Load field group definitions for structured display
       co_id_to_tag = CellOntology.pluck(:id, :tag).to_h

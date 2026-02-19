@@ -10,7 +10,7 @@ class ComplianceController < ApplicationController
   include CxgSchemaRules
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields]
+  before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
   skip_before_action :authenticate_user!, only: %i[index schema_docs], raise: false
 
   # GET /compliance
@@ -158,17 +158,15 @@ class ComplianceController < ApplicationController
   # GET /compliance/projects/:id/status
   # Get validation status (for AJAX polling)
   def project_status
-    project = Project.find_by(id: params[:id])
-    
-    unless project
+    unless @project
       render json: { error: 'Project not found' }, status: :not_found
       return
     end
 
-    result = load_validation_result(project)
+    result = load_validation_result(@project)
     
     render json: {
-      project_id: project.id,
+      project_id: @project.id,
       has_result: result.present?,
       valid: result&.dig(:valid),
       validated_at: result&.dig(:validated_at),
@@ -211,6 +209,8 @@ class ComplianceController < ApplicationController
   # GET /compliance/projects/:id/fix
   # Show the fix compliance form with metadata mapping options
   def fix_project
+    expires_now
+
     unless @project
       redirect_to compliance_index_path, alert: 'Project not found'
       return
@@ -259,31 +259,51 @@ class ComplianceController < ApplicationController
     # Load existing OtProject records for prefilling the form
     @prefill_data = build_prefill_data(@project)
 
-    # For compliant fields that were fixed by the compliance tool, pre-load their
-    # current unique values from the LOOM so we can display them in the form.
-    compliant_paths = []
-    compliant_groups = []
+    # When the target field already exists in the loom (e.g. from a previous fix),
+    # switch the prefill source to the target field itself so the "Map from existing"
+    # form shows current data rather than the original source annotation.
+    @fixable_groups.each do |fg|
+      g = fg[:group]
+      fg_id = g[:id]
+      next unless @prefill_data[fg_id]
+
+      target_attr = g[:term_path]&.sub(%r{\A/col_attrs/}, '')
+      if target_attr.present? && @available_col_attrs&.include?(target_attr)
+        label_attr = g[:label_path]&.sub(%r{\A/col_attrs/}, '')
+        source_is_target = @prefill_data[fg_id][:source_annot_name] == g[:term_path] ||
+                           @prefill_data[fg_id][:source_annot_name] == g[:label_path]
+        unless source_is_target
+          preferred = if label_attr.present? && @available_col_attrs&.include?(label_attr)
+                        g[:label_path]
+                      else
+                        g[:term_path]
+                      end
+          @prefill_data[fg_id][:source_annot_name] = preferred
+        end
+      end
+    end
+
+    # Pre-load current unique values from the LOOM for ALL field groups so that:
+    # - Compliant fields show their current content with resolution badges
+    # - Fields with errors also show current loom content (which may differ from
+    #   the source annotation if a previous fix was partially applied)
+    all_paths = []
+    all_groups = []
     paired_paths = []
     @fixable_groups.each do |fg|
       g = fg[:group]
-      next if fg[:term_has_error]
-      next if g[:label_path].present? && fg[:label_has_error]
-      next if g[:auto_from_project] # organism/title are auto-filled, no need
-      compliant_paths << g[:term_path]
-      compliant_paths << g[:label_path] if g[:label_path].present?
-      compliant_groups << g
-      # For paired fields, also request co-occurrence pairs so we can display
-      # them in matching order (term and label side-by-side).
+      next if g[:auto_from_project]
+      all_paths << g[:term_path]
+      all_paths << g[:label_path] if g[:label_path].present?
+      all_groups << g
       if g[:label_path].present?
         paired_paths << [g[:term_path], g[:label_path]]
       end
     end
-    raw_values = compliant_paths.any? ? batch_read_field_values(@loom_path, compliant_paths, paired_paths: paired_paths) : {}
+    raw_values = all_paths.any? ? batch_read_field_values(@loom_path, all_paths, paired_paths: paired_paths) : {}
 
-    # Resolve each value against the ontology to detect unresolved terms.
-    # Result: { "/col_attrs/tissue" => { "fat body" => true, "body" => false }, ... }
     @compliant_field_values = raw_values
-    @compliant_field_resolved = resolve_compliant_field_values(compliant_groups, raw_values)
+    @compliant_field_resolved = resolve_field_values(all_groups, raw_values)
 
     # Merge cached field_resolutions from the validation result so that any
     # path/value not covered by resolve_compliant_field_values still gets
@@ -586,7 +606,7 @@ class ComplianceController < ApplicationController
 
     results = matched_scope
       .order(Arel.sql(relevance_sql))
-      .limit(25)
+      .limit(100)
       .pluck(:id, :identifier, :name)
 
     render json: {
@@ -1017,42 +1037,63 @@ class ComplianceController < ApplicationController
     nil
   end
 
-  # Save validation result to project directory
+  # Save validation result to project directory and record in DB.
+  # Each distinct result is stored as cxg_validation_result_<id>.json;
+  # the latest is also written to cxg_validation_result.json for backward compat.
   def save_validation_result(project, validation_data)
     return unless project.respond_to?(:key) && project.respond_to?(:user_id)
     return unless project.key.present? && project.user_id.present?
 
-    validation_path = File.join(
+    project_dir = File.join(
       ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'),
       project.user_id.to_s,
-      project.key,
-      'cxg_validation_result.json'
+      project.key
     )
-    
+    latest_path = File.join(project_dir, 'cxg_validation_result.json')
+    json_content = JSON.pretty_generate(validation_data)
+
+    # Record in compliance_validations history (skip if result unchanged)
     begin
-      FileUtils.mkdir_p(File.dirname(validation_path))
-      File.write(validation_path, JSON.pretty_generate(validation_data))
-      Rails.logger.info("[Compliance] Saved validation result to: #{validation_path}")
+      cs = project.compliance_schemas.first
+      digest = Digest::MD5.hexdigest(json_content)
+      latest = ComplianceValidation.for_project(project.id).first
+
+      if latest.nil? || latest.result_digest != digest
+        cv = ComplianceValidation.create!(
+          project_id: project.id,
+          compliance_schema_id: cs&.id,
+          passed: validation_data[:valid] || false,
+          errors_count: validation_data[:errors_count] || 0,
+          warnings_count: validation_data[:warnings_count] || 0,
+          valid_checks_count: validation_data[:valid_checks_count] || 0,
+          result_digest: digest,
+          validated_at: validation_data[:validated_at] || Time.current
+        )
+
+        FileUtils.mkdir_p(project_dir)
+        File.write(cv.result_file_path, json_content)
+        Rails.logger.info("[Compliance] Saved validation result to: #{cv.result_file_path}")
+      else
+        Rails.logger.info("[Compliance] Validation result unchanged (digest: #{digest}), skipping history entry")
+      end
     rescue StandardError => e
-      Rails.logger.error("[Compliance] Could not save validation result: #{e.message}")
+      Rails.logger.error("[Compliance] Could not record validation history: #{e.message}")
+    end
+
+    # Always overwrite the latest result file for backward compat
+    begin
+      FileUtils.mkdir_p(project_dir)
+      File.write(latest_path, json_content)
+    rescue StandardError => e
+      Rails.logger.error("[Compliance] Could not save latest validation result: #{e.message}")
     end
   end
 
-  # Resolve the first compliance schema config for a project's type from its version
-  # Returns a hash with all schema fields, with sensible defaults
+  # Resolve the first active ComplianceSchema for a project's type.
+  # Returns a hash with all schema fields (same shape as the old env_json config).
   def resolve_compliance_schema(project)
-    schemas = project.version&.compliance_schemas_for(project.project_type_id) || []
-    schema = schemas.first || {}
-    {
-      'name' => schema['name'],
-      'version' => schema['version'],
-      'source_url' => schema['source_url'],
-      'source_schema_name' => schema['source_schema_name'],
-      'description' => schema['description'],
-      'url' => schema['url'],
-      'compliant_icon' => schema['compliant_icon'],
-      'not_compliant_icon' => schema['not_compliant_icon']
-    }.compact
+    cs = project.compliance_schemas.first
+    cs ? cs.to_config_hash : {}
   end
 
   def can_access_project?(project)
@@ -1415,7 +1456,7 @@ class ComplianceController < ApplicationController
   # based on the project's organism, tissue_type, or assay.
   # Returns a hash: { field_group_id => { forced_value:, reason:, dependent_on: } }
   #
-  # Rules implemented (from CELLxGENE schema):
+  # Rules implemented (from scFAIR schema):
   # 1. If organism != Homo sapiens -> self_reported_ethnicity* MUST be "na"
   # 2. If tissue_type == "cell line" -> self_reported_ethnicity* MUST be "na",
   #    donor_id SHOULD be the cell line name
@@ -2565,7 +2606,7 @@ class ComplianceController < ApplicationController
     end
   end
 
-  # Record compliance mappings for tracking how scFAIR/CELLxGENE metadata vectors were generated.
+  # Record compliance mappings for tracking how scFAIR metadata vectors were generated.
   # Each applied fix is recorded with its action type, source, and resolve map.
   def record_compliance_mappings(project, applied, fixes)
     now = Time.current
@@ -2627,6 +2668,7 @@ class ComplianceController < ApplicationController
 
       mapping = ComplianceMapping.create!(
         project_id: project.id,
+        compliance_schema_id: project.compliance_schemas.first&.id,
         field_group_id: field_group_id,
         ontology_term_type_id: ott_id_map[field_path],
         target_path: field_path,

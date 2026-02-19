@@ -1,0 +1,67 @@
+<% content_for :title, "Compliance Schemas - ASAP" %>
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900">Compliance Schemas</h1>
+      <p class="mt-2 text-gray-600">
+        Manage the compliance schemas used to validate projects.
+      </p>
+    </div>
+    <%= link_to 'New Schema', new_compliance_schema_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <% if @compliance_schemas.any? %>
+    <table class="min-w-full divide-y divide-gray-200 bg-white rounded-lg border border-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project Types</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @compliance_schemas.each do |cs| %>
+          <tr class="<%= cs.active? ? '' : 'opacity-50' %>">
+            <td class="px-4 py-3 text-sm font-medium text-gray-900">
+              <%= cs.name %>
+              <% if cs.source_schema_name.present? %>
+                <span class="text-xs text-gray-500">(<%= cs.source_schema_name %>)</span>
+              <% end %>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-600"><%= cs.version %></td>
+            <td class="px-4 py-3 text-sm text-gray-600">
+              <% cs.project_type_tags.to_s.split(',').each do |tag| %>
+                <span class="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 mr-1"><%= tag.strip %></span>
+              <% end %>
+            </td>
+            <td class="px-4 py-3 text-sm">
+              <% if cs.active? %>
+                <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Active</span>
+              <% else %>
+                <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">Obsolete</span>
+              <% end %>
+              <% if cs.requires_public? %>
+                <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 ml-1">Required for publishing</span>
+              <% end %>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-500"><%= cs.started_at&.strftime('%Y-%m-%d') %></td>
+            <td class="px-4 py-3 text-sm text-right space-x-2">
+              <%= link_to 'Edit', edit_compliance_schema_path(cs), class: 'text-blue-600 hover:text-blue-800 hover:underline' %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
+      No compliance schemas configured yet.
+    </div>
+  <% end %>
+</div>

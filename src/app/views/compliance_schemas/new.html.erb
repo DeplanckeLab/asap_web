@@ -1,0 +1,9 @@
+<% content_for :title, "New Compliance Schema - ASAP" %>
+<div class="max-w-3xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-semibold text-gray-900">New Compliance Schema</h1>
+    <p class="mt-2 text-gray-600">Add a new schema to validate projects against.</p>
+  </div>
+
+  <%= render 'form', compliance_schema: @compliance_schema %>
+</div>

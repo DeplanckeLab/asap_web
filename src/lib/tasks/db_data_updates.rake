@@ -293,6 +293,130 @@ namespace :versions do
     puts "  Total:   #{Version.count}"
   end
 
+  desc "Update compliance config: replace CELLxGENE references with scFAIR"
+  task update_compliance_to_scfair: :environment do
+    puts "Updating compliance config in all Versions to reference scFAIR..."
+    puts ""
+
+    updated_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    old_source_url = "https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/schema.md"
+    new_source_url = "https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/README.md"
+
+    Version.find_each do |version|
+      begin
+        env_data = JSON.parse(version.env_json.presence || '{}')
+        comp = env_data['compliance']
+        next unless comp.is_a?(Hash)
+
+        changed = false
+        comp.each do |_pt_id, schemas|
+          next unless schemas.is_a?(Array)
+          schemas.each do |s|
+            if s['source_url'] == old_source_url
+              s['source_url'] = new_source_url
+              changed = true
+            end
+            if s['source_schema_name'] == 'CELLxGENE schema'
+              s['source_schema_name'] = 'scFAIR schema'
+              changed = true
+            end
+            if s['description']&.include?('CELLxGENE')
+              s['description'] = 'scFAIR validates single-cell transcriptomics datasets against the scFAIR cell metadata schema'
+              changed = true
+            end
+          end
+        end
+
+        if changed
+          version.update!(env_json: JSON.generate(env_data))
+          puts "  Version ##{version.id}: Updated"
+          updated_count += 1
+        else
+          puts "  Version ##{version.id}: Already up to date, skipping"
+          skipped_count += 1
+        end
+
+      rescue StandardError => e
+        puts "  Version ##{version.id}: ERROR - #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated_count}"
+    puts "  Skipped: #{skipped_count}"
+    puts "  Errors:  #{error_count}"
+    puts "  Total:   #{Version.count}"
+  end
+
+end
+
+namespace :compliance_schemas do
+  desc "Seed compliance_schemas table from Version env_json compliance config"
+  task seed_from_env_json: :environment do
+    puts "Seeding ComplianceSchema records from Version env_json..."
+    puts ""
+
+    pt_tag_map = ProjectType.pluck(:id, :tag).to_h
+
+    seen = Set.new
+    created_count = 0
+    skipped_count = 0
+
+    Version.find_each do |version|
+      env_data = JSON.parse(version.env_json.presence || '{}') rescue {}
+      comp = env_data['compliance']
+      next unless comp.is_a?(Hash)
+
+      comp.each do |pt_id_str, schemas|
+        next unless schemas.is_a?(Array)
+
+        tag = pt_tag_map[pt_id_str.to_i] || "type_#{pt_id_str}"
+
+        schemas.each do |s|
+          key = [s['name'], s['version'], tag].join('|')
+          next if seen.include?(key)
+          seen << key
+
+          existing = ComplianceSchema.where(name: s['name'], version: s['version'])
+                                     .where("project_type_tags LIKE ?", "%#{tag}%")
+                                     .first
+          if existing
+            puts "  Already exists: #{s['name']} v#{s['version']} (#{tag}), skipping"
+            skipped_count += 1
+            next
+          end
+
+          cs = ComplianceSchema.create!(
+            name: s['name'],
+            version: s['version'],
+            source_schema_name: s['source_schema_name'],
+            description: s['description'],
+            source_url: s['source_url'],
+            url: s['url'],
+            compliant_icon: s['compliant_icon'],
+            not_compliant_icon: s['not_compliant_icon'],
+            project_type_tags: tag,
+            if_compliant: Array(s['if_compliant']).join(','),
+            active: true,
+            started_at: Time.current
+          )
+          puts "  Created: #{cs.name} v#{cs.version} (#{tag}) -> ComplianceSchema##{cs.id}"
+          created_count += 1
+        end
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Created: #{created_count}"
+    puts "  Skipped: #{skipped_count}"
+    puts "  Total:   #{ComplianceSchema.count}"
+  end
 end
 
 namespace :projects do

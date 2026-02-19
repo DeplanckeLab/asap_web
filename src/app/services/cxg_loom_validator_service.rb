@@ -6,11 +6,11 @@ require 'shellwords'
 
 # scFAIR Cell Metadata Compliance Validator
 #
-# Validates cell metadata in Loom files against the CELLxGENE Schema 7.1.0
+# Validates cell metadata in Loom files against the scFAIR Schema 7.1.0
 # requirements, focusing exclusively on cell-level metadata and required
 # global attributes.
 #
-# Reference: https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/schema.md
+# Reference: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/README.md
 #
 # ASAP Matrix Orientation:
 # ASAP uses a genes x cells matrix orientation (genes as rows, cells as columns).
@@ -24,9 +24,9 @@ require 'shellwords'
 #   - Organism-specific requirements for cell metadata
 #
 # Ontology Versions:
-# ASAP applies the structural rules and field requirements from CELLxGENE schema,
+# ASAP applies the structural rules and field requirements from the scFAIR schema,
 # but uses its own ontology and reference database versions associated with each
-# ASAP version. The specific versions pinned by CELLxGENE are NOT enforced.
+# ASAP version. The specific versions pinned by the upstream schema are NOT enforced.
 # This validator checks ontology term FORMAT (PREFIX:ID) but not specific versions.
 class CxgLoomValidatorService
   include CxgSchemaRules
@@ -51,7 +51,7 @@ class CxgLoomValidatorService
   VALID_SUSPENSION_TYPES = ['cell', 'nucleus', 'na'].freeze
 
   # Schema-allowed special (non-ontology) values per ontology field.
-  # These are free-text values that the CELLxGENE schema explicitly permits
+  # These are free-text values that the scFAIR schema explicitly permits
   # alongside ontology term identifiers.
   ALLOWED_SPECIAL_VALUES = {
     '/col_attrs/cell_type_ontology_term_id'                     => %w[unknown na].freeze,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_17_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_18_201000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -282,6 +282,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_100000) do
   create_table "compliance_mappings", force: :cascade do |t|
     t.string "action_type", null: false
     t.datetime "applied_at", null: false
+    t.integer "compliance_schema_id"
     t.datetime "created_at", null: false
     t.string "field_group_id", null: false
     t.integer "ontology_term_type_id"
@@ -292,10 +293,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_100000) do
     t.string "source_path"
     t.string "target_path", null: false
     t.datetime "updated_at", null: false
+    t.index ["compliance_schema_id"], name: "index_compliance_mappings_on_compliance_schema_id"
     t.index ["ontology_term_type_id"], name: "index_compliance_mappings_on_ontology_term_type_id"
     t.index ["project_id", "field_group_id"], name: "index_compliance_mappings_on_project_id_and_field_group_id"
     t.index ["project_id"], name: "index_compliance_mappings_on_project_id"
     t.index ["source_annot_id"], name: "index_compliance_mappings_on_source_annot_id"
+  end
+
+  create_table "compliance_schemas", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.string "compliant_icon"
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.datetime "ended_at"
+    t.string "if_compliant"
+    t.string "name", null: false
+    t.string "not_compliant_icon"
+    t.string "project_type_tags", null: false
+    t.string "source_schema_name"
+    t.string "source_url"
+    t.datetime "started_at"
+    t.datetime "updated_at", null: false
+    t.string "url"
+    t.string "version"
+    t.index ["active"], name: "index_compliance_schemas_on_active"
   end
 
   create_table "compliance_term_replacements", force: :cascade do |t|
@@ -309,6 +330,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_17_100000) do
     t.index ["cell_ontology_term_id"], name: "index_compliance_term_replacements_on_cell_ontology_term_id"
     t.index ["compliance_mapping_id"], name: "index_compliance_term_replacements_on_compliance_mapping_id"
     t.index ["original_value"], name: "index_compliance_term_replacements_on_original_value"
+  end
+
+  create_table "compliance_validations", force: :cascade do |t|
+    t.integer "compliance_schema_id"
+    t.datetime "created_at", null: false
+    t.integer "errors_count", default: 0, null: false
+    t.boolean "passed", default: false, null: false
+    t.integer "project_id", null: false
+    t.string "result_digest", limit: 32
+    t.datetime "updated_at", null: false
+    t.integer "valid_checks_count", default: 0, null: false
+    t.datetime "validated_at", null: false
+    t.integer "warnings_count", default: 0, null: false
+    t.index ["compliance_schema_id"], name: "index_compliance_validations_on_compliance_schema_id"
+    t.index ["project_id", "validated_at"], name: "index_compliance_validations_on_project_id_and_validated_at"
+    t.index ["project_id"], name: "index_compliance_validations_on_project_id"
   end
 
   create_table "correlations", id: :serial, force: :cascade do |t|

@@ -24,94 +24,12 @@
     </div>
   </div>
 
-  <!-- Compliance Schemas Section -->
-  <div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
-    <h3 class="text-sm font-semibold text-gray-800 mb-3">Compliance Schemas</h3>
-    <p class="text-xs text-gray-500 mb-4">Configure compliance schemas per project type. Stored in <code>compliance</code> key of env_json.</p>
-    
-    <% env_data = version.env_data rescue {} %>
-    <% sc_schemas = env_data.dig('compliance', '1') || [] %>
-    <% sc_schema = sc_schemas.first || {} %>
-    
-    <div class="space-y-4">
-      <!-- Single-cell transcriptomics (project_type_id = 1) -->
-      <div class="bg-white rounded-md p-3 border border-gray-200">
-        <div class="text-xs font-medium text-purple-700 mb-2">Single-cell transcriptomics (project type 1)</div>
-        <div class="grid grid-cols-3 gap-3 mb-3">
-          <div>
-            <%= label_tag :compliance_sc_name, "Name", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_name, 
-                               sc_schema['name'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "e.g., scFAIR" %>
-          </div>
-          <div>
-            <%= label_tag :compliance_sc_version, "Version", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_version, 
-                               sc_schema['version'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "e.g., 7.1.0" %>
-          </div>
-          <div>
-            <%= label_tag :compliance_sc_source_schema_name, "Source Schema Name", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_source_schema_name, 
-                               sc_schema['source_schema_name'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "e.g., CELLxGENE schema" %>
-          </div>
-        </div>
-        <div class="grid grid-cols-1 gap-3 mb-3">
-          <div>
-            <%= label_tag :compliance_sc_description, "Description", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_description, 
-                               sc_schema['description'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "e.g., scFAIR is using the CELLxGENE cell metadata schema to validate..." %>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <%= label_tag :compliance_sc_source_url, "Source URL (schema reference)", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_source_url, 
-                               sc_schema['source_url'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "https://..." %>
-          </div>
-          <div>
-            <%= label_tag :compliance_sc_url, "URL (badge link)", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_url, 
-                               sc_schema['url'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "https://sc-fair.org" %>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <%= label_tag :compliance_sc_compliant_icon, "Compliant Icon", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_compliant_icon, 
-                               sc_schema['compliant_icon'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "badge_compliant.svg" %>
-          </div>
-          <div>
-            <%= label_tag :compliance_sc_not_compliant_icon, "Non-Compliant Icon", class: "block text-xs font-medium text-gray-600" %>
-            <%= text_field_tag :compliance_sc_not_compliant_icon, 
-                               sc_schema['not_compliant_icon'], 
-                               class: "mt-1 w-full text-sm rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900",
-                               placeholder: "badge_noncompliant.svg" %>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-gray-400">if_compliant: allow_public (enforced automatically)</p>
-      </div>
-    </div>
-  </div>
-
   <div>
     <%= form.label :env_json, "Environment JSON (Advanced)", class: "block text-sm font-medium text-gray-700" %>
     <div class="mt-1">
       <%= form.text_area :env_json, rows: 8, class: "w-full font-mono text-xs rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
     </div>
-    <p class="mt-1 text-xs text-gray-500">Raw JSON configuration. The compliance fields above will be merged into the <code>compliance</code> key on save.</p>
+    <p class="mt-1 text-xs text-gray-500">Raw JSON configuration for version-specific settings (docker images, tools, etc.). Compliance schemas are managed separately via <%= link_to 'Compliance Schemas', compliance_schemas_path %>.</p>
   </div>
 
   <div class="grid grid-cols-2 gap-4">

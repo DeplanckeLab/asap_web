@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-# Shared CELLxGENE schema cross-field constraint rules.
+# Shared scFAIR schema cross-field constraint rules.
 #
 # Used by both:
 # - ComplianceController (to auto-fill / force values in the fix form)
 # - CxgLoomValidatorService (to report errors/warnings during validation)
 #
-# Reference: https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/schema.md
+# Reference: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/README.md
 module CxgSchemaRules
   extend ActiveSupport::Concern
 
@@ -15,7 +15,7 @@ module CxgSchemaRules
   # Maps EFO assay terms to their allowed suspension_type values.
   # When a single value is allowed, suspension_type is fully determined.
   # When multiple values are allowed, the user must pick one.
-  # Source: CELLxGENE schema 7.1.0, suspension_type table.
+  # Source: scFAIR schema 7.1.0, suspension_type table.
   ASSAY_SUSPENSION_TYPE_MAP = {
     # Exact assay terms -> allowed suspension_type values
     'EFO:0700004' => ['cell'],                    # BD Rhapsody Targeted mRNA
@@ -71,7 +71,7 @@ module CxgSchemaRules
 
   # ── Allowed sex_ontology_term_id values ──────────────────────────────
   #
-  # The CELLxGENE / scFAIR schema restricts sex_ontology_term_id to
+  # The scFAIR schema restricts sex_ontology_term_id to
   # exactly these three PATO terms (plus the special values "unknown"
   # and "na" handled separately).
   VALID_SEX_TERMS = {

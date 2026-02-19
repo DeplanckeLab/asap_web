@@ -11,8 +11,8 @@
      data-compliance-fix-organism-is-human-value="<%= @organism_info && @organism_info[:tax_id].to_s == '9606' %>"
      data-compliance-fix-current-trigger-values-value="<%= (@current_trigger_values || {}).to_json %>">
   <%
-    c_name = @schema_config['name'] || @validation_result&.dig(:schema_name)
-    c_version = @validation_result&.dig(:schema_version) || @schema_config['version']
+    c_name = @schema_config&.dig('name') || @validation_result&.dig(:schema_name)
+    c_version = @validation_result&.dig(:schema_version) || @schema_config&.dig('version')
     display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
   %>
 

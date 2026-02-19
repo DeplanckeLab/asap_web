@@ -151,6 +151,10 @@ import ComplianceFixController from "controllers/compliance_fix_controller"
 application.register("compliance-fix", ComplianceFixController)
 console.log('Compliance fix controller registered')
 
+import CloneOverlayController from "controllers/clone_overlay_controller"
+application.register("clone-overlay", CloneOverlayController)
+console.log('Clone overlay controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

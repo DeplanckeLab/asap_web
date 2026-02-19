@@ -86,7 +86,7 @@
     <% end %>
   </div>
 
-  <%# Show current values for compliant fields that were fixed by the compliance tool %>
+  <%# Show current values from the LOOM file with resolution status %>
   <% cfv = compliant_field_values || {} %>
   <% cfr = compliant_field_resolved || {} %>
   <% term_vals = cfv[group[:term_path]] %>
@@ -689,7 +689,7 @@
             <% if group_id == 'is_primary_data' %>
               <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
                 <p class="text-xs text-gray-600">
-                  Per the CELLxGENE schema, this MUST be <strong>True</strong> if this is the canonical instance of this cellular observation
+                  Per the scFAIR schema, this MUST be <strong>True</strong> if this is the canonical instance of this cellular observation
                   and <strong>False</strong> if not.
                 </p>
                 <p class="text-xs text-gray-600 mt-1">
@@ -730,7 +730,7 @@
             <% if group_id == 'donor_id' %>
               <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
                 <p class="text-xs text-gray-600">
-                  Per the CELLxGENE schema, this MUST be free-text that identifies a unique individual that data were derived from.
+                  Per the scFAIR schema, this MUST be free-text that identifies a unique individual that data were derived from.
                   If <code class="bg-gray-100 px-0.5 rounded">tissue_type</code> is "cell line", this MUST be "na".
                 </p>
                 <p class="text-xs text-gray-600 mt-1">

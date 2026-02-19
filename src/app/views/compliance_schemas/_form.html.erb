@@ -1,0 +1,111 @@
+<%= form_with(model: compliance_schema, class: "space-y-6", local: true) do |form| %>
+  <% if compliance_schema.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p class="font-semibold"><%= pluralize(compliance_schema.errors.count, "error") %> prohibited this schema from being saved:</p>
+      <ul class="mt-2 list-disc pl-5">
+        <% compliance_schema.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid grid-cols-3 gap-4">
+    <div>
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :name, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., scFAIR" %>
+      </div>
+    </div>
+    <div>
+      <%= form.label :version, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :version, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., 7.1.0" %>
+      </div>
+    </div>
+    <div>
+      <%= form.label :source_schema_name, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :source_schema_name, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., scFAIR schema" %>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :description, class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1">
+      <%= form.text_area :description, rows: 2, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "Short description of what this schema validates" %>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <%= form.label :source_url, "Source URL (schema reference)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :source_url, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "https://..." %>
+      </div>
+    </div>
+    <div>
+      <%= form.label :url, "URL (badge link)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :url, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "https://sc-fair.org" %>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <%= form.label :compliant_icon, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :compliant_icon, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "badge_compliant.svg" %>
+      </div>
+    </div>
+    <div>
+      <%= form.label :not_compliant_icon, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :not_compliant_icon, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "badge_noncompliant.svg" %>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <%= form.label :project_type_tags, "Project Type Tags (comma-separated)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :project_type_tags, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., sc or sc,bulk" %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">Matches against ProjectType.tag (<%= ProjectType.pluck(:tag).compact.join(', ') %>)</p>
+    </div>
+    <div>
+      <%= form.label :if_compliant, "If Compliant (comma-separated effects)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_field :if_compliant, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., allow_public" %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">"allow_public" means compliance is required before publishing</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-4">
+    <div class="flex items-center gap-2 pt-6">
+      <%= form.check_box :active, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.label :active, class: "text-sm text-gray-700" %>
+    </div>
+    <div>
+      <%= form.label :started_at, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.datetime_select :started_at, { include_seconds: false, include_blank: true }, class: "rounded-md border border-gray-300 px-2 py-1 shadow-sm text-sm" %>
+      </div>
+    </div>
+    <div>
+      <%= form.label :ended_at, class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.datetime_select :ended_at, { include_seconds: false, include_blank: true }, class: "rounded-md border border-gray-300 px-2 py-1 shadow-sm text-sm" %>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex items-center justify-end gap-2">
+    <%= link_to 'Cancel', compliance_schemas_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+    <%= form.submit (compliance_schema.persisted? ? 'Update Schema' : 'Create Schema'), class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+  </div>
+<% end %>

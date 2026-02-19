@@ -20,7 +20,7 @@
             <p class="text-sm text-gray-600">Allow other users to view and clone this project</p>
             <% unless @project.compliance_valid? %>
               <%
-                schema_label = @project.compliance_schemas.first&.dig('name') || 'compliance'
+                schema_label = @project.compliance_schemas.first&.name || 'compliance'
               %>
               <p class="text-xs text-amber-600 mt-1">
                 <% if @project.cxg_validation_result.nil? %>

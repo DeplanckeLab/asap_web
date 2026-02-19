@@ -56,25 +56,27 @@ export default class extends Controller {
     }
     document.addEventListener('click', this.outsideClickHandler)
 
-    // Hover-highlight for paired "Current field content" badges:
+    // Hover-highlight for paired badges (both "Current field content" and "Map from existing"):
     // when hovering a badge, highlight its counterpart on the other side.
     this.pairHoverIn = (e) => {
-      const badge = e.target.closest('.cfv-pair-badge')
+      const badge = e.target.closest('.cfv-pair-badge, .map-pair-badge')
       if (!badge) return
       const group = badge.dataset.pairGroup
       const idx = badge.dataset.pairIdx
       if (!group || idx == null) return
-      this.element.querySelectorAll(`.cfv-pair-badge[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
+      const cls = badge.classList.contains('cfv-pair-badge') ? 'cfv-pair-badge' : 'map-pair-badge'
+      this.element.querySelectorAll(`.${cls}[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
         el.classList.add('ring-2', 'ring-blue-400')
       })
     }
     this.pairHoverOut = (e) => {
-      const badge = e.target.closest('.cfv-pair-badge')
+      const badge = e.target.closest('.cfv-pair-badge, .map-pair-badge')
       if (!badge) return
       const group = badge.dataset.pairGroup
       const idx = badge.dataset.pairIdx
       if (!group || idx == null) return
-      this.element.querySelectorAll(`.cfv-pair-badge[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
+      const cls = badge.classList.contains('cfv-pair-badge') ? 'cfv-pair-badge' : 'map-pair-badge'
+      this.element.querySelectorAll(`.${cls}[data-pair-group="${group}"][data-pair-idx="${idx}"]`).forEach(el => {
         el.classList.remove('ring-2', 'ring-blue-400')
       })
     }
@@ -1010,10 +1012,12 @@ export default class extends Controller {
     const sourceStyle = 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200'
     const derivedStyle = 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
 
+    const pairGroup = `map_${groupId}`
+
     // Render term side (identifiers): font-mono always
     if (termBadgeEl) {
       const termStyle = termIsSource ? sourceStyle : derivedStyle
-      sortedValues.forEach(val => {
+      sortedValues.forEach((val, idx) => {
         const badge = document.createElement('span')
         const isResolved = !!resolved[val]
         const isArrayFormat = val.startsWith('[') && val.endsWith(']')
@@ -1025,21 +1029,23 @@ export default class extends Controller {
         badge.dataset.originalValue = val
         badge.dataset.mapBadgeValue = val
         badge.dataset.mapBadgeRole = 'term'
+        badge.dataset.pairGroup = pairGroup
+        badge.dataset.pairIdx = idx
 
         if (!isResolved) {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
+          badge.className = 'map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
           badge.textContent = termIsSource ? val : `? (${val})`
           badge.title = 'Click to fix this unresolved term'
         } else if (isArrayFormat) {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          badge.className = 'map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
           badge.textContent = termIsSource ? (sourceRenames[val] || val) : resolved[val]
           badge.title = 'Click to change'
         } else if (hasRename) {
-          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-mono bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
+          badge.className = 'map-pair-badge inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-mono bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
           badge.innerHTML = `<s class="text-red-400 text-[10px]">${this.escapeHtml(val)}</s> ${this.escapeHtml(sourceRenames[val])}`
           badge.title = 'Click to change'
         } else {
-          badge.className = `inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono ${termStyle} cursor-pointer`
+          badge.className = `map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full font-mono ${termStyle} cursor-pointer`
           badge.textContent = displayValue || val
           badge.title = 'Click to change'
         }
@@ -1050,7 +1056,7 @@ export default class extends Controller {
     // Render label side (names): no font-mono
     if (labelBadgeEl) {
       const labelStyle = termIsSource ? derivedStyle : sourceStyle
-      sortedValues.forEach(val => {
+      sortedValues.forEach((val, idx) => {
         const badge = document.createElement('span')
         const isResolved = !!resolved[val]
         const isArrayFormat = val.startsWith('[') && val.endsWith(']')
@@ -1062,21 +1068,23 @@ export default class extends Controller {
         badge.dataset.originalValue = val
         badge.dataset.mapBadgeValue = val
         badge.dataset.mapBadgeRole = 'label'
+        badge.dataset.pairGroup = pairGroup
+        badge.dataset.pairIdx = idx
 
         if (!isResolved) {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
+          badge.className = 'map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 border border-red-300 cursor-pointer hover:bg-red-200'
           badge.textContent = termIsSource ? `? (${val})` : val
           badge.title = 'Click to fix this unresolved term'
         } else if (isArrayFormat) {
-          badge.className = 'inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
+          badge.className = 'map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200 cursor-pointer hover:bg-purple-200'
           badge.textContent = termIsSource ? resolved[val] : (sourceRenames[val] || val)
           badge.title = 'Click to change'
         } else if (hasRename) {
-          badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
+          badge.className = 'map-pair-badge inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200 cursor-pointer hover:bg-green-200'
           badge.innerHTML = `<s class="text-red-400 text-[10px]">${this.escapeHtml(val)}</s> ${this.escapeHtml(sourceRenames[val])}`
           badge.title = 'Click to change'
         } else {
-          badge.className = `inline-flex items-center px-2 py-0.5 text-xs rounded-full ${labelStyle} cursor-pointer`
+          badge.className = `map-pair-badge inline-flex items-center px-2 py-0.5 text-xs rounded-full ${labelStyle} cursor-pointer`
           badge.textContent = displayValue || val
           badge.title = 'Click to change'
         }

@@ -1,18 +1,29 @@
 <%
-  # Display data: current config takes priority for name (branding), rest from validation result with config fallback
-  schema_config = @project.compliance_schemas.first || {}
+  schema_config = @project.compliance_schemas.first&.to_config_hash
 
-  c_name = schema_config['name'] || @validation_result&.dig(:schema_name)
-  c_version = @validation_result&.dig(:schema_version) || schema_config['version']
-  c_url = @validation_result&.dig(:url) || schema_config['url']
-  c_source_url = @validation_result&.dig(:source_url) || schema_config['source_url']
-  c_source_schema_name = @validation_result&.dig(:source_schema_name) || schema_config['source_schema_name']
-  c_description = @validation_result&.dig(:description) || schema_config['description']
-  c_compliant_icon = @validation_result&.dig(:compliant_icon) || schema_config['compliant_icon']
-  c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon) || schema_config['not_compliant_icon']
+  c_name = schema_config&.dig('name') || @validation_result&.dig(:schema_name)
+  c_version = @validation_result&.dig(:schema_version) || schema_config&.dig('version')
+  c_url = @validation_result&.dig(:url) || schema_config&.dig('url')
+  c_source_url = @validation_result&.dig(:source_url) || schema_config&.dig('source_url')
+  c_source_schema_name = @validation_result&.dig(:source_schema_name) || schema_config&.dig('source_schema_name')
+  c_description = @validation_result&.dig(:description) || schema_config&.dig('description')
+  c_compliant_icon = @validation_result&.dig(:compliant_icon) || schema_config&.dig('compliant_icon')
+  c_not_compliant_icon = @validation_result&.dig(:not_compliant_icon) || schema_config&.dig('not_compliant_icon')
 
   display_title = [c_name, ("v#{c_version}" if c_version.present?)].compact.join(' ')
 %>
+
+<% if @viewing_historical %>
+  <div class="max-w-6xl mx-auto mb-4">
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+      <span class="text-sm text-amber-800">
+        Viewing historical result from <strong><%= @viewing_historical.validated_at.strftime('%B %d, %Y at %H:%M') %></strong>
+      </span>
+      <%= link_to "Back to latest", project_path(@project, view: 'compliance'),
+          class: "text-sm font-medium text-amber-700 hover:text-amber-900 underline" %>
+    </div>
+  </div>
+<% end %>
 
 <div class="max-w-6xl mx-auto"
      data-controller="metadata-validation"
@@ -80,6 +91,7 @@
                         class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
           <% end %>
         <% end %>
+        <%= render 'compliance/validation_history_modal', project: @project %>
       </div>
     </div>
   </div>
@@ -525,6 +537,7 @@
       <span class="text-gray-400 text-sm">The page will reload when complete.</span>
     </div>
   </div>
+
 </div>
 
 <script>

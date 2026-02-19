@@ -470,21 +470,17 @@ class Project < ApplicationRecord
     validation['valid'] == true || validation[:valid] == true
   end
 
-  # Check whether the project's version has compliance schemas with "allow_public" for this project type
   def compliance_requires_public?
-    return false unless version.present? && project_type_id.present?
-    version.compliance_requires_public?(project_type_id)
-  rescue StandardError
-    # Backward compatibility: if no compliance config, single-cell projects still require it
-    single_cell?
+    compliance_schemas.any?(&:requires_public?)
   end
 
-  # Get the compliance schemas configured for this project's type
+  # Get the active ComplianceSchema records for this project's type.
+  # Returns an array of ComplianceSchema AR objects.
+  # Views that expect a hash can call .to_config_hash on each record.
   def compliance_schemas
-    return [] unless version.present? && project_type_id.present?
-    version.compliance_schemas_for(project_type_id)
-  rescue StandardError
-    []
+    tag = project_type&.tag
+    return ComplianceSchema.none if tag.blank?
+    ComplianceSchema.active.for_project_type(tag)
   end
 
   # Get the CXG validation result
@@ -531,7 +527,7 @@ class Project < ApplicationRecord
   def can_be_public?
     unless compliance_valid?
       validation = cxg_validation_result
-      schema_name = validation&.dig('schema_name') || compliance_schemas.first&.dig('name') || 'compliance'
+      schema_name = validation&.dig('schema_name') || compliance_schemas.first&.name || 'compliance'
       if validation.nil?
         return [false, "#{schema_name} check has not been run. Please validate your project before making it public."]
       else

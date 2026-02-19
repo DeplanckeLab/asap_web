@@ -260,19 +260,17 @@
     <!-- Compliance section (driven entirely by compliance schemas in env_json and validation results) -->
     <% if @project.compliance_requires_public? %>
     <%
-      # All display data comes from the validation result (if available) or from the compliance config
       validation_result = @project.cxg_validation_result
-      schema_config = @project.compliance_schemas.first || {}
+      schema_config = @project.compliance_schemas.first&.to_config_hash
 
-      # Schema metadata: prefer what was stored in the result at validation time, fall back to current config
-      c_name = schema_config['name'] || validation_result&.dig('schema_name')
-      c_version = validation_result&.dig('schema_version') || schema_config['version']
-      c_url = validation_result&.dig('url') || schema_config['url']
-      c_source_url = validation_result&.dig('source_url') || schema_config['source_url']
-      c_source_schema_name = validation_result&.dig('source_schema_name') || schema_config['source_schema_name']
-      c_description = validation_result&.dig('description') || schema_config['description']
-      c_compliant_icon = validation_result&.dig('compliant_icon') || schema_config['compliant_icon']
-      c_not_compliant_icon = validation_result&.dig('not_compliant_icon') || schema_config['not_compliant_icon']
+      c_name = schema_config&.dig('name') || validation_result&.dig('schema_name')
+      c_version = validation_result&.dig('schema_version') || schema_config&.dig('version')
+      c_url = validation_result&.dig('url') || schema_config&.dig('url')
+      c_source_url = validation_result&.dig('source_url') || schema_config&.dig('source_url')
+      c_source_schema_name = validation_result&.dig('source_schema_name') || schema_config&.dig('source_schema_name')
+      c_description = validation_result&.dig('description') || schema_config&.dig('description')
+      c_compliant_icon = validation_result&.dig('compliant_icon') || schema_config&.dig('compliant_icon')
+      c_not_compliant_icon = validation_result&.dig('not_compliant_icon') || schema_config&.dig('not_compliant_icon')
     %>
     <div class="bg-gray-50 rounded-lg p-6" 
          data-controller="metadata-validation" 
@@ -374,6 +372,8 @@
                     Fix Compliance Issues
                   <% end %>
                 <% end %>
+
+                <%= render 'compliance/validation_history_modal', project: @project %>
               </div>
               <% if validation_result['validated_at'] %>
                 <span class="text-xs text-gray-500">

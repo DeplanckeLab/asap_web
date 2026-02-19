@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Background job to validate a loom file against CELLxGENE schema
+# Background job to validate a loom file against the scFAIR schema
 # Runs asynchronously after parsing is finished
 class CxgValidationJob < ApplicationJob
   queue_as :default
@@ -19,7 +19,7 @@ class CxgValidationJob < ApplicationJob
       return
     end
 
-    broadcast(project_id, status: 'validating', message: 'Starting CELLxGENE schema validation...')
+    broadcast(project_id, status: 'validating', message: 'Starting scFAIR schema validation...')
 
     # Find the loom file to validate
     loom_path = options[:loom_path] || find_project_loom_file(project)
@@ -56,7 +56,7 @@ class CxgValidationJob < ApplicationJob
       broadcast(project_id,
         status: 'completed',
         valid: true,
-        message: 'Validation passed! File is compliant with CELLxGENE schema 7.1.0',
+        message: 'Validation passed! File is compliant with scFAIR schema 7.1.0',
         errors_count: 0,
         warnings_count: result.warnings.count,
         valid_checks_count: result.valid_checks.count,
@@ -141,11 +141,20 @@ class CxgValidationJob < ApplicationJob
   end
 
   def save_validation_result(project, result, error_or_path)
-    # Store validation result in project metadata or dedicated table
+    cs = project.compliance_schemas.first
+    schema_meta = cs ? cs.to_config_hash.transform_keys(&:to_sym) : {}
+
     validation_data = if result
       {
         valid: result.valid?,
         schema_version: result.schema_version,
+        schema_name: schema_meta[:name],
+        source_url: schema_meta[:source_url],
+        source_schema_name: schema_meta[:source_schema_name],
+        description: schema_meta[:description],
+        url: schema_meta[:url],
+        compliant_icon: schema_meta[:compliant_icon],
+        not_compliant_icon: schema_meta[:not_compliant_icon],
         validated_at: result.validated_at,
         loom_path: error_or_path,
         errors: result.errors,
@@ -156,17 +165,47 @@ class CxgValidationJob < ApplicationJob
         warnings_count: result.warnings.count,
         valid_checks_count: result.valid_checks.count,
         field_resolutions: result.field_resolutions || {}
-      }
+      }.compact
     else
       {
         valid: false,
         schema_version: CxgLoomValidatorService::SCHEMA_VERSION,
+        schema_name: schema_meta[:name],
         validated_at: Time.current.iso8601,
         error: error_or_path
-      }
+      }.compact
     end
 
-    # Try to save to project metadata
+    json_content = JSON.pretty_generate(validation_data)
+
+    # Record in compliance_validations history (skip if result unchanged)
+    begin
+      digest = Digest::MD5.hexdigest(json_content)
+      latest = ComplianceValidation.for_project(project.id).first
+      if latest.nil? || latest.result_digest != digest
+        cv = ComplianceValidation.create!(
+          project_id: project.id,
+          compliance_schema_id: cs&.id,
+          passed: validation_data[:valid] || false,
+          errors_count: validation_data[:errors_count] || 0,
+          warnings_count: validation_data[:warnings_count] || 0,
+          valid_checks_count: validation_data[:valid_checks_count] || 0,
+          result_digest: digest,
+          validated_at: validation_data[:validated_at] || Time.current
+        )
+        if cv.result_file_path
+          FileUtils.mkdir_p(File.dirname(cv.result_file_path))
+          File.write(cv.result_file_path, json_content)
+          Rails.logger.info("[CxgValidationJob] Saved validation result to: #{cv.result_file_path}")
+        end
+      else
+        Rails.logger.info("[CxgValidationJob] Validation result unchanged (digest: #{digest}), skipping history entry")
+      end
+    rescue StandardError => e
+      Rails.logger.error("[CxgValidationJob] Could not record validation history: #{e.message}")
+    end
+
+    # Always overwrite the latest result file for backward compat
     if project.respond_to?(:cxg_validation_result=)
       project.cxg_validation_result = validation_data.to_json
       project.save
@@ -175,9 +214,7 @@ class CxgValidationJob < ApplicationJob
       project.metadata['cxg_validation'] = validation_data
       project.save
     else
-      # Store in a file - prefer project directory
       validation_path = nil
-      
       if project.respond_to?(:key) && project.respond_to?(:user_id) && project.key.present? && project.user_id.present?
         validation_path = File.join(
           ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'),
@@ -186,18 +223,15 @@ class CxgValidationJob < ApplicationJob
           'cxg_validation_result.json'
         )
       end
-      
-      # Fall back to upload directory if project directory not available
       validation_path ||= File.join(
         ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
         project.id.to_s,
         'cxg_validation_result.json'
       )
-      
       begin
         FileUtils.mkdir_p(File.dirname(validation_path))
-        File.write(validation_path, JSON.pretty_generate(validation_data))
-        Rails.logger.info("[CxgValidationJob] Saved validation result to: #{validation_path}")
+        File.write(validation_path, json_content)
+        Rails.logger.info("[CxgValidationJob] Saved latest result to: #{validation_path}")
       rescue StandardError => e
         Rails.logger.error("[CxgValidationJob] Could not save validation result: #{e.message}")
       end

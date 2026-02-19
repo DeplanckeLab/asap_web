@@ -82,6 +82,8 @@ Rails.application.routes.draw do
     end
   end
   
+  resources :compliance_schemas, except: [:destroy]
+
   resources :versions do
     collection do
       get :last_version
@@ -109,7 +111,7 @@ Rails.application.routes.draw do
   # CXG Schema Compliance routes
   scope '/compliance', controller: :compliance do
     get '/', action: :index, as: :compliance_index
-    get 'schema/:version', action: :schema_docs, as: :compliance_schema, constraints: { version: /[^\/]+/ }
+    get 'schema/:version', action: :schema_docs, as: :compliance_schema_docs, constraints: { version: /[^\/]+/ }
     post 'validate', action: :validate, as: :compliance_validate
     post 'validate_file', action: :validate_file, as: :compliance_validate_file
     

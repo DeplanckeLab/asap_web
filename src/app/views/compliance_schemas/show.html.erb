@@ -1,0 +1,86 @@
+<% content_for :title, "#{@compliance_schema.name} - Compliance Schema" %>
+<div class="max-w-3xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900"><%= @compliance_schema.name %> v<%= @compliance_schema.version %></h1>
+      <% if @compliance_schema.source_schema_name.present? %>
+        <p class="mt-1 text-gray-600"><%= @compliance_schema.source_schema_name %></p>
+      <% end %>
+    </div>
+    <div class="flex items-center gap-2">
+      <% if @compliance_schema.active? %>
+        <span class="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">Active</span>
+      <% else %>
+        <span class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-500">Obsolete</span>
+      <% end %>
+      <%= link_to 'Edit', edit_compliance_schema_path(@compliance_schema), class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
+    <% if @compliance_schema.description.present? %>
+      <div>
+        <dt class="text-xs font-medium text-gray-500 uppercase">Description</dt>
+        <dd class="mt-1 text-sm text-gray-900"><%= @compliance_schema.description %></dd>
+      </div>
+    <% end %>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <dt class="text-xs font-medium text-gray-500 uppercase">Project Type Tags</dt>
+        <dd class="mt-1">
+          <% @compliance_schema.project_type_tags.to_s.split(',').each do |tag| %>
+            <span class="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 mr-1"><%= tag.strip %></span>
+          <% end %>
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs font-medium text-gray-500 uppercase">If Compliant</dt>
+        <dd class="mt-1 text-sm text-gray-900"><%= @compliance_schema.if_compliant %></dd>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <% if @compliance_schema.source_url.present? %>
+        <div>
+          <dt class="text-xs font-medium text-gray-500 uppercase">Source URL</dt>
+          <dd class="mt-1"><%= link_to @compliance_schema.source_url, @compliance_schema.source_url, target: '_blank', rel: 'noopener', class: 'text-sm text-blue-600 hover:underline break-all' %></dd>
+        </div>
+      <% end %>
+      <% if @compliance_schema.url.present? %>
+        <div>
+          <dt class="text-xs font-medium text-gray-500 uppercase">Badge Link URL</dt>
+          <dd class="mt-1"><%= link_to @compliance_schema.url, @compliance_schema.url, target: '_blank', rel: 'noopener', class: 'text-sm text-blue-600 hover:underline break-all' %></dd>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <% if @compliance_schema.compliant_icon.present? %>
+        <div>
+          <dt class="text-xs font-medium text-gray-500 uppercase">Compliant Icon</dt>
+          <dd class="mt-1 flex items-center gap-2">
+            <%= image_tag @compliance_schema.compliant_icon, alt: 'Compliant', class: 'h-6' rescue nil %>
+            <span class="text-xs text-gray-500"><%= @compliance_schema.compliant_icon %></span>
+          </dd>
+        </div>
+      <% end %>
+      <% if @compliance_schema.not_compliant_icon.present? %>
+        <div>
+          <dt class="text-xs font-medium text-gray-500 uppercase">Non-Compliant Icon</dt>
+          <dd class="mt-1 flex items-center gap-2">
+            <%= image_tag @compliance_schema.not_compliant_icon, alt: 'Non-compliant', class: 'h-6' rescue nil %>
+            <span class="text-xs text-gray-500"><%= @compliance_schema.not_compliant_icon %></span>
+          </dd>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 text-sm text-gray-500">
+      <div>Started: <%= @compliance_schema.started_at&.strftime('%Y-%m-%d %H:%M') || 'N/A' %></div>
+      <div>Ended: <%= @compliance_schema.ended_at&.strftime('%Y-%m-%d %H:%M') || 'N/A' %></div>
+    </div>
+  </div>
+
+  <%= link_to 'Back to list', compliance_schemas_path, class: 'inline-flex items-center text-sm text-gray-600 hover:text-gray-900' %>
+</div>

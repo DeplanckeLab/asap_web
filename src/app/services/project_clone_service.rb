@@ -62,7 +62,7 @@ class ProjectCloneService
     now = Time.current
     
     @new_project.assign_attributes(
-      name: "#{source_project.name} cloned",
+      name: next_clone_name,
       public: false,
       user_id: user&.id || 1,
       cloned_project_id: source_project.id,
@@ -85,6 +85,19 @@ class ProjectCloneService
     )
     
     @new_project.save!
+  end
+
+  def next_clone_name
+    name = source_project.name
+    repeated = name.scan(/ cloned(?!\s*\[)/).length
+    base = name.sub(/( cloned)+(?:\s*\[\d+\])?$/, '')
+    owner_id = user&.id || 1
+    existing_nums = Project.where(user_id: owner_id)
+                           .where("name LIKE ?", "#{Project.sanitize_sql_like(base)} cloned%")
+                           .pluck(:name)
+                           .filter_map { |n| n[/cloned\s*\[(\d+)\]$/, 1]&.to_i }
+    max_num = ([repeated] + existing_nums).max || 0
+    "#{base} cloned [#{max_num + 1}]"
   end
 
   def generate_unique_key
@@ -236,10 +249,10 @@ class ProjectCloneService
   end
 
   def update_parent_run_json(run)
-    return nil unless run.run_parents_json
+    return [] unless run.run_parents_json
     
     parent_runs = Basic.safe_parse_json(run.run_parents_json, [])
-    return nil if parent_runs.empty?
+    return [] unless parent_runs.is_a?(Array) && parent_runs.any?
     
     parent_runs.map do |p_run|
       {

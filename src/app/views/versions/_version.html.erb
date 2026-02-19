@@ -45,18 +45,14 @@
     <div>
       <h2 class="text-sm font-semibold text-gray-800 mb-2">Compliance Schemas</h2>
       
-      <% compliance_data = version.env_data.fetch('compliance', {}) %>
-      <% if compliance_data.any? %>
-        <% compliance_data.each do |type_id, schemas| %>
-          <% next unless schemas.is_a?(Array) && schemas.any? %>
-          <% type_label = case type_id
-               when '1' then 'Single-cell transcriptomics'
-               when '2' then 'Bulk transcriptomics'
-               else "Project type #{type_id}"
-             end %>
+      <% all_compliance_schemas = ComplianceSchema.order(active: :desc, started_at: :desc) %>
+      <% if all_compliance_schemas.any? %>
+        <% grouped = all_compliance_schemas.group_by(&:project_type_tags) %>
+        <% grouped.each do |tags, schemas| %>
           <div class="mb-4">
-            <div class="text-xs text-gray-500 mb-2"><%= type_label %> (type <%= type_id %>)</div>
-            <% schemas.each do |schema| %>
+            <div class="text-xs text-gray-500 mb-2"><%= tags %></div>
+            <% schemas.each do |cs| %>
+            <% schema = cs.to_config_hash %>
               <div class="flex flex-wrap items-center gap-3 mb-2">
                 <span class="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
                   <%= schema['name'] %><%= " v#{schema['version']}" if schema['version'].present? %>
@@ -85,7 +81,7 @@
                   <% end %>
                 <% end %>
                 <% if schema['version'].present? %>
-                  <%= link_to compliance_schema_path(version: schema['version']), 
+                  <%= link_to compliance_schema_docs_path(version: schema['version']), 
                               class: "inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800" do %>
                     Loom Path Translation
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -109,6 +109,19 @@
   </div>
 </div>
 
+<!-- Gene Detail Modal (on top of gene set modal) -->
+<div id="gsi-gene-detail-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.35); z-index: 60;">
+  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
+      <h3 class="text-lg font-semibold text-gray-900" id="gsi-gene-detail-modal-title">Gene Details</h3>
+      <button type="button" onclick="closeGsiGeneDetailModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+    </div>
+    <div class="px-6 py-5 overflow-y-auto" id="gsi-gene-detail-modal-body" style="max-height: calc(80vh - 70px);">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   var tableEl = document.getElementById('ge-geneset-table');
@@ -254,7 +267,17 @@
       headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
     })
     .then(function(r) { return r.text(); })
-    .then(function(html) { body.innerHTML = html; })
+    .then(function(html) {
+      body.innerHTML = html;
+      body.querySelectorAll('.gsi-gene-badge').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var ensemblId = this.dataset.ensemblId;
+          if (typeof openGsiGeneDetailModal === 'function') {
+            openGsiGeneDetailModal(ensemblId);
+          }
+        });
+      });
+    })
     .catch(function() { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene set details.</div>'; });
   };
 
@@ -264,6 +287,31 @@
 
   document.getElementById('ge-gene-modal-overlay').addEventListener('click', function(e) {
     if (e.target === this) closeGeGeneModal();
+  });
+
+  window.openGsiGeneDetailModal = function(ensemblId) {
+    var overlay = document.getElementById('gsi-gene-detail-modal-overlay');
+    var body = document.getElementById('gsi-gene-detail-modal-body');
+    var title = document.getElementById('gsi-gene-detail-modal-title');
+    title.textContent = ensemblId;
+    body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+    overlay.classList.remove('hidden');
+
+    var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
+      headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(html) { body.innerHTML = html; })
+    .catch(function() { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
+  };
+
+  window.closeGsiGeneDetailModal = function() {
+    document.getElementById('gsi-gene-detail-modal-overlay').classList.add('hidden');
+  };
+
+  document.getElementById('gsi-gene-detail-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeGsiGeneDetailModal();
   });
 
   window.downloadGeGenesetList = function(fmt) {

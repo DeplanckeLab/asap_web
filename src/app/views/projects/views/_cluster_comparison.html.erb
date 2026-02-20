@@ -1,0 +1,109 @@
+<% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+
+<div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        Comparison of clusters
+      </h3>
+      <div class="flex items-center gap-3">
+        <button type="button"
+                class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer"
+                onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')"
+                style="flex-shrink: 0;">
+          Back to runs
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="px-6 py-5 space-y-6 flex-1">
+    <% if completed_runs.size >= 2 %>
+      <% s = completed_runs.map { |r| [display_run(r), r.id] } %>
+      <% cc = session[:clust_comparison]&.dig(@project.id) || {} %>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-center gap-3">
+          <label class="w-28 text-sm font-medium text-gray-700 text-right">Clustering A</label>
+          <%= select_tag 'run_id1', options_for_select(s, cc[:run_id1]), class: 'form-select rounded border-gray-300 text-sm select_run_id', id: 'run_id1' %>
+        </div>
+        <div class="flex items-center gap-3">
+          <label class="w-28 text-sm font-medium text-gray-700 text-right">Clustering B</label>
+          <%= select_tag 'run_id2', options_for_select(s, cc[:run_id2]), class: 'form-select rounded border-gray-300 text-sm select_run_id', id: 'run_id2' %>
+        </div>
+        <div class="flex items-center gap-3">
+          <label class="w-28 text-sm font-medium text-gray-700 text-right">Operation</label>
+          <div class="inline-flex rounded-md shadow-sm" role="group">
+            <button id="op-1-btn" type="button" class="px-4 py-2 text-sm font-medium border rounded-l-lg op_btn <%= cc[:op] == '1' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">A-B</button>
+            <button id="op-2-btn" type="button" class="px-4 py-2 text-sm font-medium border-t border-b op_btn <%= cc[:op] == '2' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">B-A</button>
+            <button id="op-3-btn" type="button" class="px-4 py-2 text-sm font-medium border rounded-r-lg op_btn <%= (!cc[:op] || cc[:op] == '3') ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">A &cap; B</button>
+          </div>
+          <input type="hidden" id="op" value="<%= cc[:op] || '3' %>">
+        </div>
+      </div>
+
+      <div id="cluster_comparison_results" class="mt-4">
+      </div>
+
+      <script>
+      (function() {
+        var url = '<%= cluster_comparison_project_path(@project) %>';
+        var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+        function updateComparison(opValue) {
+          var formData = new FormData();
+          formData.append('run_id1', document.getElementById('run_id1').value);
+          formData.append('run_id2', document.getElementById('run_id2').value);
+          formData.append('op', opValue);
+
+          var container = document.getElementById('cluster_comparison_results');
+          container.innerHTML = '<div class="flex justify-center py-8"><div class="text-gray-500">Loading...</div></div>';
+
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              'X-CSRF-Token': csrfToken,
+              'Accept': 'text/html'
+            },
+            body: formData
+          })
+          .then(function(response) { return response.text(); })
+          .then(function(html) { container.innerHTML = html; })
+          .catch(function(error) {
+            container.innerHTML = '<div class="text-red-600">Error loading comparison results.</div>';
+          });
+        }
+
+        document.querySelectorAll('.op_btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var v = this.id.split('-')[1];
+            document.getElementById('op').value = v;
+            document.querySelectorAll('.op_btn').forEach(function(b) {
+              b.className = b.className.replace(/bg-blue-600 text-white border-blue-600/g, '').trim();
+              if (!b.className.includes('bg-white')) {
+                b.className += ' bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
+              }
+            });
+            this.className = this.className.replace(/bg-white text-gray-700 border-gray-300 hover:bg-gray-50/g, '').trim();
+            this.className += ' bg-blue-600 text-white border-blue-600';
+            updateComparison(v);
+          });
+        });
+
+        document.querySelectorAll('.select_run_id').forEach(function(sel) {
+          sel.addEventListener('change', function() {
+            updateComparison(document.getElementById('op').value);
+          });
+        });
+
+        updateComparison(document.getElementById('op').value);
+      })();
+      </script>
+
+    <% else %>
+      <div class="text-gray-500 text-center py-8">
+        At least 2 completed clustering runs are needed to compare clusters.
+      </div>
+    <% end %>
+  </div>
+</div>

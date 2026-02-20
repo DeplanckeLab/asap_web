@@ -33,6 +33,7 @@ Rails.application.routes.draw do
       get :run_counts
       get :graph
       get :pipeline_runs
+      post :cluster_comparison
       post :clone
       post :toggle_public
     end

@@ -40,6 +40,15 @@
               <%= @step.label.presence || @step.name %> results
             </h3>
             <div class="flex items-center gap-3">
+              <!-- Compare Clusters Button -->
+              <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
+                <button type="button"
+                        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-arrows-alt-h mr-1"></i> Compare clusters
+                </button>
+              <% end %>
               <!-- New Run Button -->
               <% if @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 
@@ -111,6 +120,15 @@
               <%= @step.label.presence || @step.name %> results
             </h3>
             <div class="flex items-center gap-3">
+              <!-- Compare Clusters Button -->
+              <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
+                <button type="button"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-arrows-alt-h mr-1"></i> Compare clusters
+                </button>
+              <% end %>
               <!-- New Run Button -->
               <% if @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 

@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison]
 
   # GET /projects or /projects.json
   def index
@@ -480,6 +480,9 @@ class ProjectsController < ApplicationController
       # Initialize session variables if not present
       session[:activated_filter] ||= {}
       session[:activated_filter][@project.id] ||= false
+      session[:clust_comparison] ||= {}
+      session[:clust_comparison][@project.id] ||= {}
+      session[:clust_comparison][@project.id][:op] ||= "1"
     end
     
     # For testing, if no embeddings found, use a project that has them
@@ -1470,6 +1473,63 @@ class ProjectsController < ApplicationController
   end
 
 
+  # POST /projects/1/cluster_comparison
+  def cluster_comparison
+    session[:clust_comparison] ||= {}
+    session[:clust_comparison][@project.id] ||= {}
+    session[:clust_comparison][@project.id][:op] ||= "1"
+
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+    [:run_id1, :run_id2, :op].each { |e| session[:clust_comparison][@project.id][e] = params[e] }
+
+    @res = []
+    p = session[:clust_comparison][@project.id]
+    @vals = []
+    @h_runs = {}
+
+    if p[:run_id1].present? && p[:run_id2].present? && p[:op].present?
+      list_run_ids = [p[:run_id1], p[:run_id2]]
+      Run.where(id: list_run_ids).each { |r| @h_runs[r.id.to_s] = r }
+      annots = Annot.where(run_id: list_run_ids).to_a
+      @h_annots = {}
+      annots.each { |a| @h_annots[a.run_id.to_s] = a }
+
+      @list_cats = []
+      list_run_ids.each do |e|
+        cats = Basic.safe_parse_json(@h_annots[e].list_cat_json, [])
+        @list_cats.push(cats)
+        loom_file = @project_dir + @h_annots[e].filepath
+        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_file} -meta \"#{@h_annots[e].name}\" -names"
+        tmp_res = Basic.safe_parse_json(`#{cmd}`, {})
+        h_vals = {}
+        cats.each { |cat| h_vals[cat] = [] }
+        if tmp_res['values'] && tmp_res['cells']
+          tmp_res['values'].each_index do |i|
+            h_vals[tmp_res['values'][i]]&.push(tmp_res['cells'][i])
+          end
+        end
+        @vals.push(h_vals)
+      end
+
+      @list_cats[0].each_index do |i|
+        @res[i] = []
+        set1 = @vals[0][@list_cats[0][i]]
+        next unless set1
+        @list_cats[1].each_index do |j|
+          set2 = @vals[1][@list_cats[1][j]]
+          @res[i][j] = case p[:op]
+                        when "1" then set1 - set2
+                        when "2" then set2 - set1
+                        else          set1 & set2
+                        end
+        end
+      end
+    end
+
+    render partial: "cluster_comparison_results"
+  end
+
   # GET /projects/1/data_content
   # Returns just the right panel content for AJAX loading
   def data_content
@@ -1826,6 +1886,9 @@ class ProjectsController < ApplicationController
     # Initialize session variables if not present
     session[:activated_filter] ||= {}
     session[:activated_filter][@project.id] ||= false
+    session[:clust_comparison] ||= {}
+    session[:clust_comparison][@project.id] ||= {}
+    session[:clust_comparison][@project.id][:op] ||= "1"
     
     render 'summary_test'
   end
@@ -2520,6 +2583,11 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { 
         begin
+          # If compare_clusters view is requested, return the comparison UI
+          if params[:view] == 'compare_clusters'
+            render partial: 'projects/views/cluster_comparison', layout: false
+            return
+          end
           # If show_form is requested, return just the form (for AJAX or new page)
           if params[:show_form].present? && params[:show_form].to_s == '1'
             if @show_form

@@ -355,6 +355,37 @@ namespace :versions do
 
 end
 
+namespace :std_methods do
+  desc "Add allowed_downstream_steps to the integration std_method"
+  task add_integration_downstream_steps: :environment do
+    puts "Adding allowed_downstream_steps to integration std_method..."
+
+    methods = StdMethod.where(name: 'integration')
+    if methods.empty?
+      puts "  No integration std_method found, skipping"
+      exit 0
+    end
+
+    updated_count = 0
+    methods.each do |method|
+      obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
+
+      if obj_attrs['allowed_downstream_steps'].present?
+        puts "  StdMethod ##{method.id}: already has allowed_downstream_steps, skipping"
+        next
+      end
+
+      obj_attrs['allowed_downstream_steps'] = ['umap', 'clustering']
+      method.update!(obj_attrs_json: JSON.generate(obj_attrs))
+      puts "  StdMethod ##{method.id}: added allowed_downstream_steps: [\"umap\", \"clustering\"]"
+      updated_count += 1
+    end
+
+    puts ""
+    puts "Summary: updated #{updated_count} std_method(s)"
+  end
+end
+
 namespace :compliance_schemas do
   desc "Seed compliance_schemas table from Version env_json compliance config"
   task seed_from_env_json: :environment do

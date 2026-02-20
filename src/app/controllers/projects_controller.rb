@@ -3345,6 +3345,16 @@ class ProjectsController < ApplicationController
     
     # Returns both unlock status and reason: { unlocked: boolean, reason: string or nil }
     def step_unlock_status(step, previous_steps_with_status, successful_runs)
+      # If the parsing method restricts downstream steps (e.g. integration),
+      # only allow steps explicitly listed in allowed_downstream_steps
+      if @parsing_method_allowed_steps.present?
+        if step.name.in?(@parsing_method_allowed_steps)
+          return { unlocked: true, reason: nil }
+        else
+          return { unlocked: false, reason: "Not available after integration" }
+        end
+      end
+      
       # Debug logging for project 69560
       if @project.id == 69560 && step.name == 'normalization'
         Rails.logger.info("[DEBUG] step_unlock_status called for normalization step")
@@ -4010,6 +4020,22 @@ class ProjectsController < ApplicationController
       
       # Find parsing step index to filter out steps before it
       parsing_step_index = @pretreatment_steps.index { |s| s.name == 'parsing' }
+      
+      # Check if the parsing method restricts which downstream steps are allowed
+      # (e.g. the "integration" method may set allowed_downstream_steps: ["umap", "clustering"])
+      @parsing_method_allowed_steps = nil
+      if parsing_step_index
+        parsing_step = @pretreatment_steps[parsing_step_index]
+        parsing_runs = @runs.select { |r| r.step_id == parsing_step.id && r.status_id == 3 }
+        latest_parsing_run = parsing_runs.max_by(&:created_at)
+        if latest_parsing_run&.std_method_id
+          parsing_std_method = StdMethod.find_by(id: latest_parsing_run.std_method_id)
+          if parsing_std_method
+            method_obj_attrs = Basic.safe_parse_json(parsing_std_method.obj_attrs_json, {})
+            @parsing_method_allowed_steps = method_obj_attrs['allowed_downstream_steps']
+          end
+        end
+      end
       
       # Filter to only show steps from parsing onwards
       steps_to_show = if parsing_step_index

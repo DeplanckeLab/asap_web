@@ -4,7 +4,7 @@ All database schema and data changes to apply on production, in order.
 
 Run each step from the host with `docker-compose exec website bin/rake ...`.
 
-Last updated: 2026-02-18
+Last updated: 2026-02-20
 
 ---
 
@@ -145,4 +145,17 @@ with more than 100 columns that don't already have it.
 
 ```bash
 docker-compose exec website bin/rake projects:set_single_cell_for_public
+```
+
+---
+
+## Step 11 -- Add allowed_downstream_steps to integration std_method
+
+Adds `allowed_downstream_steps: ["umap", "clustering"]` to the `obj_attrs_json`
+of the `integration` std_method. This restricts integrated projects so that only
+UMAP and Clustering steps are unlocked after integration (skipping Filtering,
+Normalization, Scaling, PCA, etc.). Idempotent.
+
+```bash
+docker-compose exec website bin/rake std_methods:add_integration_downstream_steps
 ```

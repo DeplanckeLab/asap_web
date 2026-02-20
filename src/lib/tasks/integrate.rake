@@ -170,8 +170,9 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     }
 
     cmd_parse = Basic.build_cmd(h_cmd_parse)
-    puts "CMD_JAVA: #{cmd_parse}"
-    `#{cmd_parse}`
+    puts "CMD_PARSE: #{cmd_parse}"
+    parse_output = `#{cmd_parse} 2>&1`
+    puts "PARSE_OUTPUT: #{parse_output}"
 
     # Update project with parsing results
     output_json_parse = tmp_dir + "output.json"

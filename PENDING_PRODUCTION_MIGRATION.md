@@ -162,3 +162,16 @@ Idempotent.
 ```bash
 docker-compose exec website bin/rake std_methods:update_integration
 ```
+
+---
+
+## Step 12 -- Fix parsing matrix data classes
+
+Backfills missing `num_matrix` or `int_matrix` data class on parsing `/matrix`
+annotations that only have `dataset`. The correct type is read from each run's
+`output_json`. Without this fix, the Cell filtering step appears locked on
+affected projects.
+
+```bash
+docker-compose exec website bin/rake projects:fix_parsing_matrix_data_classes
+```

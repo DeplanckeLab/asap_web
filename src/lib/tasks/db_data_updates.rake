@@ -500,4 +500,83 @@ namespace :projects do
     puts "  Errors:  #{error_count}"
     puts "  Total candidates: #{total}"
   end
+
+  desc "Backfill missing num_matrix/int_matrix data class on parsing /matrix annotations"
+  task fix_parsing_matrix_data_classes: :environment do
+    num_matrix_id = DataClass.find_by(name: 'num_matrix')&.id
+    int_matrix_id = DataClass.find_by(name: 'int_matrix')&.id
+    unless num_matrix_id && int_matrix_id
+      puts "DataClass num_matrix (#{num_matrix_id}) or int_matrix (#{int_matrix_id}) not found, aborting."
+      next
+    end
+
+    parsing_step_ids = Step.where(name: 'parsing').pluck(:id)
+    matrix_annots = Annot.where(step_id: parsing_step_ids, name: '/matrix')
+
+    broken = matrix_annots.select { |a|
+      dc_ids = (a.data_class_ids || '').split(',').map(&:to_i)
+      !dc_ids.include?(num_matrix_id) && !dc_ids.include?(int_matrix_id)
+    }
+
+    puts "Found #{broken.size} parsing /matrix annotations missing num_matrix/int_matrix"
+
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    broken.each do |annot|
+      run = Run.find_by(id: annot.run_id)
+      unless run&.output_json.present?
+        puts "  annot #{annot.id}: no run or output_json, skipped"
+        skipped += 1
+        next
+      end
+
+      h_output = JSON.parse(run.output_json) rescue nil
+      om = h_output&.dig('output_matrix')
+      unless om
+        puts "  annot #{annot.id}: no output_matrix in output_json, skipped"
+        skipped += 1
+        next
+      end
+
+      matrix_type = nil
+      om.each_value do |v|
+        types = v['types'] || []
+        if types.include?('int_matrix')
+          matrix_type = int_matrix_id
+          break
+        elsif types.include?('num_matrix')
+          matrix_type = num_matrix_id
+          break
+        end
+      end
+
+      unless matrix_type
+        puts "  annot #{annot.id}: output_json has no int_matrix/num_matrix type, skipped"
+        skipped += 1
+        next
+      end
+
+      dc_ids = (annot.data_class_ids || '').split(',').map(&:to_i)
+      dc_ids << matrix_type
+      new_dc_ids = dc_ids.uniq.sort.join(',')
+
+      begin
+        annot.update!(data_class_ids: new_dc_ids)
+        puts "  annot #{annot.id}: #{annot.data_class_ids_before_last_save} -> #{new_dc_ids}"
+        updated += 1
+      rescue StandardError => e
+        puts "  annot #{annot.id}: ERROR - #{e.message}"
+        errors += 1
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated}"
+    puts "  Skipped: #{skipped}"
+    puts "  Errors:  #{errors}"
+    puts "  Total:   #{broken.size}"
+  end
 end

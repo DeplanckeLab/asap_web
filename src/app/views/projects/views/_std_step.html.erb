@@ -270,7 +270,7 @@
                   <% params_display = params_array.map { |k, v| "#{k}: #{v}" }.join(", ") %>
                   <tr class="hover:bg-gray-50 cursor-pointer" 
                       data-run-id="<%= run.id %>"
-                      onclick="window.location.href = '<%= run_view_url(run, @project, @step) %>';"
+                      onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>', '<%= @step.id %>'); } else { window.location.href = '<%= run_view_url(run, @project, @step) %>'; }"
                       style="cursor: pointer;">
                     <td class="px-3 py-4 whitespace-nowrap" onclick="event.stopPropagation();">
                       <input type="checkbox" 

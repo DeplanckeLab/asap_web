@@ -242,11 +242,23 @@ module ApplicationHelper
       reject_attrs = @h_dashboard_card[run.step_id]["reject_attrs"]
     end
     
+    method_attrs_map = if h_std_method_attrs.is_a?(Hash) && h_std_method_attrs.any?
+                          nested = h_std_method_attrs[run.std_method_id]
+                          if nested.is_a?(Hash)
+                            nested
+                          else
+                            first_val = h_std_method_attrs.values.first
+                            (first_val.is_a?(Hash) && (first_val.key?('label') || first_val.key?('default') || first_val.key?('description'))) ? h_std_method_attrs : {}
+                          end
+                        else
+                          {}
+                        end
+
     array = h_attrs.keys.reject { |attr|
       reject_attrs.include?(attr) ||
-      (opt[:reject_if_default] && run && h_std_method_attrs && h_std_method_attrs[run.std_method_id] &&
-       (std_method_attr = h_std_method_attrs[run.std_method_id][attr]) &&
-       (attr_default = std_method_attr['default']) &&
+      (opt[:reject_if_default] && run &&
+       (sma = method_attrs_map[attr]).is_a?(Hash) &&
+       (attr_default = sma['default']) &&
        attr_default.to_s == h_attrs[attr].to_s)
     }.map { |attr|
       v = h_attrs[attr]
@@ -259,17 +271,24 @@ module ApplicationHelper
       elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
         list_datasets_by_attr_name[attr] = v
       else
-        std_method_attr = (h_std_method_attrs && h_std_method_attrs[run.std_method_id]) ? h_std_method_attrs[run.std_method_id][attr] : nil
+        std_method_attr = method_attrs_map[attr]
+        std_method_attr = nil unless std_method_attr.is_a?(Hash)
+        display_name = if std_method_attr && std_method_attr['label'].present?
+                         std_method_attr['label']
+                       else
+                         attr.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize }
+                       end
         if std_method_attr
-          tooltip_text = [std_method_attr['label'], (std_method_attr['description_text'] || std_method_attr['description'] || 'No description')].select { |e| e && !e.empty? }.join(": ")
+          tooltip_text = [attr, (std_method_attr['description_text'] || std_method_attr['description'] || '')].select { |e| e && !e.empty? }.join(": ")
           txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' " \
             "title=\"#{tooltip_text}\">" \
-            "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
+            "<span class='font-semibold text-gray-800'>#{display_name}:</span>" \
             "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
             "</span>"
         else
-          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>" \
-            "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
+          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200' " \
+            "title=\"#{attr}\">" \
+            "<span class='font-semibold text-gray-800'>#{display_name}:</span>" \
             "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
             "</span>"
         end

@@ -1,4 +1,5 @@
 <% if @step && @run %>
+<% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'] %>
 
 <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);">
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
@@ -7,6 +8,13 @@
         #<%= @run.num || @run.id %> - <%= @nber_genes %> <%= params[:type] %>-regulated genes
       </h3>
       <div class="flex items-center gap-2">
+        <button type="button"
+                class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                title="Copy direct link to clipboard"
+                style="flex-shrink: 0;"
+                onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+          <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
+        </button>
         <% if exportable?(@project) %>
           <a href="<%= get_de_gene_list_run_path(@run) %>?type=<%= params[:type] %>&download=1&format=json"
              target="_blank"
@@ -22,7 +30,7 @@
         <button type="button"
                 class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                 onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
-          Back to DE results
+          <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to DE results</span>
         </button>
       </div>
     </div>
@@ -34,12 +42,24 @@
     </div>
   <% end %>
 
-  <div class="flex-1 overflow-y-auto">
+  <div class="px-6 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
+    <input type="text" id="de-genelist-search" placeholder="Filter by any value"
+           class="form-input rounded border border-gray-300 bg-white text-sm w-64 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+           oninput="(function(input){var q=input.value.toLowerCase();var c=document.getElementById('de-genelist-container');if(!c)return;var rows=c.querySelectorAll('tbody tr');var count=0;rows.forEach(function(r){var txt=r.textContent.toLowerCase();var show=!q||txt.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)count++;});var info=document.getElementById('de-genelist-count');if(info)info.textContent=count+' / '+rows.length+' genes';})(this)">
+    <span id="de-genelist-count" class="text-xs text-gray-500"></span>
+  </div>
+
+  <div id="de-genelist-container" class="flex-1 overflow-y-auto">
     <table class="min-w-full divide-y divide-gray-200 text-sm">
       <thead class="bg-gray-50 sticky top-0">
         <tr>
-          <% @fields.each do |f| %>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"><%= f %></th>
+          <% @fields.each_with_index do |f, idx| %>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none"
+                data-col="<%= idx %>"
+                data-numeric="<%= numeric_fields.include?(f) %>"
+                onclick="(function(th){var c=document.getElementById('de-genelist-container');if(!c)return;var tbody=c.querySelector('tbody');if(!tbody)return;var col=parseInt(th.dataset.col);var num=th.dataset.numeric==='true';var rows=Array.from(tbody.querySelectorAll('tr'));var cur=th.dataset.sortDir||'none';var asc=(cur!=='asc');th.dataset.sortDir=asc?'asc':'desc';c.querySelectorAll('th[data-col]').forEach(function(h){if(h!==th){h.dataset.sortDir='none';var si=h.querySelector('.sort-indicator');if(si)si.textContent='';}});var si=th.querySelector('.sort-indicator');if(si)si.textContent=asc?' \u25B2':' \u25BC';rows.sort(function(a,b){var av=a.cells[col]?a.cells[col].textContent.trim():'';var bv=b.cells[col]?b.cells[col].textContent.trim():'';if(num){var an=parseFloat(av)||0;var bn=parseFloat(bv)||0;return asc?an-bn:bn-an;}return asc?av.localeCompare(bv):bv.localeCompare(av);});rows.forEach(function(r){tbody.appendChild(r);});})(this)">
+              <%= f %> <span class="sort-indicator"></span>
+            </th>
           <% end %>
         </tr>
       </thead>

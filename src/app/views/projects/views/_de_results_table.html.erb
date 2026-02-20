@@ -24,10 +24,15 @@
           <td class="px-3 py-2 text-gray-900 font-semibold" data-sort-value="<%= run.num || run.id %>">#<%= run.num || run.id %></td>
           <td class="px-3 py-2 text-gray-900" data-sort-value="<%= method_label.downcase %>"><%= method_label %></td>
           <td class="px-3 py-2 text-gray-600 text-xs">
+            <% h_method_attrs = (std_method && std_method.attrs_json.present?) ? Basic.safe_parse_json(std_method.attrs_json, {}) : {} %>
             <% h_attrs.each do |k, v| %>
               <% next if v.is_a?(Hash) || v.is_a?(Array) %>
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1">
-                <span class="font-semibold"><%= k %>:</span> <span class="ml-1"><%= v.to_s.truncate(30) %></span>
+              <% sma = h_method_attrs[k] %>
+              <% sma = nil unless sma.is_a?(Hash) %>
+              <% display_name = (sma && sma['label'].present?) ? sma['label'] : k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
+              <% tooltip = sma ? [k, (sma['description_text'] || sma['description'] || '')].select(&:present?).join(': ') : k %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1 cursor-help" title="<%= tooltip %>">
+                <span class="font-semibold"><%= display_name %>:</span> <span class="ml-1"><%= v.to_s.truncate(30) %></span>
               </span>
             <% end %>
           </td>

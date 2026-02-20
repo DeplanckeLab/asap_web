@@ -19,27 +19,35 @@
           </span>
         <% end %>
       </div>
-      <div class="flex items-center gap-3 flex-shrink-0">
+      <div class="flex items-center gap-2 flex-shrink-0">
         <% if @run && @step %>
           <button type="button"
-                  class="px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
-                  title="Copy link"
-                  onclick="(function(btn) { const url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, run_id: @run.id) %>'; navigator.clipboard.writeText(url).then(() => { const originalTitle = btn.title; btn.title = 'Copied!'; setTimeout(() => { btn.title = originalTitle; }, 2000); }).catch(() => { alert('Failed to copy to clipboard'); }); })(this);">
-            <i class="fas fa-link text-lg"></i>
-            <span class="text-sm">Copy link</span>
+                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                  title="Copy direct link to clipboard"
+                  style="flex-shrink: 0;"
+                  onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, run_id: @run.id) %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+            <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
           </button>
           <button type="button"
-                  class="p-2 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
+                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
                   title="Refresh"
+                  style="flex-shrink: 0;"
                   onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(@run) %>', '<%= @step&.id %>'); }">
-            <i class="fas fa-sync text-lg"></i>
+            <i class="fas fa-sync sm:mr-1"></i><span class="hidden sm:inline"> Refresh</span>
+          </button>
+          <button type="button"
+                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  style="flex-shrink: 0;"
+                  onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
+            <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to runs</span>
           </button>
         <% end %>
         <% if @step && @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) %>
           <%= link_to project_path(@project, view: 'visualization'), 
-              class: "p-2 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors", 
-              title: "Visualization" do %>
-            <i class="fas fa-chart-line text-lg"></i>
+              class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",
+              title: "Visualization",
+              style: "flex-shrink: 0;" do %>
+            <i class="fas fa-chart-line sm:mr-1"></i><span class="hidden sm:inline"> Visualization</span>
           <% end %>
         <% end %>
       </div>

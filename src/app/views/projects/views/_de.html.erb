@@ -91,6 +91,13 @@
               <i class="fas fa-sliders-h"></i>
             </button>
             <button type="button"
+                    class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Copy direct link to clipboard"
+                    style="flex-shrink: 0;"
+                    onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'markers') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+              <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
+            </button>
+            <button type="button"
                     class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                     onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
               <i class="fas fa-th-list sm:mr-1"></i><span class="hidden sm:inline"> Dashboard</span>
@@ -277,6 +284,13 @@
                     title="Toggle filters"
                     onclick="var p=document.getElementById('de-filters-panel'); if(p){p.classList.toggle('hidden'); this.classList.toggle('bg-gray-200',!p.classList.contains('hidden'));}">
               <i class="fas fa-sliders-h"></i>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Copy direct link to clipboard"
+                    style="flex-shrink: 0;"
+                    onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+              <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
             </button>
             <button type="button"
                     class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"

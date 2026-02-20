@@ -196,21 +196,66 @@ class ProjectsController < ApplicationController
       # because step_results will render the custom partial instead
       # This matches the behavior of clicking on a step in the left panel
       @load_run_panel = false
+      @run_panel_html = nil
       if @selected_run_id.present?
         selected_run = Run.find_by(id: @selected_run_id)
         selected_step = selected_run&.step
         Rails.logger.info("[show] run_panel_logic: selected_run_id=#{@selected_run_id}, selected_run=#{selected_run&.id}, selected_step=#{selected_step&.name}")
-        if selected_step
-          # Check if there's a step-specific partial
-          step_partial_path = "projects/views/#{selected_step.name}"
-          partial_exists = lookup_context.template_exists?(step_partial_path, [], true)
-          Rails.logger.info("[show] run_panel_logic: step_partial_path=#{step_partial_path}, partial_exists=#{partial_exists}, has_std_view=#{selected_step.has_std_view}")
-          
-          # Only load run panel if no step-specific partial exists and step has std_view
-          if !partial_exists && selected_step.has_std_view
+        if selected_run && selected_step
+          begin
+            @run_panel_html = render_run_panel_to_string(selected_run, selected_step)
             @load_run_panel = true
+            Rails.logger.info("[show] run_panel rendered server-side, html_length=#{@run_panel_html&.length}")
+          rescue => e
+            Rails.logger.error("[show] Error rendering run panel: #{e.class} - #{e.message}")
+            Rails.logger.error(e.backtrace.first(10).join("\n"))
+            @load_run_panel = false
+            @run_panel_html = nil
           end
-          Rails.logger.info("[show] run_panel_logic: @load_run_panel=#{@load_run_panel}")
+        end
+      end
+
+      @load_sub_view = false
+      @sub_view_html = nil
+      if params[:sub_view].present? && @selected_step_id.present?
+        begin
+          sub_view_step = Step.find_by(id: @selected_step_id)
+          if sub_view_step
+            saved_step = @step
+            saved_runs = @runs
+            saved_show_form = @show_form
+            saved_show_custom_form = @show_custom_form
+            saved_show_dashboard = @show_dashboard
+            saved_show_view = @show_view
+            saved_view_param = params[:view]
+
+            @step = sub_view_step
+            @runs = @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            @project_step = ProjectStep.find_or_create_by(project_id: @project.id, step_id: @selected_step_id)
+            @show_form = false
+            @show_custom_form = false
+            @show_dashboard = false
+            @show_view = false
+
+            params[:view] = params[:sub_view]
+
+            @sub_view_html = render_to_string(partial: 'projects/views/step_results', layout: false)
+            @load_sub_view = true
+            Rails.logger.info("[show] sub_view rendered: #{params[:sub_view]}, html_length=#{@sub_view_html&.length}")
+
+            params[:view] = saved_view_param
+            @step = saved_step
+            @runs = saved_runs
+            @show_form = saved_show_form
+            @show_custom_form = saved_show_custom_form
+            @show_dashboard = saved_show_dashboard
+            @show_view = saved_show_view
+          end
+        rescue => e
+          Rails.logger.error("[show] Error preparing sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
+          @load_sub_view = false
+          @sub_view_html = nil
         end
       end
     end
@@ -5470,8 +5515,8 @@ class ProjectsController < ApplicationController
       @h_std_method_attrs = {}
       if run.std_method_id
         std_method = StdMethod.find_by(id: run.std_method_id)
-        if std_method && std_method.method_attrs_json.present?
-          @h_std_method_attrs = Basic.safe_parse_json(std_method.method_attrs_json, {})
+        if std_method && std_method.attrs_json.present?
+          @h_std_method_attrs = Basic.safe_parse_json(std_method.attrs_json, {})
         end
       end
       
@@ -5623,8 +5668,8 @@ class ProjectsController < ApplicationController
         h_std_method_attrs = {}
         if run.std_method_id && @h_std_methods[run.std_method_id]
           std_method = @h_std_methods[run.std_method_id]
-          if std_method.method_attrs_json.present?
-            h_std_method_attrs = Basic.safe_parse_json(std_method.method_attrs_json, {})
+          if std_method.attrs_json.present?
+            h_std_method_attrs = Basic.safe_parse_json(std_method.attrs_json, {})
           end
         end
         
@@ -5716,6 +5761,204 @@ class ProjectsController < ApplicationController
         'Failed'
       else
         'Unknown'
+      end
+    end
+
+    def render_run_panel_to_string(run, step)
+      saved_ivars = {}
+      %i[@run @step @std_method @status @h_run_attrs @h_std_method_attrs @h_dashboard_card
+         @project_dir @h_res @h_outputs @h_steps @h_statuses @h_annots_by_dim @layout @h_el
+         @h_annots_for_params @h_ori_runs_for_params @h_steps_for_params @asap_docker_image @ps].each do |ivar|
+        saved_ivars[ivar] = instance_variable_get(ivar) if instance_variable_defined?(ivar)
+      end
+
+      begin
+        @run = run
+        @step = step
+        @std_method = run.std_method
+
+        asap_docker_image = Basic.get_asap_docker(@project.version)
+        @asap_docker_image = asap_docker_image
+
+        @ps = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
+        @status = Status.find_by(id: run.status_id)
+
+        @h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+
+        @h_std_method_attrs = {}
+        if @std_method && @step
+          h_res = Basic.get_std_method_attrs(@std_method, @step)
+          @h_std_method_attrs = h_res[:h_attrs] || {}
+        elsif @std_method && @std_method.attrs_json.present?
+          @h_std_method_attrs = Basic.safe_parse_json(@std_method.attrs_json, {})
+        end
+
+        @h_dashboard_card = {}
+        if step.dashboard_card_json.present?
+          @h_dashboard_card[step.id] = Basic.safe_parse_json(step.dashboard_card_json, {})
+        end
+
+        @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+        step_dir = @project_dir + step.name
+        output_dir = step.multiple_runs ? (step_dir + run.id.to_s) : step_dir
+        output_json_file = output_dir + "output.json"
+
+        @h_res = {}
+        @h_outputs = {}
+        begin
+          @h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+          @h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
+        rescue => e
+          Rails.logger.error("[render_run_panel_to_string] Error loading run data: #{e.message}")
+        end
+
+        @h_steps = {}
+        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s } if asap_docker_image
+
+        @h_statuses = {}
+        Status.all.each { |s| @h_statuses[s.id] = s }
+
+        if step.has_std_view
+          @h_annots_by_dim = {}
+          Annot.where(run_id: run.id).each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
+
+          @layout = step.show_view_json.present? ? Basic.safe_parse_json(step.show_view_json, []) : []
+
+          @h_el = {}
+          h_files = {}
+          h_links = {}
+
+          if @h_dashboard_card[step.id] && @h_dashboard_card[step.id]["output_links"]
+            output_links_config = @h_dashboard_card[step.id]["output_links"]
+            if @h_outputs && output_links_config
+              output_links_config.each do |link_config|
+                key = link_config["key"]
+                h_links[key] = @h_outputs[key] if @h_outputs[key]
+              end
+            end
+          end
+
+          if @h_dashboard_card[step.id] && @h_dashboard_card[step.id]["output_files"]
+            list_p = @h_dashboard_card[step.id]["output_files"]
+            list_p.select { |e| @h_outputs && @h_outputs[e["key"]] && ((admin? || e["admin"] == true) || !e["admin"]) }.each do |e|
+              k = e["key"]
+              @h_outputs[k].keys.each do |output_key|
+                t = output_key.split(":")
+                h_files[t[0]] ||= { h_output: @h_outputs[k][output_key], datasets: [] }
+                h_files[t[0]][:datasets].push({ name: t[1], dataset_size: @h_outputs[k][output_key]['dataset_size'] }) if t.size > 1
+              end
+            end
+          end
+
+          dataset_results = []
+          h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
+          @h_annots_by_dim.each_key do |dim|
+            subtitle = h_dim[dim]
+            subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
+            dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
+              @h_annots_by_dim[dim].map { |annot|
+                col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
+                row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
+                col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
+                row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
+                annot_link = Rails.application.routes.url_helpers.annot_path(annot)
+                "<a href='#{annot_link}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'>#{annot.name} <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_cols} #{col_name}</span> <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_rows} #{row_name}</span></a>"
+              }.join(" ") + "</p>"
+          end
+
+          exec_files_html = ""
+          if admin?
+            exec_out_path = output_dir + "exec.out"
+            exec_err_path = output_dir + "exec.err"
+            exec_files = []
+            if File.exist?(exec_out_path)
+              file_size_display = helpers.display_mem(File.size(exec_out_path))
+              exec_files << "<a href='#{get_file_project_path(@project, filename: 'exec.out', step: step.name, run_id: run.id)}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'><span>exec.out</span><span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{file_size_display}</span></a>"
+            end
+            if File.exist?(exec_err_path)
+              file_size_display = helpers.display_mem(File.size(exec_err_path))
+              exec_files << "<a href='#{get_file_project_path(@project, filename: 'exec.err', step: step.name, run_id: run.id)}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'><span>exec.err</span><span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{file_size_display}</span></a>"
+            end
+            exec_files_html = exec_files.join("")
+          end
+
+          @h_el = {
+            "card-params" => {
+              card_header: 'Parameters',
+              card_body: helpers.display_run_attrs(run, @h_run_attrs, @h_std_method_attrs, {})
+            },
+            "card-downloads" => {
+              card_header: 'Downloads',
+              card_body: ((h_files.keys.size > 0) ? ("<div class='flex flex-wrap gap-1 items-start'>" + h_files.keys.map { |k| helpers.display_download_btn(run, h_files[k]) }.join("") + "</div>") : "") + (exec_files_html.present? ? "<div class='flex flex-wrap gap-1 items-start mt-1'>" + exec_files_html.strip + "</div>" : "")
+            },
+            "card-results" => {
+              card_header: 'Results',
+              card_body: ((run.status_id == 3 && @h_res['warnings']) ? @h_res['warnings'].map { |e|
+                if e.is_a?(Hash)
+                  "<p class='text-warning text-truncate' title=\"#{e['name']}. #{e['description']}\">#{e['name']}</p>"
+                else
+                  "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
+                end
+              }.join(" ") : '') + dataset_results.join("<br/>\n")
+            }
+          }
+        else
+          @h_annots_by_dim = {}
+          @layout = []
+          @h_el = {}
+        end
+
+        @h_annots_for_params = {}
+        @h_ori_runs_for_params = {}
+        @h_steps_for_params = {}
+        annot_ids = []
+        direct_run_ids = []
+        h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+        h_attrs.each_value do |v|
+          if v.is_a?(Hash)
+            annot_ids << (v['annot_id'] || v[:annot_id]) if v['annot_id'].present? || v[:annot_id].present?
+            direct_run_ids << (v['run_id'] || v[:run_id]) if v['run_id'].present? || v[:run_id].present?
+          elsif v.is_a?(Array)
+            v.each do |item|
+              next unless item.is_a?(Hash)
+              annot_ids << (item['annot_id'] || item[:annot_id]) if item['annot_id'].present? || item[:annot_id].present?
+              direct_run_ids << (item['run_id'] || item[:run_id]) if item['run_id'].present? || item[:run_id].present?
+            end
+          end
+        end
+        if annot_ids.any?
+          Annot.where(id: annot_ids.uniq).each do |annot|
+            @h_annots_for_params[annot.id] = annot
+            if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
+              ori_run = Run.find_by(id: annot.ori_run_id)
+              if ori_run
+                @h_ori_runs_for_params[annot.ori_run_id] = ori_run
+                if ori_run.step_id.present? && !@h_steps_for_params[ori_run.step_id]
+                  s = Step.find_by(id: ori_run.step_id)
+                  @h_steps_for_params[ori_run.step_id] = s if s
+                end
+              end
+            end
+          end
+        end
+        if direct_run_ids.any?
+          Run.where(id: direct_run_ids.uniq).each do |dr|
+            @h_ori_runs_for_params[dr.id] = dr unless @h_ori_runs_for_params[dr.id]
+            if dr.step_id.present? && !@h_steps_for_params[dr.step_id]
+              s = Step.find_by(id: dr.step_id)
+              @h_steps_for_params[dr.step_id] = s if s
+            end
+          end
+        end
+
+        render_to_string(partial: 'runs/panel', layout: false)
+      ensure
+        saved_ivars.each { |ivar, val| instance_variable_set(ivar, val) }
+        %i[@run @step @std_method @status @h_run_attrs @h_std_method_attrs @h_dashboard_card
+           @project_dir @h_res @h_outputs @h_steps @h_statuses @h_annots_by_dim @layout @h_el
+           @h_annots_for_params @h_ori_runs_for_params @h_steps_for_params @asap_docker_image @ps].each do |ivar|
+          remove_instance_variable(ivar) if instance_variable_defined?(ivar) && !saved_ivars.key?(ivar)
+        end
       end
     end
 end

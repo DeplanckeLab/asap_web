@@ -1,4 +1,4 @@
-<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>" data-step-selector-project-key-value="<%= @project.key %>" data-step-selector-status-icons-value="<%= status_icons_json %>" data-step-selector-load-run-panel-value="<%= @load_run_panel %>">
+<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>" data-step-selector-project-key-value="<%= @project.key %>" data-step-selector-status-icons-value="<%= status_icons_json %>" data-step-selector-load-run-panel-value="<%= @load_run_panel %>" data-step-selector-load-sub-view-value="<%= @load_sub_view %>" data-step-selector-sub-view-step-id-value="<%= @selected_step_id %>">
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-2">
@@ -37,7 +37,8 @@
     <div class="flex-1 flex flex-col min-h-0 min-w-0" style="min-width: 0; max-width: 100%; overflow-x: hidden;">
       <div data-step-selector-target="resultsContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
         <div class="overflow-y-auto overflow-x-hidden flex-1 min-w-0 w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
-          <div class="text-center text-gray-500 py-12 px-6" data-step-selector-target="emptyState">
+          <% has_server_content = (@load_sub_view && @sub_view_html.present?) || (@load_run_panel && @run_panel_html.present?) %>
+          <div class="text-center text-gray-500 py-12 px-6" data-step-selector-target="emptyState" <% if has_server_content %>style="display: none;"<% end %>>
             <i class="fas fa-mouse-pointer text-5xl mb-4 opacity-30"></i>
             <p class="mb-0 lg:hidden">Select a step from the dropdown above to view its results</p>
             <p class="mb-0 hidden lg:block">Select a step from the left panel to view its results</p>
@@ -46,9 +47,18 @@
             <i class="fas fa-spinner fa-spin text-3xl text-blue-600 mb-4"></i>
             <p class="text-gray-600 mb-0">Loading step results...</p>
           </div>
-          <div data-step-selector-target="content" style="display: none; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; box-sizing: border-box !important;" class="w-full max-w-full min-w-0 overflow-x-hidden">
-            <!-- Step results will be loaded here -->
-          </div>
+          <% if has_server_content %>
+            <div data-step-selector-target="content" style="display: block; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; box-sizing: border-box !important;" class="w-full max-w-full min-w-0 overflow-x-hidden">
+              <% if @load_sub_view && @sub_view_html.present? %>
+                <%= @sub_view_html.html_safe %>
+              <% elsif @load_run_panel && @run_panel_html.present? %>
+                <%= @run_panel_html.html_safe %>
+              <% end %>
+            </div>
+          <% else %>
+            <div data-step-selector-target="content" style="display: none; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; box-sizing: border-box !important;" class="w-full max-w-full min-w-0 overflow-x-hidden">
+            </div>
+          <% end %>
         </div>
       </div>
     </div>
@@ -347,47 +357,6 @@
     })
   }
 
-  // Auto-load selected run if run_id is provided in URL
-  // Only load in panel if the step uses standard view (has_std_view == true)
-  // For custom view steps (has_std_view == false), the step_results partial shows the custom partial
-  console.log('[Analysis] Debug: @selected_run_id=<%= @selected_run_id.inspect %>, @selected_step_id=<%= @selected_step_id.inspect %>, @load_run_panel=<%= @load_run_panel.inspect %>')
-  
-  // Debug: Check step selector state after DOM is ready
-  document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(function() {
-      const stepSelectorEl = document.querySelector('[data-controller*="step-selector"]')
-      console.log('[Analysis] Step selector element:', stepSelectorEl)
-      console.log('[Analysis] Step selector data-current-step-id:', stepSelectorEl?.getAttribute('data-current-step-id'))
-      
-      const stepElements = document.querySelectorAll('[data-step-id]')
-      console.log('[Analysis] Found step elements:', stepElements.length)
-      stepElements.forEach(el => {
-        console.log('[Analysis] Step element:', el.getAttribute('data-step-id'), el.textContent.trim().substring(0, 30))
-      })
-      
-      const targetStepEl = document.querySelector('[data-step-id="<%= @selected_step_id %>"]')
-      console.log('[Analysis] Target step element (step_id=<%= @selected_step_id %>):', targetStepEl)
-      
-      const contentTarget = document.querySelector('[data-step-selector-target="content"]')
-      console.log('[Analysis] Content target innerHTML length:', contentTarget?.innerHTML?.length)
-      console.log('[Analysis] Content target preview:', contentTarget?.innerHTML?.substring(0, 200))
-    }, 500)
-  })
-  
-  <% if @load_run_panel %>
-  console.log('[Analysis] @load_run_panel is TRUE - will auto-load run panel directly')
-  // Load run panel directly - step_selector_controller is skipping step results for this case
-  document.addEventListener('DOMContentLoaded', function() {
-    // Small delay to ensure Stimulus controller is initialized
-    setTimeout(function() {
-      const runUrl = '<%= run_path(@selected_run_id) %>'
-      const stepId = '<%= @selected_step_id %>'
-      console.log('[Auto-load] Loading run panel directly:', runUrl, 'stepId:', stepId)
-      loadRunInRightPanel(runUrl, stepId)
-    }, 100)
-  })
-  <% else %>
-  console.log('[Analysis] @load_run_panel is FALSE - will NOT auto-load run panel, step_results will show custom partial')
-  <% end %>
+  console.log('[Analysis] selected_run_id=<%= @selected_run_id.inspect %>, selected_step_id=<%= @selected_step_id.inspect %>, load_run_panel=<%= @load_run_panel.inspect %>, load_sub_view=<%= @load_sub_view.inspect %>')
 
 </script>

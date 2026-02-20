@@ -29,7 +29,7 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
-  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean }
+  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean, loadSubView: Boolean, subViewStepId: Number }
 
   get projectIdentifier() {
     return this.projectKeyValue || this.projectIdValue
@@ -131,36 +131,33 @@ export default class extends Controller {
     
     // Check if server says to load run panel (false when step has a custom partial like _parsing.html.erb)
     const shouldLoadRunPanel = this.hasLoadRunPanelValue ? this.loadRunPanelValue : false
-    console.log('[StepSelectorController] loadRunPanelValue from server:', shouldLoadRunPanel)
-    console.log('[StepSelectorController] runIdFromUrl:', runIdFromUrl, 'stepIdFromUrl:', stepIdFromUrl)
+    const shouldLoadSubView = this.hasLoadSubViewValue ? this.loadSubViewValue : false
+    const subViewStepId = this.hasSubViewStepIdValue ? this.subViewStepIdValue : null
+    console.log('[StepSelectorController] loadRunPanelValue:', shouldLoadRunPanel, 'loadSubViewValue:', shouldLoadSubView, 'subViewStepId:', subViewStepId)
     
-    // If run_id is in URL and server says to load run panel, skip loading step results
-    // The auto-load script in _analysis.html.erb will load the run panel directly
-    if (runIdFromUrl && shouldLoadRunPanel) {
-      console.log('[StepSelectorController] Skipping step results - will load run panel directly')
-      
-      // Set current step ID for highlighting the step in the sidebar
-      if (stepIdFromUrl) {
-        this.currentStepId = stepIdFromUrl.toString()
-        this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
-        // Save state for when user returns from visualization view
-        this.saveState(stepIdFromUrl, 'run', runIdFromUrl)
-        // Refresh steps panel to show the border/highlight for the selected step
-        this.refreshStepsPanel()
-      }
-      
-      // Hide empty state and loading state
-      if (this.hasEmptyStateTarget) {
-        this.emptyStateTarget.style.display = 'none'
-      }
-      if (this.hasLoadingStateTarget) {
-        this.loadingStateTarget.style.display = 'none'
-      }
-      
-      // Subscribe to websocket updates
+    // If server already rendered the sub_view content into the page, just set up state and return
+    if (shouldLoadSubView && subViewStepId) {
+      console.log('[StepSelectorController] Sub-view content server-rendered, setting up state for step:', subViewStepId)
+      this.currentStepId = subViewStepId.toString()
+      this.element.setAttribute('data-current-step-id', subViewStepId.toString())
+      this.saveState(subViewStepId, 'step', null)
+      this.refreshStepsPanel()
       this.subscribeToProject()
-      console.log('[StepSelectorController] Initial setup complete (run panel mode), currentStepId:', this.currentStepId)
-      return // Exit early, don't load step results
+      this._cleanUrlParams()
+      return
+    }
+
+    // If server already rendered the run panel content into the page, just set up state and return
+    if (shouldLoadRunPanel && stepIdFromUrl) {
+      console.log('[StepSelectorController] Run panel content server-rendered, setting up state for step:', stepIdFromUrl)
+      this.currentStepId = stepIdFromUrl.toString()
+      this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+      this.saveState(stepIdFromUrl, 'run', runIdFromUrl)
+      this.refreshStepsPanel()
+      this._executeInlineScripts()
+      this.subscribeToProject()
+      this._cleanUrlParams()
+      return
     }
     
     // Normal flow: load step results
@@ -207,12 +204,6 @@ export default class extends Controller {
           // If saved state was showing a run, load the run directly
           if (savedState.contentType === 'run' && savedState.runId) {
             console.log('[StepSelectorController] Restoring run panel for run_id:', savedState.runId)
-            // Update URL to reflect restored state (without page reload)
-            const newUrl = new URL(window.location.href)
-            newUrl.searchParams.set('step_id', stepId)
-            newUrl.searchParams.set('run_id', savedState.runId)
-            window.history.replaceState({}, '', newUrl.toString())
-            
             // Hide empty state and loading state, show loading
             if (controller.hasEmptyStateTarget) {
               controller.emptyStateTarget.style.display = 'none'
@@ -430,14 +421,7 @@ export default class extends Controller {
             this.updateRunStatus(runId)
           })
         } else if (runRows.length === 0 && this.contentTarget.innerHTML.trim().length > 0) {
-          console.log(`[StepSelectorController] No run rows found but content exists, falling back to full reload`)
-          const stepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
-          if (stepElement) {
-            clearTimeout(this.reloadTimeout)
-            this.reloadTimeout = setTimeout(() => {
-              this.loadStepResults(this.currentStepId, stepElement, false)
-            }, 500)
-          }
+          console.log(`[StepSelectorController] No run rows found but content exists, skipping reload to preserve current sub-view`)
         }
       } else {
         console.warn(`[StepSelectorController] No content target available`)
@@ -490,6 +474,28 @@ export default class extends Controller {
   isAnyFormOpen() {
     // No longer using slide-in forms, so always return false
     return false
+  }
+
+  _cleanUrlParams() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('step_id')
+    url.searchParams.delete('run_id')
+    url.searchParams.delete('sub_view')
+    window.history.replaceState({}, '', url.toString())
+  }
+
+  _executeInlineScripts() {
+    if (!this.hasContentTarget) return
+    const scripts = this.contentTarget.querySelectorAll('script')
+    scripts.forEach(original => {
+      const replacement = document.createElement('script')
+      if (original.src) {
+        replacement.src = original.src
+      } else {
+        replacement.textContent = original.textContent
+      }
+      original.parentNode.replaceChild(replacement, original)
+    })
   }
 
   refreshStepsPanel() {

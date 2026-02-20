@@ -163,13 +163,13 @@
             </span>
           <% end %>-->
         </div>
-        <div class="flex items-center gap-3 flex-shrink-0">
+        <div class="flex items-center gap-2 flex-shrink-0">
           <!-- Reset Button -->
           <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
             <%= link_to reset_parsing_project_path(@project),
-                  class: "px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block",
+                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
                   style: "flex-shrink: 0;" do %>
-              Reset
+              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
             <% end %>
           <% end %>
         </div>
@@ -445,9 +445,9 @@
         </h3>
         <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
           <%= link_to reset_parsing_project_path(@project),
-                class: "px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block",
+                class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
                 style: "flex-shrink: 0;" do %>
-            Reset
+            <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
           <% end %>
         <% end %>
       </div>

@@ -69,6 +69,7 @@ Rails.application.routes.draw do
   resources :runs do
     member do
       get :get_de_gene_list
+      get :get_ge_geneset_list
     end
   end
   resources :reqs

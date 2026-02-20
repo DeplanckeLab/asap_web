@@ -1,10 +1,532 @@
-<% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+<%
+  fdr_threshold = local_assigns[:markers_fdr] || 0.05
+  fc_threshold = local_assigns[:markers_fc] || 2.0
+  max_genes = local_assigns[:markers_max] || 10
+  highlight_type = local_assigns[:markers_highlight]
+  runs = local_assigns[:current_runs] || []
+  h_attrs_by_run_id = local_assigns[:h_attrs_by_run_id] || {}
+  log2fc_threshold = Math.log2(fc_threshold)
 
-<% if completed_runs.any? %>
-  <div class="text-gray-500 text-center py-12">
-    <p class="text-lg font-medium text-gray-700 mb-2">Markers view</p>
-    <p>This view will display marker genes for each cluster comparison.</p>
+  project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+  h_highlight_ensembl_ids = {}
+  if highlight_type.present?
+    h_gene_types = {
+      'transcription_factors' => ['GO:0003677', 'GO:0006355'],
+      'surface_markers' => ['GO:0009986', 'GO:0005887']
+    }
+    go_ids = h_gene_types[highlight_type]
+    if go_ids
+      begin
+        h_env = Basic.safe_parse_json(@project.version.env_json, {})
+        db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+        RemoteGene.with_remote(db_version) do
+          conn = RemoteGene.connection
+          go_quoted = go_ids.map { |g| conn.quote(g) }.join(', ')
+          gene_ids_rows = conn.select_all(
+            "SELECT content FROM gene_set_items JOIN gene_sets ON gene_set_items.gene_set_id = gene_sets.id WHERE gene_set_items.identifier IN (#{go_quoted}) AND gene_sets.organism_id = #{@project.organism_id.to_i}"
+          )
+          all_gene_ids = []
+          gene_ids_rows.each do |row|
+            all_gene_ids.concat(row['content'].split(',').map(&:to_i))
+          end
+          all_gene_ids.uniq!
+          if all_gene_ids.any?
+            ensembl_rows = conn.select_all(
+              "SELECT ensembl_id FROM genes WHERE id IN (#{all_gene_ids.join(',')})"
+            )
+            ensembl_rows.each { |row| h_highlight_ensembl_ids[row['ensembl_id']] = true }
+          end
+        end
+      rescue => e
+        Rails.logger.warn("[Markers] Could not load highlight genes: #{e.message}")
+      end
+    end
+  end
+
+  clustering_run_ids = runs.map { |r| (h_attrs_by_run_id[r.id] || {}).dig('groups', 0, 'run_id') }.compact.map(&:to_i).uniq
+  h_cat_aliases = {}
+  h_annots_by_run_id = {}
+  h_user_ids = {}
+  Annot.where(dim: 1, run_id: clustering_run_ids).each do |annot|
+    h_annots_by_run_id[annot.run_id] = annot
+    aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
+    h_cat_aliases[annot.run_id] = aliases
+    if aliases['user_ids']
+      aliases['user_ids'].each_value { |uid| h_user_ids[uid] = true }
+    end
+  end
+  h_users = {}
+  User.where(id: h_user_ids.keys).each { |u| h_users[u.id] = u }
+
+  h_ge_by_de_run = {}
+  h_ge_runs = {}
+  h_gene_sets_labels = {}
+  ge_fdr_cutoff = Basic.safe_parse_json(@project.respond_to?(:ge_filter_json) ? @project.ge_filter_json : '{}', {})['fdr_cutoff'].to_f
+  ge_fdr_cutoff = 0.05 if ge_fdr_cutoff <= 0
+  begin
+    successful_ge_runs = Run.joins(:step).where(project_id: @project.id, steps: { name: 'ge' }, status_id: 3)
+    gene_set_ids = {}
+    successful_ge_runs.each do |r|
+      h_ge_runs[r.id] = r
+      ge_attrs = Basic.safe_parse_json(r.attrs_json, {})
+      de_run_id = ge_attrs.dig('input_de', 'run_id').to_i
+      h_ge_by_de_run[de_run_id] ||= []
+      h_ge_by_de_run[de_run_id] << [r.id, ge_attrs]
+      gene_set_ids[ge_attrs['gene_set_id'].to_i] = true if ge_attrs['gene_set_id']
+    end
+    if gene_set_ids.any?
+      h_env ||= Basic.safe_parse_json(@project.version.env_json, {})
+      db_version ||= "asap2_data_v#{h_env['asap_data_db_version']}"
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        conn.select_all("SELECT id, label FROM gene_sets WHERE id IN (#{gene_set_ids.keys.join(',')})").each do |row|
+          h_gene_sets_labels[row['id'].to_i] = row['label']
+        end
+      end
+    end
+  rescue => e
+    Rails.logger.warn("[Markers] Could not load enrichment data: #{e.message}")
+  end
+
+  h_ge_filtered_stats = {}
+  ge_stats_file = project_dir + 'tmp' + "#{current_user.id}_ge_filtered_stats.json"
+  if File.exist?(ge_stats_file)
+    h_ge_filtered_stats = Basic.safe_parse_json(File.read(ge_stats_file), {})
+  end
+  if h_ge_filtered_stats.empty?
+    h_ge_runs.each_key do |ge_run_id|
+      ge_output_file = project_dir + 'ge' + ge_run_id.to_s + 'output.json'
+      next unless File.exist?(ge_output_file)
+      begin
+        ge_data = Basic.safe_parse_json(File.read(ge_output_file), {})
+        headers = ge_data['headers'] || []
+        fdr_idx = headers.index('fdr')
+        next unless fdr_idx
+        up_count = (ge_data['up'] || []).count { |e| e[fdr_idx].to_f <= ge_fdr_cutoff }
+        down_count = (ge_data['down'] || []).count { |e| e[fdr_idx].to_f <= ge_fdr_cutoff }
+        h_ge_filtered_stats[ge_run_id.to_s] = { 'up' => up_count, 'down' => down_count }
+      rescue => e
+        Rails.logger.warn("[Markers] Error reading GE output #{ge_run_id}: #{e.message}")
+      end
+    end
+  end
+
+  markers_data = []
+  runs.each do |run|
+    h_attrs = h_attrs_by_run_id[run.id] || {}
+    file = project_dir + 'de' + run.id.to_s + 'output.txt'
+    next unless File.exist?(file)
+
+    up_genes = []
+    down_genes = []
+    nber_up = 0
+    nber_down = 0
+
+    File.open(file, 'r') do |f|
+      header = f.gets
+      lines = []
+      while (l = f.gets)
+        lines << l.chomp.split("\t")
+      end
+
+      lines.reverse.each do |t|
+        next if t[5] == 'NA' || t[7] == 'NA'
+        logfc = t[5].to_f
+        fdr = t[7].to_f
+        break if logfc < log2fc_threshold
+        next if fdr > fdr_threshold
+        if up_genes.size < max_genes
+          (4..8).each { |i| v = t[i].to_f; t[i] = (v.abs > 9999 || (v.abs < 0.009 && v != 0)) ? "%.2E" % v : v.round(2).to_s }
+          up_genes << t
+        else
+          nber_up += 1
+        end
+      end
+
+      lines.each do |t|
+        next if t[5] == 'NA' || t[7] == 'NA'
+        logfc = t[5].to_f
+        fdr = t[7].to_f
+        break if logfc > -log2fc_threshold
+        next if fdr > fdr_threshold
+        if down_genes.size < max_genes
+          (4..8).each { |i| v = t[i].to_f; t[i] = (v.abs > 9999 || (v.abs < 0.009 && v != 0)) ? "%.2E" % v : v.round(2).to_s }
+          down_genes << t
+        else
+          nber_down += 1
+        end
+      end
+    end
+
+    nber_up += up_genes.size
+    nber_down += down_genes.size
+
+    clust_run_id = h_attrs.dig('groups', 0, 'run_id').to_i
+    aliases = h_cat_aliases[clust_run_id] || {}
+    cluster_name = aliases.dig('names', h_attrs['group_ref']) || ''
+    editor_id = aliases.dig('user_ids', h_attrs['group_ref'])
+    editor = editor_id ? h_users[editor_id] : nil
+
+    enrichments = h_ge_by_de_run[run.id] || []
+
+    markers_data << {
+      run: run,
+      group_ref: h_attrs['group_ref'],
+      group_comp: h_attrs['group_comp'].presence || 'all others',
+      up_genes: up_genes,
+      down_genes: down_genes,
+      nber_up: nber_up,
+      nber_down: nber_down,
+      cluster_name: cluster_name,
+      editor: editor,
+      enrichments: enrichments
+    }
+  end
+%>
+
+<% if markers_data.any? %>
+<div id="markers-results">
+  <table class="min-w-full divide-y divide-gray-200 text-sm">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="0">Run <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="1">Ref cluster <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="2">Comp cluster <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top up-regulated genes</th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top down-regulated genes</th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="5">Cluster name <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Edited by</th>
+      </tr>
+    </thead>
+    <tbody class="bg-white divide-y divide-gray-200">
+      <% markers_data.each do |md| %>
+        <tr class="hover:bg-gray-50 align-top">
+          <td class="px-3 py-2 text-gray-900 font-semibold whitespace-nowrap" data-sort-value="<%= md[:run].num || md[:run].id %>">#<%= md[:run].num || md[:run].id %></td>
+          <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:group_ref].to_s.gsub(/\D/, '') %>"><%= md[:group_ref] || '-' %></td>
+          <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:group_comp].to_s == 'all others' ? '99999' : md[:group_comp].to_s.gsub(/\D/, '') %>"><%= md[:group_comp] %></td>
+          <td class="px-3 py-2">
+            <div class="mb-1 text-xs text-gray-500"><%= md[:nber_up] %> gene<%= md[:nber_up] != 1 ? 's' : '' %></div>
+            <div class="flex flex-wrap gap-1">
+              <% md[:up_genes].each do |g| %>
+                <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
+                <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
+                      data-ensembl-id="<%= g[1] %>"
+                      title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
+              <% end %>
+            </div>
+            <% if md[:enrichments].any? %>
+              <div class="flex flex-wrap gap-1 mt-2">
+                <% md[:enrichments].each do |ge_run_id, ge_attrs| %>
+                  <% ge_run = h_ge_runs[ge_run_id] %>
+                  <% gs_label = h_gene_sets_labels[ge_attrs['gene_set_id'].to_i] || 'Gene set' %>
+                  <% stats = h_ge_filtered_stats[ge_run_id.to_s] %>
+                  <span class="enrichment-badge cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        data-ge-run-id="<%= ge_run_id %>" data-type="up">
+                    Enrichment #<%= ge_run&.num || ge_run_id %> <%= gs_label %>
+                    <% if stats %>
+                      <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-bold <%= stats['up'].to_i > 0 ? 'bg-green-500 text-white' : 'bg-gray-400 text-white' %>"><%= stats['up'] %></span>
+                    <% end %>
+                  </span>
+                <% end %>
+              </div>
+            <% end %>
+          </td>
+          <td class="px-3 py-2">
+            <div class="mb-1 text-xs text-gray-500"><%= md[:nber_down] %> gene<%= md[:nber_down] != 1 ? 's' : '' %></div>
+            <div class="flex flex-wrap gap-1">
+              <% md[:down_genes].each do |g| %>
+                <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
+                <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
+                      data-ensembl-id="<%= g[1] %>"
+                      title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
+              <% end %>
+            </div>
+            <% if md[:enrichments].any? %>
+              <div class="flex flex-wrap gap-1 mt-2">
+                <% md[:enrichments].each do |ge_run_id, ge_attrs| %>
+                  <% ge_run = h_ge_runs[ge_run_id] %>
+                  <% gs_label = h_gene_sets_labels[ge_attrs['gene_set_id'].to_i] || 'Gene set' %>
+                  <% stats = h_ge_filtered_stats[ge_run_id.to_s] %>
+                  <span class="enrichment-badge cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        data-ge-run-id="<%= ge_run_id %>" data-type="down">
+                    Enrichment #<%= ge_run&.num || ge_run_id %> <%= gs_label %>
+                    <% if stats %>
+                      <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-bold <%= stats['down'].to_i > 0 ? 'bg-red-500 text-white' : 'bg-gray-400 text-white' %>"><%= stats['down'] %></span>
+                    <% end %>
+                  </span>
+                <% end %>
+              </div>
+            <% end %>
+          </td>
+          <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:cluster_name].to_s.downcase %>"><%= md[:cluster_name] %></td>
+          <td class="px-3 py-2 text-gray-500 whitespace-nowrap text-xs"><%= md[:editor] ? (md[:editor].id == current_user.id ? 'me' : md[:editor].email) : '' %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <div id="markers-pagination" class="flex items-center justify-between px-3 py-3 border-t border-gray-200 bg-gray-50 text-sm">
+    <div class="flex items-center gap-2 text-gray-600">
+      <span>Rows per page:</span>
+      <select id="markers-page-size" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white cursor-pointer">
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="0">All</option>
+      </select>
+      <span id="markers-page-info" class="ml-2"></span>
+    </div>
+    <div class="flex items-center gap-1">
+      <button id="markers-prev" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Prev</button>
+      <span id="markers-page-numbers" class="flex items-center gap-1"></span>
+      <button id="markers-next" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Next</button>
+    </div>
   </div>
+</div>
+
+<!-- Gene Details Modal -->
+<div id="markers-gene-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
+  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
+      <h3 class="text-lg font-semibold text-gray-900" id="markers-gene-modal-title">Gene Details</h3>
+      <button type="button" onclick="closeMarkersGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+    </div>
+    <div class="px-6 py-5" id="markers-gene-modal-body">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Enrichment Modal -->
+<div id="markers-enrichment-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
+  <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f0fdf4, #ecfdf5);">
+      <h3 class="text-lg font-semibold text-gray-900" id="markers-enrichment-modal-title">Enrichment</h3>
+      <button type="button" onclick="closeEnrichmentModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+    </div>
+    <div class="overflow-auto" style="max-height: calc(80vh - 60px);" id="markers-enrichment-modal-body">
+      <div class="text-gray-500 text-sm p-6">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var container = document.getElementById('markers-results');
+  if (!container) return;
+
+  container.addEventListener('click', function(e) {
+    var badge = e.target.closest('.gene-badge');
+    if (badge) {
+      var ensemblId = badge.dataset.ensemblId;
+      if (ensemblId) openMarkersGeneModal(ensemblId);
+      return;
+    }
+    var enrBadge = e.target.closest('.enrichment-badge');
+    if (enrBadge) {
+      var geRunId = enrBadge.dataset.geRunId;
+      var type = enrBadge.dataset.type;
+      if (geRunId) openEnrichmentModal(geRunId, type);
+      return;
+    }
+  });
+
+  var tbody = container.querySelector('tbody');
+  var allRows = Array.from(tbody.querySelectorAll('tr'));
+  var filteredRows = allRows;
+  var pageSizeSelect = document.getElementById('markers-page-size');
+  var prevBtn = document.getElementById('markers-prev');
+  var nextBtn = document.getElementById('markers-next');
+  var pageInfo = document.getElementById('markers-page-info');
+  var pageNumbers = document.getElementById('markers-page-numbers');
+  var searchInput = document.getElementById('markers-search');
+  var currentPage = 1;
+  var searchTimer = null;
+  var sortCol = null;
+  var sortAsc = true;
+
+  function getPageSize() {
+    var v = parseInt(pageSizeSelect.value, 10);
+    return v === 0 ? filteredRows.length : v;
+  }
+
+  function totalPages() {
+    var ps = getPageSize();
+    return Math.max(1, Math.ceil(filteredRows.length / ps));
+  }
+
+  function applySearch() {
+    var query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    if (!query) {
+      filteredRows = allRows;
+    } else {
+      filteredRows = allRows.filter(function(row) {
+        return row.textContent.toLowerCase().indexOf(query) !== -1;
+      });
+    }
+    currentPage = 1;
+    renderPage();
+  }
+
+  function renderPage() {
+    var ps = getPageSize();
+    var tp = totalPages();
+    if (currentPage > tp) currentPage = tp;
+    var start = (currentPage - 1) * ps;
+    var end = start + ps;
+
+    var visibleSet = new Set(filteredRows.slice(start, end));
+    allRows.forEach(function(row) {
+      row.style.display = visibleSet.has(row) ? '' : 'none';
+    });
+
+    if (filteredRows.length === 0) {
+      pageInfo.textContent = '0 of 0';
+    } else {
+      pageInfo.textContent = (start + 1) + '-' + Math.min(end, filteredRows.length) + ' of ' + filteredRows.length;
+    }
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= tp;
+
+    pageNumbers.innerHTML = '';
+    var maxVisible = 7;
+    var pages = [];
+    if (tp <= maxVisible) {
+      for (var i = 1; i <= tp; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      var lo = Math.max(2, currentPage - 1);
+      var hi = Math.min(tp - 1, currentPage + 1);
+      if (lo > 2) pages.push('...');
+      for (var i = lo; i <= hi; i++) pages.push(i);
+      if (hi < tp - 1) pages.push('...');
+      pages.push(tp);
+    }
+    pages.forEach(function(p) {
+      if (p === '...') {
+        var s = document.createElement('span');
+        s.className = 'px-1 text-gray-400';
+        s.textContent = '...';
+        pageNumbers.appendChild(s);
+      } else {
+        var btn = document.createElement('button');
+        btn.textContent = p;
+        btn.className = 'px-2.5 py-1 rounded text-sm cursor-pointer ' +
+          (p === currentPage ? 'bg-blue-600 text-white font-semibold' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-100');
+        btn.addEventListener('click', function() { currentPage = p; renderPage(); });
+        pageNumbers.appendChild(btn);
+      }
+    });
+  }
+
+  pageSizeSelect.addEventListener('change', function() { currentPage = 1; renderPage(); });
+  prevBtn.addEventListener('click', function() { if (currentPage > 1) { currentPage--; renderPage(); } });
+  nextBtn.addEventListener('click', function() { if (currentPage < totalPages()) { currentPage++; renderPage(); } });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(applySearch, 200);
+    });
+  }
+
+  var sortableHeaders = container.querySelectorAll('th[data-sort-col]');
+  function updateSortIndicators() {
+    sortableHeaders.forEach(function(th) {
+      var indicator = th.querySelector('.sort-indicator');
+      var col = parseInt(th.dataset.sortCol, 10);
+      if (col === sortCol) {
+        indicator.textContent = sortAsc ? ' \u25B2' : ' \u25BC';
+      } else {
+        indicator.textContent = '';
+      }
+    });
+  }
+
+  function sortRows(colIdx) {
+    if (sortCol === colIdx) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = colIdx;
+      sortAsc = true;
+    }
+    updateSortIndicators();
+    var isNumeric = (colIdx !== 5);
+    allRows.sort(function(a, b) {
+      var aVal = a.cells[colIdx].getAttribute('data-sort-value') || '';
+      var bVal = b.cells[colIdx].getAttribute('data-sort-value') || '';
+      var cmp;
+      if (isNumeric) {
+        cmp = (parseFloat(aVal) || 0) - (parseFloat(bVal) || 0);
+      } else {
+        cmp = aVal.localeCompare(bVal);
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+    allRows.forEach(function(row) { tbody.appendChild(row); });
+    applySearch();
+  }
+
+  sortableHeaders.forEach(function(th) {
+    th.addEventListener('click', function() {
+      sortRows(parseInt(this.dataset.sortCol, 10));
+    });
+  });
+
+  sortRows(0);
+})();
+
+function openMarkersGeneModal(ensemblId) {
+  var overlay = document.getElementById('markers-gene-modal-overlay');
+  var body = document.getElementById('markers-gene-modal-body');
+  var title = document.getElementById('markers-gene-modal-title');
+  title.textContent = ensemblId;
+  body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+  overlay.classList.remove('hidden');
+
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+  fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
+    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+  })
+  .then(function(r) { return r.text(); })
+  .then(function(html) { body.innerHTML = html; })
+  .catch(function(err) { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
+}
+
+function closeMarkersGeneModal() {
+  document.getElementById('markers-gene-modal-overlay').classList.add('hidden');
+}
+
+document.getElementById('markers-gene-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeMarkersGeneModal();
+});
+
+function openEnrichmentModal(geRunId, type) {
+  var overlay = document.getElementById('markers-enrichment-modal-overlay');
+  var body = document.getElementById('markers-enrichment-modal-body');
+  var title = document.getElementById('markers-enrichment-modal-title');
+  title.textContent = 'Enrichment - ' + (type === 'up' ? 'Up-regulated' : 'Down-regulated');
+  body.innerHTML = '<div class="text-gray-500 text-sm p-6">Loading...</div>';
+  overlay.classList.remove('hidden');
+
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+  fetch('/runs/' + geRunId + '/get_ge_geneset_list?from=markers&type=' + type, {
+    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+  })
+  .then(function(r) { return r.text(); })
+  .then(function(html) { body.innerHTML = html; })
+  .catch(function(err) { body.innerHTML = '<div class="text-red-600 text-sm p-6">Failed to load enrichment data.</div>'; });
+}
+
+function closeEnrichmentModal() {
+  document.getElementById('markers-enrichment-modal-overlay').classList.add('hidden');
+}
+
+document.getElementById('markers-enrichment-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeEnrichmentModal();
+});
+</script>
+
 <% else %>
-  <div class="text-gray-500 text-center py-8">No completed DE runs found.</div>
+  <div class="text-gray-500 text-center py-8">No marker genes found with the current filter criteria.</div>
 <% end %>

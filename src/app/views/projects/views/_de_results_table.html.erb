@@ -1,15 +1,15 @@
 <% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
 <% if completed_runs.any? %>
 
-<div class="overflow-x-auto">
-  <table id="de_table" class="min-w-full divide-y divide-gray-200 text-sm">
+<div data-de-filter-target="tableRoot" class="overflow-x-auto">
+  <table class="min-w-full divide-y divide-gray-200 text-sm">
     <thead class="bg-gray-50">
       <tr>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-action="click->de-filter#sort" data-col="0" data-numeric="true"># <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-action="click->de-filter#sort" data-col="1" data-numeric="false">Method <span class="sort-indicator"></span></th>
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameters</th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Up-regulated</th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Down-regulated</th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-action="click->de-filter#sort" data-col="3" data-numeric="true">Up-regulated <span class="sort-indicator"></span></th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-action="click->de-filter#sort" data-col="4" data-numeric="true">Down-regulated <span class="sort-indicator"></span></th>
       </tr>
     </thead>
     <tbody class="bg-white divide-y divide-gray-200">
@@ -18,9 +18,11 @@
         <% std_method = @h_std_methods && run.std_method_id ? @h_std_methods[run.std_method_id] : nil %>
         <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
         <% h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
+        <% up_count = (@h_stats && @h_stats[run_id]) ? @h_stats[run_id]['up'].to_i : -1 %>
+        <% down_count = (@h_stats && @h_stats[run_id]) ? @h_stats[run_id]['down'].to_i : -1 %>
         <tr class="hover:bg-gray-50">
-          <td class="px-3 py-2 text-gray-900 font-semibold">#<%= run.num || run.id %></td>
-          <td class="px-3 py-2 text-gray-900"><%= method_label %></td>
+          <td class="px-3 py-2 text-gray-900 font-semibold" data-sort-value="<%= run.num || run.id %>">#<%= run.num || run.id %></td>
+          <td class="px-3 py-2 text-gray-900" data-sort-value="<%= method_label.downcase %>"><%= method_label %></td>
           <td class="px-3 py-2 text-gray-600 text-xs">
             <% h_attrs.each do |k, v| %>
               <% next if v.is_a?(Hash) || v.is_a?(Array) %>
@@ -29,19 +31,19 @@
               </span>
             <% end %>
           </td>
-          <td class="px-3 py-2">
-            <% if @h_stats && @h_stats[run_id] && @h_stats[run_id]['up'] %>
-              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= @h_stats[run_id]['up'] > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
+          <td class="px-3 py-2" data-sort-value="<%= up_count %>">
+            <% if up_count >= 0 %>
+              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= up_count > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
                     onclick="loadFormInRightPanel('<%= get_de_gene_list_run_path(run) %>?type=up')">
-                <%= @h_stats[run_id]['up'] %> genes
+                <%= up_count %> genes
               </span>
             <% end %>
           </td>
-          <td class="px-3 py-2">
-            <% if @h_stats && @h_stats[run_id] && @h_stats[run_id]['down'] %>
-              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= @h_stats[run_id]['down'] > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
+          <td class="px-3 py-2" data-sort-value="<%= down_count %>">
+            <% if down_count >= 0 %>
+              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= down_count > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
                     onclick="loadFormInRightPanel('<%= get_de_gene_list_run_path(run) %>?type=down')">
-                <%= @h_stats[run_id]['down'] %> genes
+                <%= down_count %> genes
               </span>
             <% end %>
           </td>
@@ -49,6 +51,23 @@
       <% end %>
     </tbody>
   </table>
+  <div class="flex items-center justify-between px-3 py-3 border-t border-gray-200 bg-gray-50 text-sm">
+    <div class="flex items-center gap-2 text-gray-600">
+      <span>Rows per page:</span>
+      <select data-de-filter-target="pageSize" data-action="change->de-filter#changePage" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white cursor-pointer">
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="0">All</option>
+      </select>
+      <span data-de-filter-target="pageInfo" class="ml-2"></span>
+    </div>
+    <div class="flex items-center gap-1">
+      <button data-action="click->de-filter#prevPage" data-de-filter-target="prevBtn" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Prev</button>
+      <span data-de-filter-target="pageNumbersContainer" class="flex items-center gap-1"></span>
+      <button data-action="click->de-filter#nextPage" data-de-filter-target="nextBtn" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Next</button>
+    </div>
+  </div>
 </div>
 
 <% else %>

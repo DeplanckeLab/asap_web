@@ -9,13 +9,13 @@
             class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
             onclick="loadFormInRightPanel('<%= base_url %>&view=de_filter')"
             style="flex-shrink: 0;">
-      <i class="fas fa-filter mr-1"></i> DE results
+      <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> DE results</span>
     </button>
     <button type="button"
             class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
             onclick="loadFormInRightPanel('<%= base_url %>&view=markers')"
             style="flex-shrink: 0;">
-      <i class="fas fa-crosshairs mr-1"></i> Markers
+      <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
     </button>
   <% end %>
   <%= render 'projects/views/std_step' %>
@@ -23,30 +23,223 @@
 <% elsif de_view == 'markers' %>
 
   <%# === MARKERS VIEW === %>
-  <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
-    <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          Markers
-        </h3>
-        <div class="flex items-center gap-2">
-          <button type="button"
-                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                  onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
-            <i class="fas fa-th-list mr-1"></i> Dashboard
-          </button>
-          <button type="button"
-                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                  onclick="loadFormInRightPanel('<%= base_url %>&view=de_filter')">
-            <i class="fas fa-filter mr-1"></i> DE results
-          </button>
+  <%
+    markers_fdr = (params[:markers_fdr] || '0.05')
+    markers_fc = (params[:markers_fc] || '2')
+    markers_max = (params[:markers_max_genes] || 10).to_i
+    markers_highlight = params[:markers_highlight].presence
+    selected_analysis = params[:markers_analysis]
+
+    completed_runs = @runs&.select { |r| r.status_id == 3 } || []
+
+    unless @h_std_methods
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @h_std_methods = {}
+      StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
+    end
+
+    h_attrs_by_run_id = {}
+    analyses = {}
+    completed_runs.each do |r|
+      h_tmp = Basic.safe_parse_json(r.attrs_json, {})
+      h_attrs_by_run_id[r.id] = h_tmp
+
+      std_method = @h_std_methods[r.std_method_id]
+      tag_attrs = {}
+      tag_attrs['method'] = std_method&.name || 'unknown'
+      h_tmp.each do |k, v|
+        next if ['group_comp', 'group_ref'].include?(k)
+        next if v.is_a?(Hash) || v.is_a?(Array)
+        tag_attrs[k] = v
+      end
+      tag_key = tag_attrs.to_json
+
+      analyses[tag_key] ||= { label_attrs: tag_attrs, runs: [] }
+      analyses[tag_key][:runs] << r
+    end
+
+    analysis_options = []
+    analyses.each do |key, data|
+      attrs = data[:label_attrs]
+      method_name = attrs['method'] || 'unknown'
+      param_parts = attrs.reject { |k, _| k == 'method' }.map { |k, v| "#{k}: #{v}" }
+      analysis_options << {
+        key: key,
+        method_name: method_name,
+        params: param_parts,
+        nber_clusters: data[:runs].size
+      }
+    end
+
+    selected_analysis = analysis_options.first&.dig(:key) if selected_analysis.blank? || !analyses.key?(selected_analysis)
+    current_runs = selected_analysis ? (analyses[selected_analysis]&.fetch(:runs, [])) : []
+    selected_option = analysis_options.find { |o| o[:key] == selected_analysis }
+  %>
+  <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);"
+       id="markers-container">
+    <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+      <div class="border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            Markers
+          </h3>
+          <div class="flex items-center gap-2">
+            <button type="button" id="markers-toggle-filters"
+                    class="px-2 py-1.5 bg-white hover:bg-gray-100 text-gray-600 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Toggle filters"
+                    onclick="var p=document.getElementById('markers-filters-panel'); if(p){p.classList.toggle('hidden'); this.classList.toggle('bg-gray-200',!p.classList.contains('hidden'));}">
+              <i class="fas fa-sliders-h"></i>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
+              <i class="fas fa-th-list sm:mr-1"></i><span class="hidden sm:inline"> Dashboard</span>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    onclick="loadFormInRightPanel('<%= base_url %>&view=de_filter')">
+              <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> DE results</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="markers-filters-panel" class="border-b border-gray-200 px-6 py-3 bg-white">
+        <% if analysis_options.any? %>
+          <div class="mb-3 relative" id="markers-analysis-wrapper">
+            <label class="text-sm font-medium text-gray-700 mb-1 block">Analysis</label>
+            <input type="hidden" id="markers-analysis" value="<%= CGI.escapeHTML(selected_analysis || '') %>">
+            <button type="button" id="markers-analysis-btn"
+                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-left shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white flex items-center justify-between cursor-pointer">
+              <div class="flex-1 min-w-0">
+                <% if selected_option %>
+                  <span class="font-medium text-gray-900"><%= selected_option[:method_name] %></span>
+                  <% if selected_option[:params].any? %>
+                    <span class="text-gray-500 text-sm ml-2"><%= selected_option[:params].join(', ') %></span>
+                  <% end %>
+                  <span class="text-blue-600 text-sm ml-2">(<%= selected_option[:nber_clusters] %> clusters)</span>
+                <% else %>
+                  <span class="text-gray-500">-- Select analysis --</span>
+                <% end %>
+              </div>
+              <span class="ml-2 text-gray-400 flex-shrink-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </span>
+            </button>
+            <div id="markers-analysis-menu"
+                 class="hidden absolute z-50 top-full left-0 w-full mt-1 max-h-72 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg">
+              <% analysis_options.each do |opt| %>
+                <div class="markers-analysis-option px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 <%= opt[:key] == selected_analysis ? 'bg-blue-50' : '' %>"
+                     data-value="<%= CGI.escapeHTML(opt[:key]) %>">
+                  <div class="font-medium text-gray-900"><%= opt[:method_name] %></div>
+                  <div class="text-sm text-gray-600 mt-0.5">
+                    <% if opt[:params].any? %>
+                      <% opt[:params].each do |p| %>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1"><%= p %></span>
+                      <% end %>
+                    <% end %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700"><%= opt[:nber_clusters] %> clusters</span>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="inline-flex items-center gap-1 whitespace-nowrap">
+            <label class="text-sm font-medium text-gray-700">Highlight</label>
+            <select id="markers-highlight" class="form-select rounded border border-gray-300 bg-white text-sm px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+              <option value="" <%= 'selected' unless markers_highlight %>>All</option>
+              <option value="transcription_factors" <%= 'selected' if markers_highlight == 'transcription_factors' %>>Transcription factors</option>
+              <option value="surface_markers" <%= 'selected' if markers_highlight == 'surface_markers' %>>Surface markers</option>
+            </select>
+          </span>
+          <span class="inline-flex items-center gap-1 whitespace-nowrap">
+            <label class="text-sm font-medium text-gray-700">Max genes</label>
+            <select id="markers-max" class="form-select rounded border border-gray-300 bg-white text-sm px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+              <% [10, 20, 50, 100, 500, 1000].each do |v| %>
+                <option value="<%= v %>" <%= 'selected' if v == markers_max %>><%= v %></option>
+              <% end %>
+            </select>
+          </span>
+          <span class="inline-flex items-center gap-1 whitespace-nowrap">
+            <label class="text-sm font-medium text-gray-700">FDR &lt;=</label>
+            <input type="text" id="markers-fdr" value="<%= markers_fdr %>"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-20 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+          </span>
+          <span class="inline-flex items-center gap-1 whitespace-nowrap">
+            <label class="text-sm font-medium text-gray-700">|FC| &gt;=</label>
+            <input type="text" id="markers-fc" value="<%= markers_fc %>"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-20 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+          </span>
+          <input type="text" id="markers-search" placeholder="Filter by gene or cluster"
+                 class="form-input rounded border border-gray-300 bg-white text-sm w-48 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
         </div>
       </div>
     </div>
-    <div class="px-6 py-5 flex-1">
-      <%= render partial: 'projects/views/de_markers' %>
+    <div class="px-6 py-5 flex-1 overflow-y-auto">
+      <%= render partial: 'projects/views/de_markers', locals: {
+            current_runs: current_runs,
+            h_attrs_by_run_id: h_attrs_by_run_id,
+            markers_fdr: markers_fdr.to_f,
+            markers_fc: markers_fc.to_f,
+            markers_max: markers_max,
+            markers_highlight: markers_highlight
+          } %>
     </div>
   </div>
+  <script>
+  (function() {
+    var baseUrl = '<%= base_url %>';
+    var btn = document.getElementById('markers-analysis-btn');
+    var menu = document.getElementById('markers-analysis-menu');
+    var hidden = document.getElementById('markers-analysis');
+
+    if (btn && menu) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+      });
+
+      document.querySelectorAll('.markers-analysis-option').forEach(function(opt) {
+        opt.addEventListener('click', function() {
+          hidden.value = this.dataset.value;
+          menu.classList.add('hidden');
+          reloadMarkers();
+        });
+      });
+
+      document.addEventListener('click', function(e) {
+        if (!document.getElementById('markers-analysis-wrapper').contains(e.target)) {
+          menu.classList.add('hidden');
+        }
+      });
+    }
+
+    function reloadMarkers() {
+      var analysisVal = hidden ? encodeURIComponent(hidden.value) : '';
+      var fdr = document.getElementById('markers-fdr').value;
+      var fc = document.getElementById('markers-fc').value;
+      var max = document.getElementById('markers-max').value;
+      var highlight = document.getElementById('markers-highlight').value;
+      var url = baseUrl + '&view=markers&markers_fdr=' + fdr + '&markers_fc=' + fc + '&markers_max_genes=' + max;
+      if (highlight) url += '&markers_highlight=' + highlight;
+      if (analysisVal) url += '&markers_analysis=' + analysisVal;
+      loadFormInRightPanel(url);
+    }
+
+    ['markers-max', 'markers-highlight'].forEach(function(id) {
+      document.getElementById(id).addEventListener('change', reloadMarkers);
+    });
+
+    ['markers-fdr', 'markers-fc'].forEach(function(id) {
+      document.getElementById(id).addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') reloadMarkers();
+      });
+    });
+  })();
+  </script>
 
 <% else %>
 
@@ -79,38 +272,38 @@
             Filtered DE results
           </h3>
           <div class="flex items-center gap-2">
+            <button type="button" id="de-toggle-filters"
+                    class="px-2 py-1.5 bg-white hover:bg-gray-100 text-gray-600 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Toggle filters"
+                    onclick="var p=document.getElementById('de-filters-panel'); if(p){p.classList.toggle('hidden'); this.classList.toggle('bg-gray-200',!p.classList.contains('hidden'));}">
+              <i class="fas fa-sliders-h"></i>
+            </button>
             <button type="button"
                     class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                     onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
-              <i class="fas fa-th-list mr-1"></i> Dashboard
+              <i class="fas fa-th-list sm:mr-1"></i><span class="hidden sm:inline"> Dashboard</span>
             </button>
             <button type="button"
                     class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                     onclick="loadFormInRightPanel('<%= base_url %>&view=markers')">
-              <i class="fas fa-crosshairs mr-1"></i> Markers
+              <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
             </button>
           </div>
         </div>
       </div>
       <% if completed_runs.any? %>
-        <div class="border-b border-gray-200 px-6 py-3 bg-white">
+        <div id="de-filters-panel" class="border-b border-gray-200 px-6 py-3 bg-white">
           <div class="flex items-center gap-3 flex-wrap">
-            <label class="text-sm font-medium text-gray-700">FDR &lt;=</label>
+            <label class="text-sm font-medium text-gray-700 cursor-help" title="False Discovery Rate - adjusted p-value controlling for multiple testing">FDR &lt;=</label>
             <input type="text" value="<%= @h_de_filter['fdr_cutoff'] %>"
                    data-de-filter-target="fdrCutoff"
                    data-action="keyup->de-filter#filterOnEnter"
                    class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
-            <label class="text-sm font-medium text-gray-700 ml-2">Fold change &gt;=</label>
+            <label class="text-sm font-medium text-gray-700 ml-2 cursor-help" title="Fold Change - ratio of expression between compared groups">|FC| &gt;=</label>
             <input type="text" value="<%= @h_de_filter['fc_cutoff'] %>"
                    data-de-filter-target="fcCutoff"
                    data-action="keyup->de-filter#filterOnEnter"
                    class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
-            <button type="button"
-                    data-de-filter-target="filterBtn"
-                    data-action="click->de-filter#filter"
-                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer ml-2">
-              Filter
-            </button>
           </div>
         </div>
       <% end %>

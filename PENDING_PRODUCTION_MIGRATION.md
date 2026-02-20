@@ -149,13 +149,16 @@ docker-compose exec website bin/rake projects:set_single_cell_for_public
 
 ---
 
-## Step 11 -- Add allowed_downstream_steps to integration std_method
+## Step 11 -- Update integration std_method
 
-Adds `allowed_downstream_steps: ["umap", "clustering"]` to the `obj_attrs_json`
-of the `integration` std_method. This restricts integrated projects so that only
-UMAP and Clustering steps are unlocked after integration (skipping Filtering,
-Normalization, Scaling, PCA, etc.). Idempotent.
+Updates all `integration` std_methods:
+- Adds `allowed_downstream_steps: ["umap", "clustering"]` to `obj_attrs_json`,
+  restricting integrated projects so that only UMAP and Clustering steps are
+  unlocked after integration (skipping Filtering, Normalization, Scaling, PCA, etc.)
+- Updates the R script name from `integration.R` to `integration.v8.R` in `command_json`
+
+Idempotent.
 
 ```bash
-docker-compose exec website bin/rake std_methods:add_integration_downstream_steps
+docker-compose exec website bin/rake std_methods:update_integration
 ```

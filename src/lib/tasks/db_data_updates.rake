@@ -356,9 +356,9 @@ namespace :versions do
 end
 
 namespace :std_methods do
-  desc "Add allowed_downstream_steps to the integration std_method"
-  task add_integration_downstream_steps: :environment do
-    puts "Adding allowed_downstream_steps to integration std_method..."
+  desc "Update integration std_method: allowed_downstream_steps + R script name"
+  task update_integration: :environment do
+    puts "Updating integration std_method..."
 
     methods = StdMethod.where(name: 'integration')
     if methods.empty?
@@ -368,17 +368,28 @@ namespace :std_methods do
 
     updated_count = 0
     methods.each do |method|
-      obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
+      changed = false
 
-      if obj_attrs['allowed_downstream_steps'].present?
-        puts "  StdMethod ##{method.id}: already has allowed_downstream_steps, skipping"
-        next
+      obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
+      unless obj_attrs['allowed_downstream_steps'].present?
+        obj_attrs['allowed_downstream_steps'] = ['umap', 'clustering']
+        method.obj_attrs_json = JSON.generate(obj_attrs)
+        puts "  StdMethod ##{method.id}: added allowed_downstream_steps"
+        changed = true
       end
 
-      obj_attrs['allowed_downstream_steps'] = ['umap', 'clustering']
-      method.update!(obj_attrs_json: JSON.generate(obj_attrs))
-      puts "  StdMethod ##{method.id}: added allowed_downstream_steps: [\"umap\", \"clustering\"]"
-      updated_count += 1
+      if method.command_json.present? && method.command_json.include?('integration.R') && !method.command_json.include?('integration.v8.R')
+        method.command_json = method.command_json.gsub('integration.R', 'integration.v8.R')
+        puts "  StdMethod ##{method.id}: updated program to integration.v8.R"
+        changed = true
+      end
+
+      if changed
+        method.save!
+        updated_count += 1
+      else
+        puts "  StdMethod ##{method.id}: already up to date, skipping"
+      end
     end
 
     puts ""

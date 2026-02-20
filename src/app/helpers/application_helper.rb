@@ -235,6 +235,18 @@ module ApplicationHelper
     end
   end
   
+  def param_tooltip(key, h_method_attrs)
+    return key.to_s unless h_method_attrs.is_a?(Hash)
+    sma = h_method_attrs[key.to_s]
+    return key.to_s unless sma.is_a?(Hash)
+    parts = []
+    desc = sma['description_text'].presence || sma['description'].presence
+    parts << desc if desc
+    parts << "[DEFAULT=#{sma['default']}]" if sma.key?('default') && sma['default'].to_s.present?
+    return key.to_s if parts.empty?
+    "#{key}: #{parts.join(' ')}"
+  end
+
   # Display run attributes
   def display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
     return { datasets: [], attrs: [] } unless run && h_attrs
@@ -275,27 +287,12 @@ module ApplicationHelper
       elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
         list_datasets_by_attr_name[attr] = v
       else
-        std_method_attr = method_attrs_map[attr]
-        std_method_attr = nil unless std_method_attr.is_a?(Hash)
-        display_name = if std_method_attr && std_method_attr['label'].present?
-                         std_method_attr['label']
-                       else
-                         attr.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize }
-                       end
-        if std_method_attr
-          tooltip_text = [attr, (std_method_attr['description_text'] || std_method_attr['description'] || '')].select { |e| e && !e.empty? }.join(": ")
-          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' " \
-            "title=\"#{tooltip_text}\">" \
-            "<span class='font-semibold text-gray-800'>#{display_name}:</span>" \
-            "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
-            "</span>"
-        else
-          txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200' " \
-            "title=\"#{attr}\">" \
-            "<span class='font-semibold text-gray-800'>#{display_name}:</span>" \
-            "<span class='ml-1 text-gray-600'>#{v.to_s}</span>" \
-            "</span>"
-        end
+        tooltip_text = param_tooltip(attr, method_attrs_map)
+        txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' " \
+          "title=\"#{tooltip_text}\">" \
+          "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
+          "<span class='text-gray-600'>#{v.to_s}</span>" \
+          "</span>"
       end
       
       # Get annots for datasets
@@ -334,10 +331,9 @@ module ApplicationHelper
                   "onclick='event.stopPropagation();' " \
                   "title='#{displayed_val} - Click to view pipeline'>" \
                   "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
-                  "<span class='ml-1 text-blue-600'>#{displayed_val}</span>" \
+                  "<span class='text-blue-600'>#{displayed_val}</span>" \
                   "</span>"
               else
-                # Use run_id for pipeline lookup
                 array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
                   "data-controller='pipeline-runs' " \
                   "data-pipeline-runs-run-id-value='#{tmp_run.id}' " \
@@ -346,7 +342,7 @@ module ApplicationHelper
                   "onclick='event.stopPropagation();' " \
                   "title='#{displayed_val} - Click to view pipeline'>" \
                   "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
-                  "<span class='ml-1 text-blue-600'>#{displayed_val}</span>" \
+                  "<span class='text-blue-600'>#{displayed_val}</span>" \
                   "</span>"
               end
             else

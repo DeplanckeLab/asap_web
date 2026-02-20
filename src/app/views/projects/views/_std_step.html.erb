@@ -268,6 +268,7 @@
                                   end %>
                   <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
                   <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
+                  <% h_method_attrs = (std_method && @step) ? (Basic.get_std_method_attrs(std_method, @step)[:h_attrs] rescue Basic.safe_parse_json(std_method.attrs_json, {})) : {} %>
                   <%# Parse run attributes for parameters %>
                   <% h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
                   <% params_array = h_run_attrs.to_a %>
@@ -327,9 +328,9 @@
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        title="<%= tooltip_full %>">
+                                        title="<%= param_tooltip(key, h_method_attrs) %>">
                                     <span class="font-semibold <%= badge_label_cls %>"><%= key %>:</span>
-                                    <span class="ml-1 <%= badge_value_cls %>"><%= short_name %></span>
+                                    <span class="<%= badge_value_cls %>"><%= short_name %></span>
                                   </span>
                                 <% else %>
                                   <%# annot_id present but annot not found - check if run_id is available %>
@@ -357,24 +358,24 @@
                                             data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                             data-action="click->pipeline-runs#showPipeline"
                                             onclick="event.stopPropagation();"
-                                            title="<%= tooltip_full2 %>">
+                                            title="<%= param_tooltip(key, h_method_attrs) %>">
                                         <span class="font-semibold <%= badge_label_cls2 %>"><%= key %>:</span>
-                                        <span class="ml-1 <%= badge_value_cls2 %>"><%= short_name2 %></span>
+                                        <span class="<%= badge_value_cls2 %>"><%= short_name2 %></span>
                                       </span>
                                     <% else %>
                                       <% value_str = value.to_json %>
                                       <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
                                         <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                        <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                        <span class="text-gray-600"><%= truncated_value %></span>
                                       </span>
                                     <% end %>
                                   <% else %>
                                     <% value_str = value.to_json %>
                                     <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
                                       <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                      <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                      <span class="text-gray-600"><%= truncated_value %></span>
                                     </span>
                                   <% end %>
                                 <% end %>
@@ -403,16 +404,16 @@
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        title="<%= tooltip_full3 %>">
+                                        title="<%= param_tooltip(key, h_method_attrs) %>">
                                     <span class="font-semibold <%= badge_label_cls3 %>"><%= key %>:</span>
-                                    <span class="ml-1 <%= badge_value_cls3 %>"><%= short_name3 %></span>
+                                    <span class="<%= badge_value_cls3 %>"><%= short_name3 %></span>
                                   </span>
                                 <% else %>
                                   <% value_str = value.to_json %>
                                   <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
                                     <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                    <span class="text-gray-600"><%= truncated_value %></span>
                                   </span>
                                 <% end %>
                               <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
@@ -443,9 +444,9 @@
                                           data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                           data-action="click->pipeline-runs#showPipeline"
                                           onclick="event.stopPropagation();"
-                                          title="<%= arr_tooltip %>">
+                                          title="<%= param_tooltip(key, h_method_attrs) %>">
                                       <span class="font-semibold <%= alc %>"><%= key %>:</span>
-                                      <span class="ml-1 <%= avc %>"><%= arr_short %></span>
+                                      <span class="<%= avc %>"><%= arr_short %></span>
                                     </span>
                                   <% end %>
                                 <% elsif first_run_id.present? %>
@@ -467,18 +468,18 @@
                                           data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                           data-action="click->pipeline-runs#showPipeline"
                                           onclick="event.stopPropagation();"
-                                          title="<%= arr_tooltip %>">
+                                          title="<%= param_tooltip(key, h_method_attrs) %>">
                                       <span class="font-semibold <%= alc %>"><%= key %>:</span>
-                                      <span class="ml-1 <%= avc %>"><%= arr_short %></span>
+                                      <span class="<%= avc %>"><%= arr_short %></span>
                                     </span>
                                   <% end %>
                                 <% end %>
                               <% else %>
                                 <% value_str = value.to_s %>
                                 <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
                                   <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                  <span class="ml-1 text-gray-600"><%= truncated_value %></span>
+                                  <span class="text-gray-600"><%= truncated_value %></span>
                                 </span>
                               <% end %>
                             </span>
@@ -486,9 +487,7 @@
                           <% if params_array.size > max_visible %>
                             <button type="button" 
                                     class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300 hover:bg-gray-300 cursor-pointer transition-colors run-params-more-btn" 
-                                    data-run-id="<%= run.id %>"
-                                    data-action="click->run-params-toggle#toggle"
-                                    onclick="event.stopPropagation();">
+                                    data-run-id="<%= run.id %>">
                               +<%= params_array.size - max_visible %> more
                             </button>
                           <% end %>
@@ -736,44 +735,36 @@
 <% end %>
 
 <script>
-  // Fallback handler for run params toggle
   (function() {
-    var buttonsSetup = new WeakSet()
-    
     function setupRunParamsToggle() {
       document.querySelectorAll('.run-params-more-btn').forEach(function(button) {
-        // Skip if already setup
-        if (buttonsSetup.has(button)) return
-        buttonsSetup.add(button)
-        
+        if (button.dataset.paramsToggleReady) return
+        button.dataset.paramsToggleReady = '1'
+
         button.addEventListener('click', function(event) {
-          // Let Stimulus handle it first if it's connected
-          // This will still fire but Stimulus should handle it
           event.stopPropagation()
-          
-          const runId = this.getAttribute('data-run-id')
+
+          var runId = this.getAttribute('data-run-id')
           if (!runId) return
-          
-          const container = this.closest('[data-run-params-container]')
+
+          var container = this.closest('[data-run-params-container]')
           if (!container) return
-          
-          const allBadges = Array.from(container.querySelectorAll('.run-param-badge[data-run-id="' + runId + '"]'))
-          const hiddenBadges = allBadges.filter(function(badge) {
+
+          var allBadges = Array.from(container.querySelectorAll('.run-param-badge[data-run-id="' + runId + '"]'))
+          var hiddenBadges = allBadges.filter(function(badge) {
             return badge.classList.contains('hidden')
           })
-          const maxVisible = 3
-          
+          var maxVisible = 3
+
           if (hiddenBadges.length === 0) {
-            // All parameters are visible, hide the ones beyond max_visible
             allBadges.forEach(function(badge, index) {
               if (index >= maxVisible) {
                 badge.classList.add('hidden')
               }
             })
-            const hiddenCount = allBadges.length - maxVisible
+            var hiddenCount = allBadges.length - maxVisible
             this.textContent = hiddenCount > 0 ? '+' + hiddenCount + ' more' : ''
           } else {
-            // Show all hidden parameters
             hiddenBadges.forEach(function(badge) {
               badge.classList.remove('hidden')
             })
@@ -782,29 +773,9 @@
         })
       })
     }
-    
-    // Setup when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', setupRunParamsToggle)
-    } else {
-      setupRunParamsToggle()
-    }
-    
-    // Also setup after delays in case content loads dynamically
-    setTimeout(setupRunParamsToggle, 500)
-    setTimeout(setupRunParamsToggle, 1000)
-    
-    // Use MutationObserver to catch dynamically added content
-    if (typeof MutationObserver !== 'undefined') {
-      var observer = new MutationObserver(function(mutations) {
-        setupRunParamsToggle()
-      })
-      
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      })
-    }
+
+    setupRunParamsToggle()
+    setTimeout(setupRunParamsToggle, 300)
   })()
 </script>
 

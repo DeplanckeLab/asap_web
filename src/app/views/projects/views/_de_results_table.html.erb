@@ -24,12 +24,12 @@
           <td class="px-3 py-2 text-gray-900 font-semibold" data-sort-value="<%= run.num || run.id %>">#<%= run.num || run.id %></td>
           <td class="px-3 py-2 text-gray-900" data-sort-value="<%= method_label.downcase %>"><%= method_label %></td>
           <td class="px-3 py-2 text-gray-600 text-xs">
-            <% h_method_attrs = (std_method && std_method.attrs_json.present?) ? Basic.safe_parse_json(std_method.attrs_json, {}) : {} %>
+            <% h_method_attrs = (std_method && @step) ? (Basic.get_std_method_attrs(std_method, @step)[:h_attrs] rescue Basic.safe_parse_json(std_method.attrs_json, {})) : {} %>
             <% h_attrs.each do |k, v| %>
               <% if v.is_a?(Hash) %>
                 <% annot_id = v['annot_id'] || v[:annot_id] %>
                 <% run_id_ref = v['run_id'] || v[:run_id] %>
-                <% display_label = k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
+                <% display_label = k.to_s %>
                 <% is_im = k.to_s.start_with?('input_matrix') %>
                 <% dbg = is_im ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
                 <% dlc = is_im ? 'text-blue-800' : 'text-purple-800' %>
@@ -55,7 +55,7 @@
                           data-action="click->pipeline-runs#showPipeline"
                           title="<%= tooltip_h %>">
                       <span class="font-semibold <%= dlc %>"><%= display_label %>:</span>
-                      <span class="ml-1 <%= dvc %>"><%= clean_metadata_path(annot.name) %></span>
+                      <span class="<%= dvc %>"><%= clean_metadata_path(annot.name) %></span>
                     </span>
                   <% end %>
                 <% elsif run_id_ref.present? %>
@@ -77,7 +77,7 @@
                           data-action="click->pipeline-runs#showPipeline"
                           title="<%= tooltip_h %>">
                       <span class="font-semibold <%= dlc %>"><%= display_label %>:</span>
-                      <span class="ml-1 <%= dvc %>"><%= clean_metadata_path(dataset_name) %></span>
+                      <span class="<%= dvc %>"><%= clean_metadata_path(dataset_name) %></span>
                     </span>
                   <% end %>
                 <% end %>
@@ -87,7 +87,7 @@
                 <% first_item = v.first %>
                 <% arr_annot_id = first_item['annot_id'] || first_item[:annot_id] %>
                 <% arr_run_id = first_item['run_id'] || first_item[:run_id] %>
-                <% arr_label = k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
+                <% arr_label = k.to_s %>
                 <% is_im_a = k.to_s.start_with?('input_matrix') %>
                 <% abg = is_im_a ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
                 <% alc = is_im_a ? 'text-blue-800' : 'text-purple-800' %>
@@ -112,7 +112,7 @@
                         data-action="click->pipeline-runs#showPipeline"
                         title="<%= arr_tooltip %>">
                     <span class="font-semibold <%= alc %>"><%= arr_label %>:</span>
-                    <span class="ml-1 <%= avc %>"><%= clean_metadata_path(arr_annot.name) %></span>
+                    <span class="<%= avc %>"><%= clean_metadata_path(arr_annot.name) %></span>
                   </span>
                 <% elsif arr_run_id.present? %>
                   <% arr_ref_run = Run.find_by(id: arr_run_id) %>
@@ -133,19 +133,15 @@
                           data-action="click->pipeline-runs#showPipeline"
                           title="<%= arr_tooltip %>">
                       <span class="font-semibold <%= alc %>"><%= arr_label %>:</span>
-                      <span class="ml-1 <%= avc %>"><%= clean_metadata_path(arr_dataset) %></span>
+                      <span class="<%= avc %>"><%= clean_metadata_path(arr_dataset) %></span>
                     </span>
                   <% end %>
                 <% end %>
                 <% next %>
               <% end %>
               <% next if v.is_a?(Array) %>
-              <% sma = h_method_attrs[k] %>
-              <% sma = nil unless sma.is_a?(Hash) %>
-              <% display_name = (sma && sma['label'].present?) ? sma['label'] : k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
-              <% tooltip = sma ? [k, (sma['description_text'] || sma['description'] || '')].select(&:present?).join(': ') : k %>
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1 cursor-help" title="<%= tooltip %>">
-                <span class="font-semibold"><%= display_name %>:</span> <span class="ml-1"><%= v.to_s.truncate(30) %></span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1 cursor-help" title="<%= param_tooltip(k, h_method_attrs) %>">
+                <span class="font-semibold"><%= k %>:</span><span><%= v.to_s.truncate(30) %></span>
               </span>
             <% end %>
           </td>

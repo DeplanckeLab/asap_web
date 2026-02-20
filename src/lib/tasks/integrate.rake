@@ -124,7 +124,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
       'time_call' => h_env["time_call"]&.gsub(/\#output_dir/, tmp_dir.to_s),
       'container_name' => ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev') + "_" + run.id.to_s,
       'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
-      'program' => "Rscript integration.R",
+      'program' => "Rscript integration.v8.R",
       'opts' => {},
       'args' => [
         { "param_key" => 'input_loom_path_list', "value" => file_paths },
@@ -146,12 +146,17 @@ task :integrate, [:project_key] => [:environment] do |t, args|
 
     # Step 2: Parse the integrated file
     opts = [
-      { 'opt' => "-type", 'value' => 'RDS' },
-      { 'opt' => '-T', 'value' => "Parsing" },
-      { 'opt' => "-organism", 'value' => project.organism_id.to_s },
-      { 'opt' => "-o", 'value' => tmp_dir.to_s },
-      { 'opt' => "-f", 'value' => input_loom_file.to_s },
-      { 'opt' => '-h', 'value' => db_conn }
+      #{ 'opt' => "-type", 'value' => 'RDS' },
+      #{ 'opt' => '-T', 'value' => "Parsing" },
+      #{ 'opt' => "-organism", 'value' => project.organism_id.to_s },
+      #{ 'opt' => "-o", 'value' => tmp_dir.to_s },
+      #{ 'opt' => "-f", 'value' => rds_file.to_s },
+      #{ 'opt' => '-h', 'value' => db_conn }
+      {'opt' => "--organism", 'value' => project.organism_id.to_s},
+      {'opt' => "--filetype", 'value' => 'RDS'},
+      {'opt' => "-o", 'value' => tmp_dir.to_s},
+      {'opt' => "-f", 'value' => rds_file.to_s},
+      {'opt' => '--dburl', 'value' => db_conn}
     ]
 
     h_cmd_parse = {
@@ -159,7 +164,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
       'time_call' => h_env["time_call"]&.gsub(/\#output_dir/, tmp_dir.to_s),
       'container_name' => ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev') + "_" + run.id.to_s,
       'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
-      'program' => "java -jar ASAP.jar",
+      'program' => "python3 parse.v8.py",
       'opts' => opts,
       'args' => []
     }

@@ -94,7 +94,7 @@
                     class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
                     title="Copy direct link to clipboard"
                     style="flex-shrink: 0;"
-                    onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'markers') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+                    onclick="(function(btn) { var base = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'markers') %>'; var p = []; var v; v = document.getElementById('markers-analysis'); if(v && v.value) p.push('markers_analysis=' + encodeURIComponent(v.value)); v = document.getElementById('markers-highlight'); if(v && v.value) p.push('markers_highlight=' + encodeURIComponent(v.value)); v = document.getElementById('markers-max'); if(v) p.push('markers_max_genes=' + encodeURIComponent(v.value)); v = document.getElementById('markers-fdr'); if(v) p.push('markers_fdr=' + encodeURIComponent(v.value)); v = document.getElementById('markers-fc'); if(v) p.push('markers_fc=' + encodeURIComponent(v.value)); var url = base + (p.length ? '&' + p.join('&') : ''); navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
               <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
             </button>
             <button type="button"
@@ -255,6 +255,8 @@
 
   <%
     @h_de_filter ||= Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
+    @h_de_filter['fdr_cutoff'] = params[:de_fdr] if params[:de_fdr].present?
+    @h_de_filter['fc_cutoff'] = params[:de_fc] if params[:de_fc].present?
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     user_id = current_user ? current_user.id : 1
     filter_stats_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
@@ -269,9 +271,12 @@
     end
   %>
 
+  <% de_auto_filter = params[:de_fdr].present? || params[:de_fc].present? %>
   <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);"
        data-controller="de-filter"
-       data-de-filter-url-value="<%= filter_de_results_project_path(@project) %>">
+       data-de-filter-url-value="<%= filter_de_results_project_path(@project) %>"
+       data-de-filter-auto-filter-value="<%= de_auto_filter %>"
+  >
     <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
       <div class="border-b border-gray-200 px-6 py-4">
         <div class="flex items-center justify-between">
@@ -289,7 +294,7 @@
                     class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
                     title="Copy direct link to clipboard"
                     style="flex-shrink: 0;"
-                    onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+                    onclick="(function(btn) { var base = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter') %>'; var p = []; var el = document.querySelector('[data-de-filter-target=&quot;fdrCutoff&quot;]'); if(el) p.push('de_fdr=' + encodeURIComponent(el.value)); el = document.querySelector('[data-de-filter-target=&quot;fcCutoff&quot;]'); if(el) p.push('de_fc=' + encodeURIComponent(el.value)); var url = base + (p.length ? '&' + p.join('&') : ''); navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
               <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
             </button>
             <button type="button"

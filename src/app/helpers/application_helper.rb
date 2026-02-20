@@ -1,4 +1,8 @@
 module ApplicationHelper
+  def clean_metadata_path(name)
+    name.to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/row_attrs/}, '').sub(%r{^/}, '')
+  end
+
   def display_run(run)
     return "Unknown Run" unless run
     "#{run.step&.label || 'Step'} ##{run.num}"

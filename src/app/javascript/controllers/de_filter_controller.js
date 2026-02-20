@@ -3,12 +3,15 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = ["fdrCutoff", "fcCutoff", "resultsContainer", "tableRoot",
                      "pageSize", "pageInfo", "pageNumbersContainer", "prevBtn", "nextBtn"]
-  static values = { url: String }
+  static values = { url: String, autoFilter: { type: Boolean, default: false } }
 
   connect() {
     this._sortCol = null
     this._sortAsc = true
     this._currentPage = 1
+    if (this.autoFilterValue) {
+      setTimeout(() => this.filter(), 100)
+    }
   }
 
   resultsContainerTargetConnected() {

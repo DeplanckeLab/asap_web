@@ -235,8 +235,12 @@
             <% end %>
           <% end %>
           
+          <div class="px-6 py-2">
+            <input type="text" id="runs-search" placeholder="Filter runs"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-full px-3 py-1.5 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+          </div>
           <div class="flex-1 min-h-0 px-6 pb-5 overflow-x-auto">
-            <table class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
+            <table id="runs-table" class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
               <thead class="bg-gray-50">
                 <tr>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
@@ -245,11 +249,11 @@
                            data-action="change->run-selection#toggleAll"
                            data-run-selection-target="selectAll">
                   </th>
-                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">#</th>
-                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16 cursor-pointer whitespace-nowrap select-none" data-sort-col="0" data-sort-numeric="true" onclick="sortRunsTable(this)"># <span class="sort-indicator"></span></th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer whitespace-nowrap select-none" data-sort-col="1" onclick="sortRunsTable(this)">Method <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameters</th>
-                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Status</th>
-                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Created</th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer whitespace-nowrap select-none" data-sort-col="3" onclick="sortRunsTable(this)">Status <span class="sort-indicator"></span></th>
+                  <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32 cursor-pointer whitespace-nowrap select-none" data-sort-col="4" onclick="sortRunsTable(this)">Created <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
                 </tr>
               </thead>
@@ -279,13 +283,13 @@
                              data-action="change->run-selection#updateSelection"
                              data-run-selection-target="checkbox">
                     </td>
-                    <td class="px-3 py-4 whitespace-nowrap">
+                    <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.num || run.id %>">
                       <div class="text-sm font-semibold text-gray-900">#<%= run.num || run.id %></div>
                       <% if admin? %>
                         <div class="text-xs text-gray-500 font-mono" style="font-size: 0.7rem;"><%= run.id %></div>
                       <% end %>
                     </td>
-                    <td class="px-3 py-4" style="max-width: 0;">
+                    <td class="px-3 py-4" style="max-width: 0;" data-sort-value="<%= method_label.downcase %>">
                       <div class="text-sm text-gray-900 truncate" title="<%= method_label %>" style="width: 100%;"><%= method_label %></div>
                     </td>
                     <td class="px-3 py-4">
@@ -307,23 +311,25 @@
                                   <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
                                   <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
                                   <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                    <% run_num = ori_run.num || ori_run.id %>
-                                    <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
+                                    <% tooltip_full = "#{step_name} ##{ori_run.num || ori_run.id} #{annot.name}" %>
                                   <% else %>
-                                    <% dataset_display = "#{step_name} #{annot.name}" %>
+                                    <% tooltip_full = "#{step_name} #{annot.name}" %>
                                   <% end %>
-                                  <% is_truncated = dataset_display.length > 30 %>
-                                  <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                  <% short_name = clean_metadata_path(annot.name) %>
+                                  <% is_input_matrix = key.to_s.start_with?('input_matrix') %>
+                                  <% badge_bg = is_input_matrix ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                                  <% badge_label_cls = is_input_matrix ? 'text-blue-800' : 'text-purple-800' %>
+                                  <% badge_value_cls = is_input_matrix ? 'text-blue-600' : 'text-purple-600' %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg %>"
                                         data-controller="pipeline-runs"
                                         data-pipeline-runs-annot-id-value="<%= annot_id %>"
                                         data-pipeline-runs-project-id-value="<%= @project.id %>"
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        <%= "title=\"#{dataset_display}\"" if is_truncated %>>
-                                    <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                    <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                                        title="<%= tooltip_full %>">
+                                    <span class="font-semibold <%= badge_label_cls %>"><%= key %>:</span>
+                                    <span class="ml-1 <%= badge_value_cls %>"><%= short_name %></span>
                                   </span>
                                 <% else %>
                                   <%# annot_id present but annot not found - check if run_id is available %>
@@ -334,24 +340,26 @@
                                       <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
                                       <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
                                       <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                                      <% short_name2 = clean_metadata_path(dataset_name) %>
                                       <% if direct_step && direct_step.multiple_runs %>
-                                        <% run_num = direct_run.num || direct_run.id %>
-                                        <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                                        <% tooltip_full2 = "#{step_name} ##{direct_run.num || direct_run.id} #{dataset_name}" %>
                                       <% else %>
-                                        <% dataset_display = "#{step_name} #{dataset_name}" %>
+                                        <% tooltip_full2 = "#{step_name} #{dataset_name}" %>
                                       <% end %>
-                                      <% is_truncated = dataset_display.length > 30 %>
-                                      <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
-                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                      <% is_input_matrix2 = key.to_s.start_with?('input_matrix') %>
+                                      <% badge_bg2 = is_input_matrix2 ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                                      <% badge_label_cls2 = is_input_matrix2 ? 'text-blue-800' : 'text-purple-800' %>
+                                      <% badge_value_cls2 = is_input_matrix2 ? 'text-blue-600' : 'text-purple-600' %>
+                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg2 %>"
                                             data-controller="pipeline-runs"
                                             data-pipeline-runs-run-id-value="<%= direct_run_id %>"
                                             data-pipeline-runs-project-id-value="<%= @project.id %>"
                                             data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                             data-action="click->pipeline-runs#showPipeline"
                                             onclick="event.stopPropagation();"
-                                            <%= "title=\"#{dataset_display}\"" if is_truncated %>>
-                                        <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                        <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                                            title="<%= tooltip_full2 %>">
+                                        <span class="font-semibold <%= badge_label_cls2 %>"><%= key %>:</span>
+                                        <span class="ml-1 <%= badge_value_cls2 %>"><%= short_name2 %></span>
                                       </span>
                                     <% else %>
                                       <% value_str = value.to_json %>
@@ -378,24 +386,26 @@
                                   <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
                                   <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
                                   <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
+                                  <% short_name3 = clean_metadata_path(dataset_name) %>
                                   <% if direct_step && direct_step.multiple_runs %>
-                                    <% run_num = direct_run.num || direct_run.id %>
-                                    <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
+                                    <% tooltip_full3 = "#{step_name} ##{direct_run.num || direct_run.id} #{dataset_name}" %>
                                   <% else %>
-                                    <% dataset_display = "#{step_name} #{dataset_name}" %>
+                                    <% tooltip_full3 = "#{step_name} #{dataset_name}" %>
                                   <% end %>
-                                  <% is_truncated = dataset_display.length > 30 %>
-                                  <% truncated_dataset = is_truncated ? dataset_display[0..26] + "..." : dataset_display %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                  <% is_input_matrix3 = key.to_s.start_with?('input_matrix') %>
+                                  <% badge_bg3 = is_input_matrix3 ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                                  <% badge_label_cls3 = is_input_matrix3 ? 'text-blue-800' : 'text-purple-800' %>
+                                  <% badge_value_cls3 = is_input_matrix3 ? 'text-blue-600' : 'text-purple-600' %>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg3 %>"
                                         data-controller="pipeline-runs"
                                         data-pipeline-runs-run-id-value="<%= direct_run_id %>"
                                         data-pipeline-runs-project-id-value="<%= @project.id %>"
                                         data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                         data-action="click->pipeline-runs#showPipeline"
                                         onclick="event.stopPropagation();"
-                                        <%= "title=\"#{dataset_display}\"" if is_truncated %>>
-                                    <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                    <span class="ml-1 text-blue-600"><%= truncated_dataset %></span>
+                                        title="<%= tooltip_full3 %>">
+                                    <span class="font-semibold <%= badge_label_cls3 %>"><%= key %>:</span>
+                                    <span class="ml-1 <%= badge_value_cls3 %>"><%= short_name3 %></span>
                                   </span>
                                 <% else %>
                                   <% value_str = value.to_json %>
@@ -406,8 +416,14 @@
                                   </span>
                                 <% end %>
                               <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
-                                <%# Array of datasets - show first dataset and count %>
-                                <% first_annot_id = value.first['annot_id'] || value.first[:annot_id] %>
+                                <%# Array of dataset refs - use first element %>
+                                <% first_item = value.first %>
+                                <% first_annot_id = first_item['annot_id'] || first_item[:annot_id] %>
+                                <% first_run_id = first_item['run_id'] || first_item[:run_id] %>
+                                <% is_im = key.to_s.start_with?('input_matrix') %>
+                                <% abg = is_im ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                                <% alc = is_im ? 'text-blue-800' : 'text-purple-800' %>
+                                <% avc = is_im ? 'text-blue-600' : 'text-purple-600' %>
                                 <% if first_annot_id.present? %>
                                   <% first_annot = @h_annots_for_params[first_annot_id.to_i] if defined?(@h_annots_for_params) %>
                                   <% if first_annot %>
@@ -415,39 +431,47 @@
                                     <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
                                     <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
                                     <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                      <% run_num = ori_run.num || ori_run.id %>
-                                      <% dataset_display = "#{step_name} ##{run_num} #{first_annot.name}" %>
+                                      <% arr_tooltip = "#{step_name} ##{ori_run.num || ori_run.id} #{first_annot.name}" %>
                                     <% else %>
-                                      <% dataset_display = "#{step_name} #{first_annot.name}" %>
+                                      <% arr_tooltip = "#{step_name} #{first_annot.name}" %>
                                     <% end %>
-                                    <% array_display = value.size > 1 ? "#{dataset_display} (+#{value.size - 1} more)" : dataset_display %>
-                                    <% is_truncated = array_display.length > 30 %>
-                                    <% truncated_array = is_truncated ? array_display[0..26] + "..." : array_display %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors"
+                                    <% arr_short = clean_metadata_path(first_annot.name) %>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= abg %>"
                                           data-controller="pipeline-runs"
                                           data-pipeline-runs-annot-id-value="<%= first_annot_id %>"
                                           data-pipeline-runs-project-id-value="<%= @project.id %>"
                                           data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
                                           data-action="click->pipeline-runs#showPipeline"
                                           onclick="event.stopPropagation();"
-                                          <%= "title=\"#{array_display}\"" if is_truncated %>>
-                                      <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                      <span class="ml-1 text-blue-600"><%= truncated_array %></span>
-                                    </span>
-                                  <% else %>
-                                    <% value_str = "[#{value.size} datasets]" %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                                      <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                      <span class="ml-1 text-gray-600"><%= value_str %></span>
+                                          title="<%= arr_tooltip %>">
+                                      <span class="font-semibold <%= alc %>"><%= key %>:</span>
+                                      <span class="ml-1 <%= avc %>"><%= arr_short %></span>
                                     </span>
                                   <% end %>
-                                <% else %>
-                                  <% value_str = value.to_s %>
-                                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                                    <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                    <span class="ml-1 text-gray-600"><%= truncated_value %></span>
-                                  </span>
+                                <% elsif first_run_id.present? %>
+                                  <% arr_run = @h_ori_runs_for_params[first_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
+                                  <% if arr_run %>
+                                    <% arr_step = @h_steps_for_params[arr_run.step_id] if arr_run.step_id.present? && defined?(@h_steps_for_params) %>
+                                    <% step_name = arr_step ? (arr_step.label.presence || arr_step.name.presence || 'N/A') : 'N/A' %>
+                                    <% dataset_name = first_item['output_dataset'] || first_item[:output_dataset] || '' %>
+                                    <% arr_short = clean_metadata_path(dataset_name) %>
+                                    <% if arr_step && arr_step.multiple_runs %>
+                                      <% arr_tooltip = "#{step_name} ##{arr_run.num || arr_run.id} #{dataset_name}".strip %>
+                                    <% else %>
+                                      <% arr_tooltip = "#{step_name} #{dataset_name}".strip %>
+                                    <% end %>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= abg %>"
+                                          data-controller="pipeline-runs"
+                                          data-pipeline-runs-run-id-value="<%= first_run_id %>"
+                                          data-pipeline-runs-project-id-value="<%= @project.id %>"
+                                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                                          data-action="click->pipeline-runs#showPipeline"
+                                          onclick="event.stopPropagation();"
+                                          title="<%= arr_tooltip %>">
+                                      <span class="font-semibold <%= alc %>"><%= key %>:</span>
+                                      <span class="ml-1 <%= avc %>"><%= arr_short %></span>
+                                    </span>
+                                  <% end %>
                                 <% end %>
                               <% else %>
                                 <% value_str = value.to_s %>
@@ -473,7 +497,7 @@
                         <span class="text-gray-400 text-xs">-</span>
                       <% end %>
                     </td>
-                    <td class="px-3 py-4 whitespace-nowrap">
+                    <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.status_id %>">
                       <div class="flex flex-col gap-1">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
                           <%= run_status[:name].humanize %>
@@ -521,7 +545,7 @@
                         <% end %>
                       </div>
                     </td>
-                    <td class="px-3 py-4 whitespace-nowrap">
+                    <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.created_at&.to_i || 0 %>">
                       <div class="text-xs text-gray-900">
                         <% if run.created_at %>
                           <%= run.created_at.strftime("%Y-%m-%d<br>%H:%M").html_safe %>
@@ -567,6 +591,129 @@
               </tbody>
             </table>
           </div>
+          <div id="runs-pagination" class="px-6 py-2 flex items-center justify-between text-sm text-gray-600 border-t border-gray-200" style="display: none;">
+            <div>
+              <span id="runs-page-info"></span>
+              <select id="runs-page-size" class="ml-2 rounded border border-gray-300 text-xs px-1 py-0.5">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+              <span class="text-xs text-gray-500">per page</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button id="runs-prev" class="px-2 py-1 rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs">&laquo; Prev</button>
+              <span id="runs-page-numbers" class="flex items-center gap-1"></span>
+              <button id="runs-next" class="px-2 py-1 rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs">Next &raquo;</button>
+            </div>
+          </div>
+          <script>
+          (function() {
+            var table = document.getElementById('runs-table');
+            var search = document.getElementById('runs-search');
+            if (!table || !search) return;
+            var tbody = table.querySelector('tbody');
+            var allRows = Array.from(tbody.querySelectorAll('tr'));
+            var currentCol = null, currentDir = 'asc';
+            var currentPage = 1;
+            var filteredRows = allRows.slice();
+
+            var paginationEl = document.getElementById('runs-pagination');
+            var pageSizeSelect = document.getElementById('runs-page-size');
+            var pageInfo = document.getElementById('runs-page-info');
+            var pageNumbers = document.getElementById('runs-page-numbers');
+            var prevBtn = document.getElementById('runs-prev');
+            var nextBtn = document.getElementById('runs-next');
+
+            function getPageSize() { return parseInt(pageSizeSelect.value) || 25; }
+            function totalPages() { return Math.max(1, Math.ceil(filteredRows.length / getPageSize())); }
+
+            function renderPage() {
+              var ps = getPageSize();
+              var tp = totalPages();
+              if (currentPage > tp) currentPage = tp;
+              if (currentPage < 1) currentPage = 1;
+              var start = (currentPage - 1) * ps;
+              var end = start + ps;
+
+              allRows.forEach(function(r) { r.style.display = 'none'; });
+              filteredRows.forEach(function(r, i) {
+                r.style.display = (i >= start && i < end) ? '' : 'none';
+              });
+
+              if (filteredRows.length > 0) {
+                paginationEl.style.display = 'flex';
+                pageInfo.textContent = (start + 1) + '-' + Math.min(end, filteredRows.length) + ' of ' + filteredRows.length;
+              } else {
+                paginationEl.style.display = 'none';
+              }
+
+              prevBtn.disabled = currentPage <= 1;
+              nextBtn.disabled = currentPage >= tp;
+
+              pageNumbers.innerHTML = '';
+              var maxBtns = 5;
+              var startP = Math.max(1, currentPage - Math.floor(maxBtns / 2));
+              var endP = Math.min(tp, startP + maxBtns - 1);
+              if (endP - startP < maxBtns - 1) startP = Math.max(1, endP - maxBtns + 1);
+              for (var p = startP; p <= endP; p++) {
+                var btn = document.createElement('button');
+                btn.textContent = p;
+                btn.className = 'px-2 py-1 rounded border text-xs ' + (p === currentPage ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 bg-white hover:bg-gray-50');
+                btn.setAttribute('data-page', p);
+                btn.addEventListener('click', function() { currentPage = parseInt(this.getAttribute('data-page')); renderPage(); });
+                pageNumbers.appendChild(btn);
+              }
+            }
+
+            function applyFilter() {
+              var q = search.value.toLowerCase();
+              filteredRows = allRows.filter(function(row) {
+                return row.textContent.toLowerCase().indexOf(q) >= 0;
+              });
+              currentPage = 1;
+              renderPage();
+            }
+
+            search.addEventListener('input', applyFilter);
+
+            pageSizeSelect.addEventListener('change', function() { currentPage = 1; renderPage(); });
+            prevBtn.addEventListener('click', function() { if (currentPage > 1) { currentPage--; renderPage(); } });
+            nextBtn.addEventListener('click', function() { if (currentPage < totalPages()) { currentPage++; renderPage(); } });
+
+            window.sortRunsTable = function(th) {
+              var col = parseInt(th.getAttribute('data-sort-col'));
+              var numeric = th.getAttribute('data-sort-numeric') === 'true';
+              if (currentCol === col) {
+                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+              } else {
+                currentCol = col;
+                currentDir = 'asc';
+              }
+              var colIdx = col + 1;
+              var sortFn = function(a, b) {
+                var cellA = a.querySelectorAll('td')[colIdx];
+                var cellB = b.querySelectorAll('td')[colIdx];
+                var vA = cellA ? (cellA.getAttribute('data-sort-value') || cellA.textContent.trim()) : '';
+                var vB = cellB ? (cellB.getAttribute('data-sort-value') || cellB.textContent.trim()) : '';
+                if (numeric) { vA = parseFloat(vA) || 0; vB = parseFloat(vB) || 0; }
+                else { vA = vA.toLowerCase(); vB = vB.toLowerCase(); }
+                var cmp = vA < vB ? -1 : vA > vB ? 1 : 0;
+                return currentDir === 'asc' ? cmp : -cmp;
+              };
+              allRows.sort(sortFn);
+              filteredRows.sort(sortFn);
+              allRows.forEach(function(row) { tbody.appendChild(row); });
+              table.querySelectorAll('thead th .sort-indicator').forEach(function(el) { el.textContent = ''; });
+              th.querySelector('.sort-indicator').textContent = currentDir === 'asc' ? ' \u25B2' : ' \u25BC';
+              renderPage();
+            };
+
+            var idTh = table.querySelector('thead th[data-sort-col="0"]');
+            if (idTh) { sortRunsTable(idTh); sortRunsTable(idTh); }
+          })();
+          </script>
         <% else %>
           <div class="flex-1 flex items-center justify-center">
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">

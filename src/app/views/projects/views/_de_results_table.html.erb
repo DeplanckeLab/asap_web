@@ -26,7 +26,120 @@
           <td class="px-3 py-2 text-gray-600 text-xs">
             <% h_method_attrs = (std_method && std_method.attrs_json.present?) ? Basic.safe_parse_json(std_method.attrs_json, {}) : {} %>
             <% h_attrs.each do |k, v| %>
-              <% next if v.is_a?(Hash) || v.is_a?(Array) %>
+              <% if v.is_a?(Hash) %>
+                <% annot_id = v['annot_id'] || v[:annot_id] %>
+                <% run_id_ref = v['run_id'] || v[:run_id] %>
+                <% display_label = k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
+                <% is_im = k.to_s.start_with?('input_matrix') %>
+                <% dbg = is_im ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                <% dlc = is_im ? 'text-blue-800' : 'text-purple-800' %>
+                <% dvc = is_im ? 'text-blue-600' : 'text-purple-600' %>
+                <% if annot_id.present? %>
+                  <% annot = Annot.find_by(id: annot_id) %>
+                  <% if annot %>
+                    <% ori_run = annot.ori_run_id.present? ? Run.find_by(id: annot.ori_run_id) : nil %>
+                    <% ori_step = ori_run&.step_id.present? ? Step.find_by(id: ori_run.step_id) : nil %>
+                    <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : nil %>
+                    <% if ori_step && ori_step.multiple_runs && ori_run %>
+                      <% tooltip_h = "#{step_name} ##{ori_run.num || ori_run.id} #{annot.name}" %>
+                    <% elsif step_name %>
+                      <% tooltip_h = "#{step_name} #{annot.name}" %>
+                    <% else %>
+                      <% tooltip_h = annot.name %>
+                    <% end %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors mr-1 mb-1 <%= dbg %>"
+                          data-controller="pipeline-runs"
+                          data-pipeline-runs-annot-id-value="<%= annot_id %>"
+                          data-pipeline-runs-project-id-value="<%= @project.id %>"
+                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                          data-action="click->pipeline-runs#showPipeline"
+                          title="<%= tooltip_h %>">
+                      <span class="font-semibold <%= dlc %>"><%= display_label %>:</span>
+                      <span class="ml-1 <%= dvc %>"><%= clean_metadata_path(annot.name) %></span>
+                    </span>
+                  <% end %>
+                <% elsif run_id_ref.present? %>
+                  <% ref_run = Run.find_by(id: run_id_ref) %>
+                  <% if ref_run %>
+                    <% ref_step = ref_run.step_id.present? ? Step.find_by(id: ref_run.step_id) : nil %>
+                    <% step_name = ref_step ? (ref_step.label.presence || ref_step.name.presence || 'N/A') : 'N/A' %>
+                    <% dataset_name = v['output_dataset'] || v[:output_dataset] || '' %>
+                    <% if ref_step && ref_step.multiple_runs %>
+                      <% tooltip_h = "#{step_name} ##{ref_run.num || ref_run.id} #{dataset_name}".strip %>
+                    <% else %>
+                      <% tooltip_h = "#{step_name} #{dataset_name}".strip %>
+                    <% end %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors mr-1 mb-1 <%= dbg %>"
+                          data-controller="pipeline-runs"
+                          data-pipeline-runs-run-id-value="<%= run_id_ref %>"
+                          data-pipeline-runs-project-id-value="<%= @project.id %>"
+                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                          data-action="click->pipeline-runs#showPipeline"
+                          title="<%= tooltip_h %>">
+                      <span class="font-semibold <%= dlc %>"><%= display_label %>:</span>
+                      <span class="ml-1 <%= dvc %>"><%= clean_metadata_path(dataset_name) %></span>
+                    </span>
+                  <% end %>
+                <% end %>
+                <% next %>
+              <% end %>
+              <% if v.is_a?(Array) && v.any? && v.first.is_a?(Hash) %>
+                <% first_item = v.first %>
+                <% arr_annot_id = first_item['annot_id'] || first_item[:annot_id] %>
+                <% arr_run_id = first_item['run_id'] || first_item[:run_id] %>
+                <% arr_label = k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>
+                <% is_im_a = k.to_s.start_with?('input_matrix') %>
+                <% abg = is_im_a ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
+                <% alc = is_im_a ? 'text-blue-800' : 'text-purple-800' %>
+                <% avc = is_im_a ? 'text-blue-600' : 'text-purple-600' %>
+                <% arr_annot = arr_annot_id.present? ? Annot.find_by(id: arr_annot_id) : nil %>
+                <% if arr_annot %>
+                  <% arr_ori_run = arr_annot.ori_run_id.present? ? Run.find_by(id: arr_annot.ori_run_id) : nil %>
+                  <% arr_ori_step = arr_ori_run&.step_id.present? ? Step.find_by(id: arr_ori_run.step_id) : nil %>
+                  <% arr_step_name = arr_ori_step ? (arr_ori_step.label.presence || arr_ori_step.name.presence || 'N/A') : nil %>
+                  <% if arr_ori_step && arr_ori_step.multiple_runs && arr_ori_run %>
+                    <% arr_tooltip = "#{arr_step_name} ##{arr_ori_run.num || arr_ori_run.id} #{arr_annot.name}" %>
+                  <% elsif arr_step_name %>
+                    <% arr_tooltip = "#{arr_step_name} #{arr_annot.name}" %>
+                  <% else %>
+                    <% arr_tooltip = arr_annot.name %>
+                  <% end %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors mr-1 mb-1 <%= abg %>"
+                        data-controller="pipeline-runs"
+                        data-pipeline-runs-annot-id-value="<%= arr_annot_id %>"
+                        data-pipeline-runs-project-id-value="<%= @project.id %>"
+                        data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                        data-action="click->pipeline-runs#showPipeline"
+                        title="<%= arr_tooltip %>">
+                    <span class="font-semibold <%= alc %>"><%= arr_label %>:</span>
+                    <span class="ml-1 <%= avc %>"><%= clean_metadata_path(arr_annot.name) %></span>
+                  </span>
+                <% elsif arr_run_id.present? %>
+                  <% arr_ref_run = Run.find_by(id: arr_run_id) %>
+                  <% if arr_ref_run %>
+                    <% arr_ref_step = arr_ref_run.step_id.present? ? Step.find_by(id: arr_ref_run.step_id) : nil %>
+                    <% arr_step_name = arr_ref_step ? (arr_ref_step.label.presence || arr_ref_step.name.presence || 'N/A') : 'N/A' %>
+                    <% arr_dataset = first_item['output_dataset'] || first_item[:output_dataset] || '' %>
+                    <% if arr_ref_step && arr_ref_step.multiple_runs %>
+                      <% arr_tooltip = "#{arr_step_name} ##{arr_ref_run.num || arr_ref_run.id} #{arr_dataset}".strip %>
+                    <% else %>
+                      <% arr_tooltip = "#{arr_step_name} #{arr_dataset}".strip %>
+                    <% end %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors mr-1 mb-1 <%= abg %>"
+                          data-controller="pipeline-runs"
+                          data-pipeline-runs-run-id-value="<%= arr_run_id %>"
+                          data-pipeline-runs-project-id-value="<%= @project.id %>"
+                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
+                          data-action="click->pipeline-runs#showPipeline"
+                          title="<%= arr_tooltip %>">
+                      <span class="font-semibold <%= alc %>"><%= arr_label %>:</span>
+                      <span class="ml-1 <%= avc %>"><%= clean_metadata_path(arr_dataset) %></span>
+                    </span>
+                  <% end %>
+                <% end %>
+                <% next %>
+              <% end %>
+              <% next if v.is_a?(Array) %>
               <% sma = h_method_attrs[k] %>
               <% sma = nil unless sma.is_a?(Hash) %>
               <% display_name = (sma && sma['label'].present?) ? sma['label'] : k.to_s.gsub('_', ' ').gsub(/\b([a-z])/) { $1.capitalize } %>

@@ -142,6 +142,7 @@ export default class extends Controller {
       this.element.setAttribute('data-current-step-id', subViewStepId.toString())
       this.saveState(subViewStepId, 'step', null)
       this.refreshStepsPanel()
+      this._executeInlineScripts()
       this.subscribeToProject()
       this._cleanUrlParams()
       return
@@ -478,9 +479,10 @@ export default class extends Controller {
 
   _cleanUrlParams() {
     const url = new URL(window.location.href)
-    url.searchParams.delete('step_id')
-    url.searchParams.delete('run_id')
-    url.searchParams.delete('sub_view')
+    const keysToRemove = ['step_id', 'run_id', 'sub_view',
+      'de_fdr', 'de_fc',
+      'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis']
+    keysToRemove.forEach(k => url.searchParams.delete(k))
     window.history.replaceState({}, '', url.toString())
   }
 
@@ -1051,6 +1053,9 @@ export default class extends Controller {
       controller.contentTarget.style.overflowX = 'hidden'
       controller.contentTarget.style.boxSizing = 'border-box'
       controller.contentTarget.innerHTML = html
+      
+      // Execute inline scripts that were inserted via innerHTML
+      controller._executeInlineScripts()
       
       // Trigger Stimulus to scan for new controllers
       if (window.Stimulus && window.Stimulus.router) {

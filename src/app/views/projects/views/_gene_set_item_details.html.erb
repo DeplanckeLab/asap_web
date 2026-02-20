@@ -1,0 +1,63 @@
+<% if @gsi %>
+<div class="space-y-4">
+  <div class="flex items-center gap-2">
+    <span class="text-sm text-gray-500 w-28 flex-shrink-0">Identifier</span>
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-gray-800 text-white"><%= @gsi.identifier %></span>
+  </div>
+  <div class="flex items-start gap-2">
+    <span class="text-sm text-gray-500 w-28 flex-shrink-0">Description</span>
+    <span class="text-gray-800 text-sm"><%= @gsi.name %></span>
+  </div>
+  <div class="flex items-start gap-2">
+    <span class="text-sm text-gray-500 w-28 flex-shrink-0">Genes (<%= @genes.size %>)</span>
+    <div>
+      <div class="flex flex-wrap gap-1 text-xs mb-3">
+        <span class="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 text-gray-500">Not in dataset</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-700">In dataset</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded bg-green-100 text-green-700">Enriched in related DE</span>
+      </div>
+      <div class="flex flex-wrap gap-1">
+        <% @genes.each do |gene| %>
+          <%
+            if @h_enriched_genes[gene.ensembl_id]
+              badge_class = "bg-green-100 text-green-700 hover:bg-green-200"
+            elsif @h_all_genes[gene.ensembl_id]
+              badge_class = "bg-blue-100 text-blue-700 hover:bg-blue-200"
+            else
+              badge_class = "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            end
+          %>
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors gsi-gene-badge <%= badge_class %>"
+                data-ensembl-id="<%= gene.ensembl_id %>"><%= gene.name %></span>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="border-t border-gray-200 pt-3">
+    <div class="text-sm text-gray-500 mb-2">Gene details</div>
+    <div id="gsi-gene-detail-area" class="text-sm text-gray-400 italic">Click on a gene above to see details here</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  document.querySelectorAll('.gsi-gene-badge').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var ensemblId = this.dataset.ensemblId;
+      var area = document.getElementById('gsi-gene-detail-area');
+      area.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+
+      var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
+        headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+      })
+      .then(function(r) { return r.text(); })
+      .then(function(html) { area.innerHTML = html; })
+      .catch(function() { area.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
+    });
+  });
+})();
+</script>
+<% else %>
+<div class="text-gray-500 text-sm">Gene set item not found.</div>
+<% end %>

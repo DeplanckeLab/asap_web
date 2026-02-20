@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["fdrCutoff", "fcCutoff", "resultsContainer", "tableRoot",
+  static targets = ["fdrCutoff", "resultsContainer", "tableRoot",
                      "pageSize", "pageInfo", "pageNumbersContainer", "prevBtn", "nextBtn"]
   static values = { url: String, autoFilter: { type: Boolean, default: false } }
 
@@ -39,7 +39,6 @@ export default class extends Controller {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
     const formData = new FormData()
     formData.append('filter[fdr_cutoff]', this.fdrCutoffTarget.value)
-    formData.append('filter[fc_cutoff]', this.fcCutoffTarget.value)
 
     const container = this.resultsContainerTarget
     container.innerHTML = '<div class="flex justify-center py-8"><div class="text-gray-500">Filtering...</div></div>'
@@ -55,8 +54,8 @@ export default class extends Controller {
       queueMicrotask(() => this._initTable())
     })
     .catch(error => {
-      console.error('[DeFilterController] Error:', error)
-      container.innerHTML = '<div class="text-red-600">Error filtering DE results.</div>'
+      console.error('[GeFilterController] Error:', error)
+      container.innerHTML = '<div class="text-red-600">Error filtering GE results.</div>'
     })
   }
 

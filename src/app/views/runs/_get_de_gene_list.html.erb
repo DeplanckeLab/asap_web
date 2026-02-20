@@ -12,20 +12,20 @@
                 class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
                 title="Copy direct link to clipboard"
                 style="flex-shrink: 0;"
-                onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter') %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+                onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter', gene_list_run_id: @run.id, gene_list_type: params[:type]) %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
           <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
         </button>
         <% if exportable?(@project) %>
-          <a href="<%= get_de_gene_list_run_path(@run) %>?type=<%= params[:type] %>&download=1&format=json"
-             target="_blank"
-             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block">
-            JSON
-          </a>
-          <a href="<%= get_de_gene_list_run_path(@run) %>?type=<%= params[:type] %>&download=1&format=text"
-             target="_blank"
-             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block">
-            TSV
-          </a>
+          <button type="button"
+                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                  onclick="downloadDeGeneList('json')">
+            <i class="fas fa-download sm:mr-1"></i><span class="hidden sm:inline"> JSON</span>
+          </button>
+          <button type="button"
+                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                  onclick="downloadDeGeneList('tsv')">
+            <i class="fas fa-file-alt sm:mr-1"></i><span class="hidden sm:inline"> TSV</span>
+          </button>
         <% end %>
         <button type="button"
                 class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
@@ -133,6 +133,50 @@ function closeGeneModal() {
 document.getElementById('gene-modal-overlay').addEventListener('click', function(e) {
   if (e.target === this) closeGeneModal();
 });
+
+(function() {
+  var c = document.getElementById('de-genelist-container');
+  if (!c) return;
+  var ths = c.querySelectorAll('th[data-col]');
+  ths.forEach(function(th) {
+    if (th.textContent.trim().toLowerCase().indexOf('logfc') === 0) {
+      th.dataset.sortDir = 'asc';
+      th.click();
+    }
+  });
+})();
+
+window.downloadDeGeneList = function(fmt) {
+  var c = document.getElementById('de-genelist-container');
+  if (!c) return;
+  var headers = [];
+  c.querySelectorAll('thead th').forEach(function(th) {
+    headers.push(th.textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim());
+  });
+  var rows = [];
+  c.querySelectorAll('tbody tr').forEach(function(tr) {
+    if (tr.style.display === 'none') return;
+    var row = [];
+    tr.querySelectorAll('td').forEach(function(td) { row.push(td.textContent.trim()); });
+    rows.push(row);
+  });
+  var content, filename, mime;
+  if (fmt === 'json') {
+    content = JSON.stringify(rows);
+    filename = '<%= @project.key %>_run<%= @run.num %>_de_<%= params[:type] %>.json';
+    mime = 'application/json';
+  } else {
+    content = headers.join('\t') + '\n' + rows.map(function(r) { return r.join('\t'); }).join('\n');
+    filename = '<%= @project.key %>_run<%= @run.num %>_de_<%= params[:type] %>.txt';
+    mime = 'text/tab-separated-values';
+  }
+  var blob = new Blob([content], { type: mime });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
 </script>
 
 <% else %>

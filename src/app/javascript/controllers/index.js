@@ -159,6 +159,10 @@ import DeFilterController from "controllers/de_filter_controller"
 application.register("de-filter", DeFilterController)
 console.log('DE filter controller registered')
 
+import GeFilterController from "controllers/ge_filter_controller"
+application.register("ge-filter", GeFilterController)
+console.log('GE filter controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

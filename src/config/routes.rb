@@ -34,8 +34,10 @@ Rails.application.routes.draw do
       get :graph
       get :pipeline_runs
       get :search_gene
+      get :search_gene_set_items
       post :cluster_comparison
       post :filter_de_results
+      post :filter_ge_results
       post :clone
       post :toggle_public
     end

@@ -1,0 +1,109 @@
+<% ge_view = params[:view].presence || 'ge_filter' %>
+<% base_url = step_results_project_path(@project, step_id: @step.id, format: :html) %>
+
+<% if ge_view == 'dashboard' %>
+
+  <%# === DASHBOARD VIEW === %>
+  <% @extra_header_buttons = capture do %>
+    <button type="button"
+            class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+            onclick="loadFormInRightPanel('<%= base_url %>&view=ge_filter')"
+            style="flex-shrink: 0;">
+      <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> GE results</span>
+    </button>
+  <% end %>
+  <%= render 'projects/views/std_step' %>
+
+<% else %>
+
+  <%# === GE FILTER VIEW (default) === %>
+  <% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+
+  <%
+    @h_ge_filter ||= Basic.safe_parse_json(@project.ge_filter_json, { 'fdr_cutoff' => 0.05 })
+    @h_ge_filter['fdr_cutoff'] = params[:ge_fdr] if params[:ge_fdr].present?
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    @h_stats ||= {}
+
+    unless @h_std_methods
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @h_std_methods = {}
+      StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
+    end
+
+    fdr_cutoff = @h_ge_filter['fdr_cutoff'].to_f
+    completed_runs.each do |run|
+      output_file = project_dir + 'ge' + run.id.to_s + 'output.json'
+      next unless File.exist?(output_file)
+      h_output = Basic.safe_parse_json(File.read(output_file), {})
+      headers = h_output['headers'] || []
+      h_fields = {}
+      headers.each_index { |i| h_fields[headers[i]] = i }
+      fdr_idx = h_fields['fdr']
+      next unless fdr_idx
+      up_count = 0
+      down_count = 0
+      (h_output['up'] || []).each { |e| up_count += 1 if e[fdr_idx].to_f <= fdr_cutoff }
+      (h_output['down'] || []).each { |e| down_count += 1 if e[fdr_idx].to_f <= fdr_cutoff }
+      @h_stats[run.id.to_s] = { 'up' => up_count, 'down' => down_count }
+    end
+  %>
+
+  <% ge_auto_filter = params[:ge_fdr].present? %>
+  <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);"
+       data-controller="ge-filter"
+       data-ge-filter-url-value="<%= filter_ge_results_project_path(@project) %>"
+       data-ge-filter-auto-filter-value="<%= ge_auto_filter %>"
+  >
+    <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+      <div class="border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            Filtered GE results
+          </h3>
+          <div class="flex items-center gap-2">
+            <button type="button" id="ge-toggle-filters"
+                    class="px-2 py-1.5 bg-white hover:bg-gray-100 text-gray-600 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Toggle filters"
+                    onclick="var p=document.getElementById('ge-filters-panel'); if(p){p.classList.toggle('hidden'); this.classList.toggle('bg-gray-200',!p.classList.contains('hidden'));}">
+              <i class="fas fa-sliders-h"></i>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                    title="Copy direct link to clipboard"
+                    style="flex-shrink: 0;"
+                    onclick="(function(btn) { var base = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'ge_filter') %>'; var p = []; var el = document.querySelector('[data-ge-filter-target=&quot;fdrCutoff&quot;]'); if(el) p.push('ge_fdr=' + encodeURIComponent(el.value)); var url = base + (p.length ? '&' + p.join('&') : ''); navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+              <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
+              <i class="fas fa-th-list sm:mr-1"></i><span class="hidden sm:inline"> Dashboard</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <% if completed_runs.any? %>
+        <div id="ge-filters-panel" class="border-b border-gray-200 px-6 py-3 bg-white">
+          <div class="flex items-center gap-3 flex-wrap">
+            <label class="text-sm font-medium text-gray-700 cursor-help" title="False Discovery Rate - adjusted p-value controlling for multiple testing">FDR &lt;=</label>
+            <input type="text" value="<%= @h_ge_filter['fdr_cutoff'] %>"
+                   data-ge-filter-target="fdrCutoff"
+                   data-action="keyup->ge-filter#filterOnEnter"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+          </div>
+        </div>
+      <% end %>
+    </div>
+    <div class="px-6 py-5 flex-1 overflow-y-auto">
+      <% if completed_runs.any? %>
+        <div data-ge-filter-target="resultsContainer">
+          <%= render partial: 'projects/views/ge_results_table' %>
+        </div>
+      <% else %>
+        <div class="text-gray-500 text-center py-8">No completed GE runs found.</div>
+      <% end %>
+    </div>
+  </div>
+
+<% end %>

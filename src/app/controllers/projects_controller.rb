@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results search_gene]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items]
 
   # GET /projects or /projects.json
   def index
@@ -256,6 +256,105 @@ class ProjectsController < ApplicationController
           Rails.logger.error(e.backtrace.first(10).join("\n"))
           @load_sub_view = false
           @sub_view_html = nil
+        end
+      end
+
+      if @load_sub_view && params[:gene_list_run_id].present? && params[:gene_list_type].present?
+        begin
+          gl_run = Run.find(params[:gene_list_run_id])
+          gl_step = gl_run.step
+          gl_std_method = gl_run.std_method
+          params[:type] = params[:gene_list_type]
+          params[:from] ||= 'de_results'
+
+          @run = gl_run
+          @step = gl_step
+          @std_method = gl_std_method
+          @fields = ["Gene index", "EnsemblID", "Gene name", "Alt names", "Description", "logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
+          @limit = 3000
+          @h_std_method_attrs = { gl_std_method.id => Basic.get_std_method_attrs(gl_std_method, gl_step)[:h_attrs] }
+          @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
+          @data = []
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+          filename = project_dir + "de" + gl_run.id.to_s + "filtered.#{params[:type]}.json"
+          list_filtered_rows = Basic.safe_parse_json(File.read(filename), [])
+          @h_filtered_rows = {}
+          list_filtered_rows.each { |e| @h_filtered_rows[e.to_i] = 1 }
+          @nber_genes = list_filtered_rows.size
+
+          filename = project_dir + "de" + gl_run.id.to_s + "output.txt"
+          @tmp_data = File.readlines(filename)
+          i = 0; j = 0
+          if params[:type] == 'up'
+            @tmp_data.reverse.each do |l|
+              if @h_filtered_rows[@tmp_data.size - 1 - i]
+                t = l.chomp.split("\t")
+                t[2] = t[2].split(",").join(", ")
+                @data.push t
+                j += 1
+              end
+              i += 1
+              break if j == @limit
+            end
+          else
+            @tmp_data.each do |l|
+              if @h_filtered_rows[i]
+                t = l.chomp.split("\t")
+                t[2] = t[2].split(",").join(", ")
+                @data.push t
+                j += 1
+              end
+              i += 1
+              break if j == @limit
+            end
+          end
+
+          @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
+          Rails.logger.info("[show] gene_list sub_view rendered for run #{gl_run.id}, type=#{params[:type]}, genes=#{@nber_genes}")
+        rescue => e
+          Rails.logger.error("[show] Error preparing gene_list sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
+        end
+      end
+
+      if @load_sub_view && params[:geneset_list_run_id].present? && params[:geneset_list_type].present?
+        begin
+          gs_run = Run.find(params[:geneset_list_run_id])
+          gs_step = gs_run.step
+          gs_std_method = gs_run.std_method
+          params[:type] = params[:geneset_list_type]
+          params[:from] ||= 'ge_results'
+
+          @run = gs_run
+          @step = gs_step
+          @std_method = gs_std_method
+          @h_ge_filters = Basic.safe_parse_json(@project.ge_filter_json, {})
+          @limit = 3000
+          @data = []
+          @h_run_attrs = gs_run.attrs_json ? JSON.parse(gs_run.attrs_json) : {}
+
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+          filename = project_dir + "ge" + gs_run.id.to_s + "output.json"
+          h_output = Basic.safe_parse_json(File.read(filename), {})
+          @fields = h_output["headers"]
+          h_fields = {}
+          @fields.each_index { |i| h_fields[@fields[i]] = i }
+
+          if h_output[params[:type]]
+            h_output[params[:type]].sort { |a, b| b[h_fields['effect size']].to_f <=> a[h_fields['effect size']].to_f }.each do |e|
+              if e[h_fields['fdr']] <= @h_ge_filters['fdr_cutoff'].to_f
+                @data.push e
+              end
+            end
+          end
+          @nber_genesets = @data.size
+
+          @sub_view_html = render_to_string(partial: 'runs/get_ge_geneset_list', layout: false)
+          Rails.logger.info("[show] geneset_list sub_view rendered for run #{gs_run.id}, type=#{params[:type]}, genesets=#{@nber_genesets}")
+        rescue => e
+          Rails.logger.error("[show] Error preparing geneset_list sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
         end
       end
     end
@@ -1602,6 +1701,48 @@ class ProjectsController < ApplicationController
     render partial: 'projects/views/de_results_table', layout: false
   end
 
+  # POST /projects/1/filter_ge_results
+  def filter_ge_results
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    ge_step = Step.where(docker_image_id: asap_docker_image.id, name: 'ge').first
+    @step = ge_step
+    @runs = @project.runs.where(step_id: ge_step.id).includes(:annots).order(created_at: :desc)
+
+    @h_ge_filter = Basic.safe_parse_json(@project.ge_filter_json, { 'fdr_cutoff' => 0.05 })
+
+    if params[:filter].present?
+      new_fdr = params[:filter][:fdr_cutoff].to_f
+      @project.update_attribute(:ge_filter_json, { fdr_cutoff: new_fdr }.to_json)
+      @h_ge_filter = { 'fdr_cutoff' => new_fdr }
+    end
+
+    fdr_cutoff = @h_ge_filter['fdr_cutoff'].to_f
+    @h_stats = {}
+    completed_runs = @runs.select { |r| r.status_id == 3 }
+    completed_runs.each do |run|
+      output_file = @project_dir + 'ge' + run.id.to_s + 'output.json'
+      next unless File.exist?(output_file)
+      h_output = Basic.safe_parse_json(File.read(output_file), {})
+      headers = h_output['headers'] || []
+      h_fields = {}
+      headers.each_index { |i| h_fields[headers[i]] = i }
+      fdr_idx = h_fields['fdr']
+      next unless fdr_idx
+      up_count = 0
+      down_count = 0
+      (h_output['up'] || []).each { |e| up_count += 1 if e[fdr_idx].to_f <= fdr_cutoff }
+      (h_output['down'] || []).each { |e| down_count += 1 if e[fdr_idx].to_f <= fdr_cutoff }
+      @h_stats[run.id.to_s] = { 'up' => up_count, 'down' => down_count }
+    end
+
+    @h_std_methods = {}
+    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+
+    render partial: 'projects/views/ge_results_table', layout: false
+  end
+
   # GET /projects/1/search_gene
   def search_gene
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
@@ -1613,6 +1754,71 @@ class ProjectsController < ApplicationController
     end
 
     render partial: 'projects/views/gene_details', layout: false
+  end
+
+  # GET /projects/1/search_gene_set_items
+  def search_gene_set_items
+    require 'ostruct'
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+
+    @gsi = nil
+    @genes = []
+    @h_all_genes = {}
+    @h_enriched_genes = {}
+
+    ge_run = Run.find_by(id: params[:ge_run_id])
+    h_ge_run_attrs = ge_run ? Basic.safe_parse_json(ge_run.attrs_json, {}) : {}
+    gene_set_id = params[:gene_set_id] || h_ge_run_attrs['gene_set_id']
+
+    if gene_set_id.present? && params[:identifier].present?
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        gsi_rows = conn.select_all(
+          "SELECT * FROM gene_set_items WHERE gene_set_id = #{gene_set_id.to_i} AND identifier = #{conn.quote(params[:identifier])}"
+        )
+        if gsi_rows.any?
+          @gsi = OpenStruct.new(gsi_rows.first)
+          if @gsi.content.present?
+            gene_rows = conn.select_all(
+              "SELECT * FROM genes WHERE id IN (#{@gsi.content})"
+            )
+            @genes = gene_rows.map { |r| OpenStruct.new(r) }
+          end
+        end
+      end
+    end
+
+    if ge_run && params[:type].present?
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+      input_de = h_ge_run_attrs['input_de']
+      if input_de && input_de['run_id']
+        de_output_file = project_dir + 'de' + input_de['run_id'].to_s + 'output.txt'
+        h_stable_ids = {}
+        if File.exist?(de_output_file)
+          File.readlines(de_output_file).each do |line|
+            cols = line.strip.split("\t")
+            if cols[1]
+              @h_all_genes[cols[1]] = 1
+              h_stable_ids[cols[0]] = cols[1] if cols[0]
+            end
+          end
+        end
+
+        filtered_filename = "#{ge_run.user_id}_#{input_de['run_id']}_#{h_ge_run_attrs['fc_cutoff']}_#{h_ge_run_attrs['fdr_cutoff']}_filtered_ids.json"
+        filtered_file = project_dir + 'tmp' + filtered_filename
+        if File.exist?(filtered_file)
+          h_filtered = Basic.safe_parse_json(File.read(filtered_file), {})
+          (h_filtered[params[:type]] || []).each do |gid|
+            ensembl_id = h_stable_ids[gid.to_s]
+            @h_enriched_genes[ensembl_id] = 1 if ensembl_id
+          end
+        end
+      end
+    end
+
+    render partial: 'projects/views/gene_set_item_details', layout: false
   end
 
   # GET /projects/1/data_content

@@ -218,7 +218,8 @@
       });
 
       document.addEventListener('click', function(e) {
-        if (!document.getElementById('markers-analysis-wrapper').contains(e.target)) {
+        var wrapper = document.getElementById('markers-analysis-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
           menu.classList.add('hidden');
         }
       });

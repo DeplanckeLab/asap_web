@@ -481,7 +481,9 @@ export default class extends Controller {
     const url = new URL(window.location.href)
     const keysToRemove = ['step_id', 'run_id', 'sub_view',
       'de_fdr', 'de_fc',
-      'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis']
+      'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis',
+      'ge_fdr',
+      'gene_list_run_id', 'gene_list_type', 'geneset_list_run_id', 'geneset_list_type']
     keysToRemove.forEach(k => url.searchParams.delete(k))
     window.history.replaceState({}, '', url.toString())
   }

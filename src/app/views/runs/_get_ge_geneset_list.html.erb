@@ -1,105 +1,301 @@
-<div id='<%= @step.name %>_step_container'>
-<!--<% if @step and @ps and @run %>
- <div id='step_header_container'>
-   <%# render :partial => 'projects/step_header_container' %>
- </div>
-
- <% if params[:errors] %>
- <div class='alert alert-danger'><%= params[:errors] %></div>
- <% end %>
-
- <% if  @step.description and ! @step.description.empty? %>
- <div id='step-info_<%= @step.id %>' class='alert alert-info <%= (@ps.status_id) ? 'hidden' : '' %>'><%= raw @step.description %></div>
- <% end %>
--->
- <p id="notice"><%= notice %></p>
-
-<div class='container'>
-
-<div class='btn btn-sm btn-secondary' id='back-btn'><< Back</div>
-
-<div class='float-right'>
-  <b>Download all</b>
-  <%= link_to(raw("<button id='download-ge-table' class='btn btn-primary btn-sm' type='button'>JSON</button>"), 
-      get_ge_geneset_list_run_path(@run, :format => 'json', :type => params[:type], :download => 1), "target" => "_blank") if exportable?(@project) %>
-    <%= link_to(raw("<button id='download-ge-table' class='btn btn-primary btn-sm' type='button'>Tab-separated</button>"),
-      get_ge_geneset_list_run_path(@run, :format => 'text', :type => params[:type], :download => 1), "target" => "_blank") if exportable?(@project) %>
+<div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);">
+  <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="border-b border-gray-200 px-6 py-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900">
+          <%= @nber_genesets %> enriched gene sets among <%= params[:type] %>-regulated genes
+        </h3>
+        <div class="flex items-center gap-2">
+          <button type="button"
+                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+                  title="Copy direct link to clipboard"
+                  style="flex-shrink: 0;"
+                  onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'ge_filter', geneset_list_run_id: @run.id, geneset_list_type: params[:type]) %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
+            <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
+          </button>
+          <% if exportable?(@project) %>
+            <button type="button"
+                    class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300 inline-flex items-center"
+                    style="flex-shrink: 0;"
+                    onclick="downloadGeGenesetList('json')">
+              <i class="fas fa-download sm:mr-1"></i><span class="hidden sm:inline"> JSON</span>
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300 inline-flex items-center"
+                    style="flex-shrink: 0;"
+                    onclick="downloadGeGenesetList('tsv')">
+              <i class="fas fa-file-alt sm:mr-1"></i><span class="hidden sm:inline"> TSV</span>
+            </button>
+          <% end %>
+          <button type="button"
+                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>&view=ge_filter')">
+            <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="border-b border-gray-200 px-6 py-2 bg-white">
+      <input type="text" id="ge-geneset-search" placeholder="Filter by gene set or value"
+             class="form-input rounded border border-gray-300 bg-white text-sm w-64 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+    </div>
+  </div>
+  <div class="px-6 py-5 flex-1 overflow-y-auto">
+    <% if @limit < @nber_genesets %>
+      <div class="text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3 text-sm">
+        Only <%= @limit %> gene sets with highest effect size displayed.
+      </div>
+    <% end %>
+    <div class="overflow-x-auto" id="ge-geneset-table-root">
+      <table class="min-w-full divide-y divide-gray-200 text-sm" id="ge-geneset-table">
+        <thead class="bg-gray-50">
+          <tr>
+            <% @fields.each_with_index do |f, idx| %>
+              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none"
+                  onclick="sortGeGenesetTable(this, <%= idx %>)"
+                  data-col="<%= idx %>" data-sort-dir="">
+                <span class="whitespace-nowrap"><%= f %> <span class="sort-indicator"></span></span>
+              </th>
+            <% end %>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <% @data.each do |e| %>
+            <tr>
+              <% @fields.each_index do |i| %>
+                <td class="px-3 py-2 text-gray-700" data-sort-value="<%= e[i].to_s %>">
+                  <% if i == 0 %>
+                    <span class="cursor-pointer text-blue-600 hover:text-blue-800 hover:underline gene-set-item" data-identifier="<%= e[i] %>"><%= e[i] %></span>
+                  <% else %>
+                    <%= e[i] %>
+                  <% end %>
+                </td>
+              <% end %>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between px-3 py-3 border-t border-gray-200 bg-gray-50 text-sm mt-2" id="ge-geneset-pagination">
+      <div class="flex items-center gap-2 text-gray-600">
+        <span>Rows per page:</span>
+        <select id="ge-geneset-page-size" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white cursor-pointer">
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="0">All</option>
+        </select>
+        <span id="ge-geneset-page-info" class="ml-2"></span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="ge-geneset-prev" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Prev</button>
+        <span id="ge-geneset-page-numbers" class="flex items-center gap-1"></span>
+        <button id="ge-geneset-next" class="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-default cursor-pointer">Next</button>
+      </div>
+    </div>
+  </div>
 </div>
-<h5><%= raw display_run2(@run, @step, @std_method) %> - List of <%= @nber_genesets %> enriched genesets among <%= params[:type] %>-regulated genes</h5>
-<%# raw display_run_attrs(@run, @h_run_attrs, @h_std_method_attrs) %>
-<% if @limit < @nber_genesets %>
-<div class='alert alert-danger'>Only <%= @limit %> genes with highest fold change displayed</div>
-<% end %>
-<!-- <div class='card' style='margin:10px'>
-   <div class='card-header'>List of <%= params[:type] %>-regulated genes
-     <div class='btn btn-secondary btn-sm back' style='float:right'>Back</div>
-   </div>
-   <div class='card-body'>
--->
-     <table id='ge-gene_list'>
-       <thead>
-         <% @fields.each do |f| %>
-         <th><%= f %></th>
-         <% end %>
-       </thead>
-       <tbody>
-	 <% @data.each do |e| %>
-	 <tr>
-	 <% @fields.each_index do |i| %>
-	 <td>
-	 <% if i==0 %>
-	 <span class='pointer badge badge-light gene_set_item'><%= e[i] %></span>
-	 <% else %>
-	 <%= e[i] %>
-	 <% end %>
-	 </td>
-	 <% end %>
-	 </tr>
-	 <% end %>
-       </tbody>
-     </table>
 
-
-<!-- </div></div> -->
-</div>
-<% end %>
+<!-- Gene Set Item Details Modal -->
+<div id="ge-gene-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
+  <div class="bg-white rounded-lg shadow-xl w-full mx-4 overflow-hidden" style="max-width: 700px; max-height: 80vh;">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
+      <h3 class="text-lg font-semibold text-gray-900" id="ge-gene-modal-title">Gene Set Details</h3>
+      <button type="button" onclick="closeGeGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+    </div>
+    <div class="px-6 py-5 overflow-y-auto" id="ge-gene-modal-body" style="max-height: calc(80vh - 70px);">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+  </div>
 </div>
 
+<script>
+(function() {
+  var tableEl = document.getElementById('ge-geneset-table');
+  if (!tableEl) return;
+  var tbody = tableEl.querySelector('tbody');
+  var allRows = Array.from(tbody.querySelectorAll('tr'));
+  var filteredRows = allRows.slice();
+  var currentPage = 1;
+  var sortCol = null;
+  var sortAsc = true;
 
+  var searchEl = document.getElementById('ge-geneset-search');
+  var pageSizeEl = document.getElementById('ge-geneset-page-size');
+  var pageInfoEl = document.getElementById('ge-geneset-page-info');
+  var prevBtn = document.getElementById('ge-geneset-prev');
+  var nextBtn = document.getElementById('ge-geneset-next');
+  var pageNumEl = document.getElementById('ge-geneset-page-numbers');
 
-<%= javascript_tag do %>
+  function getPageSize() {
+    var v = parseInt(pageSizeEl.value, 10);
+    return v === 0 ? (filteredRows.length || 1) : v;
+  }
 
-$("#back-btn").click(function(){
- refresh("step_container", "<%= get_step_project_path(:key => @project.key, :step_id => @step.id, :nolayout => 1) %>", {loading: 'fa-2x loading-step'});
-})
+  function totalPages() {
+    return Math.max(1, Math.ceil(filteredRows.length / getPageSize()));
+  }
 
-$("#ge-gene_list").on("click", ".gene_set_item", function(e){
- var identifier = $(this).html()
- var w = $(window).width()
- var ww = 600
-  $("#ontop_popup_window").css({
-        left: (w-e.pageX > ww) ? (e.pageX + 10) : w-ww+10,
-        width:ww,
-        'z-index':1000000,
-        top: e.pageY + 10
-  }).stop().show(100);
- refresh("ontop_popup_container", "<%= search_gene_set_items_path() %>?gene_set_id=<%= @h_run_attrs['gene_set_id'] %>&identifier=" + identifier + "&version_id=<%= @project.version_id %>&project_key=<%= @project.key %>&ge_run_id=<%= @run.id %>&type=<%= params[:type] %>", {loading:true})
-})
+  function renderPage() {
+    var ps = getPageSize();
+    var tp = totalPages();
+    if (currentPage > tp) currentPage = tp;
+    var start = (currentPage - 1) * ps;
+    var end = start + ps;
+    allRows.forEach(function(r) { r.style.display = 'none'; });
+    filteredRows.forEach(function(r, i) {
+      r.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+    pageInfoEl.textContent = filteredRows.length === 0 ? '0 of 0' : (start + 1) + '-' + Math.min(end, filteredRows.length) + ' of ' + filteredRows.length;
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= tp;
 
+    pageNumEl.innerHTML = '';
+    var maxV = 7, pages = [];
+    if (tp <= maxV) { for (var i = 1; i <= tp; i++) pages.push(i); }
+    else {
+      pages.push(1);
+      var lo = Math.max(2, currentPage - 1), hi = Math.min(tp - 1, currentPage + 1);
+      if (lo > 2) pages.push('...');
+      for (var j = lo; j <= hi; j++) pages.push(j);
+      if (hi < tp - 1) pages.push('...');
+      pages.push(tp);
+    }
+    pages.forEach(function(p) {
+      if (p === '...') {
+        var s = document.createElement('span'); s.className = 'px-1 text-gray-400'; s.textContent = '...';
+        pageNumEl.appendChild(s);
+      } else {
+        var btn = document.createElement('button');
+        btn.textContent = p;
+        btn.className = 'px-2.5 py-1 rounded text-sm cursor-pointer ' + (p === currentPage ? 'bg-blue-600 text-white font-semibold' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-100');
+        btn.addEventListener('click', function() { currentPage = p; renderPage(); });
+        pageNumEl.appendChild(btn);
+      }
+    });
+  }
 
-$("#ge-gene_list").dataTable({
-"order": [[4, "desc"]]
-})
+  function applySearch() {
+    var q = (searchEl.value || '').toLowerCase();
+    if (!q) { filteredRows = allRows.slice(); }
+    else {
+      filteredRows = allRows.filter(function(r) {
+        return r.textContent.toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    currentPage = 1;
+    renderPage();
+  }
 
-$(".show_link").click(function(){
- var t = this.id.split("_")
- // alert("bla!")
- $("#ontop_popup_window").css({display:'none'})
- refresh("step_container", "<%= get_run_project_path(:key => @project.key, :nolayout => 1) %>&run_id=" + t[2], {loading: 'fa-2x loading-step'})
-})
+  searchEl.addEventListener('input', applySearch);
+  pageSizeEl.addEventListener('change', function() { currentPage = 1; renderPage(); });
+  prevBtn.addEventListener('click', function() { if (currentPage > 1) { currentPage--; renderPage(); } });
+  nextBtn.addEventListener('click', function() { if (currentPage < totalPages()) { currentPage++; renderPage(); } });
 
- $(".input_lineage").click(function(e){
-<%= render :partial => 'projects/input_lineage_js' %>
- })
+  window.sortGeGenesetTable = function(th, colIdx) {
+    if (sortCol === colIdx) { sortAsc = !sortAsc; }
+    else { sortCol = colIdx; sortAsc = true; }
+    tableEl.querySelectorAll('th[data-col]').forEach(function(h) {
+      var ind = h.querySelector('.sort-indicator');
+      if (ind) ind.textContent = parseInt(h.dataset.col, 10) === sortCol ? (sortAsc ? ' \u25B2' : ' \u25BC') : '';
+    });
+    var isNum = filteredRows.length > 0 && filteredRows.every(function(r) {
+      var v = (r.cells[colIdx] && r.cells[colIdx].getAttribute('data-sort-value')) || '';
+      return v === '' || !isNaN(parseFloat(v));
+    });
+    var sortFn = function(a, b) {
+      var aV = (a.cells[colIdx] && a.cells[colIdx].getAttribute('data-sort-value')) || '';
+      var bV = (b.cells[colIdx] && b.cells[colIdx].getAttribute('data-sort-value')) || '';
+      var cmp = isNum ? ((parseFloat(aV) || 0) - (parseFloat(bV) || 0)) : aV.localeCompare(bV);
+      return sortAsc ? cmp : -cmp;
+    };
+    filteredRows.sort(sortFn);
+    allRows.sort(sortFn);
+    allRows.forEach(function(r) { tbody.appendChild(r); });
+    currentPage = 1;
+    renderPage();
+  };
 
-<% end %>
+  var effectSizeCol = -1;
+  tableEl.querySelectorAll('thead th[data-col]').forEach(function(th) {
+    if (th.textContent.trim().toLowerCase().indexOf('effect size') >= 0) {
+      effectSizeCol = parseInt(th.dataset.col, 10);
+    }
+  });
+  if (effectSizeCol >= 0) {
+    sortCol = effectSizeCol;
+    sortAsc = true;
+    sortGeGenesetTable(tableEl.querySelector('th[data-col="' + effectSizeCol + '"]'), effectSizeCol);
+  } else {
+    renderPage();
+  }
+
+  document.querySelectorAll('.gene-set-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var identifier = this.dataset.identifier;
+      openGeGeneModal(identifier);
+    });
+  });
+
+  window.openGeGeneModal = function(identifier) {
+    var overlay = document.getElementById('ge-gene-modal-overlay');
+    var body = document.getElementById('ge-gene-modal-body');
+    var title = document.getElementById('ge-gene-modal-title');
+    title.textContent = identifier;
+    body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+    overlay.classList.remove('hidden');
+
+    var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    var url = '<%= search_gene_set_items_project_path(@project) %>' +
+      '?identifier=' + encodeURIComponent(identifier) +
+      '&ge_run_id=<%= @run.id %>' +
+      '&type=<%= params[:type] %>';
+    fetch(url, {
+      headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(html) { body.innerHTML = html; })
+    .catch(function() { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene set details.</div>'; });
+  };
+
+  window.closeGeGeneModal = function() {
+    document.getElementById('ge-gene-modal-overlay').classList.add('hidden');
+  };
+
+  document.getElementById('ge-gene-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeGeGeneModal();
+  });
+
+  window.downloadGeGenesetList = function(fmt) {
+    var tbl = document.getElementById('ge-geneset-table');
+    if (!tbl) return;
+    var headers = [];
+    tbl.querySelectorAll('thead th').forEach(function(th) {
+      headers.push(th.textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim());
+    });
+    var rows = [];
+    tbl.querySelectorAll('tbody tr').forEach(function(tr) {
+      if (tr.style.display === 'none') return;
+      var row = [];
+      tr.querySelectorAll('td').forEach(function(td) { row.push(td.textContent.trim()); });
+      rows.push(row);
+    });
+    var content, filename, mime;
+    if (fmt === 'json') {
+      content = JSON.stringify(rows);
+      filename = '<%= @project.key %>_run<%= @run.num %>_ge_<%= params[:type] %>.json';
+      mime = 'application/json';
+    } else {
+      content = headers.join('\t') + '\n' + rows.map(function(r) { return r.join('\t'); }).join('\n');
+      filename = '<%= @project.key %>_run<%= @run.num %>_ge_<%= params[:type] %>.txt';
+      mime = 'text/tab-separated-values';
+    }
+    var blob = new Blob([content], { type: mime });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+})();
+</script>

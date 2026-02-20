@@ -33,7 +33,9 @@ Rails.application.routes.draw do
       get :run_counts
       get :graph
       get :pipeline_runs
+      get :search_gene
       post :cluster_comparison
+      post :filter_de_results
       post :clone
       post :toggle_public
     end
@@ -64,7 +66,11 @@ Rails.application.routes.draw do
   end
   
   resources :annots, only: [:show]
-  resources :runs
+  resources :runs do
+    member do
+      get :get_de_gene_list
+    end
+  end
   resources :reqs
   resources :docker_images
   resources :tools

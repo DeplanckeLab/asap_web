@@ -1,0 +1,129 @@
+<% de_view = params[:view].presence || 'de_filter' %>
+<% base_url = step_results_project_path(@project, step_id: @step.id, format: :html) %>
+
+<% if de_view == 'dashboard' %>
+
+  <%# === DASHBOARD VIEW === %>
+  <% @extra_header_buttons = capture do %>
+    <button type="button"
+            class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+            onclick="loadFormInRightPanel('<%= base_url %>&view=de_filter')"
+            style="flex-shrink: 0;">
+      <i class="fas fa-filter mr-1"></i> DE results
+    </button>
+    <button type="button"
+            class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+            onclick="loadFormInRightPanel('<%= base_url %>&view=markers')"
+            style="flex-shrink: 0;">
+      <i class="fas fa-crosshairs mr-1"></i> Markers
+    </button>
+  <% end %>
+  <%= render 'projects/views/std_step' %>
+
+<% elsif de_view == 'markers' %>
+
+  <%# === MARKERS VIEW === %>
+  <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+    <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          Markers
+        </h3>
+        <div class="flex items-center gap-2">
+          <button type="button"
+                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
+            <i class="fas fa-th-list mr-1"></i> Dashboard
+          </button>
+          <button type="button"
+                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  onclick="loadFormInRightPanel('<%= base_url %>&view=de_filter')">
+            <i class="fas fa-filter mr-1"></i> DE results
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-5 flex-1">
+      <%= render partial: 'projects/views/de_markers' %>
+    </div>
+  </div>
+
+<% else %>
+
+  <%# === DE FILTER VIEW (default) === %>
+  <% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+
+  <%
+    @h_de_filter ||= Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    user_id = current_user ? current_user.id : 1
+    filter_stats_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
+    @h_stats ||= {}
+    if File.exist?(filter_stats_file)
+      @h_stats = Basic.safe_parse_json(File.read(filter_stats_file), {})
+    end
+    unless @h_std_methods
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @h_std_methods = {}
+      StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
+    end
+  %>
+
+  <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);"
+       data-controller="de-filter"
+       data-de-filter-url-value="<%= filter_de_results_project_path(@project) %>">
+    <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+      <div class="border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            Filtered DE results
+          </h3>
+          <div class="flex items-center gap-2">
+            <button type="button"
+                    class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    onclick="loadFormInRightPanel('<%= base_url %>&view=dashboard')">
+              <i class="fas fa-th-list mr-1"></i> Dashboard
+            </button>
+            <button type="button"
+                    class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    onclick="loadFormInRightPanel('<%= base_url %>&view=markers')">
+              <i class="fas fa-crosshairs mr-1"></i> Markers
+            </button>
+          </div>
+        </div>
+      </div>
+      <% if completed_runs.any? %>
+        <div class="border-b border-gray-200 px-6 py-3 bg-white">
+          <div class="flex items-center gap-3 flex-wrap">
+            <label class="text-sm font-medium text-gray-700">FDR &lt;=</label>
+            <input type="text" value="<%= @h_de_filter['fdr_cutoff'] %>"
+                   data-de-filter-target="fdrCutoff"
+                   data-action="keyup->de-filter#filterOnEnter"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            <label class="text-sm font-medium text-gray-700 ml-2">Fold change &gt;=</label>
+            <input type="text" value="<%= @h_de_filter['fc_cutoff'] %>"
+                   data-de-filter-target="fcCutoff"
+                   data-action="keyup->de-filter#filterOnEnter"
+                   class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            <button type="button"
+                    data-de-filter-target="filterBtn"
+                    data-action="click->de-filter#filter"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer ml-2">
+              Filter
+            </button>
+          </div>
+        </div>
+      <% end %>
+    </div>
+    <div class="px-6 py-5 flex-1 overflow-y-auto">
+      <% if completed_runs.any? %>
+        <div data-de-filter-target="resultsContainer">
+          <%= render partial: 'projects/views/de_results_table' %>
+        </div>
+      <% else %>
+        <div class="text-gray-500 text-center py-8">No completed DE runs found.</div>
+      <% end %>
+    </div>
+  </div>
+
+<% end %>

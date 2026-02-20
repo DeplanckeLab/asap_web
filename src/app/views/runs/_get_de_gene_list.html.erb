@@ -1,106 +1,120 @@
-<div id='<%= @step.name %>_step_container'>
+<% if @step && @run %>
 
-<% if @step and @ps and @run %>
- <div id='step_header_container'>
-   <%# render :partial => 'projects/step_header_container' %>
- </div>
+<div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);">
+  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-gray-900">
+        #<%= @run.num || @run.id %> - <%= @nber_genes %> <%= params[:type] %>-regulated genes
+      </h3>
+      <div class="flex items-center gap-2">
+        <% if exportable?(@project) %>
+          <a href="<%= get_de_gene_list_run_path(@run) %>?type=<%= params[:type] %>&download=1&format=json"
+             target="_blank"
+             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block">
+            JSON
+          </a>
+          <a href="<%= get_de_gene_list_run_path(@run) %>?type=<%= params[:type] %>&download=1&format=text"
+             target="_blank"
+             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block">
+            TSV
+          </a>
+        <% end %>
+        <button type="button"
+                class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
+          Back to DE results
+        </button>
+      </div>
+    </div>
+  </div>
 
- <% if params[:errors] %>
- <div class='alert alert-danger'><%= params[:errors] %></div>
- <% end %>
+  <% if @limit < @nber_genes %>
+    <div class="px-6 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-sm">
+      Only <%= @limit %> genes with highest fold change displayed
+    </div>
+  <% end %>
 
- <% if  @step.description and ! @step.description.empty? %>
- <div id='step-info_<%= @step.id %>' class='alert alert-info <%= (@ps.status_id) ? 'hidden' : '' %>'><%= raw @step.description %></div>
- <% end %>
-
- <p id="notice"><%= notice %></p>
-
-<div class='container'>
-
-<!--<div class='btn btn-sm btn-secondary' id='back-btn'><< Back</div>-->
-
-<%# @data %>
-
-<div class='float-right'>
-  <b>Download all</b>
-  <%= link_to(raw("<button id='download-de-table' class='btn btn-primary btn-sm' type='button'>JSON</button>"), 
-      get_de_gene_list_run_path(@run, :format => 'json', :type => params[:type], :download => 1), "target" => "_blank") if exportable?(@project) %>
-    <%= link_to(raw("<button id='download-de-table' class='btn btn-primary btn-sm' type='button'>Tab-separated</button>"),
-      get_de_gene_list_run_path(@run, :format => 'text', :type => params[:type], :download => 1), "target" => "_blank") if exportable?(@project) %>
-</div>
-<h5><%= raw display_run2(@run, @step, @std_method) %> - List of <%= @nber_genes %> <%= params[:type] %>-regulated genes</h5>
-<%= raw display_run_attrs(@run, @h_run_attrs, @h_std_method_attrs, {}) %>
-<% if @limit < @nber_genes %>
-<div class='alert alert-danger'>Only <%= @limit %> genes with highest fold change displayed</div>
-<% end %>
-<!-- <div class='card' style='margin:10px'>
-   <div class='card-header'>List of <%= params[:type] %>-regulated genes
-     <div class='btn btn-secondary btn-sm back' style='float:right'>Back</div>
-   </div>
-   <div class='card-body'>
--->
-     <table id='de-gene_list'>
-       <thead>
-         <% @fields.each do |f| %>
-         <th><%= f %></th>
-         <% end %>
-       </thead>
-       <tbody>
-	 <% @data.each do |e| %>
-	 <tr>
-	 <% @fields.each_index do |i| %>
-           <td>
-	     
-          <% if @fields[i] == 'EnsemblID' %>
-           <span class='ensembl-gene pointer badge badge-light'><%= e[i] %></span>
-          <%# elsif ['fdr', 'size_effect', 'p-value'].include? @fields[i] %>
-	    <%# e[i].to_f.round(2) %>
-	  <% else %>
-	   <span class='nowrap'><%= e[i] %></span>
+  <div class="flex-1 overflow-y-auto">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 sticky top-0">
+        <tr>
+          <% @fields.each do |f| %>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"><%= f %></th>
           <% end %>
-          </td>
-	 <% end %>
-	 </tr>
-	 <% end %>
-       </tbody>
-     </table>
-<!-- </div></div> -->
+        </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200">
+        <% @data.each do |e| %>
+          <tr class="hover:bg-gray-50">
+            <% @fields.each_index do |i| %>
+              <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap">
+                <% if @fields[i] == 'EnsemblID' && e[i].present? %>
+                  <span class="text-blue-600 cursor-pointer hover:underline gene-link" data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
+                <% else %>
+                  <%= e[i] %>
+                <% end %>
+              </td>
+            <% end %>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
 </div>
-<% end %>
+
+<!-- Gene Details Modal -->
+<div id="gene-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
+  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
+      <h3 class="text-lg font-semibold text-gray-900" id="gene-modal-title">Gene Details</h3>
+      <button type="button" onclick="closeGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+    </div>
+    <div class="px-6 py-5" id="gene-modal-body">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+  </div>
 </div>
 
-<%= javascript_tag do %>
+<script>
+(function() {
+  var container = document.querySelector('.gene-link')?.closest('.flex-1.overflow-y-auto') || document.querySelector('.flex-1.overflow-y-auto');
+  if (container) {
+    container.addEventListener('click', function(e) {
+      var link = e.target.closest('.gene-link');
+      if (!link) return;
+      var ensemblId = link.dataset.ensemblId;
+      if (!ensemblId) return;
+      openGeneModal(ensemblId);
+    });
+  }
+})();
 
-$("#back-btn").click(function(){
- refresh("step_container", "<%= get_step_project_path(:key => @project.key, :step_id => @step.id, :nolayout => 1) %>", {loading: 'fa-2x loading-step'});
-})
+function openGeneModal(ensemblId) {
+  var overlay = document.getElementById('gene-modal-overlay');
+  var body = document.getElementById('gene-modal-body');
+  var title = document.getElementById('gene-modal-title');
+  title.textContent = ensemblId;
+  body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+  overlay.classList.remove('hidden');
 
-$("#de-gene_list").dataTable({
-"order": [[ 5, "<%= (params[:type] == 'down') ? "asc" : "desc" %>" ]]
-})
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+  fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
+    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
+  })
+  .then(function(r) { return r.text(); })
+  .then(function(html) { body.innerHTML = html; })
+  .catch(function(err) { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
+}
 
-$("#de-gene_list").on("click", ".ensembl-gene", function(e){
- var ensembl_id = $(this).html()
- var w = $(window).width()
- var ww = 600
-  $("#ontop_popup_window").css({
-        left: (w-e.pageX > ww) ? (e.pageX + 10) : w-ww+10,
-        width:ww,
-        'z-index':1000000,
-        top: e.pageY + 10
-  }).stop().show(100);
- refresh("ontop_popup_container", "<%= search_genes_path() %>?ensembl_id=" + ensembl_id + "&version_id=<%= @project.version_id %>", {loading:true})
-})
+function closeGeneModal() {
+  document.getElementById('gene-modal-overlay').classList.add('hidden');
+}
 
-$(".show_link").click(function(){
- var t = this.id.split("_")
- // alert("bla!")
- $("#popup_window").css({display:'none'})
- refresh("step_container", "<%= get_run_project_path(:key => @project.key, :nolayout => 1) %>&run_id=" + t[2], {loading: 'fa-2x loading-step'})
-})
+document.getElementById('gene-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeGeneModal();
+});
+</script>
 
- $(".input_lineage").click(function(e){
-<%= render :partial => 'projects/input_lineage_js' %>
- })
-
+<% else %>
+<div class="text-red-600 p-4">Could not load gene list data.</div>
 <% end %>

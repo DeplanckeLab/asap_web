@@ -1,0 +1,10 @@
+<% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+
+<% if completed_runs.any? %>
+  <div class="text-gray-500 text-center py-12">
+    <p class="text-lg font-medium text-gray-700 mb-2">Markers view</p>
+    <p>This view will display marker genes for each cluster comparison.</p>
+  </div>
+<% else %>
+  <div class="text-gray-500 text-center py-8">No completed DE runs found.</div>
+<% end %>

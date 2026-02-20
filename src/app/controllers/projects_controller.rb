@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results search_gene]
 
   # GET /projects or /projects.json
   def index
@@ -1528,6 +1528,46 @@ class ProjectsController < ApplicationController
     end
 
     render partial: "cluster_comparison_results"
+  end
+
+  # POST /projects/1/filter_de_results
+  def filter_de_results
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
+    @step = de_step
+    @runs = @project.runs.where(step_id: de_step.id).includes(:annots).order(created_at: :desc)
+    annots = Annot.where(run_id: @runs.map(&:id)).to_a
+
+    @h_de_filter = Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
+
+    if params[:filter].present?
+      new_fc = params[:filter][:fc_cutoff].to_f
+      new_fdr = params[:filter][:fdr_cutoff].to_f
+      @project.update_attribute(:de_filter_json, { fc_cutoff: new_fc, fdr_cutoff: new_fdr }.to_json)
+      @h_de_filter = { 'fc_cutoff' => new_fc, 'fdr_cutoff' => new_fdr }
+    end
+
+    @h_stats = run_de_filter(annots, @h_de_filter)
+
+    @h_std_methods = {}
+    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+
+    render partial: 'projects/views/de_results_table', layout: false
+  end
+
+  # GET /projects/1/search_gene
+  def search_gene
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+
+    @gene = nil
+    if params[:ensembl_id].present?
+      @gene = RemoteGene.find_by_ensembl_id(params[:ensembl_id], version: db_version)
+    end
+
+    render partial: 'projects/views/gene_details', layout: false
   end
 
   # GET /projects/1/data_content
@@ -3328,6 +3368,131 @@ class ProjectsController < ApplicationController
   end
 
   private
+
+  def run_de_filter(annots, h_de_filter)
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    h_stats = {}
+
+    h_annots_by_loom_path = {}
+    annots_to_do = annots.select do |annot|
+      output_txt = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
+      !File.exist?(output_txt) || File.size(output_txt) == 0
+    end
+    annots_to_do.each do |annot|
+      h_annots_by_loom_path[annot.filepath] ||= []
+      h_annots_by_loom_path[annot.filepath].push(annot)
+    end
+
+    h_ensembl_ids = {}
+    h_ensembl_ids_by_loom_path = {}
+    h_gene_names_by_loom_path = {}
+
+    loom_paths = annots_to_do.map(&:filepath).uniq
+    loom_paths.each do |loom_path|
+      to_compute = h_annots_by_loom_path[loom_path].any? do |annot|
+        output_file = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
+        !File.exist?(output_file) || File.size(output_file) == 0
+      end
+
+      next unless to_compute
+
+      loom_file = project_dir + loom_path
+      cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_file} -meta /row_attrs/Accession"
+      h_res = Basic.safe_parse_json(`#{cmd}`, {})
+      if h_res['values']
+        h_res['values'].each { |v| h_ensembl_ids[v] = 1 }
+      end
+      h_ensembl_ids_by_loom_path[loom_path] = h_res['values']
+
+      cmd2 = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_file} -meta /row_attrs/Gene"
+      h_res2 = Basic.safe_parse_json(`#{cmd2}`, {})
+      h_gene_names_by_loom_path[loom_path] = h_res2['values']
+    end
+
+    h_genes = {}
+    if annots_to_do.size > 0
+      version = @project.version
+      h_env = Basic.safe_parse_json(version.env_json, {})
+      res = Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', 'ensembl_id, organism_id, name, description, alt_names', "organism_id = #{@project.organism_id}")
+      res.select { |g| h_ensembl_ids[g.ensembl_id] }.each { |g| h_genes[g.ensembl_id] = g }
+    end
+
+    annots_to_do.select { |a| File.exist?(project_dir + 'de' + a.run_id.to_s) }.each do |annot|
+      loom_path = annot.filepath
+      loom_file = project_dir + loom_path
+      output_file = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
+
+      next if File.exist?(output_file) && File.size(output_file) > 0
+
+      cmd3 = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata --scientific -prec 5 -loom #{loom_file} -meta \"#{annot.name}\""
+      h_results = Basic.safe_parse_json(`#{cmd3}`.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8), {})
+      if h_results['values']
+        h_results['values'].each_index do |i|
+          h_results['values'][i] = h_results['values'][i].map { |e| e ? e.to_f : 'NA' } if h_results['values'][i]
+        end
+      end
+
+      ensembl_ids = h_ensembl_ids_by_loom_path[loom_path]
+      gene_names = h_gene_names_by_loom_path[loom_path]
+
+      File.open(output_file, 'w') do |f|
+        if h_results['values'] && h_results['values'][0] && h_results['values'][0].size > 0
+          f.write(
+            (0..h_results['values'][0].size - 1).to_a
+              .select { |e| h_results['values'][0][e] }
+              .sort { |a, b| h_results['values'][0][a].to_f <=> h_results['values'][0][b].to_f }
+              .map { |i|
+                if ensembl_ids && ensembl_ids[i] && (g = h_genes[ensembl_ids[i]])
+                  details = [i, g.ensembl_id, g.name, g.alt_names, g.description]
+                else
+                  details = [i, nil, gene_names ? gene_names[i] : nil, nil, nil]
+                end
+                (details + (0..4).map { |vi|
+                  val = h_results['values'][vi][i]
+                  if val
+                    if [1, 2].include?(vi) || !val.is_a?(Float)
+                      val
+                    elsif val.is_a?(Float) && val.abs > 0.001
+                      '%.3f' % val
+                    else
+                      '%.e' % val
+                    end
+                  else
+                    'NA'
+                  end
+                }).join("\t")
+              }.join("\n") + "\n"
+          )
+        end
+      end
+    end
+
+    user_id = current_user ? current_user.id : 1
+    list_of_run_ids = annots.map(&:run_id)
+
+    filtered_stats_txt_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.txt"
+    File.delete(filtered_stats_txt_file) if File.exist?(filtered_stats_txt_file)
+
+    FileUtils.mkdir_p(project_dir + 'tmp')
+    cmd = "echo '#{list_of_run_ids.join("\n")}' | xargs -P 24 -I '{}' lib/filter_de '#{project_dir}' #{h_de_filter['fdr_cutoff']} #{h_de_filter['fc_cutoff']} de_results #{user_id} '{}' > #{project_dir + 'toto.txt'}"
+    script_file = project_dir + 'tmp' + "#{user_id}_de_script.sh"
+    File.open(script_file, 'w') { |f| f.write(cmd) }
+    `sh #{script_file}`
+
+    if File.exist?(filtered_stats_txt_file)
+      File.open(filtered_stats_txt_file, 'r') do |f|
+        while (l = f.gets)
+          t = l.chomp.split("\t")
+          h_stats[t[0]] = { 'up' => t[1].to_i, 'down' => t[2].to_i }
+        end
+      end
+
+      filtered_stats_json = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
+      File.open(filtered_stats_json, 'w') { |f| f.write(h_stats.to_json) }
+    end
+
+    h_stats
+  end
 
   # Get all run IDs in the pipeline that created a given run
   # This returns only the run itself and all its ancestors (the pipeline that produced it)

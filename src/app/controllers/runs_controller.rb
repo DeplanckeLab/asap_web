@@ -133,7 +133,10 @@ class RunsController < ApplicationController
     if !params[:download]
       render :partial => 'get_de_gene_list'
     else
-      send_data ((params[:format]=='json') ? @data.to_json : @data.map{|e| e.join("\t")}.join("\n")), type: 'text', disposition: "attachment; filename=" + @project.key  + "_" + display_run_ultra_short_txt(@run) + "_de_table_#{params[:type]}"  + "." + ((params[:format]=='json') ? 'json' : 'txt')
+      run_label = "run#{@run.num}#{@std_method ? "_#{@std_method.name}" : ""}"
+      ext = (params[:format] == 'json') ? 'json' : 'txt'
+      content = (params[:format] == 'json') ? @data.to_json : @data.map { |e| e.join("\t") }.join("\n")
+      send_data content, type: 'text', disposition: "attachment; filename=#{@project.key}_#{run_label}_de_table_#{params[:type]}.#{ext}"
     end
   end
 

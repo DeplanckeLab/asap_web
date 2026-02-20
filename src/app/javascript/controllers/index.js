@@ -155,6 +155,10 @@ import CloneOverlayController from "controllers/clone_overlay_controller"
 application.register("clone-overlay", CloneOverlayController)
 console.log('Clone overlay controller registered')
 
+import DeFilterController from "controllers/de_filter_controller"
+application.register("de-filter", DeFilterController)
+console.log('DE filter controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

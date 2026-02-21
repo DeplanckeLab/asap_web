@@ -430,6 +430,21 @@
             
             <div class="border-t border-gray-200 my-1"></div>
             
+            <!-- Feedback -->
+            <div class="px-4 py-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Feedback</p>
+            </div>
+            <% feedback_menu_links.each do |link| %>
+              <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                 href="<%= link[:path] %>"
+                 <%= 'target="_blank" rel="noopener noreferrer"'.html_safe if link[:external] %>>
+                <i class="<%= link[:icon] %> text-lg mr-3 text-orange-400"></i>
+                <%= link[:label] %>
+              </a>
+            <% end %>
+
+            <div class="border-t border-gray-200 my-1"></div>
+
             <!-- Back to Projects -->
             <%= link_to projects_browse_url, 
                 class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" do %>
@@ -490,6 +505,20 @@
         
         <%= render "shared/user_menu", wrapper_classes: "relative ml-4" %>
         
+        <!-- Feedback Dropdown -->
+        <div class="relative"
+             data-controller="nav-dropdown">
+          <button type="button"
+                  class="p-2 rounded-lg hover:bg-gray-700 focus:outline-hidden transition"
+                  title="Feedback"
+                  data-nav-dropdown-toggle>
+            <i class="fas fa-comment text-lg text-orange-400"></i>
+          </button>
+          <%= render "shared/feedback_menu",
+                      wrapper_classes: "hidden absolute right-0 mt-2 w-64 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
+                      data_attributes: { nav_menu: true } %>
+        </div>
+
         <!-- Back to Projects -->
         <%= link_to projects_browse_url, 
             class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",

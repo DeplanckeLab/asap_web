@@ -105,6 +105,21 @@
             <% end %>
             
             <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+
+            <!-- Feedback -->
+            <div class="px-4 py-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Feedback</p>
+            </div>
+            <% feedback_menu_links.each do |link| %>
+              <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= link[:path] %>"
+                 <%= 'target="_blank" rel="noopener noreferrer"'.html_safe if link[:external] %>>
+                <i class="<%= link[:icon] %> w-4 text-center text-orange-400"></i>
+                <%= link[:label] %>
+              </a>
+            <% end %>
+
+            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
             
             <%= render "shared/user_menu_mobile", show_signup: true, dark_mode: true %>
           </div>
@@ -167,6 +182,20 @@
           </div>
           <!-- End Admin Dropdown -->
         <% end %>
+
+        <!-- Feedback Dropdown -->
+        <div class="relative inline-block text-left"
+             data-controller="nav-dropdown">
+          <button type="button"
+                  class="inline-flex items-center justify-center size-9 rounded-lg border border-transparent hover:bg-gray-100 dark:hover:bg-neutral-700 focus:outline-hidden transition"
+                  title="Feedback"
+                  data-nav-dropdown-toggle>
+            <i class="fas fa-comment text-lg text-orange-400"></i>
+          </button>
+          <%= render "shared/feedback_menu",
+                      wrapper_classes: "hidden absolute right-0 mt-2 w-64 bg-white shadow-md rounded-lg p-2 dark:bg-gray-800 dark:border dark:border-gray-700 z-[1000] top-full",
+                      data_attributes: { nav_menu: true } %>
+        </div>
 
         <%= render "shared/user_menu", 
                    show_signup: true, 

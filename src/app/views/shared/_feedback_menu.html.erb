@@ -1,0 +1,18 @@
+<div class="<%= local_assigns[:wrapper_classes] || 'py-2 text-sm' %>"
+     <%= (local_assigns[:data_attributes] || {}).map { |key, value| %(data-#{key.to_s.tr('_', '-')}="#{value}") }.join(' ') %>>
+  <% feedback_menu_links.each do |link| %>
+    <a href="<%= link[:path] %>"
+       class="flex items-start gap-3 rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60"
+       <%= 'target="_blank" rel="noopener noreferrer"' if link[:external] %>>
+      <% if link[:icon].present? %>
+        <i class="<%= link[:icon] %> mt-1 text-xs text-gray-500 dark:text-gray-400"></i>
+      <% end %>
+      <div>
+        <p class="text-sm font-medium text-gray-900 dark:text-gray-100"><%= link[:label] %></p>
+        <% if link[:description].present? %>
+          <p class="text-xs text-gray-500 dark:text-gray-400"><%= link[:description] %></p>
+        <% end %>
+      </div>
+    </a>
+  <% end %>
+</div>

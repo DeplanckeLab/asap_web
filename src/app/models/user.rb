@@ -9,6 +9,7 @@ class User < ApplicationRecord
   has_many :runs, dependent: :destroy
   has_many :annots, dependent: :destroy
   has_many :shares, dependent: :destroy
+  has_many :ratings, dependent: :destroy
 
   # Validations
   validates :email, presence: true, uniqueness: true

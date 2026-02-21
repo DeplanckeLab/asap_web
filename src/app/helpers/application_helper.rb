@@ -184,6 +184,37 @@ module ApplicationHelper
     ]
   end
 
+  def feedback_menu_links
+    [
+      {
+        label: "Discussions",
+        description: "Ask questions and share ideas",
+        path: "https://github.com/DeplanckeLab/ASAP/discussions",
+        icon: "fas fa-comments",
+        external: true
+      },
+      {
+        label: "Feature requests and issues",
+        description: "Report bugs or suggest improvements",
+        path: "https://github.com/DeplanckeLab/ASAP/issues",
+        icon: "fab fa-github",
+        external: true
+      },
+      {
+        label: "Contact us",
+        description: "Reach the ASAP team by email",
+        path: contact_home_index_path,
+        icon: "fas fa-envelope"
+      },
+      {
+        label: "Rate the app",
+        description: "Share your experience with ASAP",
+        path: rate_home_index_path,
+        icon: "fas fa-star"
+      }
+    ]
+  end
+
   def display_file_format(f)
     return "" unless f
 

@@ -111,6 +111,10 @@ Rails.application.routes.draw do
       get :cross_references
       get :cross_references_admin
       get :faq
+      get :contact
+      post :contact_submit
+      get :rate
+      post :rate_submit
     end
   end
 

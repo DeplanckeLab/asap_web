@@ -503,8 +503,6 @@
         </div>
         <% end %>
         
-        <%= render "shared/user_menu", wrapper_classes: "relative ml-4" %>
-        
         <!-- Feedback Dropdown -->
         <div class="relative"
              data-controller="nav-dropdown">
@@ -518,6 +516,8 @@
                       wrapper_classes: "hidden absolute right-0 mt-2 w-64 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50",
                       data_attributes: { nav_menu: true } %>
         </div>
+
+        <%= render "shared/user_menu", wrapper_classes: "relative ml-4" %>
 
         <!-- Back to Projects -->
         <%= link_to projects_browse_url, 

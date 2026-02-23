@@ -33,6 +33,12 @@
               data-data-view-loom-file-param="<%= @selected_loom_file %>">
         Global Metadata
       </button>
+      <button type="button"
+              class="ml-auto px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors cursor-pointer flex items-center gap-1"
+              data-action="click->data-view#addMetadata"
+              data-data-view-loom-file-param="<%= @selected_loom_file %>">
+        <i class="fas fa-plus text-xs"></i> Add metadata
+      </button>
     </div>
   </div>
   
@@ -60,28 +66,24 @@
       <% if selected_annots && selected_annots.any? %>
         <div class="space-y-3">
           <% selected_annots.each do |annot| %>
-            <%= link_to annot_path(annot, from: 'data'), class: 'block bg-gray-50 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 hover:border-blue-300 transition-colors cursor-pointer' do %>
-              <div class="flex items-start justify-between">
-                <div class="flex-1">
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 hover:border-blue-300 transition-colors">
+              <div class="flex items-start justify-between gap-3">
+                <%= link_to annot_path(annot, from: 'data'), class: 'flex-1 min-w-0 cursor-pointer' do %>
                   <h4 class="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
                     <%= format_annot_name(annot.name) %>
                     <i class="fas fa-chevron-right text-xs text-gray-400"></i>
                   </h4>
                   <div class="flex flex-wrap gap-2 items-center">
                     <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
-                      <%# Expression matrix %>
                       <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
                       <%= dimension_badge(annot.nber_cols, :col, @project) if annot.nber_cols %>
                     <% elsif annot.name.start_with?('/col_attrs/') %>
-                      <%# Column metadata - use matrix dimensions %>
                       <%= dimension_badge(1, :row, @project) %>
                       <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
                     <% elsif annot.name.start_with?('/row_attrs/') %>
-                      <%# Row metadata - use matrix dimensions %>
                       <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
                       <%= dimension_badge(1, :col, @project) %>
                     <% else %>
-                      <%# Global metadata %>
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
                         Global
                       </span>
@@ -97,9 +99,21 @@
                       Size: <%= display_mem(annot.mem_size) %>
                     </div>
                   <% end %>
+                <% end %>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <%= link_to download_annot_path(annot, format_type: 'tsv'),
+                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
+                      title: 'Download as TSV' do %>
+                    <i class="fas fa-download mr-1"></i>TSV
+                  <% end %>
+                  <%= link_to download_annot_path(annot, format_type: 'json'),
+                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
+                      title: 'Download as JSON' do %>
+                    <i class="fas fa-download mr-1"></i>JSON
+                  <% end %>
                 </div>
               </div>
-            <% end %>
+            </div>
           <% end %>
         </div>
       <% else %>
@@ -122,5 +136,6 @@
     </div>
   </div>
 <% end %>
+
 </div>
 

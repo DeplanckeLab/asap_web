@@ -44,6 +44,18 @@
               <% if defined?(@extra_header_buttons) && @extra_header_buttons %>
                 <%= raw @extra_header_buttons %>
               <% end %>
+              <!-- Visualization Button -->
+              <% if @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) && @runs %>
+                <% successful_run_ids = @runs.select { |r| r.status_id == 3 }.map(&:id) %>
+                <% if successful_run_ids.any? && Annot.where(project_id: @project.id, ori_run_id: successful_run_ids, nber_rows: 2).exists? %>
+                  <%= link_to project_path(@project, view: 'visualization'),
+                      class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",
+                      title: "Visualization",
+                      style: "flex-shrink: 0;" do %>
+                    <i class="fas fa-chart-line sm:mr-1"></i><span class="hidden sm:inline"> Visualization</span>
+                  <% end %>
+                <% end %>
+              <% end %>
               <!-- Compare Clusters Button -->
               <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
                 <button type="button"
@@ -127,6 +139,18 @@
               <!-- Extra header buttons injected by step-specific views -->
               <% if defined?(@extra_header_buttons) && @extra_header_buttons %>
                 <%= raw @extra_header_buttons %>
+              <% end %>
+              <!-- Visualization Button -->
+              <% if @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) && @runs %>
+                <% successful_run_ids = @runs.select { |r| r.status_id == 3 }.map(&:id) %>
+                <% if successful_run_ids.any? && Annot.where(project_id: @project.id, ori_run_id: successful_run_ids, nber_rows: 2).exists? %>
+                  <%= link_to project_path(@project, view: 'visualization'),
+                      class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",
+                      title: "Visualization",
+                      style: "flex-shrink: 0;" do %>
+                    <i class="fas fa-chart-line sm:mr-1"></i><span class="hidden sm:inline"> Visualization</span>
+                  <% end %>
+                <% end %>
               <% end %>
               <!-- Compare Clusters Button -->
               <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
@@ -295,11 +319,9 @@
                     </td>
                     <td class="px-3 py-4">
                       <% if params_array.any? %>
-                        <div class="flex flex-wrap gap-1.5 items-center" data-run-params-container="<%= run.id %>" data-controller="run-params-toggle">
-                          <% max_visible = 3 %>
+                        <div class="flex flex-wrap gap-1.5 items-center">
                           <% params_array.each_with_index do |(key, value), index| %>
-                            <% is_hidden = index >= max_visible %>
-                            <span class="<%= is_hidden ? 'hidden' : '' %> run-param-badge" data-run-id="<%= run.id %>">
+                            <span class="run-param-badge">
                               <%# Check if value is a dataset (annot object) or array of datasets %>
                               <% annot_id = nil %>
                               <% if value.is_a?(Hash) %>
@@ -483,13 +505,6 @@
                                 </span>
                               <% end %>
                             </span>
-                          <% end %>
-                          <% if params_array.size > max_visible %>
-                            <button type="button" 
-                                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600 border border-gray-300 hover:bg-gray-300 cursor-pointer transition-colors run-params-more-btn" 
-                                    data-run-id="<%= run.id %>">
-                              +<%= params_array.size - max_visible %> more
-                            </button>
                           <% end %>
                         </div>
                       <% else %>
@@ -734,48 +749,4 @@
   </div>
 <% end %>
 
-<script>
-  (function() {
-    function setupRunParamsToggle() {
-      document.querySelectorAll('.run-params-more-btn').forEach(function(button) {
-        if (button.dataset.paramsToggleReady) return
-        button.dataset.paramsToggleReady = '1'
-
-        button.addEventListener('click', function(event) {
-          event.stopPropagation()
-
-          var runId = this.getAttribute('data-run-id')
-          if (!runId) return
-
-          var container = this.closest('[data-run-params-container]')
-          if (!container) return
-
-          var allBadges = Array.from(container.querySelectorAll('.run-param-badge[data-run-id="' + runId + '"]'))
-          var hiddenBadges = allBadges.filter(function(badge) {
-            return badge.classList.contains('hidden')
-          })
-          var maxVisible = 3
-
-          if (hiddenBadges.length === 0) {
-            allBadges.forEach(function(badge, index) {
-              if (index >= maxVisible) {
-                badge.classList.add('hidden')
-              }
-            })
-            var hiddenCount = allBadges.length - maxVisible
-            this.textContent = hiddenCount > 0 ? '+' + hiddenCount + ' more' : ''
-          } else {
-            hiddenBadges.forEach(function(badge) {
-              badge.classList.remove('hidden')
-            })
-            this.textContent = 'Show less'
-          }
-        })
-      })
-    }
-
-    setupRunParamsToggle()
-    setTimeout(setupRunParamsToggle, 300)
-  })()
-</script>
 

@@ -40,6 +40,9 @@ Rails.application.routes.draw do
       post :filter_ge_results
       post :clone
       post :toggle_public
+      post :prepare_metadata
+      post :do_import_metadata
+      get :sample_identifiers
     end
   end
   
@@ -67,7 +70,11 @@ Rails.application.routes.draw do
     end
   end
   
-  resources :annots, only: [:show]
+  resources :annots, only: [:show] do
+    member do
+      get :download
+    end
+  end
   resources :runs do
     member do
       get :get_de_gene_list

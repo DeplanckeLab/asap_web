@@ -1,5 +1,7 @@
+require 'open3'
+
 class AnnotsController < ApplicationController
-  before_action :set_annot, only: [:show]
+  before_action :set_annot, only: [:show, :download]
 
   # GET /annots/:id
   def show
@@ -187,6 +189,78 @@ class AnnotsController < ApplicationController
         @categories = JSON.parse(@annot.categories_json)
       rescue
         @categories = {}
+      end
+    end
+  end
+
+  # GET /annots/:id/download?format_type=tsv|json
+  def download
+    project = @annot.project
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
+    loom_path = project_dir + @annot.filepath
+    format_type = params[:format_type] || 'tsv'
+
+    annot_label = @annot.name.split('/').last || @annot.name
+
+    unless File.exist?(loom_path)
+      render plain: 'Loom file not found', status: :not_found
+      return
+    end
+
+    if @annot.dim == 3
+      cmd = H5DataService.asap_command(
+        '-T', 'ExtractRow',
+        '-loom', loom_path.to_s,
+        '-iAnnot', @annot.name,
+        '-start', '0',
+        '-nber', (@annot.nber_rows || 100).to_s
+      )
+      stdout, stderr, status = Open3.capture3(*cmd)
+
+      unless status.success?
+        render plain: "Failed to extract data: #{stderr}", status: :internal_server_error
+        return
+      end
+
+      data = JSON.parse(stdout) rescue {}
+      rows = data['rows'] || []
+
+      if format_type == 'json'
+        send_data data.to_json,
+                  filename: "#{annot_label}.json",
+                  type: 'application/json',
+                  disposition: 'attachment'
+      else
+        tsv_lines = []
+        rows.each do |row|
+          if row.is_a?(Array)
+            tsv_lines << row.join("\t")
+          else
+            tsv_lines << row.to_s
+          end
+        end
+        send_data tsv_lines.join("\n"),
+                  filename: "#{annot_label}.tsv",
+                  type: 'text/tab-separated-values',
+                  disposition: 'attachment'
+      end
+    else
+      values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+
+      if format_type == 'json'
+        json_output = { name: @annot.name, values: values }.to_json
+        send_data json_output,
+                  filename: "#{annot_label}.json",
+                  type: 'application/json',
+                  disposition: 'attachment'
+      else
+        tsv_lines = [annot_label]
+        values.each { |v| tsv_lines << v.to_s }
+        send_data tsv_lines.join("\n"),
+                  filename: "#{annot_label}.tsv",
+                  type: 'text/tab-separated-values',
+                  disposition: 'attachment'
       end
     end
   end

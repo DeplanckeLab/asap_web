@@ -141,6 +141,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= categorical_count %>
             </span>
+            <button type="button" onclick="openAddMetadataModal()"
+                    style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                    onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
+                    title="Add metadata">
+              <i class="fas fa-plus" style="font-size: 14px;"></i>
+            </button>
           </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
@@ -426,6 +432,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= continuous_count %>
             </span>
+            <button type="button" onclick="openAddMetadataModal()"
+                    style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                    onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
+                    title="Add metadata">
+              <i class="fas fa-plus" style="font-size: 14px;"></i>
+            </button>
           </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
@@ -1910,6 +1922,328 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
        onmouseover="this.style.backgroundColor='#3b82f6'"
        onmouseout="this.style.backgroundColor='transparent'"></div>
 </div>
+
+<%= render 'projects/views/add_metadata_modal' %>
+
+<script>
+function openAddMetadataModal() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-metadata-type') === '1') {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var metaTypeInput = modal.querySelector('#import-metadata-type-id')
+  if (metaTypeInput) metaTypeInput.value = '1'
+
+  modal.querySelectorAll('.input-type-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-input-type') === '2') {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var inputTypeInput = modal.querySelector('#import-input-type-id')
+  if (inputTypeInput) inputTypeInput.value = '2'
+
+  modal.querySelectorAll('.input-method-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-input-method') === '1') {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var inputMethodInput = modal.querySelector('#import-input-method-id')
+  if (inputMethodInput) inputMethodInput.value = '1'
+
+  var delimiter = modal.querySelector('#import-delimiter')
+  if (delimiter) { delimiter.value = '0'; delimiter.disabled = true }
+
+  var nameInput = modal.querySelector('#import-metadata-name')
+  if (nameInput) { nameInput.value = ''; nameInput.disabled = true; nameInput.placeholder = 'Metadata names have to be set in the header of the file' }
+
+  var hasHeader = modal.querySelector('#import-has-header')
+  if (hasHeader) { hasHeader.checked = true; hasHeader.disabled = true }
+
+  var content = modal.querySelector('#import-metadata-content')
+  if (content) { content.value = ''; content.placeholder = '' }
+
+  var fileInput = modal.querySelector('#import-metadata-file')
+  if (fileInput) fileInput.value = ''
+  var fileInfo = modal.querySelector('#import-file-info')
+  if (fileInfo) { fileInfo.classList.add('hidden'); fileInfo.textContent = '' }
+
+  modal.querySelector('#import-copypaste-section')?.classList.remove('hidden')
+  modal.querySelector('#import-upload-section')?.classList.add('hidden')
+  modal.querySelector('#import-delimiter-group')?.classList.remove('hidden')
+  modal.querySelector('#import-name-group')?.classList.remove('hidden')
+  modal.querySelector('#import-has-header-group')?.classList.remove('hidden')
+  modal.querySelector('#import-format-group')?.classList.remove('hidden')
+  modal.querySelector('#import-format-desc-list')?.classList.add('hidden')
+  modal.querySelector('#import-format-desc-matrix')?.classList.remove('hidden')
+  modal.querySelector('#import-format-desc-global')?.classList.add('hidden')
+
+  var previewBtn = modal.querySelector('#import-preview-btn')
+  if (previewBtn) { previewBtn.disabled = true; previewBtn.classList.remove('hidden'); previewBtn.textContent = 'Preview' }
+  var submitBtn = modal.querySelector('#import-submit-btn')
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('hidden') }
+
+  var warnings = modal.querySelector('#import-warnings')
+  if (warnings) { warnings.classList.add('hidden'); warnings.innerHTML = '' }
+  var preview = modal.querySelector('#import-preview')
+  if (preview) preview.classList.add('hidden')
+
+  modal.classList.remove('hidden')
+
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var loomFile = '<%= @default_loom_file %>'
+  if (projectId && loomFile) {
+    fetch('/projects/' + projectId + '/sample_identifiers?loom_file=' + encodeURIComponent(loomFile), {
+      headers: { 'Accept': 'application/json' }, credentials: 'same-origin'
+    })
+    .then(function(r) { return r.ok ? r.json() : { cells: [], genes: [] } })
+    .then(function(data) {
+      window._sampleCells = data.cells || []
+      window._sampleGenes = data.genes || []
+      updateModalPlaceholder()
+    })
+    .catch(function() {})
+  }
+}
+
+function updateModalPlaceholder() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var metadataType = modal.querySelector('#import-metadata-type-id')?.value
+  var inputType = modal.querySelector('#import-input-type-id')?.value
+  var content = modal.querySelector('#import-metadata-content')
+  if (!content) return
+  var cells = window._sampleCells && window._sampleCells.length > 0 ? window._sampleCells : ['Cell1', 'Cell2', 'Cell3']
+  var genes = window._sampleGenes && window._sampleGenes.length > 0 ? window._sampleGenes : ['Gene1', 'Gene2', 'Gene3']
+  if (inputType === '2') {
+    var ids = metadataType === '2' ? genes : cells
+    var header = metadataType === '2' ? 'Gene symbols/EnsemblIDs' : 'Cell names'
+    var lines = [header + '\tmetadata_1\tmetadata_2']
+    ids.forEach(function(id, i) { lines.push(id + '\t' + Math.round(Math.random() * 10) + '\t' + (i % 2 === 0 ? 'TypeA' : 'TypeB')) })
+    content.placeholder = lines.join('\n')
+  } else {
+    content.placeholder = (metadataType === '2' ? genes : cells).join('\n')
+  }
+}
+
+function checkModalForm() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
+  var previewBtn = modal.querySelector('#import-preview-btn')
+  if (!previewBtn) return
+  if (inputMethod === '2') {
+    var fileInput = modal.querySelector('#import-metadata-file')
+    previewBtn.disabled = !(fileInput && fileInput.files && fileInput.files.length > 0)
+    return
+  }
+  var inputType = modal.querySelector('#import-input-type-id')?.value
+  var name = (modal.querySelector('#import-metadata-name')?.value || '').trim()
+  var content = (modal.querySelector('#import-metadata-content')?.value || '').trim()
+  previewBtn.disabled = inputType === '2' ? content === '' : (name === '' || content === '')
+}
+
+function setupModalFormListeners() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal || modal._listenersAttached) return
+  modal._listenersAttached = true
+
+  var nameInput = modal.querySelector('#import-metadata-name')
+  if (nameInput) nameInput.addEventListener('input', checkModalForm)
+  var contentInput = modal.querySelector('#import-metadata-content')
+  if (contentInput) {
+    contentInput.addEventListener('input', checkModalForm)
+    contentInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        var start = contentInput.selectionStart, end = contentInput.selectionEnd
+        contentInput.value = contentInput.value.substring(0, start) + '\t' + contentInput.value.substring(end)
+        contentInput.setSelectionRange(start + 1, start + 1)
+      }
+    })
+  }
+  var fileInput = modal.querySelector('#import-metadata-file')
+  if (fileInput) fileInput.addEventListener('change', function() {
+    var info = modal.querySelector('#import-file-info')
+    if (fileInput.files[0] && info) {
+      info.textContent = fileInput.files[0].name + ' (' + (fileInput.files[0].size / 1024).toFixed(1) + ' KB)'
+      info.classList.remove('hidden')
+    }
+    checkModalForm()
+  })
+
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-metadata-type')
+      modal.querySelector('#import-metadata-type-id').value = type
+      modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
+        if (b.getAttribute('data-metadata-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      updateModalPlaceholder()
+      checkModalForm()
+    })
+  })
+
+  modal.querySelectorAll('.input-type-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-input-type')
+      modal.querySelector('#import-input-type-id').value = type
+      modal.querySelectorAll('.input-type-btn').forEach(function(b) {
+        if (b.getAttribute('data-input-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      var delim = modal.querySelector('#import-delimiter')
+      var name = modal.querySelector('#import-metadata-name')
+      var hh = modal.querySelector('#import-has-header')
+      var descList = modal.querySelector('#import-format-desc-list')
+      var descMatrix = modal.querySelector('#import-format-desc-matrix')
+      if (type === '2') {
+        if (delim) { delim.value = '0'; delim.disabled = true }
+        if (name) { name.disabled = true; name.placeholder = 'Metadata names have to be set in the header of the file' }
+        if (hh) { hh.checked = true; hh.disabled = true }
+        if (descList) descList.classList.add('hidden')
+        if (descMatrix) descMatrix.classList.remove('hidden')
+      } else {
+        if (delim) { delim.value = '0'; delim.disabled = false }
+        if (name) { name.disabled = false; name.placeholder = 'Metadata name (as written in Loom file)' }
+        if (hh) { hh.disabled = false }
+        if (descList) descList.classList.remove('hidden')
+        if (descMatrix) descMatrix.classList.add('hidden')
+      }
+      updateModalPlaceholder()
+      checkModalForm()
+    })
+  })
+
+  modal.querySelectorAll('.input-method-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var method = btn.getAttribute('data-input-method')
+      modal.querySelector('#import-input-method-id').value = method
+      modal.querySelectorAll('.input-method-btn').forEach(function(b) {
+        if (b.getAttribute('data-input-method') === method) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      if (method === '1') { modal.querySelector('#import-copypaste-section')?.classList.remove('hidden'); modal.querySelector('#import-upload-section')?.classList.add('hidden') }
+      else { modal.querySelector('#import-copypaste-section')?.classList.add('hidden'); modal.querySelector('#import-upload-section')?.classList.remove('hidden') }
+      checkModalForm()
+    })
+  })
+}
+document.addEventListener('DOMContentLoaded', setupModalFormListeners)
+
+function handlePreviewMetadata(btn) {
+  if (btn.closest('[data-controller="data-view"]')) return
+  btn.disabled = true
+  btn.textContent = 'Processing...'
+
+  var modal = document.getElementById('add-metadata-modal')
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
+  var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
+  var inputTypeId = modal.querySelector('#import-input-type-id')?.value
+  var delimiter = modal.querySelector('#import-delimiter')?.value
+  var name = modal.querySelector('#import-metadata-name')?.value || ''
+  var hasHeader = modal.querySelector('#import-has-header')?.checked ? '1' : '0'
+  var loomFile = '<%= @default_loom_file %>'
+
+  var fetchPromise
+  if (inputMethod === '2') {
+    var fileInput = modal.querySelector('#import-metadata-file')
+    if (!fileInput?.files?.[0]) return
+    var formData = new FormData()
+    formData.append('file', fileInput.files[0])
+    formData.append('metadata_type_id', metadataTypeId)
+    formData.append('input_type_id', inputTypeId)
+    formData.append('delimiter', delimiter)
+    formData.append('name', name)
+    formData.append('has_header', hasHeader)
+    formData.append('loom_file', loomFile)
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json' }, credentials: 'same-origin', body: formData })
+  } else {
+    var content = modal.querySelector('#import-metadata-content')?.value || ''
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ metadata_type_id: metadataTypeId, input_type_id: inputTypeId, delimiter: delimiter, name: name, has_header: hasHeader, content: content, loom_file: loomFile }) })
+  }
+
+  fetchPromise.then(function(r) { if (!r.ok) throw new Error('HTTP error ' + r.status); return r.json() })
+  .then(function(data) {
+    btn.textContent = 'Preview'
+    window._importFuId = data.fu_id
+    var warnings = modal.querySelector('#import-warnings')
+    if (data.duplicates && data.duplicates.length > 0) {
+      warnings.innerHTML = '<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">' + data.duplicates.length + ' duplicate(s) found (' + data.duplicates.join(', ') + '). Only first occurrence is kept.</div>'
+      warnings.classList.remove('hidden')
+    } else { warnings.classList.add('hidden') }
+    var preview = modal.querySelector('#import-preview')
+    var previewContent = modal.querySelector('#import-preview-content')
+    if (data.preview_lines && data.preview_lines.length > 0) {
+      previewContent.innerHTML = data.preview_lines.map(function(l) { var d = document.createElement('div'); d.textContent = l; return '<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">' + d.innerHTML + '</div>' }).join('')
+      preview.classList.remove('hidden')
+    }
+    if (data.header_name) {
+      var nameInput = modal.querySelector('#import-metadata-name')
+      if (nameInput && !nameInput.value.trim()) nameInput.value = data.header_name
+    }
+    var submitBtn = modal.querySelector('#import-submit-btn')
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('hidden') }
+    btn.classList.add('hidden')
+  })
+  .catch(function(err) {
+    btn.textContent = 'Preview'; btn.disabled = false
+    var warnings = modal.querySelector('#import-warnings')
+    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ' + err.message + '</div>'
+    warnings.classList.remove('hidden')
+  })
+}
+
+function handleSubmitMetadata(btn) {
+  if (btn.closest('[data-controller="data-view"]')) return
+  btn.disabled = true
+  btn.textContent = 'Importing...'
+
+  var modal = document.getElementById('add-metadata-modal')
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+  var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
+  var loomFile = '<%= @default_loom_file %>'
+
+  fetch('/projects/' + projectId + '/do_import_metadata', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ fu_id: window._importFuId, metadata_type_id: metadataTypeId, loom_file: loomFile })
+  })
+  .then(function(r) { if (!r.ok) throw new Error('HTTP error ' + r.status); return r.json() })
+  .then(function(data) {
+    modal.classList.add('hidden')
+    if (data.status === 'ok') {
+      window.location.reload()
+    }
+  })
+  .catch(function(err) {
+    btn.textContent = 'Import'; btn.disabled = false
+    var warnings = modal.querySelector('#import-warnings')
+    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ' + err.message + '</div>'
+    warnings.classList.remove('hidden')
+  })
+}
+</script>
 
 <% end %>
 

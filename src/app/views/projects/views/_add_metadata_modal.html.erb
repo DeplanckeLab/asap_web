@@ -1,0 +1,148 @@
+<div id="add-metadata-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/40"
+       onclick="document.getElementById('add-metadata-modal').classList.add('hidden')"></div>
+  <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+      <h3 class="text-lg font-semibold text-gray-900">Import metadata</h3>
+      <button type="button" onclick="document.getElementById('add-metadata-modal').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+        <i class="fas fa-times text-lg"></i>
+      </button>
+    </div>
+
+    <div class="px-6 py-5 overflow-y-auto flex-1 space-y-5">
+
+      <div class="flex flex-wrap gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Type</label>
+          <div class="flex rounded-md overflow-hidden border border-gray-300">
+            <button type="button" data-metadata-type="1"
+                    class="metadata-type-btn px-4 py-1.5 text-sm font-medium bg-blue-600 text-white cursor-pointer">
+              <%= col_label(@project, plural: false).capitalize %>
+            </button>
+            <button type="button" data-metadata-type="2"
+                    class="metadata-type-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
+              <%= row_label(@project, plural: false).capitalize %>
+            </button>
+            <button type="button" data-metadata-type="4"
+                    class="metadata-type-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
+              Global
+            </button>
+          </div>
+          <input type="hidden" id="import-metadata-type-id" value="1">
+        </div>
+
+        <div id="import-delimiter-group">
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Delimiter</label>
+          <select id="import-delimiter" class="block w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+            <option value="0">Carriage return</option>
+            <option value="1">Tabulation</option>
+            <option value="2">Space</option>
+            <option value="3">Semicolon</option>
+            <option value="4">Comma</option>
+          </select>
+        </div>
+
+        <div id="import-format-group">
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Format</label>
+          <div class="flex rounded-md overflow-hidden border border-gray-300">
+            <button type="button" data-input-type="1"
+                    class="input-type-btn px-4 py-1.5 text-sm font-medium bg-blue-600 text-white cursor-pointer">
+              List
+            </button>
+            <button type="button" data-input-type="2"
+                    class="input-type-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
+              Matrix
+            </button>
+          </div>
+          <input type="hidden" id="import-input-type-id" value="1">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Input method</label>
+          <div class="flex rounded-md overflow-hidden border border-gray-300">
+            <button type="button" data-input-method="1"
+                    class="input-method-btn px-4 py-1.5 text-sm font-medium bg-blue-600 text-white cursor-pointer">
+              Copy-paste
+            </button>
+            <button type="button" data-input-method="2"
+                    class="input-method-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
+              Upload file
+            </button>
+          </div>
+          <input type="hidden" id="import-input-method-id" value="1">
+        </div>
+      </div>
+
+      <div id="import-format-description" class="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+        <span id="import-format-desc-list">A simple list of identifiers (<%= col_label(@project) %> or <%= row_label(@project) %>), one per delimiter.</span>
+        <span id="import-format-desc-matrix" class="hidden">A tab-separated table with identifiers in the first column and metadata values in the following columns. The first row must contain column headers.</span>
+        <span id="import-format-desc-global" class="hidden">Global metadata stored at the file level. The content can be free text or JSON.</span>
+      </div>
+
+      <div id="import-has-header-group" class="flex items-center gap-2">
+        <input type="checkbox" id="import-has-header" checked
+               class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+        <label for="import-has-header" class="text-sm font-medium text-gray-700 cursor-pointer">With column header</label>
+      </div>
+
+      <div id="import-name-group">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Name</label>
+        <input type="text" id="import-metadata-name"
+               class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+               placeholder="Metadata name (as written in Loom file)">
+      </div>
+
+      <div id="import-copypaste-section">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Content</label>
+        <textarea id="import-metadata-content" rows="10"
+                  class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder=""></textarea>
+      </div>
+
+      <div id="import-upload-section" class="hidden">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">File</label>
+        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+          <input type="file" id="import-metadata-file" class="hidden" accept=".txt,.csv,.tsv,.tab">
+          <label for="import-metadata-file" class="cursor-pointer">
+            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+            <p class="text-sm text-gray-600">Click to select a file</p>
+            <p class="text-xs text-gray-400 mt-1">.txt, .csv, .tsv</p>
+          </label>
+          <div id="import-file-info" class="hidden mt-3 text-sm text-gray-700"></div>
+        </div>
+      </div>
+
+      <div id="import-warnings" class="hidden">
+      </div>
+
+      <div id="import-preview" class="hidden">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Preview</label>
+        <div id="import-preview-content" class="border border-gray-200 rounded-md bg-gray-50 p-3 text-sm font-mono max-h-48 overflow-auto">
+        </div>
+      </div>
+
+    </div>
+
+    <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+      <button type="button" onclick="document.getElementById('add-metadata-modal').classList.add('hidden')"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors cursor-pointer">
+        Cancel
+      </button>
+      <button type="button" id="import-preview-btn" disabled
+              class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              data-action="click->data-view#previewMetadata"
+              onclick="if(typeof handlePreviewMetadata==='function')handlePreviewMetadata(this)">
+        Preview
+      </button>
+      <button type="button" id="import-submit-btn" disabled
+              class="hidden px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              data-action="click->data-view#submitMetadata"
+              onclick="if(typeof handleSubmitMetadata==='function')handleSubmitMetadata(this)">
+        Import
+      </button>
+    </div>
+
+  </div>
+</div>

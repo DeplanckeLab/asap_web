@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers]
 
   # GET /projects or /projects.json
   def index
@@ -1932,6 +1932,222 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { render partial: 'projects/views/data_content', layout: false }
     end
+  end
+
+  # POST /projects/1/prepare_metadata
+  def prepare_metadata
+    delimiters = ["\n", "\t", " ", ";", ","]
+
+    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                        ENV["UPLOAD_DATA_DIR"]
+                      elsif ENV["DATA_DIR"]
+                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                      else
+                        '/data/asap2/fus'
+                      end
+
+    h_fu = {
+      project_id: @project.id,
+      project_key: @project.key,
+      status: 'new',
+      upload_type: 2,
+      upload_file_name: 'clipboard.txt',
+      upload_content_type: 'text/plain',
+      user_id: current_user&.id || 1
+    }
+
+    fu = Fu.new(h_fu)
+    fu.save!
+
+    fu_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+    FileUtils.mkdir_p(fu_dir)
+    filepath = fu_dir + 'clipboard.txt'
+
+    duplicates = []
+    h_identifiers = {}
+    final_content = []
+
+    if params[:file].present?
+      raw_content = params[:file].read
+    else
+      raw_content = params[:content] || ''
+    end
+
+    input_type_id = params[:input_type_id].to_s
+    metadata_type_id = params[:metadata_type_id].to_s
+    delimiter_idx = (params[:delimiter] || '0').to_i
+    name = params[:name] || ''
+    has_header = params[:has_header].to_s != '0'
+
+    header_name = nil
+
+    if metadata_type_id == '4'
+      raw_content.split(/\n/).each do |line|
+        line = line.strip
+        next if line.empty?
+        final_content.push(line)
+      end
+    elsif input_type_id == '2'
+      lines = raw_content.split(/\n/)
+      lines.each_with_index do |line, idx|
+        if idx == 0 && has_header
+          final_content.push(line)
+          next
+        end
+        parts = line.split(/\t/)
+        identifier = parts[0]
+        if identifier && !h_identifiers[identifier]
+          h_identifiers[identifier] = 1
+          final_content.push(line)
+        elsif identifier
+          duplicates.push(identifier)
+        end
+      end
+    elsif input_type_id == '1'
+      delimiter = delimiters[delimiter_idx] || "\n"
+      entries = raw_content.split(/#{Regexp.escape(delimiter)}+/).map(&:strip).reject(&:empty?)
+
+      if has_header && entries.any?
+        header_name = entries.shift
+        header_prefix = metadata_type_id == '2' ? 'genes' : 'cells'
+        final_content.push("#{header_prefix}\t#{header_name}")
+      end
+
+      entries.each do |e|
+        if !h_identifiers[e]
+          h_identifiers[e] = 1
+          final_content.push("#{e}\t1")
+        else
+          duplicates.push(e)
+        end
+      end
+    end
+
+    File.open(filepath, 'w') { |f| f.write(final_content.join("\n")) }
+
+    if File.exist?(filepath) && File.size(filepath) > 0
+      fu.update(
+        status: 'written',
+        upload_file_size: File.size(filepath),
+        upload_updated_at: Time.now
+      )
+    end
+
+    preview_lines = final_content.first(20)
+
+    response = {
+      fu_id: fu.id,
+      duplicates: duplicates,
+      preview_lines: preview_lines,
+      total_lines: final_content.size
+    }
+    response[:header_name] = header_name if header_name.present?
+
+    render json: response
+  end
+
+  # POST /projects/1/do_import_metadata
+  def do_import_metadata
+    fu_id = params[:fu_id]
+    metadata_type_id = params[:metadata_type_id].to_s
+    loom_file = params[:loom_file]
+
+    unless fu_id
+      render json: { status: 'error', message: 'No file upload ID provided' }, status: :unprocessable_entity
+      return
+    end
+
+    fu = Fu.find_by(id: fu_id)
+    unless fu
+      render json: { status: 'error', message: 'File upload not found' }, status: :not_found
+      return
+    end
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    import_metadata_step = Step.where(docker_image_id: asap_docker_image.id, name: 'import_metadata').first
+
+    unless import_metadata_step
+      render json: { status: 'error', message: 'Import metadata step not found' }, status: :unprocessable_entity
+      return
+    end
+
+    std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'add_meta').first
+
+    last_run = Run.joins(:step)
+                  .where(project_id: @project.id, steps: { name: 'import_metadata' })
+                  .order(num: :asc).last
+
+    h_run = {
+      project_id: @project.id,
+      step_id: import_metadata_step.id,
+      std_method_id: std_method&.id,
+      status_id: 1,
+      num: last_run ? last_run.num + 1 : 1,
+      user_id: current_user&.id || 1,
+      command_json: '{}',
+      attrs_json: '{}',
+      output_json: '{}',
+      lineage_run_ids: '',
+      submitted_at: Time.now
+    }
+
+    new_run = Run.new(h_run)
+    new_run.save!
+
+    input_run_ids = Run.joins(:step)
+                       .where(project_id: @project.id, steps: { name: ['parsing', 'cell_filtering', 'gene_filtering'] })
+                       .pluck(:id).join(',')
+
+    h_attrs = {
+      input_run_ids: input_run_ids,
+      ori_filename: fu.upload_file_name,
+      input_filename: fu.upload_file_name,
+      metadata_type_id: metadata_type_id,
+      fu_id: fu_id,
+      loom_file: loom_file
+    }
+
+    h_command = {
+      program: "rake parse_metadata[#{new_run.id}]",
+      host_name: 'localhost',
+      opts: [],
+      args: []
+    }
+
+    new_run.update(
+      command_json: h_command.to_json,
+      attrs_json: h_attrs.to_json
+    )
+
+    render json: { status: 'ok', run_id: new_run.id }
+  end
+
+  # GET /projects/1/sample_identifiers?loom_file=...
+  def sample_identifiers
+    loom_file = params[:loom_file]
+    result = { cells: [], genes: [] }
+
+    if loom_file.present?
+      user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+      loom_path = project_dir + loom_file
+
+      if File.exist?(loom_path)
+        [
+          { key: :cells, meta: '/col_attrs/CellID' },
+          { key: :genes, meta: '/row_attrs/Gene' }
+        ].each do |entry|
+          begin
+            values = H5DataService.get_metadata_vector(loom_path.to_s, entry[:meta])
+            result[entry[:key]] = values.first(10).map(&:to_s) if values.is_a?(Array)
+          rescue => e
+            Rails.logger.warn("sample_identifiers: could not extract #{entry[:meta]}: #{e.message}")
+          end
+        end
+      end
+    end
+
+    render json: result
   end
 
   # GET /projects/1/get_loom_files_json

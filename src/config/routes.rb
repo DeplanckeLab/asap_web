@@ -38,6 +38,7 @@ Rails.application.routes.draw do
       post :cluster_comparison
       post :filter_de_results
       post :filter_ge_results
+      get :get_annot_info
       post :clone
       post :toggle_public
       post :prepare_metadata

@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_annot_info]
 
   # GET /projects or /projects.json
   def index
@@ -2195,6 +2195,51 @@ class ProjectsController < ApplicationController
   def get_lineage
     # Placeholder for get_lineage action
     render plain: "Lineage for project #{@project.key}"
+  end
+
+  # GET /projects/1/get_annot_info?annot_id=123&cat_idx=0&cat_name=foo
+  def get_annot_info
+    annot_id = params[:annot_id].to_i
+    cat_idx = params[:cat_idx].to_i
+    cat_name = params[:cat_name]
+
+    annot = Annot.find_by(id: annot_id)
+    return render(json: { error: "Annotation not found" }, status: :not_found) unless annot
+
+    annot_cell_set = AnnotCellSet.where(annot_id: annot.id, cat_idx: cat_idx).first
+    clas_list = []
+    if annot_cell_set&.cell_set_id
+      clas_list = Cla.active.where(cell_set_id: annot_cell_set.cell_set_id)
+                     .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
+                     .to_a
+    end
+
+    cla_data = clas_list.map do |cla|
+      {
+        id: cla.id,
+        num: cla.num,
+        name: cla.name,
+        cell_ontology_term_ids: cla.cell_ontology_term_ids,
+        sorted_cell_ontology_term_ids: cla.sorted_cell_ontology_term_ids,
+        up_gene_ids: cla.up_gene_ids,
+        sorted_up_gene_ids: cla.sorted_up_gene_ids,
+        down_gene_ids: cla.down_gene_ids,
+        sorted_down_gene_ids: cla.sorted_down_gene_ids,
+        comment: cla.comment,
+        nber_agree: cla.nber_agree || 0,
+        nber_disagree: cla.nber_disagree || 0,
+        score: cla.score,
+        created_at: cla.created_at&.strftime("%Y-%m-%d %H:%M"),
+        obsolete: cla.obsolete
+      }
+    end
+
+    render json: {
+      annot_id: annot.id,
+      cat_idx: cat_idx,
+      cat_name: cat_name,
+      clas: cla_data
+    }
   end
 
   # GET /projects/1/pipeline_runs?annot_id=123 or ?run_id=456
@@ -4866,13 +4911,16 @@ class ProjectsController < ApplicationController
         cla_candidates = cla_by_cell_set_id[cell_set.id]
         next if cla_candidates.blank?
 
-        best_cla = cla_candidates.max_by(&:score)
+        best_cla = cla_candidates.max_by { |cla| [cla_consensus_score(cla), cla.created_at&.to_i || 0] }
           next unless best_cla
 
           category_label = category_label_for(metadata, annot_cell_set.cat_idx, cell_set)
           next unless category_label.present?
 
-          entry = build_best_cla_entry(best_cla).merge(category_label: category_label)
+          entry = build_best_cla_entry(best_cla).merge(
+            category_label: category_label,
+            nber_clas: cla_candidates.size
+          )
           store_best_cla_entry(metadata.id, category_label, entry)
         end
     end
@@ -4986,12 +5034,16 @@ class ProjectsController < ApplicationController
 
     def build_best_cla_entry(cla)
       {
-        score: cla.score,
+        score: cla_consensus_score(cla),
         name: cla.name.presence || "Unnamed annotation",
         cell_ontology_term_ids: format_cla_list(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids),
         sorted_up_gene_ids: format_cla_list(cla.sorted_up_gene_ids),
         sorted_down_gene_ids: format_cla_list(cla.sorted_down_gene_ids)
       }
+    end
+
+    def cla_consensus_score(cla)
+      (cla.nber_agree || 0) - (cla.nber_disagree || 0)
     end
 
     def format_cla_list(raw_value, limit: 5)

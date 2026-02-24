@@ -258,9 +258,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                         <% if sorted_categories.present? %>
                           <div class="metadata-category-header">
                             <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
-                            <span class="metadata-category-header-cell metadata-category-header-ontology">Cell ontology term IDs</span>
-                            <span class="metadata-category-header-cell metadata-category-header-genes">Sorted up gene IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-best">Best annotation</span>
                             <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                            <span class="metadata-category-header-cell metadata-category-header-annot" aria-hidden="true"></span>
                           </div>
                         <% end %>
                         <% sorted_categories.each_with_index do |(category, count), index| %>
@@ -286,17 +286,22 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                 </div>
                                 <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
-                              <% if best_cla.present? %>
-                                <% ontology_value = best_cla[:cell_ontology_term_ids].presence %>
-                                <% up_genes_value = best_cla[:sorted_up_gene_ids].presence %>
-                                <div class="metadata-category-cla metadata-category-cla--ontology">
-                                  <span class="metadata-category-cla-meta" title="<%= ontology_value %>"><%= ontology_value || '-' %></span>
-                                </div>
-                                <div class="metadata-category-cla metadata-category-cla--genes">
-                                  <span class="metadata-category-cla-meta" title="<%= up_genes_value %>"><%= up_genes_value || '-' %></span>
-                                </div>
-                              <% end %>
+                              <% best_annotation_name = best_cla&.dig(:name).presence || '-' %>
+                              <div class="metadata-category-best" title="<%= best_annotation_name %>"><%= best_annotation_name %></div>
                               <div class="metadata-category-count"><%= count %></div>
+                              <% has_annots = best_cla.present? %>
+                              <button class="category-annot-btn"
+                                      data-metadata-id="<%= metadata.id %>"
+                                      data-cat-idx="<%= index %>"
+                                      data-cat-name="<%= category %>"
+                                      data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
+                                      style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_annots ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                                      onmouseover="this.style.backgroundColor='#f3f4f6'"
+                                      onmouseout="this.style.backgroundColor=''"
+                                      title="<%= has_annots ? 'View annotations' : 'No annotations yet' %>"
+                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl)">
+                                <i class="fas fa-edit" style="font-size: 11px;"></i>
+                              </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
                             <canvas class="category-distribution-canvas" 
@@ -309,9 +314,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                         <% if categories.present? %>
                           <div class="metadata-category-header">
                             <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
-                            <span class="metadata-category-header-cell metadata-category-header-ontology">Cell ontology term IDs</span>
-                            <span class="metadata-category-header-cell metadata-category-header-genes">Sorted up gene IDs</span>
+                            <span class="metadata-category-header-cell metadata-category-header-best">Best annotation</span>
                             <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                            <span class="metadata-category-header-cell metadata-category-header-annot" aria-hidden="true"></span>
                           </div>
                         <% end %>
                         <% categories.each_with_index do |category, index| %>
@@ -337,17 +342,22 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                 </div>
                                 <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
-                              <% if best_cla.present? %>
-                                <% ontology_value = best_cla[:cell_ontology_term_ids].presence %>
-                                <% up_genes_value = best_cla[:sorted_up_gene_ids].presence %>
-                                <div class="metadata-category-cla metadata-category-cla--ontology">
-                                  <span class="metadata-category-cla-meta" title="<%= ontology_value %>"><%= ontology_value || '-' %></span>
-                                </div>
-                                <div class="metadata-category-cla metadata-category-cla--genes">
-                                  <span class="metadata-category-cla-meta" title="<%= up_genes_value %>"><%= up_genes_value || '-' %></span>
-                                </div>
-                              <% end %>
+                              <% best_annotation_name_arr = best_cla&.dig(:name).presence || '-' %>
+                              <div class="metadata-category-best" title="<%= best_annotation_name_arr %>"><%= best_annotation_name_arr %></div>
                               <div class="metadata-category-count">Category <%= index + 1 %></div>
+                              <% has_annots_arr = best_cla.present? %>
+                              <button class="category-annot-btn"
+                                      data-metadata-id="<%= metadata.id %>"
+                                      data-cat-idx="<%= index %>"
+                                      data-cat-name="<%= category %>"
+                                      data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
+                                      style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_annots_arr ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                                      onmouseover="this.style.backgroundColor='#f3f4f6'"
+                                      onmouseout="this.style.backgroundColor=''"
+                                      title="<%= has_annots_arr ? 'View annotations' : 'No annotations yet' %>"
+                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl)">
+                                <i class="fas fa-edit" style="font-size: 11px;"></i>
+                              </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
                           <canvas class="category-distribution-canvas" 
@@ -865,33 +875,51 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           }
           .metadata-category-row {
             display: grid;
-            align-items: flex-start;
-            gap: 12px;
+            align-items: center;
+            gap: 4px;
             padding: 2px 0;
-            grid-template-columns: minmax(0, 1fr) max-content;
+            grid-template-columns: minmax(0, 1fr) 72px 24px;
           }
           .metadata-category-row--wide {
-            grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr) max-content;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 24px;
           }
           .metadata-category-header {
-            display: none;
+            display: grid;
             padding: 4px 8px;
             font-size: 11px;
             font-weight: 600;
             color: #4b5563;
             text-transform: uppercase;
             letter-spacing: 0.02em;
+            align-items: center;
+            grid-template-columns: minmax(0, 1fr) 72px 24px;
+            gap: 4px;
+            margin-bottom: 4px;
           }
           .metadata-category-header--wide {
             display: grid;
-            grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr) max-content;
-            gap: 12px;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 24px;
+            gap: 4px;
             margin-bottom: 4px;
           }
           .metadata-category-header-cell {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+          }
+          .metadata-category-header-count {
+            justify-self: end;
+            width: 100%;
+            text-align: right;
+          }
+          .metadata-category-header-annot {
+            justify-self: center;
+          }
+          .metadata-category-header-best {
+            display: none;
+          }
+          .metadata-category-header--wide .metadata-category-header-best {
+            display: block;
           }
           .metadata-category-main {
             display: flex;
@@ -914,12 +942,29 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             white-space: nowrap;
             align-self: center;
             justify-self: end;
+            width: 100%;
+            text-align: right;
+          }
+          .metadata-category-best {
+            display: none;
+            color: #4b5563;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .metadata-category-row--wide .metadata-category-best {
+            display: block;
+          }
+          .category-annot-btn {
+            justify-self: center;
+            align-self: center;
           }
           .metadata-category-cla {
             display: none;
           }
           .metadata-category-row--wide .metadata-category-cla {
-            display: flex;
+            display: none;
             flex-direction: column;
             gap: 2px;
             font-size: 11px;
@@ -2243,7 +2288,152 @@ function handleSubmitMetadata(btn) {
     warnings.classList.remove('hidden')
   })
 }
+
+// --- Annotation Popup + Draggable ---
+
+(function() {
+  var isDragging = false, dragOffsetX = 0, dragOffsetY = 0, dragDialog = null
+  document.addEventListener('mousedown', function(e) {
+    var header = e.target.closest('#annotation-popup-header')
+    if (!header) return
+    dragDialog = document.getElementById('annotation-popup-dialog')
+    if (!dragDialog) return
+    isDragging = true
+    var rect = dragDialog.getBoundingClientRect()
+    dragDialog.style.position = 'fixed'
+    dragDialog.style.margin = '0'
+    dragDialog.style.left = rect.left + 'px'
+    dragDialog.style.top = rect.top + 'px'
+    dragDialog.style.transform = 'none'
+    dragOffsetX = e.clientX - rect.left
+    dragOffsetY = e.clientY - rect.top
+    e.preventDefault()
+  })
+  document.addEventListener('mousemove', function(e) {
+    if (!isDragging || !dragDialog) return
+    var nx = Math.max(0, Math.min(e.clientX - dragOffsetX, window.innerWidth - 100))
+    var ny = Math.max(0, Math.min(e.clientY - dragOffsetY, window.innerHeight - 50))
+    dragDialog.style.left = nx + 'px'
+    dragDialog.style.top = ny + 'px'
+  })
+  document.addEventListener('mouseup', function() { isDragging = false; dragDialog = null })
+})()
+
+function openAnnotationPopup(metadataId, catIdx, catName, baseUrl) {
+  var overlay = document.getElementById('annotation-popup-overlay')
+  var dialog = document.getElementById('annotation-popup-dialog')
+  var panel = document.getElementById('annot-popup-panel')
+  var titleEl = document.getElementById('annot-popup-title')
+
+  var colors = window.CATEGORY_COLORS || []
+  var color = colors[catIdx % colors.length] || '#9ca3af'
+  titleEl.innerHTML = '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ' + color + '; margin-right: 8px;"></span>' + catName
+
+  panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>'
+
+  overlay.style.display = 'flex'
+  dialog.style.left = ''
+  dialog.style.top = ''
+  dialog.style.position = ''
+  dialog.style.margin = ''
+  dialog.style.transform = ''
+
+  var url = baseUrl + '?annot_id=' + metadataId + '&cat_idx=' + catIdx + '&cat_name=' + encodeURIComponent(catName)
+
+  fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.json()
+    })
+    .then(function(data) {
+      renderAnnotationPanel(data, catName, catIdx)
+    })
+    .catch(function(err) {
+      panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + err.message + '</div>'
+    })
+}
+
+function closeAnnotationPopup() {
+  document.getElementById('annotation-popup-overlay').style.display = 'none'
+}
+
+function renderAnnotationPanel(data, catName, catIdx) {
+  var panel = document.getElementById('annot-popup-panel')
+  var clas = data.clas || []
+
+  var html = ''
+  html += '<div style="overflow-y: auto; flex: 1; padding: 12px 16px;">'
+
+  if (clas.length === 0) {
+    html += '<div style="text-align: center; padding: 40px 20px; color: #9ca3af;">'
+    html += '<i class="fas fa-clipboard" style="font-size: 32px; margin-bottom: 12px; display: block;"></i>'
+    html += '<div style="font-size: 14px;">No annotations yet for this category.</div>'
+    html += '</div>'
+  } else {
+    clas.forEach(function(cla) {
+      var score = (cla.nber_agree || 0) - (cla.nber_disagree || 0)
+      var scoreColor = score > 0 ? '#10b981' : (score < 0 ? '#ef4444' : '#9ca3af')
+
+      html += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px;">'
+
+      html += '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">'
+      html += '<div style="font-weight: 600; font-size: 13px; color: #374151;">#' + (cla.num || cla.id) + '</div>'
+      html += '<div style="display: flex; align-items: center; gap: 8px;">'
+      html += '<span style="font-size: 11px; color: #9ca3af;">' + (cla.created_at || '') + '</span>'
+      html += '<span style="font-weight: 600; font-size: 14px; color: ' + scoreColor + ';">' + score + '</span>'
+      html += '</div></div>'
+
+      if (cla.name) {
+        html += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Name: </span><span style="font-size: 12px; color: #374151;">' + cla.name + '</span></div>'
+      }
+
+      if (cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids) {
+        var cotIds = cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids
+        html += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span><span style="font-size: 12px; color: #374151;">' + cotIds + '</span></div>'
+      }
+
+      if (cla.sorted_up_gene_ids || cla.up_gene_ids) {
+        var upGenes = cla.sorted_up_gene_ids || cla.up_gene_ids
+        html += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Up genes: </span><span style="font-size: 12px; color: #374151;">' + upGenes + '</span></div>'
+      }
+
+      if (cla.sorted_down_gene_ids || cla.down_gene_ids) {
+        var downGenes = cla.sorted_down_gene_ids || cla.down_gene_ids
+        html += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Down genes: </span><span style="font-size: 12px; color: #374151;">' + downGenes + '</span></div>'
+      }
+
+      if (cla.comment) {
+        html += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Comment: </span><span style="font-size: 12px; color: #374151;">' + cla.comment + '</span></div>'
+      }
+
+      html += '<div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">'
+      html += '<span style="font-size: 12px; color: #10b981;"><i class="far fa-thumbs-up"></i> ' + (cla.nber_agree || 0) + '</span>'
+      html += '<span style="font-size: 12px; color: #ef4444;"><i class="far fa-thumbs-down"></i> ' + (cla.nber_disagree || 0) + '</span>'
+      html += '</div>'
+
+      html += '</div>'
+    })
+  }
+
+  html += '</div>'
+  panel.innerHTML = html
+}
 </script>
 
-<% end %>
+<!-- Annotation Popup Overlay -->
+<div id="annotation-popup-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.15); z-index: 10000; align-items: center; justify-content: center;" onclick="if(event.target === this) closeAnnotationPopup()">
+  <div id="annotation-popup-dialog" style="width: 560px; max-width: 90vw; height: 500px; max-height: 80vh; background-color: white; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden;">
+    <!-- Header (draggable) -->
+    <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: grab; user-select: none; border-radius: 12px 12px 0 0;">
+      <div id="annot-popup-title" style="font-size: 15px; font-weight: 600; color: #111827; display: flex; align-items: center;">Annotations</div>
+      <button onclick="closeAnnotationPopup()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
+        <i class="fas fa-times" style="font-size: 18px;"></i>
+      </button>
+    </div>
+    <!-- Panel: Annotation Details -->
+    <div id="annot-popup-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+    </div>
+  </div>
+</div>
 
+<% end %>

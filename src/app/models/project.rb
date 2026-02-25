@@ -20,6 +20,7 @@ class Project < ApplicationRecord
   has_many :runs, dependent: :destroy
   has_many :project_steps, dependent: :destroy
   has_many :shares, dependent: :destroy
+  has_many :checkpoints, dependent: :destroy
   has_many :projects_provider_projects, dependent: :destroy
   has_many :provider_projects, through: :projects_provider_projects
   has_many :articles_projects, dependent: :destroy

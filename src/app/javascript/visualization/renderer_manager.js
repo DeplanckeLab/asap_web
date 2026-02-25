@@ -1080,8 +1080,13 @@ export class RendererManager {
         // console.log(`✅ ReGL mode - using Canvas 2D overlay (no PixiJS containers)`)
       
 
-      // Store current loom file
-      this.controller.currentLoomFile = this.controller.loomFileSelectTarget.value
+      // Store current loom file safely (loom selector can be absent in some layouts)
+      const selectedLoomFile = this.controller.hasLoomFileSelectTarget
+        ? this.controller.loomFileSelectTarget?.value
+        : this.controller.getCurrentLoomFile?.()
+      if (selectedLoomFile) {
+        this.controller.currentLoomFile = selectedLoomFile
+      }
       
       // Render the scatter plot
       await this.controller.renderScatterPlot(coordinates)

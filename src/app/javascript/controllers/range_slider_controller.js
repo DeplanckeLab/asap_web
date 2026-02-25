@@ -62,6 +62,12 @@ export default class extends Controller {
     this.visualizationController = visualizationController
     this.dataManager = this.visualizationController?.dataManager
     this.rendererManager = this.visualizationController?.rendererManager
+    if (this.visualizationController) {
+      if (!this.visualizationController.adaptColorRangeByMetadataId) {
+        this.visualizationController.adaptColorRangeByMetadataId = {}
+      }
+      this.adaptColorRangeEnabled = this.visualizationController.adaptColorRangeByMetadataId[this.metadataIdValue] === true
+    }
     // console.log('🎚️ Range slider controller connected, visualization controller:', !!this.visualizationController)
     // console.log('🎚️ Range slider controller connected, controller instance ID:', this.visualizationController?.instanceId || 'none')
     // console.log('🎚️ Range slider controller connected, renderer instance ID:', this.visualizationController?.reglRenderer?.instanceId || 'none')
@@ -1158,6 +1164,12 @@ export default class extends Controller {
     
     // Toggle the state
     this.adaptColorRangeEnabled = !this.adaptColorRangeEnabled
+    if (this.visualizationController) {
+      if (!this.visualizationController.adaptColorRangeByMetadataId) {
+        this.visualizationController.adaptColorRangeByMetadataId = {}
+      }
+      this.visualizationController.adaptColorRangeByMetadataId[this.metadataIdValue] = this.adaptColorRangeEnabled
+    }
     // console.log('🎨 Color range adaptation changed:', this.adaptColorRangeEnabled ? 'enabled' : 'disabled')
     // console.log('🎨 Current range:', { min: this.currentMinValue, max: this.currentMaxValue })
     

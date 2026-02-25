@@ -1134,12 +1134,14 @@ export class UIManager {
     const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
     const debugSummary = new Map()
     const missingMetadata = new Set()
-    const logPrefix = '[FILTER COUNTS]'
-    console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
-      totalCheckboxes: allCategoryCheckboxes.length,
-      visibleCheckboxes: visibleCheckboxes.length,
-      currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
-    })
+    if (window.CHECKPOINT_TRACE === true) {
+      const logPrefix = '[FILTER COUNTS]'
+      console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
+        totalCheckboxes: allCategoryCheckboxes.length,
+        visibleCheckboxes: visibleCheckboxes.length,
+        currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
+      })
+    }
     
     visibleCheckboxes.forEach(checkbox => {
       const metadataId = checkbox.dataset.metadataId
@@ -2082,9 +2084,15 @@ export class UIManager {
   }
 
   // Update metadata dropdown
-  updateMetadata() {
+  updateMetadata(event = null) {
     const perfStart = performance.now()
     // console.log('⏱️ [PERF] ====== EMBEDDING SWITCH STARTED ======')
+
+    const isTrustedUserEvent = event?.isTrusted === true
+    if (this.controller.isApplyingCheckpointState && !isTrustedUserEvent) {
+      this.controller.checkpointTrace('updateMetadata:skipped-during-checkpoint-apply')
+      return
+    }
     
     if (!this.controller.hasMetadataSelectTarget) {
       // console.log('Metadata select target not available')
@@ -2092,9 +2100,28 @@ export class UIManager {
     }
     
     const selectedMetadataId = this.controller.metadataSelectTarget.value
+    this.controller.checkpointTrace('updateMetadata:start', {
+      selectedMetadataId: selectedMetadataId ? String(selectedMetadataId) : null,
+      isApplyingCheckpointState: !!this.controller.isApplyingCheckpointState,
+      blockers: this.controller.collectCheckpointUiBlockers()
+    })
     // console.log(`⏱️ [PERF] Selected embedding ID: ${selectedMetadataId}`)
     
     if (selectedMetadataId) {
+      // Keep embedding link/menu state in sync when selection comes from the dropdown.
+      const selectedInfo = this.controller.findEmbeddingById(
+        selectedMetadataId,
+        this.controller.getCurrentLoomFile()
+      )
+      if (selectedInfo) {
+        this.controller.currentLoomFile = selectedInfo.loomFile
+        if (this.controller.loomFileSelectTarget) {
+          this.controller.loomFileSelectTarget.value = selectedInfo.loomFile
+        }
+        this.controller.updateEmbeddingSelectionLink(selectedInfo.embedding, selectedInfo.loomFile)
+        this.controller.highlightSelectedEmbedding(String(selectedInfo.embedding.id), selectedInfo.loomFile)
+      }
+
       // Show loading spinner
       this.showMetadataDropdownSpinner()
       
@@ -2105,6 +2132,11 @@ export class UIManager {
         })
         .finally(() => {
           this.hideMetadataDropdownSpinner()
+          this.controller.checkpointTrace('updateMetadata:done', {
+            selectedMetadataId: String(selectedMetadataId),
+            currentMetadataId: this.controller.currentMetadataId ? String(this.controller.currentMetadataId) : null,
+            blockers: this.controller.collectCheckpointUiBlockers()
+          })
           const perfEnd = performance.now()
           // console.log(`⏱️ [PERF] ====== EMBEDDING SWITCH COMPLETED in ${(perfEnd - perfStart).toFixed(2)}ms ======`)
         })

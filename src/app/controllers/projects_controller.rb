@@ -2706,62 +2706,72 @@ class ProjectsController < ApplicationController
     begin
       metadata_vectors_data = {}
       loom_files_used = []
+      metadata_errors = {}
       
       metadata_ids.each do |metadata_id|
-        metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
-        next unless metadata
-        
-        # Use the metadata's own filepath to find the correct loom file
-        loom_file = params[:loom_file] || metadata.filepath
-        loom_path = @project_dir + loom_file
-        
-        # Check if the loom file exists before trying to extract metadata
-        unless File.exist?(loom_path)
-          Rails.logger.warn "Loom file does not exist: #{loom_path} - skipping metadata #{metadata_id}"
+        begin
+          metadata = Annot.find_by(id: metadata_id, project_id: @project.id)
+          next unless metadata
+          
+          # Use the metadata's own filepath to find the correct loom file
+          loom_file = params[:loom_file] || metadata.filepath
+          loom_path = @project_dir + loom_file
+          
+          # Check if the loom file exists before trying to extract metadata
+          unless File.exist?(loom_path)
+            Rails.logger.warn "Loom file does not exist: #{loom_path} - skipping metadata #{metadata_id}"
+            metadata_errors[metadata_id] = "Loom file not found: #{loom_file}"
+            next
+          end
+          
+          loom_files_used << loom_file unless loom_files_used.include?(loom_file)
+          
+          Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"
+          Rails.logger.info "Metadata path: #{metadata.name}, Data type: #{metadata.data_type.name}"
+          Rails.logger.info "Loom file path: #{loom_path}"
+          preview_cmd = H5DataService.asap_command(
+            '-T', 'ExtractMetadata',
+            '-meta', metadata.name,
+            '-loom', loom_path.to_s
+          )
+          Rails.logger.info "Full command will be: #{H5DataService.command_to_string(preview_cmd)}"
+          
+          # Get the raw metadata vector
+          raw_vector = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
+          
+          if raw_vector.empty?
+            Rails.logger.warn "No data found for metadata: #{metadata.display_name} (path: #{metadata.name})"
+            Rails.logger.warn "This could be due to: 1) Metadata path not found in loom file, 2) Empty metadata, 3) ASAP.jar extraction failed"
+            metadata_errors[metadata_id] = "No data found for metadata"
+            next
+          end
+          
+          Rails.logger.info "Successfully extracted #{raw_vector.length} values for #{metadata.display_name}"
+          
+          # Compress based on data type
+          compressed_data = compress_metadata_vector(raw_vector, metadata)
+          
+          metadata_vectors_data[metadata_id] = {
+            id: metadata.id,
+            name: metadata.display_name,
+            data_type: metadata.data_type.name,
+            compressed_data: compressed_data[:data] ? Base64.encode64(compressed_data[:data]) : nil,
+            compression_info: compressed_data[:info]
+          }
+          
+          Rails.logger.info "Compressed metadata #{metadata.display_name}: #{compressed_data[:info]}"
+        rescue => e
+          Rails.logger.error "Error loading metadata vector #{metadata_id}: #{e.class} - #{e.message}"
+          metadata_errors[metadata_id] = e.message
           next
         end
-        
-        loom_files_used << loom_file unless loom_files_used.include?(loom_file)
-        
-        Rails.logger.info "Loading metadata vector for: #{metadata.display_name} (ID: #{metadata_id})"
-        Rails.logger.info "Metadata path: #{metadata.name}, Data type: #{metadata.data_type.name}"
-        Rails.logger.info "Loom file path: #{loom_path}"
-        preview_cmd = H5DataService.asap_command(
-          '-T', 'ExtractMetadata',
-          '-meta', metadata.name,
-          '-loom', loom_path.to_s
-        )
-        Rails.logger.info "Full command will be: #{H5DataService.command_to_string(preview_cmd)}"
-        
-        # Get the raw metadata vector
-        raw_vector = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
-        
-        if raw_vector.empty?
-          Rails.logger.warn "No data found for metadata: #{metadata.display_name} (path: #{metadata.name})"
-          Rails.logger.warn "This could be due to: 1) Metadata path not found in loom file, 2) Empty metadata, 3) ASAP.jar extraction failed"
-          next
-        end
-        
-        Rails.logger.info "Successfully extracted #{raw_vector.length} values for #{metadata.display_name}"
-        
-        # Compress based on data type
-        compressed_data = compress_metadata_vector(raw_vector, metadata)
-        
-        metadata_vectors_data[metadata_id] = {
-          id: metadata.id,
-          name: metadata.display_name,
-          data_type: metadata.data_type.name,
-          compressed_data: compressed_data[:data] ? Base64.encode64(compressed_data[:data]) : nil,
-          compression_info: compressed_data[:info]
-        }
-        
-        Rails.logger.info "Compressed metadata #{metadata.display_name}: #{compressed_data[:info]}"
       end
       
       render json: { 
         metadata_vectors: metadata_vectors_data,
         total_loaded: metadata_vectors_data.size,
-        loom_files: loom_files_used
+        loom_files: loom_files_used,
+        errors: metadata_errors
       }
     rescue => e
       Rails.logger.error "Error loading metadata vectors: #{e.message}"

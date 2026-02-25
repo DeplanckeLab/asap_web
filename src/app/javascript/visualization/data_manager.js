@@ -212,7 +212,7 @@ export class DataManager {
   }
 
   // Update visualization with metadata
-  updateVisualizationWithMetadata() {
+  async updateVisualizationWithMetadata() {
     const vizStart = performance.now()
     // console.log('⏱️ [PERF] Step 2: updateVisualizationWithMetadata started') */
     
@@ -244,7 +244,7 @@ export class DataManager {
     
     // Initialize scatter plot
     const plotStart = performance.now()
-    this.controller.rendererManager.initializeScatterPlot(decompressedCoords)
+    await this.controller.rendererManager.initializeScatterPlot(decompressedCoords)
     const plotTime = performance.now() - plotStart
     // console.log(`⏱️ [PERF] Plot initialization completed in ${plotTime.toFixed(2)}ms`) */
     const vizTime = performance.now() - vizStart
@@ -252,7 +252,7 @@ export class DataManager {
   }
 
   // Load a single metadata vector on demand
-  async loadSingleMetadataVector(metadataId) {
+  async loadSingleMetadataVector(metadataId, options = {}) {
     // console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`) */
     // console.log(`Call stack:`, new Error().stack) */
     
@@ -297,12 +297,18 @@ export class DataManager {
     
     // Check if currently loading
     if (this.controller.loadingMetadataVectors.has(metadataId)) {
-      // console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
-      // Wait for the loading to complete
-      while (this.controller.loadingMetadataVectors.has(metadataId)) {
+      const waitStart = Date.now()
+      while (this.controller.loadingMetadataVectors.has(metadataId) && Date.now() - waitStart < 8000) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
-      return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
+
+      if (!this.controller.loadingMetadataVectors.has(metadataId)) {
+        return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
+      }
+
+      // The metadata stayed "loading" for too long, which blocks all future color switches.
+      console.error(`Metadata ${metadataId} remained in loading state for too long; resetting loading flag`)
+      this.controller.loadingMetadataVectors.delete(metadataId)
     }
     
     // Mark as loading and update status icon to show downloading
@@ -311,7 +317,7 @@ export class DataManager {
     
     try {
       // Get the current loom file
-      const loomFile = this.controller.hasLoomFileSelectTarget ? this.controller.loomFileSelectTarget.value : this.controller.defaultLoomFileValue
+      const loomFile = options.loomFile || (this.controller.hasLoomFileSelectTarget ? this.controller.loomFileSelectTarget.value : this.controller.defaultLoomFileValue)
       
       // Build the URL for the single metadata vector endpoint
       // Extract project identifier from URL (supports ID, key, or public_id)
@@ -598,14 +604,19 @@ export class DataManager {
   }
 
   // Load and visualize metadata vector for a specific metadata ID
-  async loadAndVisualizeMetadataVector(metadataId) {
+  async loadAndVisualizeMetadataVector(metadataId, options = {}) {
+    this.controller.checkpointTrace('loadAndVisualizeMetadataVector:start', {
+      metadataId: metadataId ? String(metadataId) : null,
+      isApplyingCheckpointState: !!this.controller.isApplyingCheckpointState
+    })
+
     // console.log(`🔍 [DEBUG] Loading and visualizing metadata vector for ID: ${metadataId}`) */
     // console.log(`🔍 [DEBUG] Current state before load:`) */
     // console.log(`🔍 [DEBUG] - loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors || {})) */
     // console.log(`🔍 [DEBUG] - loadingMetadataVectors size:`, this.controller.loadingMetadataVectors?.size || 0) */
     
     // Ensure metadata is loaded into memory for fast access
-    let vectorData = await this.loadSingleMetadataVector(metadataId)
+    let vectorData = await this.loadSingleMetadataVector(metadataId, options)
     
     if (!vectorData) {
       console.error('❌ Failed to load metadata vector for:', metadataId)
@@ -617,7 +628,10 @@ export class DataManager {
       if (this.controller.loadingMetadataVectors.has(metadataId)) {
         console.error('❌ DIAGNOSIS: Metadata is still marked as loading - this indicates a race condition!')
       }
-      
+      this.controller.checkpointTrace('loadAndVisualizeMetadataVector:missing-data', {
+        metadataId: metadataId ? String(metadataId) : null,
+        loadingMetadataVectors: Array.from(this.controller.loadingMetadataVectors || [])
+      })
       return
     }
     
@@ -685,7 +699,7 @@ export class DataManager {
         // Clear the corrupted cache entry and try to reload
         delete this.controller.loadedMetadataVectors[metadataId]
         // console.log('Cleared corrupted cache entry, retrying load...')
-        const retryData = await this.loadSingleMetadataVector(metadataId)
+        const retryData = await this.loadSingleMetadataVector(metadataId, options)
         if (!retryData) {
           console.error('Retry failed - metadata vector is still corrupted')
           return
@@ -720,12 +734,19 @@ export class DataManager {
         }
       } else {
         console.error('No valid data found in metadata vector')
+        this.controller.checkpointTrace('loadAndVisualizeMetadataVector:no-valid-data', {
+          metadataId: metadataId ? String(metadataId) : null
+        })
         return
       }
     } catch (error) {
       console.error('Error processing metadata vector:', error)
       // Clear the corrupted cache entry
       delete this.controller.loadedMetadataVectors[metadataId]
+      this.controller.checkpointTrace('loadAndVisualizeMetadataVector:processing-error', {
+        metadataId: metadataId ? String(metadataId) : null,
+        error: String(error?.message || error)
+      })
       return
     }
     
@@ -852,6 +873,11 @@ export class DataManager {
     // Final check - is the data still in memory at the end of this function?
     // console.log(`✅ [DEBUG] [Instance ${this.controller.instanceId}] END of loadAndVisualizeMetadataVector - loadedMetadataVectors keys:`, Object.keys(this.controller.loadedMetadataVectors)) */
     // console.log(`✅ [DEBUG] END - loadedMetadataVectors[${metadataId}] still exists:`, !!this.controller.loadedMetadataVectors[metadataId]) */
+    this.controller.checkpointTrace('loadAndVisualizeMetadataVector:done', {
+      metadataId: metadataId ? String(metadataId) : null,
+      currentMetadataId: this.controller.currentMetadataId ? String(this.controller.currentMetadataId) : null,
+      metadataType: this.controller.currentMetadataVector?.data_type || null
+    })
   }
 
   // Update cell filtering with performance optimization
@@ -2055,8 +2081,17 @@ export class DataManager {
 
   // Preload metadata vector on hover for better UX
   preloadMetadataVector(event) {
+    if (window.ENABLE_METADATA_HOVER_PRELOAD !== true) {
+      return
+    }
+
+    if (this.controller.isApplyingCheckpointState) {
+      return
+    }
+
     const button = event.currentTarget
     const metadataId = button.dataset.metadataId
+    if (!metadataId) return
     
     // Debounce: Only preload if mouse stays on element for 300ms
     // This prevents UI lag when quickly moving mouse over items
@@ -2079,6 +2114,10 @@ export class DataManager {
   
   // Cancel preload if user quickly moves away
   cancelPreload(event) {
+    if (window.ENABLE_METADATA_HOVER_PRELOAD !== true) {
+      return
+    }
+
     if (this.controller.preloadTimeout) {
       clearTimeout(this.controller.preloadTimeout)
       this.controller.preloadTimeout = null
@@ -2112,7 +2151,7 @@ export class DataManager {
   }
 
   // Store binary metadata data
-  storeBinaryMetadataData(data) {
+  async storeBinaryMetadataData(data) {
     // Store the binary coordinate data for later use
     // The coordinates are stored as 16-bit signed integers in binary format
     // Each coordinate pair takes 4 bytes (2 bytes for x, 2 bytes for y)
@@ -2159,7 +2198,7 @@ export class DataManager {
     
     // Update visualization with the new coordinate data
     // console.log(`📊 [EMBEDDING] Updating visualization with new coordinates...`) */
-    this.updateVisualizationWithMetadata()
+    await this.updateVisualizationWithMetadata()
     // console.log(`📊 [EMBEDDING] Visualization updated, checking for active coloring and filters...`) */
     
     // IMPORTANT: Apply filters IMMEDIATELY after plot initialization to avoid glitch

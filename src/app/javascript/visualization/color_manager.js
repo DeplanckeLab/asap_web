@@ -259,6 +259,16 @@ export class ColorManager {
   getColoringMetadataVector() {
     // Temporarily reduce logging to prevent infinite loop spam
     // console.log('🎨 [GET COLORING] getColoringMetadataVector() called')
+
+    // Source of truth: current metadata vector actively selected for coloring.
+    // DOM legends can be stale after checkpoint restore, so do not prioritize them.
+    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.values) {
+      return this.controller.currentMetadataVector
+    }
+
+    if (this.controller.currentMetadataId && this.controller.loadedMetadataVectors?.[this.controller.currentMetadataId]) {
+      return this.controller.loadedMetadataVectors[this.controller.currentMetadataId]
+    }
     
     // First, check if there's a metadata vector that has a visible legend
     // Look for active legend elements in the DOM

@@ -49,9 +49,64 @@ export default class extends Controller {
     return pathMatch ? pathMatch[1] : null
   }
 
+  checkpointDebug(message, data = null) {
+    // Debug logs are opt-in to avoid flooding the console and blocking UI interactions.
+    if (window.CHECKPOINT_DEBUG !== true) {
+      return
+    }
+
+    if (data === null) {
+      console.log(`[CheckpointDebug] ${message}`)
+      return
+    }
+    console.log(`[CheckpointDebug] ${message}`, data)
+  }
+
+  checkpointTrace(message, data = null) {
+    if (window.CHECKPOINT_TRACE !== true) {
+      return
+    }
+
+    const timestamp = new Date().toISOString()
+    if (data === null) {
+      console.log(`[CheckpointTrace ${timestamp}] ${message}`)
+      return
+    }
+    console.log(`[CheckpointTrace ${timestamp}] ${message}`, data)
+  }
+
+  collectCheckpointUiBlockers() {
+    const overlayIds = [
+      'checkpoint-history-overlay',
+      'checkpoint-comments-overlay',
+      'metadata-loading-spinner',
+      'global-filter-panel'
+    ]
+
+    return overlayIds
+      .map((id) => document.getElementById(id))
+      .filter((el) => !!el)
+      .map((el) => {
+        const style = window.getComputedStyle(el)
+        return {
+          id: el.id,
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+          pointerEvents: style.pointerEvents,
+          zIndex: style.zIndex
+        }
+      })
+  }
+
   connect() {
     // Generate unique ID for this controller instance
     this.instanceId = Math.random().toString(36).substring(7)
+    // Keep global reference aligned with the main visualization instance only.
+    // Auxiliary/modal visualization controllers do not own the embedding dropdown.
+    if (this.hasMetadataSelectTarget) {
+      window.visualizationController = this
+    }
     // console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
     // console.trace(`🚀 Visualization controller connect() call stack:`)
     
@@ -141,6 +196,9 @@ export default class extends Controller {
     this.globalFiltersEnabled = true // Track global filtering toggle state
     this.globalFilterPanelVisible = false
     this._globalFilterOutsideHandler = null
+    this.checkpointHistory = []
+    this.currentMatchedCheckpointId = null
+    this.adaptColorRangeByMetadataId = {}
     this.uiManager.updateGlobalFilterSummary()
     this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
     this.currentVisibleCells = null // Track currently visible cells (null = all visible)
@@ -235,33 +293,9 @@ export default class extends Controller {
     // Cache for binary embedding data (avoid re-fetching from network)
     this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
     
-    // Expose controller globally for range slider access
-    // CRITICAL: Only overwrite window.visualizationController if:
-    // 1. It doesn't exist yet, OR
-    // 2. The existing one has no state (was never initialized), OR  
-    // 3. This instance has state (preserve the one with state)
-    const existingController = window.visualizationController
-    const existingHasState = existingController?.reglRenderer?.numPoints > 0 || 
-                             (existingController?.reglRenderer?.positions && existingController.reglRenderer.positions.length > 0) ||
-                             (existingController?.reglRenderer?.colors && existingController.reglRenderer.colors.length > 0)
-    const thisHasState = this.reglRenderer?.numPoints > 0 || 
-                         (this.reglRenderer?.positions && this.reglRenderer.positions.length > 0) ||
-                         (this.reglRenderer?.colors && this.reglRenderer.colors.length > 0)
-    
-    if (!existingController || !existingHasState || thisHasState) {
-      // Only set if no existing controller, or existing has no state, or this one has state
-      if (existingController && existingHasState && !thisHasState) {
-        // console.log('🚀 [CONNECT] Preserving existing visualization controller with state in window.visualizationController')
-        // console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
-        // console.log('🚀 [CONNECT] This renderer ID:', this.reglRenderer?.instanceId || 'none')
-        // Don't overwrite - keep the existing one
-      } else {
-    window.visualizationController = this
-        // console.log('🚀 [CONNECT] Set window.visualizationController to this instance')
-      }
-    } else {
-      // console.log('🚀 [CONNECT] Keeping existing visualization controller with state in window.visualizationController')
-      // console.log('🚀 [CONNECT] Existing renderer ID:', existingController.reglRenderer?.instanceId)
+    // Expose the main visualization controller globally for external button handlers.
+    if (this.hasMetadataSelectTarget) {
+      window.visualizationController = this
     }
     
     // Expose emergency diagnostic function
@@ -409,20 +443,35 @@ export default class extends Controller {
     // Add window resize listener
     window.addEventListener('resize', this.resizeHandler)
     
+    this.lastLeftPanelWidth = null
+    this.lastMetadataClaLayout = null
+    this.leftPanelResizeRaf = null
+
     // Observe left panel width changes
     const leftPanel = document.getElementById('left-panel')
     if (leftPanel && window.ResizeObserver) {
-      this.leftPanelResizeObserver = new ResizeObserver(() => {
-        // eslint-disable-next-line no-console
-        console.debug('[Visualization] Left panel resized via ResizeObserver')
-        this.updateMetadataClaColumns()
+      this.leftPanelResizeObserver = new ResizeObserver((entries) => {
+        const entry = Array.isArray(entries) && entries.length > 0 ? entries[0] : null
+        if (!entry?.contentRect) {
+          this.updateMetadataClaColumns()
+          return
+        }
+
+        const nextWidth = Math.round(entry.contentRect.width)
+        if (this.lastLeftPanelWidth === nextWidth) {
+          return
+        }
+        this.lastLeftPanelWidth = nextWidth
+
+        if (this.leftPanelResizeRaf) {
+          cancelAnimationFrame(this.leftPanelResizeRaf)
+        }
+        this.leftPanelResizeRaf = requestAnimationFrame(() => {
+          this.leftPanelResizeRaf = null
+          this.updateMetadataClaColumns(nextWidth)
+        })
       })
       this.leftPanelResizeObserver.observe(leftPanel)
-      // eslint-disable-next-line no-console
-      console.debug('[Visualization] Started observing left panel size changes')
-    } else {
-      // eslint-disable-next-line no-console
-      console.debug('[Visualization] ResizeObserver not available or left panel missing; relying on window resize')
     }
     
     // Initialize metadata vectors storage
@@ -516,6 +565,32 @@ export default class extends Controller {
         }
       }, 200) // Slightly longer delay to ensure UI is fully ready
     }
+
+    this.checkpointMatchTimer = window.setInterval(() => {
+      this.refreshCurrentCheckpointMatch()
+    }, 1500)
+
+    this.fetchCheckpointHistory()
+
+    this.boundCheckpointTraceClick = (event) => {
+      if (window.CHECKPOINT_TRACE !== true) return
+      const target = event.target
+      const targetElement = target instanceof Element ? target : null
+      const targetSummary = targetElement
+        ? {
+            tag: targetElement.tagName,
+            id: targetElement.id || null,
+            className: targetElement.className || null
+          }
+        : { tag: null, id: null, className: null }
+      this.checkpointTrace('click-capture', {
+        target: targetSummary,
+        isApplyingCheckpointState: !!this.isApplyingCheckpointState,
+        isRefreshingCheckpointMatch: !!this.isRefreshingCheckpointMatch,
+        blockers: this.collectCheckpointUiBlockers()
+      })
+    }
+    document.addEventListener('click', this.boundCheckpointTraceClick, true)
   }
 
   disconnect() {
@@ -532,8 +607,25 @@ export default class extends Controller {
     if (this.leftPanelResizeObserver) {
       this.leftPanelResizeObserver.disconnect()
       this.leftPanelResizeObserver = null
-      // eslint-disable-next-line no-console
-      console.debug('[Visualization] Stopped observing left panel size changes')
+    }
+
+    if (this.leftPanelResizeRaf) {
+      cancelAnimationFrame(this.leftPanelResizeRaf)
+      this.leftPanelResizeRaf = null
+    }
+
+    if (this.checkpointMatchTimer) {
+      window.clearInterval(this.checkpointMatchTimer)
+      this.checkpointMatchTimer = null
+    }
+
+    if (this.boundCheckpointTraceClick) {
+      document.removeEventListener('click', this.boundCheckpointTraceClick, true)
+      this.boundCheckpointTraceClick = null
+    }
+
+    if (window.visualizationController === this) {
+      window.visualizationController = null
     }
     
     // Remove interaction event listeners
@@ -547,8 +639,8 @@ export default class extends Controller {
   }
   
   // Delegates to ui_manager to avoid duplication
-  updateMetadata() {
-    this.uiManager.updateMetadata()
+  updateMetadata(event) {
+    this.uiManager.updateMetadata(event)
   }
 
   initializeEmbeddingSelectionUI() {
@@ -568,6 +660,15 @@ export default class extends Controller {
     }
 
     setTimeout(() => {
+      const selectedEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
+      if (selectedEmbeddingId.length > 0) {
+        this.checkpointDebug('initializeEmbeddingSelectionUI:skip-default-apply', {
+          selectedEmbeddingId,
+          currentLoomFile: this.getCurrentLoomFile()
+        })
+        return
+      }
+
       this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
     }, 100)
   }
@@ -739,43 +840,193 @@ export default class extends Controller {
     return name
   }
 
-  findEmbeddingById(embeddingId, preferredLoomFile = null) {
-    if (!this.embeddingsByLoomValue) {
+  findEmbeddingById(embeddingId, preferredLoomFile = null, expectedName = null) {
+    const normalizeId = (value) => String(value || '').trim()
+    const targetId = normalizeId(embeddingId)
+    const normalizedExpectedName = this.sanitizeEmbeddingName(expectedName)
+    const embeddingCatalog = (this.embeddingsByLoomValue && typeof this.embeddingsByLoomValue === 'object')
+      ? this.embeddingsByLoomValue
+      : {}
+    this.checkpointDebug('findEmbeddingById:start', {
+      targetId,
+      preferredLoomFile,
+      expectedName: normalizedExpectedName,
+      hasCatalog: Object.keys(embeddingCatalog).length > 0
+    })
+
+    const pickBestMatch = (embeddings, loomFileKey) => {
+      if (!Array.isArray(embeddings)) return null
+      const idMatches = embeddings.filter(embedding => normalizeId(embedding.id) === targetId)
+      if (idMatches.length === 0) return null
+
+      if (normalizedExpectedName) {
+        const nameMatch = idMatches.find((embedding) => {
+          const embeddingName = this.sanitizeEmbeddingName(this.getEmbeddingName(embedding))
+          return embeddingName === normalizedExpectedName
+        })
+        if (nameMatch) {
+          return { embedding: nameMatch, loomFile: loomFileKey }
+        }
+      }
+
+      return { embedding: idMatches[0], loomFile: loomFileKey }
+    }
+
+    const pickByNameWhenIdMissing = (embeddings, loomFileKey) => {
+      if (!Array.isArray(embeddings) || !normalizedExpectedName) return null
+
+      const nameMatches = embeddings.filter((embedding) => {
+        const embeddingName = this.sanitizeEmbeddingName(this.getEmbeddingName(embedding))
+        return embeddingName === normalizedExpectedName
+      })
+
+      if (nameMatches.length === 1) {
+        this.checkpointDebug('findEmbeddingById:resolved-by-name', {
+          requestedId: targetId,
+          resolvedEmbeddingId: normalizeId(nameMatches[0].id),
+          resolvedEmbeddingName: this.getEmbeddingName(nameMatches[0]),
+          resolvedLoomFile: loomFileKey
+        })
+        return { embedding: nameMatches[0], loomFile: loomFileKey }
+      }
+
+      if (nameMatches.length > 1) {
+        this.checkpointDebug('findEmbeddingById:ambiguous-name-match', {
+          requestedId: targetId,
+          expectedName: normalizedExpectedName,
+          loomFile: loomFileKey,
+          matchCount: nameMatches.length
+        })
+      }
+
       return null
     }
 
-    const targetId = String(embeddingId)
-
-    if (preferredLoomFile && this.embeddingsByLoomValue[preferredLoomFile]) {
-      const matchInPreferred = this.embeddingsByLoomValue[preferredLoomFile].find(embedding => String(embedding.id) === targetId)
+    if (preferredLoomFile && embeddingCatalog[preferredLoomFile]) {
+      const matchInPreferred = pickBestMatch(embeddingCatalog[preferredLoomFile], preferredLoomFile)
       if (matchInPreferred) {
-        return { embedding: matchInPreferred, loomFile: preferredLoomFile }
+        this.checkpointDebug('findEmbeddingById:match-in-preferred', {
+          resolvedEmbeddingId: String(matchInPreferred.embedding?.id || ''),
+          resolvedEmbeddingName: this.getEmbeddingName(matchInPreferred.embedding),
+          resolvedLoomFile: matchInPreferred.loomFile
+        })
+        return matchInPreferred
+      }
+
+      const nameMatchInPreferred = pickByNameWhenIdMissing(embeddingCatalog[preferredLoomFile], preferredLoomFile)
+      if (nameMatchInPreferred) {
+        return nameMatchInPreferred
       }
     }
 
-    for (const [loomFileKey, embeddings] of Object.entries(this.embeddingsByLoomValue)) {
-      if (!Array.isArray(embeddings)) {
-        continue
-      }
-      const match = embeddings.find(embedding => String(embedding.id) === targetId)
+    for (const [loomFileKey, embeddings] of Object.entries(embeddingCatalog)) {
+      const match = pickBestMatch(embeddings, loomFileKey)
       if (match) {
-        return { embedding: match, loomFile: loomFileKey }
+        this.checkpointDebug('findEmbeddingById:match-in-any-loom', {
+          resolvedEmbeddingId: String(match.embedding?.id || ''),
+          resolvedEmbeddingName: this.getEmbeddingName(match.embedding),
+          resolvedLoomFile: match.loomFile
+        })
+        return match
       }
     }
 
+    if (normalizedExpectedName) {
+      for (const [loomFileKey, embeddings] of Object.entries(embeddingCatalog)) {
+        const nameMatch = pickByNameWhenIdMissing(embeddings, loomFileKey)
+        if (nameMatch) {
+          return nameMatch
+        }
+      }
+    }
+
+    const menuItems = Array.from(document.querySelectorAll('.embedding-menu-item[data-embedding-id]'))
+    if (menuItems.length > 0) {
+      const idMatches = menuItems.filter((item) => normalizeId(item.dataset.embeddingId) === targetId)
+      if (idMatches.length > 0) {
+        const preferredMenuMatch = preferredLoomFile
+          ? idMatches.find((item) => item.dataset.loomFile === preferredLoomFile)
+          : null
+        const matchedItem = preferredMenuMatch || idMatches[0]
+        const loomFile = matchedItem?.dataset?.loomFile || preferredLoomFile || this.getCurrentLoomFile()
+        const label = matchedItem?.dataset?.embeddingLabel || `Embedding ${targetId}`
+        this.checkpointDebug('findEmbeddingById:match-in-dom-menu', {
+          resolvedEmbeddingId: targetId,
+          resolvedEmbeddingName: label,
+          resolvedLoomFile: loomFile
+        })
+        return {
+          embedding: { id: targetId, display_name: label, name: label },
+          loomFile
+        }
+      }
+
+      if (normalizedExpectedName) {
+        const nameMatches = menuItems.filter((item) => {
+          const candidate = this.sanitizeEmbeddingName(item.dataset.embeddingLabel)
+          return candidate === normalizedExpectedName
+        })
+        if (nameMatches.length > 0) {
+          const preferredNameMatch = preferredLoomFile
+            ? nameMatches.find((item) => item.dataset.loomFile === preferredLoomFile)
+            : null
+          const matchedItem = preferredNameMatch || nameMatches[0]
+          const resolvedId = normalizeId(matchedItem?.dataset?.embeddingId)
+          const loomFile = matchedItem?.dataset?.loomFile || preferredLoomFile || this.getCurrentLoomFile()
+          const label = matchedItem?.dataset?.embeddingLabel || normalizedExpectedName
+          this.checkpointDebug('findEmbeddingById:resolved-by-dom-name', {
+            requestedId: targetId,
+            resolvedEmbeddingId: resolvedId,
+            resolvedEmbeddingName: label,
+            resolvedLoomFile: loomFile
+          })
+          return {
+            embedding: { id: resolvedId, display_name: label, name: label },
+            loomFile
+          }
+        }
+      }
+    }
+
+    if (this.hasMetadataSelectTarget) {
+      const options = Array.from(this.metadataSelectTarget.options || [])
+      const idOption = options.find((option) => normalizeId(option.value) === targetId)
+      if (idOption) {
+        const loomFile = preferredLoomFile || this.getCurrentLoomFile()
+        const label = idOption.textContent?.trim() || `Embedding ${targetId}`
+        this.checkpointDebug('findEmbeddingById:match-in-dropdown', {
+          resolvedEmbeddingId: targetId,
+          resolvedEmbeddingName: label,
+          resolvedLoomFile: loomFile
+        })
+        return {
+          embedding: { id: targetId, display_name: label, name: label },
+          loomFile
+        }
+      }
+    }
+
+    this.checkpointDebug('findEmbeddingById:no-match', { targetId, preferredLoomFile, expectedName: normalizedExpectedName })
     return null
   }
 
   applyEmbeddingSelection(embeddingId, loomFile, options = {}) {
-    const { skipLoad = false } = options
-    const info = this.findEmbeddingById(embeddingId, loomFile)
+    const { skipLoad = false, expectedEmbeddingName = null } = options
+    this.checkpointDebug('applyEmbeddingSelection:start', {
+      embeddingId: String(embeddingId),
+      loomFile,
+      skipLoad,
+      expectedEmbeddingName
+    })
+    const info = this.findEmbeddingById(embeddingId, loomFile, expectedEmbeddingName)
 
     if (!info) {
       console.warn('[Embedding] Could not find embedding with id', embeddingId)
-      return
+      this.checkpointDebug('applyEmbeddingSelection:abort-no-match', { embeddingId: String(embeddingId), loomFile, expectedEmbeddingName })
+      return null
     }
 
-    const targetId = String(info.embedding.id)
+    const targetId = String(info.embedding.id).trim()
     const targetLoom = info.loomFile
 
     this.currentLoomFile = targetLoom
@@ -798,6 +1049,85 @@ export default class extends Controller {
 
     if (!skipLoad) {
       this.updateMetadata()
+    }
+
+    this.checkpointDebug('applyEmbeddingSelection:applied', {
+      resolvedEmbeddingId: targetId,
+      resolvedEmbeddingName: this.getEmbeddingName(info.embedding),
+      resolvedLoomFile: targetLoom,
+      metadataSelectValue: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null
+    })
+
+    return {
+      embeddingId: targetId,
+      loomFile: targetLoom,
+      embeddingName: this.getEmbeddingName(info.embedding)
+    }
+  }
+
+  async applyEmbeddingSelectionAndLoad(embeddingId, loomFile, options = {}) {
+    const selection = this.applyEmbeddingSelection(embeddingId, loomFile, { ...options, skipLoad: true })
+    if (!selection || !selection.embeddingId) {
+      return null
+    }
+
+    // During checkpoint restore we need deterministic loading:
+    // if coordinates are not cached yet, this will fetch them before continuing.
+    await this.loadMetadataCoordinates(selection.embeddingId)
+    return selection
+  }
+
+  getCurrentSelectedEmbeddingState() {
+    const selectedId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : ''
+    if (!selectedId) {
+      return {
+        id: null,
+        loomFile: this.getCurrentLoomFile(),
+        name: null,
+        dimension: null
+      }
+    }
+
+    const currentLoom = this.getCurrentLoomFile()
+    const info = this.findEmbeddingById(selectedId, currentLoom)
+    if (!info || !info.embedding) {
+      return {
+        id: selectedId,
+        loomFile: currentLoom,
+        name: null,
+        dimension: null
+      }
+    }
+
+    return {
+      id: String(info.embedding.id),
+      loomFile: info.loomFile,
+      name: this.getEmbeddingName(info.embedding),
+      dimension: this.getEmbeddingDimensionLabel(info.embedding)
+    }
+  }
+
+  syncEmbeddingUiToLoadedEmbedding(embeddingId, embeddingName = null) {
+    const normalizedId = String(embeddingId || '').trim()
+    if (!normalizedId) return
+
+    const currentLoom = this.getCurrentLoomFile()
+    const info = this.findEmbeddingById(normalizedId, currentLoom, embeddingName)
+
+    if (this.hasMetadataSelectTarget) {
+      const hasOption = Array.from(this.metadataSelectTarget.options || []).some((option) => String(option.value) === normalizedId)
+      if (!hasOption) {
+        const option = document.createElement('option')
+        option.value = normalizedId
+        option.textContent = embeddingName || `Embedding ${normalizedId}`
+        this.metadataSelectTarget.appendChild(option)
+      }
+      this.metadataSelectTarget.value = normalizedId
+    }
+
+    if (info) {
+      this.updateEmbeddingSelectionLink(info.embedding, info.loomFile)
+      this.highlightSelectedEmbedding(String(info.embedding.id), info.loomFile)
     }
   }
 
@@ -941,6 +1271,11 @@ export default class extends Controller {
 
     this.closeAllDropdowns()
 
+    if (saveType === 'checkpoint') {
+      this.openSaveCheckpointDialog()
+      return
+    }
+
     if (plotTarget === 'custom') {
       if (saveType === 'svg') {
         this.saveCustomPlotAsSVG()
@@ -970,26 +1305,393 @@ export default class extends Controller {
     customSection.style.display = hasCustomPlot ? 'block' : 'none'
   }
 
+  openSaveCheckpointDialog() {
+    const title = window.prompt('Checkpoint title')
+    if (!title) return
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) return
+    this.saveCheckpoint(normalizedTitle)
+  }
+
+  async saveCheckpoint(title) {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) {
+      alert('Cannot determine project identifier.')
+      return
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const state = this.buildCheckpointState()
+    this.checkpointDebug('saveCheckpoint:state', {
+      title,
+      embedding: state.embedding,
+      visualizationEmbedding: state.visualizationEmbedding,
+      loomFile: state.loomFile
+    })
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        checkpoint: {
+          title: title,
+          state: state
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      const errorMessage = errorPayload.error || `Failed to save checkpoint (${response.status})`
+      alert(errorMessage)
+      return
+    }
+
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    this.mergeCheckpointIntoHistory(checkpoint)
+    this.currentMatchedCheckpointId = checkpoint.id
+    this.refreshCurrentCheckpointMatch()
+  }
+
+  async openCheckpointHistory(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const overlay = document.getElementById('checkpoint-history-overlay')
+    if (!overlay) return
+
+    overlay.style.display = 'flex'
+    await this.fetchCheckpointHistory()
+    this.renderCheckpointHistory()
+  }
+
+  closeCheckpointHistory() {
+    const overlay = document.getElementById('checkpoint-history-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  async fetchCheckpointHistory() {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    })
+
+    if (!response.ok) {
+      return
+    }
+
+    const payload = await response.json()
+    this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
+    this.refreshCurrentCheckpointMatch()
+  }
+
+  renderCheckpointHistory() {
+    const listContainer = document.getElementById('checkpoint-history-list')
+    if (!listContainer) return
+
+    if (!Array.isArray(this.checkpointHistory) || this.checkpointHistory.length === 0) {
+      listContainer.innerHTML = '<div style="padding: 12px; color: #6b7280;">No checkpoints yet.</div>'
+      return
+    }
+
+    listContainer.innerHTML = this.checkpointHistory.map((checkpoint) => {
+      const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ''
+      const commentCount = Number(checkpoint.comments_count || 0)
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
+            <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button type="button"
+                    data-checkpoint-id="${checkpoint.id}"
+                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${this.escapeHtml(checkpoint.id)}')"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;">
+              Load
+            </button>
+            <button type="button"
+                    data-checkpoint-id="${checkpoint.id}"
+                    onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${this.escapeHtml(checkpoint.id)}')"
+                    style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;">
+              Delete
+            </button>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  async deleteCheckpointById(checkpointId) {
+    if (!checkpointId) return
+    if (!window.confirm('Delete this checkpoint?')) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin'
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to delete checkpoint.')
+      return
+    }
+
+    this.checkpointHistory = (this.checkpointHistory || []).filter((checkpoint) => String(checkpoint.id) !== String(checkpointId))
+    if (String(this.currentMatchedCheckpointId) === String(checkpointId)) {
+      this.currentMatchedCheckpointId = null
+    }
+    this.renderCheckpointHistory()
+    this.refreshCurrentCheckpointMatch()
+  }
+
+  async loadCheckpoint(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const checkpointId = event.currentTarget?.dataset?.checkpointId
+    await this.loadCheckpointById(checkpointId)
+  }
+
+  async loadCheckpointById(checkpointId) {
+    if (!checkpointId) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to load checkpoint.')
+      return
+    }
+
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    if (!checkpoint || !checkpoint.state) return
+
+    const requestedLoom = checkpoint.state.embedding?.loomFile || checkpoint.state.visualizationEmbedding?.loomFile || checkpoint.state.loomFile || null
+    const requestedName = checkpoint.state.visualizationEmbedding?.name || null
+    const requestedId = checkpoint.state.embedding?.id || checkpoint.state.visualizationEmbedding?.id || null
+    const loomEmbeddings = (requestedLoom && this.embeddingsByLoomValue && Array.isArray(this.embeddingsByLoomValue[requestedLoom]))
+      ? this.embeddingsByLoomValue[requestedLoom]
+      : []
+    this.checkpointDebug('loadCheckpointById:embedding-catalog-for-loom', {
+      requestedLoom,
+      requestedId: requestedId ? String(requestedId) : null,
+      requestedName,
+      availableCount: loomEmbeddings.length,
+      availableEmbeddings: loomEmbeddings.map((embedding) => ({
+        id: String(embedding.id || '').trim(),
+        name: this.getEmbeddingName(embedding)
+      }))
+    })
+
+    this.checkpointDebug('loadCheckpointById:received-checkpoint', {
+      checkpointId: String(checkpoint.id || checkpointId),
+      embedding: checkpoint.state.embedding || null,
+      visualizationEmbedding: checkpoint.state.visualizationEmbedding || null,
+      loomFile: checkpoint.state.loomFile || null
+    })
+
+    this.isApplyingCheckpointState = true
+    this.checkpointTrace('loadCheckpointById:apply-start', {
+      checkpointId: String(checkpoint.id || checkpointId),
+      blockers: this.collectCheckpointUiBlockers()
+    })
+    try {
+      await this.applyCheckpointState(checkpoint.state)
+      this.checkpointDebug('loadCheckpointById:after-apply', {
+        selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
+        currentLoomFile: this.currentLoomFile,
+        linkEmbeddingId: document.getElementById('embedding-selection-link')?.dataset?.selectedEmbeddingId || null,
+        linkLoomFile: document.getElementById('embedding-selection-link')?.dataset?.currentLoomFile || null
+      })
+      const currentSignature = this.computeCheckpointStateSignature(this.buildCheckpointState())
+      this.mergeCheckpointIntoHistory({
+        ...checkpoint,
+        state_signature: currentSignature
+      })
+      this.currentMatchedCheckpointId = checkpoint.id
+      this.refreshCurrentCheckpointMatch()
+      this.checkpointTrace('loadCheckpointById:apply-success', {
+        checkpointId: String(checkpoint.id || checkpointId),
+        blockers: this.collectCheckpointUiBlockers()
+      })
+    } catch (error) {
+      console.error('Error applying checkpoint state:', error)
+      this.checkpointTrace('loadCheckpointById:apply-error', {
+        checkpointId: String(checkpoint.id || checkpointId),
+        error: String(error?.message || error)
+      })
+      alert('Failed to apply checkpoint state. Please retry.')
+    } finally {
+      this.isApplyingCheckpointState = false
+      this.closeCheckpointHistory()
+      this.uiManager?.hideMetadataDropdownSpinner?.()
+      this.checkpointTrace('loadCheckpointById:apply-finally', {
+        checkpointId: String(checkpoint.id || checkpointId),
+        blockers: this.collectCheckpointUiBlockers()
+      })
+    }
+  }
+
+  async openCheckpointComments(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    if (!this.currentMatchedCheckpointId) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    })
+
+    if (!response.ok) {
+      return
+    }
+
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    this.mergeCheckpointIntoHistory(checkpoint)
+
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    const title = document.getElementById('checkpoint-comments-title')
+    const list = document.getElementById('checkpoint-comments-list')
+    if (!overlay || !title || !list) return
+
+    title.textContent = checkpoint.title || 'Checkpoint comments'
+    const comments = Array.isArray(checkpoint.comments) ? checkpoint.comments : []
+    if (comments.length === 0) {
+      list.innerHTML = '<div style="padding: 10px; color: #6b7280;">No comments yet.</div>'
+    } else {
+      list.innerHTML = comments.map((comment) => {
+        const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ''
+        return `
+          <div style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</div>
+            <div style="font-size:13px;color:#111827;white-space:pre-wrap;">${this.escapeHtml(comment.body || '')}</div>
+          </div>
+        `
+      }).join('')
+    }
+
+    overlay.style.display = 'flex'
+  }
+
+  closeCheckpointComments() {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  async submitCheckpointComment(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (!this.currentMatchedCheckpointId) return
+    const input = document.getElementById('checkpoint-comment-input')
+    if (!input) return
+    const body = input.value.trim()
+    if (!body) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        checkpoint: {
+          comment_body: body
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to save comment.')
+      return
+    }
+
+    input.value = ''
+    await this.openCheckpointComments()
+  }
+
   async loadMetadataCoordinates(metadataId) {
     const fetchStart = performance.now()
+    this.checkpointDebug('loadMetadataCoordinates:start', {
+      metadataId: String(metadataId),
+      currentLoomFile: this.currentLoomFile,
+      requestedLoomFile: this.getCurrentLoomFile()
+    })
     
     try {
       // Check in-memory cache first!
       if (this.binaryDataCache.has(metadataId)) {
+        this.checkpointDebug('loadMetadataCoordinates:binary-cache-hit', {
+          metadataId: String(metadataId)
+        })
         // console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
         const cachedData = this.binaryDataCache.get(metadataId)
         const cacheTime = performance.now() - fetchStart
         // console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
         
         // Use cached binary data
-        this.dataManager.storeBinaryMetadataData(cachedData)
-        return
+        await this.dataManager.storeBinaryMetadataData(cachedData)
+        this.syncEmbeddingUiToLoadedEmbedding(cachedData?.id || metadataId, cachedData?.name || null)
+        this.checkpointDebug('loadMetadataCoordinates:binary-cache-rendered', {
+          metadataId: String(metadataId),
+          metadataDataId: String(this.metadataData?.id || ''),
+          metadataDataName: this.metadataData?.name || null,
+          hasCurrentCoordinates: !!this.currentCoordinates,
+          currentCoordinatesLength: this.currentCoordinates?.length || 0
+        })
+        return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
       }
       
       // Check IndexedDB (disk storage) for embeddings - this is the key fix!
       // console.log(`⏱️ [PERF] Step 1a: Checking IndexedDB for coordinates ${metadataId}...`)
       const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
       if (diskData) {
+        this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-hit', {
+          metadataId: String(metadataId)
+        })
         const diskTime = performance.now() - fetchStart
         // console.log(`⏱️ [PERF] Step 1a: IndexedDB HIT for ${metadataId} - ${diskTime.toFixed(2)}ms (saved network fetch!)`)
         
@@ -997,14 +1699,26 @@ export default class extends Controller {
         this.binaryDataCache.set(metadataId, diskData)
         
         // Use cached binary data
-        this.dataManager.storeBinaryMetadataData(diskData)
-        return
+        await this.dataManager.storeBinaryMetadataData(diskData)
+        this.syncEmbeddingUiToLoadedEmbedding(diskData?.id || metadataId, diskData?.name || null)
+        this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-rendered', {
+          metadataId: String(metadataId),
+          metadataDataId: String(this.metadataData?.id || ''),
+          metadataDataName: this.metadataData?.name || null,
+          hasCurrentCoordinates: !!this.currentCoordinates,
+          currentCoordinatesLength: this.currentCoordinates?.length || 0
+        })
+        return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
       }
       
       // console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
       
       // Get the current loom file selection
       const loomFile = this.getCurrentLoomFileForRequest()
+      this.checkpointDebug('loadMetadataCoordinates:request', {
+        metadataId: String(metadataId),
+        loomFile
+      })
       
       // Build the URL for the metadata coordinates endpoint
       const projectIdentifier = this.getProjectIdentifier()
@@ -1043,7 +1757,7 @@ export default class extends Controller {
         const errorData = await response.json()
         console.error('Error from server:', errorData.error)
         alert(`Error loading metadata: ${errorData.error}`)
-        return
+        return false
       }
       
       // Extract metadata from headers
@@ -1089,11 +1803,33 @@ export default class extends Controller {
       // console.log(`⏱️ [PERF] Stored coordinates in IndexedDB for ${metadataName} (will survive page reload)`)
       
       // Store the binary coordinate data
-      this.dataManager.storeBinaryMetadataData(dataObject)
+      await this.dataManager.storeBinaryMetadataData(dataObject)
+      this.syncEmbeddingUiToLoadedEmbedding(headerMetadataId || metadataId, metadataName || null)
+      this.checkpointDebug('loadMetadataCoordinates:success', {
+        metadataId: String(metadataId),
+        headerMetadataId: String(headerMetadataId || ''),
+        metadataName,
+        cellCount,
+        loomFile
+      })
+      this.checkpointDebug('loadMetadataCoordinates:post-render-state', {
+        metadataDataId: String(this.metadataData?.id || ''),
+        metadataDataName: this.metadataData?.name || null,
+        hasCurrentCoordinates: !!this.currentCoordinates,
+        currentCoordinatesLength: this.currentCoordinates?.length || 0,
+        hasRenderer: !!this.reglRenderer
+      })
+      return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
       
     } catch (error) {
+      this.checkpointDebug('loadMetadataCoordinates:error', {
+        metadataId: String(metadataId),
+        error: String(error?.message || error),
+        stack: error?.stack || null
+      })
       console.error('Error loading metadata coordinates:', error)
       alert(`Failed to load metadata coordinates: ${error.message}`)
+      return false
     }
   }
 
@@ -2675,6 +3411,13 @@ export default class extends Controller {
     const hasRenderer = !!this.reglRenderer
     
     if (!this.currentMetadataVector || !hasRenderer) {
+      this.checkpointDebug('updateVisualizationWithMetadataVector:skipped', {
+        hasRenderer,
+        hasCurrentMetadataVector: !!this.currentMetadataVector,
+        currentMetadataId: this.currentMetadataId || null,
+        hasCurrentCoordinates: !!this.currentCoordinates,
+        currentCoordinatesLength: this.currentCoordinates?.length || 0
+      })
       // console.log('Cannot update visualization - missing data or renderer')
       return
     }
@@ -2739,6 +3482,11 @@ export default class extends Controller {
     
     // Ensure we have the same number of values as coordinates
     if (values.length !== this.currentCoordinates.length) {
+      this.checkpointDebug('updateVisualizationWithMetadataVector:length-mismatch', {
+        metadataId: this.currentMetadataVector?.id || null,
+        valuesLength: values.length,
+        coordinatesLength: this.currentCoordinates?.length || 0
+      })
       console.error(`Mismatch: ${values.length} metadata values vs ${this.currentCoordinates.length} coordinates`)
       return
     }
@@ -3878,6 +4626,552 @@ export default class extends Controller {
     }
   }
 
+  escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  buildCheckpointState() {
+    const selectedEmbedding = this.getCurrentSelectedEmbeddingState()
+    const selectedCategories = {}
+    Object.entries(this.selectedCategories || {}).forEach(([metadataId, values]) => {
+      selectedCategories[metadataId] = Array.from(values || []).map(String).sort()
+    })
+
+    const selectedRanges = {}
+    Object.entries(this.selectedRanges || {}).forEach(([metadataId, range]) => {
+      selectedRanges[metadataId] = {
+        min: Number(range.min),
+        max: Number(range.max)
+      }
+    })
+
+    const metadataFoldState = {}
+    document.querySelectorAll('[data-action*="toggleMetadata"][data-metadata-id]').forEach((header) => {
+      const metadataId = header.dataset.metadataId
+      const chevron = header.querySelector('.fa-chevron-right')
+      const isExpanded = chevron && chevron.style.transform === 'rotate(90deg)'
+      metadataFoldState[metadataId] = !!isExpanded
+    })
+
+    const geneFoldState = {}
+    document.querySelectorAll('[data-gene-item]').forEach((geneEl) => {
+      const geneId = geneEl.dataset.geneItem
+      const rangeSection = geneEl.querySelector('.gene-range-section')
+      const isExpanded = rangeSection && rangeSection.style.display !== 'none'
+      geneFoldState[geneId] = !!isExpanded
+    })
+
+    const metadataFilterSwitches = {}
+    document.querySelectorAll('.metadata-filter-switch[data-metadata-id]').forEach((switchEl) => {
+      metadataFilterSwitches[switchEl.dataset.metadataId] = switchEl.dataset.filterEnabled === 'true'
+    })
+
+    const geneFilterSwitches = {}
+    document.querySelectorAll('.gene-filter-switch[data-gene-id]').forEach((switchEl) => {
+      geneFilterSwitches[switchEl.dataset.geneId] = switchEl.dataset.filterEnabled === 'true'
+    })
+
+    const categoryColorOverrides = {}
+    Object.keys(localStorage).forEach((key) => {
+      if (!key.startsWith('category_color_')) return
+      categoryColorOverrides[key] = localStorage.getItem(key)
+    })
+
+    const geneTags = Array.isArray(this.geneManager?.geneTags)
+      ? this.geneManager.geneTags.map((gene) => ({
+          stableId: String(gene.stableId),
+          symbol: gene.symbol,
+          ensemblId: gene.ensemblId
+        }))
+      : []
+
+    const selectedCells = Array.from(this.selectedCells || []).sort((a, b) => a - b)
+
+    const state = {
+      version: 1,
+      loomFile: this.getCurrentLoomFile(),
+      embedding: {
+        id: selectedEmbedding.id,
+        loomFile: selectedEmbedding.loomFile
+      },
+      visualizationEmbedding: {
+        id: selectedEmbedding.id,
+        loomFile: selectedEmbedding.loomFile,
+        name: selectedEmbedding.name,
+        dimension: selectedEmbedding.dimension
+      },
+      matrix: {
+        layer: this.geneManager?.currentMatrixLayer || null,
+        annotId: this.geneManager?.currentMatrixAnnotId || null
+      },
+      coloring: {
+        metadataId: this.currentMetadataId || null,
+        categoryColorOverrides: categoryColorOverrides,
+        customColorRange: this.customColorRange,
+        currentColorScheme: this.currentColorScheme
+      },
+      filters: {
+        selectedCategories: selectedCategories,
+        selectedRanges: selectedRanges,
+        metadataFilterSwitches: metadataFilterSwitches,
+        geneFilterSwitches: geneFilterSwitches,
+        globalFiltersEnabled: this.globalFiltersEnabled !== false
+      },
+      adaptColorRangeByMetadataId: { ...(this.adaptColorRangeByMetadataId || {}) },
+      axes: {
+        x: this.selectedXButton ? { metadataId: this.selectedXButton.metadataId, isGene: !!this.selectedXButton.isGene } : null,
+        y: this.selectedYButton ? { metadataId: this.selectedYButton.metadataId, isGene: !!this.selectedYButton.isGene } : null
+      },
+      foldState: {
+        metadata: metadataFoldState,
+        genes: geneFoldState
+      },
+      genes: {
+        tags: geneTags
+      },
+      display: {
+        pointSize: this.currentPointSize,
+        categoryOrder: this.categoryOrder,
+        numericalOrder: this.numericalOrder,
+        showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
+        showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
+        showCategories: !!document.getElementById('show-categories-checkbox')?.checked,
+        showLabelBoxes: this.showLabelBoxes !== false,
+        labelFontSizeMode: this.labelFontSizeMode,
+        labelFontSize: this.labelFontSize,
+        truncateLongLabels: this.truncateLongLabels !== false,
+        freezeMovedLabels: this.freezeMovedLabels !== false,
+        labelPlacementMode: this.labelPlacementMode
+      },
+      interaction: {
+        mode: this.interactionMode,
+        bounds: this.currentBounds || null
+      },
+      selection: {
+        selectedCells: selectedCells,
+        activeTab: document.getElementById('cells-tab')?.classList.contains('text-blue-600') ? 'cells' : 'gene-sets'
+      }
+    }
+
+    state.signature = this.computeCheckpointStateSignature(state)
+    return state
+  }
+
+  computeCheckpointStateSignature(state) {
+    const normalize = (value) => {
+      if (Array.isArray(value)) {
+        return value.map(normalize)
+      }
+      if (value && typeof value === 'object') {
+        const out = {}
+        Object.keys(value).sort().forEach((key) => {
+          if (key === 'signature') return
+          out[key] = normalize(value[key])
+        })
+        return out
+      }
+      return value
+    }
+    return JSON.stringify(normalize(state))
+  }
+
+  mergeCheckpointIntoHistory(checkpoint) {
+    if (!checkpoint || !checkpoint.id) return
+    const entry = { ...checkpoint }
+    if (entry.state) {
+      entry.state_signature = this.computeCheckpointStateSignature(entry.state)
+    }
+    const index = this.checkpointHistory.findIndex((item) => item.id === checkpoint.id)
+    if (index === -1) {
+      this.checkpointHistory.unshift(entry)
+    } else {
+      this.checkpointHistory[index] = { ...this.checkpointHistory[index], ...entry }
+    }
+  }
+
+  refreshCurrentCheckpointMatch() {
+    if (this.isApplyingCheckpointState) return
+    if (this.isRefreshingCheckpointMatch) return
+
+    const commentsBtn = document.getElementById('checkpoint-comments-btn')
+    if (!commentsBtn) return
+
+    const history = this.checkpointHistory || []
+    if (history.length === 0) {
+      this.currentMatchedCheckpointId = null
+      commentsBtn.style.opacity = '0.45'
+      commentsBtn.style.pointerEvents = 'none'
+      commentsBtn.title = 'No checkpoint matches current view'
+      return
+    }
+
+    this.isRefreshingCheckpointMatch = true
+    try {
+      const currentSignature = this.computeCheckpointStateSignature(this.buildCheckpointState())
+      const match = history.find((checkpoint) => {
+        if (checkpoint.state_signature) {
+          return checkpoint.state_signature === currentSignature
+        }
+        if (checkpoint.state) {
+          return this.computeCheckpointStateSignature(checkpoint.state) === currentSignature
+        }
+        return false
+      })
+
+      if (match) {
+        this.currentMatchedCheckpointId = match.id
+        commentsBtn.style.opacity = '1'
+        commentsBtn.style.pointerEvents = 'auto'
+        commentsBtn.title = 'Checkpoint comments'
+      } else {
+        this.currentMatchedCheckpointId = null
+        commentsBtn.style.opacity = '0.45'
+        commentsBtn.style.pointerEvents = 'none'
+        commentsBtn.title = 'No checkpoint matches current view'
+      }
+    } finally {
+      this.isRefreshingCheckpointMatch = false
+    }
+  }
+
+  async applyCheckpointState(state) {
+    if (!state || typeof state !== 'object') return
+
+    const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
+    const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null
+    const checkpointEmbeddingName = state.visualizationEmbedding?.name || null
+    let embeddingCoordinatesReady = !checkpointEmbeddingId
+    this.checkpointDebug('applyCheckpointState:start', {
+      checkpointEmbeddingId: checkpointEmbeddingId ? String(checkpointEmbeddingId) : null,
+      checkpointEmbeddingLoomFile,
+      checkpointEmbeddingName,
+      currentSelectedBeforeApply: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
+      currentLoomBeforeApply: this.currentLoomFile
+    })
+    if (checkpointEmbeddingId) {
+      const normalizedEmbeddingId = String(checkpointEmbeddingId)
+      let applyResult = this.applyEmbeddingSelection(normalizedEmbeddingId, checkpointEmbeddingLoomFile, {
+        skipLoad: true,
+        expectedEmbeddingName: checkpointEmbeddingName
+      })
+      if (!applyResult) {
+        const fallbackInfo = this.determineDefaultEmbedding()
+        if (fallbackInfo?.embedding?.id) {
+          applyResult = this.applyEmbeddingSelection(String(fallbackInfo.embedding.id), fallbackInfo.loomFile, {
+            skipLoad: true,
+            expectedEmbeddingName: this.getEmbeddingName(fallbackInfo.embedding)
+          })
+          this.checkpointDebug('applyCheckpointState:embedding-fallback-used', {
+            requestedEmbeddingId: normalizedEmbeddingId,
+            requestedEmbeddingName: checkpointEmbeddingName,
+            fallbackEmbeddingId: String(fallbackInfo.embedding.id),
+            fallbackLoomFile: fallbackInfo.loomFile
+          })
+        }
+      }
+
+      const resolvedEmbeddingId = String(applyResult?.embeddingId || '')
+      if (!resolvedEmbeddingId) {
+        this.checkpointDebug('applyCheckpointState:skip-embedding-load-no-resolve', {
+          requestedEmbeddingId: normalizedEmbeddingId,
+          requestedEmbeddingName: checkpointEmbeddingName,
+          requestedLoomFile: checkpointEmbeddingLoomFile
+        })
+      }
+
+      const targetLoomForLoad = applyResult?.loomFile || checkpointEmbeddingLoomFile || this.getCurrentLoomFile()
+      if (targetLoomForLoad) {
+        this.currentLoomFile = targetLoomForLoad
+        if (this.loomFileSelectTarget) {
+          this.loomFileSelectTarget.value = targetLoomForLoad
+        }
+        this.populateMetadataSelectForLoom(targetLoomForLoad)
+      }
+
+      if (this.hasMetadataSelectTarget && resolvedEmbeddingId) {
+        const hasOption = Array.from(this.metadataSelectTarget.options || []).some((option) => String(option.value) === resolvedEmbeddingId)
+        if (!hasOption) {
+          const option = document.createElement('option')
+          option.value = resolvedEmbeddingId
+          option.textContent = checkpointEmbeddingName || `Embedding ${normalizedEmbeddingId}`
+          this.metadataSelectTarget.appendChild(option)
+        }
+        this.metadataSelectTarget.value = resolvedEmbeddingId
+      }
+
+      const resolvedInfo = resolvedEmbeddingId
+        ? this.findEmbeddingById(resolvedEmbeddingId, targetLoomForLoad, checkpointEmbeddingName)
+        : null
+      if (resolvedInfo) {
+        this.updateEmbeddingSelectionLink(resolvedInfo.embedding, resolvedInfo.loomFile)
+        this.highlightSelectedEmbedding(String(resolvedInfo.embedding.id), resolvedInfo.loomFile)
+      }
+
+      if (resolvedEmbeddingId) {
+        try {
+          const loaded = await this.loadMetadataCoordinates(resolvedEmbeddingId)
+          embeddingCoordinatesReady = loaded === true && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+        } catch (error) {
+          embeddingCoordinatesReady = false
+          this.checkpointDebug('applyCheckpointState:loadMetadataCoordinates-threw', {
+            metadataId: resolvedEmbeddingId,
+            error: String(error?.message || error),
+            stack: error?.stack || null
+          })
+        }
+      }
+
+      // Force embedding UI to reflect the embedding that was just loaded.
+      // This is UI-only (skipLoad) and prevents stale default label display.
+      if (resolvedEmbeddingId) {
+        const uiSyncResult = this.applyEmbeddingSelection(resolvedEmbeddingId, targetLoomForLoad, {
+          skipLoad: true,
+          expectedEmbeddingName: checkpointEmbeddingName
+        })
+        if (!uiSyncResult) {
+          this.updateEmbeddingSelectionLink({
+            id: resolvedEmbeddingId,
+            display_name: checkpointEmbeddingName || `Embedding ${resolvedEmbeddingId}`,
+            name: checkpointEmbeddingName || `Embedding ${resolvedEmbeddingId}`
+          }, targetLoomForLoad || this.getCurrentLoomFile())
+        }
+        if (this.hasMetadataSelectTarget) {
+          this.metadataSelectTarget.value = resolvedEmbeddingId
+        }
+      }
+
+    }
+
+    if (this.geneManager && state.matrix) {
+      this.geneManager.currentMatrixLayer = state.matrix.layer || this.geneManager.currentMatrixLayer
+      this.geneManager.currentMatrixAnnotId = state.matrix.annotId || this.geneManager.currentMatrixAnnotId
+    }
+
+    this.selectedCategories = {}
+    Object.entries(state.filters?.selectedCategories || {}).forEach(([metadataId, values]) => {
+      this.selectedCategories[metadataId] = new Set((values || []).map(String))
+    })
+
+    this.selectedRanges = {}
+    Object.entries(state.filters?.selectedRanges || {}).forEach(([metadataId, range]) => {
+      this.selectedRanges[metadataId] = {
+        min: Number(range.min),
+        max: Number(range.max)
+      }
+    })
+
+    this.adaptColorRangeByMetadataId = { ...(state.adaptColorRangeByMetadataId || {}) }
+    this.setGlobalFiltersEnabled(state.filters?.globalFiltersEnabled !== false)
+
+    if (this.geneManager && Array.isArray(state.genes?.tags)) {
+      this.geneManager.geneTags = state.genes.tags.map((gene) => ({
+        stableId: String(gene.stableId),
+        symbol: gene.symbol,
+        ensemblId: gene.ensemblId,
+        query: gene.symbol
+      }))
+      await this.geneManager.processAllGenes()
+    }
+
+    if (state.display) {
+      this.categoryOrder = state.display.categoryOrder || this.categoryOrder
+      this.numericalOrder = state.display.numericalOrder || this.numericalOrder
+      this.showLabelBoxes = state.display.showLabelBoxes !== false
+      this.labelFontSizeMode = state.display.labelFontSizeMode || this.labelFontSizeMode
+      this.labelFontSize = Number(state.display.labelFontSize || this.labelFontSize)
+      this.truncateLongLabels = state.display.truncateLongLabels !== false
+      this.freezeMovedLabels = state.display.freezeMovedLabels !== false
+      this.labelPlacementMode = state.display.labelPlacementMode || this.labelPlacementMode
+
+      const pointSizeSlider = document.getElementById('point-size-slider')
+      if (pointSizeSlider && state.display.pointSize) {
+        pointSizeSlider.value = String(state.display.pointSize)
+        this.currentPointSize = Number(state.display.pointSize)
+        this.uiManager.updatePointSize(this.currentPointSize)
+      }
+
+      const gridCheckbox = document.getElementById('show-grid-checkbox')
+      if (gridCheckbox) {
+        gridCheckbox.checked = !!state.display.showGrid
+        this.toggleGrid()
+      }
+
+      const axesCheckbox = document.getElementById('show-axes-checkbox')
+      if (axesCheckbox) {
+        axesCheckbox.checked = !!state.display.showAxes
+        this.toggleAxes()
+      }
+
+      const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+      if (categoriesCheckbox) {
+        categoriesCheckbox.checked = !!state.display.showCategories
+        this.toggleCategories()
+      }
+    }
+
+    await this.restoreFoldAndSwitchState(state)
+    this.syncAdaptColorRangeState()
+    if (embeddingCoordinatesReady || (Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0)) {
+      await this.restoreColoringAndAxisState(state)
+    } else {
+      this.checkpointDebug('applyCheckpointState:skipping-color-restore-no-coordinates', {
+        checkpointEmbeddingId: checkpointEmbeddingId ? String(checkpointEmbeddingId) : null,
+        currentCoordinatesLength: this.currentCoordinates?.length || 0
+      })
+    }
+
+    if (state.interaction?.mode) {
+      this.setInteractionMode(state.interaction.mode)
+      this.updateButtonStates(state.interaction.mode)
+    }
+
+    if (state.interaction?.bounds) {
+      this.currentBounds = { ...state.interaction.bounds }
+      this.updatePointPositions()
+    }
+
+    if (Array.isArray(state.selection?.selectedCells)) {
+      this.selectedCells = new Set(state.selection.selectedCells.map((index) => Number(index)))
+      this.updateSelectionCount()
+      this.updateSelectedPointColors()
+    }
+
+    if (state.selection?.activeTab === 'gene-sets') {
+      const geneSetsTab = document.getElementById('gene-sets-tab')
+      if (geneSetsTab) {
+        geneSetsTab.click()
+      }
+    } else {
+      const cellsTab = document.getElementById('cells-tab')
+      if (cellsTab) {
+        cellsTab.click()
+      }
+    }
+
+    this.dataManager.updateCellFiltering(true)
+    if (this.metadataData?.id) {
+      this.syncEmbeddingUiToLoadedEmbedding(this.metadataData.id, this.metadataData.name || null)
+    }
+    this.updateAllRangeSliderButtonAppearances()
+    this.refreshCurrentCheckpointMatch()
+    this.checkpointDebug('applyCheckpointState:completed', {
+      finalSelectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
+      finalCurrentLoomFile: this.currentLoomFile,
+      finalLinkEmbeddingId: document.getElementById('embedding-selection-link')?.dataset?.selectedEmbeddingId || null,
+      finalLinkLoomFile: document.getElementById('embedding-selection-link')?.dataset?.currentLoomFile || null
+    })
+  }
+
+  syncAdaptColorRangeState() {
+    document.querySelectorAll('[data-controller="range-slider"]').forEach((sliderEl) => {
+      const controller = this.application.getControllerForElementAndIdentifier(sliderEl, 'range-slider')
+      if (!controller) return
+      const metadataId = controller.metadataIdValue
+      const enabled = this.adaptColorRangeByMetadataId?.[metadataId] === true
+      controller.adaptColorRangeEnabled = enabled
+      controller.updateButtonAppearance()
+    })
+  }
+
+  async restoreFoldAndSwitchState(state) {
+    const metadataFoldState = state.foldState?.metadata || {}
+    for (const [metadataId, shouldBeExpanded] of Object.entries(metadataFoldState)) {
+      const header = document.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
+      if (!header) continue
+      const chevron = header.querySelector('.fa-chevron-right')
+      const isExpanded = !!(chevron && chevron.style.transform === 'rotate(90deg)')
+      if (isExpanded !== !!shouldBeExpanded) {
+        await this.toggleMetadata({ currentTarget: header, timeStamp: performance.now() })
+      }
+    }
+
+    const geneFoldState = state.foldState?.genes || {}
+    for (const [geneId, shouldBeExpanded] of Object.entries(geneFoldState)) {
+      const geneElement = document.querySelector(`[data-gene-item="${geneId}"]`)
+      if (!geneElement) continue
+      const section = geneElement.querySelector('.gene-range-section')
+      const isExpanded = !!(section && section.style.display !== 'none')
+      if (isExpanded !== !!shouldBeExpanded) {
+        this.geneManager?.toggleGeneExpansion(geneId)
+      }
+    }
+
+    const metadataSwitches = state.filters?.metadataFilterSwitches || {}
+    Object.entries(metadataSwitches).forEach(([metadataId, enabled]) => {
+      const switchEl = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
+      if (!switchEl) return
+      const current = switchEl.dataset.filterEnabled === 'true'
+      if (current !== !!enabled) {
+        switchEl.click()
+      }
+    })
+
+    const geneSwitches = state.filters?.geneFilterSwitches || {}
+    Object.entries(geneSwitches).forEach(([geneId, enabled]) => {
+      const switchEl = document.querySelector(`.gene-filter-switch[data-gene-id="${geneId}"]`)
+      if (!switchEl) return
+      const current = switchEl.dataset.filterEnabled === 'true'
+      if (current !== !!enabled) {
+        switchEl.click()
+      }
+    })
+  }
+
+  async restoreColoringAndAxisState(state) {
+    if (state.coloring?.categoryColorOverrides) {
+      Object.entries(state.coloring.categoryColorOverrides).forEach(([storageKey, color]) => {
+        localStorage.setItem(storageKey, color)
+      })
+    }
+
+    const coloringMetadataId = state.coloring?.metadataId
+    if (coloringMetadataId) {
+      // Avoid toggle-off behavior when a water drop is already active from previous state.
+      this.resetAllWaterDropButtons()
+      const colorButton = document.querySelector(`[data-action*="waterDropClicked"][data-metadata-id="${coloringMetadataId}"], [data-action*="geneWaterDropClicked"][data-layer-metadata-id="${coloringMetadataId}"], [data-action*="geneWaterDropClicked"][data-metadata-id="${coloringMetadataId}"]`)
+      if (colorButton) {
+        this.setWaterDropButtonActive(colorButton)
+      }
+      // Apply coloring through the data path deterministically.
+      const loadedColorVector = await this.dataManager.loadAndVisualizeMetadataVector(String(coloringMetadataId))
+      this.checkpointDebug('restoreColoringAndAxisState:color-reapply', {
+        coloringMetadataId: String(coloringMetadataId),
+        colorButtonFound: !!colorButton,
+        loadedVector: !!loadedColorVector,
+        currentMetadataId: this.currentMetadataId || null,
+        currentMetadataVectorId: this.currentMetadataVector?.id || null
+      })
+    } else {
+      this.resetAllWaterDropButtons()
+      this.clearMetadataColoring()
+    }
+
+    if (state.axes?.x?.metadataId) {
+      const xButton = state.axes.x.isGene
+        ? document.querySelector(`.gene-x-btn[data-gene-id="${state.axes.x.metadataId}"]`)
+        : document.querySelector(`.categorical-x-btn[data-metadata-id="${state.axes.x.metadataId}"], .continuous-x-btn[data-metadata-id="${state.axes.x.metadataId}"]`)
+      if (xButton) xButton.click()
+    } else {
+      this.resetAllXButtons()
+      this.selectedXButton = null
+    }
+
+    if (state.axes?.y?.metadataId) {
+      const yButton = state.axes.y.isGene
+        ? document.querySelector(`.gene-y-btn[data-gene-id="${state.axes.y.metadataId}"]`)
+        : document.querySelector(`.continuous-y-btn[data-metadata-id="${state.axes.y.metadataId}"]`)
+      if (yButton) yButton.click()
+    } else {
+      this.resetAllYButtons()
+      this.selectedYButton = null
+    }
+  }
+
   // Toggle metadata categories (moved from inline JS)
   async toggleMetadata(event) {
     // Log the event timestamp to see if there's a delay before this function is called
@@ -4366,7 +5660,7 @@ export default class extends Controller {
     const button = event.currentTarget
     const metadataName = button.dataset.metadataName
     let metadataId = button.dataset.metadataId
-    const isCurrentlyActive = button.dataset.active === 'true'
+    const metadataLoomFile = button.dataset.metadataLoomFile || null
     
     // Debug: Check what attributes the button actually has
     // console.log('🔍 Button debugging:')
@@ -4435,6 +5729,25 @@ export default class extends Controller {
       console.error('Button dataset:', button.dataset)
       return
     }
+
+    const normalizedMetadataId = String(metadataId).trim()
+    const clickedMetadataType = String(button.dataset.metadataType || '').trim()
+    const currentColoringId = this.currentMetadataId ? String(this.currentMetadataId) : ''
+    const buttonClaimsActive = button.dataset.active === 'true'
+    const isCurrentlyActive = buttonClaimsActive && currentColoringId === normalizedMetadataId
+    this.checkpointTrace('waterDropClicked:start', {
+      metadataId: normalizedMetadataId,
+      metadataName: metadataName || null,
+      isCurrentlyActive,
+      isApplyingCheckpointState: !!this.isApplyingCheckpointState,
+      blockers: this.collectCheckpointUiBlockers()
+    })
+
+    // Checkpoint restore can leave stale data-active flags on buttons.
+    // Only treat a click as "toggle off" when the clicked metadata is truly the active coloring.
+    if (buttonClaimsActive && !isCurrentlyActive) {
+      button.dataset.active = 'false'
+    }
     
     // console.log('✅ Valid metadataId found:', metadataId)
     // console.log('Metadata name:', metadataName)
@@ -4502,11 +5815,11 @@ export default class extends Controller {
       if (isContinuousMetadata) {
         // console.log('Step 5: Continuous metadata detected - expanding panel')
         // Expand the continuous metadata panel to show histogram
-        this.expandContinuousMetadataPanel(metadataId, metadataName)
+        this.expandContinuousMetadataPanel(normalizedMetadataId, metadataName)
         // Continue to load and visualize below
       } else {
         // console.log('Step 5: Adding category colors for discrete metadata...')
-        this.addCategoryColors(metadataContainer, metadataId)
+        this.addCategoryColors(metadataContainer, normalizedMetadataId)
       }
     } else {
       console.warn('🎨 WARNING: Could not find metadata container, but continuing with metadata loading...')
@@ -4524,64 +5837,47 @@ export default class extends Controller {
     // Show loading spinner immediately
     this.uiManager.showMetadataDropdownSpinner()
     
-    // For continuous metadata, set the color range before visualizing
+    // Keep one deterministic async path for both NUMERIC and DISCRETE metadata.
+    // The previous numeric pre-load path could stall before visualization.
     if (button.dataset.metadataType === 'NUMERIC') {
-      // console.log('🎚️ Handling NUMERIC metadata for coloring')
-      // Load the metadata first to get the range
-      this.dataManager.loadSingleMetadataVector(metadataId).then(vectorData => {
-        // console.log('🎚️ Metadata loaded:', vectorData)
-        if (vectorData) {
-          // Decompress if needed
-          let values = vectorData.values
-          if (!values && vectorData.compressed_data) {
-            // console.log('🎚️ Decompressing numeric metadata...')
-            values = this.decompressMetadataVector(vectorData)
-          }
-          
-          if (values) {
-            // Check if there's already a selected range for this metadata - preserve it!
-            const existingRange = this.selectedRanges?.[metadataId]
-            
-            if (existingRange) {
-              // Preserve the existing range
-              // console.log('🎚️ Preserving existing range for continuous metadata:', existingRange)
-              this.setColorRange(existingRange.min, existingRange.max)
-            } else {
-              // No existing range - use full range
-              const minVal = this.dataManager.safeMin(values)
-              const maxVal = this.dataManager.safeMax(values)
-              // console.log('🎚️ Setting full color range for continuous metadata:', minVal, maxVal)
-              this.setColorRange(minVal, maxVal)
-            }
-            
-            // Now load and visualize
-            // console.log('🎚️ Calling loadAndVisualizeMetadataVector for metadataId:', metadataId)
-            return this.dataManager.loadAndVisualizeMetadataVector(metadataId)
-          } else {
-            console.error('❌ No values available after decompression')
-          }
-        } else {
-          console.error('❌ No vector data loaded')
-        }
+      const existingRange = this.selectedRanges?.[normalizedMetadataId]
+      if (existingRange && Number.isFinite(existingRange.min) && Number.isFinite(existingRange.max)) {
+        this.setColorRange(existingRange.min, existingRange.max)
+      }
+    }
+
+    const enforceClickedMetadataAsActive = () => {
+      if (String(this.currentMetadataId || '') === normalizedMetadataId) {
+        return
+      }
+      const loadedVector = this.loadedMetadataVectors?.[normalizedMetadataId]
+      if (!loadedVector) {
+        return
+      }
+      this.currentMetadataVector = loadedVector
+      this.currentMetadataId = normalizedMetadataId
+      this.colorManager.clearColorMapCache()
+      this.updateVisualizationWithMetadataVector()
+    }
+
+    this.dataManager.loadAndVisualizeMetadataVector(normalizedMetadataId, { loomFile: metadataLoomFile })
+      .then(() => {
+        enforceClickedMetadataAsActive()
+        requestAnimationFrame(() => {
+          enforceClickedMetadataAsActive()
+        })
       })
       .catch(error => {
-        console.error('❌ Error loading/visualizing metadata:', error)
+        console.error('Error loading metadata for coloring:', error)
       })
       .finally(() => {
-        // console.log('🎚️ Hiding spinner after continuous metadata processing')
         this.uiManager.hideMetadataDropdownSpinner()
+        this.checkpointTrace('waterDropClicked:done', {
+          metadataId: normalizedMetadataId,
+          currentMetadataId: this.currentMetadataId ? String(this.currentMetadataId) : null,
+          blockers: this.collectCheckpointUiBlockers()
+        })
       })
-    } else {
-      // For discrete metadata, just load and visualize directly
-      // console.log('📋 Calling loadAndVisualizeMetadataVector for discrete metadataId:', metadataId)
-      this.dataManager.loadAndVisualizeMetadataVector(metadataId)
-        .catch(error => {
-          console.error('❌ Error loading metadata:', error)
-        })
-        .finally(() => {
-          this.uiManager.hideMetadataDropdownSpinner()
-        })
-    }
     
     //console.log('=== WATER DROP CLICK COMPLETE ===')
   }
@@ -6001,15 +7297,12 @@ export default class extends Controller {
         if (this.rendererManager) {
           this.rendererManager.renderGrid()
           this.rendererManager.renderAxes()
-          
-          if (preservedMetadataVector) {
-            // Restore metadata vector reference
-            this.currentMetadataVector = preservedMetadataVector
-            this.currentMetadataId = preservedMetadataId
-            
-            if (preservedMetadataVector.data_type === 'DISCRETE' || preservedMetadataVector.data_type === 'STRING') {
+
+          const overlayMetadataVector = this.currentMetadataVector || preservedMetadataVector
+          if (overlayMetadataVector) {
+            if (overlayMetadataVector.data_type === 'DISCRETE' || overlayMetadataVector.data_type === 'STRING') {
               this.rendererManager.renderCategoryLabels()
-            } else if (preservedMetadataVector.data_type === 'NUMERIC') {
+            } else if (overlayMetadataVector.data_type === 'NUMERIC') {
               this.renderContinuousColorLegend()
             }
           }
@@ -6017,12 +7310,6 @@ export default class extends Controller {
         
         // console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
       }
-    }
-    
-    // Restore metadata vector reference before filtering (needed for filtering logic)
-    if (preservedMetadataVector && preservedMetadataId) {
-      this.currentMetadataVector = preservedMetadataVector
-      this.currentMetadataId = preservedMetadataId
     }
     
     // Now apply filtering (will update visibility and render)
@@ -6037,9 +7324,8 @@ export default class extends Controller {
         // Then apply coloring and remove overlay
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            // After filtering is applied, restore coloring if needed
-            if (preservedMetadataVector && preservedMetadataId && this.reglRenderer) {
-              // console.log('🔄 [RESIZE] Reapplying coloring after filtering...')
+            // After filtering is applied, restore coloring with the current active metadata state.
+            if (this.currentMetadataVector && this.currentMetadataId && this.reglRenderer) {
               this.renderPointsWithCurrentColoring()
             }
             
@@ -6055,13 +7341,9 @@ export default class extends Controller {
         })
       }
     } else {
-      // No filtering - restore coloring
-      if (preservedMetadataVector && preservedMetadataId) {
-        // console.log('🔄 [RESIZE] Restoring coloring state (no filtering)...')
-        if (this.reglRenderer) {
-          // console.log('🔄 [RESIZE] Reapplying coloring...')
-          this.renderPointsWithCurrentColoring()
-        }
+      // No filtering - restore coloring using current active metadata state.
+      if (this.currentMetadataVector && this.currentMetadataId && this.reglRenderer) {
+        this.renderPointsWithCurrentColoring()
       }
     }
     
@@ -6231,36 +7513,24 @@ export default class extends Controller {
     }
   }
 
-  updateMetadataClaColumns() {
+  updateMetadataClaColumns(panelWidthOverride = null) {
     const leftPanel = document.getElementById('left-panel')
-    if (!leftPanel) {
-      // eslint-disable-next-line no-console
-      console.debug('[Visualization] Left panel not found; skipping CLA column update')
+    if (!leftPanel) return
+
+    const panelWidth = typeof panelWidthOverride === 'number' ? panelWidthOverride : leftPanel.offsetWidth
+    const nextLayout = panelWidth > 400 ? 'wide' : 'compact'
+    if (this.lastMetadataClaLayout === nextLayout) {
       return
     }
-
-    const panelWidth = leftPanel.offsetWidth
-    // eslint-disable-next-line no-console
-    console.debug('[Visualization] Left panel width:', panelWidth)
-
-    const isWide = panelWidth > 400
-    // eslint-disable-next-line no-console
-    console.debug('[Visualization] Applying CLA column layout:', isWide ? 'wide' : 'compact')
+    this.lastMetadataClaLayout = nextLayout
+    const isWide = nextLayout === 'wide'
 
     document.querySelectorAll('.metadata-category-row').forEach(row => {
-      if (isWide) {
-        row.classList.add('metadata-category-row--wide')
-      } else {
-        row.classList.remove('metadata-category-row--wide')
-      }
+      row.classList.toggle('metadata-category-row--wide', isWide)
     })
 
     document.querySelectorAll('.metadata-category-header').forEach(header => {
-      if (isWide) {
-        header.classList.add('metadata-category-header--wide')
-      } else {
-        header.classList.remove('metadata-category-header--wide')
-      }
+      header.classList.toggle('metadata-category-header--wide', isWide)
     })
   }
 
@@ -12469,26 +13739,26 @@ export default class extends Controller {
   // Toggle inline range slider for numeric metadata
   // Expand continuous metadata panel and show histogram (no coloring)
   expandContinuousMetadataPanel(metadataId, metadataName) {
-    // console.log('🎚️ Expanding continuous metadata panel for:', metadataId, metadataName)
-    
     const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataCard) {
-      console.error('❌ Metadata card not found for ID:', metadataId)
+      console.error('Metadata card not found for ID:', metadataId)
       return
     }
     
     const rangeSection = metadataCard.querySelector('.metadata-range-section')
-    const chevron = metadataCard.querySelector('svg')
+    const chevron = metadataCard.querySelector('.fa-chevron-right, svg')
     
-    if (!rangeSection || !chevron) {
-      console.error('❌ Range section or chevron not found')
+    if (!rangeSection) {
+      console.error('Range section not found for metadata ID:', metadataId)
       return
     }
     
     // Expand the panel if not already expanded
     if (rangeSection.style.display !== 'block') {
       rangeSection.style.display = 'block'
-      chevron.style.transform = 'rotate(90deg)'
+      if (chevron) {
+        chevron.style.transform = 'rotate(90deg)'
+      }
     }
     
     // Initialize the range slider data (just for histogram, no coloring)

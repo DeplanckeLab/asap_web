@@ -536,8 +536,10 @@ module ApplicationHelper
   # Returns { waiting: N, running: N, completed: N, failed: N }
   def project_run_counts(project)
     totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    visible_step_ids = visible_step_ids_for_run_counts
     
     project.project_steps.each do |ps|
+      next unless visible_step_ids.include?(ps.step_id)
       next if ps.nber_runs_json.blank?
       
       json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
@@ -553,6 +555,10 @@ module ApplicationHelper
       completed: totals[3],
       failed: totals[4]
     }
+  end
+
+  def visible_step_ids_for_run_counts
+    @visible_step_ids_for_run_counts ||= Step.where.not(hidden: true).pluck(:id)
   end
 
   # Returns the URL to go back to the projects browse page

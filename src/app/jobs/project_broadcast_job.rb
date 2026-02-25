@@ -12,7 +12,9 @@ class ProjectBroadcastJob < ApplicationJob
     
     # Aggregate run counts across all project steps for header display
     run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    visible_step_ids = Step.where.not(hidden: true).pluck(:id)
     project.project_steps.each do |ps|
+      next unless visible_step_ids.include?(ps.step_id)
       next if ps.nber_runs_json.blank?
       json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
       json_data.each do |sid, count|

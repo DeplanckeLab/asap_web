@@ -299,6 +299,7 @@ class FusController < ApplicationController
         render json: { error: 'URL must use HTTP or HTTPS protocol' }, status: :bad_request
         return
       end
+      normalized_url = uri_obj.to_s
 
       # Extract filename from URL or use default
       filename = uri_obj.path.split('/').last.presence || 'downloaded_file'
@@ -309,6 +310,49 @@ class FusController < ApplicationController
       file_ext = '.txt' if file_ext.blank? # Default extension if none found
       input_filename = "input_file#{file_ext}"
 
+      # Temporary reuse optimization: if same URL was already downloaded by this user, reuse it.
+      reusable_fu = Fu.where(user_id: current_user.id, url: normalized_url)
+                      .where(status: %w[downloading uploaded preparsing preparsed completed])
+                      .order(updated_at: :desc)
+                      .detect do |candidate|
+        if candidate.status == 'downloading'
+          # Reuse only fresh in-progress downloads; stale records should not block new attempts.
+          candidate.updated_at && candidate.updated_at > 30.minutes.ago
+        else
+          path = candidate.file_path
+          path && File.exist?(path) && File.size(path) > 0
+        end
+      end
+
+      if reusable_fu
+        upload_path = reusable_fu.file_path
+        size = (upload_path && File.exist?(upload_path)) ? File.size(upload_path) : 0
+        status = reusable_fu.status == 'completed' ? 'uploaded' : reusable_fu.status
+        is_complete = %w[uploaded preparsing preparsed completed].include?(reusable_fu.status)
+
+        session[:file_upload] = {
+          fu_id: reusable_fu.id,
+          original_filename: reusable_fu.name.presence || filename,
+          input_filename: reusable_fu.upload_file_name,
+          path: upload_path&.to_s,
+          size: size,
+          total_size: reusable_fu.upload_file_size || size,
+          complete: is_complete,
+          organism_id: request_body['organism_id'] || safe_integer_param(:organism_id),
+          version_id: request_body['version_id'] || safe_integer_param(:version_id)
+        }
+
+        render json: {
+          success: true,
+          fu_id: reusable_fu.id,
+          filename: reusable_fu.name.presence || filename,
+          size: size,
+          status: status,
+          reused: true
+        }
+        return
+      end
+
       fu = Fu.create!(
         user_id: current_user.id,
         project_key: nil,
@@ -316,7 +360,7 @@ class FusController < ApplicationController
         upload_file_size: 0,
         status: 'downloading',
         name: filename,
-        url: url
+        url: normalized_url
       )
 
       # Get organism_id and version_id from request body (already parsed) or params
@@ -348,7 +392,7 @@ class FusController < ApplicationController
 
       FuDownloadFromUrlJob.perform_later(
         fu.id,
-        url,
+        normalized_url,
         organism_id: organism_id,
         version_id: version_id
       )

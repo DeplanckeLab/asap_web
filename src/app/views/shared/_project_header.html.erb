@@ -40,13 +40,14 @@
         <%
           # Get run counts from project_steps (more efficient than counting runs)
           run_counts = project_run_counts(@project)
+          visible_step_ids = visible_step_ids_for_run_counts
           
           # Only load actual runs for statuses that have runs (for dropdown lists)
           runs_by_status = {}
           [:waiting, :running, :completed, :failed].each do |key|
             status_id = { waiting: 1, running: 2, completed: 3, failed: 4 }[key]
             if run_counts[key] > 0
-              runs_by_status[key] = @project.runs.includes(:step, :std_method).where(status_id: status_id).order(created_at: :desc)
+              runs_by_status[key] = @project.runs.includes(:step, :std_method).where(status_id: status_id, step_id: visible_step_ids).order(created_at: :desc)
             else
               runs_by_status[key] = []
             end

@@ -18,7 +18,7 @@
     <% unless @show_form %>
     <!-- Custom Form (when std_form is false for single-run steps) -->
     <% if @show_custom_form %>
-      <% custom_form_partial = "projects/views/#{@step.name}_form" %>
+      <% custom_form_partial = "projects/views/#{@step.name}" %>
       <% begin %>
         <%= render custom_form_partial %>
       <% rescue ActionView::MissingTemplate => e %>
@@ -117,7 +117,7 @@
     <% end %>
     
     <!-- Debug info: Show what display mode is active -->
-    <% if @show_dashboard || @show_view || @show_form || @show_custom_form %>
+    <% if Rails.env.development? && (@show_dashboard || @show_view || @show_form || @show_custom_form) %>
       <div class="mb-3">
         <div class="alert alert-secondary">
           <strong>Step Configuration:</strong> multiple_runs=<%= @step.multiple_runs %>, has_std_view=<%= @step.has_std_view %>, has_std_dashboard=<%= @step.has_std_dashboard %>, has_std_form=<%= @step.has_std_form %> | 

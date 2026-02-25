@@ -3394,7 +3394,10 @@ class ProjectsController < ApplicationController
     # Each project_step has nber_runs_json like {"3": 1, "4": 2} where key is status_id
     totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
     
+    visible_step_ids = Step.where.not(hidden: true).pluck(:id)
+
     @project.project_steps.each do |ps|
+      next unless visible_step_ids.include?(ps.step_id)
       next if ps.nber_runs_json.blank?
       
       json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json

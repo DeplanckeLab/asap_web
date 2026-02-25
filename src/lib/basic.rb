@@ -297,6 +297,64 @@ module Basic
       asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       return asap_docker_image
     end
+
+    def get_asap_docker_for_markers project
+      version = project.version
+      asap_docker_image = get_asap_docker(version)
+      return asap_docker_image if !asap_docker_image
+
+      # FindMarkers is not available in ASAP v4; pin only this step to v5.
+      if asap_docker_image.tag == 'v4'
+        return DockerImage.find_by!(name: asap_docker_image.name, tag: 'v5')
+      end
+
+      asap_docker_image
+    end
+
+    def marker_groups_annot_id project, meta
+      cloned_project_id = project.respond_to?(:cloned_project_id) ? project.cloned_project_id : nil
+      return meta.id if cloned_project_id.blank?
+
+      source_meta = Annot.where(
+        project_id: cloned_project_id,
+        name: meta.name,
+        latest_version: true
+      ).order(version_nber: :desc, id: :desc).first
+
+      if source_meta.nil?
+        raise "Unable to resolve source metadata for cloned project #{project.key} and annot #{meta.name}"
+      end
+
+      source_meta.id
+    end
+
+    def ensure_markers_original_gene_attr logger, loom_filename
+      return if loom_filename.blank? || !File.exist?(loom_filename)
+
+      py_script = <<~PY
+        import h5py
+        p = #{loom_filename.to_s.inspect}
+        with h5py.File(p, "r+") as f:
+            if "row_attrs" not in f:
+                raise RuntimeError("Loom row_attrs group is missing")
+            row = f["row_attrs"]
+            if "Original_Gene" in row:
+                print("original_gene_exists")
+            elif "Gene" in row:
+                data = row["Gene"][...]
+                row.create_dataset("Original_Gene", data=data)
+                print("original_gene_created")
+            else:
+                raise RuntimeError("Loom row_attrs/Gene dataset is missing")
+      PY
+
+      require 'open3'
+      out, err, status = Open3.capture3('docker', 'exec', '-i', 'asap_run', 'python', '-', stdin_data: py_script)
+      if !status.success?
+        raise "Failed to ensure /row_attrs/Original_Gene in loom file #{loom_filename}: #{out} #{err}"
+      end
+      logger.debug("[FindMarkers] #{out.strip}") unless out.to_s.strip.empty?
+    end
     
     def find_marker_enrichment logger, project, meta, find_marker_run, user_id
       t = Time.now
@@ -308,6 +366,12 @@ module Basic
       #   docker_images = DockerImage.where("full_name in (#{list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all
       #   asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       asap_docker_image = get_asap_docker(version)
+      runtime_marker_docker_image = get_asap_docker_for_markers(project)
+      marker_docker_entry = h_env['docker_images'] && h_env['docker_images']['asap_run']
+      if marker_docker_entry && runtime_marker_docker_image
+        marker_docker_entry['name'] = runtime_marker_docker_image.name
+        marker_docker_entry['tag'] = runtime_marker_docker_image.tag
+      end
       
 #      find_marker_step = Step.where(:version_id => project.version_id, :name => 'markers').first
       find_marker_step = Step.where(:docker_image_id => asap_docker_image.id, :name => 'markers').first 
@@ -427,6 +491,12 @@ module Basic
       #      docker_images = DockerImage.where("full_name in (#{list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all
       #      asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
       asap_docker_image = get_asap_docker(version)
+      runtime_marker_docker_image = get_asap_docker_for_markers(project)
+      marker_docker_entry = h_env['docker_images'] && h_env['docker_images']['asap_run']
+      if marker_docker_entry && runtime_marker_docker_image
+        marker_docker_entry['name'] = runtime_marker_docker_image.name
+        marker_docker_entry['tag'] = runtime_marker_docker_image.tag
+      end
       #find_marker_step = Step.where(:version_id => project.version_id, :name => 'markers').first
       find_marker_step = Step.where(:docker_image_id => asap_docker_image.id, :name => 'markers').first 
 
@@ -453,6 +523,8 @@ module Basic
       DataClass.all.map{|dc| h_data_classes[dc.id] = dc}
       
       if matrix and meta #and last_run
+        marker_groups_id = marker_groups_annot_id(project, meta)
+        ensure_markers_original_gene_attr(logger, project_dir + meta.filepath)
         h_attrs = {
   #        #        {"input_de":{"annot_id":168794,"run_id":32390},"fdr_cutoff":"0.05","fc_cutoff":"2","gene_set_id":"672","adj_method":"fdr","min":"15","max":"500"}
 #          :input_matrix_filename => project_dir + meta.filepath,
@@ -460,7 +532,7 @@ module Basic
           :input_matrix => {"annot_id" => matrix.id,"run_id" => matrix.run_id},
           :groups_filename => project_dir + meta.filepath, #[{:annot_id => matrix.id, :run_id => matrix.run_id, :output_filename => matrix.filepath}],
           :groups_dataset => meta.name,
-          :groups_id => meta.id
+          :groups_id => marker_groups_id
         }
 
         h_run = {
@@ -583,8 +655,15 @@ module Basic
           #          #          end
 
           ### need to add the children
-          children_runs = JSON.parse(matrix_run.children_run_ids)
-          children_runs.push run.id if !children_runs.include? run.id
+          children_runs_raw = Basic.safe_parse_json(matrix_run.children_run_ids, [])
+          children_runs = if children_runs_raw.is_a?(Array)
+                            children_runs_raw
+                          elsif children_runs_raw.nil?
+                            []
+                          else
+                            [children_runs_raw]
+                          end
+          children_runs.push(run.id) unless children_runs.include?(run.id)
           matrix_run.update_attribute(:children_run_ids, children_runs.to_json)
           
         end

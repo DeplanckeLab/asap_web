@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_annot_info]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_annot_info get_annot_evidences]
 
   # GET /projects or /projects.json
   def index
@@ -832,7 +832,7 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[ProjectsController#create] session_fu_id (resolved): #{session_fu_id.inspect} (#{session_fu_id.class})")
       Rails.logger.info("[ProjectsController#create] session_path (resolved): #{session_path.inspect}")
       
-      if session_complete && session_fu_id
+      if session_fu_id
         fu_id = session_fu_id
         # Fu records are created with current_user.id, so use that to find the record
         search_user_id = current_user&.id
@@ -867,7 +867,7 @@ class ProjectsController < ApplicationController
           Rails.logger.info("[ProjectsController#create] ✓ Successfully found Fu record: id=#{input_file.id}, user_id=#{input_file.user_id}, upload_file_name=#{input_file.upload_file_name}")
     end
       else
-        Rails.logger.warn("[ProjectsController#create] Session check failed - complete: #{session_complete.inspect}, fu_id: #{session_fu_id.inspect}")
+        Rails.logger.warn("[ProjectsController#create] Session check failed - fu_id: #{session_fu_id.inspect}")
       end
     else
       Rails.logger.warn("[ProjectsController#create] No session[:file_upload] found")
@@ -2239,6 +2239,110 @@ class ProjectsController < ApplicationController
       cat_idx: cat_idx,
       cat_name: cat_name,
       clas: cla_data
+    }
+  end
+
+  # GET /projects/1/get_annot_evidences?annot_id=123&cat_idx=0
+  def get_annot_evidences
+    annot_id = params[:annot_id].to_i
+    cat_idx = params[:cat_idx].to_i
+
+    annot = Annot.find_by(id: annot_id, project_id: @project.id)
+    return render(json: { error: 'Annotation not found' }, status: :not_found) unless annot
+
+    unless marker_compatible_metadata?(annot)
+      return render json: {
+        state: 'unsupported',
+        message: 'FindMarkers evidences are available only for categorical metadata (for example clustering or selections).',
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    run_data = find_or_start_marker_run_for_annot(annot)
+    marker_run = run_data[:run]
+    return render(json: { state: 'error', message: run_data[:error] || 'Unable to initialize FindMarkers run.', rows_up: [], rows_down: [] }) unless marker_run
+
+    status_id = marker_run.status_id.to_i
+    status_name = marker_run.status&.name.to_s
+
+    if status_id == 1
+      msg = if marker_run.slurm_job_id.present?
+              'FindMarkers is queued for execution.'
+            elsif run_data[:submitted]
+              'FindMarkers was queued. Waiting for scheduler assignment.'
+            else
+              'FindMarkers is pending scheduling.'
+            end
+      return render json: {
+        state: 'queued',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: msg,
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    if [2, 6].include?(status_id)
+      msg = run_data[:started] ? 'FindMarkers started for this category. Results will appear when the run is complete.' : 'FindMarkers is running for this category.'
+      return render json: {
+        state: 'running',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: msg,
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    if status_id == 4
+      return render json: {
+        state: 'failed',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: 'FindMarkers failed for this category. Retry once the run issue is resolved.',
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    unless status_id == 3
+      return render json: {
+        state: 'running',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: 'FindMarkers status is being updated. Please refresh in a few seconds.',
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    parsed = parse_marker_rows_for_category(marker_run, cat_idx)
+    if parsed[:error]
+      return render json: {
+        state: 'failed',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: parsed[:error],
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    render json: {
+      state: 'completed',
+      run_id: marker_run.id,
+      status_id: status_id,
+      status_name: status_name,
+      message: "FindMarkers evidences loaded for category #{cat_idx + 1}.",
+      rows_up: parsed[:rows_up],
+      rows_down: parsed[:rows_down]
     }
   end
 
@@ -3880,6 +3984,110 @@ class ProjectsController < ApplicationController
   end
 
   private
+
+  def find_or_start_marker_run_for_annot(annot)
+    marker_run = marker_run_for_annot(annot)
+    started = false
+    submitted = false
+
+    if marker_run.nil? || marker_run.status_id.to_i == 4
+      user_id = current_user&.id || @project.user_id
+      res = Basic.find_markers(Rails.logger, @project, annot, user_id)
+      marker_run = res[:run]
+      started = marker_run.present?
+    end
+
+    if marker_run && marker_run.status_id.to_i == 1 && marker_run.slurm_job_id.blank? && marker_run.req_id.blank?
+      Basic.exec_run(Rails.logger, marker_run)
+      submitted = true
+    end
+
+    marker_run&.reload
+    { run: marker_run, started: started, submitted: submitted, error: marker_run ? nil : 'Marker run could not be created.' }
+  rescue StandardError => e
+    Rails.logger.error("[get_annot_evidences] find_or_start_marker_run_for_annot failed: #{e.class} - #{e.message}")
+    { run: nil, started: false, submitted: false, error: e.message }
+  end
+
+  def marker_run_for_annot(annot)
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    return nil unless asap_docker_image
+
+    marker_step = Step.find_by(docker_image_id: asap_docker_image.id, name: 'markers')
+    return nil unless marker_step
+
+    matrix_annot = Annot.find_by(project_id: @project.id, dim: 3, name: '/matrix', filepath: annot.filepath)
+    return nil unless matrix_annot
+
+    marker_groups_id = Basic.marker_groups_annot_id(@project, annot)
+    attrs = {
+      input_matrix: { 'annot_id' => matrix_annot.id, 'run_id' => matrix_annot.run_id },
+      groups_filename: project_data_dir + annot.filepath,
+      groups_dataset: annot.name,
+      groups_id: marker_groups_id
+    }
+
+    Run.where(project_id: @project.id, step_id: marker_step.id, attrs_json: attrs.to_json).order(id: :desc).first
+  end
+
+  def parse_marker_rows_for_category(marker_run, cat_idx)
+    marker_file = project_data_dir + 'markers' + marker_run.id.to_s + "cat_#{cat_idx + 1}.tsv"
+    return { error: 'FindMarkers output is not available yet. Please refresh shortly.' } unless File.exist?(marker_file)
+
+    rows_up = []
+    rows_down = []
+    fdr_cutoff = 0.05
+    fc_cutoff = Math.log2(2.0)
+    max_rows_per_group = 100
+
+    File.foreach(marker_file).with_index do |line, line_idx|
+      next if line_idx.zero? && line.include?('gene')
+      cols = line.rstrip.split("\t")
+      next if cols.size < 9
+
+      log2fc = cols[4].to_f
+      p_value = cols[5].to_f
+      fdr = cols[6].to_f
+      next if fdr > fdr_cutoff
+      next if log2fc.abs < fc_cutoff
+
+      row = {
+        gene_id: cols[0].to_s,
+        gene: cols[2].to_s,
+        log2fc: log2fc.round(4),
+        p_value: p_value,
+        fdr: fdr
+      }
+
+      if log2fc >= 0
+        rows_up << row if rows_up.size < max_rows_per_group
+      else
+        rows_down << row if rows_down.size < max_rows_per_group
+      end
+
+      break if rows_up.size >= max_rows_per_group && rows_down.size >= max_rows_per_group
+    end
+
+    { rows_up: rows_up, rows_down: rows_down }
+  rescue StandardError => e
+    Rails.logger.error("[get_annot_evidences] parse_marker_rows_for_category failed: #{e.class} - #{e.message}")
+    { error: e.message }
+  end
+
+  def project_data_dir
+    Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+  end
+
+  def marker_compatible_metadata?(annot)
+    return false unless annot
+
+    data_type = annot.data_type
+    return false unless data_type
+    return false unless data_type.name.to_s == 'DISCRETE'
+    return false if annot.nber_cats.to_i <= 1
+
+    true
+  end
 
   def run_de_filter(annots, h_de_filter)
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key

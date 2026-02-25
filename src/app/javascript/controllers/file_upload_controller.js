@@ -49,6 +49,8 @@ export default class extends Controller {
     this.originalFilename = null  // Store original uploaded filename
     this.preparsingSubscription = null
     this.preparsingStatusPollInterval = null  // For polling preparsing status
+    this.downloadStatusPollInterval = null
+    this.downloadCompletionHandled = false
     this.isPreparsingComplete = false
     this.hasMatrixData = false  // Track if we have actual matrix/dataset data
     this.selectedDatasetIndex = null
@@ -162,6 +164,7 @@ export default class extends Controller {
     }
     
     this.teardownPreparsingSubscription()
+    this.stopDownloadStatusPoll()
     if (this.projectNameInputHandler && this.projectNameInputElement) {
       this.projectNameInputElement.removeEventListener('input', this.projectNameInputHandler)
       this.projectNameInputHandler = null
@@ -583,6 +586,141 @@ export default class extends Controller {
     if (this.hasStatusTarget) {
       this.statusTarget.textContent = `Uploading... ${this.formatBytes(uploaded)} / ${this.formatBytes(total)}`
     }
+  }
+
+  updateDownloadProgress(downloaded, total) {
+    const downloadedValue = Number(downloaded) || 0
+    const totalValue = Number(total) || 0
+
+    if (this.hasProgressTarget) {
+      this.progressTarget.classList.remove('hidden')
+    }
+
+    if (totalValue > 0) {
+      const percentage = Math.min(100, Math.max(0, Math.round((downloadedValue / totalValue) * 100)))
+      if (this.hasPercentageTarget) {
+        this.percentageTarget.textContent = percentage + '%'
+      }
+      if (this.hasProgressBarTarget) {
+        this.progressBarTarget.style.width = percentage + '%'
+      }
+      if (this.hasStatusTarget) {
+        this.statusTarget.textContent = `Downloading... ${this.formatBytes(downloadedValue)} / ${this.formatBytes(totalValue)}`
+      }
+      return
+    }
+
+    if (this.hasPercentageTarget) {
+      this.percentageTarget.textContent = '...'
+    }
+    if (this.hasProgressBarTarget) {
+      // Keep a visible bar even when remote content-length is unavailable.
+      this.progressBarTarget.style.width = '100%'
+    }
+    if (this.hasStatusTarget) {
+      this.statusTarget.textContent = `Downloading... ${this.formatBytes(downloadedValue)}`
+    }
+  }
+
+  stopDownloadStatusPoll() {
+    if (this.downloadStatusPollInterval) {
+      clearInterval(this.downloadStatusPollInterval)
+      this.downloadStatusPollInterval = null
+    }
+  }
+
+  startDownloadStatusPoll(fuId) {
+    if (!fuId) return
+    this.stopDownloadStatusPoll()
+    this.downloadCompletionHandled = false
+
+    this.downloadStatusPollInterval = setInterval(async () => {
+      try {
+        const csrfToken = document.querySelector('[name="csrf-token"]')?.content
+        const response = await fetch(`/fus/upload_status?fu_id=${encodeURIComponent(fuId)}`, {
+          method: 'GET',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+            'Accept': 'application/json'
+          }
+        })
+
+        if (!response.ok) return
+        const status = await response.json()
+        if (!status || status.exists !== true) return
+
+        this.updateDownloadProgress(status.size, status.total_size)
+
+        if (status.status === 'download_failed') {
+          this.stopDownloadStatusPoll()
+          this.resetDownloadButtonState()
+          if (this.hasStatusTarget) {
+            this.statusTarget.textContent = 'Download failed on server'
+            this.statusTarget.classList.remove('text-gray-600', 'text-green-600', 'text-yellow-600')
+            this.statusTarget.classList.add('text-red-600')
+          }
+          return
+        }
+
+        const isReadyForPreparsingFlow = (
+          status.status === 'uploaded' ||
+          status.status === 'preparsing' ||
+          status.status === 'preparsed'
+        )
+
+        if (isReadyForPreparsingFlow) {
+          this.stopDownloadStatusPoll()
+          this.handleDownloadCompletedFromStatus(status)
+        }
+      } catch (error) {
+        console.error('[FileUpload] Error polling download status:', error)
+      }
+    }, 1000)
+  }
+
+  resetDownloadButtonState() {
+    if (this.hasDownloadUrlButtonTarget) {
+      this.downloadUrlButtonTarget.disabled = false
+      this.downloadUrlButtonTarget.textContent = 'Download'
+    }
+  }
+
+  handleDownloadCompletedFromStatus(status) {
+    if (this.downloadCompletionHandled) return
+    this.downloadCompletionHandled = true
+
+    this.isUploadComplete = true
+    this.updateResetButtonState()
+
+    const completedFilename = status.filename || this.originalFilename || 'downloaded file'
+    this.originalFilename = completedFilename
+    const lastDotIndex = this.originalFilename.lastIndexOf('.')
+    if (lastDotIndex > 0) {
+      this.originalFilename = this.originalFilename.substring(0, lastDotIndex)
+    }
+
+    if (this.hasInputFilenameTarget) {
+      this.inputFilenameTarget.value = status.input_filename || 'input_file'
+    }
+
+    if (this.hasStatusTarget) {
+      this.statusTarget.textContent = 'Download complete!'
+      this.statusTarget.classList.remove('text-gray-600', 'text-yellow-600', 'text-red-600')
+      this.statusTarget.classList.add('text-green-600')
+    }
+
+    if (this.fuId) {
+      this.subscribeToPreparsing(this.fuId)
+      // Ensure status transitions even if websocket connect is delayed.
+      this.checkPreparsingStatus(this.fuId)
+      this.startPreparsingStatusPoll(this.fuId)
+    }
+
+    this.displayUploadSuccess('downloaded', completedFilename, status.size)
+    this.showPreparsingPanel()
+    this.setPreparsingStatus('Download complete. Checking preparsing status...', 'info', true)
+    this.checkSubmitButton()
+    this.resetDownloadButtonState()
   }
 
   formatBytes(bytes) {
@@ -2111,48 +2249,19 @@ export default class extends Controller {
       })
 
       const result = await response.json()
-
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to download file from URL')
+        throw new Error(result.error || 'Failed to initialize URL download')
       }
 
       this.fuId = result.fu_id
-      this.isUploadComplete = true
-      this.updateResetButtonState()
-      
-      // Extract filename from URL or use default
-      try {
-        const urlObj = new URL(url)
-        const pathParts = urlObj.pathname.split('/').filter(p => p)
-        const filename = pathParts[pathParts.length - 1] || 'downloaded_file'
-        this.originalFilename = filename
-        const lastDotIndex = this.originalFilename.lastIndexOf('.')
-        if (lastDotIndex > 0) {
-          this.originalFilename = this.originalFilename.substring(0, lastDotIndex)
-        }
-      } catch (e) {
-        this.originalFilename = 'downloaded_file'
+      if (this.hasFilenameTarget) {
+        this.filenameTarget.textContent = result.filename || 'downloaded_file'
       }
-
-      if (this.hasInputFilenameTarget) {
-        this.inputFilenameTarget.value = result.filename || 'downloaded_file'
+      if (this.hasProgressTarget) {
+        this.progressTarget.classList.remove('hidden')
       }
-
-      if (this.hasStatusTarget) {
-        this.statusTarget.textContent = 'Download complete!'
-        this.statusTarget.classList.remove('text-gray-600', 'text-yellow-600', 'text-red-600')
-        this.statusTarget.classList.add('text-green-600')
-      }
-
-      // Subscribe to preparsing updates
-      if (this.fuId) {
-        this.subscribeToPreparsing(this.fuId)
-      }
-
-      this.displayUploadSuccess('downloaded', result.filename || this.originalFilename || 'downloaded file', result.size)
-      this.showPreparsingPanel()
-      this.setPreparsingStatus('Download complete. Preparsing will start automatically.', 'info', true)
-      this.checkSubmitButton()
+      this.updateDownloadProgress(0, 0)
+      this.startDownloadStatusPoll(this.fuId)
 
     } catch (error) {
       console.error('Error downloading from URL:', error)
@@ -2161,11 +2270,8 @@ export default class extends Controller {
         this.statusTarget.classList.remove('text-gray-600', 'text-green-600', 'text-yellow-600')
         this.statusTarget.classList.add('text-red-600')
       }
-    } finally {
-      if (this.hasDownloadUrlButtonTarget) {
-        this.downloadUrlButtonTarget.disabled = false
-        this.downloadUrlButtonTarget.textContent = 'Download'
-      }
+      this.stopDownloadStatusPoll()
+      this.resetDownloadButtonState()
     }
   }
 
@@ -2403,6 +2509,7 @@ export default class extends Controller {
     
     // Unsubscribe from preparsing updates
     this.teardownPreparsingSubscription()
+    this.stopDownloadStatusPoll()
 
     // Reset parsing parameters
     this.parsingParams = {

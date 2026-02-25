@@ -4,7 +4,7 @@ import { Controller } from "@hotwired/stimulus"
 console.log('🔵 [OrganismSelector] JavaScript file loaded!')
 
 export default class extends Controller {
-  static targets = ["dropdownButton", "dropdownMenu", "groupHeader", "groupContent", "groupChevron", "option", "hiddenInput", "selectedText", "chevron"]
+  static targets = ["dropdownButton", "dropdownMenu", "groupHeader", "groupContent", "groupChevron", "option", "hiddenInput", "selectedText", "chevron", "searchInput"]
 
   connect() {
     console.log('=== [OrganismSelector] Controller connecting... ===')
@@ -94,12 +94,16 @@ export default class extends Controller {
       if (this.hasChevronTarget) {
         this.chevronTarget.classList.add('rotate-180')
       }
+      if (this.hasSearchInputTarget) {
+        this.searchInputTarget.focus()
+      }
     } else {
       console.log('[OrganismSelector] Closing dropdown')
       this.dropdownMenuTarget.classList.add('hidden')
       if (this.hasChevronTarget) {
         this.chevronTarget.classList.remove('rotate-180')
       }
+      this.clearFilter()
     }
   }
 
@@ -162,6 +166,56 @@ export default class extends Controller {
         this.chevronTarget.classList.remove('rotate-180')
       }
     }
+    this.isOpen = false
+    this.clearFilter()
+  }
+
+  preventDropdownCloseOnInput(event) {
+    event.stopPropagation()
+  }
+
+  filterOptions() {
+    const query = this.hasSearchInputTarget ? this.searchInputTarget.value.trim().toLowerCase() : ''
+
+    this.groupContentTargets.forEach(content => {
+      const options = Array.from(content.querySelectorAll('[data-organism-id]'))
+      let visibleCount = 0
+
+      options.forEach(option => {
+        const haystack = option.dataset.searchText || option.textContent.toLowerCase()
+        const matches = query === '' || haystack.includes(query)
+        option.classList.toggle('hidden', !matches)
+        if (matches) {
+          visibleCount += 1
+        }
+      })
+
+      const header = content.previousElementSibling
+      const chevron = header?.querySelector('[data-organism-selector-target="groupChevron"]')
+
+      if (header) {
+        header.classList.toggle('hidden', visibleCount === 0)
+      }
+
+      if (visibleCount === 0) {
+        content.classList.add('hidden')
+        if (chevron) {
+          chevron.style.transform = 'rotate(0deg)'
+        }
+      } else if (query !== '') {
+        content.classList.remove('hidden')
+        if (chevron) {
+          chevron.style.transform = 'rotate(90deg)'
+        }
+      }
+    })
+  }
+
+  clearFilter() {
+    if (this.hasSearchInputTarget) {
+      this.searchInputTarget.value = ''
+    }
+    this.filterOptions()
   }
 
   closeOnOutsideClick(event) {
@@ -299,6 +353,22 @@ export default class extends Controller {
     return true
   }
 
+  addSearchInputToDropdown() {
+    const searchWrapper = document.createElement('div')
+    searchWrapper.className = 'sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2'
+
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = 'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
+    input.placeholder = 'Search organisms...'
+    input.autocomplete = 'off'
+    input.setAttribute('data-organism-selector-target', 'searchInput')
+    input.setAttribute('data-action', 'input->organism-selector#filterOptions click->organism-selector#preventDropdownCloseOnInput keydown->organism-selector#preventDropdownCloseOnInput')
+
+    searchWrapper.appendChild(input)
+    this.dropdownMenuTarget.appendChild(searchWrapper)
+  }
+
   updateOrganismDropdown(groups) {
     if (!this.hasDropdownMenuTarget) {
       return
@@ -306,6 +376,7 @@ export default class extends Controller {
 
     // Clear existing content
     this.dropdownMenuTarget.innerHTML = ''
+    this.addSearchInputToDropdown()
 
     // Build new content
     groups.forEach(group => {
@@ -351,6 +422,7 @@ export default class extends Controller {
         option.type = 'button'
         option.className = 'w-full px-6 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors'
         option.setAttribute('data-organism-id', org.id)
+        option.setAttribute('data-search-text', `${org.display_name || ''} ${org.tax_id || ''}`.toLowerCase())
         option.setAttribute('data-organism-selector-target', 'option')
         option.setAttribute('data-action', 'click->organism-selector#selectOrganism')
 
@@ -374,6 +446,7 @@ export default class extends Controller {
     })
 
     console.log('[OrganismSelector] Updated organism dropdown with', groups.length, 'groups')
+    this.filterOptions()
   }
 }
 

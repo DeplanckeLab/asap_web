@@ -17,8 +17,11 @@ class FusController < ApplicationController
     filename.gsub!(/[()\[\]#?$]/, '')
     
     # Extract file extension and create input filename
-    file_ext = File.extname(filename)
-    input_filename = "input_file#{file_ext}"
+    input_filename = nil
+    if filename.present?
+      file_ext = File.extname(filename)
+      input_filename = "input_file#{file_ext}"
+    end
     
     # Find or create Fu record for tracking resumable upload
     # Project key will be set later when project is created
@@ -217,15 +220,18 @@ class FusController < ApplicationController
     filename = params[:filename]
     fu_id = params[:fu_id]
     
-    unless filename
+    unless filename.present? || fu_id.present?
       render json: { exists: false, size: 0, total_size: 0, complete: false }
       return
     end
     
     # Find existing Fu record for this upload
     # If fu_id provided, use it; otherwise find most recent upload for this user/filename
-    file_ext = File.extname(filename)
-    input_filename = "input_file#{file_ext}"
+    input_filename = nil
+    if filename.present?
+      file_ext = File.extname(filename)
+      input_filename = "input_file#{file_ext}"
+    end
     
     fu = if fu_id.present?
            Fu.find_by(id: fu_id, user_id: current_user.id)
@@ -234,26 +240,29 @@ class FusController < ApplicationController
            Fu.where(
              user_id: current_user.id,
              upload_file_name: input_filename,
-             status: ['uploading', 'uploaded'],
+             status: ['uploading', 'downloading', 'uploaded'],
              project_id: nil
            ).order(created_at: :desc).first
          end
     
-    if fu && fu.file_path && File.exist?(fu.file_path)
-      current_size = File.size(fu.file_path)
-      is_complete = fu.complete?
+    if fu
+      current_size = (fu.file_path && File.exist?(fu.file_path)) ? File.size(fu.file_path) : 0
       total_size = fu.upload_file_size || 0
-      
+      is_complete = fu.status == 'uploaded' || fu.status == 'preparsing' || fu.status == 'preparsed' || fu.complete?
+
       # Only mark as resumable if we have valid size information
       resumable = fu.resumable? && total_size > 0 && current_size >= 0 && current_size <= total_size
-      
+
       render json: {
         exists: true,
         fu_id: fu.id,
         size: current_size,
         total_size: total_size,
+        status: fu.status,
         complete: is_complete,
-        resumable: resumable
+        resumable: resumable,
+        filename: fu.name,
+        input_filename: fu.upload_file_name
       }
     else
       render json: { exists: false, size: 0, total_size: 0, complete: false }
@@ -270,7 +279,6 @@ class FusController < ApplicationController
     # Parse JSON body
     request_body = JSON.parse(request.body.read) rescue {}
     url = request_body['url'] || params[:url]
-    
     if url.blank?
       render json: { error: 'URL is required' }, status: :bad_request
       return
@@ -301,18 +309,20 @@ class FusController < ApplicationController
       file_ext = '.txt' if file_ext.blank? # Default extension if none found
       input_filename = "input_file#{file_ext}"
 
-      # Create Fu record
-      fu = Fu.new(
+      fu = Fu.create!(
         user_id: current_user.id,
         project_key: nil,
         upload_file_name: input_filename,
-        upload_file_size: 0, # Will be updated after download
+        upload_file_size: 0,
         status: 'downloading',
-        name: filename
+        name: filename,
+        url: url
       )
-      fu.save!
 
-      # Create upload directory
+      # Get organism_id and version_id from request body (already parsed) or params
+      organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+      version_id = request_body['version_id'] || safe_integer_param(:version_id)
+
       upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
                           ENV["UPLOAD_DATA_DIR"]
                         elsif ENV["DATA_DIR"]
@@ -320,75 +330,34 @@ class FusController < ApplicationController
                         else
                           '/data/asap2/fus'
                         end
-      
-      upload_base_dir = Pathname.new(upload_base_dir)
-      FileUtils.mkdir_p(upload_base_dir) unless upload_base_dir.exist?
-      
-      upload_dir = upload_base_dir.join(fu.id.to_s)
-      FileUtils.mkdir_p(upload_dir)
-      
+      upload_dir = Pathname.new(upload_base_dir).join(fu.id.to_s)
       upload_file_path = upload_dir.join(input_filename)
 
-      # Download file from URL using OpenURI (following Basic.safe_download pattern)
-      download_options = {
-        'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-        read_timeout: 300, # 5 minutes timeout
-        open_timeout: 30
-      }
-      
-      # Download the file
-      downloaded_size = 0
-      File.open(upload_file_path, 'wb') do |file|
-        uri_obj.open(download_options) do |uri_io|
-          IO.copy_stream(uri_io, file)
-        end
-        # Ensure file is flushed to disk
-        file.flush
-        file.fsync if file.respond_to?(:fsync)
-      end
-      
-      # Get file size after download is complete
-      downloaded_size = File.size(upload_file_path)
-      
-      # Verify file exists and has content
-      unless File.exist?(upload_file_path) && downloaded_size > 0
-        raise "Downloaded file is missing or empty"
-      end
-
-      # Update Fu record with file size
-      fu.update!(
-        upload_file_size: downloaded_size,
-        status: 'uploaded'
-      )
-      
-      # Reload to ensure database state is fresh
-      fu.reload
-
-      # Get organism_id and version_id from request body (already parsed) or params
-      organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
-      version_id = request_body['version_id'] || safe_integer_param(:version_id)
-      
-      # Store upload info in session for project creation
+      # Store upload info in session for project creation (completion checked through Fu status)
       session[:file_upload] = {
         fu_id: fu.id,
         original_filename: filename,
         input_filename: input_filename,
         path: upload_file_path.to_s,
-        size: downloaded_size,
-        total_size: downloaded_size,
-        complete: true,
+        size: 0,
+        total_size: 0,
+        complete: false,
         organism_id: organism_id,
         version_id: version_id
       }
 
-      # Trigger preparsing
-      enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
+      FuDownloadFromUrlJob.perform_later(
+        fu.id,
+        url,
+        organism_id: organism_id,
+        version_id: version_id
+      )
 
       render json: {
         success: true,
         fu_id: fu.id,
         filename: filename,
-        size: downloaded_size
+        status: 'downloading'
       }
     rescue URI::InvalidURIError => e
       Rails.logger.error "Invalid URL: #{url} - #{e.message}"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_23_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -238,6 +238,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_100000) do
     t.integer "nber_disagree", default: 0
     t.integer "num"
     t.boolean "obsolete", default: false
+    t.integer "ontology_term_type_id"
     t.integer "orcid_user_id"
     t.integer "project_id"
     t.text "sorted_cell_ontology_term_ids"
@@ -246,6 +247,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_100000) do
     t.text "up_gene_ids"
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
+    t.index ["ontology_term_type_id"], name: "index_clas_on_ontology_term_type_id"
   end
 
   create_table "cluster_methods", id: :serial, force: :cascade do |t|
@@ -1385,6 +1387,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_100000) do
   add_foreign_key "clas", "cell_sets", name: "clas_cell_set_id_fkey"
   add_foreign_key "clas", "cla_sources", name: "clas_cla_source_id_fkey"
   add_foreign_key "clas", "clas", column: "clone_id", name: "clas_clone_id_fkey"
+  add_foreign_key "clas", "ontology_term_types", name: "clas_ontology_term_type_id_fkey"
   add_foreign_key "clas", "orcid_users", name: "clas_orcid_user_id_fkey"
   add_foreign_key "clas", "users", name: "clas_user_id_fkey"
   add_foreign_key "cluster_methods", "speeds", name: "cluster_methods_speed_id_fkey"

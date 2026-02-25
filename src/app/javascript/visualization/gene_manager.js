@@ -429,14 +429,16 @@ export class GeneManager {
       
       // Handle paste events for bulk input
       input.addEventListener('paste', (e) => {
-        setTimeout(() => {
-          const pastedText = input.value
-          const genes = this.parseBulkGeneInput(pastedText)
-          input.value = ''
-          
-          // Process all pasted genes and track found/not found
-          this.processBulkGeneInput(genes)
-        }, 10)
+        e.preventDefault()
+        clearTimeout(debounceTimer)
+        this.hideDropdown()
+
+        const pastedText = (e.clipboardData || window.clipboardData)?.getData('text') || ''
+        const genes = this.parseBulkGeneInput(pastedText)
+        input.value = ''
+
+        // Process pasted genes directly without showing autocomplete suggestions.
+        this.processBulkGeneInput(genes)
       })
 
     } else {
@@ -550,104 +552,71 @@ export class GeneManager {
     }
   }
 
-  async loadAutocompleteData(runId = null) {
-    // console.log('GeneManager: loadAutocompleteData called, runId:', runId)
+  resolveCurrentLoomFile() {
+    const controller = this.resolveVisualizationController()
+    if (controller && typeof controller.getCurrentLoomFileForRequest === 'function') {
+      const loom = controller.getCurrentLoomFileForRequest()
+      if (loom) return loom
+    }
+    if (controller?.currentLoomFile) return controller.currentLoomFile
+
+    const linkLoom = document.getElementById('embedding-selection-link')?.dataset?.currentLoomFile
+    if (linkLoom) return linkLoom
+
+    const select = document.querySelector('[data-visualization-target="loomFileSelect"]')
+    if (select?.value) return select.value
+
+    return null
+  }
+
+  async loadAutocompleteData() {
     if (!this.projectIdentifier) {
       console.warn('GeneManager: No project identifier found')
       return
     }
 
+    const loomFile = this.resolveCurrentLoomFile()
+    if (!loomFile) {
+      console.warn('[GeneManager] loadAutocompleteData deferred: loom file is not selected yet')
+      return
+    }
+
     try {
-      // Try run-specific file first if run_id is provided
-      let url = null
+      const url = `/projects/${encodeURIComponent(this.projectIdentifier)}/get_autocomplete_genes?loom_file=${encodeURIComponent(loomFile)}`
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        }
+      })
+
       let data = null
-
-      if (runId) {
-        url = `/projects/${encodeURIComponent(this.projectIdentifier)}/get_file?filename=autocomplete_genes.json&step=cell_filtering&run_id=${encodeURIComponent(runId)}&display=true`
-        // console.log('GeneManager: Attempting to load run-specific file:', url)
+      if (response.ok) {
+        const text = await response.text()
         try {
-          const response = await fetch(url)
-          // console.log('GeneManager: Run-specific response status:', response.status, 'ok:', response.ok)
-          if (response.ok) {
-            const contentType = response.headers.get('content-type')
-            // console.log('GeneManager: Run-specific content-type:', contentType)
-            if (contentType && contentType.includes('application/json')) {
-              data = await response.json()
-              // console.log('GeneManager: Run-specific data loaded, has search:', !!data.search, 'search length:', data.search?.length)
-            } else {
-              console.warn('GeneManager: Run-specific response is not JSON, content-type:', contentType)
-            }
-          } else {
-            console.warn('GeneManager: Run-specific response not OK, status:', response.status)
-          }
-        } catch (e) {
-          console.warn('GeneManager: Failed to load run-specific autocomplete file:', e)
+          data = JSON.parse(text)
+        } catch (jsonError) {
+          console.warn('GeneManager: Failed to parse generated autocomplete response as JSON:', jsonError)
+          console.warn('[GeneManager] Generated response preview:', text.substring(0, 500))
         }
+      } else {
+        console.warn(`GeneManager: Failed to load autocomplete genes (status ${response.status})`)
       }
 
-      // Fall back to parsing directory file if run-specific file not found
-      if (!data || !data.search) {
-        url = `/projects/${encodeURIComponent(this.projectIdentifier)}/get_file?filename=autocomplete_genes.json&step=parsing&display=true`
-        // console.log('GeneManager: Attempting to load parsing file:', url)
-        try {
-          const response = await fetch(url, {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: {
-              'Accept': 'application/json'
-            }
-          })
-          // console.log('GeneManager: Parsing response status:', response.status, 'ok:', response.ok)
-          if (response.ok) {
-            const contentType = response.headers.get('content-type')
-            // console.log('GeneManager: Parsing content-type:', contentType)
-            
-            // Read response as text first, then parse as JSON
-            // This avoids "Body has already been consumed" error
-            const text = await response.text()
-            try {
-              data = JSON.parse(text)
-              // console.log('GeneManager: Parsing data loaded as JSON, has search:', !!data.search, 'search length:', data.search?.length)
-            } catch (jsonError) {
-              console.warn('GeneManager: Failed to parse response as JSON:', jsonError)
-              // console.log('GeneManager: Parsing response text (first 500 chars):', text.substring(0, 500))
-            }
-            
-            // Check if content-type was not JSON but we got JSON data
-            if (!contentType || !contentType.includes('application/json')) {
-              if (data && typeof data === 'object') {
-                console.warn('GeneManager: Got JSON data but content-type was:', contentType, '- proceeding anyway')
-              }
-            }
-          } else {
-            console.warn('GeneManager: Parsing response not OK, status:', response.status, response.statusText)
-            try {
-              const errorText = await response.text()
-              // console.log('GeneManager: Parsing error response (first 500 chars):', errorText.substring(0, 500))
-            } catch (textError) {
-              console.error('GeneManager: Could not read error response text:', textError)
-            }
-          }
-        } catch (e) {
-          console.error('GeneManager: Exception loading parsing autocomplete file:', e)
-          console.error('GeneManager: Exception name:', e.name)
-          console.error('GeneManager: Exception message:', e.message)
-          console.error('GeneManager: Exception stack:', e.stack)
-        }
-      }
-
-      if (data && data.search) {
-        this.autocompleteData = data.search
+      const extractedEntries = this.extractAutocompleteEntries(data)
+      if (extractedEntries.length > 0) {
+        this.autocompleteData = extractedEntries
         const geneCount = this.autocompleteData.length
         this.totalGeneCount = geneCount
-        // console.log(`GeneManager: Successfully loaded ${geneCount} genes for autocomplete`)
-        // console.log('GeneManager: First 3 entries:', this.autocompleteData.slice(0, 3))
+        console.warn(`[GeneManager] Autocomplete genes loaded: ${geneCount} (loomFile=${loomFile})`)
         // Update the gene count badge
         this.updateGeneCountBadge()
       } else {
         console.warn('GeneManager: Failed to load autocomplete data - data:', data, 'has search:', !!data?.search)
         this.autocompleteData = []
         this.totalGeneCount = 0
+        console.warn(`[GeneManager] Autocomplete genes loaded: 0 (loomFile=${loomFile})`)
         this.updateGeneCountBadge()
       }
       this.autocompleteLoaded = true
@@ -661,6 +630,32 @@ export class GeneManager {
       this.autocompleteLoaded = true
       this.updateGeneSearchVisibility()
     }
+  }
+
+  extractAutocompleteEntries(data) {
+    if (!data) return []
+    if (Array.isArray(data.search)) return data.search
+    if (Array.isArray(data)) return data
+    return []
+  }
+
+  parseAutocompleteEntry(entry) {
+    if (typeof entry !== 'string') return null
+    const trimmed = entry.trim()
+    if (!trimmed) return null
+
+    // Expected format: "SYMBOL ENSEMBL_ID {STABLE_ID}"
+    const braceMatch = trimmed.match(/^(.+?)\s+(\S+)\s+\{([^}]+)\}\s*$/)
+    if (braceMatch) {
+      const [, geneSymbolRaw, ensemblIdRaw, stableIdRaw] = braceMatch
+      const symbol = geneSymbolRaw.trim()
+      const ensemblId = ensemblIdRaw.trim()
+      const stableId = stableIdRaw.trim()
+      if (symbol && ensemblId && stableId) {
+        return { symbol, ensemblId, stableId, raw: entry }
+      }
+    }
+    return null
   }
 
   handleInput(query) {
@@ -679,22 +674,13 @@ export class GeneManager {
     // console.log('GeneManager: Searching in', this.autocompleteData.length, 'entries')
     const searchTerm = query.toLowerCase().trim()
     this.currentMatches = this.autocompleteData
-      .filter(entry => {
-        // Parse entry: "gene_symbol FBgn0000000 {stable_id}"
-        const match = entry.match(/^(.+?)\s+(FBgn\d+)\s+\{(\d+)\}/)
-        if (!match) {
-          console.warn('GeneManager: Entry does not match pattern:', entry.substring(0, 50))
-          return false
-        }
-        
-        const [, geneSymbol, ensemblId, stableId] = match
+      .map(entry => this.parseAutocompleteEntry(entry))
+      .filter(parsed => {
+        if (!parsed) return false
+        const { symbol: geneSymbol, ensemblId } = parsed
         const searchLower = searchTerm.toLowerCase()
-        
-        const matches = geneSymbol.toLowerCase().includes(searchLower) ||
-               ensemblId.toLowerCase().includes(searchLower) ||
-               stableId.includes(searchTerm)
-        
-        return matches
+        return geneSymbol.toLowerCase().includes(searchLower) ||
+          ensemblId.toLowerCase().includes(searchLower)
       })
       .slice(0, 10) // Limit to 10 results
 
@@ -719,11 +705,8 @@ export class GeneManager {
 
     dropdown.innerHTML = ''
 
-    this.currentMatches.forEach((entry, index) => {
-      const match = entry.match(/^(.+?)\s+(FBgn\d+)\s+\{(\d+)\}/)
-      if (!match) return
-
-      const [, geneSymbol, ensemblId, stableId] = match
+    this.currentMatches.forEach((parsed, index) => {
+      const { symbol: geneSymbol, ensemblId, stableId } = parsed
       const item = document.createElement('div')
       item.style.cssText = 'padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f3f4f6; transition: background-color 0.15s;'
       item.innerHTML = `
@@ -739,7 +722,7 @@ export class GeneManager {
       })
 
       item.addEventListener('click', () => {
-        this.selectGene(entry)
+        this.selectGene(parsed)
       })
 
       dropdown.appendChild(item)
@@ -775,23 +758,25 @@ export class GeneManager {
 
   selectGene(entry) {
     // Parse the entry to extract gene information
-    const match = entry.match(/^(.+?)\s+(FBgn\d+)\s+\{(\d+)\}/)
-    if (!match) {
+    const parsed = entry && typeof entry === 'object' && entry.symbol && entry.ensemblId && entry.stableId
+      ? entry
+      : this.parseAutocompleteEntry(entry)
+    if (!parsed) {
       console.error('GeneManager: Invalid gene entry format:', entry)
       return
     }
 
-    const [, geneSymbol, ensemblId, stableId] = match
+    const { symbol: geneSymbol, ensemblId, stableId } = parsed
     
     const gene = {
       symbol: geneSymbol,
       ensemblId: ensemblId,
-      stableId: parseInt(stableId),
+      stableId,
       query: geneSymbol
     }
 
     // Add to tags if not already present
-    const existingIndex = this.geneTags.findIndex(g => g.stableId === gene.stableId)
+    const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(gene.stableId))
     if (existingIndex === -1) {
       this.geneTags.push(gene)
       // Update badge when gene is added
@@ -910,7 +895,7 @@ export class GeneManager {
   }
 
   removeGeneByStableId(stableId) {
-    const index = this.geneTags.findIndex(g => g.stableId === stableId)
+    const index = this.geneTags.findIndex(g => String(g.stableId) === String(stableId))
     if (index !== -1) {
       const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
       const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
@@ -972,7 +957,7 @@ export class GeneManager {
     const matched = this.findGeneInAutocomplete(query.trim())
     if (matched) {
       // Check if already in tags
-      const existingIndex = this.geneTags.findIndex(g => g.stableId === matched.stableId)
+      const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(matched.stableId))
       if (existingIndex === -1) {
         this.geneTags.push(matched)
         // Update badge when gene is added
@@ -1048,8 +1033,10 @@ export class GeneManager {
 
     statusDiv.dataset.statusType = 'summary'
     statusDiv.style.display = 'block'
-    
-    let message = ''
+
+    const closeId = 'close-gene-input-status-' + Date.now()
+    let message = '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">'
+    message += '<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">'
     if (foundCount > 0) {
       message += `<span style="color: #059669; font-weight: 500;">Found: ${foundCount}</span>`
       if (duplicateCount > 0) {
@@ -1075,7 +1062,21 @@ export class GeneManager {
       }, 0)
     }
 
+    message += '</div>'
+    message += `<button type="button" id="${closeId}" style="border: 1px solid #cbd5e1; background: white; color: #475569; border-radius: 4px; width: 22px; height: 22px; line-height: 18px; cursor: pointer; padding: 0;">x</button>`
+    message += '</div>'
+
     statusTextDiv.innerHTML = message
+
+    setTimeout(() => {
+      const closeBtn = document.getElementById(closeId)
+      if (!closeBtn) return
+      closeBtn.addEventListener('click', () => {
+        delete statusDiv.dataset.statusType
+        statusDiv.style.display = 'none'
+        statusTextDiv.innerHTML = ''
+      })
+    }, 0)
   }
 
   async processAllGenes() {
@@ -1442,21 +1443,22 @@ export class GeneManager {
     
     // Try to find exact or partial match
     for (const entry of this.autocompleteData) {
-      const match = entry.match(/^(.+?)\s+(FBgn\d+)\s+\{(\d+)\}/)
-      if (!match) continue
+      const parsed = this.parseAutocompleteEntry(entry)
+      if (!parsed) continue
+
+      const { symbol: geneSymbol, ensemblId, stableId } = parsed
       
-      const [, geneSymbol, ensemblId, stableId] = match
-      
-      // Check for exact match on symbol, Ensembl ID, or stable ID
+      // Match by gene symbol or Ensembl ID (exact/prefix/substring)
       if (geneSymbol.toLowerCase() === searchTerm ||
           ensemblId.toLowerCase() === searchTerm ||
-          stableId === searchTerm ||
           geneSymbol.toLowerCase().startsWith(searchTerm) ||
-          ensemblId.toLowerCase().startsWith(searchTerm)) {
+          ensemblId.toLowerCase().startsWith(searchTerm) ||
+          geneSymbol.toLowerCase().includes(searchTerm) ||
+          ensemblId.toLowerCase().includes(searchTerm)) {
         return {
           symbol: geneSymbol,
           ensemblId: ensemblId,
-          stableId: parseInt(stableId),
+          stableId,
           originalQuery: query
         }
       }

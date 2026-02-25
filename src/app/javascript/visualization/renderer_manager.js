@@ -332,27 +332,20 @@ export class RendererManager {
 
   // Category labels and legends
   renderCategoryLabels() {
-    // console.log('🏷️ [Canvas2D] renderCategoryLabelsCanvas2D called')
-    
     if (!this.controller.overlayCtx || !this.controller.overlayCanvas || !this.controller.currentBounds || !this.controller.currentMetadataVector || !this.controller.currentCoordinates) {
-      // console.log('🏷️ [Canvas2D] Missing required components')
       return
     }
     
     // Only render labels for discrete metadata
     if (this.controller.currentMetadataVector.data_type !== 'DISCRETE') {
-      // console.log('🏷️ [Canvas2D] Not discrete metadata, skipping (checkbox can still be toggled for when categorical metadata is selected)')
       return
     }
     
     // Check if the user wants to see category labels
     const categoriesCheckbox = document.getElementById('show-categories-checkbox')
     const shouldShowLabels = categoriesCheckbox ? categoriesCheckbox.checked : false
-    
-    // console.log(`🏷️ [Canvas2D] Category labels checkbox state: ${shouldShowLabels}`)
-    
+
     if (!shouldShowLabels) {
-      // console.log('🏷️ [Canvas2D] Category labels hidden by user preference')
       // Clear stored labels when hidden
       this.controller.canvas2DLabels = []
       return
@@ -371,25 +364,15 @@ export class RendererManager {
     const values = this.controller.currentMetadataVector.values
     const categories = this.controller.currentMetadataVector.categories
     
-    // If categories is undefined, try to get unique values from the values array
     let categoryList = categories
     if (!categoryList || categoryList.length === 0) {
       categoryList = [...new Set(values)]
     }
-    
-    // console.log(`🏷️ [Canvas2D] Found ${categoryList.length} categories`)
-    // console.log(`🏷️ [Canvas2D] Current bounds:`, this.controller.currentBounds)
-    // console.log(`🏷️ [Canvas2D] Canvas dimensions: ${width}x${height}`)
-    
+
     // Calculate centroids
     const centroids = this.controller.dataManager.calculateCategoryCentroids(values, categoryList)
-    
-    // console.log(`🏷️ [Canvas2D] Calculated ${Object.keys(centroids).length} centroids`)
-    
-    // Get category colors using the same logic as plot dots for consistency
-    // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-    // Otherwise fall back to unique categories from values
-    // This ensures colors remain stable even when categories have 0 visible cells
+
+    // Keep colors stable even when categories currently have 0 visible cells.
     let allCategories
     if (this.controller.currentMetadataVector.compression_info && this.controller.currentMetadataVector.compression_info.categories) {
       allCategories = [...this.controller.currentMetadataVector.compression_info.categories]
@@ -400,109 +383,315 @@ export class RendererManager {
     const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
     const colorMap = this.controller.colorManager.createDiscreteColorMap(stableSortedCategories, this.controller.currentMetadataVector.id)
     
-    // Clear old labels array for this rendering
+    // Label style settings
+    const showLabelBoxes = this.controller.showLabelBoxes !== false
+    const truncateLongLabels = this.controller.truncateLongLabels !== false
+    const collisionPadding = 2
+    const hitPadding = 6
+
+    // Keep existing manual drag offsets so user positioning persists.
+    const existingLabelsByCategory = new Map((this.controller.canvas2DLabels || []).map(label => [label.category, label]))
+
     const newLabels = []
-    
-    // Render labels for each category
-    let labelsDrawn = 0
-    let labelsSkipped = 0
-    Object.entries(centroids).forEach(([category, centroid]) => {
-      if (centroid.count > 0) {
-        // Calculate default screen position from centroid
-        let screenX = this.controller.interactionHandler.normalizeX(centroid.x, this.controller.currentBounds)
-        let screenY = this.controller.interactionHandler.normalizeY(centroid.y, this.controller.currentBounds)
-        
-        // Check if this label was previously dragged (has offset)
-        const existingLabel = this.controller.canvas2DLabels.find(l => l.category === category)
-        if (existingLabel && existingLabel.offsetX !== undefined && existingLabel.offsetY !== undefined) {
-          // Apply the drag offset to the centroid position
-          // console.log(`🏷️ [Canvas2D] Found existing label for "${category}" with offset (${existingLabel.offsetX}, ${existingLabel.offsetY})`)
-          screenX += existingLabel.offsetX
-          screenY += existingLabel.offsetY
+    const placedBounds = []
+    const placedVisualBounds = []
+    const margins = this.getPlotMargins()
+
+    const plotCenterX = (margins.left + (width - margins.right)) / 2
+    const plotCenterY = (margins.top + (height - margins.bottom)) / 2
+
+    const sortable = Object.entries(centroids)
+      .filter(([, centroid]) => centroid && centroid.count > 0)
+      .sort((a, b) => {
+        const aX = this.controller.interactionHandler.normalizeX(a[1].x, this.controller.currentBounds)
+        const aY = this.controller.interactionHandler.normalizeY(a[1].y, this.controller.currentBounds)
+        const bX = this.controller.interactionHandler.normalizeX(b[1].x, this.controller.currentBounds)
+        const bY = this.controller.interactionHandler.normalizeY(b[1].y, this.controller.currentBounds)
+
+        const aDistanceToCenter = Math.hypot(aX - plotCenterX, aY - plotCenterY)
+        const bDistanceToCenter = Math.hypot(bX - plotCenterX, bY - plotCenterY)
+        if (aDistanceToCenter !== bDistanceToCenter) {
+          return aDistanceToCenter - bDistanceToCenter
         }
-        
-        // console.log(`🏷️ [Canvas2D] Category "${category}": data coords (${centroid.x.toFixed(2)}, ${centroid.y.toFixed(2)}) -> screen coords (${screenX.toFixed(0)}, ${screenY.toFixed(0)})`)
-        
-        // Skip if outside visible area
-        const margins = this.getPlotMargins()
-        const margin = Math.max(margins.left, margins.right, margins.top, margins.bottom)
-        const isOffScreen = screenX < -margin || screenX > width + margin || screenY < -margin || screenY > height + margin
-        if (isOffScreen) {
-          // console.log(`🏷️ [Canvas2D] Category "${category}" is off-screen (width: ${width}, height: ${height}, margin: ${margin})`)
-          labelsSkipped++
-          return
+
+        // Tie-breaker: larger categories first.
+        return b[1].count - a[1].count
+      })
+
+    const manualLabelFontSize = Number(this.controller.labelFontSize) > 0 ? Number(this.controller.labelFontSize) : 12
+    const autoLabelFontSize = this.getAutoLabelFontSize(sortable.length)
+    const labelFontSize = this.controller.labelFontSizeMode === 'auto' ? autoLabelFontSize : manualLabelFontSize
+    // Use tighter, font-scaled padding so small labels have compact boxes.
+    const boxPadding = showLabelBoxes ? Math.max(2, Math.round(labelFontSize * 0.2)) : 2
+
+    sortable.forEach(([category, centroid]) => {
+      const centroidScreenX = this.controller.interactionHandler.normalizeX(centroid.x, this.controller.currentBounds)
+      const centroidScreenY = this.controller.interactionHandler.normalizeY(centroid.y, this.controller.currentBounds)
+
+      // Hide labels when the underlying centroid is outside the visible plot area.
+      const centroidVisibleInPlot = (
+        centroidScreenX >= margins.left &&
+        centroidScreenX <= (width - margins.right) &&
+        centroidScreenY >= margins.top &&
+        centroidScreenY <= (height - margins.bottom)
+      )
+      if (!centroidVisibleInPlot) return
+
+      const existingLabel = existingLabelsByCategory.get(category)
+      const persistedLock = this.controller.manualLabelLocks ? this.controller.manualLabelLocks.get(category) : null
+      const manualOffsetX = persistedLock?.manualOffsetX ?? (existingLabel ? (existingLabel.manualOffsetX ?? existingLabel.offsetX ?? 0) : 0)
+      const manualOffsetY = persistedLock?.manualOffsetY ?? (existingLabel ? (existingLabel.manualOffsetY ?? existingLabel.offsetY ?? 0) : 0)
+      const labelIsManuallyMoved = !!(persistedLock?.isManuallyMoved || (existingLabel && existingLabel.isManuallyMoved))
+      const freezeMovedLabels = this.controller.freezeMovedLabels !== false
+
+      const freezePlacement = !!(this.controller.draggingLabel && this.controller.draggingLabel.category === category)
+
+      let preferredX = centroidScreenX + manualOffsetX
+      let preferredY = centroidScreenY + manualOffsetY
+      // Keep manually moved labels fixed across re-renders, but never while actively dragging.
+      if (!freezePlacement && freezeMovedLabels && labelIsManuallyMoved) {
+        preferredX = persistedLock?.lockedX ?? existingLabel?.lockedX ?? existingLabel?.x ?? preferredX
+        preferredY = persistedLock?.lockedY ?? existingLabel?.lockedY ?? existingLabel?.y ?? preferredY
+      }
+
+      const displayText = this.formatCategoryLabel(category, truncateLongLabels)
+      ctx.font = `${labelFontSize}px Arial`
+      const textMetrics = ctx.measureText(displayText)
+      const textWidth = textMetrics.width
+      const textHeight = Math.max(labelFontSize + 2, 12)
+
+      // Build candidates around centroid/manual location and pick one that minimizes overlap.
+      const placementMode = this.controller.labelPlacementMode || 'avoid-collisions'
+      const useCentroidPlacement = placementMode === 'centroid'
+      const keepManualPlacementFixed = freezeMovedLabels && labelIsManuallyMoved
+      const centroidDistanceToCenter = Math.hypot(centroidScreenX - plotCenterX, centroidScreenY - plotCenterY)
+      const maxCandidateRadius = Math.min(192, Math.max(56, 56 + centroidDistanceToCenter * 0.5))
+      const candidates = (freezePlacement || useCentroidPlacement || keepManualPlacementFixed)
+        ? [{ x: preferredX, y: preferredY }]
+        : this.buildLabelCandidates(preferredX, preferredY, maxCandidateRadius)
+
+      const evaluatedCandidates = []
+
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i]
+        const visualBounds = {
+          x: candidate.x - textWidth / 2 - boxPadding,
+          y: candidate.y - textHeight / 2 - boxPadding,
+          width: textWidth + boxPadding * 2,
+          height: textHeight + boxPadding * 2
         }
-        
-        // Get category color from the same color map used by plot dots
-        const colorValue = colorMap[category] || 0x3b82f6 // Default blue if not found
-        
-        // Convert color to RGB for canvas
-        let r, g, b
-        if (typeof colorValue === 'string') {
-          const hex = colorValue.replace('#', '')
-          r = parseInt(hex.substr(0, 2), 16)
-          g = parseInt(hex.substr(2, 2), 16)
-          b = parseInt(hex.substr(4, 2), 16)
+
+        // Keep labels inside viewport to avoid inaccessible drag targets.
+        const insideCanvas = (
+          visualBounds.x >= 0 &&
+          visualBounds.y >= 0 &&
+          (visualBounds.x + visualBounds.width) <= width &&
+          (visualBounds.y + visualBounds.height) <= height
+        )
+        if (!insideCanvas) continue
+
+        const collisionBounds = {
+          x: visualBounds.x - collisionPadding,
+          y: visualBounds.y - collisionPadding,
+          width: visualBounds.width + collisionPadding * 2,
+          height: visualBounds.height + collisionPadding * 2
+        }
+
+        let overlapArea = 0
+        for (let j = 0; j < placedBounds.length; j++) {
+          overlapArea += this.computeOverlapArea(collisionBounds, placedBounds[j])
+        }
+
+        // Penalize candidates whose leader line would cross existing label boxes.
+        let lineCrossCount = 0
+        const displacement = Math.hypot(candidate.x - centroidScreenX, candidate.y - centroidScreenY)
+        if (displacement > 4) {
+          for (let j = 0; j < placedVisualBounds.length; j++) {
+            if (this.doesSegmentIntersectRect(
+              centroidScreenX,
+              centroidScreenY,
+              candidate.x,
+              candidate.y,
+              placedVisualBounds[j]
+            )) {
+              lineCrossCount += 1
+            }
+          }
+        }
+
+        const distance = Math.hypot(candidate.x - preferredX, candidate.y - preferredY)
+        evaluatedCandidates.push({
+          ...candidate,
+          visualBounds,
+          collisionBounds,
+          overlapArea,
+          lineCrossCount,
+          distance
+        })
+      }
+
+      let bestCandidate = null
+      if (evaluatedCandidates.length > 0) {
+        const nearCandidates = evaluatedCandidates.filter(c => c.distance <= maxCandidateRadius)
+        const candidatePool = nearCandidates.length > 0 ? nearCandidates : evaluatedCandidates
+
+        const sortByQuality = (a, b) => {
+          if (a.overlapArea !== b.overlapArea) return a.overlapArea - b.overlapArea
+          if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
+          return a.distance - b.distance
+        }
+
+        const zeroOverlapZeroCross = candidatePool
+          .filter(c => c.overlapArea === 0 && c.lineCrossCount === 0)
+          .sort((a, b) => a.distance - b.distance)
+
+        if (zeroOverlapZeroCross.length > 0) {
+          bestCandidate = zeroOverlapZeroCross[0]
         } else {
-          r = (colorValue >> 16) & 0xFF
-          g = (colorValue >> 8) & 0xFF
-          b = colorValue & 0xFF
+          // Prioritize non-overlapping boxes before anything else.
+          const zeroOverlap = candidatePool
+            .filter(c => c.overlapArea === 0)
+            .sort((a, b) => {
+              if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
+              return a.distance - b.distance
+            })
+
+          if (zeroOverlap.length > 0) {
+            bestCandidate = zeroOverlap[0]
+          } else {
+            // Last resort: smallest overlap first, then crossings, then distance.
+            bestCandidate = candidatePool.sort(sortByQuality)[0]
+          }
         }
-        
-        // Draw label with background
-        ctx.save()
-        
-        // Measure text for background sizing
-        ctx.font = '12px Arial'
-        const text = category
-        const textMetrics = ctx.measureText(text)
-        const textWidth = textMetrics.width
-        const textHeight = 14
-        const padding = 4
-        
-        // Draw white background with border
+      }
+
+      if (!bestCandidate) return
+
+      const screenX = bestCandidate.x
+      const screenY = bestCandidate.y
+      const { visualBounds } = bestCandidate
+
+      const colorValue = colorMap[category] || 0x3b82f6
+      let r, g, b
+      if (typeof colorValue === 'string') {
+        const hex = colorValue.replace('#', '')
+        r = parseInt(hex.substr(0, 2), 16)
+        g = parseInt(hex.substr(2, 2), 16)
+        b = parseInt(hex.substr(4, 2), 16)
+      } else {
+        r = (colorValue >> 16) & 0xFF
+        g = (colorValue >> 8) & 0xFF
+        b = colorValue & 0xFF
+      }
+
+      ctx.save()
+
+      // Draw leader line whenever label is displaced from centroid/manual anchor.
+      const displacement = Math.hypot(screenX - centroidScreenX, screenY - centroidScreenY)
+      if (displacement > 4) {
+        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.85)`
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(centroidScreenX, centroidScreenY)
+        ctx.lineTo(screenX, screenY)
+        ctx.stroke()
+      }
+
+      if (showLabelBoxes) {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
         ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`
         ctx.lineWidth = 2
-        
-        const bgX = screenX - textWidth / 2 - padding
-        const bgY = screenY - textHeight / 2 - padding
-        const bgWidth = textWidth + padding * 2
-        const bgHeight = textHeight + padding * 2
-        
-        ctx.fillRect(bgX, bgY, bgWidth, bgHeight)
-        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight)
-        
-        // Draw text
-        ctx.fillStyle = '#333333'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(text, screenX, screenY)
-        
-        ctx.restore()
-        
-        // Store label bounds for hit testing and dragging
-        newLabels.push({
-          category: category,
-          x: screenX,
-          y: screenY,
-          bounds: {
-            x: bgX,
-            y: bgY,
-            width: bgWidth,
-            height: bgHeight
-          },
-          centroidX: centroid.x,
-          centroidY: centroid.y,
-          offsetX: existingLabel ? existingLabel.offsetX || 0 : 0,
-          offsetY: existingLabel ? existingLabel.offsetY || 0 : 0,
-          color: { r, g, b }
-        })
-        
-        labelsDrawn++
+        ctx.fillRect(visualBounds.x, visualBounds.y, visualBounds.width, visualBounds.height)
+        ctx.strokeRect(visualBounds.x, visualBounds.y, visualBounds.width, visualBounds.height)
+      } else {
+        // Shadowed text mode for cleaner overlays without background boxes.
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.95)'
+        ctx.shadowBlur = Math.max(4, Math.round(labelFontSize * 0.45))
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
       }
+
+      ctx.fillStyle = '#333333'
+      ctx.font = `${labelFontSize}px Arial`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(displayText, screenX, screenY)
+
+      ctx.restore()
+
+      // Slightly larger hit area keeps drag interaction easy in text-only mode.
+      const hitBounds = {
+        x: visualBounds.x - hitPadding,
+        y: visualBounds.y - hitPadding,
+        width: visualBounds.width + hitPadding * 2,
+        height: visualBounds.height + hitPadding * 2
+      }
+
+      const finalIsManuallyMoved = labelIsManuallyMoved || freezePlacement
+      const finalLockedX = finalIsManuallyMoved ? screenX : null
+      const finalLockedY = finalIsManuallyMoved ? screenY : null
+
+      newLabels.push({
+        category: category,
+        displayText: displayText,
+        x: screenX,
+        y: screenY,
+        bounds: hitBounds,
+        visualBounds: visualBounds,
+        centroidX: centroid.x,
+        centroidY: centroid.y,
+        centroidScreenX: centroidScreenX,
+        centroidScreenY: centroidScreenY,
+        manualOffsetX: manualOffsetX,
+        manualOffsetY: manualOffsetY,
+        offsetX: manualOffsetX,
+        offsetY: manualOffsetY,
+        isManuallyMoved: finalIsManuallyMoved,
+        lockedX: finalLockedX,
+        lockedY: finalLockedY,
+        autoOffsetX: screenX - preferredX,
+        autoOffsetY: screenY - preferredY,
+        color: { r, g, b },
+        fontSize: labelFontSize,
+        showBox: showLabelBoxes
+      })
+
+      if (this.controller.manualLabelLocks) {
+        if (finalIsManuallyMoved) {
+          this.controller.manualLabelLocks.set(category, {
+            isManuallyMoved: true,
+            manualOffsetX: manualOffsetX,
+            manualOffsetY: manualOffsetY,
+            lockedX: finalLockedX,
+            lockedY: finalLockedY
+          })
+        } else if (this.controller.manualLabelLocks.has(category)) {
+          this.controller.manualLabelLocks.delete(category)
+        }
+      }
+
+      placedBounds.push(bestCandidate.collisionBounds)
+      placedVisualBounds.push(visualBounds)
     })
-    
+
+    // Draw centroid anchors last so line endpoints remain visible even if labels overlap.
+    ctx.save()
+    newLabels.forEach(label => {
+      if (typeof label.centroidScreenX !== 'number' || typeof label.centroidScreenY !== 'number') return
+      const displacement = Math.hypot(label.x - label.centroidScreenX, label.y - label.centroidScreenY)
+      if (displacement <= 4) return
+
+      const { r, g, b } = label.color
+      ctx.beginPath()
+      ctx.arc(label.centroidScreenX, label.centroidScreenY, 2.5, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.95)`
+      ctx.fill()
+      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)'
+      ctx.stroke()
+    })
+    ctx.restore()
+
     // Update stored labels
     this.controller.canvas2DLabels = newLabels
     
@@ -515,7 +704,105 @@ export class RendererManager {
       }
     }
     
-    // console.log(`🏷️ [Canvas2D] Drew ${labelsDrawn} category labels (${labelsSkipped} skipped as off-screen)`)
+  }
+
+  formatCategoryLabel(label, truncateLongLabels = true) {
+    const value = String(label ?? '')
+    if (!truncateLongLabels || value.length <= 20) return value
+    const prefix = value.slice(0, 10)
+    const suffix = value.slice(-10)
+    return `${prefix}...${suffix}`
+  }
+
+  buildLabelCandidates(centerX, centerY, maxRadius = 192) {
+    const candidates = [{ x: centerX, y: centerY }]
+    const distances = [16, 28, 40, 54, 70, 88, 108, 132, 160, 192]
+    const angles = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345]
+
+    distances.forEach(distance => {
+      if (distance > maxRadius) return
+      angles.forEach(angleDeg => {
+        const angle = (angleDeg * Math.PI) / 180
+        candidates.push({
+          x: centerX + Math.cos(angle) * distance,
+          y: centerY + Math.sin(angle) * distance
+        })
+      })
+    })
+
+    return candidates
+  }
+
+  computeOverlapArea(a, b) {
+    const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+    const overlapY = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+    return overlapX * overlapY
+  }
+
+  getAutoLabelFontSize(labelCount) {
+    if (labelCount <= 12) return 16
+    if (labelCount <= 24) return 14
+    if (labelCount <= 45) return 12
+    return 10
+  }
+
+  doesSegmentIntersectRect(x1, y1, x2, y2, rect) {
+    if (!rect) return false
+
+    // If either endpoint is inside the box, we treat that as an intersection.
+    if (this.isPointInRect(x1, y1, rect) || this.isPointInRect(x2, y2, rect)) {
+      return true
+    }
+
+    const left = rect.x
+    const right = rect.x + rect.width
+    const top = rect.y
+    const bottom = rect.y + rect.height
+
+    // Check intersection against each rectangle edge.
+    return (
+      this.doSegmentsIntersect(x1, y1, x2, y2, left, top, right, top) ||
+      this.doSegmentsIntersect(x1, y1, x2, y2, right, top, right, bottom) ||
+      this.doSegmentsIntersect(x1, y1, x2, y2, right, bottom, left, bottom) ||
+      this.doSegmentsIntersect(x1, y1, x2, y2, left, bottom, left, top)
+    )
+  }
+
+  isPointInRect(x, y, rect) {
+    return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+  }
+
+  doSegmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+    const o1 = this.orientation(ax, ay, bx, by, cx, cy)
+    const o2 = this.orientation(ax, ay, bx, by, dx, dy)
+    const o3 = this.orientation(cx, cy, dx, dy, ax, ay)
+    const o4 = this.orientation(cx, cy, dx, dy, bx, by)
+
+    // General case
+    if (o1 !== o2 && o3 !== o4) return true
+
+    // Collinear edge cases
+    if (o1 === 0 && this.isPointOnSegment(ax, ay, cx, cy, bx, by)) return true
+    if (o2 === 0 && this.isPointOnSegment(ax, ay, dx, dy, bx, by)) return true
+    if (o3 === 0 && this.isPointOnSegment(cx, cy, ax, ay, dx, dy)) return true
+    if (o4 === 0 && this.isPointOnSegment(cx, cy, bx, by, dx, dy)) return true
+
+    return false
+  }
+
+  orientation(ax, ay, bx, by, cx, cy) {
+    const val = (by - ay) * (cx - bx) - (bx - ax) * (cy - by)
+    if (Math.abs(val) < 1e-9) return 0
+    return val > 0 ? 1 : 2
+  }
+
+  isPointOnSegment(ax, ay, px, py, bx, by) {
+    return (
+      px <= Math.max(ax, bx) &&
+      px >= Math.min(ax, bx) &&
+      py <= Math.max(ay, by) &&
+      py >= Math.min(ay, by)
+    )
   }
 
   renderContinuousColorLegend() {

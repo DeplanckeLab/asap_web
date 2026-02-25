@@ -19,8 +19,8 @@ export class InteractionHandler {
     const lassoBtn = document.getElementById('lasso-mode-btn')
     if (panBtn && pickBtn && lassoBtn) {
       //console.log('Found interaction mode buttons')
-      // Set initial state (pan mode is default)
-      this.controller.updateButtonStates('pan')
+      // Set initial state (pick mode is default)
+      this.controller.updateButtonStates('pick')
       this.controller.updateControlInstructions()
     } else {
       // console.log('Interaction mode buttons not found')

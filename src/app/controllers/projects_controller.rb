@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_annot_info get_annot_evidences]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences]
 
   # GET /projects or /projects.json
   def index
@@ -2148,6 +2148,85 @@ class ProjectsController < ApplicationController
     end
 
     render json: result
+  end
+
+  # GET /projects/1/get_autocomplete_genes?loom_file=...
+  # Builds the same payload shape as legacy ASAP:
+  # { "search": ["Gene ENSID {stable}", ...], "h_indexes": { "stable" => idx, ... } }
+  def get_autocomplete_genes
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+
+    loom_file = params[:loom_file].presence
+    if loom_file.blank?
+      loom_file = Annot.where(project_id: @project.id, dim: 3, name: '/matrix').order(id: :asc).pick(:filepath)
+      loom_file ||= Annot.where(project_id: @project.id, dim: 3).order(id: :asc).pick(:filepath)
+    end
+
+    if loom_file.blank?
+      render json: { search: [], h_indexes: {} }
+      return
+    end
+
+    autocomplete_file = project_dir + File.dirname(loom_file) + 'autocomplete_genes.json'
+    if File.exist?(autocomplete_file)
+      begin
+        render json: JSON.parse(File.read(autocomplete_file))
+        return
+      rescue JSON::ParserError => e
+        Rails.logger.warn("get_autocomplete_genes: existing file is invalid JSON (#{autocomplete_file}): #{e.message}")
+      end
+    end
+
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { search: [], h_indexes: {} }
+      return
+    end
+
+    gene_values = []
+    accession_values = []
+    stable_values = []
+
+    begin
+      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+    rescue => e
+      Rails.logger.error("get_autocomplete_genes: failed to extract row attrs from #{loom_path}: #{e.message}")
+      render json: { search: [], h_indexes: {} }
+      return
+    end
+
+    size = [gene_values&.length || 0, accession_values&.length || 0, stable_values&.length || 0].min
+    if size <= 0
+      render json: { search: [], h_indexes: {} }
+      return
+    end
+
+    autocomplete_list = []
+    h_indexes = {}
+
+    size.times do |i|
+      gene = gene_values[i].to_s.strip
+      accession = accession_values[i].to_s.strip
+      stable = stable_values[i].to_s.strip
+      next if gene.blank? || accession.blank? || stable.blank?
+
+      h_indexes[stable] = i
+      autocomplete_list << "#{gene} #{accession} {#{stable}}"
+    end
+
+    payload = { search: autocomplete_list.sort, h_indexes: h_indexes }
+
+    begin
+      FileUtils.mkdir_p(autocomplete_file.dirname)
+      File.write(autocomplete_file, payload.to_json)
+    rescue => e
+      Rails.logger.warn("get_autocomplete_genes: failed to cache file #{autocomplete_file}: #{e.message}")
+    end
+
+    render json: payload
   end
 
   # GET /projects/1/get_loom_files_json

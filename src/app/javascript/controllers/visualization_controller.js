@@ -187,6 +187,14 @@ export default class extends Controller {
     // Initialize numerical display order preference for continuous metadata
     this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
     
+    // Category label rendering preferences
+    this.showLabelBoxes = true
+    this.labelFontSize = 12
+    this.labelFontSizeMode = 'auto'
+    this.truncateLongLabels = true
+    this.labelPlacementMode = 'avoid-collisions'
+    this.freezeMovedLabels = true
+    
     // Initialize custom plot axis scale preferences
     this.customPlotXAxisScale = 'normal'
     this.customPlotYAxisScale = 'normal'
@@ -428,11 +436,15 @@ export default class extends Controller {
     this.maxMetadataInMemory = 5 // Default buffer size, will be adjusted based on dataset size
     
     // Initialize interaction mode state
-    this.interactionMode = 'pan' // 'pick', 'pan', 'lasso', or 'zoom'
+    this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
     this.clickingOnLabel = false // Track if we're clicking on a label
+    this.labelDragMoved = false
+    if (!this.manualLabelLocks) {
+      this.manualLabelLocks = new Map() // Persist manually moved label positions by category
+    }
     //console.log(`Initializing currentPointSize to: 1.0 (was: ${this.currentPointSize})`)
     this.currentPointSize = 8.0 // Store current point size for consistent rendering (increased for debugging)
     this.lassoGraphics = null
@@ -776,6 +788,10 @@ export default class extends Controller {
 
     this.updateEmbeddingSelectionLink(info.embedding, targetLoom)
     this.highlightSelectedEmbedding(targetId, targetLoom)
+
+    if (this.geneManager && typeof this.geneManager.loadAutocompleteData === 'function') {
+      this.geneManager.loadAutocompleteData()
+    }
 
     if (!skipLoad) {
       this.updateMetadata()
@@ -5014,6 +5030,10 @@ export default class extends Controller {
       //console.log(`removeAllCategoryColors: Removing disk ${index}:`, disk)
       disk.remove()
     })
+    // Restore static dots once editable disks are removed
+    document.querySelectorAll('.metadata-category-dot').forEach(dot => {
+      dot.style.display = ''
+    })
     //console.log('removeAllCategoryColors: Complete')
   }
   
@@ -5090,15 +5110,25 @@ export default class extends Controller {
       })
     
     // Add colored disks to each category
-    const categoryItems = categoriesContainer.querySelectorAll('div[style*="display: flex; justify-content: space-between"]')
+    const categoryItems = categoriesContainer.querySelectorAll('.metadata-category-row, div[style*="display: flex; justify-content: space-between"]')
     //console.log('Found category items:', categoryItems.length)
     
     categoryItems.forEach((item, index) => {
+      const targetContainer = item.querySelector('.metadata-category-main') || item
+      if (!targetContainer) return
+
+      // Hide static dot while editable disk is displayed
+      const staticDot = targetContainer.querySelector('.metadata-category-dot')
+      if (staticDot) staticDot.style.display = 'none'
+
       // Set up the container for absolute positioning
-      item.style.position = 'relative'
-      item.style.paddingLeft = '20px' // Make space for the color disk
-      
-      const categoryName = item.querySelector('span').textContent.trim()
+      targetContainer.style.position = 'relative'
+      targetContainer.style.paddingLeft = '20px' // Make space for the editable color disk
+
+      const categoryNameEl = item.querySelector('.metadata-category-name') || item.querySelector('span[title]') || item.querySelector('span')
+      const categoryName = categoryNameEl ? categoryNameEl.textContent.trim() : ''
+      if (!categoryName) return
+
       // Use stable index for color assignment (not DOM index)
       const stableIndex = categoryToStableIndex[categoryName] !== undefined ? categoryToStableIndex[categoryName] : index
       const color = this.getCategoryColor(categoryName, stableIndex, metadataId)
@@ -5138,8 +5168,8 @@ export default class extends Controller {
         this.showColorPicker(e.target, categoryName, metadataId)
       })
       
-      // Insert color disk at the beginning of the category item
-      item.insertBefore(colorDisk, item.firstChild)
+      // Insert color disk at the beginning of the category label area
+      targetContainer.insertBefore(colorDisk, targetContainer.firstChild)
     })
     
     // Add reset button if there are customized colors
@@ -5159,12 +5189,12 @@ export default class extends Controller {
     if (!categoriesContainer || categoriesContainer.style.display === 'none') return null
     
     // Extract categories from the DOM
-    const categoryItems = categoriesContainer.querySelectorAll('div[style*="display: flex; justify-content: space-between"]')
+    const categoryItems = categoriesContainer.querySelectorAll('.metadata-category-row, div[style*="display: flex; justify-content: space-between"]')
     const categories = []
     
     categoryItems.forEach(item => {
-      const nameSpan = item.querySelector('span')
-      const countSpan = item.querySelector('span:last-child')
+      const nameSpan = item.querySelector('.metadata-category-name') || item.querySelector('span[title]') || item.querySelector('span')
+      const countSpan = item.querySelector('.metadata-category-count') || item.querySelector('span:last-child')
       
       if (nameSpan && countSpan) {
         const name = nameSpan.textContent.trim()
@@ -6272,6 +6302,11 @@ export default class extends Controller {
       // canvas: !!this.canvas,
       // target: event.target?.tagName
     // })
+    const allowLabelInteraction = this.interactionMode === 'pick' || this.interactionMode === 'pan'
+    if (allowLabelInteraction && this.tryStartLabelInteraction(event)) {
+      return
+    }
+
     if (this.interactionMode === 'lasso') {
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
@@ -6290,8 +6325,8 @@ export default class extends Controller {
       // console.log(`⚠️ [PERF] onInteractionMouseMove called ${this.mouseMoveCount} times - this might be blocking the main thread!`)
     }
     
-    // Handle label dragging in pick mode (ReGL)
-    if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
+    // Handle label dragging in pick/move mode (ReGL)
+    if ((this.interactionMode === 'pick' || this.interactionMode === 'pan') && this.draggingLabel && this.rendererType === 'regl') {
       const canvas = this.canvas
       const rect = canvas.getBoundingClientRect()
       const mouseX = event.clientX - rect.left
@@ -6300,10 +6335,25 @@ export default class extends Controller {
       // Calculate drag delta
       const deltaX = mouseX - this.labelDragStartX
       const deltaY = mouseY - this.labelDragStartY
+      if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
+        this.labelDragMoved = true
+      }
       
       // Update label offset
       this.draggingLabel.offsetX = this.labelStartOffsetX + deltaX
       this.draggingLabel.offsetY = this.labelStartOffsetY + deltaY
+      this.draggingLabel.manualOffsetX = this.draggingLabel.offsetX
+      this.draggingLabel.manualOffsetY = this.draggingLabel.offsetY
+      this.draggingLabel.isManuallyMoved = true
+      this.draggingLabel.lockedX = mouseX
+      this.draggingLabel.lockedY = mouseY
+      this.manualLabelLocks.set(this.draggingLabel.category, {
+        isManuallyMoved: true,
+        manualOffsetX: this.draggingLabel.manualOffsetX,
+        manualOffsetY: this.draggingLabel.manualOffsetY,
+        lockedX: this.draggingLabel.lockedX,
+        lockedY: this.draggingLabel.lockedY
+      })
       
       // console.log(`🏷️ [Drag] Moving label "${this.draggingLabel.category}" - offset: (${this.draggingLabel.offsetX}, ${this.draggingLabel.offsetY})`)
       
@@ -6344,11 +6394,15 @@ export default class extends Controller {
   }
 
   onInteractionMouseUp(event) {
-    // Handle label drag end in pick mode (ReGL)
-    if (this.interactionMode === 'pick' && this.draggingLabel && this.rendererType === 'regl') {
+    // Handle label drag end in pick/move mode (ReGL)
+    if ((this.interactionMode === 'pick' || this.interactionMode === 'pan') && this.draggingLabel && this.rendererType === 'regl') {
+      if (!this.labelDragMoved) {
+        this.focusMetadataCategoryFromLabel(this.draggingLabel)
+      }
       // console.log(`🏷️ Finished dragging label: ${this.draggingLabel.category}`)
       this.draggingLabel = null
       this.clickingOnLabel = false
+      this.labelDragMoved = false
       return
     }
     
@@ -6357,6 +6411,39 @@ export default class extends Controller {
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseUp(event)
     }
+  }
+
+  tryStartLabelInteraction(event) {
+    if (this.rendererType !== 'regl' || !this.canvas2DLabels || this.canvas2DLabels.length === 0) {
+      return false
+    }
+
+    const canvas = this.canvas
+    if (!canvas) return false
+
+    const rect = canvas.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+
+    for (let i = this.canvas2DLabels.length - 1; i >= 0; i--) {
+      const label = this.canvas2DLabels[i]
+      const bounds = label.bounds
+      if (!bounds) continue
+
+      if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+          mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+        this.draggingLabel = label
+        this.labelDragStartX = mouseX
+        this.labelDragStartY = mouseY
+        this.labelStartOffsetX = label.offsetX
+        this.labelStartOffsetY = label.offsetY
+        this.clickingOnLabel = true
+        this.labelDragMoved = false
+        return true
+      }
+    }
+
+    return false
   }
 
   onInteractionDoubleClick(event) {
@@ -8327,6 +8414,14 @@ export default class extends Controller {
     this.uiManager.toggleCategories()
   }
 
+  toggleDisplayLabelsFromToolbar() {
+    const checkbox = document.getElementById('show-categories-checkbox')
+    if (!checkbox) return
+
+    checkbox.checked = !checkbox.checked
+    this.toggleCategories()
+  }
+
   setCustomPlotAxisScale(axis, scale) {
     const allowedScales = new Set(['normal', 'log2', 'log10'])
     const normalizedScale = allowedScales.has(scale) ? scale : 'normal'
@@ -9122,13 +9217,28 @@ export default class extends Controller {
     let svg = ''
     
     this.canvas2DLabels.forEach(label => {
-      const { x, y, bounds, color, category } = label
+      const {
+        x, y, bounds, color, category, displayText, showBox, fontSize,
+        centroidScreenX, centroidScreenY
+      } = label
+      const textValue = displayText || category
+      const labelFontSize = fontSize || 12
+      const visualBounds = label.visualBounds || bounds
+      const labelHasBox = showBox !== false
+
+      if (typeof centroidScreenX === 'number' && typeof centroidScreenY === 'number') {
+        const displacement = Math.hypot(x - centroidScreenX, y - centroidScreenY)
+        if (displacement > 4) {
+          svg += `<line x1="${centroidScreenX}" y1="${centroidScreenY}" x2="${x}" y2="${y}" stroke="rgb(${color.r},${color.g},${color.b})" stroke-opacity="0.85" stroke-width="1.5"/>`
+          svg += `<circle cx="${centroidScreenX}" cy="${centroidScreenY}" r="2.5" fill="rgb(${color.r},${color.g},${color.b})" fill-opacity="0.95" stroke="rgba(255,255,255,0.95)" stroke-width="1"/>`
+        }
+      }
+
+      if (labelHasBox) {
+        svg += `<rect x="${visualBounds.x}" y="${visualBounds.y}" width="${visualBounds.width}" height="${visualBounds.height}" fill="rgba(255,255,255,0.9)" stroke="rgb(${color.r},${color.g},${color.b})" stroke-width="2"/>`
+      }
       
-      // Draw background rectangle
-      svg += `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="rgba(255,255,255,0.9)" stroke="rgb(${color.r},${color.g},${color.b})" stroke-width="2"/>`
-      
-      // Draw text
-      svg += `<text x="${x}" y="${y}" font-family="Arial" font-size="12" fill="#333333" text-anchor="middle" dominant-baseline="middle">${category}</text>`
+      svg += `<text x="${x}" y="${y}" font-family="Arial" font-size="${labelFontSize}" fill="#333333" text-anchor="middle" dominant-baseline="middle">${textValue}</text>`
     })
     
     return svg
@@ -10012,6 +10122,7 @@ export default class extends Controller {
           this.labelStartOffsetX = label.offsetX
           this.labelStartOffsetY = label.offsetY
           this.clickingOnLabel = true
+          this.labelDragMoved = false
           // console.log(`🏷️ Started dragging label: ${label.category}`)
           return
         }
@@ -10033,6 +10144,105 @@ export default class extends Controller {
       }
       this.detectRegLPointClick(event)
     
+  }
+
+  async focusMetadataCategoryFromLabel(label) {
+    if (!label || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'DISCRETE') return
+
+    const metadataId = String(this.currentMetadataVector.id || this.currentMetadataId || '')
+    const category = String(label.category || '').trim()
+    if (!metadataId || !category) return
+
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+
+    const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
+    const categoriesDiv = header ? header.nextElementSibling : null
+
+    if (header && categoriesDiv && categoriesDiv.style.display === 'none') {
+      header.click()
+    }
+
+    await this.waitForMetadataExpansion(categoriesDiv)
+    const categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+    if (!categoryRow) return
+
+    // Ensure layout/transition has settled before scrolling to the exact category row.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        categoryRow.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      })
+    })
+  }
+
+  waitForMetadataExpansion(categoriesDiv) {
+    if (!categoriesDiv) return Promise.resolve()
+
+    return new Promise(resolve => {
+      let resolved = false
+      const finish = () => {
+        if (resolved) return
+        resolved = true
+        categoriesDiv.removeEventListener('transitionend', onTransitionEnd)
+        resolve()
+      }
+
+      const onTransitionEnd = event => {
+        if (event.target === categoriesDiv && event.propertyName === 'max-height') {
+          // One extra frame so browser can apply the final layout.
+          requestAnimationFrame(() => finish())
+        }
+      }
+
+      categoriesDiv.addEventListener('transitionend', onTransitionEnd)
+
+      // Heavy panels may skip/interrupt transitions; fallback timeout keeps this resilient.
+      setTimeout(() => finish(), 1200)
+    })
+  }
+
+  waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv) {
+    const maxAttempts = 75
+    let attempts = 0
+
+    return new Promise(resolve => {
+      const tryFind = () => {
+        attempts += 1
+        const escapedCategory = this.escapeAttributeSelectorValue(category)
+        const checkbox = metadataItem.querySelector(
+          `.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escapedCategory}"]`
+        )
+        const row = checkbox ? (checkbox.closest('.metadata-category-row') || checkbox.parentElement) : null
+
+        const categoriesVisible = !categoriesDiv || (
+          categoriesDiv.style.display !== 'none' &&
+          categoriesDiv.scrollHeight > 0
+        )
+        const rowVisible = !!(row && row.getClientRects && row.getClientRects().length > 0)
+
+        if (row && categoriesVisible && rowVisible) {
+          resolve(row)
+          return
+        }
+
+        if (attempts >= maxAttempts) {
+          resolve(null)
+          return
+        }
+
+        setTimeout(tryFind, 80)
+      }
+
+      tryFind()
+    })
+  }
+
+  escapeAttributeSelectorValue(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(value)
+    }
+
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   }
 
   onPointClick(cellId, point, event) {

@@ -19,6 +19,7 @@ Rails.application.routes.draw do
       get :metadata_coordinates
       get :metadata_vectors
       get :gene_expression
+      get :get_autocomplete_genes
       get :creating
       get :creation_status
       get :step_results

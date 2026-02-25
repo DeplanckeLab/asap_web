@@ -1097,18 +1097,18 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <!-- Interaction Mode Buttons -->
         <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
-            <!-- Pan/Zoom Button (Default) -->
+            <!-- Pan/Zoom Button -->
             <button id="pan-mode-btn"
-                    style="padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
                     title="Pan/Zoom Mode"
                     data-action="click->visualization#setPanMode"
                     data-mode="pan">
               <i class="fas fa-arrows-alt" style="font-size: 14px;"></i>
             </button>
-            
-            <!-- Pick Mode Button -->
+
+            <!-- Pick Mode Button (Default) -->
             <button id="pick-mode-btn"
-                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; cursor: pointer; transition: background-color 0.2s; border-right: 1px solid #d1d5db;"
                     title="Pick Mode - Click points for details"
                     data-action="click->visualization#setPickMode"
                     data-mode="pick">
@@ -1124,6 +1124,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               <%= render 'shared/lasso_icon' %>
             </button>
           </div>
+
+          <button id="toggle-labels-toolbar-btn"
+                  type="button"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
+                  title="Display labels"
+                  data-action="click->visualization#toggleDisplayLabelsFromToolbar">
+            <i class="fas fa-tags" style="font-size: 14px;"></i>
+          </button>
         </div>
         
         <!-- Save Dropdown -->
@@ -1585,7 +1593,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
 
 <!-- Floating Settings Window -->
 <div id="settings-window" 
-     style="position: fixed; top: 100px; right: 20px; width: 280px; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); z-index: 10000; display: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+     style="position: fixed; top: 100px; right: 20px; width: 360px; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); z-index: 10000; display: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
   
   <!-- Window Header -->
   <div id="settings-header" 
@@ -1601,10 +1609,28 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   
   <!-- Window Content -->
   <div style="padding: 16px;">
-    <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <!-- Settings Tabs -->
+      <div style="display: flex; gap: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px;">
+        <button id="settings-tab-general"
+                type="button"
+                style="padding: 6px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #eff6ff; color: #1d4ed8; cursor: pointer; font-weight: 600;">
+          General
+        </button>
+        <button id="settings-tab-main-plot"
+                type="button"
+                style="padding: 6px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #374151; cursor: pointer;">
+          Main plot
+        </button>
+        <button id="settings-tab-custom-plot"
+                type="button"
+                style="padding: 6px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #374151; cursor: pointer; display: none;">
+          Custom plot
+        </button>
+      </div>
       
       <!-- General Settings -->
-      <div>
+      <div id="settings-tab-content-general">
         <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
           General settings
         </div>
@@ -1660,7 +1686,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       </div>
       
       <!-- Main Plot Settings -->
-      <div>
+      <div id="settings-tab-content-main-plot" style="display: none;">
         <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
           Main plot settings
         </div>
@@ -1689,26 +1715,102 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                    style="width: 16px; height: 16px; cursor: pointer;"
                    data-action="change->visualization#toggleAxes">
           </div>
-          
+        </div>
+      </div>
+
+      <!-- Label Settings -->
+      <div id="settings-tab-content-labels" style="display: none;">
+        <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
+          Label settings
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
           <!-- Show Categories -->
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
               Show Category Labels
             </label>
-            <input type="checkbox" 
+            <input type="checkbox"
                    id="show-categories-checkbox"
                    style="width: 16px; height: 16px; cursor: pointer;"
                    data-action="change->visualization#toggleCategories">
+          </div>
+
+          <!-- Label Boxes -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Label boxes
+            </label>
+            <input type="checkbox"
+                   id="show-label-boxes-checkbox"
+                   checked
+                   style="width: 16px; height: 16px; cursor: pointer;">
+          </div>
+
+          <!-- Label Text Size -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label for="label-font-size-select" style="font-size: 13px; font-weight: 500; color: #374151;">
+              Label text size
+            </label>
+            <select id="label-font-size-select"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="auto" selected>Auto</option>
+              <option value="10">Small</option>
+              <option value="12">Medium</option>
+              <option value="14">Large</option>
+              <option value="16">X-Large</option>
+            </select>
+          </div>
+
+          <!-- Truncate Long Labels -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Truncate long labels
+            </label>
+            <input type="checkbox"
+                   id="truncate-labels-checkbox"
+                   checked
+                   style="width: 16px; height: 16px; cursor: pointer;">
+          </div>
+
+          <!-- Keep moved labels fixed -->
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-size: 13px; font-weight: 500; color: #374151; cursor: pointer;">
+              Keep moved labels fixed
+            </label>
+            <input type="checkbox"
+                   id="freeze-moved-labels-checkbox"
+                   checked
+                   style="width: 16px; height: 16px; cursor: pointer;">
+          </div>
+
+          <!-- Reset Label Placement -->
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 2px;">
+            <label for="label-placement-reset-select" style="font-size: 13px; font-weight: 500; color: #374151;">
+              Reset label placement
+            </label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <select id="label-placement-reset-select"
+                      style="flex: 1; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+                <option value="avoid-collisions" selected>Avoiding collisions</option>
+                <option value="centroid">At the centroid</option>
+              </select>
+              <button id="reset-label-placement-btn"
+                      type="button"
+                      style="padding: 6px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #374151; cursor: pointer;">
+                Reset
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Custom Plot Settings -->
-      <div id="custom-plot-settings-section" style="display: none;">
+      <div id="settings-tab-content-custom-plot" style="display: none;">
         <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 12px;">
           Custom plot settings
         </div>
-        <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div id="custom-plot-settings-section" style="display: none;">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <label for="custom-plot-x-scale" style="font-size: 13px; font-weight: 500; color: #374151;">
               X-axis scale
@@ -1731,6 +1833,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               <option value="log10">Log10</option>
             </select>
           </div>
+          </div>
+        </div>
+        <div id="custom-plot-settings-empty-state" style="display: none; font-size: 13px; color: #6b7280; line-height: 1.4;">
+          Custom plot settings are available when a custom plot is active.
         </div>
       </div>
     </div>

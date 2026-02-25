@@ -10,6 +10,7 @@ export class UIManager {
       visible: false,
       xAxisIsCategorical: false
     }
+    this.activeSettingsTab = 'general'
   }
 
   // Tooltip management
@@ -695,6 +696,8 @@ export class UIManager {
     } else {
       checkbox.title = 'Category labels will appear when categorical metadata is selected'
     }
+
+    this.updateDisplayLabelsButtonState()
   }
 
   // Enable range slider for continuous metadata
@@ -1331,6 +1334,8 @@ export class UIManager {
   }
 
   initializeSettingsWindow() {
+    this.initializeSettingsTabs()
+
     // Initialize point size slider value display
     const slider = document.getElementById('point-size-slider')
     const valueDisplay = document.getElementById('point-size-value')
@@ -1385,6 +1390,67 @@ export class UIManager {
         this.controller.toggleCategories()
       })
     }
+    this.updateDisplayLabelsButtonState()
+
+    const showLabelBoxesCheckbox = document.getElementById('show-label-boxes-checkbox')
+    if (showLabelBoxesCheckbox) {
+      showLabelBoxesCheckbox.checked = this.controller.showLabelBoxes !== false
+      showLabelBoxesCheckbox.onchange = () => {
+        this.controller.showLabelBoxes = showLabelBoxesCheckbox.checked
+        this.refreshCategoryLabels()
+      }
+    }
+
+    const labelFontSizeSelect = document.getElementById('label-font-size-select')
+    if (labelFontSizeSelect) {
+      labelFontSizeSelect.value = this.controller.labelFontSizeMode === 'auto'
+        ? 'auto'
+        : String(this.controller.labelFontSize || 12)
+      labelFontSizeSelect.onchange = () => {
+        if (labelFontSizeSelect.value === 'auto') {
+          this.controller.labelFontSizeMode = 'auto'
+          this.refreshCategoryLabels()
+          return
+        }
+
+        const newSize = parseInt(labelFontSizeSelect.value, 10)
+        if (Number.isNaN(newSize) || newSize <= 0) return
+        this.controller.labelFontSizeMode = 'manual'
+        this.controller.labelFontSize = newSize
+        this.refreshCategoryLabels()
+      }
+    }
+
+    const truncateLabelsCheckbox = document.getElementById('truncate-labels-checkbox')
+    if (truncateLabelsCheckbox) {
+      truncateLabelsCheckbox.checked = this.controller.truncateLongLabels !== false
+      truncateLabelsCheckbox.onchange = () => {
+        this.controller.truncateLongLabels = truncateLabelsCheckbox.checked
+        this.refreshCategoryLabels()
+      }
+    }
+
+    const freezeMovedLabelsCheckbox = document.getElementById('freeze-moved-labels-checkbox')
+    if (freezeMovedLabelsCheckbox) {
+      freezeMovedLabelsCheckbox.checked = this.controller.freezeMovedLabels !== false
+      freezeMovedLabelsCheckbox.onchange = () => {
+        this.controller.freezeMovedLabels = freezeMovedLabelsCheckbox.checked
+        this.refreshCategoryLabels()
+      }
+    }
+
+    const labelPlacementResetSelect = document.getElementById('label-placement-reset-select')
+    if (labelPlacementResetSelect) {
+      labelPlacementResetSelect.value = this.controller.labelPlacementMode || 'avoid-collisions'
+    }
+
+    const resetLabelPlacementBtn = document.getElementById('reset-label-placement-btn')
+    if (resetLabelPlacementBtn) {
+      resetLabelPlacementBtn.onclick = () => {
+        const mode = labelPlacementResetSelect ? labelPlacementResetSelect.value : 'avoid-collisions'
+        this.resetLabelPlacement(mode)
+      }
+    }
     
     // Add event listener for category order dropdown and set current value
     const categoryOrderSelect = document.getElementById('category-order-select')
@@ -1435,6 +1501,93 @@ export class UIManager {
     this.makeSettingsWindowDraggable()
   }
 
+  refreshCategoryLabels() {
+    const categoriesCheckbox = document.getElementById('show-categories-checkbox')
+    if (!categoriesCheckbox || !categoriesCheckbox.checked) return
+
+    const hasDiscreteMetadata = this.controller.currentMetadataVector &&
+      this.controller.currentMetadataVector.data_type === 'DISCRETE'
+    if (!hasDiscreteMetadata) return
+
+    if (this.controller.rendererType === 'regl') {
+      // renderGrid clears and redraws grid + axes + labels in proper order
+      this.controller.rendererManager.renderGrid()
+      return
+    }
+
+    this.controller.rendererManager.renderCategoryLabels()
+  }
+
+  resetLabelPlacement(mode = 'avoid-collisions') {
+    const placementMode = mode === 'centroid' ? 'centroid' : 'avoid-collisions'
+    this.controller.labelPlacementMode = placementMode
+
+    if (Array.isArray(this.controller.canvas2DLabels)) {
+      this.controller.canvas2DLabels.forEach(label => {
+        label.offsetX = 0
+        label.offsetY = 0
+        label.manualOffsetX = 0
+        label.manualOffsetY = 0
+        label.isManuallyMoved = false
+        label.lockedX = null
+        label.lockedY = null
+      })
+    }
+    if (this.controller.manualLabelLocks) {
+      this.controller.manualLabelLocks.clear()
+    }
+
+    this.refreshCategoryLabels()
+  }
+
+  initializeSettingsTabs() {
+    const generalBtn = document.getElementById('settings-tab-general')
+    const mainPlotBtn = document.getElementById('settings-tab-main-plot')
+    const customPlotBtn = document.getElementById('settings-tab-custom-plot')
+
+    if (generalBtn) {
+      generalBtn.onclick = () => this.switchSettingsTab('general')
+    }
+    if (mainPlotBtn) {
+      mainPlotBtn.onclick = () => this.switchSettingsTab('main-plot')
+    }
+    if (customPlotBtn) {
+      customPlotBtn.onclick = () => this.switchSettingsTab('custom-plot')
+    }
+
+    this.switchSettingsTab(this.activeSettingsTab || 'general')
+  }
+
+  switchSettingsTab(tabId) {
+    const normalizedTab = ['general', 'main-plot', 'custom-plot'].includes(tabId) ? tabId : 'general'
+    const sectionGeneral = document.getElementById('settings-tab-content-general')
+    const sectionMainPlot = document.getElementById('settings-tab-content-main-plot')
+    const sectionLabels = document.getElementById('settings-tab-content-labels')
+    const sectionCustomPlot = document.getElementById('settings-tab-content-custom-plot')
+
+    if (sectionGeneral) sectionGeneral.style.display = normalizedTab === 'general' ? 'block' : 'none'
+    if (sectionMainPlot) sectionMainPlot.style.display = normalizedTab === 'main-plot' ? 'block' : 'none'
+    if (sectionLabels) sectionLabels.style.display = normalizedTab === 'main-plot' ? 'block' : 'none'
+    if (sectionCustomPlot) sectionCustomPlot.style.display = normalizedTab === 'custom-plot' ? 'block' : 'none'
+
+    const buttons = {
+      general: document.getElementById('settings-tab-general'),
+      'main-plot': document.getElementById('settings-tab-main-plot'),
+      'custom-plot': document.getElementById('settings-tab-custom-plot')
+    }
+
+    Object.entries(buttons).forEach(([key, button]) => {
+      if (!button) return
+      const isActive = key === normalizedTab
+      button.style.background = isActive ? '#eff6ff' : 'white'
+      button.style.color = isActive ? '#1d4ed8' : '#374151'
+      button.style.fontWeight = isActive ? '600' : '500'
+      button.style.borderColor = '#d1d5db'
+    })
+
+    this.activeSettingsTab = normalizedTab
+  }
+
   setCustomPlotSettingsState(state = {}) {
     this.customPlotSettingsState = {
       ...this.customPlotSettingsState,
@@ -1445,12 +1598,23 @@ export class UIManager {
 
   updateCustomPlotSettingsSection() {
     const section = document.getElementById('custom-plot-settings-section')
+    const emptyState = document.getElementById('custom-plot-settings-empty-state')
+    const customTabButton = document.getElementById('settings-tab-custom-plot')
     if (!section) return
 
     const isVisible = !!(this.customPlotSettingsState && this.customPlotSettingsState.visible)
     section.style.display = isVisible ? 'block' : 'none'
+    if (emptyState) {
+      emptyState.style.display = isVisible ? 'none' : 'block'
+    }
+    if (customTabButton) {
+      customTabButton.style.display = isVisible ? 'inline-block' : 'none'
+    }
 
     if (!isVisible) {
+      if (this.activeSettingsTab === 'custom-plot') {
+        this.switchSettingsTab('general')
+      }
       return
     }
 
@@ -1783,8 +1947,22 @@ export class UIManager {
       categoriesContainer.style.display = checkbox.checked ? 'block' : 'none'
       // console.log(`🏷️ Metadata categories panel: ${checkbox.checked ? 'shown' : 'hidden'}`)
     }
+
+    this.updateDisplayLabelsButtonState()
     
     // console.log('🏷️ Categories toggle complete!')
+  }
+
+  updateDisplayLabelsButtonState() {
+    const button = document.getElementById('toggle-labels-toolbar-btn')
+    const checkbox = document.getElementById('show-categories-checkbox')
+    if (!button || !checkbox) return
+
+    const isActive = !!checkbox.checked
+    button.style.backgroundColor = isActive ? '#3b82f6' : '#f3f4f6'
+    button.style.color = isActive ? 'white' : '#374151'
+    button.style.borderColor = '#d1d5db'
+    button.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   }
 
   changeCategoryOrder(event) {

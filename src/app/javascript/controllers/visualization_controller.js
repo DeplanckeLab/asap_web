@@ -108,6 +108,9 @@ export default class extends Controller {
     this.downloadManager = new DownloadManager(this)
     this.geneManager = new GeneManager(this)
     this.customPlotManager = new CustomPlotManager(this)
+
+    // Keep static category dots in sync with stored custom colors.
+    setTimeout(() => this.syncStaticCategoryDots(), 0)
     
     // RENDERER CHOICE: 'regl' only
     this.rendererType = 'regl' // 🎯 Using ReGL for better performance
@@ -2855,6 +2858,7 @@ export default class extends Controller {
         stableSortedCategories.forEach((cat, idx) => {
           categoryToIndex[cat] = idx
         })
+        const discreteColorMap = this.colorManager.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
         
         // console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
         
@@ -2867,10 +2871,11 @@ export default class extends Controller {
             const category = coloringMetadataVector.values[cellIndex]
             const categoryIndex = categoryToIndex[category] || 0
             const colorValue = categoryColors[categoryIndex % categoryColors.length]
-            
-            const metadataColor = typeof colorValue === 'string' 
+
+            const fallbackColor = typeof colorValue === 'string'
               ? parseInt(colorValue.replace('#', ''), 16)
               : colorValue
+            const metadataColor = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
             
             this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
             const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
@@ -5034,6 +5039,7 @@ export default class extends Controller {
     document.querySelectorAll('.metadata-category-dot').forEach(dot => {
       dot.style.display = ''
     })
+    this.syncStaticCategoryDots()
     //console.log('removeAllCategoryColors: Complete')
   }
   
@@ -5242,6 +5248,29 @@ export default class extends Controller {
     // console.log(`Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
     return fallbackColor
   }
+
+  syncStaticCategoryDots(metadataId = null) {
+    const metadataItems = metadataId
+      ? document.querySelectorAll(`[data-metadata-item="${metadataId}"]`)
+      : document.querySelectorAll('[data-metadata-item]')
+
+    metadataItems.forEach(item => {
+      const rows = item.querySelectorAll('.metadata-category-row')
+      rows.forEach((row, index) => {
+        const dot = row.querySelector('.metadata-category-dot')
+        const nameEl = row.querySelector('.metadata-category-name')
+        if (!dot || !nameEl) return
+
+        const dotMetadataId = dot.dataset.metadataId || metadataId
+        if (!dotMetadataId) return
+
+        const categoryName = nameEl.textContent ? nameEl.textContent.trim() : ''
+        if (!categoryName) return
+
+        dot.style.backgroundColor = this.getCategoryColor(categoryName, index, dotMetadataId)
+      })
+    })
+  }
   
   // Check if a metadata has any customized colors
   hasCustomizedColors(metadataId) {
@@ -5359,21 +5388,23 @@ export default class extends Controller {
     
     // Clear cached color map
     this._cachedColorMap = null
+    this.lastColorUpdateHash = null
+    this.colorUpdateCache.clear()
+    this.colorManager.clearColorMapCache()
     
-    // Re-render the plot if this is the current metadata
-    if (this.currentMetadataId === metadataId && this.currentMetadataVector) {
-      //console.log('Re-rendering plot with default colors')
-      this.renderPointsWithCurrentColoring()
-      
-      // Re-render category labels if they are visible
-      if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-        //console.log('Re-rendering category labels with default colors')
-        this.rendererManager.renderCategoryLabels()
-      }
+    // Re-render plot/custom plot immediately so revert is visible everywhere.
+    this.renderPointsWithCurrentColoring()
+    if (this.customPlotManager && typeof this.customPlotManager.refresh2DPlotIfOpen === 'function') {
+      this.customPlotManager.refresh2DPlotIfOpen()
+    }
+    if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
+      this.rendererManager.renderCategoryLabels()
     }
     
     // Update the legend colors
     this.updateLegendColors(metadataId)
+    this.syncStaticCategoryDots(metadataId)
+    this.dataManager.updateAllCategoryDistributions()
     
     // Remove the reset button since there are no more customized colors
     this.removeResetColorsButton(metadataId)
@@ -5475,8 +5506,10 @@ export default class extends Controller {
       min-width: 200px;
     `
     
-    // Get current color
-    const currentColor = colorDisk.style.backgroundColor
+    // Get current color and normalize it to #RRGGBB for the color input.
+    const currentColor = this.normalizeColorToHex(
+      colorDisk.style.backgroundColor || window.getComputedStyle(colorDisk).backgroundColor
+    )
     
     picker.innerHTML = `
       <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 500;">Change color for "${categoryName}"</h4>
@@ -5520,42 +5553,61 @@ export default class extends Controller {
     })
     
     // Save button
-    saveBtn.addEventListener('click', () => {
-      const newColor = colorInput.value
-      
-      // Update the color disk
-      colorDisk.style.backgroundColor = newColor
-      
-      // Store the color with metadata-specific key
-      const storageKey = `category_color_${metadataId}_${categoryName}`
-      localStorage.setItem(storageKey, newColor)
-      
-      // Clear the cached color map so plot will use updated colors
-      this._cachedColorMap = null
-      
-      // Re-render the plot with the new color
-      if (this.currentMetadataVector && this.currentMetadataId === metadataId) {
-        //console.log('Color changed, re-rendering plot with updated colors')
-        //console.log(`Current point size before re-render: ${this.currentPointSize}`)
+    saveBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      try {
+        const newColor = this.normalizeColorToHex(colorInput.value)
+
+        // Update the clicked dot immediately.
+        colorDisk.style.backgroundColor = newColor
+
+        // Keep all visible static dots for this category in sync immediately.
+        document.querySelectorAll('.metadata-category-dot').forEach(dot => {
+          if (String(dot.dataset.metadataId) === String(metadataId) && dot.dataset.category === categoryName) {
+            dot.style.backgroundColor = newColor
+          }
+        })
+
+        // Keep editable disks in sync when they are visible.
+        document.querySelectorAll('.category-color-disk').forEach(disk => {
+          if (String(disk.dataset.metadataId) === String(metadataId) && disk.dataset.categoryName === categoryName) {
+            disk.style.backgroundColor = newColor
+          }
+        })
+
+        // Store the color with metadata-specific key
+        const storageKey = `category_color_${metadataId}_${categoryName}`
+        localStorage.setItem(storageKey, newColor)
+
+        // Clear the cached color map so plot will use updated colors
+        this._cachedColorMap = null
+        this.lastColorUpdateHash = null
+        this.colorUpdateCache.clear()
+        this.colorManager.clearColorMapCache()
+
+        // Re-render plot/custom-plot immediately so color changes are visible without reload.
         this.renderPointsWithCurrentColoring()
-        
-        // Re-render category labels if they are visible
+        if (this.customPlotManager && typeof this.customPlotManager.refresh2DPlotIfOpen === 'function') {
+          this.customPlotManager.refresh2DPlotIfOpen()
+        }
         if (this.categoryLabelsContainer && this.categoryLabelsContainer.visible) {
-          //console.log('Re-rendering category labels with updated colors')
           this.rendererManager.renderCategoryLabels()
         }
-      } else {
-        // console.log('Color saved but not re-rendering plot (different metadata active)')
+
+        // Refresh all unfolded metadata bars to apply new category color immediately
+        this.dataManager.updateAllCategoryDistributions()
+        this.syncStaticCategoryDots(metadataId)
+
+        // Add reset button if it doesn't exist (first customization)
+        const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+        if (metadataContainer) {
+          this.addResetColorsButton(metadataContainer, metadataId)
+        }
+      } finally {
+        // Always close the picker after save.
+        picker.remove()
       }
-      
-      // Add reset button if it doesn't exist (first customization)
-      const metadataContainer = document.querySelector(`[data-metadata-item="${metadataId}"]`)
-      if (metadataContainer) {
-        this.addResetColorsButton(metadataContainer, metadataId)
-      }
-      
-      // Close the picker
-      picker.remove()
     })
     
     // Close on outside click
@@ -5567,6 +5619,28 @@ export default class extends Controller {
         }
       })
     }, 0)
+  }
+
+  normalizeColorToHex(colorValue) {
+    if (!colorValue || typeof colorValue !== 'string') return '#3b82f6'
+    const trimmed = colorValue.trim()
+    if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase()
+
+    const rgbMatch = trimmed.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i)
+    if (rgbMatch) {
+      const toHex = (n) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, '0')
+      return `#${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`
+    }
+    return '#3b82f6'
+  }
+
+  categoryDotClicked(event) {
+    event.stopPropagation()
+    const dot = event.currentTarget
+    const metadataId = dot.dataset.metadataId
+    const categoryName = dot.dataset.category
+    if (!metadataId || !categoryName) return
+    this.showColorPicker(dot, categoryName, metadataId)
   }
 
   // Interaction Mode Methods
@@ -9600,9 +9674,19 @@ export default class extends Controller {
     const plotContainer = document.querySelector('.plot-container')
     const rect = plotContainer ? plotContainer.getBoundingClientRect() : { left: 0, top: 0, width: 600, height: 400 }
     
-    // Position tooltip based on whether it's fixed or hovering
+    // Estimate tooltip size for viewport clamping and fixed corner placement.
+    const estimatedTooltipHeight = 150
+    const estimatedTooltipWidth = 250
+    const viewportBottom = window.innerHeight
+    const viewportRight = window.innerWidth
+    
+    // In pick mode, keep the inspector fixed at the bottom-right corner.
     let tooltipLeft, tooltipTop
-    if (isFixed && this.lastTooltipPosition) {
+    if (this.interactionMode === 'pick') {
+      const margin = 16
+      tooltipLeft = viewportRight - estimatedTooltipWidth - margin
+      tooltipTop = viewportBottom - estimatedTooltipHeight - margin
+    } else if (isFixed && this.lastTooltipPosition) {
       // For fixed tooltips, use saved position if available (from manual drag)
       tooltipLeft = this.lastTooltipPosition.left
       tooltipTop = this.lastTooltipPosition.top
@@ -9618,7 +9702,6 @@ export default class extends Controller {
         tooltipLeft = point.x + 12
         tooltipTop = point.y + 12
       } else {
-        // Fallback: use default position if point coordinates not available
         tooltipLeft = rect.left - 20
         tooltipTop = rect.top - 40
       }
@@ -9629,13 +9712,7 @@ export default class extends Controller {
       tooltipTop = rect.top - margins.top - 20
     }
     
-    // Ensure tooltip doesn't go below the viewport bottom
-    // Estimate tooltip height (header + table rows + padding)
-    // Conservative estimate: ~150px for typical tooltip with 3-4 rows
-    const estimatedTooltipHeight = 150
-    const estimatedTooltipWidth = 250 // Conservative estimate for max-width
-    const viewportBottom = window.innerHeight
-    const viewportRight = window.innerWidth
+    // Ensure tooltip stays within viewport bounds.
     
     // Check if tooltip would go below viewport bottom
     if (tooltipTop + estimatedTooltipHeight > viewportBottom) {
@@ -13272,6 +13349,7 @@ export default class extends Controller {
     
     // Get category colors from color manager (use full palette)
     const categoryColors = this.colorManager.getCategoryColors()
+    const discreteColorMap = this.colorManager.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
     
     // Sort visible coloring categories by count (largest first) for display order only
     // But use stable color indices for actual color assignment
@@ -13306,7 +13384,8 @@ export default class extends Controller {
         if (count > 0) {
           // Use stable color index (not the index in the filtered sorted list)
           const stableColorIndex = categoryToColorIndex[coloringCategory] !== undefined ? categoryToColorIndex[coloringCategory] : 0
-          const color = categoryColors[stableColorIndex % categoryColors.length]
+          const fallbackColor = categoryColors[stableColorIndex % categoryColors.length]
+          const color = discreteColorMap[coloringCategory] !== undefined ? discreteColorMap[coloringCategory] : fallbackColor
           
           const percentage = (count / cellsInDisplayedCategory.length) * 100
           const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width

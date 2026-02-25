@@ -48,15 +48,11 @@ export class ColorManager {
           
           const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
           
-          // Create color map using stable sorted order
-          const categoryColors = this.getCategoryColors()
+          // Create color map using stable sorted order with per-category overrides
+          const discreteColorMap = this.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
           this.controller._cachedColorMap = {}
           stableSortedCategories.forEach((cat, idx) => {
-            const colorValue = categoryColors[idx % categoryColors.length]
-            const color = typeof colorValue === 'string' 
-              ? parseInt(colorValue.replace('#', ''), 16)
-              : colorValue
-            this.controller._cachedColorMap[cat] = color
+            this.controller._cachedColorMap[cat] = discreteColorMap[cat]
           })
           
           this.controller._cachedColorMapMetadataId = coloringMetadataVector.id
@@ -180,7 +176,6 @@ export class ColorManager {
     
     if (data_type === 'DISCRETE') {
       // Discrete metadata coloring
-      const categoryColors = this.getCategoryColors()
       
       // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
       // Otherwise fall back to unique categories from values
@@ -202,14 +197,17 @@ export class ColorManager {
         categoryToIndex[cat] = idx
       })
       
+      const discreteColorMap = this.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
+
       // Cache colors for all points
       for (let i = 0; i < values.length; i++) {
         const category = values[i]
         const categoryIndex = categoryToIndex[category] || 0
-        const colorValue = categoryColors[categoryIndex % categoryColors.length]
-        const color = typeof colorValue === 'string' 
-          ? parseInt(colorValue.replace('#', ''), 16)
-          : colorValue
+        const fallbackColorValue = this.getCategoryColors()[categoryIndex % this.getCategoryColors().length]
+        const fallbackColor = typeof fallbackColorValue === 'string'
+          ? parseInt(fallbackColorValue.replace('#', ''), 16)
+          : fallbackColorValue
+        const color = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
         const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
         this.controller.cachedColorsByCellIndex.set(i, isSelected ? 0xff0000 : color)
       }

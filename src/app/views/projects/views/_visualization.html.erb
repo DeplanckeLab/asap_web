@@ -204,6 +204,17 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   <!-- Hidden Radio -->
                   <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
                   
+                  <!-- Data View Link Button -->
+                  <%= link_to annot_path(metadata, from: 'visualization'),
+                      class: 'inline-flex items-center justify-center',
+                      style: 'padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;',
+                      onmouseover: "this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';",
+                      onmouseout: "this.style.color='#9ca3af'; this.style.backgroundColor='';",
+                      title: 'Open metadata in data view',
+                      onclick: 'event.stopPropagation();' do %>
+                    <i class="fas fa-search" style="font-size: 14px;"></i>
+                  <% end %>
+                  
                   <!-- Global Download Button -->
                   <button class="global-download-btn"
                           data-metadata-id="<%= metadata.id %>"
@@ -284,7 +295,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
                                 </div>
-                                <span class="metadata-category-dot" style="background-color: <%= category_color %>;" aria-hidden="true"></span>
+                                <span class="metadata-category-dot"
+                                      style="background-color: <%= category_color %>;"
+                                      data-metadata-id="<%= metadata.id %>"
+                                      data-category="<%= category %>"
+                                      data-action="click->visualization#categoryDotClicked"
+                                      title="Change category color"></span>
                                 <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
                               <% best_annotation_name = best_cla&.dig(:name).presence || '-' %>
@@ -342,7 +358,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
                                 </div>
-                                <span class="metadata-category-dot" style="background-color: <%= category_color %>;" aria-hidden="true"></span>
+                                <span class="metadata-category-dot"
+                                      style="background-color: <%= category_color %>;"
+                                      data-metadata-id="<%= metadata.id %>"
+                                      data-category="<%= category %>"
+                                      data-action="click->visualization#categoryDotClicked"
+                                      title="Change category color"></span>
                                 <span class="metadata-category-name" title="<%= category %>"><%= category %></span>
                               </div>
                               <% best_annotation_name_arr = best_cla&.dig(:name).presence || '-' %>
@@ -423,6 +444,17 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           onclick="event.stopPropagation()">
                     <i class="fas fa-palette" style="font-size: 16px;"></i>
                   </button>
+                  
+                  <!-- Data View Link Button -->
+                  <%= link_to annot_path(metadata, from: 'visualization'),
+                      class: 'inline-flex items-center justify-center',
+                      style: 'padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;',
+                      onmouseover: "this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';",
+                      onmouseout: "this.style.color='#9ca3af'; this.style.backgroundColor='';",
+                      title: 'Open metadata in data view',
+                      onclick: 'event.stopPropagation();' do %>
+                    <i class="fas fa-search" style="font-size: 14px;"></i>
+                  <% end %>
                 </div>
               </div>
             <% end %>
@@ -498,6 +530,17 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   </div>
                   <!-- Hidden Radio -->
                   <input type="radio" name="color_by" value="<%= metadata.id %>" style="display: none;">
+                  
+                  <!-- Data View Link Button -->
+                  <%= link_to annot_path(metadata, from: 'visualization'),
+                      class: 'inline-flex items-center justify-center',
+                      style: 'padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;',
+                      onmouseover: "this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';",
+                      onmouseout: "this.style.color='#9ca3af'; this.style.backgroundColor='';",
+                      title: 'Open metadata in data view',
+                      onclick: 'event.stopPropagation();' do %>
+                    <i class="fas fa-search" style="font-size: 14px;"></i>
+                  <% end %>
                   
                   <!-- Global Download Button -->
                   <button class="global-download-btn"
@@ -945,6 +988,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             border-radius: 9999px;
             border: 1px solid rgba(17, 24, 39, 0.2);
             flex: 0 0 auto;
+            cursor: pointer;
           }
           .metadata-category-count {
             font-size: 12px;

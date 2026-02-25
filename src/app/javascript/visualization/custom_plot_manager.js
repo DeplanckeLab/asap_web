@@ -2401,15 +2401,20 @@ export class CustomPlotManager {
     })
     ctx.restore()
     
-    // Get category colors from categorical metadata
+    // Get coloring metadata vector for point colors
+    const coloringVector = this.controller.colorManager?.getColoringMetadataVector()
+
+    // Build category outline colors with per-category overrides when applicable
     const categoryColors = window.CATEGORY_COLORS || []
     const categoryColorMap = {}
     categories.forEach((cat, idx) => {
-      categoryColorMap[cat] = categoryColors[idx % categoryColors.length]
+      const fallbackColor = categoryColors[idx % categoryColors.length]
+      if (coloringVector && String(coloringVector.id) === String(this.controller.currentMetadataId) && typeof this.controller.getCategoryColor === 'function') {
+        categoryColorMap[cat] = this.controller.getCategoryColor(cat, idx, this.controller.currentMetadataId)
+      } else {
+        categoryColorMap[cat] = fallbackColor
+      }
     })
-    
-    // Get coloring metadata vector for point colors
-    const coloringVector = this.controller.colorManager?.getColoringMetadataVector()
     
     // Create a deterministic random function for consistent point positions
     const seededRandom = (seed) => {

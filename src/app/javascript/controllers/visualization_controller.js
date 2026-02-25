@@ -4179,6 +4179,15 @@ export default class extends Controller {
   // Update color range for a specific metadata (used by inline range slider)
   updateColorRange(metadataId, min, max, shouldAdaptColorRange = false) {
     // console.log('🎨 Updating color range for metadata:', metadataId, 'range:', { min, max }, 'adapt:', shouldAdaptColorRange)
+
+    const activeColoringId = this.currentMetadataId ? String(this.currentMetadataId) : ''
+    const requestedMetadataId = metadataId ? String(metadataId) : ''
+    const isActiveNumericColoring =
+      activeColoringId === requestedMetadataId &&
+      this.currentMetadataVector?.data_type === 'NUMERIC'
+    if (!isActiveNumericColoring) {
+      return
+    }
     
     if (shouldAdaptColorRange) {
       // Set the custom color range to adapt to the selected range
@@ -7169,6 +7178,7 @@ export default class extends Controller {
     const preservedDisplayOrder = this.displayOrder ? [...this.displayOrder] : null
     const preservedMetadataVector = this.currentMetadataVector
     const preservedMetadataId = this.currentMetadataId
+    const preservedMetadataIdString = preservedMetadataId ? String(preservedMetadataId) : ''
     
     // Preserve filtering state (selectedCategories and selectedRanges)
     const preservedSelectedCategories = this.selectedCategories && Object.keys(this.selectedCategories).length > 0 ? {} : null
@@ -7344,6 +7354,28 @@ export default class extends Controller {
       // No filtering - restore coloring using current active metadata state.
       if (this.currentMetadataVector && this.currentMetadataId && this.reglRenderer) {
         this.renderPointsWithCurrentColoring()
+      }
+    }
+
+    // Hard re-assert coloring after resize. Some resize/render paths can transiently
+    // lose the active vector reference and fall back to default blue.
+    if (this.reglRenderer && preservedMetadataIdString.length > 0) {
+      const currentId = this.currentMetadataId ? String(this.currentMetadataId) : ''
+      if (!currentId || currentId === preservedMetadataIdString) {
+        const restoredVector =
+          this.loadedMetadataVectors?.[preservedMetadataIdString] ||
+          preservedMetadataVector ||
+          null
+        if (restoredVector) {
+          this.currentMetadataId = preservedMetadataIdString
+          this.currentMetadataVector = restoredVector
+          this.colorManager.clearColorMapCache()
+          requestAnimationFrame(() => {
+            if (this.reglRenderer) {
+              this.renderPointsWithCurrentColoring()
+            }
+          })
+        }
       }
     }
     

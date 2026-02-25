@@ -621,30 +621,36 @@ export default class extends Controller {
     
     const startTime = performance.now()
     // console.log(`${logPrefix} performPlotUpdate started for metadata:`, this.metadataIdValue)
+
+    const activeColoringId = this.visualizationController.currentMetadataId
+      ? String(this.visualizationController.currentMetadataId)
+      : ''
+    const sliderMetadataId = this.metadataIdValue ? String(this.metadataIdValue) : ''
+    const isThisSliderActiveNumericColoring =
+      activeColoringId === sliderMetadataId &&
+      this.visualizationController.currentMetadataVector?.data_type === 'NUMERIC'
     
     // Update the color range in the main visualization
     const colorRangeStart = performance.now()
     if (this.visualizationController.updateColorRange) {
       // Check if we should adapt the color range to the selected range
-      const shouldAdaptColorRange = this.adaptColorRangeEnabled
-      
+      const shouldAdaptColorRange = this.adaptColorRangeEnabled && isThisSliderActiveNumericColoring
+
       if (shouldAdaptColorRange) {
-        // Full color range adaptation - use the full rendering approach
-        // console.log('🎨 Adapting color range to selected range')
-        this.visualizationController.visibilityOnlyUpdate = false // Force full render
+        // Full color range adaptation only when this slider controls the active numeric coloring metadata.
+        this.visualizationController.visibilityOnlyUpdate = false
+        this.visualizationController.updateColorRange(
+          this.metadataIdValue,
+          this.currentMinValue,
+          this.currentMaxValue,
+          true
+        )
       } else {
-        // Fast path - just visibility updates
+        // Filtering-only path: do not touch global color range while coloring is based on other metadata.
         if (typeof this.visualizationController.visibilityOnlyUpdate === 'boolean') {
           this.visualizationController.visibilityOnlyUpdate = true
         }
       }
-      
-      this.visualizationController.updateColorRange(
-        this.metadataIdValue, 
-        this.currentMinValue, 
-        this.currentMaxValue,
-        shouldAdaptColorRange
-      )
     }
     const colorRangeTime = performance.now() - colorRangeStart
     // console.log(`${logPrefix} updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
@@ -763,8 +769,8 @@ export default class extends Controller {
     // Trigger unified filtering (which will update ALL counts and render)
     const filterStart = performance.now()
     if (this.dataManager.updateCellFiltering) {
-      // Pass shouldUpdateColors=true if we're adapting the color range
-      const shouldUpdateColors = this.adaptColorRangeEnabled
+      // Recompute colors only when this slider controls active numeric coloring.
+      const shouldUpdateColors = this.adaptColorRangeEnabled && isThisSliderActiveNumericColoring
       // console.log(`${logPrefix} Calling updateCellFiltering with shouldUpdateColors:`, shouldUpdateColors)
       this.dataManager.updateCellFiltering(shouldUpdateColors)
     } else {

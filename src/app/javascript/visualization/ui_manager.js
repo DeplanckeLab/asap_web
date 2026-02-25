@@ -1134,8 +1134,8 @@ export class UIManager {
     const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
     const debugSummary = new Map()
     const missingMetadata = new Set()
+    const logPrefix = '[FILTER COUNTS]'
     if (window.CHECKPOINT_TRACE === true) {
-      const logPrefix = '[FILTER COUNTS]'
       console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
         totalCheckboxes: allCategoryCheckboxes.length,
         visibleCheckboxes: visibleCheckboxes.length,

@@ -571,6 +571,7 @@ export default class extends Controller {
     }, 1500)
 
     this.fetchCheckpointHistory()
+    this.loadCheckpointFromUrlIfPresent()
 
     this.boundCheckpointTraceClick = (event) => {
       if (window.CHECKPOINT_TRACE !== true) return
@@ -1367,8 +1368,13 @@ export default class extends Controller {
     if (!overlay) return
 
     overlay.style.display = 'flex'
-    await this.fetchCheckpointHistory()
-    this.renderCheckpointHistory()
+    this.setCheckpointHistoryLoading(true)
+    try {
+      await this.fetchCheckpointHistory()
+      this.renderCheckpointHistory()
+    } finally {
+      this.setCheckpointHistoryLoading(false)
+    }
   }
 
   closeCheckpointHistory() {
@@ -1417,6 +1423,13 @@ export default class extends Controller {
           <div style="display:flex;align-items:center;gap:8px;">
             <button type="button"
                     data-checkpoint-id="${checkpoint.id}"
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${this.escapeHtml(checkpoint.id)}', this)"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;"
+                    title="Copy direct link to clipboard">
+              Link
+            </button>
+            <button type="button"
+                    data-checkpoint-id="${checkpoint.id}"
                     onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${this.escapeHtml(checkpoint.id)}')"
                     style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;">
               Load
@@ -1431,6 +1444,55 @@ export default class extends Controller {
         </div>
       `
     }).join('')
+  }
+
+  setCheckpointHistoryLoading(isLoading) {
+    const loadingContainer = document.getElementById('checkpoint-history-loading')
+    const listContainer = document.getElementById('checkpoint-history-list')
+    if (loadingContainer) {
+      loadingContainer.style.display = isLoading ? 'flex' : 'none'
+    }
+    if (listContainer) {
+      listContainer.style.display = isLoading ? 'none' : 'block'
+    }
+  }
+
+  loadCheckpointFromUrlIfPresent() {
+    if (!this.hasMetadataSelectTarget) return
+    if (this.initialUrlCheckpointHandled === true) return
+    this.initialUrlCheckpointHandled = true
+
+    const params = new URLSearchParams(window.location.search)
+    const checkpointId = params.get('checkpoint_id')
+    if (!checkpointId) return
+
+    setTimeout(() => {
+      this.loadCheckpointById(checkpointId).catch((error) => {
+        console.error('Failed to load checkpoint from URL:', error)
+      })
+    }, 0)
+  }
+
+  copyCheckpointDirectLink(checkpointId, button = null) {
+    if (!checkpointId) return
+
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', 'visualization')
+    url.searchParams.set('checkpoint_id', String(checkpointId))
+    const urlText = url.toString()
+
+    navigator.clipboard.writeText(urlText).then(() => {
+      if (button) {
+        const originalTitle = button.title
+        button.title = 'Copied!'
+        setTimeout(() => {
+          button.title = originalTitle || 'Copy direct link to clipboard'
+        }, 2000)
+      }
+    }).catch(() => {
+      console.error('Failed to copy checkpoint link to clipboard')
+      alert('Failed to copy checkpoint link to clipboard.')
+    })
   }
 
   async deleteCheckpointById(checkpointId) {
@@ -1537,6 +1599,12 @@ export default class extends Controller {
         state_signature: currentSignature
       })
       this.currentMatchedCheckpointId = checkpoint.id
+      const commentsBtn = document.getElementById('checkpoint-comments-btn')
+      if (commentsBtn) {
+        commentsBtn.style.opacity = '1'
+        commentsBtn.style.pointerEvents = 'auto'
+        commentsBtn.title = 'Checkpoint comments'
+      }
       this.refreshCurrentCheckpointMatch()
       this.checkpointTrace('loadCheckpointById:apply-success', {
         checkpointId: String(checkpoint.id || checkpointId),
@@ -4700,6 +4768,19 @@ export default class extends Controller {
       : []
 
     const selectedCells = Array.from(this.selectedCells || []).sort((a, b) => a - b)
+    const manualLabelLocks = {}
+    if (this.manualLabelLocks && typeof this.manualLabelLocks.forEach === 'function') {
+      this.manualLabelLocks.forEach((lock, category) => {
+        if (!lock || lock.isManuallyMoved !== true) return
+        manualLabelLocks[String(category)] = {
+          isManuallyMoved: true,
+          manualOffsetX: Number(lock.manualOffsetX || 0),
+          manualOffsetY: Number(lock.manualOffsetY || 0),
+          lockedX: Number.isFinite(Number(lock.lockedX)) ? Number(lock.lockedX) : null,
+          lockedY: Number.isFinite(Number(lock.lockedY)) ? Number(lock.lockedY) : null
+        }
+      })
+    }
 
     const state = {
       version: 1,
@@ -4755,7 +4836,8 @@ export default class extends Controller {
         labelFontSize: this.labelFontSize,
         truncateLongLabels: this.truncateLongLabels !== false,
         freezeMovedLabels: this.freezeMovedLabels !== false,
-        labelPlacementMode: this.labelPlacementMode
+        labelPlacementMode: this.labelPlacementMode,
+        manualLabelLocks: manualLabelLocks
       },
       interaction: {
         mode: this.interactionMode,
@@ -4996,6 +5078,17 @@ export default class extends Controller {
       this.truncateLongLabels = state.display.truncateLongLabels !== false
       this.freezeMovedLabels = state.display.freezeMovedLabels !== false
       this.labelPlacementMode = state.display.labelPlacementMode || this.labelPlacementMode
+      this.manualLabelLocks = new Map()
+      Object.entries(state.display.manualLabelLocks || {}).forEach(([category, lock]) => {
+        if (!lock || lock.isManuallyMoved !== true) return
+        this.manualLabelLocks.set(String(category), {
+          isManuallyMoved: true,
+          manualOffsetX: Number(lock.manualOffsetX || 0),
+          manualOffsetY: Number(lock.manualOffsetY || 0),
+          lockedX: Number.isFinite(Number(lock.lockedX)) ? Number(lock.lockedX) : null,
+          lockedY: Number.isFinite(Number(lock.lockedY)) ? Number(lock.lockedY) : null
+        })
+      })
 
       const pointSizeSlider = document.getElementById('point-size-slider')
       if (pointSizeSlider && state.display.pointSize) {

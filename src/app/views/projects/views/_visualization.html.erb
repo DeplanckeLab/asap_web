@@ -1123,7 +1123,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       </div>
 
       <!-- Right side: Actions -->
-      <div style="display: flex; align-items: flex-start; gap: 8px; ml-1">
+      <div style="display: flex; align-items: flex-start; gap: 8px; ml-1; flex-wrap: wrap; justify-content: flex-end;">
         <!-- Global Filter Summary -->
         <div id="global-filter-summary"
              data-action="click->visualization#toggleGlobalFilterPanel"
@@ -1181,120 +1181,125 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           </button>
         </div>
         
-        <!-- Save Dropdown -->
-        <div id="save-dropdown-container"
-             style="position: relative; display: inline-block;">
-          <button id="save-menu-button"
-                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-                  title="Save visualization"
-                  data-action="click->visualization#toggleSaveMenu"
-                  onmouseover="this.style.backgroundColor='#e5e7eb'"
-                  onmouseout="this.style.backgroundColor='#f3f4f6'">
-            <i class="fas fa-save" style="font-size: 14px;"></i>
-          </button>
-          <div id="save-menu"
-               class="save-dropdown-menu"
-               data-action="click->visualization#preventSaveMenuClose">
-            <div class="save-dropdown-section">
-              <div class="save-dropdown-header">
-                General
+        <!-- Checkpoint Action Group -->
+        <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 4px; overflow: visible;">
+          <!-- Save Dropdown -->
+          <div id="save-dropdown-container"
+               style="position: relative; display: inline-block;">
+            <button id="save-menu-button"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; border-right: 1px solid #d1d5db; border-radius: 0; cursor: pointer; transition: background-color 0.2s;"
+                    title="Save visualization"
+                    data-action="click->visualization#toggleSaveMenu"
+                    onmouseover="this.style.backgroundColor='#e5e7eb'"
+                    onmouseout="this.style.backgroundColor='#f3f4f6'">
+              <i class="fas fa-save" style="font-size: 14px;"></i>
+            </button>
+            <div id="save-menu"
+                 class="save-dropdown-menu"
+                 data-action="click->visualization#preventSaveMenuClose">
+              <div class="save-dropdown-section">
+                <div class="save-dropdown-header">
+                  General
+                </div>
+                <div class="save-dropdown-list">
+                  <button type="button"
+                          class="save-dropdown-item"
+                          data-save-type="checkpoint"
+                          data-plot-target="main"
+                          data-action="click->visualization#handleSaveOption">
+                    Save checkpoint
+                  </button>
+                </div>
               </div>
-              <div class="save-dropdown-list">
-                <button type="button"
-                        class="save-dropdown-item"
-                        data-save-type="checkpoint"
-                        data-plot-target="main"
-                        data-action="click->visualization#handleSaveOption">
-                  Save checkpoint
-                </button>
+              <div class="save-dropdown-section">
+                <div class="save-dropdown-header">
+                  Main plot
+                </div>
+                <div class="save-dropdown-list">
+                  <button type="button"
+                          class="save-dropdown-item"
+                          data-save-type="svg"
+                          data-plot-target="main"
+                          data-action="click->visualization#handleSaveOption">
+                    Save as SVG
+                  </button>
+                  <button type="button"
+                          class="save-dropdown-item"
+                          data-save-type="png"
+                          data-plot-target="main"
+                          data-action="click->visualization#handleSaveOption">
+                    Save as PNG
+                  </button>
+                </div>
               </div>
-            </div>
-            <div class="save-dropdown-section">
-              <div class="save-dropdown-header">
-                Main plot
-              </div>
-              <div class="save-dropdown-list">
-                <button type="button"
-                        class="save-dropdown-item"
-                        data-save-type="svg"
-                        data-plot-target="main"
-                        data-action="click->visualization#handleSaveOption">
-                  Save as SVG
-                </button>
-                <button type="button"
-                        class="save-dropdown-item"
-                        data-save-type="png"
-                        data-plot-target="main"
-                        data-action="click->visualization#handleSaveOption">
-                  Save as PNG
-                </button>
-              </div>
-            </div>
-            <div id="save-menu-custom-section"
-                 class="save-dropdown-section"
-                 style="display: none;">
-              <div class="save-dropdown-header">
-                Custom plot
-              </div>
-              <div class="save-dropdown-list">
-                <button type="button"
-                        class="save-dropdown-item"
-                        data-save-type="svg"
-                        data-plot-target="custom"
-                        data-action="click->visualization#handleSaveOption">
-                  Save as SVG
-                </button>
-                <button type="button"
-                        class="save-dropdown-item"
-                        data-save-type="png"
-                        data-plot-target="custom"
-                        data-action="click->visualization#handleSaveOption">
-                  Save as PNG
-                </button>
+              <div id="save-menu-custom-section"
+                   class="save-dropdown-section"
+                   style="display: none;">
+                <div class="save-dropdown-header">
+                  Custom plot
+                </div>
+                <div class="save-dropdown-list">
+                  <button type="button"
+                          class="save-dropdown-item"
+                          data-save-type="svg"
+                          data-plot-target="custom"
+                          data-action="click->visualization#handleSaveOption">
+                    Save as SVG
+                  </button>
+                  <button type="button"
+                          class="save-dropdown-item"
+                          data-save-type="png"
+                          data-plot-target="custom"
+                          data-action="click->visualization#handleSaveOption">
+                    Save as PNG
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+
+          <button type="button"
+                  id="checkpoint-history-btn"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; border-right: 1px solid #d1d5db; border-radius: 0; cursor: pointer; transition: background-color 0.2s;"
+                  title="Checkpoint history"
+                  data-action="click->visualization#openCheckpointHistory"
+                  onmouseover="this.style.backgroundColor='#e5e7eb'"
+                  onmouseout="this.style.backgroundColor='#f3f4f6'">
+            <i class="fas fa-history" style="font-size: 14px;"></i>
+          </button>
+
+          <button type="button"
+                  id="checkpoint-comments-btn"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; border-radius: 0; cursor: pointer; transition: background-color 0.2s; opacity: 0.45; pointer-events: none;"
+                  title="No checkpoint matches current view"
+                  data-action="click->visualization#openCheckpointComments"
+                  onmouseover="this.style.backgroundColor='#e5e7eb'"
+                  onmouseout="this.style.backgroundColor='#f3f4f6'">
+            <i class="fas fa-comment" style="font-size: 14px;"></i>
+          </button>
         </div>
-
-        <button type="button"
-                id="checkpoint-history-btn"
-                style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-                title="Checkpoint history"
-                data-action="click->visualization#openCheckpointHistory"
-                onmouseover="this.style.backgroundColor='#e5e7eb'"
-                onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-history" style="font-size: 14px;"></i>
-        </button>
-
-        <button type="button"
-                id="checkpoint-comments-btn"
-                style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; opacity: 0.45; pointer-events: none;"
-                title="No checkpoint matches current view"
-                data-action="click->visualization#openCheckpointComments"
-                onmouseover="this.style.backgroundColor='#e5e7eb'"
-                onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-comment" style="font-size: 14px;"></i>
-        </button>
         
         <!-- Memory Diagnostic Button -->
-        <button type="button" 
-                style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
-                data-action="click->visualization#openMemoryDiagnostic"
-                title="Memory & Database Diagnostic"
-                onmouseover="this.style.backgroundColor='#e5e7eb'" 
-                onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-brain" style="font-size: 14px;"></i>
-        </button>
-        
-        <!-- Settings Button (Icon Only) -->
-        <button id="settings-btn"
-                style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
-                title="Plot Settings"
-                data-action="click->visualization#toggleSettingsWindow"
-                onmouseover="this.style.backgroundColor='#e5e7eb'" 
-                onmouseout="this.style.backgroundColor='#f3f4f6'">
-          <i class="fas fa-cog" style="font-size: 14px;"></i>
-        </button>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" 
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
+                  data-action="click->visualization#openMemoryDiagnostic"
+                  title="Memory & Database Diagnostic"
+                  onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                  onmouseout="this.style.backgroundColor='#f3f4f6'">
+            <i class="fas fa-brain" style="font-size: 14px;"></i>
+          </button>
+          
+          <!-- Settings Button (Icon Only) -->
+          <button id="settings-btn"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
+                  title="Plot Settings"
+                  data-action="click->visualization#toggleSettingsWindow"
+                  onmouseover="this.style.backgroundColor='#e5e7eb'" 
+                  onmouseout="this.style.backgroundColor='#f3f4f6'">
+            <i class="fas fa-cog" style="font-size: 14px;"></i>
+          </button>
+        </div>
         
         <!-- Fullscreen Button (Icon Only) -->
         <!--<button style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;" 
@@ -1933,6 +1938,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               onclick="if (window.visualizationController) window.visualizationController.closeCheckpointHistory()">
         <i class="fas fa-times"></i>
       </button>
+    </div>
+    <div id="checkpoint-history-loading" style="display: none; flex: 1; align-items: center; justify-content: center; color: #6b7280; font-size: 13px; gap: 8px;">
+      <i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>
+      <span>Loading checkpoints...</span>
     </div>
     <div id="checkpoint-history-list" style="overflow: auto; flex: 1;"></div>
   </div>

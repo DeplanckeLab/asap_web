@@ -4839,6 +4839,7 @@ export default class extends Controller {
         labelPlacementMode: this.labelPlacementMode,
         manualLabelLocks: manualLabelLocks
       },
+      customPlotWindow: this.customPlotManager?.get2DPlotCheckpointState?.() || null,
       interaction: {
         mode: this.interactionMode,
         bounds: this.currentBounds || null
@@ -5125,6 +5126,12 @@ export default class extends Controller {
         checkpointEmbeddingId: checkpointEmbeddingId ? String(checkpointEmbeddingId) : null,
         currentCoordinatesLength: this.currentCoordinates?.length || 0
       })
+    }
+
+    if (state.customPlotWindow && this.customPlotManager?.apply2DPlotCheckpointState) {
+      await this.customPlotManager.apply2DPlotCheckpointState(state.customPlotWindow)
+    } else if (this.customPlotManager?.close2DPlotModal) {
+      this.customPlotManager.close2DPlotModal()
     }
 
     if (state.interaction?.mode) {

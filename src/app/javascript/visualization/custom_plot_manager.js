@@ -22,6 +22,8 @@ export class CustomPlotManager {
     this.isDrawingLasso = false
     this.customLassoPoints = []
     this.lastPlotExportData = null
+    this.is2DPlotMinimized = false
+    this.previous2DPlotWindowState = null
   }
 
   resolveGeneMetadataIdentifiers(buttonInfo) {
@@ -434,11 +436,284 @@ export class CustomPlotManager {
     }
     const modal = document.getElementById('2d-plot-modal')
     if (modal) {
+      if (this.is2DPlotMinimized) {
+        this.restore2DPlotModal()
+      }
       modal.style.display = 'none'
     }
+    this.is2DPlotMinimized = false
+    this.update2DPlotWindowControls()
     this.detachCanvasInteractions()
     if (this.controller && typeof this.controller.updateCustomPlotSettingsContext === 'function') {
       this.controller.updateCustomPlotSettingsContext({ visible: false })
+    }
+  }
+
+  close2DPlotModalAndClearAxes(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (this.controller) {
+      this.controller.resetAllXButtons()
+      this.controller.resetAllYButtons()
+      this.controller.selectedXButton = null
+      this.controller.selectedYButton = null
+    }
+    this.close2DPlotModal()
+  }
+
+  update2DPlotWindowControls() {
+    const minimizeBtn = document.getElementById('minimize-2d-plot-modal')
+    const minimizeGlyph = document.getElementById('2d-plot-minimize-glyph')
+    if (!minimizeBtn || !minimizeGlyph) return
+
+    if (this.is2DPlotMinimized) {
+      minimizeBtn.title = 'Restore'
+      minimizeGlyph.classList.remove('fa-minus', 'fa-square')
+      minimizeGlyph.classList.add('fa-window-restore')
+      minimizeGlyph.style.fontSize = '12px'
+    } else {
+      minimizeBtn.title = 'Minimize'
+      minimizeGlyph.classList.remove('fa-window-restore', 'fa-square')
+      minimizeGlyph.classList.add('fa-minus')
+      minimizeGlyph.style.fontSize = '13px'
+    }
+  }
+
+  minimize2DPlotModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal || this.is2DPlotMinimized) return
+
+    const rect = modal.getBoundingClientRect()
+    this.previous2DPlotWindowState = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      transform: modal.style.transform || 'none'
+    }
+
+    const plotPanel = document.querySelector('.plot-container')
+    const minimizedHeight = 48
+    const viewportBottomMargin = 4
+    const dockBottomOffset = 4
+    let targetLeft = 12
+    let targetTop = Math.max(8, window.innerHeight - minimizedHeight - viewportBottomMargin)
+    if (plotPanel) {
+      const panelRect = plotPanel.getBoundingClientRect()
+      targetLeft = Math.max(8, Math.round(panelRect.left) + 8)
+      targetTop = Math.max(8, Math.round(panelRect.bottom) - minimizedHeight - dockBottomOffset)
+      targetTop = Math.min(targetTop, window.innerHeight - minimizedHeight - viewportBottomMargin)
+    }
+
+    modal.style.transform = 'none'
+    modal.style.left = `${targetLeft}px`
+    modal.style.top = `${targetTop}px`
+    modal.style.width = '240px'
+    modal.style.height = '48px'
+    modal.style.minWidth = '240px'
+    modal.style.minHeight = '48px'
+    modal.style.maxWidth = '240px'
+    modal.style.maxHeight = '48px'
+
+    const content = document.getElementById('2d-plot-content')
+    if (content) {
+      content.style.display = 'none'
+    }
+    const header = document.getElementById('2d-plot-header')
+    const titleRow = document.getElementById('2d-plot-title-row')
+    const controls = document.getElementById('2d-plot-window-controls')
+    if (header) {
+      header.style.height = '100%'
+      header.style.padding = '0 10px'
+      header.style.borderBottom = 'none'
+      header.style.borderRadius = '12px'
+      header.style.justifyContent = 'center'
+      header.style.gap = '12px'
+    }
+    if (titleRow) {
+      titleRow.style.margin = '0'
+    }
+    if (controls) {
+      controls.style.marginLeft = '0'
+    }
+    const resizeRight = document.getElementById('2d-plot-resize-right')
+    const resizeBottom = document.getElementById('2d-plot-resize-bottom')
+    const resizeCorner = document.getElementById('2d-plot-resize-corner')
+    if (resizeRight) resizeRight.style.display = 'none'
+    if (resizeBottom) resizeBottom.style.display = 'none'
+    if (resizeCorner) resizeCorner.style.display = 'none'
+
+    this.is2DPlotMinimized = true
+    this.update2DPlotWindowControls()
+  }
+
+  restore2DPlotModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal || !this.is2DPlotMinimized) return
+
+    const previous = this.previous2DPlotWindowState
+    if (previous) {
+      modal.style.transform = 'none'
+      modal.style.left = `${Math.max(0, Math.round(previous.left))}px`
+      modal.style.top = `${Math.max(0, Math.round(previous.top))}px`
+      modal.style.width = `${Math.round(previous.width)}px`
+      modal.style.height = `${Math.round(previous.height)}px`
+    }
+    modal.style.minWidth = '400px'
+    modal.style.minHeight = '300px'
+    modal.style.maxWidth = '90vw'
+    modal.style.maxHeight = '90vh'
+
+    const content = document.getElementById('2d-plot-content')
+    if (content) {
+      content.style.display = 'block'
+    }
+    const header = document.getElementById('2d-plot-header')
+    const titleRow = document.getElementById('2d-plot-title-row')
+    const controls = document.getElementById('2d-plot-window-controls')
+    if (header) {
+      header.style.height = ''
+      header.style.padding = '12px 16px'
+      header.style.borderBottom = '1px solid #e5e7eb'
+      header.style.borderRadius = '12px 12px 0 0'
+      header.style.justifyContent = 'space-between'
+      header.style.gap = ''
+    }
+    if (titleRow) {
+      titleRow.style.margin = ''
+    }
+    if (controls) {
+      controls.style.marginLeft = ''
+    }
+    const resizeRight = document.getElementById('2d-plot-resize-right')
+    const resizeBottom = document.getElementById('2d-plot-resize-bottom')
+    const resizeCorner = document.getElementById('2d-plot-resize-corner')
+    if (resizeRight) resizeRight.style.display = 'block'
+    if (resizeBottom) resizeBottom.style.display = 'block'
+    if (resizeCorner) resizeCorner.style.display = 'block'
+
+    this.is2DPlotMinimized = false
+    this.update2DPlotWindowControls()
+    this.update2DPlotCanvasSize()
+  }
+
+  toggle2DPlotModalMinimize(event) {
+    if (this.is2DPlotMinimized) {
+      this.restore2DPlotModal(event)
+    } else {
+      this.minimize2DPlotModal(event)
+    }
+  }
+
+  get2DPlotCheckpointState() {
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal) return null
+
+    const computedStyle = window.getComputedStyle(modal)
+    const isVisible = computedStyle.display !== 'none'
+    if (!isVisible) return null
+
+    const rect = modal.getBoundingClientRect()
+    const expandedWindow = this.previous2DPlotWindowState
+      ? {
+          left: Number(this.previous2DPlotWindowState.left),
+          top: Number(this.previous2DPlotWindowState.top),
+          width: Number(this.previous2DPlotWindowState.width),
+          height: Number(this.previous2DPlotWindowState.height)
+        }
+      : null
+
+    return {
+      isMinimized: this.is2DPlotMinimized === true,
+      left: Number(rect.left),
+      top: Number(rect.top),
+      width: Number(rect.width),
+      height: Number(rect.height),
+      expandedWindow: expandedWindow
+    }
+  }
+
+  async apply2DPlotCheckpointState(windowState) {
+    if (!windowState || !this.controller?.selectedXButton || !this.controller?.selectedYButton) {
+      return
+    }
+
+    let modal = document.getElementById('2d-plot-modal')
+    for (let i = 0; i < 40; i++) {
+      if (modal && window.getComputedStyle(modal).display !== 'none') {
+        break
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      modal = document.getElementById('2d-plot-modal')
+    }
+    if (!modal || window.getComputedStyle(modal).display === 'none') {
+      return
+    }
+
+    const normalizedExpanded = windowState.expandedWindow && Number.isFinite(Number(windowState.expandedWindow.left))
+      ? {
+          left: Number(windowState.expandedWindow.left),
+          top: Number(windowState.expandedWindow.top),
+          width: Number(windowState.expandedWindow.width),
+          height: Number(windowState.expandedWindow.height),
+          transform: 'none'
+        }
+      : null
+
+    if (normalizedExpanded) {
+      this.previous2DPlotWindowState = normalizedExpanded
+    }
+
+    const targetLeft = Number(windowState.left)
+    const targetTop = Number(windowState.top)
+    const targetWidth = Number(windowState.width)
+    const targetHeight = Number(windowState.height)
+    const shouldMinimize = windowState.isMinimized === true
+
+    if (!shouldMinimize) {
+      if (this.is2DPlotMinimized) {
+        this.restore2DPlotModal()
+      }
+      if (Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
+        modal.style.transform = 'none'
+        modal.style.left = `${Math.max(0, Math.round(targetLeft))}px`
+        modal.style.top = `${Math.max(0, Math.round(targetTop))}px`
+        modal.style.width = `${Math.round(targetWidth)}px`
+        modal.style.height = `${Math.round(targetHeight)}px`
+      }
+      this.update2DPlotCanvasSize()
+      return
+    }
+
+    if (!this.is2DPlotMinimized) {
+      if (normalizedExpanded) {
+        modal.style.transform = 'none'
+        modal.style.left = `${Math.max(0, Math.round(normalizedExpanded.left))}px`
+        modal.style.top = `${Math.max(0, Math.round(normalizedExpanded.top))}px`
+        modal.style.width = `${Math.round(normalizedExpanded.width)}px`
+        modal.style.height = `${Math.round(normalizedExpanded.height)}px`
+      }
+      this.minimize2DPlotModal()
+    }
+
+    if (Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
+      modal.style.transform = 'none'
+      modal.style.left = `${Math.max(0, Math.round(targetLeft))}px`
+      modal.style.top = `${Math.max(0, Math.round(targetTop))}px`
+      modal.style.width = `${Math.round(targetWidth)}px`
+      modal.style.height = `${Math.round(targetHeight)}px`
     }
   }
   
@@ -447,17 +722,23 @@ export class CustomPlotManager {
     const modal = document.getElementById('2d-plot-modal')
     const header = document.getElementById('2d-plot-header')
     const closeBtn = document.getElementById('close-2d-plot-modal')
+    const minimizeBtn = document.getElementById('minimize-2d-plot-modal')
     
     if (!modal || !header) return
     
     // Add direct event listener for close button (like settings window)
     if (closeBtn) {
       closeBtn.addEventListener('click', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        modal.style.display = 'none'
+        this.close2DPlotModalAndClearAxes(e)
       })
     }
+
+    if (minimizeBtn) {
+      minimizeBtn.addEventListener('click', (e) => {
+        this.toggle2DPlotModalMinimize(e)
+      })
+    }
+    this.update2DPlotWindowControls()
     
     let isDragging = false
     let currentX = 0
@@ -466,8 +747,8 @@ export class CustomPlotManager {
     let initialY = 0
     
     const startDrag = (e) => {
-      // Don't start drag if clicking on the close button
-      if (e.target.closest('#close-2d-plot-modal')) {
+      // Don't start drag if clicking on window controls.
+      if (e.target.closest('#close-2d-plot-modal') || e.target.closest('#minimize-2d-plot-modal')) {
         return
       }
       
@@ -1156,6 +1437,7 @@ export class CustomPlotManager {
     
     // Show modal and loading indicator
     modal.style.display = 'flex'
+    this.update2DPlotWindowControls()
     const loadingDiv = document.getElementById('2d-plot-loading')
     const canvas = document.getElementById('2d-plot-canvas')
     if (loadingDiv) loadingDiv.style.display = 'block'

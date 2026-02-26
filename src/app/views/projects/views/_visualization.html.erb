@@ -2173,21 +2173,30 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   <!-- Header -->
   <div id="2d-plot-header" 
        style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-radius: 12px 12px 0 0; cursor: move; user-select: none; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
-    <div style="display: flex; align-items: center; gap: 12px;">
+    <div id="2d-plot-title-row" style="display: flex; align-items: center; gap: 12px;">
       <i class="fas fa-grip-vertical drag-handle" style="cursor: move; font-size: 14px; color: #9ca3af; user-select: none; line-height: 1; display: flex; align-items: center;"></i>
       <h3 id="2d-plot-title" style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Custom plot</h3>
     </div>
-    <button id="close-2d-plot-modal" 
-            style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px; border-radius: 4px; transition: background-color 0.2s; flex-shrink: 0; margin-left: 8px;" 
-            onmouseover="this.style.backgroundColor='#e5e7eb'"
-            onmouseout="this.style.backgroundColor='transparent'"
-            title="Close">
-      <i class="fas fa-times"></i>
-    </button>
+    <div id="2d-plot-window-controls" style="display: flex; align-items: center; gap: 8px;">
+      <button id="minimize-2d-plot-modal"
+              style="background: none; border: none; color: #6b7280; cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background-color 0.2s; flex-shrink: 0;"
+              onmouseover="this.style.backgroundColor='#e5e7eb'"
+              onmouseout="this.style.backgroundColor='transparent'"
+              title="Minimize">
+        <i id="2d-plot-minimize-glyph" class="fas fa-minus" style="font-size: 13px; line-height: 1;"></i>
+      </button>
+      <button id="close-2d-plot-modal" 
+              style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px; border-radius: 4px; transition: background-color 0.2s; flex-shrink: 0;" 
+              onmouseover="this.style.backgroundColor='#e5e7eb'"
+              onmouseout="this.style.backgroundColor='transparent'"
+              title="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
   </div>
   
   <!-- Content -->
-  <div style="flex: 1; overflow: auto; padding: 16px;">
+  <div id="2d-plot-content" style="flex: 1; overflow: auto; padding: 16px;">
     
     <!-- Plot Container -->
     <div style="width: 100%; height: 100%; min-width: min-content; overflow: auto;">

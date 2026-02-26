@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_25_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -204,12 +204,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_25_110000) do
   create_table "checkpoints", force: :cascade do |t|
     t.text "comments_json", default: "[]", null: false
     t.datetime "created_at", null: false
+    t.boolean "is_landing_page", default: false, null: false
     t.integer "project_id", null: false
     t.text "state_json", default: "{}", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.index ["project_id"], name: "index_checkpoints_on_project_id"
+    t.index ["project_id"], name: "index_checkpoints_one_landing_page_per_project", unique: true, where: "(is_landing_page = true)"
     t.index ["user_id"], name: "index_checkpoints_on_user_id"
   end
 

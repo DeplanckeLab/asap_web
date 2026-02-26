@@ -570,8 +570,7 @@ export default class extends Controller {
       this.refreshCurrentCheckpointMatch()
     }, 1500)
 
-    this.fetchCheckpointHistory()
-    this.loadCheckpointFromUrlIfPresent()
+    this.loadInitialCheckpointOnEntry()
 
     this.boundCheckpointTraceClick = (event) => {
       if (window.CHECKPOINT_TRACE !== true) return
@@ -592,6 +591,15 @@ export default class extends Controller {
       })
     }
     document.addEventListener('click', this.boundCheckpointTraceClick, true)
+
+    this.boundBeforeUnload = (event) => {
+      if (!this.shouldWarnBeforeLeavingVisualization()) return
+      const message = 'Are you sure you want to leave this page? You will lost your unsaved last changes. Tip: if you want to access another page without leaving this page, press Shift when clicking on links to open the link in another page.'
+      event.preventDefault()
+      event.returnValue = message
+      return message
+    }
+    window.addEventListener('beforeunload', this.boundBeforeUnload)
   }
 
   disconnect() {
@@ -625,6 +633,11 @@ export default class extends Controller {
       this.boundCheckpointTraceClick = null
     }
 
+    if (this.boundBeforeUnload) {
+      window.removeEventListener('beforeunload', this.boundBeforeUnload)
+      this.boundBeforeUnload = null
+    }
+
     if (window.visualizationController === this) {
       window.visualizationController = null
     }
@@ -637,6 +650,27 @@ export default class extends Controller {
       this.pixiApp.destroy(true)
       this.pixiApp = null
     }
+  }
+
+  shouldWarnBeforeLeavingVisualization() {
+    if (!this.hasMetadataSelectTarget) return false
+    return !this.isCurrentViewSavedAsCheckpoint()
+  }
+
+  isCurrentViewSavedAsCheckpoint() {
+    const history = this.checkpointHistory || []
+    if (history.length === 0) return false
+
+    const currentSignature = this.computeCheckpointStateSignature(this.buildCheckpointState())
+    return history.some((checkpoint) => {
+      if (checkpoint.state_signature) {
+        return checkpoint.state_signature === currentSignature
+      }
+      if (checkpoint.state) {
+        return this.computeCheckpointStateSignature(checkpoint.state) === currentSignature
+      }
+      return false
+    })
   }
   
   // Delegates to ui_manager to avoid duplication
@@ -1399,6 +1433,7 @@ export default class extends Controller {
 
     const payload = await response.json()
     this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
+    this.updateCheckpointHistoryButtonState()
     this.refreshCurrentCheckpointMatch()
   }
 
@@ -1407,36 +1442,71 @@ export default class extends Controller {
     if (!listContainer) return
 
     if (!Array.isArray(this.checkpointHistory) || this.checkpointHistory.length === 0) {
-      listContainer.innerHTML = '<div style="padding: 12px; color: #6b7280;">No checkpoints yet.</div>'
+      listContainer.innerHTML = `
+        <div style="padding: 12px; color: #6b7280; line-height: 1.45;">
+          <div style="font-size: 13px; color: #6b7280;">No checkpoints yet.</div>
+          <div style="margin-top: 10px; font-size: 12px; color: #6b7280;">
+            Create a new checkpoint from:
+            <span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 6px;">
+              <button type="button" disabled style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #9ca3af; border: 1px solid #d1d5db; border-radius: 4px; cursor: not-allowed; line-height: 1;">
+                <i class="fas fa-save" style="font-size: 14px;"></i>
+              </button>
+              <span style="color: #9ca3af;">&gt;</span>
+              <button type="button" disabled style="padding: 3px 8px; font-size: 11px; color: #9ca3af; border: 1px solid #d1d5db; border-radius: 4px; background: #f9fafb; cursor: not-allowed;">Save checkpoint</button>
+            </span>
+          </div>
+          <div style="margin-top: 10px; font-size: 12px; color: #6b7280; font-weight: 600;">
+            Why create checkpoints:
+          </div>
+          <ul style="margin: 6px 0 0 18px; padding: 0; font-size: 12px; color: #6b7280;">
+            <li>Share direct links to an exact visualization state.</li>
+            <li>Set the project landing page to a specific view.</li>
+            <li>Preserve custom colors and plot settings.</li>
+            <li>Collaborate with comments on the same plot view.</li>
+          </ul>
+        </div>
+      `
+      this.updateCheckpointHistoryButtonState()
       return
     }
 
-    listContainer.innerHTML = this.checkpointHistory.map((checkpoint) => {
+    const rowsHtml = this.checkpointHistory.map((checkpoint) => {
       const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ''
       const commentCount = Number(checkpoint.comments_count || 0)
+      const checkpointId = this.escapeHtml(checkpoint.id)
       return `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px 72px 72px 72px;align-items:center;padding:10px 12px;border-bottom:1px solid #e5e7eb;column-gap:8px;">
           <div style="min-width:0;">
-            <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
+            <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
             <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:center;">
+            <input type="checkbox"
+                   ${checkpoint.is_landing_page === true ? 'checked' : ''}
+                   onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
+                   style="width:14px;height:14px;cursor:pointer;" />
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;">
             <button type="button"
-                    data-checkpoint-id="${checkpoint.id}"
-                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${this.escapeHtml(checkpoint.id)}', this)"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this)"
                     style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;"
                     title="Copy direct link to clipboard">
               Link
             </button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;">
             <button type="button"
-                    data-checkpoint-id="${checkpoint.id}"
-                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${this.escapeHtml(checkpoint.id)}')"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
                     style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;">
               Load
             </button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;">
             <button type="button"
-                    data-checkpoint-id="${checkpoint.id}"
-                    onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${this.escapeHtml(checkpoint.id)}')"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
                     style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;">
               Delete
             </button>
@@ -1444,6 +1514,31 @@ export default class extends Controller {
         </div>
       `
     }).join('')
+
+    listContainer.innerHTML = `
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px 72px 72px 72px;align-items:center;padding:8px 12px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:8px;position:sticky;top:0;z-index:1;">
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Use As Landing Page</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Link</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Load</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
+      </div>
+      ${rowsHtml}
+    `
+    this.updateCheckpointHistoryButtonState()
+  }
+
+  updateCheckpointHistoryButtonState() {
+    const historyBtn = document.getElementById('checkpoint-history-btn')
+    if (!historyBtn) return
+    const hasCheckpoints = Array.isArray(this.checkpointHistory) && this.checkpointHistory.length > 0
+    if (hasCheckpoints) {
+      historyBtn.style.color = '#10b981'
+      historyBtn.title = 'Checkpoint history'
+    } else {
+      historyBtn.style.color = '#374151'
+      historyBtn.title = 'Checkpoint history'
+    }
   }
 
   setCheckpointHistoryLoading(isLoading) {
@@ -1455,6 +1550,22 @@ export default class extends Controller {
     if (listContainer) {
       listContainer.style.display = isLoading ? 'none' : 'block'
     }
+  }
+
+  setCheckpointViewLoading(isLoading) {
+    const loadingOverlay = document.getElementById('checkpoint-loading-overlay')
+    if (!loadingOverlay) return
+    loadingOverlay.style.display = isLoading ? 'flex' : 'none'
+  }
+
+  updateCheckpointCommentsButtonState(commentCount = 0, enabled = true) {
+    const commentsBtn = document.getElementById('checkpoint-comments-btn')
+    if (!commentsBtn) return
+
+    commentsBtn.style.opacity = enabled ? '1' : '0.45'
+    commentsBtn.style.pointerEvents = enabled ? 'auto' : 'none'
+    commentsBtn.style.color = Number(commentCount) > 0 ? '#10b981' : '#374151'
+    commentsBtn.title = enabled ? 'Checkpoint comments' : 'No checkpoint matches current view'
   }
 
   loadCheckpointFromUrlIfPresent() {
@@ -1471,6 +1582,26 @@ export default class extends Controller {
         console.error('Failed to load checkpoint from URL:', error)
       })
     }, 0)
+  }
+
+  async loadInitialCheckpointOnEntry() {
+    if (!this.hasMetadataSelectTarget) return
+    if (this.initialEntryCheckpointHandled === true) return
+    this.initialEntryCheckpointHandled = true
+
+    await this.fetchCheckpointHistory()
+
+    const params = new URLSearchParams(window.location.search)
+    const checkpointIdFromUrl = params.get('checkpoint_id')
+    if (checkpointIdFromUrl) {
+      await this.loadCheckpointById(checkpointIdFromUrl)
+      return
+    }
+
+    const landingCheckpoint = (this.checkpointHistory || []).find((checkpoint) => checkpoint.is_landing_page === true)
+    if (landingCheckpoint?.id) {
+      await this.loadCheckpointById(String(landingCheckpoint.id))
+    }
   }
 
   copyCheckpointDirectLink(checkpointId, button = null) {
@@ -1493,6 +1624,43 @@ export default class extends Controller {
       console.error('Failed to copy checkpoint link to clipboard')
       alert('Failed to copy checkpoint link to clipboard.')
     })
+  }
+
+  async toggleCheckpointLandingPage(checkpointId, isLandingPage, checkboxEl = null) {
+    if (!checkpointId) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (checkboxEl) {
+      checkboxEl.disabled = true
+    }
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        checkpoint: {
+          is_landing_page: !!isLandingPage
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to update landing page checkpoint.')
+      await this.fetchCheckpointHistory()
+      this.renderCheckpointHistory()
+      return
+    }
+
+    await this.fetchCheckpointHistory()
+    this.renderCheckpointHistory()
   }
 
   async deleteCheckpointById(checkpointId) {
@@ -1539,53 +1707,56 @@ export default class extends Controller {
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
-
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      credentials: 'same-origin'
-    })
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}))
-      alert(errorPayload.error || 'Failed to load checkpoint.')
-      return
-    }
-
-    const payload = await response.json()
-    const checkpoint = payload.checkpoint
-    if (!checkpoint || !checkpoint.state) return
-
-    const requestedLoom = checkpoint.state.embedding?.loomFile || checkpoint.state.visualizationEmbedding?.loomFile || checkpoint.state.loomFile || null
-    const requestedName = checkpoint.state.visualizationEmbedding?.name || null
-    const requestedId = checkpoint.state.embedding?.id || checkpoint.state.visualizationEmbedding?.id || null
-    const loomEmbeddings = (requestedLoom && this.embeddingsByLoomValue && Array.isArray(this.embeddingsByLoomValue[requestedLoom]))
-      ? this.embeddingsByLoomValue[requestedLoom]
-      : []
-    this.checkpointDebug('loadCheckpointById:embedding-catalog-for-loom', {
-      requestedLoom,
-      requestedId: requestedId ? String(requestedId) : null,
-      requestedName,
-      availableCount: loomEmbeddings.length,
-      availableEmbeddings: loomEmbeddings.map((embedding) => ({
-        id: String(embedding.id || '').trim(),
-        name: this.getEmbeddingName(embedding)
-      }))
-    })
-
-    this.checkpointDebug('loadCheckpointById:received-checkpoint', {
-      checkpointId: String(checkpoint.id || checkpointId),
-      embedding: checkpoint.state.embedding || null,
-      visualizationEmbedding: checkpoint.state.visualizationEmbedding || null,
-      loomFile: checkpoint.state.loomFile || null
-    })
-
-    this.isApplyingCheckpointState = true
-    this.checkpointTrace('loadCheckpointById:apply-start', {
-      checkpointId: String(checkpoint.id || checkpointId),
-      blockers: this.collectCheckpointUiBlockers()
-    })
+    let checkpoint = null
     try {
+      this.setCheckpointViewLoading(true)
+
+      const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+      })
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}))
+        alert(errorPayload.error || 'Failed to load checkpoint.')
+        return
+      }
+
+      const payload = await response.json()
+      checkpoint = payload.checkpoint
+      if (!checkpoint || !checkpoint.state) return
+
+      const requestedLoom = checkpoint.state.embedding?.loomFile || checkpoint.state.visualizationEmbedding?.loomFile || checkpoint.state.loomFile || null
+      const requestedName = checkpoint.state.visualizationEmbedding?.name || null
+      const requestedId = checkpoint.state.embedding?.id || checkpoint.state.visualizationEmbedding?.id || null
+      const loomEmbeddings = (requestedLoom && this.embeddingsByLoomValue && Array.isArray(this.embeddingsByLoomValue[requestedLoom]))
+        ? this.embeddingsByLoomValue[requestedLoom]
+        : []
+      this.checkpointDebug('loadCheckpointById:embedding-catalog-for-loom', {
+        requestedLoom,
+        requestedId: requestedId ? String(requestedId) : null,
+        requestedName,
+        availableCount: loomEmbeddings.length,
+        availableEmbeddings: loomEmbeddings.map((embedding) => ({
+          id: String(embedding.id || '').trim(),
+          name: this.getEmbeddingName(embedding)
+        }))
+      })
+
+      this.checkpointDebug('loadCheckpointById:received-checkpoint', {
+        checkpointId: String(checkpoint.id || checkpointId),
+        embedding: checkpoint.state.embedding || null,
+        visualizationEmbedding: checkpoint.state.visualizationEmbedding || null,
+        loomFile: checkpoint.state.loomFile || null
+      })
+
+      this.isApplyingCheckpointState = true
+      this.checkpointTrace('loadCheckpointById:apply-start', {
+        checkpointId: String(checkpoint.id || checkpointId),
+        blockers: this.collectCheckpointUiBlockers()
+      })
+
       await this.applyCheckpointState(checkpoint.state)
       this.checkpointDebug('loadCheckpointById:after-apply', {
         selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
@@ -1599,12 +1770,8 @@ export default class extends Controller {
         state_signature: currentSignature
       })
       this.currentMatchedCheckpointId = checkpoint.id
-      const commentsBtn = document.getElementById('checkpoint-comments-btn')
-      if (commentsBtn) {
-        commentsBtn.style.opacity = '1'
-        commentsBtn.style.pointerEvents = 'auto'
-        commentsBtn.title = 'Checkpoint comments'
-      }
+      const commentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+      this.updateCheckpointCommentsButtonState(commentCount, true)
       this.refreshCurrentCheckpointMatch()
       this.checkpointTrace('loadCheckpointById:apply-success', {
         checkpointId: String(checkpoint.id || checkpointId),
@@ -1625,6 +1792,7 @@ export default class extends Controller {
         checkpointId: String(checkpoint.id || checkpointId),
         blockers: this.collectCheckpointUiBlockers()
       })
+      this.setCheckpointViewLoading(false)
     }
   }
 
@@ -1652,6 +1820,9 @@ export default class extends Controller {
     const payload = await response.json()
     const checkpoint = payload.checkpoint
     this.mergeCheckpointIntoHistory(checkpoint)
+    this.refreshCurrentCheckpointMatch()
+    const checkpointCommentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+    this.updateCheckpointCommentsButtonState(checkpointCommentCount, true)
 
     const overlay = document.getElementById('checkpoint-comments-overlay')
     const title = document.getElementById('checkpoint-comments-title')
@@ -1665,9 +1836,27 @@ export default class extends Controller {
     } else {
       list.innerHTML = comments.map((comment) => {
         const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ''
+        const canManage = comment.user_can_manage === true
+        const commentId = this.escapeHtml(comment.id || '')
         return `
           <div style="padding:10px;border-bottom:1px solid #e5e7eb;">
-            <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <span>${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</span>
+              ${canManage ? `
+              <span style="display:inline-flex;align-items:center;gap:6px;">
+                <button type="button"
+                        onclick="if (window.visualizationController) window.visualizationController.editCheckpointComment('${commentId}')"
+                        style="padding:2px 6px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:4px;cursor:pointer;font-size:11px;">
+                  Edit
+                </button>
+                <button type="button"
+                        onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointComment('${commentId}')"
+                        style="padding:2px 6px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:4px;cursor:pointer;font-size:11px;">
+                  Delete
+                </button>
+              </span>
+              ` : ''}
+            </div>
             <div style="font-size:13px;color:#111827;white-space:pre-wrap;">${this.escapeHtml(comment.body || '')}</div>
           </div>
         `
@@ -1718,6 +1907,81 @@ export default class extends Controller {
     }
 
     input.value = ''
+    await this.openCheckpointComments()
+  }
+
+  async editCheckpointComment(commentId) {
+    if (!this.currentMatchedCheckpointId || !commentId) return
+    const list = document.getElementById('checkpoint-comments-list')
+    if (!list) return
+    const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentMatchedCheckpointId))
+    const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
+    const target = comments.find((comment) => String(comment.id) === String(commentId))
+    if (!target) return
+
+    const editedBody = window.prompt('Edit comment:', target.body || '')
+    if (editedBody === null) return
+    const body = editedBody.trim()
+    if (!body) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        checkpoint: {
+          comment_action: 'edit',
+          comment_id: String(commentId),
+          comment_body: body
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to edit comment.')
+      return
+    }
+
+    await this.openCheckpointComments()
+  }
+
+  async deleteCheckpointComment(commentId) {
+    if (!this.currentMatchedCheckpointId || !commentId) return
+    if (!window.confirm('Delete this comment?')) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        checkpoint: {
+          comment_action: 'delete',
+          comment_id: String(commentId)
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to delete comment.')
+      return
+    }
+
     await this.openCheckpointComments()
   }
 
@@ -4884,6 +5148,7 @@ export default class extends Controller {
     } else {
       this.checkpointHistory[index] = { ...this.checkpointHistory[index], ...entry }
     }
+    this.updateCheckpointHistoryButtonState()
   }
 
   refreshCurrentCheckpointMatch() {
@@ -4896,9 +5161,7 @@ export default class extends Controller {
     const history = this.checkpointHistory || []
     if (history.length === 0) {
       this.currentMatchedCheckpointId = null
-      commentsBtn.style.opacity = '0.45'
-      commentsBtn.style.pointerEvents = 'none'
-      commentsBtn.title = 'No checkpoint matches current view'
+      this.updateCheckpointCommentsButtonState(0, false)
       return
     }
 
@@ -4917,14 +5180,11 @@ export default class extends Controller {
 
       if (match) {
         this.currentMatchedCheckpointId = match.id
-        commentsBtn.style.opacity = '1'
-        commentsBtn.style.pointerEvents = 'auto'
-        commentsBtn.title = 'Checkpoint comments'
+        const commentCount = Number(match.comments_count || (Array.isArray(match.comments) ? match.comments.length : 0))
+        this.updateCheckpointCommentsButtonState(commentCount, true)
       } else {
         this.currentMatchedCheckpointId = null
-        commentsBtn.style.opacity = '0.45'
-        commentsBtn.style.pointerEvents = 'none'
-        commentsBtn.title = 'No checkpoint matches current view'
+        this.updateCheckpointCommentsButtonState(0, false)
       }
     } finally {
       this.isRefreshingCheckpointMatch = false

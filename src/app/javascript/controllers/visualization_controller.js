@@ -12274,12 +12274,27 @@ export default class extends Controller {
     const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
     const categoriesDiv = header ? header.nextElementSibling : null
 
-    if (header && categoriesDiv && categoriesDiv.style.display === 'none') {
+    const chevron = header ? header.querySelector('.fa-chevron-right') : null
+    // Keep fold-state detection aligned with toggleMetadata() logic.
+    const categoriesAreCollapsed = !!(
+      categoriesDiv &&
+      chevron &&
+      (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)')
+    )
+    if (header && categoriesAreCollapsed) {
       header.click()
     }
 
-    await this.waitForMetadataExpansion(categoriesDiv)
-    const categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+    let categoryRow = null
+    if (categoriesAreCollapsed) {
+      await this.waitForMetadataExpansion(categoriesDiv)
+      categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+    } else {
+      categoryRow = this.findCategoryRow(metadataItem, metadataId, category)
+      if (!categoryRow) {
+        categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+      }
+    }
     if (!categoryRow) return
 
     // Ensure layout/transition has settled before scrolling to the exact category row.
@@ -12323,11 +12338,7 @@ export default class extends Controller {
     return new Promise(resolve => {
       const tryFind = () => {
         attempts += 1
-        const escapedCategory = this.escapeAttributeSelectorValue(category)
-        const checkbox = metadataItem.querySelector(
-          `.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escapedCategory}"]`
-        )
-        const row = checkbox ? (checkbox.closest('.metadata-category-row') || checkbox.parentElement) : null
+        const row = this.findCategoryRow(metadataItem, metadataId, category)
 
         const categoriesVisible = !categoriesDiv || (
           categoriesDiv.style.display !== 'none' &&
@@ -12350,6 +12361,14 @@ export default class extends Controller {
 
       tryFind()
     })
+  }
+
+  findCategoryRow(metadataItem, metadataId, category) {
+    const escapedCategory = this.escapeAttributeSelectorValue(category)
+    const checkbox = metadataItem.querySelector(
+      `.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escapedCategory}"]`
+    )
+    return checkbox ? (checkbox.closest('.metadata-category-row') || checkbox.parentElement) : null
   }
 
   escapeAttributeSelectorValue(value) {

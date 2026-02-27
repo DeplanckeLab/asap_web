@@ -49,7 +49,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
     exit 1
   end
   
-  run = Run.where(:project_id => project.id, :step_id => parsing_step.id).first
+  # Always use the latest parsing run for this project.
+  run = Run.where(:project_id => project.id, :step_id => parsing_step.id).order(created_at: :desc, id: :desc).first
   unless run
     logger.error("[ParseRake] No run found for project #{project_key}")
     exit 1
@@ -73,8 +74,11 @@ task :parse, [:project_key] => [:environment] do |t, args|
     logger.info("[ParseRake] Updated run #{run.id} to running, waiting_duration: #{waiting_duration}")
   end
   
-  # Update status to running and broadcast
-  project_step.update(status_id: 2) if project_step
+  # Recompute project_step run counters whenever run status changes.
+  Basic.upd_project_step(project, parsing_step.id)
+  project_step.reload if project_step
+  # Keep project_step status in sync in case the aggregate did not set it yet.
+  project_step.update(status_id: 2) if project_step && project_step.status_id != 2
   project.update(status_id: 2)
   project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
   logger.info("[ParseRake] Updated project status to running, broadcasting update")
@@ -617,6 +621,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       
       # Broadcast error
       project_step.update(status_id: 4) if project_step
+      Basic.upd_project_step(project, parsing_step.id)
       project.update(status_id: 4)
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
       logger.error("[ParseRake] HCA error occurred, broadcasting failure")

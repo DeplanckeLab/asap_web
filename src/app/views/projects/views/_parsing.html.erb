@@ -186,6 +186,17 @@
     <div class="px-6 py-5 space-y-6 flex-1 min-w-0 overflow-x-hidden">
 
       <!-- Warnings and Errors -->
+
+
+      <% if @parsing_errors && @parsing_errors.any? %>
+        <% @parsing_errors.each do |error| %>
+          <div class="alert alert-danger flex items-start gap-3 min-w-0">
+            <i class="fas fa-exclamation-circle text-red-600 mt-0.5 flex-shrink-0"></i>
+            <span class="min-w-0 break-words"><%= error %></span>
+          </div>
+        <% end %>
+      <% end %>
+
       <% if @parsing_warnings && @parsing_warnings.any? %>
         <% @parsing_warnings.each do |warning| %>
           <div class="alert alert-warning flex items-start gap-3 min-w-0">
@@ -195,11 +206,11 @@
         <% end %>
       <% end %>
 
-      <% if @parsing_errors && @parsing_errors.any? %>
-        <% @parsing_errors.each do |error| %>
-          <div class="alert alert-danger flex items-start gap-3 min-w-0">
-            <i class="fas fa-exclamation-circle text-red-600 mt-0.5 flex-shrink-0"></i>
-            <span class="min-w-0 break-words"><%= error %></span>
+      <% if @parsing_infos && @parsing_infos.any? %>
+        <% @parsing_infos.each do |info| %>
+          <div class="alert alert-info flex items-start gap-3 min-w-0">
+            <i class="fas fa-info-circle text-blue-600 mt-0.5 flex-shrink-0"></i>
+            <span class="min-w-0 break-words"><%= info %></span>
           </div>
         <% end %>
       <% end %>

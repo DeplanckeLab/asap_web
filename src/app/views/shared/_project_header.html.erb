@@ -52,7 +52,7 @@
               runs_by_status[key] = []
             end
           end
-          
+
           # Pre-load data for dataset parameter display
           # Collect all run_ids and annot_ids from attrs_json of all runs
           all_runs = runs_by_status.values.flatten
@@ -152,9 +152,8 @@
                            data-label="<%= status_icon[:label] %>"></i>
                         <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
                       </button>
-                      <% if is_active %>
-                        <div class="hidden w-max max-h-96 flex flex-col bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[9999]"
-                             data-nav-menu>
+                      <div class="hidden w-max max-h-96 flex flex-col bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[9999]"
+                           data-nav-menu>
                           <div class="sticky top-0 bg-white rounded-t-lg px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 flex items-center justify-between z-10">
                             <span><%= status_icon[:label] %> Runs (<%= count %>)</span>
                             <button type="button" 
@@ -167,7 +166,8 @@
                             </button>
                           </div>
                           <div class="py-1 overflow-y-auto flex-1">
-                            <% runs_list.limit(20).each do |run| %>
+                            <% if runs_list.any? %>
+                              <% runs_list.limit(20).each do |run| %>
                               <% 
                                 step = run.step
                                 step_label = step&.label.presence || step&.name.presence || "Run"
@@ -276,15 +276,19 @@
                                   </div>
                                 <% end %>
                               <% end %>
-                            <% end %>
-                            <% if count > 20 %>
-                              <div class="px-3 py-2 text-xs text-gray-400 text-center border-t border-gray-100">
-                                ... and <%= count - 20 %> more
+                              <% end %>
+                              <% if count > 20 %>
+                                <div class="px-3 py-2 text-xs text-gray-400 text-center border-t border-gray-100">
+                                  ... and <%= count - 20 %> more
+                                </div>
+                              <% end %>
+                            <% else %>
+                              <div class="px-3 py-2 text-sm text-gray-500">
+                                No runs available in this list.
                               </div>
                             <% end %>
                           </div>
                         </div>
-                      <% end %>
                     </div>
                   <% end %>
               </div>
@@ -349,7 +353,7 @@
             <!-- Analysis -->
             <%= link_to project_path(@project, view: 'analysis'), 
                 class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'analysis' ? 'bg-gray-100 font-medium' : ''}" do %>
-              <i class="fas fa-microscope text-lg mr-3"></i>
+              <i class="fas fa-sitemap text-lg mr-3"></i>
               Analysis
             <% end %>
             
@@ -462,7 +466,7 @@
         <%= link_to project_path(@project, view: 'summary'), 
             class: "p-2 rounded-lg #{@view_type == 'summary' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Summary" do %><i class="fas fa-info-circle text-lg"></i><% end %><%= link_to project_path(@project, view: 'visualization'), 
             class: "p-2 rounded-lg #{@view_type == 'visualization' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
-            class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Analysis" do %><i class="fas fa-microscope text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
+            class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Analysis" do %><i class="fas fa-sitemap text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
             class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
             class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %><% if @project.compliance_schemas.any? %><%= link_to project_path(@project, view: 'compliance'),
             class: "p-2 rounded-lg #{@view_type == 'compliance' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Compliance" do %><i class="fas fa-check-circle text-lg"></i><% end %><% end %><% if clonable?(@project) %><%= button_to clone_project_path(@project), 

@@ -1245,6 +1245,14 @@ class ProjectsController < ApplicationController
       end
     else
       # Normal update
+      if project_params.key?(:name) && !(@project.user_id == current_user&.id || admin?)
+        respond_to do |format|
+          format.html { redirect_to project_path(@project, view: 'summary'), alert: "You don't have permission to update this project's title." }
+          format.json { render json: { error: "Not authorized" }, status: :forbidden }
+        end
+        return
+      end
+
       respond_to do |format|
         if @project.update(project_params)
           format.html { redirect_to @project, notice: "Project was successfully updated." }
@@ -3172,6 +3180,7 @@ class ProjectsController < ApplicationController
         
         # Build summary arrays for warnings and errors based on all conditions in the view
         @parsing_warnings = []
+        @parsing_infos = []
         @parsing_errors = []
         
         if @results
@@ -3228,7 +3237,7 @@ class ProjectsController < ApplicationController
             total_values = @results['nber_rows'].to_f * @results['nber_cols'].to_f
             if total_values > 0
               zero_percentage = ((@results['nber_zeros'].to_f * 100) / total_values).round(2)
-              @parsing_warnings << "#{zero_percentage}% of values are zeros"
+              @parsing_infos << "#{zero_percentage}% of values are zeros"
             end
           end
         end

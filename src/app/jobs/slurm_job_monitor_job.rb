@@ -191,6 +191,7 @@ class SlurmJobMonitorJob < ApplicationJob
           
           run.update(update_hash) unless run.start_time
 
+          Basic.upd_project_step(project, step.id)
           project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
           project_step.update(status_id: 2) if project_step && project_step.status_id != 2
 

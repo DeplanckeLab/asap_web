@@ -1,3 +1,6 @@
+<%
+  can_edit_project_title = current_user.present? && (@project.user_id == current_user.id || admin?)
+%>
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
   <div class="mb-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-2">Summary</h2>
@@ -12,7 +15,49 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label class="block text-sm font-medium text-gray-500 mb-1">Project Name</label>
-          <p class="text-gray-900 font-medium"><%= @project.display_name %></p>
+          <div
+            id="project-title-editor"
+            data-project-title="<%= @project.display_name %>"
+            data-update-url="<%= project_path(@project, format: :json) %>"
+            class="flex items-center gap-2"
+          >
+            <p id="project-title-text" class="text-gray-900 font-medium"><%= @project.display_name %></p>
+            <% if can_edit_project_title %>
+              <button
+                id="project-title-edit-button"
+                type="button"
+                title="Edit project title"
+                aria-label="Edit project title"
+                class="inline-flex items-center px-2 py-1 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 3.487a2.1 2.1 0 113 2.97L8.4 17.92l-4.2 1.2 1.2-4.2L16.862 3.487z" />
+                </svg>
+              </button>
+              <div id="project-title-edit-controls" class="hidden flex items-center gap-2 w-full">
+                <input
+                  id="project-title-input"
+                  type="text"
+                  value="<%= @project.display_name %>"
+                  class="w-full max-w-md px-2 py-1 text-sm border border-gray-300 rounded"
+                >
+                <button
+                  id="project-title-save-button"
+                  type="button"
+                  class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Save
+                </button>
+                <button
+                  id="project-title-cancel-button"
+                  type="button"
+                  class="inline-flex items-center px-2 py-1 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+              </div>
+            <% end %>
+          </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-500 mb-1">Project Key</label>
@@ -437,3 +482,99 @@
     </div>
   </div>
 </div>
+
+<% if can_edit_project_title %>
+  <script>
+    (function initializeProjectTitleEditor() {
+      const editor = document.getElementById('project-title-editor')
+      if (!editor || editor.dataset.initialized === 'true') return
+      editor.dataset.initialized = 'true'
+
+      const titleText = document.getElementById('project-title-text')
+      const editButton = document.getElementById('project-title-edit-button')
+      const editControls = document.getElementById('project-title-edit-controls')
+      const input = document.getElementById('project-title-input')
+      const saveButton = document.getElementById('project-title-save-button')
+      const cancelButton = document.getElementById('project-title-cancel-button')
+      if (!titleText || !editButton || !editControls || !input || !saveButton || !cancelButton) return
+
+      let currentTitle = editor.dataset.projectTitle || titleText.textContent.trim()
+      const updateUrl = editor.dataset.updateUrl
+
+      const showEditMode = () => {
+        titleText.classList.add('hidden')
+        editButton.classList.add('hidden')
+        editControls.classList.remove('hidden')
+        input.value = currentTitle
+        input.focus()
+        input.select()
+      }
+
+      const showReadMode = () => {
+        editControls.classList.add('hidden')
+        titleText.classList.remove('hidden')
+        editButton.classList.remove('hidden')
+      }
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+      const saveTitle = async () => {
+        const nextTitle = input.value.trim()
+        if (!nextTitle) {
+          alert('Project title cannot be empty.')
+          return
+        }
+        if (nextTitle === currentTitle) {
+          showReadMode()
+          return
+        }
+
+        saveButton.disabled = true
+        try {
+          const response = await fetch(updateUrl, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ project: { name: nextTitle } })
+          })
+
+          if (!response.ok) {
+            let message = 'Failed to update project title.'
+            try {
+              const payload = await response.json()
+              if (payload && payload.error) message = payload.error
+            } catch (_error) {}
+            throw new Error(message)
+          }
+
+          currentTitle = nextTitle
+          editor.dataset.projectTitle = nextTitle
+          titleText.textContent = nextTitle
+          document.title = `${nextTitle} - ASAP`
+          showReadMode()
+        } catch (error) {
+          alert(error.message || 'Failed to update project title.')
+        } finally {
+          saveButton.disabled = false
+        }
+      }
+
+      editButton.addEventListener('click', showEditMode)
+      cancelButton.addEventListener('click', showReadMode)
+      saveButton.addEventListener('click', saveTitle)
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          saveTitle()
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          showReadMode()
+        }
+      })
+    })()
+  </script>
+<% end %>

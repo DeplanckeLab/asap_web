@@ -39,7 +39,8 @@ namespace :slurm do
       slurm_job_id: slurm_job_id.to_i
     )
     
-    # Update project step status to waiting if needed
+    # Recompute project step counters/status after transitioning run to waiting.
+    Basic.upd_project_step(project, step.id)
     project_step = ProjectStep.find_by(project_id: project.id, step_id: step.id)
     if project_step && project_step.status_id != 1
       project_step.update(status_id: 1)

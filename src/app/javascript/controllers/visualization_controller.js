@@ -593,6 +593,9 @@ export default class extends Controller {
     document.addEventListener('click', this.boundCheckpointTraceClick, true)
 
     this.boundBeforeUnload = (event) => {
+      if (this.skipBeforeUnloadForConfirmedNavigation === true) {
+        return
+      }
       if (!this.shouldWarnBeforeLeavingVisualization()) return
       const message = 'Are you sure you want to leave this page? You will lost your unsaved last changes. Tip: if you want to access another page without leaving this page, press Shift when clicking on links to open the link in another page.'
       event.preventDefault()
@@ -600,6 +603,83 @@ export default class extends Controller {
       return message
     }
     window.addEventListener('beforeunload', this.boundBeforeUnload)
+
+    this.boundInAppNavigationGuardClick = (event) => {
+      if (!this.shouldWarnBeforeLeavingVisualization()) return
+      if (this.allowNextInAppNavigation === true) return
+      if (event.defaultPrevented) return
+      if (event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+      const target = event.target instanceof Element ? event.target : null
+      const anchor = target ? target.closest('a[href]') : null
+      if (!anchor) return
+      if (anchor.closest('#visualization-leave-guard-overlay')) return
+      if (anchor.closest('#checkpoint-loading-overlay')) return
+      const rawHref = (anchor.getAttribute('href') || '').trim()
+      if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return
+      if (anchor.hasAttribute('download')) return
+      const anchorTarget = (anchor.getAttribute('target') || '').toLowerCase()
+      if (anchorTarget && anchorTarget !== '_self') return
+
+      const destination = new URL(anchor.href, window.location.href)
+      const current = new URL(window.location.href)
+      const samePageNoLeave = destination.origin === current.origin &&
+        destination.pathname === current.pathname &&
+        destination.search === current.search
+      if (samePageNoLeave) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      if (this.shouldSkipCustomLeaveGuardForSession()) {
+        this.allowNextInAppNavigation = true
+        this.skipBeforeUnloadForConfirmedNavigation = true
+        window.location.href = destination.toString()
+        return
+      }
+      this.showVisualizationLeaveGuard(() => {
+        this.allowNextInAppNavigation = true
+        this.skipBeforeUnloadForConfirmedNavigation = true
+        window.location.href = destination.toString()
+      })
+    }
+    document.addEventListener('click', this.boundInAppNavigationGuardClick, true)
+
+    this.boundInAppNavigationGuardSubmit = (event) => {
+      if (!this.shouldWarnBeforeLeavingVisualization()) return
+      if (this.allowNextInAppNavigation === true) return
+      if (event.defaultPrevented) return
+
+      const form = event.target instanceof HTMLFormElement ? event.target : null
+      if (!form) return
+      if (form.closest('#visualization-leave-guard-overlay')) return
+      const formTarget = (form.getAttribute('target') || '').toLowerCase()
+      if (formTarget && formTarget !== '_self') return
+      if (form.dataset?.remote === 'true') return
+
+      const actionAttr = (form.getAttribute('action') || '').trim()
+      const actionUrl = new URL(actionAttr || window.location.href, window.location.href)
+      const current = new URL(window.location.href)
+      const samePageNoLeave = actionUrl.origin === current.origin &&
+        actionUrl.pathname === current.pathname &&
+        actionUrl.search === current.search
+      if (samePageNoLeave) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      if (this.shouldSkipCustomLeaveGuardForSession()) {
+        this.allowNextInAppNavigation = true
+        this.skipBeforeUnloadForConfirmedNavigation = true
+        form.submit()
+        return
+      }
+      this.showVisualizationLeaveGuard(() => {
+        this.allowNextInAppNavigation = true
+        this.skipBeforeUnloadForConfirmedNavigation = true
+        form.submit()
+      })
+    }
+    document.addEventListener('submit', this.boundInAppNavigationGuardSubmit, true)
   }
 
   disconnect() {
@@ -638,6 +718,16 @@ export default class extends Controller {
       this.boundBeforeUnload = null
     }
 
+    if (this.boundInAppNavigationGuardClick) {
+      document.removeEventListener('click', this.boundInAppNavigationGuardClick, true)
+      this.boundInAppNavigationGuardClick = null
+    }
+
+    if (this.boundInAppNavigationGuardSubmit) {
+      document.removeEventListener('submit', this.boundInAppNavigationGuardSubmit, true)
+      this.boundInAppNavigationGuardSubmit = null
+    }
+
     if (window.visualizationController === this) {
       window.visualizationController = null
     }
@@ -671,6 +761,60 @@ export default class extends Controller {
       }
       return false
     })
+  }
+
+  showVisualizationLeaveGuard(onConfirm) {
+    this.pendingInAppNavigationAction = typeof onConfirm === 'function' ? onConfirm : null
+    const overlay = document.getElementById('visualization-leave-guard-overlay')
+    if (!overlay) return
+    const skipCheckbox = document.getElementById('visualization-leave-guard-skip-session')
+    if (skipCheckbox) {
+      skipCheckbox.checked = this.shouldSkipCustomLeaveGuardForSession()
+    }
+    overlay.style.display = 'flex'
+  }
+
+  hideVisualizationLeaveGuard() {
+    const overlay = document.getElementById('visualization-leave-guard-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  confirmVisualizationLeaveGuard(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.hideVisualizationLeaveGuard()
+    const skipCheckbox = document.getElementById('visualization-leave-guard-skip-session')
+    const shouldSkip = !!(skipCheckbox && skipCheckbox.checked)
+    this.setSkipCustomLeaveGuardForSession(shouldSkip)
+    const proceed = this.pendingInAppNavigationAction
+    this.pendingInAppNavigationAction = null
+    if (typeof proceed === 'function') {
+      proceed()
+    }
+  }
+
+  cancelVisualizationLeaveGuard(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.pendingInAppNavigationAction = null
+    this.hideVisualizationLeaveGuard()
+  }
+
+  shouldSkipCustomLeaveGuardForSession() {
+    return sessionStorage.getItem('viz_skip_custom_leave_guard') === 'true'
+  }
+
+  setSkipCustomLeaveGuardForSession(enabled) {
+    if (enabled) {
+      sessionStorage.setItem('viz_skip_custom_leave_guard', 'true')
+    } else {
+      sessionStorage.removeItem('viz_skip_custom_leave_guard')
+    }
   }
   
   // Delegates to ui_manager to avoid duplication

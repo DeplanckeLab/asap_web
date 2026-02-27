@@ -1757,8 +1757,8 @@ export default class extends Controller {
   buildDatasetCard(dataset, detectedFormat, index) {
     const datasetName = this.getDatasetDisplayName(dataset)
 
-    // Use original uploaded filename (without extension) if available, otherwise use dataset name
-    let label = this.originalFilename || datasetName || `Dataset ${index + 1}`
+    // Prefer the selected dataset name over the uploaded filename.
+    let label = datasetName || this.originalFilename || `Dataset ${index + 1}`
     
     // Always remove extension from label for display
     // Skip if it's the default "Dataset X" label
@@ -2166,6 +2166,8 @@ export default class extends Controller {
   }
 
   handleFormSubmit(e) {
+    this.syncSelectedDatasetInput()
+
     // If a file was selected, wait for upload to complete
     if (this.fuId && !this.isUploadComplete && this.currentUpload && !this.currentUpload.aborted) {
       e.preventDefault()
@@ -2178,6 +2180,34 @@ export default class extends Controller {
     }
     // Otherwise, allow form to submit normally - don't prevent default
     // The form will submit and follow the server redirect
+  }
+
+  syncSelectedDatasetInput() {
+    if (!this.form) return
+
+    let selectedName = this.selectedDatasetName
+    if (!selectedName) {
+      const checkedRadio = this.form.querySelector('input[name="dataset_selection"]:checked')
+      if (checkedRadio) {
+        const optionEl = checkedRadio.closest('.dataset-option')
+        selectedName = optionEl?.dataset?.datasetName || null
+      }
+    }
+
+    const existingSelInput = this.form.querySelector('input[name="sel"]')
+    if (selectedName && selectedName.trim() !== '') {
+      if (existingSelInput) {
+        existingSelInput.value = selectedName
+      } else {
+        const input = document.createElement('input')
+        input.type = 'hidden'
+        input.name = 'sel'
+        input.value = selectedName
+        this.form.appendChild(input)
+      }
+    } else if (existingSelInput) {
+      existingSelInput.remove()
+    }
   }
 
   async downloadFromUrl() {

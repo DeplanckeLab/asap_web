@@ -123,6 +123,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      data-visualization-embeddings-by-loom-value="<%= embedding_groups.to_json %>"
      data-visualization-default-loom-file-value="<%= (default_group_key.presence || @default_loom_file || 'parsing/output.loom') %>"
      data-visualization-default-embedding-id-value="<%= default_embedding_id&.to_s %>"
+     data-visualization-initial-selections-value="<%= (@initial_selection_items || []).to_json %>"
      data-visualization-gene-count-value="<%= @project&.gene_count || 0 %>"
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"
@@ -1541,7 +1542,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
     <div id="selections-panel" style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
         <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Selections</h2>
-        <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
+        <span id="saved-selections-count" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">0</span>
       </div>
 
       <!-- Selection Tabs -->
@@ -1615,17 +1616,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <!-- Saved Selections List -->
             <div>
               <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>
-              <div style="max-height: 120px; overflow-y: auto;">
-                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; background-color: white; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 4px;">
-                  <div style="flex: 1;">
-                    <div style="font-size: 14px; font-weight: 500;">T Cell Cluster</div>
-                    <div style="font-size: 12px; color: #6b7280;">1,234 cells</div>
-                  </div>
-                  <button style="color: #dc2626; background: none; border: none; cursor: pointer; padding: 4px;"
-                          onmouseover="this.style.color='#b91c1c'"
-                          onmouseout="this.style.color='#dc2626'">
-                    <i class="fas fa-trash" style="font-size: 12px;"></i>
-                  </button>
+              <div id="saved-selections-list" style="max-height: 180px; overflow-y: auto;">
+                <div style="font-size: 12px; color: #6b7280; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;">
+                  No saved selections yet
                 </div>
               </div>
             </div>

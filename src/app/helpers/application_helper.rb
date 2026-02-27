@@ -536,17 +536,11 @@ module ApplicationHelper
   # Returns { waiting: N, running: N, completed: N, failed: N }
   def project_run_counts(project)
     totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
-    visible_step_ids = visible_step_ids_for_run_counts
-    
-    project.project_steps.each do |ps|
-      next unless visible_step_ids.include?(ps.step_id)
-      next if ps.nber_runs_json.blank?
-      
-      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
-      json_data.each do |status_id, count|
-        status_key = status_id.to_i
-        totals[status_key] = (totals[status_key] || 0) + count.to_i if totals.key?(status_key)
-      end
+    json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
+    json_data ||= {}
+    json_data.each do |status_id, count|
+      status_key = status_id.to_i
+      totals[status_key] = count.to_i if totals.key?(status_key)
     end
     
     {

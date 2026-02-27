@@ -29,6 +29,7 @@ Rails.application.routes.draw do
       get :get_attributes
       get :data_content
       post :restart_step
+      post :stop_parsing
       post :delete_all_runs_from_step
       get :reset_parsing
       get :run_status
@@ -46,6 +47,8 @@ Rails.application.routes.draw do
       post :toggle_public
       post :prepare_metadata
       post :do_import_metadata
+      post :save_metadata_from_selection
+      get :selection_states
       get :sample_identifiers
     end
   end

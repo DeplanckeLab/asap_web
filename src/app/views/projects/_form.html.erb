@@ -286,6 +286,9 @@
     <%= form.hidden_field :key, value: project.key || '' %>
     <%= form.hidden_field :step_id, value: project.step_id || 1 %>
     <%= form.hidden_field :status_id, value: project.status_id || 1 %>
+    <% if @is_resetting_parsing %>
+      <%= hidden_field_tag :reset_parsing, '1' %>
+    <% end %>
 
     <!-- Actions -->
     <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">

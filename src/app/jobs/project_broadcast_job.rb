@@ -12,15 +12,11 @@ class ProjectBroadcastJob < ApplicationJob
     
     # Aggregate run counts across all project steps for header display
     run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
-    visible_step_ids = Step.where.not(hidden: true).pluck(:id)
-    project.project_steps.each do |ps|
-      next unless visible_step_ids.include?(ps.step_id)
-      next if ps.nber_runs_json.blank?
-      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
-      json_data.each do |sid, count|
-        k = sid.to_i
-        run_totals[k] = (run_totals[k] || 0) + count.to_i if run_totals.key?(k)
-      end
+    json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
+    json_data ||= {}
+    json_data.each do |sid, count|
+      k = sid.to_i
+      run_totals[k] = count.to_i if run_totals.key?(k)
     end
 
     h_data.merge!({
@@ -83,9 +79,17 @@ class ProjectBroadcastJob < ApplicationJob
       parsing_run = Run.where(:project_id => project.id, :step_id => step_id).first
       h_res[:parsing_status_id] = parsing_run.status_id if parsing_run
     else ## update the nbers
-      [1, 2, 3, 4, 5].each do |status_id|
-        tmp_nber = Run.where(:project_id => project.id, :step_id => step_id, :status_id => status_id).count
-        h_res[:h_nber_analyses][status_id] = tmp_nber
+      project_step = ProjectStep.find_by(project_id: project.id, step_id: step_id)
+      if project_step&.nber_runs_json.present?
+        json_counts = project_step.nber_runs_json.is_a?(String) ? JSON.parse(project_step.nber_runs_json) : project_step.nber_runs_json
+        [1, 2, 3, 4, 5].each do |status_id|
+          h_res[:h_nber_analyses][status_id] = json_counts[status_id.to_s].to_i
+        end
+      else
+        [1, 2, 3, 4, 5].each do |status_id|
+          tmp_nber = Run.where(:project_id => project.id, :step_id => step_id, :status_id => status_id).count
+          h_res[:h_nber_analyses][status_id] = tmp_nber
+        end
       end
     end
 

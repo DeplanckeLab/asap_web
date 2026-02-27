@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_27_203500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -55,6 +55,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.datetime "created_at", precision: nil
     t.integer "project_id"
     t.datetime "updated_at", precision: nil
+    t.index ["annot_id"], name: "idx_annot_cell_sets_annot_id"
     t.index ["cell_set_id"], name: "cell_set_id_annot_cell_sets"
   end
 
@@ -97,6 +98,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
     t.integer "version_nber", default: 1
+    t.index ["project_id", "name"], name: "idx_annots_project_name"
+    t.index ["project_id", "store_run_id", "filepath", "name"], name: "idx_annots_finish_run_lookup"
   end
 
   create_table "archive_statuses", id: :serial, force: :cascade do |t|
@@ -188,6 +191,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.text "related_term_ids"
     t.integer "tax_id"
     t.datetime "updated_at", precision: nil
+    t.index ["original", "identifier"], name: "idx_cot_original_identifier"
+    t.index ["original", "name"], name: "idx_cot_original_name"
   end
 
   create_table "cell_sets", id: :serial, force: :cascade do |t|
@@ -261,6 +266,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.text "up_gene_ids"
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
+    t.index ["annot_id"], name: "idx_clas_annot_id"
     t.index ["ontology_term_type_id"], name: "index_clas_on_ontology_term_type_id"
   end
 
@@ -865,6 +871,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.integer "ontology_term_type_id"
     t.integer "project_id"
     t.datetime "updated_at", precision: nil
+    t.index ["project_id", "annot_id"], name: "idx_ot_projects_project_annot"
   end
 
   create_table "ott_projects", id: :serial, force: :cascade do |t|
@@ -917,6 +924,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_120000) do
     t.integer "status_id"
     t.integer "step_id"
     t.datetime "updated_at", precision: nil
+    t.index ["project_id", "step_id"], name: "index_project_steps_on_project_id_and_step_id", unique: true
   end
 
   create_table "project_tags", id: :serial, force: :cascade do |t|

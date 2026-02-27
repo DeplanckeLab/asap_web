@@ -4,6 +4,19 @@ task :parse, [:project_key] => [:environment] do |t, args|
   
   now = Time.now
   logger = Rails.logger
+  profile_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  phase_starts = {}
+  phase_start = lambda do |name|
+    phase_starts[name] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    logger.info("[ParseRake][Profile] START #{name}")
+  end
+  phase_end = lambda do |name|
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    t0 = phase_starts[name]
+    elapsed = t0 ? (t1 - t0) : 0.0
+    total = t1 - profile_t0
+    logger.info("[ParseRake][Profile] END #{name} elapsed=#{format('%.3f', elapsed)}s total=#{format('%.3f', total)}s")
+  end
   puts args[:project_key]
 
   project_key = args[:project_key]
@@ -48,12 +61,106 @@ task :parse, [:project_key] => [:environment] do |t, args|
     logger.error("[ParseRake] Could not find parsing step for docker image #{asap_docker_image.id}")
     exit 1
   end
+
+  parsing_attrs = Basic.safe_parse_json(project.parsing_attrs_json, {})
+  reset_mode = parsing_attrs['reset_mode'] == true || parsing_attrs['reset_mode'].to_s == 'true' || parsing_attrs['reset_mode'].to_s == '1'
   
   # Always use the latest parsing run for this project.
   run = Run.where(:project_id => project.id, :step_id => parsing_step.id).order(created_at: :desc, id: :desc).first
   unless run
     logger.error("[ParseRake] No run found for project #{project_key}")
     exit 1
+  end
+
+  if reset_mode
+    phase_start.call('reset_cleanup')
+    logger.info("[ParseRake] reset_mode enabled for project #{project_key}; full cleanup before parsing")
+    logger.info("[ParseRake][Debug] pre-cleanup counts project=#{project.key} runs=#{project.runs.count} annots=#{Annot.where(project_id: project.id).count} ot_projects=#{OtProject.where(project_id: project.id).count} checkpoints=#{Checkpoint.where(project_id: project.id).count}")
+
+    # Batch cleanup for performance:
+    # delete run-linked records and annot-linked records with set-based SQL.
+    runs_scope = project.runs.where.not(id: run.id)
+    annots_scope = Annot.where(project_id: project.id)
+    conn = ActiveRecord::Base.connection
+
+    runs_scope.where.not(slurm_job_id: nil).pluck(:id, :slurm_job_id).each do |run_id, slurm_job_id|
+      begin
+        slurm_service = SlurmService.new(logger: Rails.logger)
+        slurm_service.cancel_job(slurm_job_id)
+      rescue => e
+        logger.error("[ParseRake] Error cancelling SLURM job for run #{run_id}: #{e.message}")
+      end
+    end
+
+    if conn.data_source_exists?('cla_votes')
+      conn.execute(<<~SQL)
+        DELETE FROM cla_votes
+        WHERE cla_id IN (
+          SELECT clas.id
+          FROM clas
+          INNER JOIN annots ON annots.id = clas.annot_id
+          WHERE annots.project_id = #{project.id.to_i}
+        )
+      SQL
+    end
+    AnnotCellSet.where(annot_id: annots_scope.select(:id)).delete_all
+    Cla.where(annot_id: annots_scope.select(:id)).delete_all
+    OtProject.where(project_id: project.id, annot_id: annots_scope.select(:id)).delete_all
+    annots_scope.delete_all
+
+    ActiveRun.where(run_id: runs_scope.select(:id)).delete_all
+    Fo.where(run_id: runs_scope.select(:id)).delete_all
+    DelRun.where(project_id: project.id, run_id: runs_scope.select(:id)).delete_all
+    if conn.data_source_exists?('tmp_fos')
+      conn.execute("DELETE FROM tmp_fos WHERE run_id IN (SELECT id FROM runs WHERE project_id = #{project.id.to_i} AND id != #{run.id.to_i})")
+    end
+    runs_scope.delete_all
+
+    # Delete checkpoints and their embedded comments for this project.
+    Checkpoint.where(project_id: project.id).delete_all
+
+    # Delete all sub-directories in project directory.
+    if File.exist?(project_dir)
+      Dir.children(project_dir).each do |entry|
+        sub_path = project_dir + entry
+        next unless File.directory?(sub_path)
+        FileUtils.rm_rf(sub_path)
+      end
+    end
+
+    # Reset project steps and deduplicate rows.
+    ProjectStep.where(project_id: project.id).select(:step_id).distinct.pluck(:step_id).each do |step_id|
+      rows = ProjectStep.where(project_id: project.id, step_id: step_id).order(:id).to_a
+      if rows.size > 1
+        duplicate_ids = rows[0..-2].map(&:id)
+        ProjectStep.where(id: duplicate_ids).delete_all if duplicate_ids.any?
+      end
+      project_step = ProjectStep.where(project_id: project.id, step_id: step_id).order(:id).last
+      project_step.update(status_id: nil, error_message: nil, nber_runs_json: '{}') if project_step
+      Basic.upd_project_step(project, step_id)
+    end
+    logger.info("[ParseRake][Debug] post-cleanup counts project=#{project.key} runs=#{project.runs.count} annots=#{Annot.where(project_id: project.id).count} ot_projects=#{OtProject.where(project_id: project.id).count} checkpoints=#{Checkpoint.where(project_id: project.id).count}")
+
+    parsing_attrs.delete('reset_mode')
+    project.update(parsing_attrs_json: parsing_attrs.to_json)
+    FileUtils.mkdir_p(tmp_dir, mode: 0777) unless File.exist?(tmp_dir)
+    FileUtils.chmod(0777, tmp_dir) if File.exist?(tmp_dir)
+    # Recreate flow can reuse the same Run row; clear timing fields so wait/elapsed
+    # are computed for the current execution only.
+    reset_timestamp = Time.current
+    run.update(
+      status_id: 1,
+      error: nil,
+      created_at: reset_timestamp,
+      submitted_at: reset_timestamp,
+      start_time: nil,
+      waiting_duration: nil,
+      duration: nil,
+      process_duration: nil
+    )
+    logger.info("[ParseRake][Debug] reset_mode timing reset for run #{run.id}")
+    project.reload
+    phase_end.call('reset_cleanup')
   end
   
   project_step = ProjectStep.find_by(:project_id => project.id, :step_id => parsing_step.id)
@@ -73,6 +180,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
     )
     logger.info("[ParseRake] Updated run #{run.id} to running, waiting_duration: #{waiting_duration}")
   end
+  logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} entered execution block with run.status_id=#{run.status_id}, start_time=#{run.start_time}")
   
   # Recompute project_step run counters whenever run status changes.
   Basic.upd_project_step(project, parsing_step.id)
@@ -127,6 +235,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       if fu.nil?
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), skipping prediction update")
       else
+        phase_start.call('load_preparsing_predictions')
         begin
           upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
                               ENV["UPLOAD_DATA_DIR"]
@@ -154,6 +263,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
         rescue => e
           logger.error("[ParseRake] Error reading prediction file: #{e.class} - #{e.message}")
           logger.error(e.backtrace.join("\n")) if e.backtrace
+        ensure
+          phase_end.call('load_preparsing_predictions')
         end
       end
 
@@ -261,6 +372,11 @@ task :parse, [:project_key] => [:environment] do |t, args|
 #parse.v8.py: error: the following arguments are required: -f, --filetype, --organism, --dburl                                                                                                
 
         opts = []
+        sel_name = p['sel_name'] || p[:sel_name] || p['sel'] || p[:sel]
+        if file_type == 'H5AD' && sel_name.present? && !sel_name.start_with?('/')
+          sel_name = (sel_name == 'X') ? '/X' : "/layers/#{sel_name}"
+        end
+        opts.push({'opt' => "--sel", 'value' => sel_name}) if sel_name.present?
         if file_type == 'RAW_TEXT'
           gene_name_col = p['gene_name_col'] || p[:gene_name_col] || 'first'
           has_header = p['has_header'] || p[:has_header]
@@ -331,8 +447,20 @@ task :parse, [:project_key] => [:environment] do |t, args|
       puts h_cmd_parse
       cmd_parse = Basic.build_cmd(h_cmd_parse)
       puts "CMD_JAVA:" + cmd_parse
+      phase_start.call('parse_java_command')
+      logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} executing parse command")
       `#{cmd_parse}`
+      cmd_exitstatus = $?.exitstatus
+      logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} parse command finished with exitstatus=#{cmd_exitstatus}")
+      unless File.exist?(output_json)
+        logger.error("[ParseRake][Debug] project=#{project.key} run=#{run.id} expected output_json missing at #{output_json}")
+      end
+      if File.exist?(output_json)
+        logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} output_json size=#{File.size(output_json)} mtime=#{File.mtime(output_json)}")
+      end
       h_parsing = Basic.safe_parse_json(File.read(output_json), {})
+      logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} parsed output_json keys=#{h_parsing.keys.sort.join(',')}")
+      phase_end.call('parse_java_command')
       if  p["file_type"] == 'MEX'
         h_parsing['detected_format'] = 'MEX'
         File.open(output_json, 'w') do |fw|
@@ -414,10 +542,22 @@ task :parse, [:project_key] => [:environment] do |t, args|
       # Call finish_run with h_parsing as h_results.
       # skip_broadcast: true because finish_run broadcasts before we update project.status_id,
       # so we do a single broadcast below with the correct project status.
-      Basic.finish_run(logger, run, h_parsing, skip_broadcast: true)
+      phase_start.call('finish_run')
+      begin
+        logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} calling Basic.finish_run")
+        Basic.finish_run(logger, run, h_parsing, skip_broadcast: true)
+        logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} Basic.finish_run returned")
+      rescue => e
+        logger.error("[ParseRake][Debug] project=#{project.key} run=#{run.id} Basic.finish_run raised #{e.class}: #{e.message}")
+        logger.error("[ParseRake][Debug] project=#{project.key} run=#{run.id} finish_run backtrace: #{e.backtrace.first(10).join("\n")}") if e.backtrace
+        raise
+      ensure
+        phase_end.call('finish_run')
+      end
       
       # Reload run to get updated status and metrics from finish_run
       run.reload
+      logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} after finish_run reload status_id=#{run.status_id}, duration=#{run.duration}, process_duration=#{run.process_duration}")
       
       # Update metrics that finish_run doesn't handle (max_ram, process_duration from exec_run_details.log)
       run_updates = {}
@@ -435,8 +575,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
       ## 
       puts "Define project cell set"
+      phase_start.call('update_project_cell_set')
       Basic.upd_project_cell_set(project)
       project.reload
+      phase_end.call('update_project_cell_set')
       if project.project_cell_set
         puts "=> " + project.project_cell_set.key
       else
@@ -460,6 +602,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       if fu.nil?
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), cannot proceed with metadata copying")
       else
+        phase_start.call('metadata_copying')
         upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
                             ENV["UPLOAD_DATA_DIR"]
                           elsif ENV["DATA_DIR"]
@@ -526,6 +669,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
 
         if ["H5AD"].include? h_preparsing["detected_format"]
+          phase_start.call('metadata_copy_h5ad')
           list_metadata = h_parsing["existing_metadata"].select{|e| !h_parsing_metadata[e]}
           if list_metadata
             relative_filepath = Basic.relative_path(project, output_path)
@@ -535,7 +679,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
               Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
             end
           end
+          phase_end.call('metadata_copy_h5ad')
         elsif ["RDS"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
+          phase_start.call('metadata_copy_rds')
           h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
           metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
           File.open(metadata_list_file, 'w') do |f|
@@ -563,7 +709,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
               Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
             end
           end
+          phase_end.call('metadata_copy_rds')
         elsif ["LOOM"].include? h_preparsing["detected_format"]  and h_preparsing["list_groups"][0]["existing_metadata"]
+          phase_start.call('metadata_copy_loom')
           puts "bou"
           h_meta = {:meta => h_preparsing["list_groups"][0]["existing_metadata"].select{|e| !h_parsing_metadata[e]}}
           metadata_list_file = tmp_dir + 'list_metadata_to_copy.json'
@@ -591,6 +739,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
               Basic.load_annot(run, meta, relative_filepath, h_data_types, h_data_classes, logger)
             end
           end
+          phase_end.call('metadata_copy_loom')
         end
 
         # Broadcast completion after metadata copying (or if no metadata copying was needed)
@@ -609,6 +758,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
         }
         project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
         logger.info("[ParseRake] Parse and metadata copying completed, broadcasting final update")
+        phase_end.call('metadata_copying')
       end
 
     else

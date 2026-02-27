@@ -2,6 +2,7 @@
 <%# Also show if status is complete but results are missing (after restart) %>
 <%# Show status section if no results OR if results exist but have displayed_error (so we show status + error) %>
 <%# Also show if parsing_run exists with status_id 4 (failed) even if @results is nil %>
+<% can_reset_parsing = @step && !@step.multiple_runs && ((@project_step && [3, 4].include?(@project_step.status_id)) || (@parsing_run && [3, 4].include?(@parsing_run.status_id))) %>
 <% if @step && @step.name == 'parsing' && (!@results || (@results && @results['displayed_error']) || (@parsing_run && @parsing_run.status_id == 4)) %>
   <%# Always show something when there are no results %>
   <%# Use ONLY the run's status_id, matching the left panel logic %>
@@ -72,6 +73,14 @@
               </div>
             <% end %>
           </div>
+
+          <div class="mt-6">
+            <%= button_to 'Stop',
+                  stop_parsing_project_path(@project),
+                  method: :post,
+                  form: { data: { turbo_confirm: 'Stop parsing now? The run will be marked as failed.' } },
+                  class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer' %>
+          </div>
         </div>
       <% elsif status_id == 3 %>
         <%# Status says complete but no results - likely after restart %>
@@ -99,6 +108,12 @@
               The parsing job failed. Please check the logs or try restarting the parsing step.
             <% end %>
           </p>
+          <% if can_reset_parsing %>
+            <%= link_to reset_parsing_project_path(@project),
+                  class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block" do %>
+              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            <% end %>
+          <% end %>
         </div>
       <% else %>
         <%# Fallback for any other status (including nil project_step) %>
@@ -165,7 +180,7 @@
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <!-- Reset Button -->
-          <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+          <% if can_reset_parsing %>
             <%= link_to reset_parsing_project_path(@project),
                   class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
                   style: "flex-shrink: 0;" do %>
@@ -233,6 +248,12 @@
           </div>
           <div class="flex flex-wrap gap-2 items-center">
             <% h_delimiter = {"\\t" => 'Tab', "\t" => "Tab", " " => "Space", "," => "Comma", ":" => "Colon"} %>
+            <% selected_dataset = h_attrs['sel_name'].presence || h_attrs['sel'].presence %>
+            <% if selected_dataset %>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                Dataset: <%= selected_dataset %>
+              </span>
+            <% end %>
             <% if h_attrs['delimiter'] && h_attrs['delimiter'] != '' %>
               <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                 Delimiter: <%= h_delimiter[h_attrs['delimiter']] || h_attrs['delimiter'] %>
@@ -454,7 +475,7 @@
           <i class="fas fa-exclamation-circle text-red-600 flex-shrink-0"></i>
           Parsing Error
         </h3>
-        <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+        <% if can_reset_parsing %>
           <%= link_to reset_parsing_project_path(@project),
                 class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
                 style: "flex-shrink: 0;" do %>

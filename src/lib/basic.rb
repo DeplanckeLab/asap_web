@@ -37,7 +37,7 @@ module Basic
         down_genes = (e.down_gene_ids and e.down_gene_ids.size > 0) ? Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', '*', "id in (#{e.down_gene_ids})").map{|g| Basic.format_gene(g)} : nil
 
         cots =  (e.cell_ontology_term_ids) ?
-        CellOntologyTerm.where(:id => e.cell_ontology_term_ids.split(",")).all.map{|cot|
+        ::CellOntologyTerm.where(:id => e.cell_ontology_term_ids.split(",")).all.map{|cot|
           {
             :identifier => cot.identifier,
             :name => cot.name,
@@ -153,7 +153,7 @@ module Basic
       }
 
       h_cots = {}
-      CellOntologyTerm.where(:id => OtProject.where(:project_id => p.id).all.map{|e| e.cell_ontology_term_id}.uniq).all.each do |cot|
+      ::CellOntologyTerm.where(:id => OtProject.where(:project_id => p.id).all.map{|e| e.cell_ontology_term_id}.uniq).all.each do |cot|
         h_cots[cot.id] = cot
       end
       
@@ -1215,15 +1215,30 @@ module Basic
       return h_res
     end
 
-    def create_upd_fo project_id, relative_filepath
+    def create_upd_fo project_id, relative_filepath, cache = nil
+      cache ||= {}
+      store_run_by_key = cache[:store_run_by_key] ||= {}
+      fo_by_key = cache[:fo_by_key] ||= {}
       
    #   puts "project_id => #{project_id}, relative_filepath => #{relative_filepath}"
       t = relative_filepath.split("/")
       store_run = nil
       if t.size == 3
-        store_run = Run.where(:id => t[1]).first
+        run_lookup_key = [:run_id, t[1].to_i]
+        if store_run_by_key.key?(run_lookup_key)
+          store_run = store_run_by_key[run_lookup_key]
+        else
+          store_run = Run.where(:id => t[1]).first
+          store_run_by_key[run_lookup_key] = store_run
+        end
       else
-        store_run = Run.joins("join steps on (step_id = steps.id)").where(:project_id => project_id, :steps => {:name => t[0]}).first
+        run_lookup_key = [:project_step_name, project_id, t[0]]
+        if store_run_by_key.key?(run_lookup_key)
+          store_run = store_run_by_key[run_lookup_key]
+        else
+          store_run = Run.joins("join steps on (step_id = steps.id)").where(:project_id => project_id, :steps => {:name => t[0]}).first
+          store_run_by_key[run_lookup_key] = store_run
+        end
       end
 
       if store_run
@@ -1236,22 +1251,29 @@ module Basic
           :filepath => relative_filepath,
           :ext => relative_filepath.split(".").last
         }
-        fo = Fo.where(h_fo).first
-        if !fo
-          fo = Fo.new(h_fo)
-          fo.save
+        fo_cache_key = [h_fo[:project_id], h_fo[:run_id], h_fo[:user_id], h_fo[:filepath], h_fo[:ext]]
+        if fo_by_key.key?(fo_cache_key)
+          fo = fo_by_key[fo_cache_key]
+        else
+          fo = Fo.where(h_fo).first
+          if !fo
+            fo = Fo.new(h_fo)
+            fo.save
+          end
+          fo_by_key[fo_cache_key] = fo
+          
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+          filepath = project_dir + fo.filepath
+          fo.update(:filesize => File.size(filepath))
         end
-        
-        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
-        filepath = project_dir + fo.filepath
-        fo.update(:filesize => File.size(filepath))
       end
 
       return fo
     end
 
-    def  add_cell_sets p, project_dir, a, meta_compl, list_cats
-      h_cell_sets = {}
+    def  add_cell_sets p, project_dir, a, meta_compl, list_cats, cache = nil
+      cache ||= {}
+      h_cell_sets = cache[:cell_sets_by_md5] ||= {}
       h_cell_set_by_cat_idx = {}
       pc = p.project_cell_set
       cell_ids_file = project_dir + 'parsing' + 'cell_ids'
@@ -1264,13 +1286,26 @@ module Basic
         puts "PROJECT_CELL_SET: " + project_cell_set.to_json
       elsif File.exist?(stable_ids_file) and File.exist?(cell_ids_file)
 
-        output = File.read(cell_ids_file)
-        res =  Basic.safe_parse_json(output,  {})
-        cells = res['values']
+        cells_cache = cache[:cells_values_by_project_id] ||= {}
+        if cells_cache.key?(p.id)
+          cells = cells_cache[p.id]
+        else
+          output = File.read(cell_ids_file)
+          res =  Basic.safe_parse_json(output,  {})
+          cells = res['values']
+          cells_cache[p.id] = cells
+        end
 
-        output = File.read(stable_ids_file)
-        res = Basic.safe_parse_json(output,  {})
-        stable_ids = res['values']
+        stable_ids_cache = cache[:stable_ids_values_by_file] ||= {}
+        stable_key = stable_ids_file.to_s
+        if stable_ids_cache.key?(stable_key)
+          stable_ids = stable_ids_cache[stable_key]
+        else
+          output = File.read(stable_ids_file)
+          res = Basic.safe_parse_json(output,  {})
+          stable_ids = res['values']
+          stable_ids_cache[stable_key] = stable_ids
+        end
 
         vals = meta_compl['values']
         
@@ -1279,9 +1314,15 @@ module Basic
 
             ## init annot cell sets
 
-            h_annot_cell_sets = {}
-            AnnotCellSet.where(:project_id => p.id).all.each do |acs|
-              h_annot_cell_sets[[acs.annot_id, acs.cat_idx]] = acs
+            project_annot_cell_sets_cache = cache[:annot_cell_sets_by_project_id] ||= {}
+            if project_annot_cell_sets_cache.key?(p.id)
+              h_annot_cell_sets = project_annot_cell_sets_cache[p.id]
+            else
+              h_annot_cell_sets = {}
+              AnnotCellSet.where(:project_id => p.id).all.each do |acs|
+                h_annot_cell_sets[[acs.annot_id, acs.cat_idx]] = acs
+              end
+              project_annot_cell_sets_cache[p.id] = h_annot_cell_sets
             end
             
             h_cells = {}
@@ -1359,12 +1400,41 @@ module Basic
       return h_cell_set_by_cat_idx
     end
 
-    def add_clas project, a, h_cell_sets
+    def add_clas project, a, h_cell_sets, cache = nil
+      cache ||= {}
+      cla_by_annot_cat = cache[:cla_by_annot_cat] ||= {}
+      cot_by_name_or_identifier = cache[:cot_by_name_or_identifier] ||= {}
+      annot_clas_by_catidx = cache[:annot_clas_by_catidx] ||= {}
 
    #   user = User.where(:id => a.user_id).first
    #   orcid_user = user.orcid_user #OrcidUser.where(:user_id => a.user_id).first
       list_cats =  Basic.safe_parse_json(a.list_cat_json, [])
       h_cat_aliases = Basic.safe_parse_json(a.cat_aliases_json, {})
+
+      # Resolve ontology terms in batch for all categories not already cached.
+      missing_names = list_cats.map(&:to_s).select { |name| name != '' }.uniq.reject { |name| cot_by_name_or_identifier.key?(name) }
+      if missing_names.any?
+        terms = ::CellOntologyTerm.where(original: true).where("identifier IN (?) OR name IN (?)", missing_names, missing_names)
+        terms.each do |term|
+          cot_by_name_or_identifier[term.identifier] ||= term if term.identifier.present?
+          cot_by_name_or_identifier[term.name] ||= term if term.name.present?
+        end
+        missing_names.each do |name|
+          cot_by_name_or_identifier[name] = nil unless cot_by_name_or_identifier.key?(name)
+        end
+      end
+
+      # Preload existing clas for this annotation once.
+      if !annot_clas_by_catidx.key?(a.id)
+        h_existing = {}
+        Cla.where(annot_id: a.id).find_each do |existing_cla|
+          h_existing[existing_cla.cat_idx] = existing_cla if !existing_cla.cat_idx.nil?
+          cla_by_annot_cat[[a.id, existing_cla.cat_idx]] ||= existing_cla if !existing_cla.cat_idx.nil?
+        end
+        annot_clas_by_catidx[a.id] = h_existing
+      end
+      existing_clas_for_annot = annot_clas_by_catidx[a.id]
+
       sel_clas = []
       list_cats.each_index do |i|
         k = list_cats[i]
@@ -1374,7 +1444,7 @@ module Basic
 #        end
         if annot_name and annot_name != ''
           
-          cot = CellOntologyTerm.where(["(identifier = ? or name = ?) and original = true", annot_name, annot_name]).first
+          cot = cot_by_name_or_identifier[annot_name.to_s]
           cot_ids = (cot) ? cot.id : nil
           h_cla = {
             :cla_source_id => 3,
@@ -1390,17 +1460,18 @@ module Basic
             :project_id => a.project_id
           }
           
-          h_cla2 = {
-            :cell_set_id => (h_cell_sets[i]) ? h_cell_sets[i].id : nil,
-            :cell_ontology_term_ids => cot_ids,
-            :name => (cot) ? "" : annot_name
-          }
-
-          cla = Cla.where(h_cla2).first
+          annot_cat_key = [a.id, i]
+          if cla_by_annot_cat.key?(annot_cat_key)
+            cla = cla_by_annot_cat[annot_cat_key]
+          else
+            cla = existing_clas_for_annot[i]
+          end
           if !cla
             cla = Cla.new(h_cla)
             cla.save
           end
+          cla_by_annot_cat[annot_cat_key] = cla
+          existing_clas_for_annot[i] ||= cla
           sel_clas.push cla.id
 
           ## add vote
@@ -1437,18 +1508,23 @@ module Basic
 
     end
     
-    def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger
+    def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger, cache = nil
+      cache ||= {}
+      project_by_id = cache[:project_by_id] ||= {}
+      annot_by_key = cache[:annot_by_key] ||= {}
+      ori_annot_by_name = cache[:ori_annot_by_name] ||= {}
+      de_step_ids = cache[:de_step_ids] ||= Step.where(:name => 'de').pluck(:id)
       
       #list_metadata.each do |meta|
-      project = Project.where(:id => run.project_id).first #run.project
-      puts run.project.to_json
-      puts "project => #{project.to_json}"
+      if project_by_id.key?(run.project_id)
+        project = project_by_id[run.project_id]
+      else
+        project = Project.where(:id => run.project_id).first #run.project
+        project_by_id[run.project_id] = project
+      end
 
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
     
-      puts "BLAAAA: " + meta.to_json
-      
-      puts "h_data_types: " + h_data_types.to_json
       
       #      if annot = Annot.where(:project_id => run.project_id, :name => meta['name'], :run_id => run.id).first
       #        annot.destroy          
@@ -1461,16 +1537,26 @@ module Basic
       #      relative_filepath = relative_path(project, filepath)
 
       # create or update fo
-      fo = create_upd_fo(run.project_id, relative_filepath)
-      annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first
+      fo = create_upd_fo(run.project_id, relative_filepath, cache)
+      annot_key = [run.project_id, meta['name'], relative_filepath, (fo ? fo.run_id : nil)]
+      if annot_by_key.key?(annot_key)
+        annot = annot_by_key[annot_key]
+      else
+        annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first
+        annot_by_key[annot_key] = annot
+      end
       
       # complete annotation details if data type is not defined      
       #      if !meta['type'] or !meta['dataset_size']
       ## get same annotation from parsing
-      ori_annot = Annot.where(:project_id => project.id, :name => meta['name']).order("id asc").first
+      ori_annot_key = [project.id, meta['name']]
+      if ori_annot_by_name.key?(ori_annot_key)
+        ori_annot = ori_annot_by_name[ori_annot_key]
+      else
+        ori_annot = Annot.where(:project_id => project.id, :name => meta['name']).order("id asc").first
+        ori_annot_by_name[ori_annot_key] = ori_annot
+      end
       type_txt = ''
-      puts "ANNOT : " + annot.to_json
-      puts "ORI_ANNOT : " + ori_annot.to_json
       if ori_annot and annot != ori_annot ## second part of expression: in case of re-importing a metadata or creating again the same metadata, do not get the metadata attributes from the previous metadata version (it might be outdated, for example in the case of imported metadata => the type can me changed by the user)
         meta["type"] = (dt = ori_annot.data_type) ? dt.name : nil
         if ori_annot.data_class_ids and ori_annot.data_class_ids != ''
@@ -1485,7 +1571,6 @@ module Basic
       type_txt = "-type #{h_data_types[meta['forced_type_id']].name}"  if meta['forced_type_id']
       
       loom_path = project_dir + relative_filepath
-      puts "META: " + meta.to_json
       if meta['data_class_names'] and meta['data_class_names'].include?("discrete_mdata")
         meta["type"]= 'DISCRETE'
       end
@@ -1515,7 +1600,6 @@ module Basic
       end
 
       data_class_names = meta['data_class_names'] || []
-      puts "DATA_CLASS_NAMES: " + data_class_names.to_json
       
       ### if imported data, try to guess types
       #if data_class_names.size == 0 #meta['imported'] == true
@@ -1546,7 +1630,6 @@ module Basic
         end
         data_classes.push h_data_classes[data_class_name]
       end
-      puts "DATA_CLASSES: " + data_classes.to_json
 
       output_attr = nil
       if meta['output_attr_name']
@@ -1567,14 +1650,13 @@ module Basic
       }
 
       if !meta['headers']
-        de_steps=Step.where(:name => 'de').all
-        meta['headers'] = ["logFC", "P-value", "FDR", "Avg group1", "Avg group2"] if de_steps.map{|e| e.id}.include? run.step_id
+        meta['headers'] = ["logFC", "P-value", "FDR", "Avg group1", "Avg group2"] if de_step_ids.include? run.step_id
       end
 
       ori_annot2 = nil
 
       if meta['name'] != '/matrix'
-        ori_annot2 = Annot.where(:project_id => project.id, :name => meta['name']).order('id').first
+        ori_annot2 = ori_annot
       end
       
       allow = true
@@ -1582,7 +1664,6 @@ module Basic
       ## do not propagate de results     
       allow = false if fo.run_id == run.id and meta['on'] == 'GENE' and meta['name'].match(/_de_\d+/) and meta['imported'] == false
 
-      puts "Allowed? : " + allow.to_json
 
       if allow
 
@@ -1626,19 +1707,19 @@ module Basic
         
 #        annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first
 
-        puts "test annot"
         if !annot
           annot = Annot.new(h_annot)
           annot.save!
+          annot_by_key[annot_key] = annot
+          ori_annot_by_name[ori_annot_key] ||= annot
         elsif !(h_annot[:data_class_ids] == '' and annot.data_class_ids != '')
-          puts "H_ANNOT: " + h_annot.to_json
           annot.update(h_annot)
+          annot_by_key[annot_key] = annot
         end
 
         ## save list of stable_ids in file
         stable_ids_file = project_dir + (annot.filepath + ".stable_ids")
         if !File.exist? stable_ids_file #annot.store_run_id == annot.run_id and annot.dim == 3
-          puts "get stable_ids for #{annot.filepath}..."
           cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{project_dir + annot.filepath} -meta /col_attrs/_StableID"
        #   res = Basic.safe_parse_json(`#{cmd}`, {})
        #   stable_ids = res['values']
@@ -1649,9 +1730,8 @@ module Basic
         
         ## add clas
         if annot.data_type_id == 3 and annot.dim == 1 
-          puts "Test cell sets"
-          h_cell_sets = add_cell_sets(project, project_dir, annot, meta_compl, list_cats)
-          add_clas(project, annot, h_cell_sets)
+          h_cell_sets = add_cell_sets(project, project_dir, annot, meta_compl, list_cats, cache)
+          add_clas(project, annot, h_cell_sets, cache)
         end
         
         ## compute_marker genes
@@ -1675,10 +1755,15 @@ module Basic
       #logger.debug("Get project_step details for " + project.key + " and step " + step_id)
       h_project_step = {}
       h_nber_runs = {}
+      step = Step.find_by(id: step_id)
       runs = Run.where(:project_id => project.id, :step_id => step_id).all
       runs.each do |run|
         h_nber_runs[run.status_id] ||= 0
         h_nber_runs[run.status_id] += 1
+      end
+      # Single-run steps cannot be both waiting and running at the same time.
+      if step && step.multiple_runs != true && h_nber_runs[2].to_i > 0
+        h_nber_runs[1] = 0
       end
       if runs.size == 0
          h_project_step[:status_id] = nil
@@ -1705,8 +1790,15 @@ module Basic
 
     def upd_project_step project, step_id
       h_project_step = Basic.get_project_step_details(project, step_id)
-      all_project_steps = ProjectStep.where(:project_id => project.id).all
-      project_step = all_project_steps.select{|e| e.step_id == step_id}.first #ProjectStep.where(:project_id => project.id, :step_id => step_id).first
+      all_project_steps = ProjectStep.where(:project_id => project.id).order(:id).all
+      step_rows = all_project_steps.select { |e| e.step_id == step_id }
+      if step_rows.size > 1
+        duplicate_ids = step_rows[0..-2].map(&:id)
+        ProjectStep.where(id: duplicate_ids).delete_all if duplicate_ids.any?
+        all_project_steps = ProjectStep.where(:project_id => project.id).order(:id).all
+        step_rows = all_project_steps.select { |e| e.step_id == step_id }
+      end
+      project_step = step_rows.last
       if project_step
         project_step.update(h_project_step)
       end
@@ -1716,7 +1808,9 @@ module Basic
       Step.all.map{|s| h_steps[s.id] = s}
       h_nber_runs = {}
 
-      all_project_steps.select{|ps| h_steps[ps.step_id].hidden == false}.each do |ps|
+      # Defensive deduplication by step_id to avoid over-counting when duplicate ProjectStep rows exist.
+      latest_project_steps = all_project_steps.group_by(&:step_id).transform_values { |rows| rows.last }.values
+      latest_project_steps.select{|ps| h_steps[ps.step_id].hidden == false}.each do |ps|
         h_tmp = JSON.parse(ps.nber_runs_json)
         h_tmp.keys.map{|k| h_nber_runs[k]||=0; h_nber_runs[k] += h_tmp[k]}
       end
@@ -2834,91 +2928,68 @@ puts "TEST RUN"
       loaded_annots = []
       logger.info("[Basic.finish_run] h_output_files keys: #{h_output_files.keys.inspect}")
       logger.debug("[Basic.finish_run] h_output_files: #{h_output_files.to_json}")
+      finish_run_cache = {}
       ## edit type of output_files in function of properties described in output.json
-      h_output_files.each_key do |k|
-        h_output_files[k].each_key do |k2|           
-          puts "BLA:" + k + "-->" + k2
-          t = k2.split(":")
-      #    puts "RELATIVE_PATH: #{t[0]}"
-          relative_filepath = t[0]
-        #  relative_filepath = relative_path(project, filepath)
-          fo = create_upd_fo project.id, relative_filepath
-      #    puts "rel_path: " + relative_filepath.to_json
-      #    puts "types: " + h_output_files[k][k2]["types"].to_json
-          if h_output_files[k][k2]["types"].flatten.include?("dataset")
-            #                h_output_files[k][k2]["types"].push((h_output_json and h_output_json['is_count_table'].to_i == 1) ? "int_matrix" : "num_matrix")               
-            #   t = k2.split(":")
-            #   relative_filepath = t[0]
-            #   fo = create_upd_fo project.id, relative_filepath
-            # h_output_files[k][k2]["fo_id"] = fo.id
-            filepath = project_dir + t[0]
-            # if h_output_json['metadata']
-            dataset_name = h_output_files[k][k2]["dataset"]
-          #   puts "DATASET name: #{dataset_name.to_json}"
-            if dataset_name
-              puts "DATASET name: #{dataset_name}"
-              if dataset_name == '/matrix' or dataset_name.match(/^\/layers\//)
-                h_output_files[k][k2]["types"].push((h_results and h_results['is_count_table'].to_i == 1) ? "int_matrix" : "num_matrix")
-                h_output_files[k][k2]["nber_rows"] = h_results['nber_rows']
-                h_output_files[k][k2]["nber_cols"] = h_results['nber_cols']
-                h_output_files[k][k2]["dataset_size"] = (h_results['nber_rows'] and h_results['nber_cols']) ? 4 * h_results['nber_rows'] * h_results['nber_cols'] : nil
-                
-                h_data = {
-                  'output_attr_name' => k,
-                  'nber_cols' => h_results['nber_cols'],
-                  'nber_rows' =>  h_results['nber_rows'],
-                  'type' => 'NUMERIC',
-                  'data_class_names' => h_output_files[k][k2]["types"],
-                  'on' => 'EXPRESSION_MATRIX',
-                  'dataset_size' => h_output_files[k][k2]["dataset_size"],                    
-                  'name' => dataset_name,
-                  'count' => (h_results and h_results['is_count_table'].to_i == 1) ? true : false
-                }
-                logger.info("[Basic.finish_run] Creating matrix annotation: #{h_data.to_json}")
-                new_annot = load_annot(run, h_data, relative_filepath, h_data_types, h_data_classes, logger)
-                if new_annot
-                  logger.info("[Basic.finish_run] Matrix annotation created: id=#{new_annot.id}, name=#{new_annot.name}, nber_rows=#{new_annot.nber_rows}, nber_cols=#{new_annot.nber_cols}")
-                else
-                  logger.warn("[Basic.finish_run] load_annot returned nil for matrix annotation")
-                end
-                h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
-                #  puts  h_output_json.to_json
-                
-                if  h_metadata_by_name.keys.size > 0
-                  h_metadata_by_name.each_key do |meta_name|
-                    metadata = h_metadata_by_name[meta_name]                    
-                     puts "H_DATA2: #{metadata.to_json}"
-                    new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger)
-                    h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
+      ActiveRecord::Base.transaction do
+        h_output_files.each_key do |k|
+          h_output_files[k].each_key do |k2|           
+            t = k2.split(":")
+            relative_filepath = t[0]
+            fo = create_upd_fo project.id, relative_filepath, finish_run_cache
+            if h_output_files[k][k2]["types"].flatten.include?("dataset")
+              filepath = project_dir + t[0]
+              dataset_name = h_output_files[k][k2]["dataset"]
+              if dataset_name
+                if dataset_name == '/matrix' or dataset_name.match(/^\/layers\//)
+                  h_output_files[k][k2]["types"].push((h_results and h_results['is_count_table'].to_i == 1) ? "int_matrix" : "num_matrix")
+                  h_output_files[k][k2]["nber_rows"] = h_results['nber_rows']
+                  h_output_files[k][k2]["nber_cols"] = h_results['nber_cols']
+                  h_output_files[k][k2]["dataset_size"] = (h_results['nber_rows'] and h_results['nber_cols']) ? 4 * h_results['nber_rows'] * h_results['nber_cols'] : nil
+                  
+                  h_data = {
+                    'output_attr_name' => k,
+                    'nber_cols' => h_results['nber_cols'],
+                    'nber_rows' =>  h_results['nber_rows'],
+                    'type' => 'NUMERIC',
+                    'data_class_names' => h_output_files[k][k2]["types"],
+                    'on' => 'EXPRESSION_MATRIX',
+                    'dataset_size' => h_output_files[k][k2]["dataset_size"],                    
+                    'name' => dataset_name,
+                    'count' => (h_results and h_results['is_count_table'].to_i == 1) ? true : false
+                  }
+                  logger.info("[Basic.finish_run] Creating matrix annotation: #{h_data.to_json}")
+                  new_annot = load_annot(run, h_data, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
+                  if new_annot
+                    logger.info("[Basic.finish_run] Matrix annotation created: id=#{new_annot.id}, name=#{new_annot.name}, nber_rows=#{new_annot.nber_rows}, nber_cols=#{new_annot.nber_cols}")
+                  else
+                    logger.warn("[Basic.finish_run] load_annot returned nil for matrix annotation")
                   end
+                  h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
+                  
+                  if  h_metadata_by_name.keys.size > 0
+                    h_metadata_by_name.each_key do |meta_name|
+                      metadata = h_metadata_by_name[meta_name]                    
+                      new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
+                      h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
+                    end
+                  end
+                elsif h_results['metadata'] and metadata = h_metadata_by_name[dataset_name]
+                  h_output_files[k][k2]["nber_rows"] = metadata['nber_rows']
+                  h_output_files[k][k2]["nber_cols"] = metadata['nber_cols']
+                  h_output_files[k][k2]["dataset_size"] = metadata['dataset_size']
+                  if metadata['type']
+                    h_output_files[k][k2]["types"].push("#{metadata['type'].downcase}_mdata")
+                  end
+                  metadata['output_attr_name'] = k
+                  metadata['data_class_names'] = h_output_files[k][k2]["types"]
+                  new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
+                  h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                 end
-              elsif h_results['metadata'] and metadata = h_metadata_by_name[dataset_name]
-                # puts metadata.to_json
-                h_output_files[k][k2]["nber_rows"] = metadata['nber_rows']
-                h_output_files[k][k2]["nber_cols"] = metadata['nber_cols']
-                h_output_files[k][k2]["dataset_size"] = metadata['dataset_size'] #() ? 4 * metadata['nber_rows'] * metadata['nber_cols']
-             #   puts "load annot!"
-                if metadata['type']
-                  h_output_files[k][k2]["types"].push("#{metadata['type'].downcase}_mdata")
-                end
-                metadata['output_attr_name'] = k
-                metadata['data_class_names'] = h_output_files[k][k2]["types"]
-                 puts "H_DATA3: #{metadata.to_json}"
-                new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger)
-                h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
-                #                if metadata['type'] == 'DISCRETE'
-                #                  h_output_files[k][k2]["types"].push("categorical_annot") 
-                #                elsif ['NUMERIC', 'STRING'].include? metadata['type']
-                #                  h_output_files[k][k2]["types"].push("continuous_annot")
-                #                end
-                #  end
               end
             end
-          end
-          puts "K2:#{k2}"
-          puts "OUTPUT_FILES:#{h_results['output_files'].to_json}"
-          if h_results['output_files'] and h_results['output_files'].is_a? Hash and h_results['output_files'][k2] and h_results['output_files'][k2]["types"]
-            h_output_files[k][k2]["types"] |= h_results['output_files'][k2]["types"]
+            if h_results['output_files'] and h_results['output_files'].is_a? Hash and h_results['output_files'][k2] and h_results['output_files'][k2]["types"]
+              h_output_files[k][k2]["types"] |= h_results['output_files'][k2]["types"]
+            end
           end
         end
       end
@@ -3065,7 +3136,7 @@ puts "TEST RUN"
         :output_json => h_output_files.to_json,
         :status_id => status_id,
         :duration => duration,
-        :waiting_duration => (start_time) ? (start_time - run.created_at) : nil,
+        :waiting_duration => (start_time && run.submitted_at) ? (start_time - run.submitted_at) : nil,
         :process_duration => process_duration, #h_time_info['E'].split(":"),                                      
         :process_idle_duration => h_results['time_idle'],
         :max_ram => max_ram_mb,

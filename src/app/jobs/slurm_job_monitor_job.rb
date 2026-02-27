@@ -298,7 +298,7 @@ class SlurmJobMonitorJob < ApplicationJob
       end
     end
     
-    error_file = output_dir + "slurm_#{run.id}.err"
+    error_file = output_dir + "slurm.err"
     return nil unless File.exist?(error_file)
     
     error_content = File.read(error_file)
@@ -403,7 +403,7 @@ class SlurmJobMonitorJob < ApplicationJob
     
     h_results = {}
     if run.return_stdout == true
-      output_file = output_dir + "slurm_#{run.id}.out"
+      output_file = output_dir + "slurm.out"
       if File.exist?(output_file)
         output_content = File.read(output_file)
         h_results = Basic.safe_parse_json(output_content, {})

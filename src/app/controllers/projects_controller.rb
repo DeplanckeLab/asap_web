@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection selection_states]
 
   # GET /projects or /projects.json
   def index
@@ -168,6 +168,14 @@ class ProjectsController < ApplicationController
     end
     
     has_visualization_data = has_visualization_embeddings || has_categorical_metadata || has_numerical_cell_metadata
+
+    @initial_selection_items = []
+    if @default_loom_file.present?
+      @initial_selection_items = selection_cache_items_for_loom(@default_loom_file, cleanup_completed: true)
+      @initial_selection_items.concat(selection_items_from_annots(@default_loom_file))
+      @initial_selection_items.sort_by! { |entry| entry[:created_at].to_s }
+      @initial_selection_items.reverse!
+    end
     
     # Set default view type: use visualization if we have visualization data, otherwise use summary
     @view_type = params[:view] || (has_visualization_data ? 'visualization' : 'summary')
@@ -538,7 +546,7 @@ class ProjectsController < ApplicationController
     if @view_type == 'summary'
       # Get parsing status for display
       @parsing_status = 'complete'
-      @parsing_step = Step.where(name: 'parsing').first
+      @parsing_step = parsing_step_for_project(@project)
       if @parsing_step
         @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
         if @parsing_project_step
@@ -747,10 +755,15 @@ class ProjectsController < ApplicationController
     tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
     
     # Collect parsing attributes from params
-    [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_batch_paths, :integrate_n_pcs].each do |k|
+    [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_batch_paths, :integrate_n_pcs].each do |k|
       if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
         tmp_attrs[k] = params[k]
       end
+    end
+    # The UI submits dataset selection as `sel`; persist canonical key `sel_name` for parse task.
+    if tmp_attrs[:sel].present?
+      tmp_attrs[:sel_name] = tmp_attrs[:sel]
+      tmp_attrs.delete(:sel)
     end
     
     # Set defaults for RAW_TEXT file types (matching original application behavior)
@@ -1128,7 +1141,8 @@ class ProjectsController < ApplicationController
   # PATCH/PUT /projects/1 or /projects/1.json
   def update
     # Check if we're resetting parsing
-    is_resetting_parsing = session[:resetting_parsing] && session[:resetting_parsing_project_id] == @project.id
+    reset_requested = params[:reset_parsing].to_s == '1'
+    is_resetting_parsing = (session[:resetting_parsing] && session[:resetting_parsing_project_id] == @project.id) || reset_requested
     
     if is_resetting_parsing
       # Handle parsing reset similar to create action
@@ -1141,10 +1155,15 @@ class ProjectsController < ApplicationController
       tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
       
       # Collect parsing attributes from params
-      [:file_type, :sel_name, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
+      [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
         if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
           tmp_attrs[k] = params[k]
         end
+      end
+      # The UI submits dataset selection as `sel`; persist canonical key `sel_name` for parse task.
+      if tmp_attrs[:sel].present?
+        tmp_attrs[:sel_name] = tmp_attrs[:sel]
+        tmp_attrs.delete(:sel)
       end
       
       # Set defaults for RAW_TEXT file types
@@ -1165,6 +1184,10 @@ class ProjectsController < ApplicationController
       # Update project attributes
       @project.assign_attributes(project_params)
       @project.parsing_attrs_json = tmp_attrs.to_json
+      # Defer destructive reset cleanup to parse.rake execution context.
+      h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {})
+      h_parsing_attrs['reset_mode'] = true
+      @project.parsing_attrs_json = h_parsing_attrs.to_json
       @project.nber_cols = params[:nber_cols] if params[:nber_cols]
       @project.nber_rows = params[:nber_rows] if params[:nber_rows]
       @project.step_id ||= 1
@@ -1204,23 +1227,21 @@ class ProjectsController < ApplicationController
       end
       
       # Reset parsing step status
-      parsing_step = Step.where(name: 'parsing').first
+      parsing_step = parsing_step_for_project(@project)
       if parsing_step
         project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
         if project_step
           project_step.update!(status_id: 1) # Set to waiting
         else
-          ProjectStep.create!(
-            project_id: @project.id,
-            step_id: parsing_step.id,
-            status_id: 1
-          )
+          ProjectStep.find_or_create_by!(project_id: @project.id, step_id: parsing_step.id) do |ps|
+            ps.status_id = 1
+          end
         end
       end
       
       respond_to do |format|
         if @project.save
-          # Call parse_files if the method exists
+          # Trigger parsing; parse.rake will perform reset cleanup in reset_mode.
           if @project.respond_to?(:parse_files)
             h_data = {}
             @project.parse_files(h_data)
@@ -1231,7 +1252,7 @@ class ProjectsController < ApplicationController
           session.delete(:resetting_parsing_project_id)
           session.delete(:file_upload)
           
-          format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Project parsing was successfully reset." }
+          format.html { redirect_to project_path(@project, view: 'analysis', step_id: parsing_step&.id), notice: "Project recreation started. Parsing will restart shortly." }
           format.json { render :show, status: :ok, location: @project }
         else
           @project_types = ProjectType.order(:name)
@@ -2128,6 +2149,146 @@ class ProjectsController < ApplicationController
     )
 
     render json: { status: 'ok', run_id: new_run.id }
+  end
+
+  # POST /projects/:id/save_metadata_from_selection
+  def save_metadata_from_selection
+    unless editable?(@project)
+      render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    list_cols = Array(params[:list_cols]).map { |v| Integer(v) rescue nil }.compact.uniq
+    if list_cols.empty?
+      render json: { status: 'error', message: 'No cells selected' }, status: :unprocessable_entity
+      return
+    end
+
+    embedding_metadata_id = params[:embedding_metadata_id].to_i
+    embedding_annot = Annot.find_by(id: embedding_metadata_id, project_id: @project.id)
+    unless embedding_annot&.run
+      render json: { status: 'error', message: 'Embedding metadata not found' }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].presence || embedding_annot.filepath
+    selection_name = params[:selection_name].to_s.strip
+    selection_name = "Selection #{Time.current.strftime('%Y-%m-%d %H:%M:%S')}" if selection_name.blank?
+    selected_name = selection_name
+    unselected_name = params[:unselected_name].to_s.strip.presence || 'Not selected'
+
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: "Loom file not found: #{loom_file}" }, status: :unprocessable_entity
+      return
+    end
+
+    stable_ids = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/_StableID')
+    if !stable_ids.is_a?(Array) || stable_ids.empty?
+      render json: { status: 'error', message: 'Could not extract cell identifiers from loom' }, status: :unprocessable_entity
+      return
+    end
+
+    selected_cells = list_cols.filter_map { |idx| stable_ids[idx] }
+    if selected_cells.empty?
+      render json: { status: 'error', message: 'Selected cells could not be mapped to identifiers' }, status: :unprocessable_entity
+      return
+    end
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    step = Step.where(docker_image_id: asap_docker_image.id, name: 'cell_selection').first
+    std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'cell_sel').first
+    unless step && std_method
+      render json: { status: 'error', message: 'Selection step configuration not found' }, status: :unprocessable_entity
+      return
+    end
+
+    last_num = Run.where(project_id: @project.id, step_id: step.id).maximum(:num).to_i
+    lineage_run_ids = embedding_annot.run.lineage_run_ids.to_s.split(',').map(&:strip).reject(&:blank?)
+    lineage_run_ids << embedding_annot.run.id.to_s
+    lineage_run_ids.uniq!
+    selection_index = Run.where(project_id: @project.id, step_id: step.id).count + 1
+    selection_metadata_name = "#{embedding_annot.name}.sel_#{selection_index}"
+
+    run = Run.create!(
+      project_id: @project.id,
+      step_id: step.id,
+      std_method_id: std_method.id,
+      status_id: 1,
+      num: last_num + 1,
+      user_id: current_user&.id || @project.user_id,
+      command_json: '{}',
+      attrs_json: '{}',
+      output_json: '{}',
+      lineage_run_ids: lineage_run_ids.join(','),
+      submitted_at: Time.current
+    )
+
+    run_dir = project_dir + 'metadata' + run.id.to_s
+    FileUtils.mkdir_p(run_dir)
+    selected_cells_file = run_dir + 'selected_cells.json'
+    File.open(selected_cells_file, 'w') do |f|
+      f.write({ selected_cells: selected_cells }.to_json)
+    end
+
+    cmd = {
+      program: "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar",
+      opts: [
+        { opt: '-T', value: 'CreateCellSelection' },
+        { opt: '-loom', value: loom_path.to_s },
+        { opt: '-meta', value: selection_metadata_name },
+        { opt: '-f', value: selected_cells_file.to_s }
+      ],
+      args: []
+    }
+
+    run.update!(
+      command_json: cmd.to_json,
+      attrs_json: {
+        loom_file: loom_file,
+        source_metadata_id: embedding_annot.id,
+        source_run_id: embedding_annot.run_id,
+        selected_name: selected_name,
+        unselected_name: unselected_name,
+        selection_metadata_name: selection_metadata_name,
+        selected_cells_file: selected_cells_file.to_s
+      }.to_json
+    )
+
+    cache_key = SecureRandom.uuid
+    cache_data = selection_session_cache
+    cache_data[cache_key] = {
+      id: cache_key,
+      run_id: run.id,
+      loom_file: loom_file,
+      name: selected_name,
+      unselected_name: unselected_name,
+      selected_count: selected_cells.size,
+      source_metadata_id: embedding_annot.id,
+      status: 'queued',
+      created_at: Time.current.iso8601
+    }
+    session[:selection_cache] ||= {}
+    session[:selection_cache][@project.id.to_s] = cache_data
+
+    SelectionMetadataImportJob.perform_later(run.id)
+
+    render json: {
+      status: 'ok',
+      item: cache_data[cache_key]
+    }
+  end
+
+  # GET /projects/:id/selection_states
+  def selection_states
+    loom_file = params[:loom_file].presence
+    items = selection_cache_items_for_loom(loom_file, cleanup_completed: true)
+    items.concat(selection_items_from_annots(loom_file))
+    items.sort_by! { |entry| entry[:created_at].to_s }
+    items.reverse!
+
+    render json: { status: 'ok', items: items }
   end
 
   # GET /projects/1/sample_identifiers?loom_file=...
@@ -3488,21 +3649,13 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Aggregate run counts from project_steps' nber_runs_json
-    # Each project_step has nber_runs_json like {"3": 1, "4": 2} where key is status_id
+    # Read pre-aggregated counts from project.nber_runs_json.
     totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
-    
-    visible_step_ids = Step.where.not(hidden: true).pluck(:id)
-
-    @project.project_steps.each do |ps|
-      next unless visible_step_ids.include?(ps.step_id)
-      next if ps.nber_runs_json.blank?
-      
-      json_data = ps.nber_runs_json.is_a?(String) ? JSON.parse(ps.nber_runs_json) : ps.nber_runs_json
-      json_data.each do |status_id, count|
-        status_key = status_id.to_i
-        totals[status_key] = (totals[status_key] || 0) + count.to_i if totals.key?(status_key)
-      end
+    json_data = @project.nber_runs_json.is_a?(String) ? JSON.parse(@project.nber_runs_json) : @project.nber_runs_json
+    json_data ||= {}
+    json_data.each do |status_id, count|
+      status_key = status_id.to_i
+      totals[status_key] = count.to_i if totals.key?(status_key)
     end
     
     # Map to canonical keys
@@ -3671,7 +3824,7 @@ class ProjectsController < ApplicationController
             options[:version_id] = @project.version_id if @project.version_id.present?
             
             # Add dataset selection if present
-            options[:sel] = h_attrs['sel'] if h_attrs['sel'].present?
+            options[:sel] = h_attrs['sel_name'] if h_attrs['sel_name'].present?
             
             # Add parsing parameters for text files (delimiter can be empty string for tab)
             options[:delimiter] = h_attrs['delimiter'] if h_attrs.key?('delimiter')
@@ -3839,9 +3992,68 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # POST /projects/:id/stop_parsing
+  def stop_parsing
+    parsing_step = parsing_step_for_project(@project)
+    if parsing_step.nil?
+      redirect_to project_path(@project, view: 'analysis'), alert: 'Parsing step not found.'
+      return
+    end
+
+    parsing_run = @project.runs.where(step_id: parsing_step.id, status_id: [1, 2]).order(id: :desc).first
+    if parsing_run.nil?
+      redirect_to project_path(@project, view: 'analysis', step_id: parsing_step.id), alert: 'No running parsing job found.'
+      return
+    end
+
+    begin
+      if parsing_run.slurm_job_id.present?
+        begin
+          slurm_service = SlurmService.new(logger: Rails.logger)
+          slurm_service.cancel_job(parsing_run.slurm_job_id)
+        rescue => e
+          Rails.logger.error("[stop_parsing] Error cancelling SLURM job for run #{parsing_run.id}: #{e.message}")
+        end
+      end
+
+      begin
+        Basic.kill_run(parsing_run)
+      rescue => e
+        Rails.logger.error("[stop_parsing] Error killing run container for run #{parsing_run.id}: #{e.message}")
+      end
+
+      if parsing_run.pid.present?
+        begin
+          Process.kill('TERM', parsing_run.pid.to_i)
+        rescue Errno::ESRCH, Errno::EPERM
+          # Process already gone or not permitted; status update still proceeds.
+        end
+      end
+
+      h_upd = {
+        status_id: 4,
+        error: 'Stopped by user',
+        duration: parsing_run.start_time ? (Time.now - parsing_run.start_time).to_f : parsing_run.duration
+      }
+      parsing_run.update(h_upd)
+
+      project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
+      project_step.update(status_id: 4, error_message: 'Stopped by user') if project_step
+      Basic.upd_project_step(@project, parsing_step.id)
+      @project.update(status_id: 4)
+      @project.broadcast(parsing_step.id) if @project.respond_to?(:broadcast)
+
+      redirect_to project_path(@project, view: 'analysis', step_id: parsing_step.id), notice: 'Parsing has been stopped and marked as failed.'
+    rescue => e
+      Rails.logger.error("[stop_parsing] Error stopping parsing for project #{@project.id}: #{e.class} - #{e.message}")
+      Rails.logger.error(e.backtrace.first(10).join("\n")) if e.backtrace
+      redirect_to project_path(@project, view: 'analysis', step_id: parsing_step.id), alert: "Error stopping parsing: #{e.message}"
+    end
+  end
+
   # GET /projects/:id/reset_parsing
   def reset_parsing
-    @original_project = Project.find(params[:id])
+    @original_project = Project.find_by(id: params[:id]) || Project.find_by!(key: params[:id])
     
     # Check if this is an integration project (no file upload, source projects instead)
     h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
@@ -3882,7 +4094,7 @@ class ProjectsController < ApplicationController
       redirect_to project_path(@original_project, view: 'analysis'), alert: 'Uploaded file not found. Cannot reset parsing.'
       return
     end
-    
+
     # Set up session with file upload info
     session[:file_upload] = {
       fu_id: fu.id,
@@ -3981,7 +4193,7 @@ class ProjectsController < ApplicationController
     }
     
     # Check parsing step status
-    parsing_step = Step.where(name: 'parsing').first
+    parsing_step = parsing_step_for_project(@project)
     if parsing_step
       project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
       if project_step
@@ -4085,6 +4297,99 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def parsing_step_for_project(project)
+      return nil unless project&.version
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      return nil unless asap_docker_image
+      Step.find_by(docker_image_id: asap_docker_image.id, name: 'parsing')
+    end
+
+    def selection_session_cache
+      session[:selection_cache] ||= {}
+      project_cache = session[:selection_cache][@project.id.to_s]
+      project_cache.is_a?(Hash) ? project_cache : {}
+    end
+
+    def selection_cache_items_for_loom(loom_file = nil, cleanup_completed: false)
+      cache_data = selection_session_cache
+      items = []
+      to_remove = []
+
+      cache_data.each do |key, entry|
+        entry_loom_file = entry['loom_file'] || entry[:loom_file]
+        next if loom_file.present? && entry_loom_file.to_s != loom_file.to_s
+
+        run_id = (entry['run_id'] || entry[:run_id]).to_i
+        run = @project.runs.find_by(id: run_id)
+        status_id = run&.status_id
+        status = case status_id
+                 when 2 then 'running'
+                 when 3 then 'completed'
+                 when 4 then 'failed'
+                 else 'queued'
+                 end
+
+        if status == 'completed'
+          to_remove << key if cleanup_completed
+          next
+        end
+
+        items << {
+          id: entry['id'] || entry[:id] || key,
+          run_id: run_id,
+          metadata_id: nil,
+          name: entry['name'] || entry[:name],
+          selected_count: (entry['selected_count'] || entry[:selected_count]).to_i,
+          status: status,
+          created_at: entry['created_at'] || entry[:created_at],
+          loom_file: entry_loom_file,
+          unselected_name: entry['unselected_name'] || entry[:unselected_name]
+        }
+      end
+
+      if cleanup_completed && to_remove.any?
+        to_remove.each { |key| cache_data.delete(key) }
+        session[:selection_cache] ||= {}
+        session[:selection_cache][@project.id.to_s] = cache_data
+      end
+
+      items
+    end
+
+    def selection_items_from_annots(loom_file = nil)
+      scope = Annot.where(project_id: @project.id, dim: 1)
+      scope = scope.where(filepath: loom_file) if loom_file.present?
+      scope = scope.where("name LIKE ?", "%.sel_%")
+      scope.order(created_at: :desc).map do |annot|
+        selected_name = 'Selected'
+        unselected_name = 'Not selected'
+        if annot.cat_aliases_json.present?
+          aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
+          selected_name = aliases.dig('names', '1').presence || selected_name
+          unselected_name = aliases.dig('names', '0').presence || unselected_name
+        end
+
+        selected_count = nil
+        if annot.categories_json.present?
+          categories = Basic.safe_parse_json(annot.categories_json, [])
+          if categories.is_a?(Array) && categories[1]
+            selected_count = categories[1].to_i
+          end
+        end
+
+        {
+          id: "annot-#{annot.id}",
+          run_id: annot.run_id,
+          metadata_id: annot.id,
+          name: selected_name,
+          selected_count: selected_count,
+          status: 'completed',
+          created_at: annot.created_at&.iso8601,
+          loom_file: annot.filepath,
+          unselected_name: unselected_name
+        }
+      end
+    end
 
   def find_or_start_marker_run_for_annot(annot)
     marker_run = marker_run_for_annot(annot)
@@ -5156,13 +5461,23 @@ class ProjectsController < ApplicationController
           }
         end
         
-        # Count runs by status for this step
-        status_counts = {
-          waiting: step_runs.count { |r| r.status_id == 1 },
-          running: step_runs.count { |r| r.status_id == 2 },
-          completed: step_runs.count { |r| r.status_id == 3 },
-          failed: step_runs.count { |r| r.status_id == 4 }
-        }
+        # Count runs by status using ProjectStep aggregate (single source of truth for icons/counters).
+        if project_step&.nber_runs_json.present?
+          json_counts = project_step.nber_runs_json.is_a?(String) ? JSON.parse(project_step.nber_runs_json) : project_step.nber_runs_json
+          status_counts = {
+            waiting: json_counts['1'].to_i,
+            running: json_counts['2'].to_i,
+            completed: json_counts['3'].to_i,
+            failed: json_counts['4'].to_i
+          }
+        else
+          status_counts = {
+            waiting: step_runs.count { |r| r.status_id == 1 },
+            running: step_runs.count { |r| r.status_id == 2 },
+            completed: step_runs.count { |r| r.status_id == 3 },
+            failed: step_runs.count { |r| r.status_id == 4 }
+          }
+        end
         
         @steps_with_status << {
           step: step,

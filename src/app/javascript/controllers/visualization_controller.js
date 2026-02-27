@@ -21,6 +21,7 @@ export default class extends Controller {
     embeddingsByLoom: Object,
     defaultLoomFile: String,
     defaultEmbeddingId: String,
+    initialSelections: Array,
     geneCount: Number,
     rowLabel: String,
     colLabel: String
@@ -419,6 +420,7 @@ export default class extends Controller {
         this.currentLoomFile = event.target.value
         // console.log('🔍 [DEBUG] Loom file changed to:', this.currentLoomFile)
         this.populateMetadataSelectForLoom(this.currentLoomFile)
+        this.refreshSelectionStates()
       })
     } else {
       // console.log('🔍 [DEBUG] No loom file select target available, but using fallback value')
@@ -490,6 +492,9 @@ export default class extends Controller {
     // Initialize interaction mode state
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
+    this.savedSelections = Array.isArray(this.initialSelectionsValue) ? this.initialSelectionsValue.map((item) => this.normalizeSelectionItem(item)).filter((item) => item) : []
+    this.selectionStatusPollingTimer = null
+    this.lastSelectionCompletionSignature = null
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
     this.clickingOnLabel = false // Track if we're clicking on a label
@@ -534,6 +539,9 @@ export default class extends Controller {
       this.initializeResizers()
       // Initialize the selection count display
       this.uiManager.updateSelectedCellsCount()
+      this.renderSavedSelections()
+      this.startSelectionStatusPolling()
+      this.refreshSelectionStates()
     }, 100)
     
     // Create diagnostic button after a delay (fallback in case preloading doesn't complete)
@@ -706,6 +714,10 @@ export default class extends Controller {
     if (this.checkpointMatchTimer) {
       window.clearInterval(this.checkpointMatchTimer)
       this.checkpointMatchTimer = null
+    }
+    if (this.selectionStatusPollingTimer) {
+      window.clearInterval(this.selectionStatusPollingTimer)
+      this.selectionStatusPollingTimer = null
     }
 
     if (this.boundCheckpointTraceClick) {
@@ -5338,6 +5350,12 @@ export default class extends Controller {
   async applyCheckpointState(state) {
     if (!state || typeof state !== 'object') return
 
+    // Reset transient UI-only filter caches so checkpoint restore cannot reuse stale pre-checkpoint values.
+    this.savedRanges = {}
+    this.savedCategorySelections = {}
+    this.uncheckedMetadata = new Set()
+    this.disabledFilters = new Set()
+
     const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
     const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null
     const checkpointEmbeddingName = state.visualizationEmbedding?.name || null
@@ -9834,6 +9852,8 @@ export default class extends Controller {
       updateCustomPlot = true
     } = options
 
+    this.switchToCellsTabForLassoSelection(source)
+
     const selectionSizeBefore = this.selectedCells ? this.selectedCells.size : 0
     console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}, current size: ${selectionSizeBefore}`)
 
@@ -9939,6 +9959,15 @@ export default class extends Controller {
     const totalApplyTime = performance.now() - applyStartTime
     const selectionSizeAfter = this.selectedCells ? this.selectedCells.size : 0
     console.log(`[SELECTION] Total applySelectionFromIndices: ${totalApplyTime.toFixed(2)}ms, size before: ${selectionSizeBefore}, after: ${selectionSizeAfter}`)
+  }
+
+  switchToCellsTabForLassoSelection(source) {
+    const sourceText = String(source || '').toLowerCase()
+    if (!sourceText.includes('lasso')) return
+
+    const cellsTab = document.getElementById('cells-tab')
+    if (!cellsTab) return
+    this.switchSelectionTab({ currentTarget: cellsTab })
   }
 
   // Reorder displayOrder to put selected cells at the end (drawn last, appear on top)
@@ -10239,6 +10268,8 @@ export default class extends Controller {
       
       cellsContent.classList.remove('hidden')
       geneSetsContent.classList.add('hidden')
+      cellsContent.style.display = 'block'
+      geneSetsContent.style.display = 'none'
     } else if (tab === 'gene-sets') {
       geneSetsTab.classList.add('border-blue-500', 'text-blue-600')
       geneSetsTab.classList.remove('border-transparent', 'text-gray-500')
@@ -10247,6 +10278,8 @@ export default class extends Controller {
       
       geneSetsContent.classList.remove('hidden')
       cellsContent.classList.add('hidden')
+      geneSetsContent.style.display = 'block'
+      cellsContent.style.display = 'none'
     }
   }
 
@@ -10718,43 +10751,242 @@ export default class extends Controller {
 
   // Save selection method
   saveSelection() {
-    //console.log('Saving selection:', this.selectedCells.size, 'cells')
-    
     if (this.selectedCells.size === 0) {
       alert('No cells selected to save')
       return
     }
-    
-    // Here you would typically save the selection to a backend or local storage
-    // For now, we'll just show a success message
+
     const selectionName = prompt('Enter a name for this selection:')
     if (selectionName) {
-      //console.log(`Selection "${selectionName}" saved with ${this.selectedCells.size} cells`)
-      // TODO: Implement actual saving logic (API call, local storage, etc.)
-      alert(`Selection "${selectionName}" saved successfully!`)
-      
-      // Clear the selection after saving
-      this.selectedCells.clear()
-      
-      // Restore the metadata state from before the selection
-      const wasRestored = this.restoreMetadataStateAfterSelection()
-      
-      // If no metadata was restored, just update colors to default
-      if (!wasRestored) {
-        // console.log('No metadata to restore after save, updating colors to default')
-        this.updateSelectedPointColors()
+      this.persistSelection(selectionName.trim())
+    }
+  }
+
+  async persistSelection(selectionName) {
+    const cleanName = selectionName || `Selection ${new Date().toLocaleString()}`
+    const selectedIndices = Array.from(this.selectedCells).map((idx) => Number(idx)).filter((idx) => Number.isInteger(idx))
+    const itemId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`
+    const pendingItem = this.normalizeSelectionItem({
+      id: itemId,
+      run_id: null,
+      metadata_id: null,
+      name: cleanName,
+      selected_count: selectedIndices.length,
+      status: 'queued',
+      created_at: new Date().toISOString(),
+      loom_file: this.getCurrentLoomFileForRequest(),
+      unselected_name: 'Not selected'
+    })
+    this.savedSelections.unshift(pendingItem)
+    this.renderSavedSelections()
+
+    const projectIdentifier = this.getProjectIdentifier()
+    const embeddingMetadataId = this.metadataData?.id || (this.metadataSelectTarget ? this.metadataSelectTarget.value : null)
+    if (!projectIdentifier || !embeddingMetadataId) {
+      alert('Cannot save selection: embedding metadata is missing.')
+      return
+    }
+
+    try {
+      const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_metadata_from_selection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+        },
+        body: JSON.stringify({
+          selection_name: cleanName,
+          embedding_metadata_id: embeddingMetadataId,
+          loom_file: this.getCurrentLoomFileForRequest(),
+          list_cols: selectedIndices
+        })
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok') {
+        throw new Error(payload.message || 'Failed to save selection')
       }
-      
-      // Update the cell count display
-      this.uiManager.updateSelectedCellsCount()
-      if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
-        this.customPlotManager.onSelectionUpdated()
+
+      const returnedItem = this.normalizeSelectionItem(payload.item)
+      const idx = this.savedSelections.findIndex((item) => item.id === itemId)
+      if (idx >= 0 && returnedItem) {
+        this.savedSelections[idx] = returnedItem
       }
-      
-      // Clear any lasso graphics
-      if (this.lassoGraphics) {
-        this.lassoGraphics.clear()
-        this.lassoGraphics = null
+      this.renderSavedSelections()
+      this.refreshSelectionStates()
+    } catch (error) {
+      const idx = this.savedSelections.findIndex((item) => item.id === itemId)
+      if (idx >= 0) {
+        this.savedSelections[idx].status = 'failed'
+      }
+      this.renderSavedSelections()
+      alert(`Failed to save selection: ${error.message}`)
+      return
+    }
+
+    this.clearCurrentSelectionAfterSave()
+  }
+
+  clearCurrentSelectionAfterSave() {
+    this.selectedCells.clear()
+
+    const wasRestored = this.restoreMetadataStateAfterSelection()
+    if (!wasRestored) {
+      this.updateSelectedPointColors()
+    }
+
+    this.uiManager.updateSelectedCellsCount()
+    if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
+      this.customPlotManager.onSelectionUpdated()
+    }
+
+    if (this.lassoGraphics) {
+      this.lassoGraphics.clear()
+      this.lassoGraphics = null
+    }
+  }
+
+  normalizeSelectionItem(item) {
+    if (!item || typeof item !== 'object') return null
+    return {
+      id: String(item.id || ''),
+      runId: item.run_id ? Number(item.run_id) : null,
+      metadataId: item.metadata_id ? String(item.metadata_id) : null,
+      name: String(item.name || 'Selection'),
+      selectedCount: Number(item.selected_count || 0),
+      status: String(item.status || 'queued'),
+      createdAt: item.created_at ? String(item.created_at) : null,
+      loomFile: item.loom_file ? String(item.loom_file) : null,
+      unselectedName: item.unselected_name ? String(item.unselected_name) : 'Not selected'
+    }
+  }
+
+  renderSavedSelections() {
+    const list = document.getElementById('saved-selections-list')
+    const countBadge = document.getElementById('saved-selections-count')
+    if (!list) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    if (countBadge) countBadge.textContent = String(items.length)
+
+    if (items.length === 0) {
+      list.innerHTML = '<div style="font-size: 12px; color: #6b7280; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;">No saved selections yet</div>'
+      return
+    }
+
+    list.innerHTML = items.map((item) => {
+      const createdAt = item.createdAt ? new Date(item.createdAt).toLocaleString() : ''
+      return `
+        <button type="button"
+                data-selection-id="${this.escapeHtml(item.id)}"
+                style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:6px;cursor:pointer;"
+                data-action="click->visualization#openSavedSelection">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(item.name)}</div>
+            <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
+          </div>
+          <div style="margin-left:8px;">${this.selectionStatusBadgeHtml(item.status)}</div>
+        </button>
+      `
+    }).join('')
+  }
+
+  selectionStatusBadgeHtml(status) {
+    if (status === 'running') {
+      return '<span title="Saving" style="display:inline-flex;width:14px;height:14px;border:2px solid #93c5fd;border-top-color:#2563eb;border-radius:9999px;animation:spin 1s linear infinite;"></span>'
+    }
+    if (status === 'completed') {
+      return '<span title="Saved" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#10b981;"></span>'
+    }
+    if (status === 'failed') {
+      return '<span title="Failed" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#ef4444;"></span>'
+    }
+    return '<span title="Queued" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#f59e0b;"></span>'
+  }
+
+  startSelectionStatusPolling() {
+    if (this.selectionStatusPollingTimer) {
+      clearInterval(this.selectionStatusPollingTimer)
+    }
+    this.selectionStatusPollingTimer = setInterval(() => {
+      this.refreshSelectionStates()
+    }, 3000)
+  }
+
+  async refreshSelectionStates() {
+    try {
+      const projectIdentifier = this.getProjectIdentifier()
+      if (!projectIdentifier) return
+      const loomFile = this.getCurrentLoomFileForRequest()
+      const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/selection_states?loom_file=${encodeURIComponent(loomFile || '')}`)
+      if (!response.ok) return
+      const payload = await response.json()
+      if (!payload || payload.status !== 'ok' || !Array.isArray(payload.items)) return
+
+      this.savedSelections = payload.items.map((item) => this.normalizeSelectionItem(item)).filter((item) => item)
+      this.renderSavedSelections()
+      const completionSignature = this.savedSelections
+        .filter((item) => item.status === 'completed' && item.metadataId)
+        .map((item) => `${item.metadataId}:${item.createdAt || ''}`)
+        .sort()
+        .join('|')
+      if (completionSignature && completionSignature !== this.lastSelectionCompletionSignature) {
+        this.lastSelectionCompletionSignature = completionSignature
+        this.refreshPageCategoricalMetadata()
+      }
+    } catch (_error) {
+      // Ignore transient refresh errors.
+    }
+  }
+
+  async refreshPageCategoricalMetadata() {
+    if (this.metadataRefreshInProgress) return
+    this.metadataRefreshInProgress = true
+    try {
+      const url = new URL(window.location.href)
+      const response = await fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      if (!response.ok) return
+      const html = await response.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+      const nextLeftPanel = doc.getElementById('left-panel')
+      const currentLeftPanel = document.getElementById('left-panel')
+      if (nextLeftPanel && currentLeftPanel) {
+        currentLeftPanel.replaceWith(nextLeftPanel)
+      }
+    } catch (_error) {
+      // Keep interaction uninterrupted if metadata panel refresh fails.
+    } finally {
+      this.metadataRefreshInProgress = false
+    }
+  }
+
+  async openSavedSelection(event) {
+    const selectionId = event.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+    const item = (this.savedSelections || []).find((entry) => entry.id === selectionId)
+    if (!item || !item.metadataId) return
+
+    const metadataId = item.metadataId
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+
+    const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
+    const categoriesDiv = header ? header.nextElementSibling : null
+    if (header && categoriesDiv && categoriesDiv.style.display === 'none') {
+      header.click()
+    }
+    await this.waitForMetadataExpansion(categoriesDiv)
+    metadataItem.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+
+    const unselectedName = item.unselectedName || 'Not selected'
+    const escaped = this.escapeAttributeSelectorValue(unselectedName)
+    const checkbox = metadataItem.querySelector(`.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escaped}"]`)
+    if (checkbox) {
+      const icon = checkbox.querySelector('i')
+      const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
+      if (iconDisplay !== 'none') {
+        checkbox.click()
       }
     }
   }
@@ -12828,8 +13060,13 @@ export default class extends Controller {
       filterSwitch.style.backgroundColor = '#10b981' // green
       switchToggle.style.transform = 'translateX(14px)' // move to right
       
-      // Restore saved selections
-      if (this.savedCategorySelections && this.savedCategorySelections[metadataId]) {
+      // During checkpoint restore, preserve checkpoint-selected categories instead of stale UI-saved selections.
+      const hasCheckpointCategories =
+        this.isApplyingCheckpointState === true &&
+        this.selectedCategories &&
+        this.selectedCategories[metadataId] instanceof Set
+
+      if (!hasCheckpointCategories && this.savedCategorySelections && this.savedCategorySelections[metadataId]) {
         if (!this.selectedCategories) this.selectedCategories = {}
         if (!this.selectedCategories[metadataId]) {
           this.selectedCategories[metadataId] = new Set()
@@ -12989,8 +13226,31 @@ export default class extends Controller {
         }
       }
       
-      // Restore saved range
-      if (this.savedRanges && this.savedRanges[metadataId]) {
+      // During checkpoint restore, preserve checkpoint-selected ranges instead of restoring stale UI-saved ranges.
+      const hasCheckpointRange =
+        this.isApplyingCheckpointState === true &&
+        this.selectedRanges &&
+        this.selectedRanges[metadataId] &&
+        Number.isFinite(Number(this.selectedRanges[metadataId].min)) &&
+        Number.isFinite(Number(this.selectedRanges[metadataId].max))
+
+      if (hasCheckpointRange) {
+        const checkpointRange = this.selectedRanges[metadataId]
+        const rangeSection = document.querySelector(`.metadata-range-section[data-metadata-id="${metadataId}"]`)
+        if (rangeSection) {
+          const rangeSliderController = this.application.getControllerForElementAndIdentifier(
+            rangeSection.querySelector('[data-controller="range-slider"]'),
+            'range-slider'
+          )
+          if (rangeSliderController) {
+            rangeSliderController.currentMinValue = Number(checkpointRange.min)
+            rangeSliderController.currentMaxValue = Number(checkpointRange.max)
+            if (typeof rangeSliderController.updateSliderUI === 'function') {
+              rangeSliderController.updateSliderUI()
+            }
+          }
+        }
+      } else if (this.savedRanges && this.savedRanges[metadataId]) {
         if (!this.selectedRanges) this.selectedRanges = {}
         this.selectedRanges[metadataId] = { ...this.savedRanges[metadataId] }
       } else {

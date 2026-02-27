@@ -136,37 +136,39 @@ class RunExecutionJob < ApplicationJob
 
     # Wait for completion in a separate thread so this job can finish
     Thread.new do
-      begin
-        _pid, status = Process.waitpid2(pid)
-        end_time = Time.now
-        process_duration = (end_time - start_time).to_f
+      Rails.application.executor.wrap do
+        begin
+          _pid, status = Process.waitpid2(pid)
+          end_time = Time.now
+          process_duration = (end_time - start_time).to_f
 
-        # Read output.json if available
-        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
-        step_dir = project_dir + step.name
-        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
-        output_json = output_dir + 'output.json'
+          # Read output.json if available
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+          step_dir = project_dir + step.name
+          output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+          output_json = output_dir + 'output.json'
 
-        h_results = {}
-        if File.exist?(output_json)
-          h_results = Basic.safe_parse_json(File.read(output_json), {})
+          h_results = {}
+          if File.exist?(output_json)
+            h_results = Basic.safe_parse_json(File.read(output_json), {})
+          end
+
+          if status.success?
+            Rails.logger.info("[RunExecutionJob] Run##{run.id} completed successfully in #{process_duration}s")
+            Basic.finish_run(Rails.logger, run, h_results)
+          else
+            Rails.logger.error("[RunExecutionJob] Run##{run.id} failed with exit code #{status.exitstatus}")
+            h_results['displayed_error'] ||= ["Process exited with code #{status.exitstatus}"]
+            Basic.finish_run(Rails.logger, run, h_results)
+          end
+        rescue => e
+          Rails.logger.error("[RunExecutionJob] Error monitoring Run##{run.id}: #{e.class} - #{e.message}")
+          run.reload
+          run.update(status_id: 4, error: e.message)
+          Basic.upd_project_step(project, step.id)
+          project.update(status_id: 4)
+          project.broadcast(step.id) if project.respond_to?(:broadcast)
         end
-
-        if status.success?
-          Rails.logger.info("[RunExecutionJob] Run##{run.id} completed successfully in #{process_duration}s")
-          Basic.finish_run(Rails.logger, run, h_results)
-        else
-          Rails.logger.error("[RunExecutionJob] Run##{run.id} failed with exit code #{status.exitstatus}")
-          h_results['displayed_error'] ||= ["Process exited with code #{status.exitstatus}"]
-          Basic.finish_run(Rails.logger, run, h_results)
-        end
-      rescue => e
-        Rails.logger.error("[RunExecutionJob] Error monitoring Run##{run.id}: #{e.class} - #{e.message}")
-        run.reload
-        run.update(status_id: 4, error: e.message)
-        Basic.upd_project_step(project, step.id)
-        project.update(status_id: 4)
-        project.broadcast(step.id) if project.respond_to?(:broadcast)
       end
     end
   end

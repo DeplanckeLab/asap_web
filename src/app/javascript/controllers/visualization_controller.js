@@ -10938,12 +10938,20 @@ export default class extends Controller {
     if (!Array.isArray(rawDetails) || rawDetails.length === 0) {
       return []
     }
+    const savedSelectionByMetadataId = new Map(
+      (this.savedSelections || [])
+        .filter((entry) => entry && entry.metadataId)
+        .map((entry) => [String(entry.metadataId), entry])
+    )
 
     return rawDetails.map((entry) => {
       if (!entry || typeof entry !== 'object') return null
 
       const metadataId = String(entry.metadataId || '')
       const metadataName = String(entry.name || '')
+      const referencedSelection = savedSelectionByMetadataId.get(metadataId)
+      const selectionRefId = referencedSelection ? String(referencedSelection.id || '') : null
+      const selectionRefName = referencedSelection ? String(referencedSelection.name || '') : null
       if (entry.type === 'continuous') {
         return {
           type: 'continuous',
@@ -10952,7 +10960,9 @@ export default class extends Controller {
           range_min: Number(entry.range?.min),
           range_max: Number(entry.range?.max),
           full_min: Number(entry.fullRange?.min),
-          full_max: Number(entry.fullRange?.max)
+          full_max: Number(entry.fullRange?.max),
+          selection_ref_id: selectionRefId,
+          selection_ref_name: selectionRefName
         }
       }
 
@@ -10964,9 +10974,38 @@ export default class extends Controller {
         selected_count: Number(entry.selectedCount || 0),
         total_count: Number(entry.totalCount || 0),
         summary_values: Array.isArray(entry.summaryValues) ? entry.summaryValues.map((value) => String(value)).slice(0, 50) : [],
-        hidden_value_count: Number(entry.hiddenValueCount || 0)
+        hidden_value_count: Number(entry.hiddenValueCount || 0),
+        selection_ref_id: selectionRefId,
+        selection_ref_name: selectionRefName
       }
     }).filter((entry) => entry)
+  }
+
+  selectionHasDeletedReferences(item) {
+    if (!item || typeof item !== 'object') return false
+    const existingSelectionIds = new Set((this.savedSelections || []).map((entry) => String(entry.id || '')))
+
+    if (item.selectionSource === 'compose' && Array.isArray(item.composeSteps)) {
+      const hasMissingComposeRef = item.composeSteps.some((step) => {
+        if (!step || typeof step !== 'object') return false
+        const operandA = String(step.operand_a || step.operandA || '')
+        const operandB = String(step.operand_b || step.operandB || '')
+        return [operandA, operandB].some((operand) => operand.startsWith('saved:') && !existingSelectionIds.has(operand.replace('saved:', '')))
+      })
+      if (hasMissingComposeRef) return true
+    }
+
+    if (item.selectionSource === 'visible' && Array.isArray(item.filterComponents)) {
+      const hasMissingFilterRef = item.filterComponents.some((component) => {
+        if (!component || typeof component !== 'object') return false
+        const selectionRefId = String(component.selection_ref_id || component.selectionRefId || '')
+        if (!selectionRefId) return false
+        return !existingSelectionIds.has(selectionRefId)
+      })
+      if (hasMissingFilterRef) return true
+    }
+
+    return false
   }
 
   renderSavedSelections() {
@@ -10990,6 +11029,7 @@ export default class extends Controller {
       const trailingMargin = isLastItem ? '20px' : '0'
       const sourceIconHtml = this.selectionSourceIconHtml(item.selectionSource)
       const hasSelectionDetails = item.selectionSource === 'compose' || item.selectionSource === 'visible'
+      const hasDeletedSelectionReference = hasSelectionDetails ? this.selectionHasDeletedReferences(item) : false
       return `
         <button type="button"
                 data-selection-id="${this.escapeHtml(item.id)}"
@@ -10999,22 +11039,27 @@ export default class extends Controller {
             <div style="display:flex;align-items:center;gap:6px;min-width:0;">
               ${sourceIconHtml}
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(`${selectionPrefix}${item.name}`)}</div>
+              ${hasSelectionDetails ? `
+              <span role="button"
+                      tabindex="0"
+                      title="Selection details"
+                      aria-label="Selection details"
+                      data-selection-id="${this.escapeHtml(item.id)}"
+                      style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#2563eb;cursor:pointer;padding:0;flex:0 0 auto;"
+                      data-action="click->visualization#openComposeSelectionDetails">
+                <i class="fas fa-circle-info" style="font-size:11px;"></i>
+              </span>
+              ` : ''}
+              ${hasDeletedSelectionReference ? `
+              <span title="Contains reference to deleted selection"
+                    aria-label="Contains reference to deleted selection"
+                    style="display:inline-flex;align-items:center;justify-content:center;color:#b91c1c;font-size:14px;font-weight:700;line-height:1;flex:0 0 auto;">!</span>
+              ` : ''}
             </div>
             <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
           </div>
           <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
             <div>${this.selectionStatusBadgeHtml(item.status)}</div>
-            ${hasSelectionDetails ? `
-            <span role="button"
-                    tabindex="0"
-                    title="Selection details"
-                    aria-label="Selection details"
-                    data-selection-id="${this.escapeHtml(item.id)}"
-                    style="display:inline-flex;align-items:center;justify-content:center;height:18px;color:#2563eb;cursor:pointer;padding:0 4px;font-size:11px;font-weight:600;border:1px solid #bfdbfe;border-radius:4px;background:#eff6ff;"
-                    data-action="click->visualization#openComposeSelectionDetails">
-              Details
-            </span>
-            ` : ''}
             <span role="button"
                     tabindex="0"
                     title="Delete selection"
@@ -11156,9 +11201,14 @@ export default class extends Controller {
       return
     }
 
+    const existingSelectionIds = new Set((this.savedSelections || []).map((entry) => String(entry.id || '')))
     const rows = components.map((component) => {
       const type = String(component.type || '')
       const name = String(component.name || component.metadata_id || 'Metadata')
+      const selectionRefId = String(component.selection_ref_id || component.selectionRefId || '')
+      const selectionRefDeleted = selectionRefId ? !existingSelectionIds.has(selectionRefId) : false
+      const headerName = selectionRefDeleted ? 'Deleted selection' : name
+      const headerColor = selectionRefDeleted ? '#b91c1c' : '#111827'
       if (type === 'continuous') {
         const minValue = Number(component.range_min)
         const maxValue = Number(component.range_max)
@@ -11170,7 +11220,7 @@ export default class extends Controller {
         const fullMaxLabel = Number.isFinite(fullMax) ? fullMax.toLocaleString() : 'N/A'
         return `
           <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
-            <div style="font-size:12px;font-weight:600;color:#111827;">${this.escapeHtml(name)} <span style="color:#6b7280;font-weight:500;">(continuous)</span></div>
+            <div style="font-size:12px;font-weight:600;color:${headerColor};">${this.escapeHtml(headerName)} <span style="color:#6b7280;font-weight:500;">(continuous)</span></div>
             <div style="font-size:12px;color:#374151;margin-top:2px;">Selected range: ${this.escapeHtml(minLabel)} to ${this.escapeHtml(maxLabel)}</div>
             <div style="font-size:11px;color:#6b7280;">Full range: ${this.escapeHtml(fullMinLabel)} to ${this.escapeHtml(fullMaxLabel)}</div>
           </div>
@@ -11186,7 +11236,7 @@ export default class extends Controller {
       const hiddenText = hiddenCount > 0 ? ` + ${hiddenCount.toLocaleString()} more` : ''
       return `
         <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
-          <div style="font-size:12px;font-weight:600;color:#111827;">${this.escapeHtml(name)} <span style="color:#6b7280;font-weight:500;">(categorical)</span></div>
+          <div style="font-size:12px;font-weight:600;color:${headerColor};">${this.escapeHtml(headerName)} <span style="color:#6b7280;font-weight:500;">(categorical)</span></div>
           <div style="font-size:12px;color:#374151;margin-top:2px;">${this.escapeHtml(summaryMode)} values: ${this.escapeHtml(valuesLabel)}${this.escapeHtml(hiddenText)}</div>
           <div style="font-size:11px;color:#6b7280;">Selected categories: ${selectedCount.toLocaleString()} / ${totalCount.toLocaleString()}</div>
         </div>
@@ -11918,13 +11968,13 @@ export default class extends Controller {
     if (status === 'running') {
       return '<span title="Saving" style="display:inline-flex;width:14px;height:14px;border:2px solid #93c5fd;border-top-color:#2563eb;border-radius:9999px;animation:spin 1s linear infinite;"></span>'
     }
-    if (status === 'completed') {
-      return '<span title="Saved" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#10b981;"></span>'
-    }
     if (status === 'failed') {
       return '<span title="Failed" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#ef4444;"></span>'
     }
-    return '<span title="Queued" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#f59e0b;"></span>'
+    if (status === 'queued') {
+      return '<span title="Queued" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#f59e0b;"></span>'
+    }
+    return ''
   }
 
   startSelectionStatusPolling() {

@@ -4617,6 +4617,8 @@ class ProjectsController < ApplicationController
           range_max = entry_hash['range_max'] || entry_hash[:range_max]
           full_min = entry_hash['full_min'] || entry_hash[:full_min]
           full_max = entry_hash['full_max'] || entry_hash[:full_max]
+          selection_ref_id = entry_hash['selection_ref_id'] || entry_hash[:selection_ref_id]
+          selection_ref_name = entry_hash['selection_ref_name'] || entry_hash[:selection_ref_name]
 
           {
             type: 'continuous',
@@ -4625,7 +4627,9 @@ class ProjectsController < ApplicationController
             range_min: range_min.nil? ? nil : range_min.to_f,
             range_max: range_max.nil? ? nil : range_max.to_f,
             full_min: full_min.nil? ? nil : full_min.to_f,
-            full_max: full_max.nil? ? nil : full_max.to_f
+            full_max: full_max.nil? ? nil : full_max.to_f,
+            selection_ref_id: selection_ref_id.to_s,
+            selection_ref_name: selection_ref_name.to_s
           }
         else
           summary_mode = (entry_hash['summary_mode'] || entry_hash[:summary_mode]).to_s
@@ -4633,6 +4637,8 @@ class ProjectsController < ApplicationController
           total_count = (entry_hash['total_count'] || entry_hash[:total_count]).to_i
           summary_values = entry_hash['summary_values'] || entry_hash[:summary_values]
           hidden_value_count = (entry_hash['hidden_value_count'] || entry_hash[:hidden_value_count]).to_i
+          selection_ref_id = entry_hash['selection_ref_id'] || entry_hash[:selection_ref_id]
+          selection_ref_name = entry_hash['selection_ref_name'] || entry_hash[:selection_ref_name]
 
           {
             type: 'categorical',
@@ -4642,7 +4648,9 @@ class ProjectsController < ApplicationController
             selected_count: selected_count,
             total_count: total_count,
             summary_values: Array(summary_values).map(&:to_s).first(50),
-            hidden_value_count: hidden_value_count
+            hidden_value_count: hidden_value_count,
+            selection_ref_id: selection_ref_id.to_s,
+            selection_ref_name: selection_ref_name.to_s
           }
         end
       end.compact

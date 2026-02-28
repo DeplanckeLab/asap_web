@@ -16692,6 +16692,13 @@ export default class extends Controller {
     // Get all canvases for this metadata
     const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
     
+    // Get filtered cell indices (if any filters are active)
+    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    
+    // Keep category count tooltips up to date even when coloring is disabled.
+    this.updateCategoryCountTooltips(metadataId, displayedMetadataVector, filteredSet)
+    
     // Get the metadata vector used for coloring (currentMetadataVector)
     const coloringMetadataVector = this.currentMetadataVector
     if (!coloringMetadataVector || !coloringMetadataVector.values) {
@@ -16716,10 +16723,6 @@ export default class extends Controller {
       // Unknown type, don't draw
       return
     }
-    
-    // Get filtered cell indices (if any filters are active)
-    const filteredIndices = this.dataManager.getFilteredCellIndices()
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     
     // Count occurrences of each coloring category (filtered only) for display
     const coloringCategoryCounts = {}
@@ -16893,6 +16896,113 @@ export default class extends Controller {
       canvas._tooltipHandler = tooltipHandler
       canvas._tooltipLeaveHandler = leaveHandler
     })
+  }
+
+  updateCategoryCountTooltips(metadataId, displayedMetadataVector, filteredSet) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem || !displayedMetadataVector?.values) return
+
+    const values = displayedMetadataVector.values
+    const totalCells = values.length
+    const totalSelectedCells = filteredSet ? filteredSet.size : totalCells
+    const countsByCategory = new Map()
+    const selectedCountsByCategory = new Map()
+
+    for (let i = 0; i < values.length; i++) {
+      const category = String(values[i])
+      countsByCategory.set(category, (countsByCategory.get(category) || 0) + 1)
+      if (!filteredSet || filteredSet.has(i)) {
+        selectedCountsByCategory.set(category, (selectedCountsByCategory.get(category) || 0) + 1)
+      }
+    }
+
+    const tooltip = this.ensureCategoryCountTooltip()
+    const countElements = metadataItem.querySelectorAll('.metadata-category-row .metadata-category-count')
+
+    countElements.forEach((countElement) => {
+      // Ensure browser-native tooltip never appears for count cells.
+      countElement.removeAttribute('title')
+      const row = countElement.closest('.metadata-category-row')
+      if (!row) return
+
+      const categoryCheckbox = row.querySelector('.category-checkbox[data-category]')
+      const categoryNameElement = row.querySelector('.metadata-category-name')
+      const category = categoryCheckbox?.dataset?.category || categoryNameElement?.textContent?.trim()
+      if (!category) return
+
+      const totalInCategory = countsByCategory.get(String(category)) || 0
+      const selectedInCategory = selectedCountsByCategory.get(String(category)) || 0
+      const percentOfTotalCells = totalCells > 0 ? (selectedInCategory / totalCells) * 100 : 0
+      const percentOfTotalCellsWithoutFiltering = totalCells > 0 ? (totalInCategory / totalCells) * 100 : 0
+      const percentOfTotalSelected = totalSelectedCells > 0 ? (selectedInCategory / totalSelectedCells) * 100 : 0
+      const percentFilteredAmongCategory = totalInCategory > 0 ? (selectedInCategory / totalInCategory) * 100 : 0
+      const isCategoryAffectedByFiltering = !!(filteredSet && selectedInCategory < totalInCategory)
+
+      const hideTooltip = () => {
+        tooltip.style.display = 'none'
+      }
+
+      const showTooltip = (event) => {
+        const lines = []
+
+        if (isCategoryAffectedByFiltering) {
+          lines.push(
+            `Selected cells: <strong>${selectedInCategory.toLocaleString()}</strong> (vs. ${totalInCategory.toLocaleString()} without filtering)`
+          )
+        } else {
+          lines.push(`Selected cells: <strong>${selectedInCategory.toLocaleString()}</strong>`)
+        }
+
+        if (isCategoryAffectedByFiltering) {
+          lines.push(
+            `% of total cells: <strong>${percentOfTotalCells.toFixed(1)}%</strong> (vs. ${percentOfTotalCellsWithoutFiltering.toFixed(1)}% without filtering)`
+          )
+          lines.push(`% of total selected cells: <strong>${percentOfTotalSelected.toFixed(1)}%</strong>`)
+          lines.push(`% of filtered cells in category: <strong>${percentFilteredAmongCategory.toFixed(1)}%</strong>`)
+        } else {
+          lines.push(`% of total cells: <strong>${percentOfTotalCells.toFixed(1)}%</strong>`)
+        }
+
+        tooltip.innerHTML = lines.join('<br>')
+        tooltip.style.display = 'block'
+        tooltip.style.left = `${event.clientX + 12}px`
+        tooltip.style.top = `${event.clientY + 12}px`
+      }
+
+      if (countElement._categoryCountTooltipMoveHandler) {
+        countElement.removeEventListener('mousemove', countElement._categoryCountTooltipMoveHandler)
+      }
+      if (countElement._categoryCountTooltipLeaveHandler) {
+        countElement.removeEventListener('mouseleave', countElement._categoryCountTooltipLeaveHandler)
+      }
+
+      countElement.addEventListener('mousemove', showTooltip)
+      countElement.addEventListener('mouseleave', hideTooltip)
+      countElement._categoryCountTooltipMoveHandler = showTooltip
+      countElement._categoryCountTooltipLeaveHandler = hideTooltip
+    })
+  }
+
+  ensureCategoryCountTooltip() {
+    let tooltip = document.getElementById('category-count-tooltip')
+    if (tooltip) return tooltip
+
+    tooltip = document.createElement('div')
+    tooltip.id = 'category-count-tooltip'
+    tooltip.style.position = 'fixed'
+    tooltip.style.display = 'none'
+    tooltip.style.pointerEvents = 'none'
+    tooltip.style.zIndex = '11000'
+    tooltip.style.backgroundColor = 'rgba(17, 24, 39, 0.95)'
+    tooltip.style.color = 'white'
+    tooltip.style.padding = '8px 10px'
+    tooltip.style.borderRadius = '6px'
+    tooltip.style.fontSize = '12px'
+    tooltip.style.lineHeight = '1.35'
+    tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.25)'
+    tooltip.style.maxWidth = '260px'
+    document.body.appendChild(tooltip)
+    return tooltip
   }
 
   // Draw continuous distribution (histogram-like bar showing value distribution)

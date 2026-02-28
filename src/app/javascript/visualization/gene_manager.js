@@ -429,6 +429,7 @@ export class GeneManager {
       
       // Handle paste events for bulk input
       input.addEventListener('paste', (e) => {
+
         e.preventDefault()
         clearTimeout(debounceTimer)
         this.hideDropdown()
@@ -2457,7 +2458,7 @@ export class GeneManager {
         rangeSliderController.setFilterControlsDisabled(false)
       }
     } else {
-      filterSwitch.style.backgroundColor = '#d1d5db'
+      filterSwitch.style.backgroundColor = '#ef4444'
       const toggle = filterSwitch.querySelector('div')
       if (toggle) {
         toggle.style.transform = 'translateX(0px)'

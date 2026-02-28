@@ -755,20 +755,46 @@ export class UIManager {
   // Enable category checkboxes for a metadata
   enableCategoryCheckboxesForMetadata(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    const selectedSet = this.controller.selectedCategories?.[metadataId] || null
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.pointerEvents = 'auto'
       checkbox.style.opacity = '1'
       checkbox.style.cursor = 'pointer'
+
+      const icon = checkbox.querySelector('i')
+      if (!icon) return
+
+      const category = checkbox.dataset.category
+      const isSelected = !!(selectedSet && selectedSet.has(category))
+      if (isSelected) {
+        icon.style.display = 'block'
+        icon.style.color = '#10b981'
+      } else {
+        icon.style.display = 'none'
+      }
     })
   }
 
   // Disable category checkboxes for a metadata
   disableCategoryCheckboxesForMetadata(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
+    const selectedSet = this.controller.selectedCategories?.[metadataId] ||
+      this.controller.savedCategorySelections?.[metadataId] ||
+      null
+
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.pointerEvents = 'none'
       checkbox.style.opacity = '0.5'
       checkbox.style.cursor = 'not-allowed'
+
+      const icon = checkbox.querySelector('i')
+      if (!icon) return
+
+      const category = checkbox.dataset.category
+      const isSelected = !!(selectedSet && selectedSet.has(category))
+
+      icon.style.display = 'block'
+      icon.style.color = isSelected ? '#10b981' : '#9ca3af'
     })
   }
 
@@ -993,9 +1019,27 @@ export class UIManager {
       item.style.flexDirection = 'column'
       item.style.gap = '4px'
       item.style.padding = '8px 0'
+      item.style.cursor = 'pointer'
+      item.style.transition = 'background-color 0.15s ease'
+      item.tabIndex = 0
       if (index !== 0) {
         item.style.borderTop = '1px solid #e5e7eb'
       }
+      item.addEventListener('mouseenter', () => {
+        item.style.backgroundColor = '#f9fafb'
+      })
+      item.addEventListener('mouseleave', () => {
+        item.style.backgroundColor = 'transparent'
+      })
+      item.addEventListener('click', () => {
+        this.controller.focusGlobalFilterItem(filter)
+      })
+      item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          this.controller.focusGlobalFilterItem(filter)
+        }
+      })
       
       const headerRow = document.createElement('div')
       headerRow.style.display = 'flex'
@@ -1034,13 +1078,41 @@ export class UIManager {
         
         if (filter.summaryValues && filter.summaryValues.length > 0) {
           const previewLine = document.createElement('div')
-          previewLine.style.fontSize = '12px'
-          previewLine.style.color = '#6b7280'
-          let label = filter.summaryValues.join(', ')
+          previewLine.style.display = 'flex'
+          previewLine.style.flexWrap = 'wrap'
+          previewLine.style.gap = '6px'
+
+          filter.summaryValues.forEach((value) => {
+            const categoryButton = document.createElement('button')
+            categoryButton.type = 'button'
+            categoryButton.style.fontSize = '12px'
+            categoryButton.style.color = '#4b5563'
+            categoryButton.style.backgroundColor = '#f9fafb'
+            categoryButton.style.border = '1px solid #e5e7eb'
+            categoryButton.style.borderRadius = '9999px'
+            categoryButton.style.padding = '2px 8px'
+            categoryButton.style.cursor = 'pointer'
+            categoryButton.style.maxWidth = '100%'
+            categoryButton.style.whiteSpace = 'nowrap'
+            categoryButton.style.overflow = 'hidden'
+            categoryButton.style.textOverflow = 'ellipsis'
+            categoryButton.title = String(value)
+            categoryButton.textContent = String(value)
+            categoryButton.addEventListener('click', (event) => {
+              event.stopPropagation()
+              this.controller.focusMetadataCategoryById(filter.metadataId, value)
+            })
+            previewLine.appendChild(categoryButton)
+          })
+
           if (filter.hiddenValueCount > 0) {
-            label += ` +${filter.hiddenValueCount} more`
+            const moreLabel = document.createElement('span')
+            moreLabel.style.fontSize = '12px'
+            moreLabel.style.color = '#6b7280'
+            moreLabel.textContent = `+${filter.hiddenValueCount} more`
+            previewLine.appendChild(moreLabel)
           }
-          previewLine.textContent = label
+
           item.appendChild(previewLine)
         }
       } else if (filter.type === 'continuous') {

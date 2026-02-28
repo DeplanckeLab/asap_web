@@ -191,26 +191,26 @@ export default class extends Controller {
     // Initialize IndexedDB for storing metadata on disk instead of memory
     this.memoryManager.initializeIndexedDB()
     
-    // Initialize selected categories tracking
-    this.selectedCategories = {}
-    this.selectedRanges = {} // Store continuous metadata ranges for filtering
-    this.globalFiltersEnabled = true // Track global filtering toggle state
-    this.globalFilterPanelVisible = false
-    this._globalFilterOutsideHandler = null
-    this.checkpointHistory = []
-    this.currentMatchedCheckpointId = null
-    this.adaptColorRangeByMetadataId = {}
+    // Initialize selected categories tracking (preserve on Stimulus reconnect)
+    if (!this.selectedCategories) this.selectedCategories = {}
+    if (!this.selectedRanges) this.selectedRanges = {} // Store continuous metadata ranges for filtering
+    if (this.globalFiltersEnabled === undefined) this.globalFiltersEnabled = true // Track global filtering toggle state
+    if (this.globalFilterPanelVisible === undefined) this.globalFilterPanelVisible = false
+    if (!this._globalFilterOutsideHandler) this._globalFilterOutsideHandler = null
+    if (!Array.isArray(this.checkpointHistory)) this.checkpointHistory = []
+    if (this.currentMatchedCheckpointId === undefined) this.currentMatchedCheckpointId = null
+    if (!this.adaptColorRangeByMetadataId) this.adaptColorRangeByMetadataId = {}
     this.uiManager.updateGlobalFilterSummary()
-    this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
-    this.currentVisibleCells = null // Track currently visible cells (null = all visible)
-    this.lastFilterState = null // Track last filter state for incremental updates
-    this.filterCache = new Map() // Cache for intersection results
+    if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
+    if (this.currentVisibleCells === undefined) this.currentVisibleCells = null // Track currently visible cells (null = all visible)
+    if (this.lastFilterState === undefined) this.lastFilterState = null // Track last filter state for incremental updates
+    if (!this.filterCache) this.filterCache = new Map() // Cache for intersection results
     
     // Performance optimization: cache and batching
-    this.lastFilteredIndices = null // Cache last filtered indices result
-    this.lastFilterStateHash = null // Hash of filter state for change detection
-    this.pendingUpdates = new Set() // Track pending updates for batching
-    this.updateBatchTimer = null // Timer for batching updates
+    if (this.lastFilteredIndices === undefined) this.lastFilteredIndices = null // Cache last filtered indices result
+    if (this.lastFilterStateHash === undefined) this.lastFilterStateHash = null // Hash of filter state for change detection
+    if (!this.pendingUpdates) this.pendingUpdates = new Set() // Track pending updates for batching
+    if (this.updateBatchTimer === undefined) this.updateBatchTimer = null // Timer for batching updates
     
     // Color update optimization
     this.lastColorUpdateHash = null // Hash of color state for change detection
@@ -289,10 +289,10 @@ export default class extends Controller {
     this.selectedYButton = null
     
     // Cache for decompressed embedding coordinates (avoid re-decompressing)
-    this.decompressedCoordinatesCache = new Map() // Key: embeddingId, Value: decompressed coordinates
+    if (!this.decompressedCoordinatesCache) this.decompressedCoordinatesCache = new Map() // Key: embeddingId, Value: decompressed coordinates
     
     // Cache for binary embedding data (avoid re-fetching from network)
-    this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
+    if (!this.binaryDataCache) this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
     
     // Expose the main visualization controller globally for external button handlers.
     if (this.hasMetadataSelectTarget) {
@@ -479,8 +479,8 @@ export default class extends Controller {
     // Initialize metadata vectors storage
     // console.log('🚨 [DEBUG] Initializing loadedMetadataVectors = {} in connect()')
     // console.trace('Call stack:')
-    this.loadedMetadataVectors = {}
-    this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
+    if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
+    if (!this.loadingMetadataVectors) this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
     // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints })
     this.metadataGradients = new Map()
@@ -555,8 +555,9 @@ export default class extends Controller {
       this.performanceManager.createDiagnosticButton()
     }, 3000) // Wait 3 seconds after connection
     
-    // Start automatic preloading if enabled
-    if (this.autoPreloadMetadata) {
+    // Start automatic preloading if enabled (avoid duplicate scheduling on reconnect)
+    if (this.autoPreloadMetadata && this._autoPreloadScheduled !== true) {
+      this._autoPreloadScheduled = true
       // console.log('🚀 Starting automatic metadata preloading...')
       // console.log('🔍 [DEBUG] Loom file state before preloading:', {
         // currentLoomFile: this.currentLoomFile,
@@ -568,6 +569,10 @@ export default class extends Controller {
       
       // Add a small delay to ensure loom file is set, then check all metadata status before preloading
       setTimeout(async () => {
+        if (this._autoPreloadStarted === true) {
+          return
+        }
+        this._autoPreloadStarted = true
         try {
           // Check status of all metadata before preloading
           await this.checkAllMetadataStatusBeforePreload()
@@ -2148,182 +2153,158 @@ export default class extends Controller {
   }
 
   async loadMetadataCoordinates(metadataId) {
-    const fetchStart = performance.now()
-    this.checkpointDebug('loadMetadataCoordinates:start', {
-      metadataId: String(metadataId),
-      currentLoomFile: this.currentLoomFile,
-      requestedLoomFile: this.getCurrentLoomFile()
-    })
-    
-    try {
-      // Check in-memory cache first!
-      if (this.binaryDataCache.has(metadataId)) {
-        this.checkpointDebug('loadMetadataCoordinates:binary-cache-hit', {
-          metadataId: String(metadataId)
-        })
-        // console.log(`⏱️ [PERF] Step 1: BINARY CACHE HIT - Skipping network fetch for ${metadataId}`)
-        const cachedData = this.binaryDataCache.get(metadataId)
-        const cacheTime = performance.now() - fetchStart
-        // console.log(`⏱️ [PERF] Step 1: Binary cache retrieval: ${cacheTime.toFixed(2)}ms (saved ~5s download!)`)
+    const normalizedMetadataId = String(metadataId)
+    const requestedLoomFile = this.getCurrentLoomFileForRequest()
+    const requestKey = `${normalizedMetadataId}::${requestedLoomFile || ''}`
+
+    if (!(this.pendingMetadataCoordinateLoads instanceof Map)) {
+      this.pendingMetadataCoordinateLoads = new Map()
+    }
+
+    const pendingRequest = this.pendingMetadataCoordinateLoads.get(requestKey)
+    if (pendingRequest) {
+      this.checkpointDebug('loadMetadataCoordinates:dedup-hit', {
+        metadataId: normalizedMetadataId,
+        loomFile: requestedLoomFile
+      })
+      return pendingRequest
+    }
+
+    const loadPromise = (async () => {
+      const fetchStart = performance.now()
+      this.checkpointDebug('loadMetadataCoordinates:start', {
+        metadataId: normalizedMetadataId,
+        currentLoomFile: this.currentLoomFile,
+        requestedLoomFile: this.getCurrentLoomFile()
+      })
+      
+      try {
+        if (this.binaryDataCache.has(normalizedMetadataId)) {
+          this.checkpointDebug('loadMetadataCoordinates:binary-cache-hit', {
+            metadataId: normalizedMetadataId
+          })
+          const cachedData = this.binaryDataCache.get(normalizedMetadataId)
+          await this.dataManager.storeBinaryMetadataData(cachedData)
+          this.syncEmbeddingUiToLoadedEmbedding(cachedData?.id || normalizedMetadataId, cachedData?.name || null)
+          this.checkpointDebug('loadMetadataCoordinates:binary-cache-rendered', {
+            metadataId: normalizedMetadataId,
+            metadataDataId: String(this.metadataData?.id || ''),
+            metadataDataName: this.metadataData?.name || null,
+            hasCurrentCoordinates: !!this.currentCoordinates,
+            currentCoordinatesLength: this.currentCoordinates?.length || 0
+          })
+          return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+        }
         
-        // Use cached binary data
-        await this.dataManager.storeBinaryMetadataData(cachedData)
-        this.syncEmbeddingUiToLoadedEmbedding(cachedData?.id || metadataId, cachedData?.name || null)
-        this.checkpointDebug('loadMetadataCoordinates:binary-cache-rendered', {
-          metadataId: String(metadataId),
+        const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(normalizedMetadataId)
+        if (diskData) {
+          this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-hit', {
+            metadataId: normalizedMetadataId
+          })
+          this.binaryDataCache.set(normalizedMetadataId, diskData)
+          await this.dataManager.storeBinaryMetadataData(diskData)
+          this.syncEmbeddingUiToLoadedEmbedding(diskData?.id || normalizedMetadataId, diskData?.name || null)
+          this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-rendered', {
+            metadataId: normalizedMetadataId,
+            metadataDataId: String(this.metadataData?.id || ''),
+            metadataDataName: this.metadataData?.name || null,
+            hasCurrentCoordinates: !!this.currentCoordinates,
+            currentCoordinatesLength: this.currentCoordinates?.length || 0
+          })
+          return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+        }
+        
+        this.checkpointDebug('loadMetadataCoordinates:request', {
+          metadataId: normalizedMetadataId,
+          loomFile: requestedLoomFile
+        })
+        
+        const projectIdentifier = this.getProjectIdentifier()
+        const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${normalizedMetadataId}&loom_file=${encodeURIComponent(requestedLoomFile || '')}`
+        
+        const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
+        const csrfToken = csrfMetaTag?.getAttribute('content')
+        const headers = { 'Accept': 'application/octet-stream' }
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken
+        } else {
+          console.warn('CSRF token not found, request may fail authentication')
+        }
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: headers,
+          credentials: 'same-origin'
+        })
+        
+        const fetchTime = performance.now() - fetchStart
+        // console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json()
+          console.error('Error from server:', errorData.error)
+          alert(`Error loading metadata: ${errorData.error}`)
+          return false
+        }
+        
+        const headerMetadataId = response.headers.get('X-Metadata-ID')
+        const metadataName = response.headers.get('X-Metadata-Name')
+        const cellCount = parseInt(response.headers.get('X-Cell-Count'))
+        
+        const arrayBuffer = await response.arrayBuffer()
+        const dataObject = {
+          id: headerMetadataId,
+          name: metadataName,
+          cellCount: cellCount,
+          binaryData: arrayBuffer
+        }
+        
+        this.binaryDataCache.set(normalizedMetadataId, dataObject)
+        this.memoryManager.storeCoordinatesInIndexedDB(normalizedMetadataId, dataObject).catch(error => {
+          console.warn('Failed to store coordinates in IndexedDB:', error)
+        })
+        
+        await this.dataManager.storeBinaryMetadataData(dataObject)
+        this.syncEmbeddingUiToLoadedEmbedding(headerMetadataId || normalizedMetadataId, metadataName || null)
+        this.checkpointDebug('loadMetadataCoordinates:success', {
+          metadataId: normalizedMetadataId,
+          headerMetadataId: String(headerMetadataId || ''),
+          metadataName,
+          cellCount,
+          loomFile: requestedLoomFile
+        })
+        this.checkpointDebug('loadMetadataCoordinates:post-render-state', {
           metadataDataId: String(this.metadataData?.id || ''),
           metadataDataName: this.metadataData?.name || null,
           hasCurrentCoordinates: !!this.currentCoordinates,
-          currentCoordinatesLength: this.currentCoordinates?.length || 0
+          currentCoordinatesLength: this.currentCoordinates?.length || 0,
+          hasRenderer: !!this.reglRenderer
         })
         return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
-      }
-      
-      // Check IndexedDB (disk storage) for embeddings - this is the key fix!
-      // console.log(`⏱️ [PERF] Step 1a: Checking IndexedDB for coordinates ${metadataId}...`)
-      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(metadataId)
-      if (diskData) {
-        this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-hit', {
-          metadataId: String(metadataId)
+      } catch (error) {
+        this.checkpointDebug('loadMetadataCoordinates:error', {
+          metadataId: normalizedMetadataId,
+          error: String(error?.message || error),
+          stack: error?.stack || null
         })
-        const diskTime = performance.now() - fetchStart
-        // console.log(`⏱️ [PERF] Step 1a: IndexedDB HIT for ${metadataId} - ${diskTime.toFixed(2)}ms (saved network fetch!)`)
-        
-        // Store in memory cache for next time
-        this.binaryDataCache.set(metadataId, diskData)
-        
-        // Use cached binary data
-        await this.dataManager.storeBinaryMetadataData(diskData)
-        this.syncEmbeddingUiToLoadedEmbedding(diskData?.id || metadataId, diskData?.name || null)
-        this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-rendered', {
-          metadataId: String(metadataId),
-          metadataDataId: String(this.metadataData?.id || ''),
-          metadataDataName: this.metadataData?.name || null,
-          hasCurrentCoordinates: !!this.currentCoordinates,
-          currentCoordinatesLength: this.currentCoordinates?.length || 0
-        })
-        return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
-      }
-      
-      // console.log(`⏱️ [PERF] Step 1b: IndexedDB MISS - Starting network fetch for ${metadataId}`)
-      
-      // Get the current loom file selection
-      const loomFile = this.getCurrentLoomFileForRequest()
-      this.checkpointDebug('loadMetadataCoordinates:request', {
-        metadataId: String(metadataId),
-        loomFile
-      })
-      
-      // Build the URL for the metadata coordinates endpoint
-      const projectIdentifier = this.getProjectIdentifier()
-      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${metadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
-      
-      // Get CSRF token safely
-      const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
-      const csrfToken = csrfMetaTag?.getAttribute('content')
-      
-      const headers = {
-        'Accept': 'application/octet-stream'
-      }
-      
-      if (csrfToken) {
-        headers['X-CSRF-Token'] = csrfToken
-      } else {
-        console.warn('CSRF token not found, request may fail authentication')
-      }
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: headers,
-        credentials: 'same-origin'
-      })
-      
-      const fetchTime = performance.now() - fetchStart
-      // console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      // Check if we got binary data or JSON error
-      const contentType = response.headers.get('content-type')
-      if (contentType && contentType.includes('application/json')) {
-        const errorData = await response.json()
-        console.error('Error from server:', errorData.error)
-        alert(`Error loading metadata: ${errorData.error}`)
+        console.error('Error loading metadata coordinates:', error)
+        alert(`Failed to load metadata coordinates: ${error.message}`)
         return false
       }
-      
-      // Extract metadata from headers
-      const headerMetadataId = response.headers.get('X-Metadata-ID')
-      const metadataName = response.headers.get('X-Metadata-Name')
-      const cellCount = parseInt(response.headers.get('X-Cell-Count'))
-      
-      // console.log(`⏱️ [PERF] Received ${metadataName} with ${cellCount} cells`)
-      
-      // Get the binary data as ArrayBuffer
-      const bufferStart = performance.now()
-      const arrayBuffer = await response.arrayBuffer()
-      const bufferTime = performance.now() - bufferStart
-      // console.log(`⏱️ [PERF] ArrayBuffer conversion: ${bufferTime.toFixed(2)}ms (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
-      
-      // /*console.log('ArrayBuffer details:', {
-        // byteLength: arrayBuffer.byteLength,
-        // expectedLength: cellCount * 4, // 4 bytes per coordinate pair
-        // isValid: arrayBuffer.byteLength === cellCount * 4
-      // })*/
-      
-      // Log first few bytes for debugging
-      const view = new Uint8Array(arrayBuffer)
-      //console.log('First 20 bytes of binary data:', Array.from(view.slice(0, 20)))
-      //console.log('Last 20 bytes of binary data:', Array.from(view.slice(-20)))
-      
-      // Prepare data object
-      const dataObject = {
-        id: headerMetadataId,
-        name: metadataName,
-        cellCount: cellCount,
-        binaryData: arrayBuffer
+    })()
+
+    this.pendingMetadataCoordinateLoads.set(requestKey, loadPromise)
+    try {
+      return await loadPromise
+    } finally {
+      if (this.pendingMetadataCoordinateLoads.get(requestKey) === loadPromise) {
+        this.pendingMetadataCoordinateLoads.delete(requestKey)
       }
-      
-      // Cache binary data in memory for instant retrieval next time
-      this.binaryDataCache.set(metadataId, dataObject)
-      // console.log(`⏱️ [PERF] Cached binary data in memory for ${metadataName} (${(arrayBuffer.byteLength / 1024).toFixed(1)}KB)`)
-      
-      // Also store in IndexedDB (disk) for persistent cache across page reloads!
-      this.memoryManager.storeCoordinatesInIndexedDB(metadataId, dataObject).catch(error => {
-        console.warn('Failed to store coordinates in IndexedDB:', error)
-      })
-      // console.log(`⏱️ [PERF] Stored coordinates in IndexedDB for ${metadataName} (will survive page reload)`)
-      
-      // Store the binary coordinate data
-      await this.dataManager.storeBinaryMetadataData(dataObject)
-      this.syncEmbeddingUiToLoadedEmbedding(headerMetadataId || metadataId, metadataName || null)
-      this.checkpointDebug('loadMetadataCoordinates:success', {
-        metadataId: String(metadataId),
-        headerMetadataId: String(headerMetadataId || ''),
-        metadataName,
-        cellCount,
-        loomFile
-      })
-      this.checkpointDebug('loadMetadataCoordinates:post-render-state', {
-        metadataDataId: String(this.metadataData?.id || ''),
-        metadataDataName: this.metadataData?.name || null,
-        hasCurrentCoordinates: !!this.currentCoordinates,
-        currentCoordinatesLength: this.currentCoordinates?.length || 0,
-        hasRenderer: !!this.reglRenderer
-      })
-      return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
-      
-    } catch (error) {
-      this.checkpointDebug('loadMetadataCoordinates:error', {
-        metadataId: String(metadataId),
-        error: String(error?.message || error),
-        stack: error?.stack || null
-      })
-      console.error('Error loading metadata coordinates:', error)
-      alert(`Failed to load metadata coordinates: ${error.message}`)
-      return false
     }
   }
 
@@ -3270,6 +3251,11 @@ export default class extends Controller {
 
   // Check status of all metadata before preloading starts
   async checkAllMetadataStatusBeforePreload() {
+    if (this._checkAllMetadataStatusPromise) {
+      return this._checkAllMetadataStatusPromise
+    }
+
+    const runPromise = (async () => {
     // console.log('🔍 [STATUS] Checking status of all metadata before preloading...')
     
     try {
@@ -3301,6 +3287,16 @@ export default class extends Controller {
       // console.log('🔍 [STATUS] Completed status check for all metadata before preloading')
     } catch (error) {
       console.error('Error in metadata status checking before preload:', error)
+    }
+    })()
+
+    this._checkAllMetadataStatusPromise = runPromise
+    try {
+      return await runPromise
+    } finally {
+      if (this._checkAllMetadataStatusPromise === runPromise) {
+        this._checkAllMetadataStatusPromise = null
+      }
     }
   }
 
@@ -3347,6 +3343,11 @@ export default class extends Controller {
 
   // Preload all metadata (embeddings + metadata vectors) for instant switching
   async preloadAllMetadata() {
+    if (this._preloadAllMetadataInProgress) {
+      return
+    }
+    this._preloadAllMetadataInProgress = true
+    try {
     // console.log('🚀 [PERF] Starting background preload of all metadata...')
     
     // Debug loom file state at start of preloading
@@ -3899,6 +3900,9 @@ export default class extends Controller {
     
     // Create diagnostic button for troubleshooting
     this.performanceManager.createDiagnosticButton()
+    } finally {
+      this._preloadAllMetadataInProgress = false
+    }
   }
 
   // Update visualization with metadata vector coloring
@@ -12129,6 +12133,80 @@ export default class extends Controller {
     })
   }
 
+  async focusGlobalFilterItem(filter) {
+    const metadataId = String(filter?.metadataId || '').trim()
+    if (!metadataId) return
+
+    if (metadataId.startsWith('gene_')) {
+      await this.focusGeneFilterItem(metadataId)
+      return
+    }
+
+    await this.focusMetadataFilterItem(metadataId)
+  }
+
+  async focusMetadataFilterItem(metadataId) {
+    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataItem) return
+
+    const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
+    const contentSection = header ? header.nextElementSibling : null
+    const chevron = header ? header.querySelector('.fa-chevron-right') : null
+
+    const isCollapsed = !!(
+      contentSection &&
+      chevron &&
+      (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)')
+    )
+
+    if (header && isCollapsed) {
+      header.click()
+      await this.waitForMetadataExpansion(contentSection)
+    }
+
+    const scrollTarget = header || metadataItem
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      })
+    })
+  }
+
+  async focusGeneFilterItem(metadataId) {
+    const escapedMetadataId = this.escapeAttributeSelectorValue(metadataId)
+    let geneItem = null
+
+    const matchingButton = document.querySelector(
+      `[data-gene-item] [data-layer-metadata-id="${escapedMetadataId}"], [data-gene-item] [data-metadata-id="${escapedMetadataId}"]`
+    )
+    if (matchingButton) {
+      geneItem = matchingButton.closest('[data-gene-item]')
+    }
+
+    if (!geneItem) {
+      const geneIdMatch = metadataId.match(/^gene_([^_]+)/)
+      if (geneIdMatch && geneIdMatch[1]) {
+        geneItem = document.querySelector(`[data-gene-item="${this.escapeAttributeSelectorValue(geneIdMatch[1])}"]`)
+      }
+    }
+    if (!geneItem) return
+
+    const geneId = String(geneItem.dataset.geneItem || '').trim()
+    if (!geneId) return
+
+    const rangeSection = geneItem.querySelector('.gene-range-section')
+    const isExpanded = !!(rangeSection && rangeSection.style.display !== 'none')
+    if (!isExpanded) {
+      this.geneManager?.toggleGeneExpansion(geneId)
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        geneItem.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      })
+    })
+  }
+
   // Save plot as SVG method
   saveAsSVG() {
     // console.log('💾 Saving plot as SVG')
@@ -13406,10 +13484,18 @@ export default class extends Controller {
     const category = String(label.category || '').trim()
     if (!metadataId || !category) return
 
-    const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    await this.focusMetadataCategoryById(metadataId, category)
+  }
+
+  async focusMetadataCategoryById(metadataId, category) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    const normalizedCategory = String(category || '').trim()
+    if (!normalizedMetadataId || !normalizedCategory) return
+
+    const metadataItem = document.querySelector(`[data-metadata-item="${normalizedMetadataId}"]`)
     if (!metadataItem) return
 
-    const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
+    const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${normalizedMetadataId}"]`)
     const categoriesDiv = header ? header.nextElementSibling : null
 
     const chevron = header ? header.querySelector('.fa-chevron-right') : null
@@ -13426,11 +13512,11 @@ export default class extends Controller {
     let categoryRow = null
     if (categoriesAreCollapsed) {
       await this.waitForMetadataExpansion(categoriesDiv)
-      categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+      categoryRow = await this.waitForCategoryRow(metadataItem, normalizedMetadataId, normalizedCategory, categoriesDiv)
     } else {
-      categoryRow = this.findCategoryRow(metadataItem, metadataId, category)
+      categoryRow = this.findCategoryRow(metadataItem, normalizedMetadataId, normalizedCategory)
       if (!categoryRow) {
-        categoryRow = await this.waitForCategoryRow(metadataItem, metadataId, category, categoriesDiv)
+        categoryRow = await this.waitForCategoryRow(metadataItem, normalizedMetadataId, normalizedCategory, categoriesDiv)
       }
     }
     if (!categoryRow) return
@@ -14169,11 +14255,106 @@ export default class extends Controller {
     if (this.globalFilterPanelVisible) {
       this.uiManager.updateGlobalFilterPanelContent()
     }
+    this.applyGlobalFilterUiState()
     
     // Re-run filtering with the new global state (will also refresh plot)
     if (this.dataManager) {
       this.dataManager.updateCellFiltering()
     }
+  }
+
+  applyGlobalFilterUiState() {
+    const filtersGloballyEnabled = this.globalFiltersEnabled !== false
+
+    document.querySelectorAll('.metadata-filter-switch[data-metadata-id]').forEach((switchEl) => {
+      const metadataId = String(switchEl.dataset.metadataId || '').trim()
+      if (!metadataId) return
+
+      const individuallyEnabled = switchEl.dataset.filterEnabled === 'true'
+      this.applyToggleSwitchVisualState(switchEl, individuallyEnabled, filtersGloballyEnabled)
+      this.applyCategoricalMetadataControlsState(metadataId, filtersGloballyEnabled && individuallyEnabled)
+    })
+
+    document.querySelectorAll('.gene-filter-switch[data-gene-id]').forEach((switchEl) => {
+      const individuallyEnabled = switchEl.dataset.filterEnabled === 'true'
+      this.applyToggleSwitchVisualState(switchEl, individuallyEnabled, filtersGloballyEnabled)
+    })
+
+    if (!(this.disabledFilters instanceof Set)) {
+      this.disabledFilters = new Set(this.disabledFilters || [])
+    }
+
+    document.querySelectorAll('[data-controller~="range-slider"]').forEach((sliderElement) => {
+      const sliderController = this.application?.getControllerForElementAndIdentifier?.(sliderElement, 'range-slider')
+      const metadataId = String(sliderElement.getAttribute('data-range-slider-metadata-id-value') || '')
+      if (!metadataId) return
+
+      const individuallyEnabled = this.isIndividualFilterEnabledForMetadata(metadataId)
+      const shouldEnableControls = filtersGloballyEnabled && individuallyEnabled
+
+      if (sliderController && typeof sliderController.setFilterControlsDisabled === 'function') {
+        sliderController.setFilterControlsDisabled(!shouldEnableControls)
+      }
+
+      if (shouldEnableControls) {
+        this.disabledFilters.delete(metadataId)
+      } else {
+        this.disabledFilters.add(metadataId)
+      }
+    })
+  }
+
+  applyToggleSwitchVisualState(switchEl, isEnabled, allowInteraction) {
+    if (!switchEl) return
+
+    const toggleKnob = switchEl.querySelector('div')
+    if (allowInteraction) {
+      switchEl.style.backgroundColor = isEnabled ? '#10b981' : '#ef4444'
+    } else {
+      switchEl.style.backgroundColor = '#9ca3af'
+    }
+    switchEl.style.opacity = allowInteraction ? '1' : '0.7'
+    switchEl.style.pointerEvents = allowInteraction ? 'auto' : 'none'
+    switchEl.style.cursor = allowInteraction ? 'pointer' : 'not-allowed'
+
+    if (toggleKnob) {
+      toggleKnob.style.transform = isEnabled ? 'translateX(14px)' : 'translateX(0px)'
+    }
+  }
+
+  applyCategoricalMetadataControlsState(metadataId, enabled) {
+    const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
+    if (selectAllCheckbox) {
+      selectAllCheckbox.style.opacity = enabled ? '1' : '0.5'
+      selectAllCheckbox.style.pointerEvents = enabled ? 'auto' : 'none'
+      selectAllCheckbox.style.cursor = enabled ? 'pointer' : 'not-allowed'
+    }
+
+    if (enabled) {
+      this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
+    } else {
+      this.uiManager.disableCategoryCheckboxesForMetadata(metadataId)
+    }
+  }
+
+  isIndividualFilterEnabledForMetadata(metadataId) {
+    const normalizedId = String(metadataId || '').trim()
+    if (!normalizedId) return false
+
+    const metadataSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${this.escapeAttributeSelectorValue(normalizedId)}"]`)
+    if (metadataSwitch) {
+      return metadataSwitch.dataset.filterEnabled === 'true'
+    }
+
+    if (normalizedId.startsWith('gene_')) {
+      const geneMatch = normalizedId.match(/^gene_([^_]+)/)
+      if (geneMatch && geneMatch[1]) {
+        const geneSwitch = document.querySelector(`.gene-filter-switch[data-gene-id="${this.escapeAttributeSelectorValue(geneMatch[1])}"]`)
+        return !!(geneSwitch && geneSwitch.dataset.filterEnabled === 'true')
+      }
+    }
+
+    return false
   }
   
   async toggleMetadataFilter(event) {
@@ -14192,7 +14373,7 @@ export default class extends Controller {
     if (isEnabled) {
       // Turn OFF - disable filtering (show all cells)
       filterSwitch.dataset.filterEnabled = 'false'
-      filterSwitch.style.backgroundColor = '#d1d5db' // gray
+      filterSwitch.style.backgroundColor = '#ef4444' // red
       switchToggle.style.transform = 'translateX(0px)' // move to left
       
       // Save current selections and remove the metadata from selectedCategories
@@ -14264,7 +14445,7 @@ export default class extends Controller {
     if (isEnabled) {
       // Turn OFF - disable filtering (show all cells)
       filterSwitch.dataset.filterEnabled = 'false'
-      filterSwitch.style.backgroundColor = '#d1d5db' // gray
+      filterSwitch.style.backgroundColor = '#ef4444' // red
       switchToggle.style.transform = 'translateX(0px)' // move to left
       
       // Disable the range slider controls (but not the histogram)

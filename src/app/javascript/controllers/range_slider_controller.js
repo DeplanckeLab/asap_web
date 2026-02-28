@@ -564,20 +564,104 @@ export default class extends Controller {
       this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
       this.selectedCountTarget.style.color = '#dc2626'
       this.selectedCountTarget.style.fontWeight = '600'
-      this.selectedCountTarget.title = `${selectedByAllFiltersCount.toLocaleString()} cells (${selectedByRangeCount.toLocaleString()} in range, but ${selectedByRangeCount - selectedByAllFiltersCount} filtered out by other metadata)`
+      this.selectedCountTooltipData = {
+        selectedByAllFiltersCount,
+        selectedByRangeCount,
+        filteredOutCount: selectedByRangeCount - selectedByAllFiltersCount,
+        hasOtherFilters: true
+      }
     } else {
       // No other filters active
       this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
       this.selectedCountTarget.style.color = '#6b7280'
       this.selectedCountTarget.style.fontWeight = '500'
-      this.selectedCountTarget.title = `${selectedByAllFiltersCount.toLocaleString()} cells selected by range`
+      this.selectedCountTooltipData = {
+        selectedByAllFiltersCount,
+        selectedByRangeCount,
+        filteredOutCount: 0,
+        hasOtherFilters: false
+      }
     }
+    this.selectedCountTarget.removeAttribute('title')
+    this.attachSelectedCountTooltipHandlers()
     
     // Update total count if the target exists (for backward compatibility)
     if (this.hasTotalCountTarget) {
       const totalCount = sliderData.values.length
       this.totalCountTarget.textContent = totalCount.toLocaleString()
     }
+  }
+
+  attachSelectedCountTooltipHandlers() {
+    if (!this.hasSelectedCountTarget) return
+
+    const target = this.selectedCountTarget
+    const tooltip = this.ensureSelectedCountTooltip()
+
+    const hideTooltip = () => {
+      tooltip.style.display = 'none'
+    }
+
+    const showTooltip = (event) => {
+      const data = this.selectedCountTooltipData
+      if (!data) return
+
+      const total = data.selectedByRangeCount
+      const filtered = data.selectedByAllFiltersCount
+      const filteredOut = data.filteredOutCount
+      const filteredPct = total > 0 ? (filtered / total) * 100 : 0
+      const filteredOutPct = total > 0 ? (filteredOut / total) * 100 : 0
+
+      const lines = []
+      lines.push(`Total: <strong>${total.toLocaleString()}</strong>`)
+      lines.push(`Filtered: <strong>${filtered.toLocaleString()}</strong> (<strong>${filteredPct.toFixed(1)}%</strong>)`)
+      lines.push(`Filtered out: <strong>${filteredOut.toLocaleString()}</strong> (<strong>${filteredOutPct.toFixed(1)}%</strong>)`)
+
+      tooltip.innerHTML = lines.join('<br>')
+      tooltip.style.display = 'block'
+      const isGeneSlider = this.metadataIdValue && this.metadataIdValue.startsWith('gene_')
+      if (isGeneSlider) {
+        const tooltipWidth = tooltip.offsetWidth || 220
+        tooltip.style.left = `${event.clientX - tooltipWidth - 12}px`
+      } else {
+        tooltip.style.left = `${event.clientX + 12}px`
+      }
+      tooltip.style.top = `${event.clientY + 12}px`
+    }
+
+    if (target._selectedCountTooltipMoveHandler) {
+      target.removeEventListener('mousemove', target._selectedCountTooltipMoveHandler)
+    }
+    if (target._selectedCountTooltipLeaveHandler) {
+      target.removeEventListener('mouseleave', target._selectedCountTooltipLeaveHandler)
+    }
+
+    target.addEventListener('mousemove', showTooltip)
+    target.addEventListener('mouseleave', hideTooltip)
+    target._selectedCountTooltipMoveHandler = showTooltip
+    target._selectedCountTooltipLeaveHandler = hideTooltip
+  }
+
+  ensureSelectedCountTooltip() {
+    let tooltip = document.getElementById('range-selected-count-tooltip')
+    if (tooltip) return tooltip
+
+    tooltip = document.createElement('div')
+    tooltip.id = 'range-selected-count-tooltip'
+    tooltip.style.position = 'fixed'
+    tooltip.style.display = 'none'
+    tooltip.style.pointerEvents = 'none'
+    tooltip.style.zIndex = '11000'
+    tooltip.style.backgroundColor = 'rgba(17, 24, 39, 0.95)'
+    tooltip.style.color = 'white'
+    tooltip.style.padding = '8px 10px'
+    tooltip.style.borderRadius = '6px'
+    tooltip.style.fontSize = '12px'
+    tooltip.style.lineHeight = '1.35'
+    tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.25)'
+    tooltip.style.maxWidth = '260px'
+    document.body.appendChild(tooltip)
+    return tooltip
   }
 
   // Update the main plot with the new range (throttled for performance)

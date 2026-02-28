@@ -808,7 +808,7 @@ export class UIManager {
     // Handle undefined or null filteredIndices
     if (!filteredIndices || filteredIndices === undefined) {
       // No filtering applied - show total points
-      pointCountElement.textContent = `${totalPoints.toLocaleString()} points`
+      pointCountElement.textContent = `${totalPoints.toLocaleString()}`
       pointCountElement.title = 'All points visible (no filtering applied)'
       pointCountElement.style.color = '' // Reset to default
       pointCountElement.style.fontWeight = ''
@@ -818,7 +818,7 @@ export class UIManager {
       const percentage = totalPoints > 0 ? ((filteredCount / totalPoints) * 100).toFixed(1) : 0
       const filteringSummary = this.controller.dataManager.getFilteringSummary()
       
-      pointCountElement.textContent = `${filteredCount.toLocaleString()} points`
+      pointCountElement.textContent = `${filteredCount.toLocaleString()}`
       
       // Create detailed tooltip
       let tooltip = `${filteredCount.toLocaleString()} of ${totalPoints.toLocaleString()} points visible (${percentage}%)`

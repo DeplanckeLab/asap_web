@@ -1351,16 +1351,10 @@ export default class extends Controller {
     const wrapper = document.createElement('div')
     wrapper.className = 'embedding-link-content'
 
-    if (info.origin) {
-      const originSpan = document.createElement('span')
-      originSpan.className = 'embedding-link-origin'
-      originSpan.textContent = info.origin
-      wrapper.appendChild(originSpan)
-    }
-
     const nameSpan = document.createElement('span')
     nameSpan.className = 'embedding-link-name'
-    nameSpan.textContent = info.name || 'Select embedding...'
+    const embeddingName = info.name || 'Select embedding...'
+    nameSpan.textContent = info.origin ? `${info.origin} > ${embeddingName}` : embeddingName
     wrapper.appendChild(nameSpan)
 
     if (info.dimension) {
@@ -2490,6 +2484,7 @@ export default class extends Controller {
     if (pointCountElement) {
       pointCountElement.textContent = coordinates.length.toLocaleString()
     }
+    this.uiManager.showPlotInfoPanel()
     
     // Store for tracking
     this.numPoints = coordinates.length

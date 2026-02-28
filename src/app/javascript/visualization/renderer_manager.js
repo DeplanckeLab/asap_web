@@ -121,7 +121,7 @@ export class RendererManager {
     
     // Y-axis title (rotated)
     ctx.save()
-    ctx.translate(15, height / 2)
+    ctx.translate(20, height / 2)
     ctx.rotate(-Math.PI / 2)
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'

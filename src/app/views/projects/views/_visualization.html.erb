@@ -693,10 +693,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
              data-dimension-label="<%= default_dimension_label %>"
              style="display: flex; text-decoration: none; color: inherit; cursor: pointer;">
             <div class="embedding-link-content">
-              <% if default_origin_label.present? %>
-                <span class="embedding-link-origin"><%= default_origin_label %></span>
-              <% end %>
-              <span class="embedding-link-name"><%= default_embedding_name_text %></span>
+              <span class="embedding-link-name"><%= default_origin_label.present? ? "#{default_origin_label} > #{default_embedding_name_text}" : default_embedding_name_text %></span>
               <% if default_dimension_label.present? %>
                 <span class="embedding-link-dimension"><%= default_dimension_label %></span>
               <% end %>
@@ -1324,7 +1321,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </button>-->
       </div>
     </div>
-    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column;">
+    <div style="flex: 1; padding: 4px; display: flex; flex-direction: column;">
       <!-- Plot Container -->
       <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px; overflow: hidden;">
         <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
@@ -1339,13 +1336,13 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       </div>
       
       <!-- Plot Controls -->
-      <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
+      <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
         <div>
           <span>Controls: </span>
           <span id="control-instructions">Click to pick a cell, click and drag to move a label, scroll to zoom</span>
         </div>
         <div id="plot-info" style="display: none;">
-          <span id="point-count">0</span> points
+          <span id="point-count"><%= number_with_delimiter(default_cells || 0) %></span> points
         </div>
       </div>
     </div>

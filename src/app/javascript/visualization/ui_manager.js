@@ -562,12 +562,22 @@ export class UIManager {
 
   // Update metadata status icon based on loading state
   // States: 'not-loaded', 'downloading', 'in-db', 'in-memory'
-  updateMetadataStatusIcon(metadataId, state) {
+  updateMetadataStatusIcon(metadataId, state, source = 'unknown') {
     const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
     if (!statusIcon) return
     
     const icon = statusIcon.querySelector('i')
     if (!icon) return
+
+    const previousState = statusIcon.dataset.statusState || 'unset'
+    if (previousState !== state) {
+      console.log(`[metadata-status] ${metadataId}: ${previousState} -> ${state} (source: ${source})`)
+      if (previousState === 'in-memory' && (state === 'downloading' || state === 'not-loaded')) {
+        console.warn(`[metadata-status] downgrade detected for ${metadataId}: ${previousState} -> ${state}`)
+        console.trace('[metadata-status] downgrade stack')
+      }
+    }
+    statusIcon.dataset.statusState = state
     
     // Show the icon
     statusIcon.style.display = 'flex'

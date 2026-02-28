@@ -2705,7 +2705,7 @@ export default class extends Controller {
         
         // Update status icon to show it's in memory (green check)
         // console.log(`🔍 [MEMORY] Metadata ${metadataId} loaded to memory in loadSingleMetadataVector - setting to green`)
-        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory', 'checkSingleMetadataStatus:in-memory')
         
         const info = vectorData.compression_info
         //console.log(`Successfully loaded metadata ${vectorData.name} silently (${info.type}): ${info.binary_size} bytes, ${info.compression_ratio}x compression`)
@@ -3321,15 +3321,15 @@ export default class extends Controller {
       
       if (isInDatabase) {
         // console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
-        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db', 'checkSingleMetadataStatus:in-db')
         return
       }
 
       // Metadata is not loaded anywhere
-      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded', 'checkSingleMetadataStatus:not-loaded')
     } catch (error) {
       console.error(`Error checking status for metadata ${metadataId}:`, error)
-      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded', 'checkSingleMetadataStatus:error')
     }
   }
 
@@ -3692,8 +3692,8 @@ export default class extends Controller {
             
             // Check if this metadata is in the database
             if (metadataInDatabase.has(metadataId.toString())) {
-              // Update status icon to show it's downloading
-              this.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
+              // Metadata is already in IndexedDB; keep disk-state visual (orange), do not reset to spinner.
+              this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db', 'preloadAllMetadata:memory-phase:queued')
               
               // Silently load from disk to memory (only log every 10th)
               const memoryLoadStart = performance.now()
@@ -3723,7 +3723,7 @@ export default class extends Controller {
                   
                   // Update status icon to show it's in memory (green check) - this is new data loaded during preloading
                   // console.log(`🔍 [PRELOAD] Setting ${metadataId} to in-memory (green) during preloading`)
-                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory', 'preloadAllMetadata:memory-phase:loaded')
                   
                   // Show checkboxes for loaded metadata
                   this.uiManager.showCheckboxesForMetadata(metadataId)
@@ -3795,7 +3795,7 @@ export default class extends Controller {
                 }
               } else {
                 // Update status icon to show it's downloading
-                this.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
+                this.uiManager.updateMetadataStatusIcon(metadataId, 'downloading', 'preloadAllMetadata:disk-phase:start')
                 
                 // Load to disk only
                 result = await this.preloadMetadataToDisk(metadataId)
@@ -12007,9 +12007,14 @@ export default class extends Controller {
         .map((item) => `${item.metadataId}:${item.createdAt || ''}`)
         .sort()
         .join('|')
-      if (completionSignature && completionSignature !== this.lastSelectionCompletionSignature) {
-        this.lastSelectionCompletionSignature = completionSignature
-        this.refreshPageCategoricalMetadata()
+      if (completionSignature) {
+        if (this.lastSelectionCompletionSignature === null) {
+          // First polling pass establishes baseline only; avoid immediate left-panel replacement.
+          this.lastSelectionCompletionSignature = completionSignature
+        } else if (completionSignature !== this.lastSelectionCompletionSignature) {
+          this.lastSelectionCompletionSignature = completionSignature
+          this.refreshPageCategoricalMetadata()
+        }
       }
     } catch (_error) {
       // Ignore transient refresh errors.

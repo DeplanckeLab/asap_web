@@ -265,7 +265,7 @@ export class DataManager {
       // console.log('Cached compression_info:', cachedData.compression_info) */
       const enrichedData = this.ensureMetadataVectorValues(metadataId, cachedData)
       // Update status icon to show it's in memory
-      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory', 'dataManager.loadSingleMetadataVector:memory-hit')
+      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
       return enrichedData
     }
     
@@ -290,7 +290,7 @@ export class DataManager {
         this.controller.loadedMetadataVectors[metadataId] = cleanData
         const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
         // Update status icon to show it's in memory (loaded from disk)
-        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory', 'dataManager.loadSingleMetadataVector:indexeddb-hit')
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         return enrichedData
       }
     }
@@ -313,7 +313,7 @@ export class DataManager {
     
     // Mark as loading and update status icon to show downloading
     this.controller.loadingMetadataVectors.add(metadataId)
-    this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'downloading', 'dataManager.loadSingleMetadataVector:start')
+    this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
     
     try {
       // Get the current loom file
@@ -374,7 +374,7 @@ export class DataManager {
         }
         
         // Update status icon to show it's in memory
-        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory', 'dataManager.loadSingleMetadataVector:network-success')
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         
         // SECOND: Store in IndexedDB for future sessions (async, don't wait)
         this.controller.memoryManager.storeMetadataInIndexedDB(metadataId, dataToPersist).catch(error => {
@@ -390,7 +390,7 @@ export class DataManager {
     } catch (error) {
       console.error(`Failed to load metadata vector ${metadataId}:`, error)
       // Update status icon to show error (gray with question mark)
-      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded', 'dataManager.loadSingleMetadataVector:error')
+      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
       throw error
     } finally {
       // Always clean up loading state

@@ -562,22 +562,12 @@ export class UIManager {
 
   // Update metadata status icon based on loading state
   // States: 'not-loaded', 'downloading', 'in-db', 'in-memory'
-  updateMetadataStatusIcon(metadataId, state, source = 'unknown') {
+  updateMetadataStatusIcon(metadataId, state) {
     const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
     if (!statusIcon) return
     
     const icon = statusIcon.querySelector('i')
     if (!icon) return
-
-    const previousState = statusIcon.dataset.statusState || 'unset'
-    if (previousState !== state) {
-      console.log(`[metadata-status] ${metadataId}: ${previousState} -> ${state} (source: ${source})`)
-      if (previousState === 'in-memory' && (state === 'downloading' || state === 'not-loaded')) {
-        console.warn(`[metadata-status] downgrade detected for ${metadataId}: ${previousState} -> ${state}`)
-        console.trace('[metadata-status] downgrade stack')
-      }
-    }
-    statusIcon.dataset.statusState = state
     
     // Show the icon
     statusIcon.style.display = 'flex'
@@ -986,6 +976,7 @@ export class UIManager {
     const filtersEnabled = this.controller.globalFiltersEnabled !== false
     const dataManager = this.controller.dataManager
     const details = dataManager && dataManager.getFilterDetails ? dataManager.getFilterDetails() : []
+    const disabledFilters = this.getIndividuallyDisabledFilters()
     const definedCount = dataManager && dataManager.getDefinedFilterCount ? dataManager.getDefinedFilterCount() : 0
     const activeCount = dataManager && dataManager.getActiveFilterCount ? dataManager.getActiveFilterCount() : 0
     
@@ -1000,8 +991,8 @@ export class UIManager {
     const statusLine = document.createElement('div')
     statusLine.style.fontSize = '13px'
     statusLine.style.fontWeight = '600'
-    statusLine.style.color = filtersEnabled ? '#2563eb' : '#6b7280'
-    statusLine.textContent = filtersEnabled ? 'Global filters enabled' : 'Global filters disabled'
+    statusLine.style.color = '#10b981'
+    statusLine.textContent = 'Enabled filters'
     heading.appendChild(statusLine)
     
     if (!filtersEnabled && definedCount > 0) {
@@ -1014,13 +1005,12 @@ export class UIManager {
     
     panel.appendChild(heading)
     
-    if (!details || details.length === 0) {
+    if ((!details || details.length === 0) && disabledFilters.length === 0) {
       const emptyState = document.createElement('div')
       emptyState.style.fontSize = '13px'
       emptyState.style.color = '#6b7280'
       emptyState.textContent = 'No filters defined.'
       panel.appendChild(emptyState)
-      return
     }
     
     details.forEach((filter, index) => {
@@ -1143,6 +1133,107 @@ export class UIManager {
       
       panel.appendChild(item)
     })
+
+    if (disabledFilters.length > 0) {
+      const disabledHeader = document.createElement('div')
+      disabledHeader.style.marginTop = details.length > 0 ? '10px' : '2px'
+      disabledHeader.style.paddingTop = details.length > 0 ? '10px' : '0'
+      disabledHeader.style.borderTop = details.length > 0 ? '1px solid #e5e7eb' : 'none'
+      disabledHeader.style.fontSize = '13px'
+      disabledHeader.style.fontWeight = '600'
+      disabledHeader.style.color = '#dc2626'
+      disabledHeader.textContent = 'Disabled filters'
+      panel.appendChild(disabledHeader)
+
+      disabledFilters.forEach((filter) => {
+        const item = document.createElement('div')
+        item.style.display = 'flex'
+        item.style.justifyContent = 'space-between'
+        item.style.alignItems = 'center'
+        item.style.padding = '8px 0'
+        item.style.cursor = 'pointer'
+        item.style.transition = 'background-color 0.15s ease'
+        item.tabIndex = 0
+        item.addEventListener('mouseenter', () => {
+          item.style.backgroundColor = '#f9fafb'
+        })
+        item.addEventListener('mouseleave', () => {
+          item.style.backgroundColor = 'transparent'
+        })
+        item.addEventListener('click', () => {
+          this.controller.focusGlobalFilterItem({ metadataId: filter.metadataId })
+        })
+        item.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            this.controller.focusGlobalFilterItem({ metadataId: filter.metadataId })
+          }
+        })
+
+        const nameEl = document.createElement('div')
+        nameEl.style.fontSize = '13px'
+        nameEl.style.fontWeight = '600'
+        nameEl.style.color = '#111827'
+        nameEl.textContent = filter.name
+        item.appendChild(nameEl)
+
+        const badge = document.createElement('span')
+        badge.style.fontSize = '11px'
+        badge.style.color = '#6b7280'
+        badge.style.backgroundColor = '#f3f4f6'
+        badge.style.borderRadius = '9999px'
+        badge.style.padding = '2px 8px'
+        badge.textContent = filter.type === 'categorical' ? 'Categorical' : 'Continuous'
+        item.appendChild(badge)
+
+        panel.appendChild(item)
+      })
+    }
+  }
+
+  getIndividuallyDisabledFilters() {
+    const disabled = []
+    const seen = new Set()
+
+    const dataManager = this.controller.dataManager
+    const resolveName = (metadataId, fallback) => {
+      return dataManager?.getMetadataNameById?.(metadataId) ||
+             this.controller.loadedMetadataVectors?.[metadataId]?.name ||
+             fallback
+    }
+
+    document.querySelectorAll('.metadata-filter-switch[data-metadata-id][data-filter-enabled="false"]').forEach((switchEl) => {
+      const metadataId = String(switchEl.dataset.metadataId || '').trim()
+      if (!metadataId || seen.has(metadataId)) return
+      seen.add(metadataId)
+
+      const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+      const hasRangeSection = !!metadataItem?.querySelector('.metadata-range-section')
+      const metadataName = metadataItem?.querySelector('[data-metadata-name]')?.dataset?.metadataName || `Metadata ${metadataId}`
+
+      disabled.push({
+        metadataId,
+        name: resolveName(metadataId, metadataName),
+        type: hasRangeSection ? 'continuous' : 'categorical'
+      })
+    })
+
+    document.querySelectorAll('.gene-filter-switch[data-gene-id][data-filter-enabled="false"]').forEach((switchEl) => {
+      const geneId = String(switchEl.dataset.geneId || '').trim()
+      if (!geneId) return
+      const metadataId = `gene_${geneId}`
+      if (seen.has(metadataId)) return
+      seen.add(metadataId)
+
+      const geneName = this.controller.geneManager?.geneTags?.find((gene) => String(gene.stableId) === geneId)?.symbol || `Gene ${geneId}`
+      disabled.push({
+        metadataId,
+        name: geneName,
+        type: 'continuous'
+      })
+    })
+
+    return disabled
   }
 
   // Show the plot info panel

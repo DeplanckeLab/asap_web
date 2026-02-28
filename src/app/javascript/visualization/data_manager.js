@@ -910,11 +910,9 @@ export class DataManager {
     // Update all range slider counts to reflect combined filtering (for ALL continuous metadata)
     this.controller.uiManager.updateAllRangeSliderCounts()
     
-    // Update manual selection count to show only visible selected cells
-    this.controller.uiManager.updateSelectedCellsCount()
-    
-    // Update button state after filtering
-    this.controller.uiManager.updateAddAllVisibleButtonState()
+    // Refresh selection summary after every filtering action.
+    // With no lasso selection it shows visible cells count; with lasso it shows lassoed cells.
+    this.controller.updateSelectionCount()
     
     // Update global filter summary (count and switch state)
     this.controller.uiManager.updateGlobalFilterSummary()

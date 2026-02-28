@@ -493,6 +493,12 @@ export default class extends Controller {
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
     this.savedSelections = Array.isArray(this.initialSelectionsValue) ? this.initialSelectionsValue.map((item) => this.normalizeSelectionItem(item)).filter((item) => item) : []
+    this.composeSelectionSteps = []
+    this.composeSelectionCurrentSet = null
+    this.composeSelectionIntermediateResults = []
+    this.composeSelectionSetCache = new Map()
+    this.composeSelectionCoordinatesCache = new Map()
+    this.composeSelectionPreviewRequestId = 0
     this.selectionStatusPollingTimer = null
     this.lastSelectionCompletionSignature = null
     this.originalPointColors = new Map() // Store original colors for reset functionality
@@ -2507,6 +2513,8 @@ export default class extends Controller {
     // Store for tracking
     this.numPoints = coordinates.length
     this.spritesRenderType = 'default'
+    this.currentVisibleCells = null
+    this.updateSelectionCount()
     
     const elapsed = performance.now() - startTime
     // console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
@@ -5572,17 +5580,7 @@ export default class extends Controller {
       this.updateSelectedPointColors()
     }
 
-    if (state.selection?.activeTab === 'gene-sets') {
-      const geneSetsTab = document.getElementById('gene-sets-tab')
-      if (geneSetsTab) {
-        geneSetsTab.click()
-      }
-    } else {
-      const cellsTab = document.getElementById('cells-tab')
-      if (cellsTab) {
-        cellsTab.click()
-      }
-    }
+    this.setSelectionTab(state.selection?.activeTab === 'gene-sets' ? 'gene-sets' : 'cells')
 
     this.dataManager.updateCellFiltering(true)
     if (this.metadataData?.id) {
@@ -9636,7 +9634,7 @@ export default class extends Controller {
         instructions = 'Drag to pan • Scroll to zoom (mouse-centered)'
         break
       case 'lasso':
-        instructions = 'Click and drag to select cells, scroll to zoom'
+        instructions = 'Click and drag to select cells, double click to cancel lasso selection, scroll to zoom'
         break
       default:
         instructions = 'Click to pick a cell, click and drag to move a label, scroll to zoom'
@@ -10244,23 +10242,72 @@ export default class extends Controller {
 
   updateSelectionCount() {
     const countElement = document.getElementById('selected-cells-count')
+    const labelElement = document.getElementById('selected-cells-label')
+    const selectionDisplay = this.getSelectionCountDisplayData()
     if (countElement) {
-      countElement.textContent = this.selectedCells.size.toLocaleString()
+      countElement.textContent = selectionDisplay.count.toLocaleString()
+      countElement.title = selectionDisplay.title
+      countElement.style.color = selectionDisplay.count > 0 ? '#1f2937' : '#6b7280'
+      countElement.style.fontWeight = selectionDisplay.count > 0 ? '600' : '500'
     }
+    if (labelElement) {
+      labelElement.textContent = selectionDisplay.label
+    }
+  }
+
+  getSelectionCountDisplayData() {
+    const lassoCount = this.selectedCells ? this.selectedCells.size : 0
+    const totalCount = this.currentCoordinates ? this.currentCoordinates.length : 0
+    const visibleCount = Array.isArray(this.currentVisibleCells) ? this.currentVisibleCells.length : totalCount
+
+    if (lassoCount > 0) {
+      const percentage = totalCount > 0 ? ((lassoCount / totalCount) * 100).toFixed(1) : '0.0'
+      return {
+        count: lassoCount,
+        label: 'lassoed cells selected',
+        title: `${lassoCount.toLocaleString()} lassoed cells selected (${percentage}% of ${totalCount.toLocaleString()} total)`
+      }
+    }
+
+    const visiblePercentage = totalCount > 0 ? ((visibleCount / totalCount) * 100).toFixed(1) : '0.0'
+    return {
+      count: visibleCount,
+      label: 'visible cells selected',
+      title: `${visibleCount.toLocaleString()} visible cells selected (${visiblePercentage}% of ${totalCount.toLocaleString()} total)`
+    }
+  }
+
+  getEffectiveSelectionIndices() {
+    if (this.selectedCells && this.selectedCells.size > 0) {
+      return Array.from(this.selectedCells)
+    }
+
+    if (Array.isArray(this.currentVisibleCells)) {
+      return [...this.currentVisibleCells]
+    }
+
+    if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
+      return []
+    }
+
+    return Array.from({ length: this.currentCoordinates.length }, (_, index) => index)
   }
 
   // Tab switching for selections panel
   switchSelectionTab(event) {
-    const tab = event.currentTarget.dataset.tab
-    //console.log('Switching to tab:', tab)
-    
-    // Update tab buttons
+    const tab = event?.currentTarget?.dataset?.tab
+    this.setSelectionTab(tab)
+  }
+
+  setSelectionTab(tab = 'cells') {
+    const normalizedTab = tab === 'gene-sets' ? 'gene-sets' : 'cells'
     const cellsTab = document.getElementById('cells-tab')
     const geneSetsTab = document.getElementById('gene-sets-tab')
     const cellsContent = document.getElementById('cells-tab-content')
     const geneSetsContent = document.getElementById('gene-sets-tab-content')
-    
-    if (tab === 'cells') {
+    if (!cellsTab || !geneSetsTab || !cellsContent || !geneSetsContent) return
+
+    if (normalizedTab === 'cells') {
       cellsTab.classList.add('border-blue-500', 'text-blue-600')
       cellsTab.classList.remove('border-transparent', 'text-gray-500')
       geneSetsTab.classList.remove('border-blue-500', 'text-blue-600')
@@ -10268,7 +10315,7 @@ export default class extends Controller {
       
       cellsContent.classList.remove('hidden')
       geneSetsContent.classList.add('hidden')
-      cellsContent.style.display = 'block'
+      cellsContent.style.display = 'flex'
       geneSetsContent.style.display = 'none'
     } else if (tab === 'gene-sets') {
       geneSetsTab.classList.add('border-blue-500', 'text-blue-600')
@@ -10278,34 +10325,10 @@ export default class extends Controller {
       
       geneSetsContent.classList.remove('hidden')
       cellsContent.classList.add('hidden')
-      geneSetsContent.style.display = 'block'
+      geneSetsContent.style.display = 'flex'
       cellsContent.style.display = 'none'
     }
   }
-
-  // Add all visible cells to selection
-  addAllVisibleCells() {
-    //console.log('Adding all visible cells to selection')
-    
-    // Get currently visible cells
-    const visibleCells = this.currentVisibleCells || (this.currentCoordinates ? Array.from({length: this.currentCoordinates.length}, (_, i) => i) : [])
-    
-    if (visibleCells.length === 0) {
-      // console.log('No visible cells to select')
-      return
-    }
-    
-    this.applySelectionFromIndices(visibleCells, {
-      source: 'add-all-visible',
-      replaceExisting: false,
-      updateCustomPlot: true
-    })
-
-    // Update button state
-    this.uiManager.updateAddAllVisibleButtonState()
-  }
-
-  // Update the state of the "Add all visible cells" button
 
   // Settings Window Methods - delegate to UIManager
   toggleSettingsWindow() {
@@ -10751,20 +10774,29 @@ export default class extends Controller {
 
   // Save selection method
   saveSelection() {
-    if (this.selectedCells.size === 0) {
+    const selectedIndices = this.getEffectiveSelectionIndices()
+    if (selectedIndices.length === 0) {
       alert('No cells selected to save')
       return
     }
 
     const selectionName = prompt('Enter a name for this selection:')
     if (selectionName) {
-      this.persistSelection(selectionName.trim())
+      this.persistSelection(selectionName.trim(), selectedIndices)
     }
   }
 
-  async persistSelection(selectionName) {
+  async persistSelection(selectionName, selectedIndicesOverride = null, options = {}) {
     const cleanName = selectionName || `Selection ${new Date().toLocaleString()}`
-    const selectedIndices = Array.from(this.selectedCells).map((idx) => Number(idx)).filter((idx) => Number.isInteger(idx))
+    const selectedIndices = (Array.isArray(selectedIndicesOverride) ? selectedIndicesOverride : this.getEffectiveSelectionIndices())
+      .map((idx) => Number(idx))
+      .filter((idx) => Number.isInteger(idx))
+    const selectionSource = this.resolveSelectionSource(options)
+    let composeSteps = Array.isArray(options?.composeSteps) ? options.composeSteps : null
+    if (selectionSource === 'compose' && (!Array.isArray(composeSteps) || composeSteps.length === 0)) {
+      composeSteps = this.composeBuildStepsForSave()
+    }
+    const filterComponents = this.buildSelectionFilterComponentsForSave(selectionSource)
     const itemId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`
     const pendingItem = this.normalizeSelectionItem({
       id: itemId,
@@ -10775,7 +10807,10 @@ export default class extends Controller {
       status: 'queued',
       created_at: new Date().toISOString(),
       loom_file: this.getCurrentLoomFileForRequest(),
-      unselected_name: 'Not selected'
+      unselected_name: 'Not selected',
+      selection_source: selectionSource,
+      compose_steps: composeSteps,
+      filter_components: filterComponents
     })
     this.savedSelections.unshift(pendingItem)
     this.renderSavedSelections()
@@ -10788,18 +10823,27 @@ export default class extends Controller {
     }
 
     try {
+      const requestBody = {
+        selection_name: cleanName,
+        embedding_metadata_id: embeddingMetadataId,
+        loom_file: this.getCurrentLoomFileForRequest(),
+        list_cols: selectedIndices
+      }
+      if (composeSteps && composeSteps.length > 0) {
+        requestBody.compose_steps = composeSteps
+      }
+      requestBody.selection_source = selectionSource
+      if (Array.isArray(filterComponents)) {
+        requestBody.filter_components = filterComponents
+      }
+
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_metadata_from_selection`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
         },
-        body: JSON.stringify({
-          selection_name: cleanName,
-          embedding_metadata_id: embeddingMetadataId,
-          loom_file: this.getCurrentLoomFileForRequest(),
-          list_cols: selectedIndices
-        })
+        body: JSON.stringify(requestBody)
       })
       const payload = await response.json()
       if (!response.ok || payload.status !== 'ok') {
@@ -10847,17 +10891,82 @@ export default class extends Controller {
 
   normalizeSelectionItem(item) {
     if (!item || typeof item !== 'object') return null
+    const rawSelectionNumber = Number(item.selection_number)
+    const selectionNumber = Number.isInteger(rawSelectionNumber) && rawSelectionNumber > 0 ? rawSelectionNumber : null
+    const rawSelectedCount = item.selected_count ?? item.selectedCount ?? 0
+    const selectedCount = Number(rawSelectedCount)
+    const composeSteps = Array.isArray(item.compose_steps)
+      ? item.compose_steps
+      : (Array.isArray(item.composeSteps) ? item.composeSteps : null)
+    const filterComponents = Array.isArray(item.filter_components)
+      ? item.filter_components
+      : (Array.isArray(item.filterComponents) ? item.filterComponents : null)
     return {
       id: String(item.id || ''),
       runId: item.run_id ? Number(item.run_id) : null,
       metadataId: item.metadata_id ? String(item.metadata_id) : null,
       name: String(item.name || 'Selection'),
-      selectedCount: Number(item.selected_count || 0),
+      selectedCount: Number.isFinite(selectedCount) ? selectedCount : 0,
       status: String(item.status || 'queued'),
       createdAt: item.created_at ? String(item.created_at) : null,
       loomFile: item.loom_file ? String(item.loom_file) : null,
-      unselectedName: item.unselected_name ? String(item.unselected_name) : 'Not selected'
+      unselectedName: item.unselected_name ? String(item.unselected_name) : 'Not selected',
+      selectionNumber: selectionNumber,
+      selectionSource: item.selection_source ? String(item.selection_source) : 'lasso',
+      composeSteps: composeSteps,
+      filterComponents: filterComponents
     }
+  }
+
+  resolveSelectionSource(options = {}) {
+    const explicit = options?.selectionSource
+    if (explicit === 'compose' || explicit === 'lasso' || explicit === 'visible') {
+      return explicit
+    }
+    return (this.selectedCells && this.selectedCells.size > 0) ? 'lasso' : 'visible'
+  }
+
+  buildSelectionFilterComponentsForSave(selectionSource) {
+    if (selectionSource !== 'visible') {
+      return null
+    }
+    if (!this.dataManager || typeof this.dataManager.getFilterDetails !== 'function') {
+      return null
+    }
+
+    const rawDetails = this.dataManager.getFilterDetails()
+    if (!Array.isArray(rawDetails) || rawDetails.length === 0) {
+      return []
+    }
+
+    return rawDetails.map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+
+      const metadataId = String(entry.metadataId || '')
+      const metadataName = String(entry.name || '')
+      if (entry.type === 'continuous') {
+        return {
+          type: 'continuous',
+          metadata_id: metadataId,
+          name: metadataName,
+          range_min: Number(entry.range?.min),
+          range_max: Number(entry.range?.max),
+          full_min: Number(entry.fullRange?.min),
+          full_max: Number(entry.fullRange?.max)
+        }
+      }
+
+      return {
+        type: 'categorical',
+        metadata_id: metadataId,
+        name: metadataName,
+        summary_mode: String(entry.summaryMode || 'selected'),
+        selected_count: Number(entry.selectedCount || 0),
+        total_count: Number(entry.totalCount || 0),
+        summary_values: Array.isArray(entry.summaryValues) ? entry.summaryValues.map((value) => String(value)).slice(0, 50) : [],
+        hidden_value_count: Number(entry.hiddenValueCount || 0)
+      }
+    }).filter((entry) => entry)
   }
 
   renderSavedSelections() {
@@ -10874,21 +10983,935 @@ export default class extends Controller {
       return
     }
 
-    list.innerHTML = items.map((item) => {
+    list.innerHTML = items.map((item, index) => {
       const createdAt = item.createdAt ? new Date(item.createdAt).toLocaleString() : ''
+      const selectionPrefix = item.selectionNumber ? `#${item.selectionNumber} ` : ''
+      const isLastItem = index === items.length - 1
+      const trailingMargin = isLastItem ? '20px' : '0'
+      const sourceIconHtml = this.selectionSourceIconHtml(item.selectionSource)
+      const hasSelectionDetails = item.selectionSource === 'compose' || item.selectionSource === 'visible'
       return `
         <button type="button"
                 data-selection-id="${this.escapeHtml(item.id)}"
-                style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:6px;cursor:pointer;"
+                style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;margin-bottom:${trailingMargin};"
                 data-action="click->visualization#openSavedSelection">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(item.name)}</div>
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+              ${sourceIconHtml}
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(`${selectionPrefix}${item.name}`)}</div>
+            </div>
             <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
           </div>
-          <div style="margin-left:8px;">${this.selectionStatusBadgeHtml(item.status)}</div>
+          <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+            <div>${this.selectionStatusBadgeHtml(item.status)}</div>
+            ${hasSelectionDetails ? `
+            <span role="button"
+                    tabindex="0"
+                    title="Selection details"
+                    aria-label="Selection details"
+                    data-selection-id="${this.escapeHtml(item.id)}"
+                    style="display:inline-flex;align-items:center;justify-content:center;height:18px;color:#2563eb;cursor:pointer;padding:0 4px;font-size:11px;font-weight:600;border:1px solid #bfdbfe;border-radius:4px;background:#eff6ff;"
+                    data-action="click->visualization#openComposeSelectionDetails">
+              Details
+            </span>
+            ` : ''}
+            <span role="button"
+                    tabindex="0"
+                    title="Delete selection"
+                    aria-label="Delete selection"
+                    data-selection-id="${this.escapeHtml(item.id)}"
+                    style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:#dc2626;cursor:pointer;padding:0;"
+                    data-action="click->visualization#deleteSavedSelection">
+              <i class="fas fa-trash" style="font-size:12px;"></i>
+            </span>
+          </div>
         </button>
       `
     }).join('')
+  }
+
+  selectionSourceIconHtml(source) {
+    const normalizedSource = String(source || 'lasso')
+    if (normalizedSource === 'compose') {
+      return '<span title="Composed selection" style="display:inline-flex;align-items:center;justify-content:center;color:#8b5cf6;flex:0 0 auto;line-height:0;"><svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="4.5" cy="6" r="3.2" fill="currentColor" fill-opacity="0.22"/><circle cx="7.5" cy="6" r="3.2" fill="currentColor" fill-opacity="0.22"/><circle cx="4.5" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="0.9"/><circle cx="7.5" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="0.9"/></svg></span>'
+    }
+    if (normalizedSource === 'visible') {
+      return '<i class="fas fa-filter" title="Visible filtered cells selection" style="font-size:11px;color:#059669;flex:0 0 auto;"></i>'
+    }
+    return '<span title="Lasso selection" style="display:inline-flex;align-items:center;justify-content:center;color:#2563eb;flex:0 0 auto;line-height:0;"><svg width="12" height="12" viewBox="0 0 496.149 496.149" style="fill: currentColor;" xmlns="http://www.w3.org/2000/svg"><g><path d="M250.201,81.608c97.43,0,179.746,43.434,179.746,94.834c0,12.449-4.934,24.449-13.645,35.465l35.402,10.404 c8.613-14.227,13.533-29.629,13.533-45.869c0-72.965-94.463-130.123-215.037-130.123S35.164,103.477,35.164,176.442 c0,26.918,12.936,51.643,35.189,72.172c-6.951,4.502-13.756,10.502-18.836,18.984c-10.453,17.449-10.66,39.094-0.645,64.35 c9.433,23.791,7.125,32.582,5.693,35.242c-3.354,6.322-18.127,9.514-32.385,12.596c-3.486,0.758-7.035,1.531-10.582,2.371 c-9.484,2.24-15.353,11.725-13.129,21.225c1.902,8.111,9.164,13.596,17.16,13.596c1.34,0,2.709-0.16,4.068-0.467 c3.32-0.791,6.656-1.518,9.932-2.227c21.111-4.564,45.016-9.742,56.076-30.482c8.486-15.902,7.195-36.516-4.031-64.85 c-5.725-14.435-6.385-25.564-1.947-33.098c4.965-8.451,16.141-12.207,22.19-13.467c35.705,19.902,82.85,32.354,135.592,33.869 l-10.504-35.74c-87.867-5.758-158.555-46.447-158.555-94.074C70.451,125.041,152.772,81.608,250.201,81.608z"/><path d="M487.573,269.629l-222.049-65.271c-1.115-0.338-2.244-0.482-3.373-0.482c-3.113,0-6.158,1.227-8.434,3.5 c-3.096,3.08-4.258,7.613-3.018,11.789l65.271,222.102c1.34,4.613,5.352,7.982,10.143,8.5c0.453,0.047,0.891,0.064,1.322,0.064 c4.309,0,8.307-2.338,10.439-6.162l54.076-98.043l98.025-54.094c4.225-2.322,6.629-6.951,6.1-11.727 C495.561,275.018,492.201,271,487.573,269.629z"/></g></svg></span>'
+  }
+
+  openComposeSelectionModal() {
+    this.ensureComposeSelectionStateInitialized()
+    window.visualizationController = this
+    const overlay = document.getElementById('compose-selection-overlay')
+    if (!overlay) return
+    overlay.style.display = 'flex'
+
+    this.populateComposeSelectionEmbeddings()
+    this.populateComposeSelectionOperands()
+    this.renderComposeSelectionSteps()
+    this.updateComposeSelectionPreview()
+  }
+
+  closeComposeSelectionModal() {
+    const overlay = document.getElementById('compose-selection-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  openComposeSelectionDetails(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const selectionId = event.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === String(selectionId))
+    if (!item || (item.selectionSource !== 'compose' && item.selectionSource !== 'visible')) {
+      return
+    }
+
+    const overlay = document.getElementById('compose-selection-details-overlay')
+    if (!overlay) return
+
+    this.renderComposeSelectionDetails(item)
+    overlay.style.display = 'flex'
+  }
+
+  closeComposeSelectionDetails() {
+    const overlay = document.getElementById('compose-selection-details-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  renderComposeSelectionDetails(item) {
+    const summary = document.getElementById('compose-selection-details-summary')
+    const stepsContainer = document.getElementById('compose-selection-details-steps')
+    const sectionTitle = document.getElementById('compose-selection-details-section-title')
+    if (!summary || !stepsContainer) return
+
+    const selectionLabel = `${item.selectionNumber ? `#${item.selectionNumber} ` : ''}${item.name}`
+    const createdLabel = item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Unknown'
+    const sourceText = item.selectionSource === 'compose' ? 'Composed selection' : 'Visible filtered cells selection'
+
+    summary.innerHTML = `
+      <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>
+      <div style="font-size:12px;color:#374151;margin-top:4px;">Final result: <span style="font-weight:600;color:#065f46;">${Number(item.selectedCount || 0).toLocaleString()} cells</span></div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Source: ${this.escapeHtml(sourceText)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Created: ${this.escapeHtml(createdLabel)}</div>
+    `
+
+    if (item.selectionSource === 'visible') {
+      if (sectionTitle) sectionTitle.textContent = 'Filter components'
+      this.renderVisibleSelectionDetails(item, stepsContainer)
+      return
+    }
+
+    if (sectionTitle) sectionTitle.textContent = 'Steps lineage'
+
+    const steps = [...(item.composeSteps || [])]
+      .filter((step) => step && typeof step === 'object')
+      .sort((a, b) => Number(a.step_index || a.stepIndex || 0) - Number(b.step_index || b.stepIndex || 0))
+    if (steps.length === 0) {
+      stepsContainer.innerHTML = '<div style="font-size:12px;color:#6b7280;padding:8px;">No composition steps available.</div>'
+      return
+    }
+
+    const selectionLabelById = new Map((this.savedSelections || []).map((entry) => [String(entry.id), this.composeSelectionOptionLabel(entry)]))
+    const stepResultLabelByKey = new Map()
+    const stepHtml = []
+
+    steps.forEach((step, idx) => {
+      const stepIndex = Number(step.step_index || step.stepIndex || (idx + 1))
+      const operation = String(step.operation || 'union')
+      const operationLabel = this.composeOperationLabel(operation)
+      const operandAKey = String(step.operand_a || step.operandA || '')
+      const operandBKey = String(step.operand_b || step.operandB || '')
+      const operandALabel = this.composeOperandLabelForDetails(operandAKey, selectionLabelById, stepResultLabelByKey)
+      const operandBLabel = this.composeOperandLabelForDetails(operandBKey, selectionLabelById, stepResultLabelByKey)
+      const resultCount = Number(step.result_count || step.resultCount || 0)
+
+      stepResultLabelByKey.set(`__step__:${stepIndex}`, `Step ${stepIndex} result`)
+
+      stepHtml.push(`
+        <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
+          <div style="font-size:12px;font-weight:600;color:#111827;">Step ${stepIndex}: ${this.escapeHtml(operationLabel)}</div>
+          <div style="font-size:12px;color:#374151;margin-top:2px;">A: ${this.renderComposeOperandDetailsLabel(operandALabel)}</div>
+          <div style="font-size:12px;color:#374151;">B: ${this.renderComposeOperandDetailsLabel(operandBLabel)}</div>
+          <div style="font-size:12px;color:#065f46;font-weight:600;">Result: ${resultCount.toLocaleString()} cells</div>
+        </div>
+      `)
+    })
+
+    stepsContainer.innerHTML = stepHtml.join('')
+  }
+
+  renderVisibleSelectionDetails(item, container) {
+    const components = Array.isArray(item.filterComponents)
+      ? item.filterComponents.filter((entry) => entry && typeof entry === 'object')
+      : []
+    if (components.length === 0) {
+      container.innerHTML = '<div style="font-size:12px;color:#6b7280;padding:8px;">No filter components are available for this selection.</div>'
+      return
+    }
+
+    const rows = components.map((component) => {
+      const type = String(component.type || '')
+      const name = String(component.name || component.metadata_id || 'Metadata')
+      if (type === 'continuous') {
+        const minValue = Number(component.range_min)
+        const maxValue = Number(component.range_max)
+        const fullMin = Number(component.full_min)
+        const fullMax = Number(component.full_max)
+        const minLabel = Number.isFinite(minValue) ? minValue.toLocaleString() : 'N/A'
+        const maxLabel = Number.isFinite(maxValue) ? maxValue.toLocaleString() : 'N/A'
+        const fullMinLabel = Number.isFinite(fullMin) ? fullMin.toLocaleString() : 'N/A'
+        const fullMaxLabel = Number.isFinite(fullMax) ? fullMax.toLocaleString() : 'N/A'
+        return `
+          <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
+            <div style="font-size:12px;font-weight:600;color:#111827;">${this.escapeHtml(name)} <span style="color:#6b7280;font-weight:500;">(continuous)</span></div>
+            <div style="font-size:12px;color:#374151;margin-top:2px;">Selected range: ${this.escapeHtml(minLabel)} to ${this.escapeHtml(maxLabel)}</div>
+            <div style="font-size:11px;color:#6b7280;">Full range: ${this.escapeHtml(fullMinLabel)} to ${this.escapeHtml(fullMaxLabel)}</div>
+          </div>
+        `
+      }
+
+      const summaryMode = String(component.summary_mode || 'selected')
+      const selectedCount = Number(component.selected_count || 0)
+      const totalCount = Number(component.total_count || 0)
+      const hiddenCount = Number(component.hidden_value_count || 0)
+      const values = Array.isArray(component.summary_values) ? component.summary_values.map((value) => String(value)) : []
+      const valuesLabel = values.length > 0 ? values.join(', ') : 'No values listed'
+      const hiddenText = hiddenCount > 0 ? ` + ${hiddenCount.toLocaleString()} more` : ''
+      return `
+        <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
+          <div style="font-size:12px;font-weight:600;color:#111827;">${this.escapeHtml(name)} <span style="color:#6b7280;font-weight:500;">(categorical)</span></div>
+          <div style="font-size:12px;color:#374151;margin-top:2px;">${this.escapeHtml(summaryMode)} values: ${this.escapeHtml(valuesLabel)}${this.escapeHtml(hiddenText)}</div>
+          <div style="font-size:11px;color:#6b7280;">Selected categories: ${selectedCount.toLocaleString()} / ${totalCount.toLocaleString()}</div>
+        </div>
+      `
+    })
+
+    container.innerHTML = rows.join('')
+  }
+
+  composeOperandLabelForDetails(key, selectionLabelById, stepResultLabelByKey) {
+    if (!key) {
+      return { text: 'Unknown operand', deleted: false }
+    }
+    const normalized = String(key)
+    if (normalized === '__current__') {
+      return { text: 'Current virtual result', deleted: false }
+    }
+    if (normalized.startsWith('__step__:')) {
+      return {
+        text: stepResultLabelByKey.get(normalized) || `Step ${normalized.replace('__step__:', '')} result`,
+        deleted: false
+      }
+    }
+    if (normalized.startsWith('saved:')) {
+      const selectionId = normalized.replace('saved:', '')
+      const label = selectionLabelById.get(selectionId)
+      if (label) {
+        return { text: label, deleted: false }
+      }
+      return { text: 'Deleted selection', deleted: true }
+    }
+    return { text: normalized, deleted: false }
+  }
+
+  renderComposeOperandDetailsLabel(labelInfo) {
+    if (!labelInfo || typeof labelInfo !== 'object') {
+      return this.escapeHtml(String(labelInfo || 'Unknown operand'))
+    }
+    const text = this.escapeHtml(String(labelInfo.text || 'Unknown operand'))
+    if (labelInfo.deleted) {
+      return `<span style="color:#b91c1c;font-weight:600;">${text}</span>`
+    }
+    return text
+  }
+
+  ensureComposeSelectionStateInitialized() {
+    if (!(this.composeSelectionSteps instanceof Array)) this.composeSelectionSteps = []
+    if (!(this.composeSelectionCurrentSet instanceof Set) && this.composeSelectionCurrentSet !== null) this.composeSelectionCurrentSet = null
+    if (!(this.composeSelectionIntermediateResults instanceof Array)) this.composeSelectionIntermediateResults = []
+    if (!(this.composeSelectionSetCache instanceof Map)) this.composeSelectionSetCache = new Map()
+    if (!(this.composeSelectionCoordinatesCache instanceof Map)) this.composeSelectionCoordinatesCache = new Map()
+    if (!Number.isFinite(this.composeSelectionPreviewRequestId)) this.composeSelectionPreviewRequestId = 0
+  }
+
+  populateComposeSelectionOperands() {
+    const operandASelect = document.getElementById('compose-selection-operand-a')
+    const operandBSelect = document.getElementById('compose-selection-operand-b')
+    if (!operandASelect || !operandBSelect) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+
+    const currentAValue = operandASelect.value
+    const currentBValue = operandBSelect.value
+    const options = []
+
+    if (this.composeSelectionCurrentSet instanceof Set) {
+      options.push({ value: '__current__', label: `Current virtual result (${this.composeSelectionCurrentSet.size.toLocaleString()} cells)` })
+    }
+
+    if (Array.isArray(this.composeSelectionIntermediateResults) && this.composeSelectionIntermediateResults.length > 0) {
+      this.composeSelectionIntermediateResults.forEach((entry) => {
+        if (!entry || !(entry.cellSet instanceof Set)) return
+        options.push({
+          value: `__step__:${entry.stepIndex}`,
+          label: `Step ${entry.stepIndex} result (${entry.cellSet.size.toLocaleString()} cells)`
+        })
+      })
+    }
+
+    items.forEach((item) => {
+      options.push({
+        value: `saved:${item.id}`,
+        label: this.composeSelectionOptionLabel(item)
+      })
+    })
+
+    const optionMarkup = options.map((opt) => `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`).join('')
+    operandASelect.innerHTML = optionMarkup
+    operandBSelect.innerHTML = optionMarkup
+
+    const validValues = new Set(options.map((opt) => opt.value))
+    if (validValues.has(currentAValue)) {
+      operandASelect.value = currentAValue
+    }
+    if (validValues.has(currentBValue)) {
+      operandBSelect.value = currentBValue
+    }
+
+    if (!operandASelect.value && options[0]) {
+      operandASelect.value = options[0].value
+    }
+    if (!operandBSelect.value && options[1]) {
+      operandBSelect.value = options[1].value
+    } else if (!operandBSelect.value && options[0]) {
+      operandBSelect.value = options[0].value
+    }
+  }
+
+  populateComposeSelectionEmbeddings() {
+    const embeddingSelect = document.getElementById('compose-selection-embedding')
+    if (!embeddingSelect) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const embeddings = (this.embeddingsByLoomValue && this.embeddingsByLoomValue[loomFile]) ? this.embeddingsByLoomValue[loomFile] : []
+    const currentValue = embeddingSelect.value
+
+    embeddingSelect.innerHTML = embeddings.map((embedding) => {
+      const label = this.composeSelectionEmbeddingLabel(embedding)
+      return `<option value="${this.escapeHtml(String(embedding.id))}">${this.escapeHtml(label)}</option>`
+    }).join('')
+
+    if (currentValue && Array.isArray(embeddings) && embeddings.some((embedding) => String(embedding.id) === currentValue)) {
+      embeddingSelect.value = currentValue
+      return
+    }
+
+    const currentEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : ''
+    if (currentEmbeddingId && Array.isArray(embeddings) && embeddings.some((embedding) => String(embedding.id) === currentEmbeddingId)) {
+      embeddingSelect.value = currentEmbeddingId
+    } else if (embeddings[0]) {
+      embeddingSelect.value = String(embeddings[0].id)
+    }
+  }
+
+  composeSelectionEmbeddingLabel(embedding) {
+    if (!embedding) return 'Embedding'
+    const name = String(embedding.display_name || embedding.label || embedding.name || `Embedding ${embedding.id}`)
+    const dims = embedding.nber_cols ? `${Number(embedding.nber_cols).toLocaleString()} cells` : null
+    return dims ? `${name} - ${dims}` : name
+  }
+
+  onComposeSelectionEmbeddingChanged() {
+    this.updateComposeSelectionPreview()
+  }
+
+  composeSelectionOptionLabel(item) {
+    const numberPrefix = item.selectionNumber ? `#${item.selectionNumber} ` : ''
+    const countPart = Number.isFinite(item.selectedCount) ? ` (${item.selectedCount.toLocaleString()} cells)` : ''
+    return `${numberPrefix}${item.name}${countPart}`
+  }
+
+  async updateComposeSelectionPreview() {
+    this.ensureComposeSelectionStateInitialized()
+    const preview = document.getElementById('compose-selection-preview')
+    const status = document.getElementById('compose-selection-status')
+    const operandASelect = document.getElementById('compose-selection-operand-a')
+    const operandBSelect = document.getElementById('compose-selection-operand-b')
+    const operationSelect = document.getElementById('compose-selection-operation')
+    const embeddingSelect = document.getElementById('compose-selection-embedding')
+    if (!preview || !operandASelect || !operandBSelect || !operationSelect || !embeddingSelect) return
+
+    this.composeSelectionPreviewRequestId += 1
+    const requestId = this.composeSelectionPreviewRequestId
+
+    let operandA
+    let operandB
+    try {
+      operandA = await this.resolveComposeOperandSelection(operandASelect.value)
+      operandB = await this.resolveComposeOperandSelection(operandBSelect.value)
+    } catch (error) {
+      if (status) {
+        this.showComposeSelectionStatus(`Could not resolve operands: ${error.message}`, 'error')
+      }
+      return
+    }
+
+    if (requestId !== this.composeSelectionPreviewRequestId) return
+
+    if (!operandA || !operandB) {
+      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Pick valid operands to preview the composed result.</div>'
+      if (status) status.style.display = 'none'
+      return
+    }
+
+    const operation = operationSelect.value || 'union'
+    const resultSet = this.applySetOperation(operandA.cellSet, operandB.cellSet, operation)
+    const embeddingId = String(embeddingSelect.value || '')
+    const loomFile = this.getCurrentLoomFileForRequest()
+
+    let coordinates = []
+    try {
+      coordinates = await this.getComposeSelectionPreviewCoordinates(embeddingId, loomFile)
+    } catch (error) {
+      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not load preview embedding coordinates.</div>'
+      this.showComposeSelectionStatus(`Embedding preview failed: ${error.message}`, 'error')
+      return
+    }
+
+    if (requestId !== this.composeSelectionPreviewRequestId) return
+    const totalCells = Array.isArray(coordinates) && coordinates.length > 0 ? coordinates.length : Math.max(operandA.cellSet.size, operandB.cellSet.size, resultSet.size)
+
+    preview.innerHTML = [
+      this.renderComposeSelectionPreviewCard('Operand A', operandA.label, operandA.cellSet.size, totalCells, '#2563eb', 'compose-preview-canvas-a'),
+      this.renderComposeSelectionPreviewCard('Operand B', operandB.label, operandB.cellSet.size, totalCells, '#d97706', 'compose-preview-canvas-b'),
+      this.renderComposeSelectionPreviewCard('Result', this.composeOperationLabel(operation), resultSet.size, totalCells, '#059669', 'compose-preview-canvas-result')
+    ].join('')
+
+    this.drawComposeSelectionScatterPreview('compose-preview-canvas-a', coordinates, operandA.cellSet, '#2563eb')
+    this.drawComposeSelectionScatterPreview('compose-preview-canvas-b', coordinates, operandB.cellSet, '#d97706')
+    this.drawComposeSelectionScatterPreview('compose-preview-canvas-result', coordinates, resultSet, '#059669')
+
+    if (status) status.style.display = 'none'
+  }
+
+  async getComposeSelectionPreviewCoordinates(embeddingId, loomFile) {
+    this.ensureComposeSelectionStateInitialized()
+    if (!embeddingId) {
+      throw new Error('No embedding selected for preview')
+    }
+
+    const cacheKey = `${loomFile || ''}::${embeddingId}`
+    if (this.composeSelectionCoordinatesCache.has(cacheKey)) {
+      return this.composeSelectionCoordinatesCache.get(cacheKey)
+    }
+
+    if (this.currentCoordinates && this.currentCoordinates.length > 0 && this.metadataData && String(this.metadataData.id) === String(embeddingId)) {
+      this.composeSelectionCoordinatesCache.set(cacheKey, this.currentCoordinates)
+      return this.currentCoordinates
+    }
+
+    let binaryDataObject = null
+    if (this.binaryDataCache.has(embeddingId)) {
+      binaryDataObject = this.binaryDataCache.get(embeddingId)
+    } else {
+      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(embeddingId)
+      if (diskData && diskData.binaryData) {
+        this.binaryDataCache.set(embeddingId, diskData)
+        binaryDataObject = diskData
+      }
+    }
+
+    if (!binaryDataObject || !binaryDataObject.binaryData) {
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${encodeURIComponent(embeddingId)}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/octet-stream' },
+        credentials: 'same-origin'
+      })
+
+      if (!response.ok) {
+        throw new Error(`Coordinate request failed with status ${response.status}`)
+      }
+
+      const contentType = response.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Server returned JSON error for coordinates')
+      }
+
+      const arrayBuffer = await response.arrayBuffer()
+      binaryDataObject = {
+        id: String(embeddingId),
+        name: response.headers.get('X-Metadata-Name') || `Embedding ${embeddingId}`,
+        cellCount: Number(response.headers.get('X-Cell-Count') || 0),
+        binaryData: arrayBuffer
+      }
+      this.binaryDataCache.set(embeddingId, binaryDataObject)
+      this.memoryManager.storeCoordinatesInIndexedDB(embeddingId, binaryDataObject).catch(() => {})
+    }
+
+    const coordinates = this.dataManager.decompressBinaryCoordinates(binaryDataObject.binaryData)
+    this.composeSelectionCoordinatesCache.set(cacheKey, coordinates)
+    return coordinates
+  }
+
+  async resolveComposeOperandSelection(operandValue) {
+    if (!operandValue) return null
+
+    if (operandValue === '__current__') {
+      if (!(this.composeSelectionCurrentSet instanceof Set)) return null
+      return {
+        key: '__current__',
+        label: 'Current virtual result',
+        cellSet: new Set(this.composeSelectionCurrentSet)
+      }
+    }
+
+    if (operandValue.startsWith('__step__:')) {
+      const rawStepIndex = operandValue.replace('__step__:', '')
+      const stepIndex = Number(rawStepIndex)
+      if (!Number.isInteger(stepIndex)) return null
+      const stepEntry = (this.composeSelectionIntermediateResults || []).find((entry) => entry.stepIndex === stepIndex)
+      if (!stepEntry || !(stepEntry.cellSet instanceof Set)) return null
+      return {
+        key: operandValue,
+        label: `Step ${stepIndex} result`,
+        cellSet: new Set(stepEntry.cellSet)
+      }
+    }
+
+    if (!operandValue.startsWith('saved:')) return null
+    const selectionId = operandValue.replace('saved:', '')
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === selectionId)
+    if (!item || !item.metadataId) return null
+
+    const cellSet = await this.getCellSetForSelectionItem(item)
+    return {
+      key: operandValue,
+      label: this.composeSelectionOptionLabel(item),
+      cellSet
+    }
+  }
+
+  async getCellSetForSelectionItem(item) {
+    this.ensureComposeSelectionStateInitialized()
+    const cacheKey = String(item.id)
+    if (this.composeSelectionSetCache.has(cacheKey)) {
+      return new Set(this.composeSelectionSetCache.get(cacheKey))
+    }
+
+    const metadataId = String(item.metadataId || '')
+    if (!metadataId) return new Set()
+
+    let metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      const diskVector = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, diskVector)
+    }
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      await this.loadSingleMetadataVectorSilently(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    }
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      throw new Error(`Metadata vector is not available for selection ${item.name}`)
+    }
+
+    const unselectedName = String(item.unselectedName || 'Not selected')
+    const cellSet = new Set()
+    for (let index = 0; index < metadataVector.values.length; index++) {
+      const rawValue = metadataVector.values[index]
+      if (!this.isSelectionExcludedCategoryValue(rawValue, unselectedName)) {
+        cellSet.add(index)
+      }
+    }
+
+    this.composeSelectionSetCache.set(cacheKey, new Set(cellSet))
+    return cellSet
+  }
+
+  ensureComposeMetadataVectorValues(metadataId, vectorData) {
+    if (!vectorData) return null
+    if (Array.isArray(vectorData.values)) {
+      return vectorData
+    }
+
+    if (!vectorData.compressed_data || !vectorData.compression_info) {
+      return null
+    }
+
+    try {
+      const compressionInfo = typeof vectorData.compression_info === 'string'
+        ? JSON.parse(vectorData.compression_info)
+        : vectorData.compression_info
+
+      let values = null
+      if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
+        values = this.dataManager.decompressDiscreteMetadataVector(vectorData.compressed_data, compressionInfo)
+      } else if (vectorData.data_type === 'NUMERIC') {
+        values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, compressionInfo)
+      }
+
+      if (!Array.isArray(values)) {
+        return null
+      }
+
+      const normalizedVector = {
+        ...vectorData,
+        id: String(vectorData.id || metadataId),
+        values
+      }
+      this.loadedMetadataVectors[metadataId] = normalizedVector
+      return normalizedVector
+    } catch (_error) {
+      return null
+    }
+  }
+
+  isSelectionExcludedCategoryValue(rawValue, unselectedName) {
+    if (rawValue === null || rawValue === undefined) return true
+    const value = String(rawValue).trim()
+    if (value.length === 0) return true
+    if (value === '0') return true
+    if (value === String(unselectedName).trim()) return true
+    return false
+  }
+
+  applySetOperation(setA, setB, operation) {
+    const result = new Set()
+    if (operation === 'intersection') {
+      setA.forEach((value) => {
+        if (setB.has(value)) result.add(value)
+      })
+      return result
+    }
+    if (operation === 'difference_ab') {
+      setA.forEach((value) => {
+        if (!setB.has(value)) result.add(value)
+      })
+      return result
+    }
+    if (operation === 'difference_ba') {
+      setB.forEach((value) => {
+        if (!setA.has(value)) result.add(value)
+      })
+      return result
+    }
+    if (operation === 'xor') {
+      setA.forEach((value) => {
+        if (!setB.has(value)) result.add(value)
+      })
+      setB.forEach((value) => {
+        if (!setA.has(value)) result.add(value)
+      })
+      return result
+    }
+
+    // Default: union
+    setA.forEach((value) => result.add(value))
+    setB.forEach((value) => result.add(value))
+    return result
+  }
+
+  renderComposeSelectionPreviewCard(title, subtitle, count, total, color, canvasId) {
+    return `
+      <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background: #fff;">
+        <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${this.escapeHtml(title)}</div>
+        <div style="font-size: 13px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(subtitle)}">${this.escapeHtml(subtitle)}</div>
+        <div style="margin-top: 8px; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb; padding: 6px;">
+          <canvas id="${this.escapeHtml(canvasId)}" width="250" height="140" style="display:block;width:100%;height:140px;background:#ffffff;border-radius:4px;"></canvas>
+          <div style="margin-top: 6px; font-size: 12px; color: #374151;"><span style="font-weight: 600; color: ${color};">${count.toLocaleString()}</span> / ${total.toLocaleString()} cells</div>
+        </div>
+      </div>
+    `
+  }
+
+  drawComposeSelectionScatterPreview(canvasId, coordinates, selectedSet, selectedColor) {
+    const canvas = document.getElementById(canvasId)
+    if (!canvas || !Array.isArray(coordinates) || coordinates.length === 0) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const width = canvas.width
+    const height = canvas.height
+    const padding = 8
+    const bounds = this.dataManager.calculateBounds(coordinates)
+    const xRange = Math.max((bounds.maxX - bounds.minX), Number.EPSILON)
+    const yRange = Math.max((bounds.maxY - bounds.minY), Number.EPSILON)
+
+    const mapX = (x) => padding + ((x - bounds.minX) / xRange) * (width - 2 * padding)
+    const mapY = (y) => height - padding - ((y - bounds.minY) / yRange) * (height - 2 * padding)
+
+    ctx.clearRect(0, 0, width, height)
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+
+    const maxBackgroundPoints = 6000
+    const step = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
+
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.45)'
+    for (let i = 0; i < coordinates.length; i += step) {
+      const point = coordinates[i]
+      if (!point) continue
+      ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
+    }
+
+    const selectedIndices = Array.from(selectedSet || [])
+    if (selectedIndices.length === 0) return
+
+    const maxSelectedPoints = 5000
+    const selectedStep = Math.max(1, Math.floor(selectedIndices.length / maxSelectedPoints))
+    ctx.fillStyle = selectedColor
+    for (let i = 0; i < selectedIndices.length; i += selectedStep) {
+      const index = selectedIndices[i]
+      const point = coordinates[index]
+      if (!point) continue
+      ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.8, 1.8)
+    }
+  }
+
+  composeOperationLabel(operation) {
+    if (operation === 'intersection') return 'INTERSECTION'
+    if (operation === 'difference_ab') return 'A \\ B'
+    if (operation === 'difference_ba') return 'B \\ A'
+    if (operation === 'xor') return 'SYMMETRIC DIFFERENCE'
+    return 'UNION'
+  }
+
+  async applyComposeSelectionOperation() {
+    this.ensureComposeSelectionStateInitialized()
+    const operandASelect = document.getElementById('compose-selection-operand-a')
+    const operandBSelect = document.getElementById('compose-selection-operand-b')
+    const operationSelect = document.getElementById('compose-selection-operation')
+    if (!operandASelect || !operandBSelect || !operationSelect) return
+
+    try {
+      const operandAValue = String(operandASelect.value || '')
+      const operandBValue = String(operandBSelect.value || '')
+      const operandA = await this.resolveComposeOperandSelection(operandAValue)
+      const operandB = await this.resolveComposeOperandSelection(operandBValue)
+      if (!operandA || !operandB) {
+        this.showComposeSelectionStatus('Please choose valid operands.', 'error')
+        return
+      }
+
+      const operation = operationSelect.value || 'union'
+      const resultSet = this.applySetOperation(operandA.cellSet, operandB.cellSet, operation)
+
+      this.composeSelectionCurrentSet = resultSet
+      const maxExistingStepIndex = this.composeSelectionSteps.reduce((maxValue, step) => Math.max(maxValue, Number(step.stepIndex || 0)), 0)
+      const stepIndex = maxExistingStepIndex + 1
+      this.composeSelectionSteps.push({
+        stepIndex,
+        timestamp: new Date().toISOString(),
+        operation,
+        operandAKey: this.normalizeComposeOperandDependencyKey(operandAValue),
+        operandBKey: this.normalizeComposeOperandDependencyKey(operandBValue),
+        operandALabel: operandA.label,
+        operandBLabel: operandB.label,
+        operandACount: operandA.cellSet.size,
+        operandBCount: operandB.cellSet.size,
+        resultCount: resultSet.size
+      })
+      this.composeSelectionIntermediateResults.push({
+        stepIndex,
+        cellSet: new Set(resultSet)
+      })
+
+      this.populateComposeSelectionOperands()
+      operandASelect.value = '__current__'
+      this.renderComposeSelectionSteps()
+      this.updateComposeSelectionPreview()
+      this.showComposeSelectionStatus(`Operation added. Virtual result now contains ${resultSet.size.toLocaleString()} cells.`, 'success')
+    } catch (error) {
+      this.showComposeSelectionStatus(`Compose operation failed: ${error.message}`, 'error')
+    }
+  }
+
+  normalizeComposeOperandDependencyKey(rawValue) {
+    const normalized = String(rawValue || '')
+    if (normalized === '__current__') {
+      const maxExistingStepIndex = this.composeSelectionSteps.reduce((maxValue, step) => Math.max(maxValue, Number(step.stepIndex || 0)), 0)
+      if (maxExistingStepIndex > 0) {
+        return `__step__:${maxExistingStepIndex}`
+      }
+    }
+    return normalized
+  }
+
+  renderComposeSelectionSteps() {
+    const container = document.getElementById('compose-selection-steps')
+    if (!container) return
+
+    if (!Array.isArray(this.composeSelectionSteps) || this.composeSelectionSteps.length === 0) {
+      container.innerHTML = '<div style="font-size: 12px; color: #6b7280; padding: 6px;">No operation yet. Add one to build a virtual selection.</div>'
+      return
+    }
+
+    container.innerHTML = this.composeSelectionSteps.map((step, index) => {
+      const effectiveStepIndex = Number(step.stepIndex || (index + 1))
+      return `
+        <div style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 6px; background: #f9fafb;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
+            <div style="font-size: 12px; font-weight: 600; color: #111827;">Step ${effectiveStepIndex}: ${this.escapeHtml(this.composeOperationLabel(step.operation))}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button"
+                      style="padding: 6px; background-color: #3b82f6; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
+                      title="Save this intermediate result"
+                      onmouseover="this.style.backgroundColor='#2563eb'"
+                      onmouseout="this.style.backgroundColor='#3b82f6'"
+                      onclick="if (window.visualizationController) window.visualizationController.composeSaveIntermediateStep(${effectiveStepIndex})">
+                <i class="fas fa-save" style="font-size: 12px;"></i>
+              </button>
+              <button type="button"
+                      style="padding: 6px; background-color: #d1d5db; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
+                      title="Delete this intermediate step"
+                      onmouseover="this.style.backgroundColor='#9ca3af'"
+                      onmouseout="this.style.backgroundColor='#d1d5db'"
+                      onclick="if (window.visualizationController) window.visualizationController.composeDeleteIntermediateStep(${effectiveStepIndex})">
+                <i class="fas fa-trash" style="font-size: 12px;"></i>
+              </button>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #374151;">A: ${this.escapeHtml(step.operandALabel)} (${step.operandACount.toLocaleString()})</div>
+          <div style="font-size: 12px; color: #374151;">B: ${this.escapeHtml(step.operandBLabel)} (${step.operandBCount.toLocaleString()})</div>
+          <div style="font-size: 12px; color: #065f46; font-weight: 600;">Result: ${step.resultCount.toLocaleString()} cells</div>
+        </div>
+      `
+    }).join('')
+  }
+
+  async composeSaveIntermediateStep(stepIndex) {
+    this.ensureComposeSelectionStateInitialized()
+    const numericStepIndex = Number(stepIndex)
+    if (!Number.isInteger(numericStepIndex)) return
+    const intermediate = (this.composeSelectionIntermediateResults || []).find((entry) => Number(entry.stepIndex) === numericStepIndex)
+    if (!intermediate || !(intermediate.cellSet instanceof Set)) {
+      this.showComposeSelectionStatus(`Could not find intermediate result for step ${numericStepIndex}.`, 'error')
+      return
+    }
+
+    const selectedIndices = Array.from(intermediate.cellSet)
+    if (selectedIndices.length === 0) {
+      this.showComposeSelectionStatus(`Step ${numericStepIndex} result is empty and cannot be saved.`, 'error')
+      return
+    }
+
+    const proposedName = `Composed Step ${numericStepIndex}`
+    const selectionName = prompt('Enter a name for this composed selection:', proposedName)
+    if (!selectionName) return
+
+    const composeStepsForSave = this.composeBuildStepsForSave(numericStepIndex)
+    await this.persistSelection(selectionName.trim(), selectedIndices, {
+      composeSteps: composeStepsForSave,
+      selectionSource: 'compose'
+    })
+    this.showComposeSelectionStatus(`Saved step ${numericStepIndex} as a selection.`, 'success')
+  }
+
+  composeBuildStepsForSave(maxStepIndex) {
+    const numericMax = maxStepIndex === undefined || maxStepIndex === null
+      ? Infinity
+      : Number(maxStepIndex)
+    if (!Number.isFinite(numericMax) && numericMax !== Infinity) return []
+    return (this.composeSelectionSteps || [])
+      .filter((step) => Number(step.stepIndex || 0) > 0 && Number(step.stepIndex || 0) <= numericMax)
+      .sort((a, b) => Number(a.stepIndex || 0) - Number(b.stepIndex || 0))
+      .map((step) => ({
+        step_index: Number(step.stepIndex || 0),
+        operation: String(step.operation || ''),
+        operand_a: String(step.operandAKey || ''),
+        operand_b: String(step.operandBKey || ''),
+        result_count: Number(step.resultCount || 0)
+      }))
+      .filter((step) => step.step_index > 0 && step.operation.length > 0)
+  }
+
+  composeDeleteIntermediateStep(stepIndex) {
+    this.ensureComposeSelectionStateInitialized()
+    const numericStepIndex = Number(stepIndex)
+    if (!Number.isInteger(numericStepIndex)) return
+
+    const stepIdsToDelete = this.getComposeDependentStepIds(numericStepIndex)
+    const dependentIds = stepIdsToDelete.filter((id) => id !== numericStepIndex).sort((a, b) => a - b)
+
+    if (dependentIds.length > 0) {
+      const dependentText = dependentIds.join(', ')
+      const confirmMessage = `Step ${numericStepIndex} is used by dependent steps (${dependentText}). Delete all these steps?`
+      if (!window.confirm(confirmMessage)) {
+        return
+      }
+    }
+
+    this.composeSelectionSteps = this.composeSelectionSteps.filter((step) => !stepIdsToDelete.includes(Number(step.stepIndex || 0)))
+    this.composeSelectionIntermediateResults = this.composeSelectionIntermediateResults.filter((entry) => !stepIdsToDelete.includes(Number(entry.stepIndex || 0)))
+
+    const remainingResults = [...this.composeSelectionIntermediateResults].sort((a, b) => Number(a.stepIndex || 0) - Number(b.stepIndex || 0))
+    if (remainingResults.length > 0) {
+      const lastResult = remainingResults[remainingResults.length - 1]
+      this.composeSelectionCurrentSet = new Set(lastResult.cellSet || [])
+    } else {
+      this.composeSelectionCurrentSet = null
+    }
+
+    this.populateComposeSelectionOperands()
+    this.renderComposeSelectionSteps()
+    this.updateComposeSelectionPreview()
+
+    const deletedSummary = dependentIds.length > 0
+      ? `Deleted step ${numericStepIndex} and dependent steps (${dependentIds.join(', ')}).`
+      : `Deleted step ${numericStepIndex}.`
+    this.showComposeSelectionStatus(deletedSummary, 'success')
+  }
+
+  getComposeDependentStepIds(rootStepIndex) {
+    const toVisit = [Number(rootStepIndex)]
+    const toDelete = new Set([Number(rootStepIndex)])
+
+    while (toVisit.length > 0) {
+      const currentStepId = toVisit.shift()
+      const stepKey = `__step__:${currentStepId}`
+
+      this.composeSelectionSteps.forEach((step) => {
+        const candidateStepIndex = Number(step.stepIndex || 0)
+        if (!candidateStepIndex || toDelete.has(candidateStepIndex)) return
+        if (step.operandAKey === stepKey || step.operandBKey === stepKey) {
+          toDelete.add(candidateStepIndex)
+          toVisit.push(candidateStepIndex)
+        }
+      })
+    }
+
+    return Array.from(toDelete)
+  }
+
+  showComposeSelectionStatus(message, tone = 'info') {
+    const status = document.getElementById('compose-selection-status')
+    if (!status) return
+
+    status.style.display = 'block'
+    status.textContent = message
+    if (tone === 'error') {
+      status.style.backgroundColor = '#fef2f2'
+      status.style.color = '#991b1b'
+      status.style.border = '1px solid #fecaca'
+    } else if (tone === 'success') {
+      status.style.backgroundColor = '#ecfdf5'
+      status.style.color = '#065f46'
+      status.style.border = '1px solid #a7f3d0'
+    } else {
+      status.style.backgroundColor = '#eff6ff'
+      status.style.color = '#1e3a8a'
+      status.style.border = '1px solid #bfdbfe'
+    }
   }
 
   selectionStatusBadgeHtml(status) {
@@ -10939,6 +11962,68 @@ export default class extends Controller {
     }
   }
 
+  async deleteSavedSelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const selectionId = event.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === String(selectionId))
+    const label = item ? this.composeSelectionOptionLabel(item) : `Selection ${selectionId}`
+    const hasAssociatedRun = item && Number.isInteger(item.runId) && item.runId > 0
+    const confirmMessage = hasAssociatedRun
+      ? `Delete ${label}? This will also delete the associated run and generated metadata.`
+      : `Delete ${label}?`
+    if (!window.confirm(confirmMessage)) return
+
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
+      let response = null
+
+      if (hasAssociatedRun) {
+        response = await fetch(`/runs/${encodeURIComponent(String(item.runId))}`, {
+          method: 'DELETE',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'same-origin'
+        })
+      } else {
+        const projectIdentifier = this.getProjectIdentifier()
+        if (!projectIdentifier) {
+          alert('Cannot delete selection: project identifier is missing.')
+          return
+        }
+        response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/delete_selection`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ selection_id: selectionId })
+        })
+      }
+
+      const payload = await response.json().catch(() => ({}))
+      const okStatus = payload.status === 'ok' || payload.status === 'success'
+      if (!response.ok || !okStatus) {
+        throw new Error(payload.message || 'Failed to delete selection')
+      }
+
+      this.savedSelections = (this.savedSelections || []).filter((entry) => String(entry.id) !== String(selectionId))
+      this.renderSavedSelections()
+      this.refreshSelectionStates()
+      this.refreshPageCategoricalMetadata()
+    } catch (error) {
+      alert(`Failed to delete selection: ${error.message}`)
+    }
+  }
+
   async refreshPageCategoricalMetadata() {
     if (this.metadataRefreshInProgress) return
     this.metadataRefreshInProgress = true
@@ -10980,15 +12065,18 @@ export default class extends Controller {
     metadataItem.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
 
     const unselectedName = item.unselectedName || 'Not selected'
-    const escaped = this.escapeAttributeSelectorValue(unselectedName)
-    const checkbox = metadataItem.querySelector(`.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escaped}"]`)
-    if (checkbox) {
+    const selectorsToDisable = new Set([unselectedName, '0'])
+
+    selectorsToDisable.forEach((categoryValue) => {
+      const escaped = this.escapeAttributeSelectorValue(String(categoryValue))
+      const checkbox = metadataItem.querySelector(`.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escaped}"]`)
+      if (!checkbox) return
       const icon = checkbox.querySelector('i')
       const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
       if (iconDisplay !== 'none') {
         checkbox.click()
       }
-    }
+    })
   }
 
   // Save plot as SVG method

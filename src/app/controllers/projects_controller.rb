@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection selection_states]
 
   # GET /projects or /projects.json
   def index
@@ -2176,6 +2176,9 @@ class ProjectsController < ApplicationController
     selection_name = "Selection #{Time.current.strftime('%Y-%m-%d %H:%M:%S')}" if selection_name.blank?
     selected_name = selection_name
     unselected_name = params[:unselected_name].to_s.strip.presence || 'Not selected'
+    compose_steps = sanitize_compose_steps(params[:compose_steps])
+    selection_source = sanitize_selection_source(params[:selection_source])
+    filter_components = sanitize_filter_components(params[:filter_components])
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     loom_path = project_dir + loom_file
@@ -2243,17 +2246,22 @@ class ProjectsController < ApplicationController
       args: []
     }
 
+    run_attrs = {
+      loom_file: loom_file,
+      source_metadata_id: embedding_annot.id,
+      source_run_id: embedding_annot.run_id,
+      selected_name: selected_name,
+      unselected_name: unselected_name,
+      selection_source: selection_source,
+      selection_metadata_name: selection_metadata_name,
+      selected_cells_file: selected_cells_file.to_s
+    }
+    run_attrs[:compose_steps] = compose_steps if compose_steps.present?
+    run_attrs[:filter_components] = filter_components if filter_components.present?
+
     run.update!(
       command_json: cmd.to_json,
-      attrs_json: {
-        loom_file: loom_file,
-        source_metadata_id: embedding_annot.id,
-        source_run_id: embedding_annot.run_id,
-        selected_name: selected_name,
-        unselected_name: unselected_name,
-        selection_metadata_name: selection_metadata_name,
-        selected_cells_file: selected_cells_file.to_s
-      }.to_json
+      attrs_json: run_attrs.to_json
     )
 
     cache_key = SecureRandom.uuid
@@ -2265,6 +2273,11 @@ class ProjectsController < ApplicationController
       name: selected_name,
       unselected_name: unselected_name,
       selected_count: selected_cells.size,
+      selection_metadata_name: selection_metadata_name,
+      selection_number: selection_number_from_metadata_name(selection_metadata_name),
+      selection_source: selection_source,
+      compose_steps: compose_steps,
+      filter_components: filter_components,
       source_metadata_id: embedding_annot.id,
       status: 'queued',
       created_at: Time.current.iso8601
@@ -2289,6 +2302,47 @@ class ProjectsController < ApplicationController
     items.reverse!
 
     render json: { status: 'ok', items: items }
+  end
+
+  # POST /projects/:id/delete_selection
+  def delete_selection
+    unless editable?(@project)
+      render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    run_id = params[:run_id].to_i
+    selection_id = params[:selection_id].to_s.strip
+
+    if run_id > 0
+      run = @project.runs.find_by(id: run_id)
+      unless run
+        render json: { status: 'error', message: 'Run not found' }, status: :not_found
+        return
+      end
+
+      RunsController.destroy_run_call(@project, run)
+      cleanup_selection_cache_for_run_id(run_id)
+
+      render json: { status: 'ok', deleted_run: true, run_id: run_id }
+      return
+    end
+
+    if selection_id.blank?
+      render json: { status: 'error', message: 'Missing selection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    deleted = remove_selection_from_cache_by_id(selection_id)
+    unless deleted
+      render json: { status: 'error', message: 'Selection not found in cache. Persisted selections must be deleted via run deletion.' }, status: :not_found
+      return
+    end
+
+    render json: { status: 'ok', deleted_run: false, selection_id: selection_id }
+  rescue StandardError => e
+    Rails.logger.error("delete_selection failed for #{selection_id}: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Deletion failed: #{e.message}" }, status: :unprocessable_entity
   end
 
   # GET /projects/1/sample_identifiers?loom_file=...
@@ -2514,9 +2568,23 @@ class ProjectsController < ApplicationController
     status_id = marker_run.status_id.to_i
     status_name = marker_run.status&.name.to_s
 
-    if status_id == 1
+    if run_data[:error].present? && (status_id == 1 || (status_id == 6 && marker_run.slurm_job_id.blank?))
+      return render json: {
+        state: 'failed',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: run_data[:error],
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    if status_id == 1 || (status_id == 6 && marker_run.slurm_job_id.blank?)
       msg = if marker_run.slurm_job_id.present?
               'FindMarkers is queued for execution.'
+            elsif run_data[:resubmitted]
+              'FindMarkers queue submission was refreshed. Waiting for scheduler assignment.'
             elsif run_data[:submitted]
               'FindMarkers was queued. Waiting for scheduler assignment.'
             else
@@ -2533,7 +2601,7 @@ class ProjectsController < ApplicationController
       }
     end
 
-    if [2, 6].include?(status_id)
+    if status_id == 2 || (status_id == 6 && marker_run.slurm_job_id.present?)
       msg = run_data[:started] ? 'FindMarkers started for this category. Results will appear when the run is complete.' : 'FindMarkers is running for this category.'
       return render json: {
         state: 'running',
@@ -4310,6 +4378,33 @@ class ProjectsController < ApplicationController
       project_cache.is_a?(Hash) ? project_cache : {}
     end
 
+    def remove_selection_from_cache_by_id(selection_id)
+      cache_data = selection_session_cache
+      cache_key, = cache_data.find do |key, entry|
+        entry_id = entry['id'] || entry[:id] || key
+        entry_id.to_s == selection_id.to_s
+      end
+      return false unless cache_key
+
+      cache_data.delete(cache_key)
+      session[:selection_cache] ||= {}
+      session[:selection_cache][@project.id.to_s] = cache_data
+      true
+    end
+
+    def cleanup_selection_cache_for_run_id(run_id)
+      cache_data = selection_session_cache
+      keys_to_remove = cache_data.keys.select do |key|
+        entry = cache_data[key]
+        (entry['run_id'] || entry[:run_id]).to_i == run_id.to_i
+      end
+      return if keys_to_remove.empty?
+
+      keys_to_remove.each { |key| cache_data.delete(key) }
+      session[:selection_cache] ||= {}
+      session[:selection_cache][@project.id.to_s] = cache_data
+    end
+
     def selection_cache_items_for_loom(loom_file = nil, cleanup_completed: false)
       cache_data = selection_session_cache
       items = []
@@ -4334,6 +4429,7 @@ class ProjectsController < ApplicationController
           next
         end
 
+        run_attrs = Basic.safe_parse_json(run&.attrs_json, {})
         items << {
           id: entry['id'] || entry[:id] || key,
           run_id: run_id,
@@ -4343,7 +4439,18 @@ class ProjectsController < ApplicationController
           status: status,
           created_at: entry['created_at'] || entry[:created_at],
           loom_file: entry_loom_file,
-          unselected_name: entry['unselected_name'] || entry[:unselected_name]
+          unselected_name: entry['unselected_name'] || entry[:unselected_name],
+          selection_source: (entry['selection_source'] || entry[:selection_source] || run_attrs['selection_source'] || run_attrs[:selection_source] || 'lasso'),
+          compose_steps: sanitize_compose_steps(entry['compose_steps'] || entry[:compose_steps]) || sanitize_compose_steps(run_attrs['compose_steps']),
+          filter_components: sanitize_filter_components(entry['filter_components'] || entry[:filter_components]) || sanitize_filter_components(run_attrs['filter_components']),
+          selection_number: begin
+            from_entry = entry['selection_number'] || entry[:selection_number]
+            if from_entry.present?
+              from_entry.to_i
+            else
+              selection_number_from_metadata_name(run_attrs['selection_metadata_name'] || run_attrs[:selection_metadata_name])
+            end
+          end
         }
       end
 
@@ -4360,7 +4467,16 @@ class ProjectsController < ApplicationController
       scope = Annot.where(project_id: @project.id, dim: 1)
       scope = scope.where(filepath: loom_file) if loom_file.present?
       scope = scope.where("name LIKE ?", "%.sel_%")
-      scope.order(created_at: :desc).map do |annot|
+      annots = scope.order(created_at: :desc).to_a
+      run_attrs_by_run_id = {}
+      run_ids = annots.map(&:run_id).compact.uniq
+      if run_ids.any?
+        Run.where(id: run_ids).pluck(:id, :attrs_json).each do |run_id, attrs_json|
+          run_attrs_by_run_id[run_id] = Basic.safe_parse_json(attrs_json, {})
+        end
+      end
+
+      annots.map do |annot|
         selected_name = 'Selected'
         unselected_name = 'Not selected'
         if annot.cat_aliases_json.present?
@@ -4369,13 +4485,7 @@ class ProjectsController < ApplicationController
           unselected_name = aliases.dig('names', '0').presence || unselected_name
         end
 
-        selected_count = nil
-        if annot.categories_json.present?
-          categories = Basic.safe_parse_json(annot.categories_json, [])
-          if categories.is_a?(Array) && categories[1]
-            selected_count = categories[1].to_i
-          end
-        end
+        selected_count = selection_selected_count_from_categories_json(annot.categories_json)
 
         {
           id: "annot-#{annot.id}",
@@ -4386,15 +4496,173 @@ class ProjectsController < ApplicationController
           status: 'completed',
           created_at: annot.created_at&.iso8601,
           loom_file: annot.filepath,
-          unselected_name: unselected_name
+          unselected_name: unselected_name,
+          selection_source: begin
+            from_annot = Basic.safe_parse_json(annot.attrs_json, {})['selection_source']
+            from_annot.presence || run_attrs_by_run_id.dig(annot.run_id, 'selection_source') || 'lasso'
+          end,
+          compose_steps: begin
+            from_annot = sanitize_compose_steps(Basic.safe_parse_json(annot.attrs_json, {})['compose_steps'])
+            from_annot.presence || sanitize_compose_steps(run_attrs_by_run_id.dig(annot.run_id, 'compose_steps'))
+          end,
+          filter_components: begin
+            from_annot = sanitize_filter_components(Basic.safe_parse_json(annot.attrs_json, {})['filter_components'])
+            from_annot.presence || sanitize_filter_components(run_attrs_by_run_id.dig(annot.run_id, 'filter_components'))
+          end,
+          selection_number: selection_number_from_metadata_name(annot.name)
         }
       end
+    end
+
+    def selection_number_from_metadata_name(metadata_name)
+      return nil if metadata_name.blank?
+      match = metadata_name.to_s.match(/\.sel_(\d+)$/)
+      match ? match[1].to_i : nil
+    end
+
+    def selection_selected_count_from_categories_json(categories_json)
+      return nil if categories_json.blank?
+
+      categories = Basic.safe_parse_json(categories_json, nil)
+      return nil if categories.blank?
+
+      if categories.is_a?(Array)
+        return selection_selected_count_from_entry(categories[1])
+      end
+
+      if categories.is_a?(Hash)
+        direct = categories['1'] || categories[1] || categories[:'1']
+        direct_count = selection_selected_count_from_entry(direct)
+        return direct_count unless direct_count.nil?
+
+        counts = categories['counts'] || categories[:counts]
+        if counts.is_a?(Array)
+          return selection_selected_count_from_entry(counts[1])
+        elsif counts.is_a?(Hash)
+          return selection_selected_count_from_entry(counts['1'] || counts[1] || counts[:'1'])
+        end
+      end
+
+      nil
+    end
+
+    def selection_selected_count_from_entry(entry)
+      return nil if entry.nil?
+      return entry.to_i if entry.is_a?(Numeric)
+
+      if entry.is_a?(String)
+        stripped = entry.strip
+        return nil if stripped.blank?
+        return stripped.to_i if stripped.match?(/\A\d+\z/)
+        return nil
+      end
+
+      if entry.is_a?(Hash)
+        %w[count n nber value size total].each do |key|
+          value = entry[key] || entry[key.to_sym]
+          next if value.nil?
+          return value.to_i if value.is_a?(Numeric)
+          return value.to_i if value.is_a?(String) && value.strip.match?(/\A\d+\z/)
+        end
+      end
+
+      nil
+    end
+
+    def sanitize_compose_steps(raw_steps)
+      return nil unless raw_steps.is_a?(Array)
+
+      normalized = raw_steps.map do |step|
+        step_hash = normalize_selection_nested_hash(step)
+        next unless step_hash.is_a?(Hash)
+        step_index = step_hash['step_index'] || step_hash[:step_index]
+        operation = step_hash['operation'] || step_hash[:operation]
+        operand_a = step_hash['operand_a'] || step_hash[:operand_a]
+        operand_b = step_hash['operand_b'] || step_hash[:operand_b]
+        result_count = step_hash['result_count'] || step_hash[:result_count]
+        next unless step_index.present? && operation.present?
+
+        {
+          step_index: step_index.to_i,
+          operation: operation.to_s,
+          operand_a: operand_a.to_s,
+          operand_b: operand_b.to_s,
+          result_count: result_count.to_i
+        }
+      end.compact
+
+      normalized.any? ? normalized : nil
+    end
+
+    def sanitize_selection_source(raw_source)
+      source = raw_source.to_s.strip
+      return source if %w[visible lasso compose].include?(source)
+      'lasso'
+    end
+
+    def sanitize_filter_components(raw_components)
+      return nil unless raw_components.is_a?(Array)
+
+      normalized = raw_components.map do |entry|
+        entry_hash = normalize_selection_nested_hash(entry)
+        next unless entry_hash.is_a?(Hash)
+
+        type = (entry_hash['type'] || entry_hash[:type]).to_s
+        metadata_id = (entry_hash['metadata_id'] || entry_hash[:metadata_id]).to_s
+        name = (entry_hash['name'] || entry_hash[:name]).to_s
+        next if type.blank? || metadata_id.blank?
+
+        if type == 'continuous'
+          range_min = entry_hash['range_min'] || entry_hash[:range_min]
+          range_max = entry_hash['range_max'] || entry_hash[:range_max]
+          full_min = entry_hash['full_min'] || entry_hash[:full_min]
+          full_max = entry_hash['full_max'] || entry_hash[:full_max]
+
+          {
+            type: 'continuous',
+            metadata_id: metadata_id,
+            name: name,
+            range_min: range_min.nil? ? nil : range_min.to_f,
+            range_max: range_max.nil? ? nil : range_max.to_f,
+            full_min: full_min.nil? ? nil : full_min.to_f,
+            full_max: full_max.nil? ? nil : full_max.to_f
+          }
+        else
+          summary_mode = (entry_hash['summary_mode'] || entry_hash[:summary_mode]).to_s
+          selected_count = (entry_hash['selected_count'] || entry_hash[:selected_count]).to_i
+          total_count = (entry_hash['total_count'] || entry_hash[:total_count]).to_i
+          summary_values = entry_hash['summary_values'] || entry_hash[:summary_values]
+          hidden_value_count = (entry_hash['hidden_value_count'] || entry_hash[:hidden_value_count]).to_i
+
+          {
+            type: 'categorical',
+            metadata_id: metadata_id,
+            name: name,
+            summary_mode: summary_mode,
+            selected_count: selected_count,
+            total_count: total_count,
+            summary_values: Array(summary_values).map(&:to_s).first(50),
+            hidden_value_count: hidden_value_count
+          }
+        end
+      end.compact
+
+      normalized.any? ? normalized : nil
+    end
+
+    def normalize_selection_nested_hash(value)
+      return value if value.is_a?(Hash)
+      return value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
+      return value.to_h if value.respond_to?(:to_h)
+
+      nil
     end
 
   def find_or_start_marker_run_for_annot(annot)
     marker_run = marker_run_for_annot(annot)
     started = false
     submitted = false
+    resubmitted = false
 
     if marker_run.nil? || marker_run.status_id.to_i == 4
       user_id = current_user&.id || @project.user_id
@@ -4403,16 +4671,63 @@ class ProjectsController < ApplicationController
       started = marker_run.present?
     end
 
-    if marker_run && marker_run.status_id.to_i == 1 && marker_run.slurm_job_id.blank? && marker_run.req_id.blank?
-      Basic.exec_run(Rails.logger, marker_run)
-      submitted = true
+    if marker_run && marker_run.slurm_job_id.blank?
+      unless slurm_controller_available?
+        return {
+          run: marker_run,
+          started: started,
+          submitted: false,
+          resubmitted: false,
+          error: 'FindMarkers cannot start because the SLURM scheduler is currently unavailable.'
+        }
+      end
+
+      if marker_run.status_id.to_i == 1
+        Basic.exec_run(Rails.logger, marker_run)
+        submitted = true
+      elsif marker_run.status_id.to_i == 6
+        # Recover stale "submitted" runs that never received a scheduler assignment.
+        # Throttle retries to avoid enqueue storms from frequent UI polling.
+        last_submit = marker_run.submitted_at || marker_run.updated_at || marker_run.created_at
+        if last_submit && last_submit < 90.seconds.ago
+          Basic.exec_run(Rails.logger, marker_run)
+          submitted = true
+          resubmitted = true
+        end
+      end
     end
 
     marker_run&.reload
-    { run: marker_run, started: started, submitted: submitted, error: marker_run ? nil : 'Marker run could not be created.' }
+
+    # If DB still says "running/submitted" but the SLURM job is gone,
+    # trigger an immediate monitor sync so UI does not show a stale running state.
+    if marker_run && marker_run.slurm_job_id.present? && [2, 6].include?(marker_run.status_id.to_i)
+      unless slurm_job_still_active?(marker_run.slurm_job_id)
+        SlurmJobMonitorJob.perform_now(marker_run.id, marker_run.slurm_job_id)
+        marker_run.reload
+      end
+    end
+
+    { run: marker_run, started: started, submitted: submitted, resubmitted: resubmitted, error: marker_run ? nil : 'Marker run could not be created.' }
   rescue StandardError => e
     Rails.logger.error("[get_annot_evidences] find_or_start_marker_run_for_annot failed: #{e.class} - #{e.message}")
-    { run: nil, started: false, submitted: false, error: e.message }
+    { run: nil, started: false, submitted: false, resubmitted: false, error: e.message }
+  end
+
+  def slurm_job_still_active?(job_id)
+    output = `squeue -h -j #{job_id.to_i} -o '%i' 2>&1`
+    $?.success? && output.present? && !output.downcase.include?('error')
+  rescue StandardError
+    false
+  end
+
+  def slurm_controller_available?
+    # `scontrol ping` can report false DOWN in some container/client setups.
+    # Use a read query against the controller instead.
+    result = `sinfo -h -o '%P' 2>&1`
+    $?.success? && result.present? && !result.downcase.include?('error')
+  rescue StandardError
+    false
   end
 
   def marker_run_for_annot(annot)

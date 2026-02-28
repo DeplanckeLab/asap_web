@@ -566,11 +566,13 @@ module Basic
         
         if find_marker_step and std_method
 
+          # Reuse only non-failed runs for identical marker requests.
+          # Failed runs must stay immutable so polling does not flip them back to queued.
           run = Run.where({:project_id => project.id,
                             :step_id => find_marker_step.id,
                             :std_method_id => std_method.id,
                             :attrs_json => h_attrs.to_json
-                          }).first
+                          }).where.not(status_id: 4).order(id: :desc).first
           if run
             run.update(h_run)
           else
@@ -2272,6 +2274,15 @@ module Basic
         # Add /data/asap2_test volume mount if USER_DATA_DIR points to it and it's not already mounted
         # This is needed for parsing jobs that write to /data/asap2_test/users/...
         user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/users')
+        # Keep docker network configurable from env to avoid hardcoded stack names.
+        # This must point to the same compose network as the website/postgres services.
+        if user_data_dir.include?('asap2_test')
+          run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
+          if run_network.blank?
+            raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
+          end
+          h_cmd['docker_call'].gsub!(/--network=\S+/, "--network=#{run_network}")
+        end
         if user_data_dir.include?('asap2_test') && !h_cmd['docker_call'].include?('-v /data/asap2_test:/data/asap2_test')
           # Insert the volume mount after the existing /data/asap2 mount
           # Match the pattern more flexibly to handle different spacing
@@ -2405,13 +2416,23 @@ module Basic
     end
 
     def exec_run_async logger, run
-      if run.status_id != 1
-        logger.warn("Run##{run.id} is not in waiting status (current: #{run.status_id}), skipping")
+      unless [1, 6].include?(run.status_id.to_i)
+        logger.warn("Run##{run.id} is not in schedulable status (current: #{run.status_id}), skipping")
         return nil
       end
 
+      # Mark as scheduler-submitted to avoid duplicate enqueue loops from polling endpoints.
+      if run.status_id.to_i == 1
+        run.update(
+          status_id: 6,
+          submitted_at: run.submitted_at || Time.now
+        )
+      end
+
       logger.info("Submitting Run##{run.id} to SLURM via RunExecutionJob")
-      RunExecutionJob.perform_later(run.id)
+      # Execute submission immediately so runs are not blocked on async in-process job workers.
+      # This job only prepares and submits to SLURM, then schedules monitoring separately.
+      RunExecutionJob.perform_now(run.id)
       return nil
     end
 

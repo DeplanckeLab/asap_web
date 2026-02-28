@@ -12,7 +12,14 @@ class SlurmService
     user_id = project.user_id
     
     cores = run.nber_cores || options[:cores] || 1
-    memory_mb = (run.pred_max_ram || run.max_ram || options[:memory_mb] || 4096).to_i
+    # pred_max_ram is stored in KB (prediction output), while max_ram is stored in MB.
+    memory_mb = if run.pred_max_ram.present?
+      (run.pred_max_ram.to_f / 1024.0).ceil
+    elsif run.max_ram.present?
+      run.max_ram.to_f.ceil
+    else
+      (options[:memory_mb] || 4096).to_i
+    end
     time_limit = (run.pred_process_duration || options[:time_limit] || 3600).to_i
     
     # Add 5 minutes (300 seconds) buffer to predicted time to account for variability
@@ -20,7 +27,7 @@ class SlurmService
     
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
-    @logger.info("  - Memory: #{memory_mb}MB (predicted: #{run.pred_max_ram}, actual: #{run.max_ram})")
+    @logger.info("  - Memory: #{memory_mb}MB (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
     @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration})")
     
     if options[:check_resources] != false

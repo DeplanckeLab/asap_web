@@ -5,8 +5,8 @@
 <style>
   html, body {
     overflow: hidden !important;
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
     margin: 0;
     padding: 0;
   }
@@ -58,7 +58,7 @@ has_visualization_data = @default_loom_file.present? && (
 %>
 
 <% unless has_visualization_data %>
-  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100%; background-color: #f9fafb; padding: 40px;">
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="max-width: 600px; text-align: center;">
       <div style="font-size: 64px; color: #d1d5db; margin-bottom: 24px;">
         <i class="fas fa-chart-scatter"></i>
@@ -128,10 +128,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
-     style="display: flex; flex-direction: row; height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden;">
+     style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
-  <div id="left-panel" style="width: 380px; height: 100vh; background-color: white; display: flex; flex-direction: column;">
+  <div id="left-panel" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
       <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
@@ -153,8 +153,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
             <%# Visible DISCRETE metadata %>
-            <% (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []).each do |metadata| %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
+            <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []) %>
+            <% categorical_metadata_items.each_with_index do |metadata, idx| %>
+              <% is_last_categorical_item = (idx == categorical_metadata_items.length - 1) %>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>">
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
@@ -320,7 +322,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                       onmouseout="this.style.backgroundColor=''"
                                       title="<%= has_annots ? 'View annotations' : 'No annotations yet' %>"
                                       onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl)">
-                                <i class="fas fa-edit" style="font-size: 11px;"></i>
+                                <i class="fas fa-bookmark" style="font-size: 11px;"></i>
                               </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
@@ -383,7 +385,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                       onmouseout="this.style.backgroundColor=''"
                                       title="<%= has_annots_arr ? 'View annotations' : 'No annotations yet' %>"
                                       onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl)">
-                                <i class="fas fa-edit" style="font-size: 11px;"></i>
+                                <i class="fas fa-bookmark" style="font-size: 11px;"></i>
                               </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
@@ -491,8 +493,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
-            <% @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 }.each do |metadata| %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px;" data-metadata-item="<%= metadata.id %>">
+            <% continuous_metadata_items = @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 } %>
+            <% continuous_metadata_items.each_with_index do |metadata, idx| %>
+              <% is_last_continuous_item = (idx == continuous_metadata_items.length - 1) %>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_continuous_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>">
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
@@ -669,12 +673,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   </div>
 
   <!-- Left Resizer -->
-  <div id="left-resizer" style="width: 4px; height: 100vh; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
+  <div id="left-resizer" style="width: 4px; height: 100%; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
        onmouseover="this.style.backgroundColor='#3b82f6'"
        onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
 
   <!-- Main Content: UMAP Plot -->
-  <div id="main-panel" style="flex: 1; height: 100vh; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden;">
+  <div id="main-panel" style="flex: 1; height: 100%; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
     <!-- Menu Bar -->
     <div style="display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
@@ -1347,12 +1351,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   </div>
 
   <!-- Right Resizer -->
-  <div id="right-resizer" style="width: 4px; height: 100vh; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
+  <div id="right-resizer" style="width: 4px; height: 100%; background-color: #e5e7eb; cursor: col-resize; transition: background-color 0.2s;"
        onmouseover="this.style.backgroundColor='#3b82f6'"
        onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
 
   <!-- Right Panel: Split into Gene Expression and Selections -->
-  <div id="right-panel" style="width: 320px; height: 100vh; display: flex; flex-direction: column; overflow: hidden;">
+  <div id="right-panel" style="width: 320px; height: 100%; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
     
     <!-- Top Section: Gene Expression Panel -->
     <div id="gene-expression-panel" style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
@@ -1568,12 +1572,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <!-- Tab Content -->
       <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
         <!-- Cells Tab Content -->
-        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
-          <div style="margin-bottom: 16px;">
+        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow: hidden; min-height: 0; display: flex; flex-direction: column;">
+          <div style="display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0;">
             <!-- Cell count with action buttons -->
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
               <div style="font-size: 14px; color: #6b7280;">
-                <span id="selected-cells-count">0</span> cells selected
+                <span id="selected-cells-count">0</span> <span id="selected-cells-label">visible cells selected</span>
               </div>
               
               <!-- Action buttons (icons only) -->
@@ -1590,8 +1594,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 
                 <!-- Cancel Selection Button (Icon Only) -->
                 <button id="cancel-selection-btn"
-                        style="padding: 6px; background-color: #d1d5db; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
-                        title="Cancel Selection"
+                        style="display: none; padding: 6px; background-color: #d1d5db; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
+                        title="Cancel lasso selection"
                         data-action="click->visualization#cancelSelection"
                         onmouseover="this.style.backgroundColor='#9ca3af'"
                         onmouseout="this.style.backgroundColor='#d1d5db'">
@@ -1600,23 +1604,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               </div>
             </div>
 
-            <!-- Add all visible cells button -->
-            <div style="margin-bottom: 16px;">
-              <button id="add-all-visible-btn"
-                      style="width: 100%; padding: 8px 12px; background-color: #10b981; color: white; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;"
-                      title="Add all currently visible cells to selection"
-                      data-action="click->visualization#addAllVisibleCells"
-                      onmouseover="this.style.backgroundColor='#059669'"
-                      onmouseout="this.style.backgroundColor='#10b981'">
-                <i class="fas fa-plus" style="margin-right: 6px;"></i>
-                All visible cells to selection
-              </button>
-            </div>
-
             <!-- Saved Selections List -->
-            <div>
-              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>
-              <div id="saved-selections-list" style="max-height: 180px; overflow-y: auto;">
+            <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0;">
+                <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>
+                <button id="compose-selection-btn"
+                        type="button"
+                        style="padding: 4px 10px; background-color: #2563eb; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                        title="Compose selection"
+                        data-action="click->visualization#openComposeSelectionModal">
+                  Compose
+                </button>
+              </div>
+              <div id="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
                 <div style="font-size: 12px; color: #6b7280; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;">
                   No saved selections yet
                 </div>
@@ -1963,6 +1963,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
     </div>
   </div>
 </div>
+
+<%= render 'projects/views/compose_selection_modal' %>
+<%= render 'projects/views/compose_selection_details_modal' %>
 
 <div id="checkpoint-loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.35); z-index: 12500; justify-content: center; align-items: center;">
   <div style="background: white; border: 1px solid #d1d5db; border-radius: 10px; padding: 18px 22px; min-width: 220px; display: flex; align-items: center; justify-content: center; gap: 10px;">
@@ -3230,7 +3233,7 @@ function renderAnnotationPanel() {
   html += '<div style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;padding:0 12px;background:#fff;">'
   html += '<button type="button" onclick="setAnnotationTab(\'new\')" style="' + navButtonStyle('new') + '">New annotation</button>'
   html += '<button type="button" onclick="setAnnotationTab(\'existing\')" style="' + navButtonStyle('existing') + '">Existing annotations <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;line-height:1;">' + clas.length + '</span></button>'
-  html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '">Evidences</button>'
+  html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '">Identify markers</button>'
   html += '</div>'
   html += '<div style="overflow-y:auto;flex:1;padding:12px 16px;">'
   if (activeTab === 'new') {

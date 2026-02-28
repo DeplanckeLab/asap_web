@@ -10,8 +10,8 @@ class RunExecutionJob < ApplicationJob
       return
     end
 
-    if run.status_id != 1
-      Rails.logger.warn("[RunExecutionJob] Run##{run_id} is not in waiting status (current: #{run.status_id})")
+    unless [1, 6].include?(run.status_id.to_i)
+      Rails.logger.warn("[RunExecutionJob] Run##{run_id} is not in schedulable status (current: #{run.status_id})")
       return
     end
 
@@ -37,8 +37,7 @@ class RunExecutionJob < ApplicationJob
       if slurm_available?
         execute_via_slurm(run, project, step, docker_cmd)
       else
-        Rails.logger.warn("[RunExecutionJob] SLURM controller unavailable, falling back to direct execution for Run##{run_id}")
-        execute_directly(run, project, step, h_cmd)
+        raise StandardError, "SLURM controller unavailable for Run##{run_id}; run submission aborted."
       end
       
     rescue StandardError => e
@@ -71,8 +70,10 @@ class RunExecutionJob < ApplicationJob
   private
 
   def slurm_available?
-    result = `scontrol ping 2>&1`
-    $?.success? && result.include?('UP')
+    # `scontrol ping` can report false DOWN in some container/client setups.
+    # Use a controller-backed read query instead.
+    result = `sinfo -h -o '%P' 2>&1`
+    $?.success? && result.present? && !result.downcase.include?('error')
   rescue
     false
   end

@@ -48,6 +48,7 @@ Rails.application.routes.draw do
       post :prepare_metadata
       post :do_import_metadata
       post :save_metadata_from_selection
+      post :delete_selection
       get :selection_states
       get :sample_identifiers
     end

@@ -45,7 +45,8 @@ RUN apt-get update && \
     automake \
     libtool \
     libssl-dev \
-    libpam0g-dev && \
+    libpam0g-dev \
+    libhdf5-dev && \
     rm -rf /var/lib/apt/lists/*
 
 
@@ -85,12 +86,18 @@ RUN wget http://downloads.sourceforge.net/project/boost/boost/${BOOST_VERSION}/$
     && cd .. \
     && rm -rf ${BOOST_DIR} ${BOOST_DIR}.tar.bz2
 
-# Install SLURM client tools from Debian packages
-# Note: Version may differ from host, but client tools are generally compatible
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    slurm-client \
-    && rm -rf /var/lib/apt/lists/*
+# Build SLURM client tools from source to match host version
+ARG SLURM_VERSION=22.05.9
+WORKDIR /tmp
+RUN wget https://download.schedmd.com/slurm/slurm-${SLURM_VERSION}.tar.bz2 && \
+    tar -xjf slurm-${SLURM_VERSION}.tar.bz2 && \
+    cd slurm-${SLURM_VERSION} && \
+    ./configure --prefix=/usr --sysconfdir=/etc/slurm --localstatedir=/var --enable-pam --disable-cgroup && \
+    make -j"$(nproc)" && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/slurm-${SLURM_VERSION}* && \
+    ldconfig
 
 # Install Rails
 RUN gem install rails
@@ -132,6 +139,14 @@ RUN groupadd --gid "${USER_GID}" "${USER}" && \
       --create-home \
       --shell /bin/bash \
       "${USER}"
+
+# Ensure SLURM service user exists for client config parsing (SlurmUser=slurm).
+RUN if ! getent group slurm >/dev/null; then groupadd --system slurm; fi && \
+    if ! id -u slurm >/dev/null 2>&1; then \
+      useradd --system --gid slurm --home /var/lib/slurm --shell /usr/sbin/nologin slurm; \
+    fi && \
+    mkdir -p /var/lib/slurm && \
+    chown slurm:slurm /var/lib/slurm
 
 # Ensure docker group exists with GID 985 to match host (for Docker socket access)
 # Remove existing docker group if it exists with wrong GID, then recreate with correct GID

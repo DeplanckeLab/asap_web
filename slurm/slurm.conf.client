@@ -19,7 +19,6 @@ SlurmctldPidFile=/var/run/slurmctld.pid
 SlurmdPidFile=/var/run/slurmd.pid
 ProctrackType=proctrack/pgid
 TaskPlugin=task/none
-PluginDir=/usr/lib/x86_64-linux-gnu/slurm-wlm
 LaunchParameters=disable_cgroup
 ReturnToService=1
 SlurmctldTimeout=300
@@ -48,8 +47,6 @@ JobAcctGatherFrequency=30
 AccountingStorageType=accounting_storage/slurmdbd
 AccountingStorageHost=host.docker.internal
 AccountingStoragePort=6819
-AccountingStorageUser=root
-AccountingStoragePass=slurm
 
 # Node definitions
 # Hardware: 4 Sockets, 18 Cores per Socket, 2 Threads per Core = 144 CPUs total

@@ -19,7 +19,7 @@ namespace :slurm do
       run,
       parse_cmd,
       cores: run.nber_cores || 1,
-      memory_mb: run.pred_max_ram || run.max_ram || 4096,
+      memory_mb: (run.pred_max_ram.present? ? (run.pred_max_ram.to_f / 1024.0).ceil : (run.max_ram || 4096)),
       time_limit: run.pred_process_duration || 3600
     )
     

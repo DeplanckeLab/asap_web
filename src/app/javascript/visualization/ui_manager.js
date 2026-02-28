@@ -1272,26 +1272,25 @@ export class UIManager {
   // Update selected cells count display
   updateSelectedCellsCount() {
     const countElement = document.getElementById('selected-cells-count')
+    const labelElement = document.getElementById('selected-cells-label')
+    const cancelButton = document.getElementById('cancel-selection-btn')
     //console.log(`updateSelectedCellsCount called - countElement found:`, !!countElement)
     
     if (countElement) {
-      const totalSelectedCount = this.controller.selectedCells ? this.controller.selectedCells.size : 0
-      countElement.textContent = totalSelectedCount.toLocaleString()
-      
-      // Update tooltip with detailed information
-      if (totalSelectedCount > 0) {
-        const visibleCount = this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : 0
-        const totalCount = this.controller.currentCoordinates ? this.controller.currentCoordinates.length : 0
-        const percentage = totalCount > 0 ? ((totalSelectedCount / totalCount) * 100).toFixed(1) : 0
-        
-        countElement.title = `${totalSelectedCount.toLocaleString()} cells selected (${percentage}% of ${totalCount.toLocaleString()} total)`
-        countElement.style.color = '#1f2937'
-        countElement.style.fontWeight = '600'
-      } else {
-        countElement.title = 'No cells selected'
-        countElement.style.color = '#6b7280'
-        countElement.style.fontWeight = '500'
+      const selectionDisplay = this.controller.getSelectionCountDisplayData()
+      countElement.textContent = selectionDisplay.count.toLocaleString()
+      countElement.title = selectionDisplay.title
+      countElement.style.color = selectionDisplay.count > 0 ? '#1f2937' : '#6b7280'
+      countElement.style.fontWeight = selectionDisplay.count > 0 ? '600' : '500'
+      if (labelElement) {
+        labelElement.textContent = selectionDisplay.label
       }
+    }
+
+    if (cancelButton) {
+      const hasLassoSelection = !!(this.controller.selectedCells && this.controller.selectedCells.size > 0)
+      cancelButton.style.display = hasLassoSelection ? 'inline-flex' : 'none'
+      cancelButton.title = 'Cancel lasso selection'
     }
   }
 

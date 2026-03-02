@@ -423,6 +423,9 @@ export class RendererManager {
     const labelFontSize = this.controller.labelFontSizeMode === 'auto' ? autoLabelFontSize : manualLabelFontSize
     // Use tighter, font-scaled padding so small labels have compact boxes.
     const boxPadding = showLabelBoxes ? Math.max(2, Math.round(labelFontSize * 0.2)) : 2
+    const resolvedMetadataId = this.controller.syncCurrentMetadataIdWithPanelByName
+      ? this.controller.syncCurrentMetadataIdWithPanelByName()
+      : String(this.controller.currentMetadataId || this.controller.currentMetadataVector?.id || '')
 
     sortable.forEach(([category, centroid]) => {
       const centroidScreenX = this.controller.interactionHandler.normalizeX(centroid.x, this.controller.currentBounds)
@@ -632,6 +635,8 @@ export class RendererManager {
       const finalLockedY = finalIsManuallyMoved ? screenY : null
 
       newLabels.push({
+        metadataId: String(resolvedMetadataId || ''),
+        metadataName: String(this.controller.currentMetadataVector?.name || this.controller.dataManager?.getMetadataNameById?.(this.controller.currentMetadataId) || ''),
         category: category,
         displayText: displayText,
         x: screenX,

@@ -5822,6 +5822,7 @@ export default class extends Controller {
       }
       // Apply coloring through the data path deterministically.
       const loadedColorVector = await this.dataManager.loadAndVisualizeMetadataVector(String(coloringMetadataId))
+      this.syncCurrentMetadataIdWithPanelByName()
       this.checkpointDebug('restoreColoringAndAxisState:color-reapply', {
         coloringMetadataId: String(coloringMetadataId),
         colorButtonFound: !!colorButton,
@@ -5853,6 +5854,56 @@ export default class extends Controller {
       this.resetAllYButtons()
       this.selectedYButton = null
     }
+  }
+
+  syncCurrentMetadataIdWithPanelByName() {
+    const currentId = String(this.currentMetadataId || this.currentMetadataVector?.id || '').trim()
+    const currentVectorName = String(this.currentMetadataVector?.name || '').trim()
+    if (!currentId && !currentVectorName) return currentId
+
+    if (currentId) {
+      const currentPanelItem = document.querySelector(`[data-metadata-item="${currentId}"]`)
+      if (currentPanelItem) return currentId
+    }
+
+    const targetName = currentVectorName || String(this.dataManager?.getMetadataNameById?.(currentId) || '').trim()
+    if (!targetName) {
+      console.error('[CheckpointSync] Cannot map metadata id without metadata name', {
+        currentMetadataId: currentId || null
+      })
+      return currentId
+    }
+
+    const candidates = Array.from(document.querySelectorAll('[data-action*="waterDropClicked"][data-metadata-id][data-metadata-name]'))
+      .filter((button) => String(button.dataset.metadataName || '').trim() === targetName)
+
+    if (candidates.length !== 1) {
+      console.error('[CheckpointSync] Metadata name mapping is not unique', {
+        metadataName: targetName,
+        currentMetadataId: currentId || null,
+        candidateCount: candidates.length
+      })
+      return currentId
+    }
+
+    const resolvedId = String(candidates[0].dataset.metadataId || '').trim()
+    if (!resolvedId) {
+      console.error('[CheckpointSync] Resolved metadata candidate has empty id', {
+        metadataName: targetName
+      })
+      return currentId
+    }
+
+    this.currentMetadataId = resolvedId
+    if (this.currentMetadataVector && typeof this.currentMetadataVector === 'object') {
+      this.currentMetadataVector.id = resolvedId
+    }
+    this.checkpointDebug('syncCurrentMetadataIdWithPanelByName:mapped', {
+      from: currentId || null,
+      to: resolvedId,
+      metadataName: targetName
+    })
+    return resolvedId
   }
 
   // Toggle metadata categories (moved from inline JS)
@@ -12270,31 +12321,55 @@ export default class extends Controller {
   async openSavedSelection(event) {
     const selectionId = event.currentTarget?.dataset?.selectionId
     if (!selectionId) return
-    const item = (this.savedSelections || []).find((entry) => entry.id === selectionId)
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === String(selectionId))
     if (!item || !item.metadataId) return
 
     const metadataId = item.metadataId
+    const previousContext = this.lastOpenedSavedSelectionContext
+    await this.applySavedSelectionCategoryMask(metadataId, item.unselectedName, false)
+    if (previousContext?.metadataId && String(previousContext.metadataId) !== String(metadataId)) {
+      this.applySavedSelectionCategoryMask(previousContext.metadataId, previousContext.unselectedName, true, false)
+    }
+    this.lastOpenedSavedSelectionContext = {
+      metadataId: String(metadataId),
+      unselectedName: item.unselectedName || 'Not selected'
+    }
+  }
+
+  async applySavedSelectionCategoryMask(metadataId, unselectedName = 'Not selected', shouldSelect = false, shouldScroll = true) {
+    if (!metadataId) return
+
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem) return
 
     const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
     const categoriesDiv = header ? header.nextElementSibling : null
-    if (header && categoriesDiv && categoriesDiv.style.display === 'none') {
+    const chevron = header ? header.querySelector('.fa-chevron-right') : null
+    const categoriesAreCollapsed = !!(
+      categoriesDiv &&
+      chevron &&
+      (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)')
+    )
+
+    if (header && categoriesAreCollapsed) {
       header.click()
+      await this.waitForMetadataExpansion(categoriesDiv)
     }
-    await this.waitForMetadataExpansion(categoriesDiv)
-    metadataItem.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    if (shouldScroll) {
+      metadataItem.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+    }
 
-    const unselectedName = item.unselectedName || 'Not selected'
-    const selectorsToDisable = new Set([unselectedName, '0'])
+    const selectorsToToggle = new Set([unselectedName || 'Not selected', '0'])
 
-    selectorsToDisable.forEach((categoryValue) => {
+    selectorsToToggle.forEach((categoryValue) => {
       const escaped = this.escapeAttributeSelectorValue(String(categoryValue))
       const checkbox = metadataItem.querySelector(`.category-checkbox[data-metadata-id="${metadataId}"][data-category="${escaped}"]`)
       if (!checkbox) return
       const icon = checkbox.querySelector('i')
       const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
-      if (iconDisplay !== 'none') {
+      if (shouldSelect && iconDisplay === 'none') {
+        checkbox.click()
+      } else if (!shouldSelect && iconDisplay !== 'none') {
         checkbox.click()
       }
     })
@@ -13645,11 +13720,18 @@ export default class extends Controller {
   }
 
   async focusMetadataCategoryFromLabel(label) {
-    if (!label || !this.currentMetadataVector || this.currentMetadataVector.data_type !== 'DISCRETE') return
+    if (!label) return
 
-    const metadataId = String(this.currentMetadataVector.id || this.currentMetadataId || '')
+    const metadataId = String(label.metadataId || '').trim()
     const category = String(label.category || '').trim()
-    if (!metadataId || !category) return
+    if (!metadataId || !category) {
+      console.error('[LabelFocus] Missing label metadata/category', {
+        metadataId,
+        category,
+        label
+      })
+      return
+    }
 
     await this.focusMetadataCategoryById(metadataId, category)
   }
@@ -13660,7 +13742,13 @@ export default class extends Controller {
     if (!normalizedMetadataId || !normalizedCategory) return
 
     const metadataItem = document.querySelector(`[data-metadata-item="${normalizedMetadataId}"]`)
-    if (!metadataItem) return
+    if (!metadataItem) {
+      console.error('[LabelFocus] Metadata item not found in panel', {
+        metadataId: normalizedMetadataId,
+        category: normalizedCategory
+      })
+      return
+    }
 
     const header = metadataItem.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${normalizedMetadataId}"]`)
     const categoriesDiv = header ? header.nextElementSibling : null
@@ -13668,9 +13756,13 @@ export default class extends Controller {
     const chevron = header ? header.querySelector('.fa-chevron-right') : null
     // Keep fold-state detection aligned with toggleMetadata() logic.
     const categoriesAreCollapsed = !!(
-      categoriesDiv &&
-      chevron &&
-      (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)')
+      categoriesDiv && (
+        categoriesDiv.style.display === 'none' ||
+        (
+          chevron &&
+          (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)')
+        )
+      )
     )
     if (header && categoriesAreCollapsed) {
       header.click()
@@ -13686,18 +13778,27 @@ export default class extends Controller {
         categoryRow = await this.waitForCategoryRow(metadataItem, normalizedMetadataId, normalizedCategory, categoriesDiv)
       }
     }
-    if (!categoryRow) return
+    if (!categoryRow) {
+      const fallbackTarget = header || metadataItem
+      requestAnimationFrame(() => {
+        fallbackTarget.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+      })
+      return
+    }
 
     // Ensure layout/transition has settled before scrolling to the exact category row.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        categoryRow.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+        categoryRow.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
       })
     })
   }
 
   waitForMetadataExpansion(categoriesDiv) {
     if (!categoriesDiv) return Promise.resolve()
+    if (categoriesDiv.style.display !== 'none' && categoriesDiv.scrollHeight > 0 && categoriesDiv.style.maxHeight === 'none') {
+      return Promise.resolve()
+    }
 
     return new Promise(resolve => {
       let resolved = false

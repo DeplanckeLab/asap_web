@@ -1925,9 +1925,11 @@ export default class extends Controller {
         linkEmbeddingId: document.getElementById('embedding-selection-link')?.dataset?.selectedEmbeddingId || null,
         linkLoomFile: document.getElementById('embedding-selection-link')?.dataset?.currentLoomFile || null
       })
-      const currentSignature = this.computeCheckpointStateSignature(this.buildCheckpointState())
+      const currentState = this.buildCheckpointState()
+      const currentSignature = this.computeCheckpointStateSignature(currentState)
       this.mergeCheckpointIntoHistory({
         ...checkpoint,
+        state: currentState,
         state_signature: currentSignature
       })
       this.currentMatchedCheckpointId = checkpoint.id
@@ -5273,7 +5275,14 @@ export default class extends Controller {
       },
       selection: {
         selectedCells: selectedCells,
-        activeTab: document.getElementById('cells-tab')?.classList.contains('text-blue-600') ? 'cells' : 'gene-sets'
+        activeTab: (() => {
+          if (this.currentSelectionTab === 'gene-sets' || this.currentSelectionTab === 'cells') {
+            return this.currentSelectionTab
+          }
+          const cellsContent = document.getElementById('cells-tab-content')
+          if (cellsContent && cellsContent.style.display !== 'none') return 'cells'
+          return 'gene-sets'
+        })()
       }
     }
 
@@ -5281,31 +5290,148 @@ export default class extends Controller {
     return state
   }
 
-  computeCheckpointStateSignature(state) {
-    const normalize = (value) => {
-      if (Array.isArray(value)) {
-        return value.map(normalize)
-      }
-      if (value && typeof value === 'object') {
-        const out = {}
-        Object.keys(value).sort().forEach((key) => {
-          if (key === 'signature') return
-          out[key] = normalize(value[key])
-        })
-        return out
-      }
-      return value
+  shouldExcludeCheckpointMatchPath(path, key) {
+    if (key === 'signature' || key === 'version' || key === 'foldState') return true
+
+    const parent = path.join('.')
+    if (parent === 'selection' && key === 'activeTab') return true
+    if (parent === 'interaction' && key === 'mode') return true
+    if (parent === 'genes' && key === 'tags') return true
+    if (parent === 'customPlotWindow' && key === 'expandedWindow') return true
+    if (parent === 'visualizationEmbedding' && (key === 'name' || key === 'dimension')) return true
+
+    return false
+  }
+
+  normalizeCheckpointState(value, path = []) {
+    if (Array.isArray(value)) {
+      return value.map((item, idx) => this.normalizeCheckpointState(item, [...path, String(idx)]))
     }
-    return JSON.stringify(normalize(state))
+    if (value && typeof value === 'object') {
+      const out = {}
+      Object.keys(value).sort().forEach((key) => {
+        if (this.shouldExcludeCheckpointMatchPath(path, key)) return
+        out[key] = this.normalizeCheckpointState(value[key], [...path, key])
+      })
+      return out
+    }
+    return value
+  }
+
+  computeCheckpointStateSignature(state) {
+    return JSON.stringify(this.normalizeCheckpointState(state))
+  }
+
+  collectCheckpointStateDiffs(currentValue, checkpointValue, path = '', diffs = [], maxDiffs = 25) {
+    if (diffs.length >= maxDiffs) return diffs
+
+    const currentIsArray = Array.isArray(currentValue)
+    const checkpointIsArray = Array.isArray(checkpointValue)
+    const currentIsObject = !!currentValue && typeof currentValue === 'object' && !currentIsArray
+    const checkpointIsObject = !!checkpointValue && typeof checkpointValue === 'object' && !checkpointIsArray
+
+    if (currentIsArray || checkpointIsArray) {
+      if (!(currentIsArray && checkpointIsArray)) {
+        diffs.push({ path: path || '<root>', current: currentValue, checkpoint: checkpointValue })
+        return diffs
+      }
+
+      if (currentValue.length !== checkpointValue.length) {
+        diffs.push({
+          path: `${path || '<root>'}.length`,
+          current: currentValue.length,
+          checkpoint: checkpointValue.length
+        })
+      }
+
+      const maxLength = Math.max(currentValue.length, checkpointValue.length)
+      for (let idx = 0; idx < maxLength; idx += 1) {
+        if (diffs.length >= maxDiffs) break
+        this.collectCheckpointStateDiffs(
+          currentValue[idx],
+          checkpointValue[idx],
+          `${path}[${idx}]`,
+          diffs,
+          maxDiffs
+        )
+      }
+      return diffs
+    }
+
+    if (currentIsObject || checkpointIsObject) {
+      if (!(currentIsObject && checkpointIsObject)) {
+        diffs.push({ path: path || '<root>', current: currentValue, checkpoint: checkpointValue })
+        return diffs
+      }
+
+      const keys = new Set([...Object.keys(currentValue), ...Object.keys(checkpointValue)])
+      Array.from(keys).sort().forEach((key) => {
+        if (diffs.length >= maxDiffs) return
+        const nextPath = path ? `${path}.${key}` : key
+        this.collectCheckpointStateDiffs(currentValue[key], checkpointValue[key], nextPath, diffs, maxDiffs)
+      })
+      return diffs
+    }
+
+    if (currentValue !== checkpointValue) {
+      diffs.push({ path: path || '<root>', current: currentValue, checkpoint: checkpointValue })
+    }
+    return diffs
+  }
+
+  logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history) {
+    if (window.CHECKPOINT_DEBUG !== true) return
+
+    const previousId = previousMatchedCheckpointId ? String(previousMatchedCheckpointId) : ''
+    const logKey = `${currentSignature}|${previousId}|${history.length}`
+    const now = Date.now()
+    if (this.lastCheckpointMismatchLogKey === logKey && now - (this.lastCheckpointMismatchLogAt || 0) < 5000) {
+      return
+    }
+    this.lastCheckpointMismatchLogKey = logKey
+    this.lastCheckpointMismatchLogAt = now
+
+    const fallbackCheckpoint = history.find((item) => item && item.state) || null
+    const previousCheckpoint = previousId
+      ? history.find((item) => String(item.id) === previousId && item.state)
+      : null
+    const checkpoint = previousCheckpoint || fallbackCheckpoint
+    if (!checkpoint || !checkpoint.state) {
+      console.warn('[CheckpointMatch] No checkpoint state available for mismatch diff', {
+        previousMatchedCheckpointId: previousId || null,
+        historySize: history.length,
+        currentSignature
+      })
+      return
+    }
+
+    const checkpointSignature = checkpoint.state_signature || this.computeCheckpointStateSignature(checkpoint.state)
+    const normalizedCurrent = this.normalizeCheckpointState(currentState)
+    const normalizedCheckpoint = this.normalizeCheckpointState(checkpoint.state)
+    const diffs = this.collectCheckpointStateDiffs(normalizedCurrent, normalizedCheckpoint, '', [], 25)
+
+    console.groupCollapsed('[CheckpointMatch] Signature mismatch detected')
+    console.log('[CheckpointMatch] previousMatchedCheckpointId', previousId || null)
+    console.log('[CheckpointMatch] comparedCheckpointId', checkpoint.id)
+    console.log('[CheckpointMatch] currentSignature', currentSignature)
+    console.log('[CheckpointMatch] checkpointSignature', checkpointSignature)
+    console.log('[CheckpointMatch] blockers', this.collectCheckpointUiBlockers())
+    console.log('[CheckpointMatch] firstDiffs', diffs)
+    console.log('[CheckpointMatch] currentColoring', normalizedCurrent?.coloring || null)
+    console.log('[CheckpointMatch] checkpointColoring', normalizedCheckpoint?.coloring || null)
+    console.log('[CheckpointMatch] currentInteraction', normalizedCurrent?.interaction || null)
+    console.log('[CheckpointMatch] checkpointInteraction', normalizedCheckpoint?.interaction || null)
+    console.groupEnd()
   }
 
   mergeCheckpointIntoHistory(checkpoint) {
     if (!checkpoint || !checkpoint.id) return
     const entry = { ...checkpoint }
-    if (entry.state) {
+    if (!entry.state_signature && entry.state) {
       entry.state_signature = this.computeCheckpointStateSignature(entry.state)
     }
-    const index = this.checkpointHistory.findIndex((item) => item.id === checkpoint.id)
+    const checkpointId = String(checkpoint.id)
+    const index = this.checkpointHistory.findIndex((item) => String(item.id) === checkpointId)
     if (index === -1) {
       this.checkpointHistory.unshift(entry)
     } else {
@@ -5330,7 +5456,9 @@ export default class extends Controller {
 
     this.isRefreshingCheckpointMatch = true
     try {
-      const currentSignature = this.computeCheckpointStateSignature(this.buildCheckpointState())
+      const previousMatchedCheckpointId = this.currentMatchedCheckpointId
+      const currentState = this.buildCheckpointState()
+      const currentSignature = this.computeCheckpointStateSignature(currentState)
       const match = history.find((checkpoint) => {
         if (checkpoint.state_signature) {
           return checkpoint.state_signature === currentSignature
@@ -5342,12 +5470,14 @@ export default class extends Controller {
       })
 
       if (match) {
+        this.lastCheckpointMismatchLogKey = null
         this.currentMatchedCheckpointId = match.id
         const commentCount = Number(match.comments_count || (Array.isArray(match.comments) ? match.comments.length : 0))
         this.updateCheckpointCommentsButtonState(commentCount, true)
       } else {
         this.currentMatchedCheckpointId = null
         this.updateCheckpointCommentsButtonState(0, false)
+        this.logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history)
       }
     } finally {
       this.isRefreshingCheckpointMatch = false
@@ -5651,10 +5781,35 @@ export default class extends Controller {
   }
 
   async restoreColoringAndAxisState(state) {
-    if (state.coloring?.categoryColorOverrides) {
-      Object.entries(state.coloring.categoryColorOverrides).forEach(([storageKey, color]) => {
-        localStorage.setItem(storageKey, color)
-      })
+    const checkpointColoringState = state.coloring || {}
+    const checkpointCategoryColorOverrides = checkpointColoringState.categoryColorOverrides || {}
+    const checkpointOverrideKeys = new Set(Object.keys(checkpointCategoryColorOverrides))
+
+    // Apply category color overrides symmetrically: remove stale keys, then restore checkpoint keys.
+    Object.keys(localStorage).forEach((storageKey) => {
+      if (!storageKey.startsWith('category_color_')) return
+      if (!checkpointOverrideKeys.has(storageKey)) {
+        localStorage.removeItem(storageKey)
+      }
+    })
+    Object.entries(checkpointCategoryColorOverrides).forEach(([storageKey, color]) => {
+      localStorage.setItem(storageKey, color)
+    })
+
+    if (Object.prototype.hasOwnProperty.call(checkpointColoringState, 'currentColorScheme')) {
+      this.currentColorScheme = checkpointColoringState.currentColorScheme
+    }
+
+    if (Object.prototype.hasOwnProperty.call(checkpointColoringState, 'customColorRange')) {
+      const range = checkpointColoringState.customColorRange
+      if (range && Number.isFinite(Number(range.min)) && Number.isFinite(Number(range.max))) {
+        this.customColorRange = {
+          min: Number(range.min),
+          max: Number(range.max)
+        }
+      } else {
+        this.customColorRange = null
+      }
     }
 
     const coloringMetadataId = state.coloring?.metadataId
@@ -10306,21 +10461,33 @@ export default class extends Controller {
     const geneSetsContent = document.getElementById('gene-sets-tab-content')
     if (!cellsTab || !geneSetsTab || !cellsContent || !geneSetsContent) return
 
+    this.currentSelectionTab = normalizedTab
+
     if (normalizedTab === 'cells') {
       cellsTab.classList.add('border-blue-500', 'text-blue-600')
       cellsTab.classList.remove('border-transparent', 'text-gray-500')
       geneSetsTab.classList.remove('border-blue-500', 'text-blue-600')
       geneSetsTab.classList.add('border-transparent', 'text-gray-500')
+
+      cellsTab.style.color = '#3b82f6'
+      cellsTab.style.borderBottomColor = '#3b82f6'
+      geneSetsTab.style.color = '#6b7280'
+      geneSetsTab.style.borderBottomColor = 'transparent'
       
       cellsContent.classList.remove('hidden')
       geneSetsContent.classList.add('hidden')
       cellsContent.style.display = 'flex'
       geneSetsContent.style.display = 'none'
-    } else if (tab === 'gene-sets') {
+    } else if (normalizedTab === 'gene-sets') {
       geneSetsTab.classList.add('border-blue-500', 'text-blue-600')
       geneSetsTab.classList.remove('border-transparent', 'text-gray-500')
       cellsTab.classList.remove('border-blue-500', 'text-blue-600')
       cellsTab.classList.add('border-transparent', 'text-gray-500')
+
+      geneSetsTab.style.color = '#3b82f6'
+      geneSetsTab.style.borderBottomColor = '#3b82f6'
+      cellsTab.style.color = '#6b7280'
+      cellsTab.style.borderBottomColor = 'transparent'
       
       geneSetsContent.classList.remove('hidden')
       cellsContent.classList.add('hidden')

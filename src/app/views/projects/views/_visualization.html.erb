@@ -1542,14 +1542,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
 
     <!-- Bottom Section: Selections Panel -->
     <div id="selections-panel" style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
-        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Selections</h2>
-        <span id="saved-selections-count" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">0</span>
-      </div>
-
       <!-- Selection Tabs -->
       <div style="border-bottom: 1px solid #e5e7eb;">
-        <nav style="display: flex; padding: 0 16px;">
+        <nav style="display: flex; align-items: center; gap: 8px; padding: 0 16px;">
+          <span style="font-size: 14px; font-weight: 600; color: #111827; white-space: nowrap;">Selections</span>
           <button id="cells-tab" 
                   style="padding: 8px 16px; border-bottom: 2px solid #3b82f6; font-weight: 500; font-size: 14px; color: #3b82f6; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer;"
                   data-action="click->visualization#switchSelectionTab"

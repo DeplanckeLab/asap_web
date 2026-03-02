@@ -74,6 +74,19 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1 or /projects/1.json
   def show
+    if selective_project_view_loading_enabled?
+      with_request_profile('projects#show', view: params[:view]) do
+        @project.ensure_project_steps
+        @view_type = resolve_project_view_type(params[:view])
+        load_view_context_for(@view_type)
+        respond_to do |format|
+          format.html
+          format.json { render json: @project }
+        end
+      end
+      return
+    end
+
     # Ensure project steps exist (safeguard for existing projects)
     @project.ensure_project_steps
     
@@ -1853,6 +1866,7 @@ class ProjectsController < ApplicationController
   # GET /projects/1/data_content
   # Returns just the right panel content for AJAX loading
   def data_content
+    with_request_profile('projects#data_content', view: 'data') do
     # Set view type to data
     @view_type = 'data'
     
@@ -1960,6 +1974,7 @@ class ProjectsController < ApplicationController
     
     respond_to do |format|
       format.html { render partial: 'projects/views/data_content', layout: false }
+    end
     end
   end
 
@@ -3294,6 +3309,7 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/step_results
   def step_results
+    with_request_profile('projects#step_results', view: params[:view] || params[:step_id]) do
     Rails.logger.info("===== STEP_RESULTS CALLED =====")
     Rails.logger.info("Project ID: #{@project&.id}, Step ID param: #{params[:step_id]}")
     
@@ -3603,6 +3619,7 @@ class ProjectsController < ApplicationController
         end
       }
       format.json { render json: { step: @step, runs: @runs } }
+    end
     end
   end
 
@@ -4365,6 +4382,486 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def selective_project_view_loading_enabled?
+      ENV.fetch('PROJECT_SELECTIVE_VIEW_LOADING', '1') != '0'
+    end
+
+    def resolve_project_view_type(requested_view)
+      view = requested_view.to_s
+      allowed_views = %w[summary visualization analysis data settings compliance]
+      return view if allowed_views.include?(view)
+
+      project_has_visualization_data? ? 'visualization' : 'summary'
+    end
+
+    def project_has_visualization_data?
+      Annot.where(project_id: @project.id)
+           .where.not(filepath: nil)
+           .where("name LIKE '/col_attrs/%' OR (dim = 1 AND nber_rows IN (2, 3))")
+           .exists?
+    end
+
+    def with_request_profile(endpoint, view: nil)
+      sql_count = 0
+      sql_duration_ms = 0.0
+      subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |_name, start, finish, _id, payload|
+        next if payload[:name] == 'SCHEMA' || payload[:cached]
+        sql_count += 1
+        sql_duration_ms += (finish - start) * 1000.0
+      end
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+      elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0).round(1)
+      Rails.logger.info("[perf] endpoint=#{endpoint} view=#{view || @view_type} duration_ms=#{elapsed_ms} sql_count=#{sql_count} sql_ms=#{sql_duration_ms.round(1)}")
+    end
+
+    def load_view_context_for(view_type)
+      case view_type
+      when 'visualization'
+        load_visualization_context
+      when 'summary'
+        load_analysis_context
+        load_summary_context
+      when 'analysis'
+        load_analysis_context
+      when 'data'
+        load_data_context
+      when 'settings'
+        load_settings_context
+      when 'compliance'
+        load_compliance_context
+      else
+        @view_type = 'summary'
+        load_analysis_context
+        load_summary_context
+      end
+    end
+
+    def load_visualization_context
+      all_loom_files = Annot.available_loom_files(@project.id)
+      available_metadata = Annot.available_metadata(@project.id)
+
+      @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      existing_loom_files = all_loom_files.select do |filepath|
+        full_path = @project_dir + filepath
+        exists = File.exist?(full_path)
+        Rails.logger.debug "[show] Checking loom file existence: #{full_path} -> #{exists}"
+        exists
+      end
+
+      existing_metadata = available_metadata.select { |metadata| existing_loom_files.include?(metadata.filepath) }
+      @h_metadata = organize_metadata(existing_metadata)
+
+      @available_loom_files = existing_loom_files.select do |filepath|
+        @h_metadata[filepath] &&
+          @h_metadata[filepath]['cell'] &&
+          @h_metadata[filepath]['cell']['NUMERIC'] &&
+          @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
+      end
+
+      @default_loom_file = @available_loom_files.first || existing_loom_files.first
+      @all_embeddings_by_loom = {}
+      @available_loom_files.each do |filepath|
+        numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
+        @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
+          metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+        end
+      end
+
+      if params[:embedding_id].present?
+        requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
+        if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
+          @default_embedding = requested_embedding
+          @default_embedding_loom_file = requested_embedding.filepath
+          @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
+        else
+          @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+          @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+        end
+      else
+        @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+        @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+      end
+
+      unless @default_embedding
+        fallback_entry = @all_embeddings_by_loom.find { |_path, embeddings| embeddings.present? }
+        if fallback_entry
+          @default_embedding_loom_file = fallback_entry[0]
+          @default_embedding = fallback_entry[1].first
+        end
+      end
+
+      @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)
+                                          .order(id: :asc)
+                                          .group_by(&:filepath)
+
+      categorical_metadata = []
+      @h_metadata.each_value do |dimension_hash|
+        next unless dimension_hash
+        discrete = dimension_hash.dig('cell', 'DISCRETE')
+        categorical_metadata.concat(discrete) if discrete.present?
+      end
+      build_best_cla_category_map(categorical_metadata)
+
+      @initial_selection_items = []
+      if @default_loom_file.present?
+        @initial_selection_items = selection_cache_items_for_loom(@default_loom_file, cleanup_completed: true)
+        @initial_selection_items.concat(selection_items_from_annots(@default_loom_file))
+        @initial_selection_items.sort_by! { |entry| entry[:created_at].to_s }
+        @initial_selection_items.reverse!
+      end
+    end
+
+    def load_analysis_context
+      @project_type = @project.project_type
+      @runs = @project.runs.includes(:annots)
+      prepare_steps_with_status
+      @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
+      @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
+
+      @load_run_panel = false
+      @run_panel_html = nil
+      if @selected_run_id.present?
+        selected_run = Run.find_by(id: @selected_run_id)
+        selected_step = selected_run&.step
+        if selected_run && selected_step
+          begin
+            @run_panel_html = render_run_panel_to_string(selected_run, selected_step)
+            @load_run_panel = true
+          rescue => e
+            Rails.logger.error("[show] Error rendering run panel: #{e.class} - #{e.message}")
+            Rails.logger.error(e.backtrace.first(10).join("\n"))
+          end
+        end
+      end
+
+      @load_sub_view = false
+      @sub_view_html = nil
+      if params[:sub_view].present? && @selected_step_id.present?
+        begin
+          sub_view_step = Step.find_by(id: @selected_step_id)
+          if sub_view_step
+            saved_step = @step
+            saved_runs = @runs
+            saved_show_form = @show_form
+            saved_show_custom_form = @show_custom_form
+            saved_show_dashboard = @show_dashboard
+            saved_show_view = @show_view
+            saved_view_param = params[:view]
+
+            @step = sub_view_step
+            @runs = @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            @project_step = ProjectStep.find_or_create_by(project_id: @project.id, step_id: @selected_step_id)
+            @show_form = false
+            @show_custom_form = false
+            @show_dashboard = false
+            @show_view = false
+
+            params[:view] = params[:sub_view]
+            @sub_view_html = render_to_string(partial: 'projects/views/step_results', layout: false)
+            @load_sub_view = true
+
+            params[:view] = saved_view_param
+            @step = saved_step
+            @runs = saved_runs
+            @show_form = saved_show_form
+            @show_custom_form = saved_show_custom_form
+            @show_dashboard = saved_show_dashboard
+            @show_view = saved_show_view
+          end
+        rescue => e
+          Rails.logger.error("[show] Error preparing sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
+        end
+      end
+
+      if @load_sub_view && params[:gene_list_run_id].present? && params[:gene_list_type].present?
+        begin
+          gl_run = Run.find(params[:gene_list_run_id])
+          gl_step = gl_run.step
+          gl_std_method = gl_run.std_method
+          params[:type] = params[:gene_list_type]
+          params[:from] ||= 'de_results'
+
+          @run = gl_run
+          @step = gl_step
+          @std_method = gl_std_method
+          @fields = ["Gene index", "EnsemblID", "Gene name", "Alt names", "Description", "logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
+          @limit = 3000
+          @h_std_method_attrs = { gl_std_method.id => Basic.get_std_method_attrs(gl_std_method, gl_step)[:h_attrs] }
+          @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
+          @data = []
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+          filename = project_dir + "de" + gl_run.id.to_s + "filtered.#{params[:type]}.json"
+          list_filtered_rows = Basic.safe_parse_json(File.read(filename), [])
+          @h_filtered_rows = {}
+          list_filtered_rows.each { |e| @h_filtered_rows[e.to_i] = 1 }
+          @nber_genes = list_filtered_rows.size
+
+          filename = project_dir + "de" + gl_run.id.to_s + "output.txt"
+          @tmp_data = File.readlines(filename)
+          i = 0
+          j = 0
+          if params[:type] == 'up'
+            @tmp_data.reverse.each do |l|
+              if @h_filtered_rows[@tmp_data.size - 1 - i]
+                t = l.chomp.split("\t")
+                t[2] = t[2].split(",").join(", ")
+                @data.push t
+                j += 1
+              end
+              i += 1
+              break if j == @limit
+            end
+          else
+            @tmp_data.each do |l|
+              if @h_filtered_rows[i]
+                t = l.chomp.split("\t")
+                t[2] = t[2].split(",").join(", ")
+                @data.push t
+                j += 1
+              end
+              i += 1
+              break if j == @limit
+            end
+          end
+
+          @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
+        rescue => e
+          Rails.logger.error("[show] Error preparing gene_list sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
+        end
+      end
+
+      if @load_sub_view && params[:geneset_list_run_id].present? && params[:geneset_list_type].present?
+        begin
+          gs_run = Run.find(params[:geneset_list_run_id])
+          gs_step = gs_run.step
+          gs_std_method = gs_run.std_method
+          params[:type] = params[:geneset_list_type]
+          params[:from] ||= 'ge_results'
+
+          @run = gs_run
+          @step = gs_step
+          @std_method = gs_std_method
+          @h_ge_filters = Basic.safe_parse_json(@project.ge_filter_json, {})
+          @limit = 3000
+          @data = []
+          @h_run_attrs = gs_run.attrs_json ? JSON.parse(gs_run.attrs_json) : {}
+
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+          filename = project_dir + "ge" + gs_run.id.to_s + "output.json"
+          h_output = Basic.safe_parse_json(File.read(filename), {})
+          @fields = h_output["headers"]
+          h_fields = {}
+          @fields.each_index { |i| h_fields[@fields[i]] = i }
+
+          if h_output[params[:type]]
+            h_output[params[:type]].sort { |a, b| b[h_fields['effect size']].to_f <=> a[h_fields['effect size']].to_f }.each do |e|
+              @data.push(e) if e[h_fields['fdr']] <= @h_ge_filters['fdr_cutoff'].to_f
+            end
+          end
+          @nber_genesets = @data.size
+
+          @sub_view_html = render_to_string(partial: 'runs/get_ge_geneset_list', layout: false)
+        rescue => e
+          Rails.logger.error("[show] Error preparing geneset_list sub_view: #{e.class} - #{e.message}")
+          Rails.logger.error(e.backtrace.first(10).join("\n"))
+        end
+      end
+    end
+
+    def load_data_context
+      @project_type = @project.project_type
+      all_annots = Annot.where(project_id: @project.id)
+                        .where.not(filepath: nil)
+                        .includes(:step, run: [:std_method])
+                        .order(:name)
+
+      filepath_info = {}
+      all_annots.each do |annot|
+        next unless annot.filepath.present?
+
+        filepath = annot.filepath
+        step_rank = annot.step&.rank
+        run_id = annot.run_id
+
+        if filepath_info[filepath]
+          existing = filepath_info[filepath]
+          existing_step_rank = existing[:step_rank] || 9999
+          existing_run_id = existing[:run_id] || 999999
+          current_step_rank = step_rank || 9999
+          current_run_id = run_id || 999999
+
+          should_update = false
+          should_update = true if current_step_rank < existing_step_rank
+          should_update = true if current_step_rank == existing_step_rank && current_run_id < existing_run_id
+          if should_update
+            existing[:step_rank] = step_rank
+            existing[:run_id] = run_id
+          end
+        else
+          filepath_info[filepath] = { step_rank: step_rank, run_id: run_id }
+        end
+      end
+
+      @available_loom_files = filepath_info.keys.sort_by do |filepath|
+        info = filepath_info[filepath]
+        [info[:step_rank] || 9999, info[:run_id] || 999999]
+      end
+      @filepath_info = filepath_info
+      run_ids = filepath_info.values.map { |info| info[:run_id] }.compact.uniq
+      @loom_file_runs = Run.where(id: run_ids).includes(:step, :std_method).index_by(&:id) if run_ids.any?
+      @loom_file_runs ||= {}
+      @selected_loom_file = params[:loom_file].presence || @available_loom_files.first
+
+      @annots_by_loom_and_type = {}
+      @matrix_dims_by_loom = {}
+      @available_loom_files.each do |filepath|
+        @annots_by_loom_and_type[filepath] = { matrices: [], col_attrs: [], row_attrs: [], global: [] }
+        file_annots = all_annots.select { |a| a.filepath == filepath }
+        matrix_annot = file_annots.find { |a| a.name == '/matrix' }
+        if matrix_annot
+          @matrix_dims_by_loom[filepath] = {
+            nber_cols: matrix_annot.nber_cols,
+            nber_rows: matrix_annot.nber_rows
+          }
+        end
+
+        file_annots.each do |annot|
+          annot_name = annot.name || ''
+          if annot_name == '/matrix' || (annot.dim == 3 && annot_name.start_with?('/layers/'))
+            @annots_by_loom_and_type[filepath][:matrices] << annot
+          elsif annot_name.start_with?('/col_attrs/')
+            @annots_by_loom_and_type[filepath][:col_attrs] << annot
+          elsif annot_name.start_with?('/row_attrs/')
+            @annots_by_loom_and_type[filepath][:row_attrs] << annot
+          else
+            @annots_by_loom_and_type[filepath][:global] << annot
+          end
+        end
+      end
+
+      @selected_data_type = params[:data_type].presence || 'matrices'
+    end
+
+    def load_settings_context
+      @shares = @project.shares.includes(:user).to_a
+    end
+
+    def load_compliance_context
+      if params[:validation_id].present?
+        cv = ComplianceValidation.find_by(id: params[:validation_id], project_id: @project.id)
+        @validation_result = cv&.result_data
+        @viewing_historical = cv if @validation_result
+      end
+      @validation_result ||= load_validation_result(@project)
+
+      co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
+      @compliance_field_groups = OntologyTermType.where.not(field_group_id: [nil, ''])
+                                                .order(:display_order)
+                                                .map { |ott| ott.to_field_group(co_id_to_tag) }
+      @compliance_field_values = {}
+      all_paths = @compliance_field_groups.flat_map { |fg| [fg[:term_path], fg[:label_path]].compact }
+      paired_paths = @compliance_field_groups.select { |fg| fg[:label_path].present? }
+                                             .map { |fg| [fg[:term_path], fg[:label_path]] }
+
+      loom_path = find_project_loom_path(@project)
+      if loom_path.present?
+        raw = batch_read_field_values(loom_path, all_paths, paired_paths: paired_paths)
+        raw.each { |k, v| @compliance_field_values[k] = v if v.present? }
+      else
+        annots_by_name = @project.annots.where(name: all_paths, latest_version: true).index_by(&:name)
+        all_paths.each do |path|
+          annot = annots_by_name[path]
+          next unless annot
+          if annot.list_cat_json.present?
+            begin
+              vals = JSON.parse(annot.list_cat_json)
+              @compliance_field_values[path] = vals if vals.is_a?(Array) && vals.any?
+            rescue JSON::ParserError
+            end
+          elsif annot.categories_json.present?
+            begin
+              cats = JSON.parse(annot.categories_json)
+              @compliance_field_values[path] = cats.keys if cats.is_a?(Hash) && cats.any?
+            rescue JSON::ParserError
+            end
+          end
+        end
+      end
+
+      if @validation_result&.dig(:field_resolutions).present?
+        @compliance_resolved = @validation_result[:field_resolutions].transform_keys(&:to_s)
+        @compliance_resolved.each do |path, val_map|
+          next unless val_map.is_a?(Hash)
+          @compliance_resolved[path] = val_map.transform_keys(&:to_s)
+        end
+      else
+        @compliance_resolved = resolve_field_values(@compliance_field_groups, @compliance_field_values)
+      end
+    end
+
+    def load_summary_context
+      @parsing_status = 'complete'
+      @parsing_step = parsing_step_for_project(@project)
+      if @parsing_step
+        @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
+        if @parsing_project_step
+          @parsing_status = case @parsing_project_step.status_id
+                            when 1 then 'waiting'
+                            when 2 then 'running'
+                            when 3 then 'complete'
+                            when 4 then 'failed'
+                            else 'complete'
+                            end
+        end
+      end
+
+      @time_to_destroy = nil
+      @time_to_destroy = @project.updated_at + 2.days if @project.sandbox? && !current_user
+      @cloned_project = @project.cloned_project if @project.cloned_project_id
+      @runs = @project.runs.includes(:annots) unless @runs
+      @h_steps ||= @all_project_steps.index_by(&:id)
+
+      @h_all_runs = {}
+      @runs.each { |run| @h_all_runs[run.id] = run }
+      @h_lineage_run_ids_by_step_id = {}
+      @runs.group_by(&:step_id).each { |step_id, runs| @h_lineage_run_ids_by_step_id[step_id] = runs.map(&:id) }
+      @list_filter_run_ids = []
+      @h_children_run_ids = {}
+      @step = @project.step || Step.first
+      @disable_filter = false
+
+      @h_identifier_types = {}
+      IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
+      @h_exp_entries = {}
+      @project.exp_entries.includes(:identifier_type).each do |exp_entry|
+        type_id = exp_entry.identifier_type_id
+        @h_exp_entries[type_id] ||= []
+        @h_exp_entries[type_id] << exp_entry
+      end
+
+      @h_articles = {}
+      if @project.doi.present?
+        dois = @project.doi.split(/\s*,\s*/).map(&:strip).reject(&:blank?)
+        Article.where(doi: dois).each { |article| @h_articles[article.doi] = article }
+      end
+
+      @project_type = @project.project_type
+      @klay_data = generate_klay_data
+      @list_cards = generate_list_cards
+      session[:activated_filter] ||= {}
+      session[:activated_filter][@project.id] ||= false
+      session[:clust_comparison] ||= {}
+      session[:clust_comparison][@project.id] ||= {}
+      session[:clust_comparison][@project.id][:op] ||= "1"
+    end
+
     def parsing_step_for_project(project)
       return nil unless project&.version
       asap_docker_image = Basic.get_asap_docker(project.version)
@@ -5600,12 +6097,18 @@ class ProjectsController < ApplicationController
     end
 
     def prepare_steps_with_status
-      # Get steps hash
-      @h_steps = {}
-      Step.all.each do |step|
-        @h_steps[step.id] = step
-      end
-      
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @all_project_steps = if asap_docker_image
+                             Step.where(docker_image_id: asap_docker_image.id)
+                                 .where.not(hidden: true)
+                                 .order(:rank, :name)
+                           else
+                             Step.none
+                           end
+
+      # Get steps hash limited to current project's docker image.
+      @h_steps = @all_project_steps.index_by(&:id)
+
       # Get statuses hash for looking up status names
       @h_statuses ||= {}
       Status.all.each { |s| @h_statuses[s.id] = s } if @h_statuses.empty?
@@ -5615,16 +6118,6 @@ class ProjectsController < ApplicationController
       ProjectStep.where(project_id: @project.id).each do |ps|
         @project_steps_hash[ps.step_id] = ps
       end
-      
-      # Get all steps for this project's docker image, ordered by rank
-      asap_docker_image = Basic.get_asap_docker(@project.version)
-      @all_project_steps = if asap_docker_image
-                             Step.where(docker_image_id: asap_docker_image.id)
-                                 .where.not(hidden: true)
-                                 .order(:rank, :name)
-                           else
-                             Step.none
-                           end
       
       # Filter to pretreatment group steps (steps with group_name 'pretreatment' or blank/null)
       # Sort by rank to ensure proper order
@@ -5642,8 +6135,6 @@ class ProjectsController < ApplicationController
       # Steps can have a project_types array in attrs_json that specifies which project types they apply to
       # If project_types is empty or missing, the step applies to all project types (backward compatibility)
       # Also check std_methods - if ALL std_methods for a step require a different project type, exclude the step
-      asap_docker_image = Basic.get_asap_docker(@project.version)
-      
       if @project.project_type
         project_type_name = @project.project_type.name
         project_type_tag = @project.project_type.tag
@@ -6803,10 +7294,10 @@ class ProjectsController < ApplicationController
       
       # Get standard methods for this step
       @h_std_methods = {}
-      all_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false).all
+      all_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false, step_id: @step.id).order(:name).to_a
       all_std_methods.each { |s| @h_std_methods[s.id] = s }
       
-      @std_methods = all_std_methods.select { |e| e.step_id == @step.id }.sort { |a, b| a.name <=> b.name }
+      @std_methods = all_std_methods
       Rails.logger.info("[prepare_std_form_data] Found #{@std_methods.count} std_methods for step #{@step.id}")
       
       # Get steps by name for lookups - use steps from project's docker_image_id
@@ -6829,13 +7320,52 @@ class ProjectsController < ApplicationController
       # Check available methods based on available annotations
       # Use the same logic as step unlocking - check if required datasets are available
       @h_unavailable_methods = {}
-      
-      # Get all available annotations in the project
-      all_annots = Annot.where(project_id: @project.id).includes(:run).all
-      
+
       # Get data classes for validation
       h_data_classes = {}
       DataClass.all.each { |dc| h_data_classes[dc.id] = dc; h_data_classes[dc.name] = dc }
+
+      source_step_names = []
+      @std_methods.each do |std_method|
+        begin
+          h_res = Basic.get_std_method_attrs(std_method, @step)
+          combined_attrs = h_res[:h_attrs] || {}
+        rescue
+          combined_attrs = @h_obj_attrs_by_std_method[std_method.id] || {}
+        end
+        combined_attrs.each_value do |attr_config|
+          next unless attr_config.is_a?(Hash)
+          next unless attr_config['source_steps'].present? && attr_config['valid_types'].present?
+          source_step_names.concat(Array(attr_config['source_steps']))
+        end
+      end
+      source_step_ids = source_step_names.uniq.map { |ssn| @h_steps_by_name[ssn]&.id }.compact
+      source_run_ids = if source_step_ids.any?
+                         Run.where(project_id: @project.id, step_id: source_step_ids).pluck(:id)
+                       else
+                         []
+                       end
+      all_annots = if source_step_ids.any? || source_run_ids.any?
+                     annots_scope = Annot.where(project_id: @project.id)
+                     clause = []
+                     values = []
+                     if source_step_ids.any?
+                       clause << "(step_id IN (?) OR ori_step_id IN (?))"
+                       values << source_step_ids << source_step_ids
+                     end
+                     if source_run_ids.any?
+                       clause << "(run_id IN (?) OR ori_run_id IN (?))"
+                       values << source_run_ids << source_run_ids
+                     end
+                     annots_scope.where(clause.join(' OR '), *values).to_a
+                   else
+                     []
+                   end
+      runs_by_id = if source_run_ids.any?
+                     Run.where(id: source_run_ids).index_by(&:id)
+                   else
+                     {}
+                   end
       
       Rails.logger.info("[prepare_std_form_data] Checking #{@std_methods.count} std_methods for step #{@step.id} (#{@step.name})")
       Rails.logger.info("[prepare_std_form_data] h_steps_by_name count: #{@h_steps_by_name.count}")
@@ -6871,8 +7401,8 @@ class ProjectsController < ApplicationController
             elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
               true
             else
-              annot_run = if annot.run_id && annot.run
-                            annot.run
+              annot_run = if annot.run_id
+                            runs_by_id[annot.run_id] || Run.find_by(id: annot.run_id)
                           elsif annot.ori_run_id
                             Run.find_by(id: annot.ori_run_id)
                           else

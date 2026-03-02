@@ -1550,12 +1550,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   style="padding: 8px 16px; border-bottom: 2px solid #3b82f6; font-weight: 500; font-size: 14px; color: #3b82f6; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer;"
                   data-action="click->visualization#switchSelectionTab"
                   data-tab="cells">
-            Cells
+            Cell Sets
           </button>
           <button id="gene-sets-tab" 
                   style="padding: 8px 16px; border-bottom: 2px solid transparent; font-weight: 500; font-size: 14px; color: #6b7280; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;"
-                  onmouseover="this.style.color='#374151'; this.style.borderBottomColor='#d1d5db'"
-                  onmouseout="this.style.color='#6b7280'; this.style.borderBottomColor='transparent'"
                   data-action="click->visualization#switchSelectionTab"
                   data-tab="gene-sets">
             Gene Sets
@@ -1599,10 +1597,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             </div>
             <div style="height: 1px; background-color: #e5e7eb; margin: 0 0 4px 0;"></div>
 
-            <!-- Saved Selections List -->
+            <!-- Saved Cell Sets List -->
             <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0;">
-                <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Saved Selections</h3>
+                <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Saved Cell Sets</h3>
                 <button id="compose-selection-btn"
                         type="button"
                         style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
@@ -1613,8 +1611,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 </button>
               </div>
               <div id="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
-                <div style="font-size: 12px; color: #6b7280; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;">
-                  No saved selections yet
+                <div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">
+                  No cell sets yet
                 </div>
               </div>
             </div>
@@ -1624,40 +1622,16 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <!-- Gene Sets Tab Content -->
         <div id="gene-sets-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0; display: none;">
           <div style="margin-bottom: 16px;">
-            <div style="font-size: 14px; color: #6b7280; margin-bottom: 12px;">
-              Manage gene sets for analysis
-            </div>
-            
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
-              <button style="width: 100%; padding: 8px 12px; background-color: #3b82f6; color: white; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
-                      onmouseover="this.style.backgroundColor='#2563eb'"
-                      onmouseout="this.style.backgroundColor='#3b82f6'">
-                <i class="fas fa-plus" style="margin-right: 8px;"></i>Create Gene Set
-              </button>
               <button style="width: 100%; padding: 8px 12px; background-color: #d1d5db; color: #374151; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
                       onmouseover="this.style.backgroundColor='#9ca3af'"
                       onmouseout="this.style.backgroundColor='#d1d5db'">
-                <i class="fas fa-upload" style="margin-right: 8px;"></i>Import Gene Set
+                Import Gene Set
               </button>
             </div>
-
-            <!-- Gene Sets List -->
-            <div>
-              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 500;">Gene Sets</h3>
-              <div style="max-height: 120px; overflow-y: auto;">
-                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; background-color: white; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 4px;">
-                  <div style="flex: 1;">
-                    <div style="font-size: 14px; font-weight: 500;">T Cell Markers</div>
-                    <div style="font-size: 12px; color: #6b7280;">15 genes</div>
-                  </div>
-                  <button style="color: #dc2626; background: none; border: none; cursor: pointer; padding: 4px;"
-                          onmouseover="this.style.color='#b91c1c'"
-                          onmouseout="this.style.color='#dc2626'">
-                    <i class="fas fa-trash" style="font-size: 12px;"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <div style="height: 1px; background-color: #e5e7eb; margin: 0 0 4px 0;"></div>
+            <h3 style="margin: 8px 0 0 0; font-size: 14px; font-weight: 500;">Saved Gene Sets</h3>
+            <div style="font-size: 12px; color: #6b7280; font-style: italic; margin-top: 8px;">No gene sets yet</div>
           </div>
         </div>
       </div>

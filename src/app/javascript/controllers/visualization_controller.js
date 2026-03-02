@@ -11235,7 +11235,7 @@ export default class extends Controller {
     if (countBadge) countBadge.textContent = String(items.length)
 
     if (items.length === 0) {
-      list.innerHTML = '<div style="font-size: 12px; color: #6b7280; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;">No saved selections yet</div>'
+      list.innerHTML = '<div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">No cell sets yet</div>'
       return
     }
 

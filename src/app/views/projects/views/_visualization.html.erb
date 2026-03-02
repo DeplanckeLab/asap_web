@@ -1601,14 +1601,24 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0;">
                 <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Saved Cell Sets</h3>
-                <button id="compose-selection-btn"
-                        type="button"
-                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
-                        title="Compose selection"
-                        aria-label="Compose selection"
-                        data-action="click->visualization#openComposeSelectionModal">
-                  <%= image_tag 'compose_icon.svg', alt: '', 'aria-hidden': true, style: 'width:14px;height:14px;display:block;' %>
-                </button>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <button id="compose-selection-btn"
+                          type="button"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
+                          title="Compose selection"
+                          aria-label="Compose selection"
+                          data-action="click->visualization#openComposeSelectionModal">
+                    <%= image_tag 'compose_icon.svg', alt: '', 'aria-hidden': true, style: 'width:14px;height:14px;display:block;' %>
+                  </button>
+                  <button id="delete-all-saved-selections-btn"
+                          type="button"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
+                          title="Delete all saved cell sets"
+                          aria-label="Delete all saved cell sets"
+                          data-action="click->visualization#deleteAllSavedSelections">
+                    <i class="fas fa-trash" style="font-size:12px;"></i>
+                  </button>
+                </div>
               </div>
               <div id="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
                 <div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">

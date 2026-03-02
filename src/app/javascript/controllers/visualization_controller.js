@@ -11015,6 +11015,7 @@ export default class extends Controller {
     }
     const filterComponents = this.buildSelectionFilterComponentsForSave(selectionSource)
     const itemId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`
+    const localItemId = String(itemId)
     const pendingItem = this.normalizeSelectionItem({
       id: itemId,
       run_id: null,
@@ -11030,6 +11031,11 @@ export default class extends Controller {
       filter_components: filterComponents
     })
     this.savedSelections.unshift(pendingItem)
+    this.recentlyCreatedSavedCellSetId = localItemId
+    this.recentlyCreatedSavedCellSetName = String(cleanName || '').trim()
+    this.recentlyCreatedSavedCellSetCount = Number(pendingItem.selectedCount || 0)
+    this.recentlyCreatedSavedCellSetRunId = null
+    this.markSavedCellSetSelected(itemId, this.savedSelections, false)
     this.renderSavedSelections()
 
     const projectIdentifier = this.getProjectIdentifier()
@@ -11068,9 +11074,23 @@ export default class extends Controller {
       }
 
       const returnedItem = this.normalizeSelectionItem(payload.item)
-      const idx = this.savedSelections.findIndex((item) => item.id === itemId)
-      if (idx >= 0 && returnedItem) {
-        this.savedSelections[idx] = returnedItem
+      const idx = this.savedSelections.findIndex((item) => item.id === localItemId)
+      if (returnedItem) {
+        const returnedId = String(returnedItem.id)
+        const existingReturnedIdx = this.savedSelections.findIndex((item) => String(item.id) === returnedId)
+        if (idx >= 0) {
+          this.savedSelections[idx] = returnedItem
+        } else if (existingReturnedIdx >= 0) {
+          this.savedSelections[existingReturnedIdx] = returnedItem
+        } else {
+          this.savedSelections.unshift(returnedItem)
+        }
+        this.savedCellSetSelectionOrder = (this.savedCellSetSelectionOrder || []).map((id) => id === localItemId ? returnedId : id)
+        this.markSavedCellSetSelected(returnedId, this.savedSelections, false)
+        this.recentlyCreatedSavedCellSetId = returnedId
+        this.recentlyCreatedSavedCellSetName = String(returnedItem.name || '').trim()
+        this.recentlyCreatedSavedCellSetCount = Number(returnedItem.selectedCount || 0)
+        this.recentlyCreatedSavedCellSetRunId = Number.isInteger(returnedItem.runId) && returnedItem.runId > 0 ? returnedItem.runId : null
       }
       this.renderSavedSelections()
       this.refreshSelectionStates()
@@ -11133,6 +11153,170 @@ export default class extends Controller {
       composeSteps: composeSteps,
       filterComponents: filterComponents
     }
+  }
+
+  getSavedCellSetSessionKey() {
+    const projectIdentifier = this.getProjectIdentifier() || 'unknown-project'
+    const loomFile = this.getCurrentLoomFileForRequest() || 'unknown-loom'
+    return `saved-cell-sets-selection:${projectIdentifier}:${loomFile}`
+  }
+
+  loadSavedCellSetSelectionOrderFromSession(sessionKey) {
+    if (!sessionKey) return []
+    try {
+      const raw = window.sessionStorage.getItem(sessionKey)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!parsed || !Array.isArray(parsed.order)) return []
+      return parsed.order.map((id) => String(id || '').trim()).filter((id) => id.length > 0)
+    } catch (_error) {
+      return []
+    }
+  }
+
+  saveSavedCellSetSelectionOrderToSession(sessionKey, order) {
+    if (!sessionKey) return
+    try {
+      window.sessionStorage.setItem(sessionKey, JSON.stringify({ order }))
+    } catch (_error) {
+      // Ignore session storage failures.
+    }
+  }
+
+  buildDefaultSavedCellSetSelectionOrder(items) {
+    const sortedNewestFirst = [...items].sort((a, b) => {
+      const aTime = Date.parse(a.createdAt || '') || 0
+      const bTime = Date.parse(b.createdAt || '') || 0
+      if (aTime !== bTime) return bTime - aTime
+      return String(b.id || '').localeCompare(String(a.id || ''))
+    })
+
+    const newestTwo = sortedNewestFirst.slice(0, 2).map((item) => String(item.id))
+    return newestTwo.reverse()
+  }
+
+  ensureSavedCellSetSelectionOrder(items) {
+    const sessionKey = this.getSavedCellSetSessionKey()
+    if (this.savedCellSetSelectionSessionKey !== sessionKey) {
+      this.savedCellSetSelectionSessionKey = sessionKey
+      this.savedCellSetSelectionOrder = this.loadSavedCellSetSelectionOrderFromSession(sessionKey)
+    }
+
+    if (!Array.isArray(this.savedCellSetSelectionOrder)) {
+      this.savedCellSetSelectionOrder = []
+    }
+
+    const existingIds = new Set(items.map((item) => String(item.id || '')))
+    this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder
+      .map((id) => String(id || '').trim())
+      .filter((id) => id.length > 0 && existingIds.has(id))
+
+    if (this.savedCellSetSelectionOrder.length > 2) {
+      this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.slice(-2)
+    }
+
+    if (this.savedCellSetSelectionOrder.length === 0 && items.length > 0) {
+      this.savedCellSetSelectionOrder = this.buildDefaultSavedCellSetSelectionOrder(items)
+    }
+
+    this.saveSavedCellSetSelectionOrderToSession(sessionKey, this.savedCellSetSelectionOrder)
+  }
+
+  resolveRecentlyCreatedSavedCellSetId(items) {
+    const pendingId = String(this.recentlyCreatedSavedCellSetId || '').trim()
+    if (!pendingId) return null
+    if (!Array.isArray(items) || items.length === 0) return null
+
+    const directMatch = items.find((item) => String(item.id || '') === pendingId)
+    if (directMatch) return directMatch
+
+    const targetRunId = Number(this.recentlyCreatedSavedCellSetRunId)
+    if (Number.isInteger(targetRunId) && targetRunId > 0) {
+      const runMatch = items.find((item) => Number(item.runId) === targetRunId)
+      if (runMatch) {
+        this.savedCellSetSelectionOrder = (this.savedCellSetSelectionOrder || []).map((id) => id === pendingId ? String(runMatch.id) : id)
+        this.recentlyCreatedSavedCellSetId = String(runMatch.id || '')
+        return runMatch
+      }
+    }
+
+    const targetName = String(this.recentlyCreatedSavedCellSetName || '').trim()
+    if (!targetName) return null
+    const targetCount = Number(this.recentlyCreatedSavedCellSetCount)
+
+    const sameName = items.filter((item) => String(item.name || '').trim() === targetName)
+    if (sameName.length === 0) return null
+
+    let candidates = sameName
+    if (Number.isFinite(targetCount) && targetCount >= 0) {
+      const sameCount = sameName.filter((item) => Number(item.selectedCount || 0) === targetCount)
+      if (sameCount.length > 0) {
+        candidates = sameCount
+      }
+    }
+
+    candidates.sort((a, b) => {
+      const aTime = Date.parse(a.createdAt || '') || 0
+      const bTime = Date.parse(b.createdAt || '') || 0
+      if (aTime !== bTime) return bTime - aTime
+      return String(b.id || '').localeCompare(String(a.id || ''))
+    })
+
+    const mappedItem = candidates[0]
+    const mappedId = String(mappedItem?.id || '').trim()
+    if (!mappedId || !mappedItem) return null
+
+    this.savedCellSetSelectionOrder = (this.savedCellSetSelectionOrder || []).map((id) => id === pendingId ? mappedId : id)
+    this.recentlyCreatedSavedCellSetId = mappedId
+    if (Number.isInteger(mappedItem.runId) && mappedItem.runId > 0) {
+      this.recentlyCreatedSavedCellSetRunId = mappedItem.runId
+    }
+    return mappedItem
+  }
+
+  markSavedCellSetSelected(selectionId, items, rerender = false) {
+    const normalizedId = String(selectionId || '').trim()
+    if (!normalizedId) return
+
+    this.ensureSavedCellSetSelectionOrder(items)
+    this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => id !== normalizedId)
+    if (this.savedCellSetSelectionOrder.length >= 2) {
+      this.savedCellSetSelectionOrder.shift()
+    }
+    this.savedCellSetSelectionOrder.push(normalizedId)
+    this.saveSavedCellSetSelectionOrderToSession(this.savedCellSetSelectionSessionKey, this.savedCellSetSelectionOrder)
+
+    if (rerender) {
+      this.renderSavedSelections()
+    }
+  }
+
+  toggleSavedCellSetSelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const selectionId = event.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    this.ensureSavedCellSetSelectionOrder(items)
+
+    const normalizedId = String(selectionId)
+    const isChecked = event.currentTarget.checked === true
+
+    if (isChecked) {
+      this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => id !== normalizedId)
+      if (this.savedCellSetSelectionOrder.length >= 2) {
+        this.savedCellSetSelectionOrder.shift()
+      }
+      this.savedCellSetSelectionOrder.push(normalizedId)
+    } else {
+      this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => id !== normalizedId)
+    }
+
+    this.saveSavedCellSetSelectionOrderToSession(this.savedCellSetSelectionSessionKey, this.savedCellSetSelectionOrder)
+    this.renderSavedSelections()
   }
 
   resolveSelectionSource(options = {}) {
@@ -11232,10 +11416,32 @@ export default class extends Controller {
 
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    if (this.recentlyCreatedSavedCellSetId) {
+      const resolvedRecentItem = this.resolveRecentlyCreatedSavedCellSetId(items)
+      if (resolvedRecentItem) {
+        this.markSavedCellSetSelected(resolvedRecentItem.id, items, false)
+      }
+    }
+    this.ensureSavedCellSetSelectionOrder(items)
+    const selectedSet = new Set(this.savedCellSetSelectionOrder || [])
     if (countBadge) countBadge.textContent = String(items.length)
+    const isBulkDeleting = this.bulkDeletingSavedSelections === true
+    list.style.position = 'relative'
+    list.style.opacity = isBulkDeleting ? '0.45' : '1'
+    list.style.pointerEvents = isBulkDeleting ? 'none' : 'auto'
 
     if (items.length === 0) {
       list.innerHTML = '<div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">No cell sets yet</div>'
+      if (isBulkDeleting) {
+        list.innerHTML += `
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.35);z-index:10;">
+            <div style="display:flex;align-items:center;gap:8px;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;color:#374151;font-size:13px;font-weight:600;">
+              <span style="display:inline-flex;width:14px;height:14px;border:2px solid #d1d5db;border-top-color:#4b5563;border-radius:9999px;animation:spin 1s linear infinite;"></span>
+              <span>Deleting...</span>
+            </div>
+          </div>
+        `
+      }
       return
     }
 
@@ -11247,16 +11453,23 @@ export default class extends Controller {
       const sourceIconHtml = this.selectionSourceIconHtml(item.selectionSource)
       const hasSelectionDetails = item.selectionSource === 'compose' || item.selectionSource === 'visible'
       const hasDeletedSelectionReference = hasSelectionDetails ? this.selectionHasDeletedReferences(item) : false
+      const isChecked = selectedSet.has(String(item.id))
       return `
         <button type="button"
                 data-selection-id="${this.escapeHtml(item.id)}"
                 style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;margin-bottom:${trailingMargin};"
                 data-action="click->visualization#openSavedSelection">
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-              ${sourceIconHtml}
-              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(`${selectionPrefix}${item.name}`)}</div>
-              ${hasSelectionDetails ? `
+          <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
+            <input type="checkbox"
+                   data-selection-id="${this.escapeHtml(item.id)}"
+                   ${isChecked ? 'checked' : ''}
+                   style="width:14px;height:14px;cursor:pointer;flex:0 0 auto;margin-top:1px;"
+                   data-action="click->visualization#toggleSavedCellSetSelection" />
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                ${sourceIconHtml}
+                <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(`${selectionPrefix}${item.name}`)}</div>
+                ${hasSelectionDetails ? `
               <span role="button"
                       tabindex="0"
                       title="Selection details"
@@ -11266,14 +11479,15 @@ export default class extends Controller {
                       data-action="click->visualization#openComposeSelectionDetails">
                 <i class="fas fa-circle-info" style="font-size:11px;"></i>
               </span>
-              ` : ''}
-              ${hasDeletedSelectionReference ? `
+                ` : ''}
+                ${hasDeletedSelectionReference ? `
               <span title="Contains reference to deleted selection"
                     aria-label="Contains reference to deleted selection"
                     style="display:inline-flex;align-items:center;justify-content:center;color:#b91c1c;font-size:14px;font-weight:700;line-height:1;flex:0 0 auto;">!</span>
-              ` : ''}
+                ` : ''}
+              </div>
+              <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
             </div>
-            <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
           </div>
           <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
             <div>${this.selectionStatusBadgeHtml(item.status)}</div>
@@ -11290,6 +11504,16 @@ export default class extends Controller {
         </button>
       `
     }).join('')
+    if (isBulkDeleting) {
+      list.innerHTML += `
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.35);z-index:10;">
+          <div style="display:flex;align-items:center;gap:8px;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;color:#374151;font-size:13px;font-weight:600;">
+            <span style="display:inline-flex;width:14px;height:14px;border:2px solid #d1d5db;border-top-color:#4b5563;border-radius:9999px;animation:spin 1s linear infinite;"></span>
+            <span>Deleting...</span>
+          </div>
+        </div>
+      `
+    }
   }
 
   selectionSourceIconHtml(source) {
@@ -12214,6 +12438,18 @@ export default class extends Controller {
       if (!payload || payload.status !== 'ok' || !Array.isArray(payload.items)) return
 
       this.savedSelections = payload.items.map((item) => this.normalizeSelectionItem(item)).filter((item) => item)
+      if (this.recentlyCreatedSavedCellSetId) {
+        const resolvedRecentItem = this.resolveRecentlyCreatedSavedCellSetId(this.savedSelections)
+        if (resolvedRecentItem) {
+          this.markSavedCellSetSelected(resolvedRecentItem.id, this.savedSelections, false)
+          if (String(resolvedRecentItem.status || '') === 'completed') {
+            this.recentlyCreatedSavedCellSetId = null
+            this.recentlyCreatedSavedCellSetName = null
+            this.recentlyCreatedSavedCellSetCount = null
+            this.recentlyCreatedSavedCellSetRunId = null
+          }
+        }
+      }
       this.renderSavedSelections()
       const completionSignature = this.savedSelections
         .filter((item) => item.status === 'completed' && item.metadataId)
@@ -12251,48 +12487,102 @@ export default class extends Controller {
 
     try {
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
-      let response = null
-
-      if (hasAssociatedRun) {
-        response = await fetch(`/runs/${encodeURIComponent(String(item.runId))}`, {
-          method: 'DELETE',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken,
-            'X-Requested-With': 'XMLHttpRequest'
-          },
-          credentials: 'same-origin'
-        })
-      } else {
-        const projectIdentifier = this.getProjectIdentifier()
-        if (!projectIdentifier) {
-          alert('Cannot delete selection: project identifier is missing.')
-          return
-        }
-        response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/delete_selection`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-          },
-          credentials: 'same-origin',
-          body: JSON.stringify({ selection_id: selectionId })
-        })
-      }
-
-      const payload = await response.json().catch(() => ({}))
-      const okStatus = payload.status === 'ok' || payload.status === 'success'
-      if (!response.ok || !okStatus) {
-        throw new Error(payload.message || 'Failed to delete selection')
-      }
+      await this.executeSavedSelectionDeletion(item, selectionId, csrfToken)
 
       this.savedSelections = (this.savedSelections || []).filter((entry) => String(entry.id) !== String(selectionId))
+      if (Array.isArray(this.savedCellSetSelectionOrder)) {
+        this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => id !== String(selectionId))
+        this.saveSavedCellSetSelectionOrderToSession(this.savedCellSetSelectionSessionKey, this.savedCellSetSelectionOrder)
+      }
       this.renderSavedSelections()
       this.refreshSelectionStates()
       this.refreshPageCategoricalMetadata()
     } catch (error) {
       alert(`Failed to delete selection: ${error.message}`)
+    }
+  }
+
+  async executeSavedSelectionDeletion(item, selectionId, csrfToken) {
+    const hasAssociatedRun = item && Number.isInteger(item.runId) && item.runId > 0
+    let response = null
+
+    if (hasAssociatedRun) {
+      response = await fetch(`/runs/${encodeURIComponent(String(item.runId))}`, {
+        method: 'DELETE',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'same-origin'
+      })
+    } else {
+      const projectIdentifier = this.getProjectIdentifier()
+      if (!projectIdentifier) {
+        throw new Error('Cannot delete selection: project identifier is missing.')
+      }
+      response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/delete_selection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ selection_id: selectionId })
+      })
+    }
+
+    const payload = await response.json().catch(() => ({}))
+    const okStatus = payload.status === 'ok' || payload.status === 'success'
+    if (!response.ok || !okStatus) {
+      throw new Error(payload.message || 'Failed to delete selection')
+    }
+  }
+
+  async deleteAllSavedSelections(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    if (items.length === 0) {
+      alert('No saved cell sets to delete.')
+      return
+    }
+
+    const confirmed = window.confirm(`Delete all saved cell sets (${items.length})? This action cannot be undone.`)
+    if (!confirmed) return
+
+    this.bulkDeletingSavedSelections = true
+    this.renderSavedSelections()
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
+      for (const item of items) {
+        await this.executeSavedSelectionDeletion(item, item.id, csrfToken)
+      }
+
+      const deletedIds = new Set(items.map((item) => String(item.id)))
+      this.savedSelections = (this.savedSelections || []).filter((entry) => !deletedIds.has(String(entry.id)))
+      if (Array.isArray(this.savedCellSetSelectionOrder)) {
+        this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => !deletedIds.has(String(id)))
+        this.saveSavedCellSetSelectionOrderToSession(this.savedCellSetSelectionSessionKey, this.savedCellSetSelectionOrder)
+      }
+      if (this.recentlyCreatedSavedCellSetId && deletedIds.has(String(this.recentlyCreatedSavedCellSetId))) {
+        this.recentlyCreatedSavedCellSetId = null
+        this.recentlyCreatedSavedCellSetName = null
+        this.recentlyCreatedSavedCellSetCount = null
+        this.recentlyCreatedSavedCellSetRunId = null
+      }
+
+      this.renderSavedSelections()
+      this.refreshSelectionStates()
+      this.refreshPageCategoricalMetadata()
+    } catch (error) {
+      alert(`Failed to delete all saved cell sets: ${error.message}`)
+    } finally {
+      this.bulkDeletingSavedSelections = false
+      this.renderSavedSelections()
     }
   }
 

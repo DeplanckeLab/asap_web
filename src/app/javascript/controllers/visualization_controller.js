@@ -11,6 +11,7 @@ import { PerformanceManager } from "visualization/performance_manager"
 import { DownloadManager } from "visualization/download_manager"
 import { GeneManager } from "visualization/gene_manager"
 import { CustomPlotManager } from "visualization/custom_plot_manager"
+import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
 
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
@@ -22,6 +23,9 @@ export default class extends Controller {
     defaultLoomFile: String,
     defaultEmbeddingId: String,
     initialSelections: Array,
+    deStepId: Number,
+    deMethods: Array,
+    deUnavailableMethods: Object,
     geneCount: Number,
     rowLabel: String,
     colLabel: String
@@ -108,6 +112,15 @@ export default class extends Controller {
     if (this.hasMetadataSelectTarget) {
       window.visualizationController = this
     }
+
+    if (!this.boundDeSelectionRunClick) {
+      this.boundDeSelectionRunClick = (event) => {
+        const target = event.target?.closest?.('#de-selection-run-btn')
+        if (!target) return
+        this.submitDeSelectionRun(event)
+      }
+      document.addEventListener('click', this.boundDeSelectionRunClick, true)
+    }
     // console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
     // console.trace(`🚀 Visualization controller connect() call stack:`)
     
@@ -163,6 +176,7 @@ export default class extends Controller {
     this.performanceManager = new PerformanceManager(this)
     this.downloadManager = new DownloadManager(this)
     this.geneManager = new GeneManager(this)
+    this.geneSetCollectionsController = new GeneSetCollectionsController(this)
     this.customPlotManager = new CustomPlotManager(this)
 
     // Keep static category dots in sync with stored custom colors.
@@ -493,6 +507,10 @@ export default class extends Controller {
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
     this.savedSelections = Array.isArray(this.initialSelectionsValue) ? this.initialSelectionsValue.map((item) => this.normalizeSelectionItem(item)).filter((item) => item) : []
+    this.savedSelectionsSortBy = this.savedSelectionsSortBy || 'created_at'
+    this.savedSelectionsSortOrder = this.savedSelectionsSortOrder || 'desc'
+    this.savedSelectionsFilterQuery = this.savedSelectionsFilterQuery || ''
+    this.savedSelectionsFilterType = this.savedSelectionsFilterType || 'all'
     this.composeSelectionSteps = []
     this.composeSelectionCurrentSet = null
     this.composeSelectionIntermediateResults = []
@@ -543,6 +561,8 @@ export default class extends Controller {
     setTimeout(() => {
       this.uiManager.initializeTooltip()
       this.initializeResizers()
+      this.initializeSavedSelectionsSortMenu()
+      this.initializeSavedSelectionsFilterMenu()
       // Initialize the selection count display
       this.uiManager.updateSelectedCellsCount()
       this.renderSavedSelections()
@@ -706,6 +726,10 @@ export default class extends Controller {
     if (this.boundCloseDropdowns) {
       document.removeEventListener('click', this.boundCloseDropdowns)
     }
+    if (this.boundDeSelectionRunClick) {
+      document.removeEventListener('click', this.boundDeSelectionRunClick, true)
+      this.boundDeSelectionRunClick = null
+    }
     
     // Remove window resize listener
     if (this.resizeHandler) {
@@ -749,6 +773,44 @@ export default class extends Controller {
     if (this.boundInAppNavigationGuardSubmit) {
       document.removeEventListener('submit', this.boundInAppNavigationGuardSubmit, true)
       this.boundInAppNavigationGuardSubmit = null
+    }
+    if (this.boundSortSavedSelectionsMenuClick) {
+      const btn = document.getElementById('sort-saved-selections-btn')
+      if (btn) btn.removeEventListener('click', this.boundSortSavedSelectionsMenuClick)
+      this.boundSortSavedSelectionsMenuClick = null
+    }
+    if (this.boundSortSavedSelectionsByChange) {
+      const sortBySelect = document.getElementById('sort-saved-selections-by')
+      if (sortBySelect) sortBySelect.removeEventListener('change', this.boundSortSavedSelectionsByChange)
+      this.boundSortSavedSelectionsByChange = null
+    }
+    if (this.boundSortSavedSelectionsOrderChange) {
+      const orderSelect = document.getElementById('sort-saved-selections-order')
+      if (orderSelect) orderSelect.removeEventListener('change', this.boundSortSavedSelectionsOrderChange)
+      this.boundSortSavedSelectionsOrderChange = null
+    }
+    if (this.boundSortSavedSelectionsOutsideClick) {
+      document.removeEventListener('click', this.boundSortSavedSelectionsOutsideClick, true)
+      this.boundSortSavedSelectionsOutsideClick = null
+    }
+    if (this.boundFilterSavedSelectionsMenuClick) {
+      const btn = document.getElementById('filter-saved-selections-btn')
+      if (btn) btn.removeEventListener('click', this.boundFilterSavedSelectionsMenuClick)
+      this.boundFilterSavedSelectionsMenuClick = null
+    }
+    if (this.boundFilterSavedSelectionsSearchInput) {
+      const input = document.getElementById('saved-selections-name-filter-input')
+      if (input) input.removeEventListener('input', this.boundFilterSavedSelectionsSearchInput)
+      this.boundFilterSavedSelectionsSearchInput = null
+    }
+    if (this.boundFilterSavedSelectionsTypeClick) {
+      const menu = document.getElementById('filter-saved-selections-menu')
+      if (menu) menu.removeEventListener('click', this.boundFilterSavedSelectionsTypeClick)
+      this.boundFilterSavedSelectionsTypeClick = null
+    }
+    if (this.boundFilterSavedSelectionsOutsideClick) {
+      document.removeEventListener('click', this.boundFilterSavedSelectionsOutsideClick, true)
+      this.boundFilterSavedSelectionsOutsideClick = null
     }
 
     if (window.visualizationController === this) {
@@ -5487,6 +5549,10 @@ export default class extends Controller {
   async applyCheckpointState(state) {
     if (!state || typeof state !== 'object') return
 
+    // Ensure checkpoint restore never reuses a stale cell-inspector instance.
+    this.hideSimpleTooltip()
+    this.lastTooltipPosition = null
+
     // Reset transient UI-only filter caches so checkpoint restore cannot reuse stale pre-checkpoint values.
     this.savedRanges = {}
     this.savedCategorySelections = {}
@@ -6893,11 +6959,108 @@ export default class extends Controller {
     
     // console.log('🧬 Gene expression coloring applied successfully', wasLoading ? '(after loading)' : '(instant from memory)')
   }
+
+  async geneSetWaterDropClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const button = event.currentTarget
+    const itemId = Number(button.dataset.geneSetItemId || 0)
+    const geneSetName = button.dataset.geneSetName || 'Gene set'
+    if (!itemId) return
+
+    const isCurrentlyActive = button.dataset.active === 'true'
+    if (isCurrentlyActive) {
+      this.resetAllWaterDropButtons()
+      this.removeAllCategoryColors()
+      this.clearMetadataColoring()
+      return
+    }
+
+    const geneSetController = this.geneSetCollectionsController
+    const geneManager = this.geneManager
+    if (!geneSetController || !geneManager) {
+      alert('Gene set coloring is not available.')
+      return
+    }
+
+    const currentLoomFile = this.getCurrentLoomFileForRequest?.() || this.currentLoomFile || ''
+    const currentDataset = geneManager.currentMatrixLayer || '/matrix'
+    if (!currentLoomFile) {
+      alert('Loom file is not selected.')
+      return
+    }
+
+    this.uiManager.showMetadataDropdownSpinner()
+    try {
+      const params = new URLSearchParams({
+        item_id: String(itemId),
+        loom_file: String(currentLoomFile),
+        dataset: String(currentDataset || '/matrix')
+      })
+      const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok') {
+        throw new Error(payload.message || 'Failed to compute ModuleScore')
+      }
+
+      const scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []
+      if (scoreValues.length === 0) {
+        alert('ModuleScore returned no values for this gene set.')
+        return
+      }
+
+      const metadataId = `gene_set_item_${itemId}_${this.geneManager?.currentMatrixAnnotId || 'base'}`
+      const minVal = this.dataManager.safeMin(scoreValues)
+      const maxVal = this.dataManager.safeMax(scoreValues)
+      const metadataVector = {
+        id: metadataId,
+        name: geneSetName,
+        display_name: geneSetName,
+        data_type: 'NUMERIC',
+        values: scoreValues,
+        compression_info: {
+          min_val: minVal,
+          max_val: maxVal,
+          data_type: 'NUMERIC'
+        },
+        nber_rows: 1,
+        nber_cols: scoreValues.length
+      }
+
+      if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
+      this.loadedMetadataVectors[metadataId] = metadataVector
+
+      this.resetAllWaterDropButtons()
+      this.hideAllResetButtons()
+      this.removeAllCategoryColors()
+      this.setWaterDropButtonActive(button)
+      this.setColorRange(minVal, maxVal)
+
+      this.currentMetadataVector = metadataVector
+      this.currentMetadataId = metadataId
+      this.colorManager.clearColorMapCache()
+      this.gradientManager.loadGradientForMetadata(metadataId)
+      this.gradientManager.initializeGradientLegendListeners()
+      this._lastNumericOrderApplied = null
+      this.updateVisualizationWithMetadataVector()
+      this.dataManager.updateAllCategoryDistributions()
+      this.dataManager.updateCellFiltering(true)
+    } catch (error) {
+      alert(error.message || 'Failed to apply gene set coloring')
+    } finally {
+      this.uiManager.hideMetadataDropdownSpinner()
+    }
+  }
   
   // Reset all water drop buttons to grey (including gene buttons)
   resetAllWaterDropButtons() {
     //console.log('resetAllWaterDropButtons: Starting...')
-    const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"], [data-action*="geneWaterDropClicked"]')
+    const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"], [data-action*="geneWaterDropClicked"], [data-action*="geneSetWaterDropClicked"]')
     //console.log('resetAllWaterDropButtons: Found', allButtons.length, 'buttons')
     allButtons.forEach((button, index) => {
       //console.log(`resetAllWaterDropButtons: Resetting button ${index}:`, button)
@@ -10998,13 +11161,13 @@ export default class extends Controller {
     }
 
     const selectionName = prompt('Enter a name for this selection:')
-    if (selectionName) {
+    if (selectionName !== null) {
       this.persistSelection(selectionName.trim(), selectedIndices)
     }
   }
 
   async persistSelection(selectionName, selectedIndicesOverride = null, options = {}) {
-    const cleanName = selectionName || `Selection ${new Date().toLocaleString()}`
+    const cleanName = (typeof selectionName === 'string') ? selectionName : ''
     const selectedIndices = (Array.isArray(selectedIndicesOverride) ? selectedIndicesOverride : this.getEffectiveSelectionIndices())
       .map((idx) => Number(idx))
       .filter((idx) => Number.isInteger(idx))
@@ -11142,7 +11305,7 @@ export default class extends Controller {
       id: String(item.id || ''),
       runId: item.run_id ? Number(item.run_id) : null,
       metadataId: item.metadata_id ? String(item.metadata_id) : null,
-      name: String(item.name || 'Selection'),
+      name: item.name == null ? '' : String(item.name),
       selectedCount: Number.isFinite(selectedCount) ? selectedCount : 0,
       status: String(item.status || 'queued'),
       createdAt: item.created_at ? String(item.created_at) : null,
@@ -11328,7 +11491,7 @@ export default class extends Controller {
   }
 
   buildSelectionFilterComponentsForSave(selectionSource) {
-    if (selectionSource !== 'visible') {
+    if (selectionSource !== 'visible' && selectionSource !== 'lasso') {
       return null
     }
     if (!this.dataManager || typeof this.dataManager.getFilterDetails !== 'function') {
@@ -11396,7 +11559,7 @@ export default class extends Controller {
       if (hasMissingComposeRef) return true
     }
 
-    if (item.selectionSource === 'visible' && Array.isArray(item.filterComponents)) {
+    if ((item.selectionSource === 'visible' || item.selectionSource === 'lasso') && Array.isArray(item.filterComponents)) {
       const hasMissingFilterRef = item.filterComponents.some((component) => {
         if (!component || typeof component !== 'object') return false
         const selectionRefId = String(component.selection_ref_id || component.selectionRefId || '')
@@ -11409,6 +11572,290 @@ export default class extends Controller {
     return false
   }
 
+  getSavedSelectionItemTemplateNode() {
+    const template = document.getElementById('saved-selection-item-template')
+    if (!template || !template.content || !template.content.firstElementChild) return null
+    return template.content.firstElementChild.cloneNode(true)
+  }
+
+  buildSavedSelectionRowElement(item, options = {}) {
+    const node = this.getSavedSelectionItemTemplateNode()
+    if (!node) return null
+
+    const isChecked = options.isChecked === true
+    const hasSelectionDetails = options.hasSelectionDetails === true
+    const hasDeletedSelectionReference = options.hasDeletedSelectionReference === true
+    const isEditingName = options.isEditingName === true
+    const trailingMargin = options.trailingMargin || '0'
+    const createdAt = options.createdAt || ''
+    const selectionPrefix = options.selectionPrefix || ''
+
+    node.dataset.selectionId = String(item.id)
+    node.style.marginBottom = trailingMargin
+
+    const checkbox = node.querySelector('[data-role="saved-selection-checkbox"]')
+    const sourceIcon = node.querySelector('[data-role="saved-selection-source-icon"]')
+    const nameDisplay = node.querySelector('[data-role="saved-selection-name-display"]')
+    const nameInput = node.querySelector('[data-role="saved-selection-name-input"]')
+    const renameBtn = node.querySelector('[data-role="saved-selection-rename"]')
+    const renameSaveBtn = node.querySelector('[data-role="saved-selection-rename-save"]')
+    const renameCancelBtn = node.querySelector('[data-role="saved-selection-rename-cancel"]')
+    const detailsBtn = node.querySelector('[data-role="saved-selection-details"]')
+    const warningBadge = node.querySelector('[data-role="saved-selection-warning"]')
+    const countLabel = node.querySelector('[data-role="saved-selection-count"]')
+    const statusSlot = node.querySelector('[data-role="saved-selection-status"]')
+    const deleteBtn = node.querySelector('[data-role="saved-selection-delete"]')
+
+    if (checkbox) {
+      checkbox.dataset.selectionId = String(item.id)
+      checkbox.checked = isChecked
+      checkbox.style.display = 'none'
+    }
+    if (sourceIcon) {
+      sourceIcon.innerHTML = this.selectionSourceIconHtml(item.selectionSource)
+    }
+    if (nameDisplay) {
+      nameDisplay.innerHTML = this.savedSelectionDisplayNameHtml(item, selectionPrefix)
+      nameDisplay.style.display = isEditingName ? 'none' : 'block'
+    }
+    if (nameInput) {
+      nameInput.dataset.selectionId = String(item.id)
+      nameInput.value = String(item.name || '')
+      nameInput.style.display = isEditingName ? 'block' : 'none'
+    }
+    if (renameBtn) {
+      renameBtn.dataset.selectionId = String(item.id)
+      renameBtn.style.display = isEditingName ? 'none' : 'inline-flex'
+    }
+    if (renameSaveBtn) {
+      renameSaveBtn.dataset.selectionId = String(item.id)
+      renameSaveBtn.style.display = isEditingName ? 'inline-flex' : 'none'
+    }
+    if (renameCancelBtn) {
+      renameCancelBtn.style.display = isEditingName ? 'inline-flex' : 'none'
+    }
+    if (detailsBtn) {
+      detailsBtn.dataset.selectionId = String(item.id)
+      detailsBtn.style.display = hasSelectionDetails ? 'inline-flex' : 'none'
+    }
+    if (warningBadge) {
+      warningBadge.style.display = hasDeletedSelectionReference ? 'inline-flex' : 'none'
+    }
+    if (countLabel) {
+      countLabel.textContent = `${item.selectedCount} cells${createdAt ? ` - ${createdAt}` : ''}`
+    }
+    if (statusSlot) {
+      statusSlot.innerHTML = this.selectionStatusBadgeHtml(item.status)
+    }
+    if (deleteBtn) {
+      deleteBtn.dataset.selectionId = String(item.id)
+    }
+
+    return node
+  }
+
+  buildSavedSelectionsDeletingOverlayNode() {
+    const overlay = document.createElement('div')
+    overlay.style.position = 'absolute'
+    overlay.style.inset = '0'
+    overlay.style.display = 'flex'
+    overlay.style.alignItems = 'center'
+    overlay.style.justifyContent = 'center'
+    overlay.style.background = 'rgba(255,255,255,0.35)'
+    overlay.style.zIndex = '10'
+    overlay.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;color:#374151;font-size:13px;font-weight:600;">
+        <span style="display:inline-flex;width:14px;height:14px;border:2px solid #d1d5db;border-top-color:#4b5563;border-radius:9999px;animation:spin 1s linear infinite;"></span>
+        <span>Deleting...</span>
+      </div>
+    `
+    return overlay
+  }
+
+  initializeSavedSelectionsSortMenu() {
+    const button = document.getElementById('sort-saved-selections-btn')
+    const menu = document.getElementById('sort-saved-selections-menu')
+    const sortBySelect = document.getElementById('sort-saved-selections-by')
+    const orderSelect = document.getElementById('sort-saved-selections-order')
+    if (!button || !menu || !sortBySelect || !orderSelect) return
+
+    sortBySelect.value = this.savedSelectionsSortBy || 'created_at'
+    orderSelect.value = this.savedSelectionsSortOrder || 'desc'
+
+    if (!this.boundSortSavedSelectionsMenuClick) {
+      this.boundSortSavedSelectionsMenuClick = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const isOpen = menu.style.display === 'block'
+        menu.style.display = isOpen ? 'none' : 'block'
+      }
+      button.addEventListener('click', this.boundSortSavedSelectionsMenuClick)
+    }
+
+    if (!this.boundSortSavedSelectionsByChange) {
+      this.boundSortSavedSelectionsByChange = (event) => {
+        this.savedSelectionsSortBy = String(event.target.value || 'created_at')
+        this.renderSavedSelections()
+      }
+      sortBySelect.addEventListener('change', this.boundSortSavedSelectionsByChange)
+    }
+
+    if (!this.boundSortSavedSelectionsOrderChange) {
+      this.boundSortSavedSelectionsOrderChange = (event) => {
+        this.savedSelectionsSortOrder = String(event.target.value || 'desc')
+        this.renderSavedSelections()
+      }
+      orderSelect.addEventListener('change', this.boundSortSavedSelectionsOrderChange)
+    }
+
+    if (!this.boundSortSavedSelectionsOutsideClick) {
+      this.boundSortSavedSelectionsOutsideClick = (event) => {
+        if (menu.style.display !== 'block') return
+        if (menu.contains(event.target) || button.contains(event.target)) return
+        menu.style.display = 'none'
+      }
+      document.addEventListener('click', this.boundSortSavedSelectionsOutsideClick, true)
+    }
+  }
+
+  getSortedSavedSelectionItems(items) {
+    const sorted = [...(items || [])]
+    const sortBy = this.savedSelectionsSortBy || 'created_at'
+    const order = this.savedSelectionsSortOrder === 'asc' ? 1 : -1
+
+    const createdAtValue = (item) => {
+      if (!item?.createdAt) return 0
+      const ts = new Date(item.createdAt).getTime()
+      return Number.isFinite(ts) ? ts : 0
+    }
+
+    sorted.sort((a, b) => {
+      if (sortBy === 'name') {
+        const aName = this.savedSelectionDisplayName(a).toLowerCase()
+        const bName = this.savedSelectionDisplayName(b).toLowerCase()
+        const cmp = aName.localeCompare(bName)
+        if (cmp !== 0) return cmp * order
+        return (createdAtValue(a) - createdAtValue(b)) * -1
+      }
+      if (sortBy === 'selected_count') {
+        const aCount = Number(a?.selectedCount || 0)
+        const bCount = Number(b?.selectedCount || 0)
+        if (aCount !== bCount) return (aCount - bCount) * order
+        return (createdAtValue(a) - createdAtValue(b)) * -1
+      }
+      return (createdAtValue(a) - createdAtValue(b)) * order
+    })
+
+    return sorted
+  }
+
+  initializeSavedSelectionsFilterMenu() {
+    const button = document.getElementById('filter-saved-selections-btn')
+    const menu = document.getElementById('filter-saved-selections-menu')
+    const searchInput = document.getElementById('saved-selections-name-filter-input')
+    if (!button || !menu || !searchInput) return
+
+    if (searchInput.value !== (this.savedSelectionsFilterQuery || '')) {
+      searchInput.value = this.savedSelectionsFilterQuery || ''
+    }
+    this.updateSavedSelectionsFilterButtonAppearance(button)
+    this.updateSavedSelectionsFilterMenuState(menu)
+
+    if (!this.boundFilterSavedSelectionsMenuClick) {
+      this.boundFilterSavedSelectionsMenuClick = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const isOpen = menu.style.display === 'block'
+        menu.style.display = isOpen ? 'none' : 'block'
+      }
+      button.addEventListener('click', this.boundFilterSavedSelectionsMenuClick)
+    }
+
+    if (!this.boundFilterSavedSelectionsSearchInput) {
+      this.boundFilterSavedSelectionsSearchInput = (event) => {
+        this.savedSelectionsFilterQuery = String(event.target.value || '')
+        this.renderSavedSelections()
+      }
+      searchInput.addEventListener('input', this.boundFilterSavedSelectionsSearchInput)
+    }
+
+    if (!this.boundFilterSavedSelectionsTypeClick) {
+      this.boundFilterSavedSelectionsTypeClick = (event) => {
+        const option = event.target?.closest?.('[data-filter-type-option]')
+        if (!option) return
+        event.preventDefault()
+        event.stopPropagation()
+        this.savedSelectionsFilterType = String(option.dataset.filterTypeOption || 'all')
+        menu.style.display = 'none'
+        this.updateSavedSelectionsFilterButtonAppearance(button)
+        this.updateSavedSelectionsFilterMenuState(menu)
+        this.renderSavedSelections()
+      }
+      menu.addEventListener('click', this.boundFilterSavedSelectionsTypeClick)
+    }
+
+    if (!this.boundFilterSavedSelectionsOutsideClick) {
+      this.boundFilterSavedSelectionsOutsideClick = (event) => {
+        if (menu.style.display !== 'block') return
+        if (menu.contains(event.target) || button.contains(event.target)) return
+        menu.style.display = 'none'
+      }
+      document.addEventListener('click', this.boundFilterSavedSelectionsOutsideClick, true)
+    }
+  }
+
+  updateSavedSelectionsFilterButtonAppearance(button) {
+    if (!button) return
+    const type = String(this.savedSelectionsFilterType || 'all')
+    button.innerHTML = '<i class="fas fa-filter" style="font-size:12px;"></i>'
+    button.title = `Filter saved cell sets: ${this.savedSelectionsFilterTypeLabel(type)}`
+
+    if (type === 'all') {
+      button.style.backgroundColor = 'white'
+      button.style.color = '#374151'
+      button.style.border = '1px solid #d1d5db'
+      return
+    }
+
+    button.style.backgroundColor = '#22c55e'
+    button.style.color = 'white'
+    button.style.border = '1px solid #22c55e'
+  }
+
+  savedSelectionsFilterTypeLabel(type) {
+    const normalizedType = String(type || 'all')
+    if (normalizedType === 'compose') return 'Composed sets'
+    if (normalizedType === 'visible') return 'Visible cells sets'
+    if (normalizedType === 'lasso') return 'Lasso sets'
+    return 'All type sets'
+  }
+
+  updateSavedSelectionsFilterMenuState(menu) {
+    if (!menu) return
+    const selectedType = String(this.savedSelectionsFilterType || 'all')
+    menu.querySelectorAll('[data-filter-type-option]').forEach((option) => {
+      const optionType = String(option.dataset.filterTypeOption || '')
+      const isSelected = optionType === selectedType
+      option.style.backgroundColor = isSelected && optionType !== 'all' ? '#dcfce7' : '#ffffff'
+      option.style.borderColor = 'transparent'
+      option.style.color = '#111827'
+      const check = option.querySelector(`[data-filter-check="${optionType}"]`)
+      if (check) check.style.display = isSelected ? 'inline-flex' : 'none'
+    })
+  }
+
+  getFilteredSavedSelectionItems(items) {
+    const query = String(this.savedSelectionsFilterQuery || '').trim().toLowerCase()
+    const type = String(this.savedSelectionsFilterType || 'all')
+    return (items || []).filter((item) => {
+      if (type !== 'all' && String(item.selectionSource || '') !== type) {
+        return false
+      }
+      if (!query) return true
+      return this.savedSelectionDisplayName(item).toLowerCase().includes(query)
+    })
+  }
+
   renderSavedSelections() {
     const list = document.getElementById('saved-selections-list')
     const countBadge = document.getElementById('saved-selections-count')
@@ -11416,6 +11863,7 @@ export default class extends Controller {
 
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    this.updateDeSelectionButtonState(items)
     if (this.recentlyCreatedSavedCellSetId) {
       const resolvedRecentItem = this.resolveRecentlyCreatedSavedCellSetId(items)
       if (resolvedRecentItem) {
@@ -11423,6 +11871,8 @@ export default class extends Controller {
       }
     }
     this.ensureSavedCellSetSelectionOrder(items)
+    this.initializeSavedSelectionsFilterMenu()
+    const filteredItems = this.getFilteredSavedSelectionItems(items)
     const selectedSet = new Set(this.savedCellSetSelectionOrder || [])
     if (countBadge) countBadge.textContent = String(items.length)
     const isBulkDeleting = this.bulkDeletingSavedSelections === true
@@ -11445,75 +11895,189 @@ export default class extends Controller {
       return
     }
 
-    list.innerHTML = items.map((item, index) => {
+    if (filteredItems.length === 0) {
+      list.innerHTML = '<div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">No cell sets match the current filters</div>'
+      return
+    }
+
+    this.initializeSavedSelectionsSortMenu()
+    const sortedItems = this.getSortedSavedSelectionItems(filteredItems)
+    const fragment = document.createDocumentFragment()
+    sortedItems.forEach((item, index) => {
       const createdAt = item.createdAt ? new Date(item.createdAt).toLocaleString() : ''
       const selectionPrefix = item.selectionNumber ? `#${item.selectionNumber} ` : ''
-      const isLastItem = index === items.length - 1
+      const isLastItem = index === sortedItems.length - 1
       const trailingMargin = isLastItem ? '20px' : '0'
-      const sourceIconHtml = this.selectionSourceIconHtml(item.selectionSource)
-      const hasSelectionDetails = item.selectionSource === 'compose' || item.selectionSource === 'visible'
-      const hasDeletedSelectionReference = hasSelectionDetails ? this.selectionHasDeletedReferences(item) : false
+      const hasSelectionDetails = true
+      const hasDeletedSelectionReference = this.selectionHasDeletedReferences(item)
       const isChecked = selectedSet.has(String(item.id))
-      return `
-        <button type="button"
-                data-selection-id="${this.escapeHtml(item.id)}"
-                style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;margin-bottom:${trailingMargin};"
-                data-action="click->visualization#openSavedSelection">
-          <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
-            <input type="checkbox"
-                   data-selection-id="${this.escapeHtml(item.id)}"
-                   ${isChecked ? 'checked' : ''}
-                   style="width:14px;height:14px;cursor:pointer;flex:0 0 auto;margin-top:1px;"
-                   data-action="click->visualization#toggleSavedCellSetSelection" />
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                ${sourceIconHtml}
-                <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(`${selectionPrefix}${item.name}`)}</div>
-                ${hasSelectionDetails ? `
-              <span role="button"
-                      tabindex="0"
-                      title="Selection details"
-                      aria-label="Selection details"
-                      data-selection-id="${this.escapeHtml(item.id)}"
-                      style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#2563eb;cursor:pointer;padding:0;flex:0 0 auto;"
-                      data-action="click->visualization#openComposeSelectionDetails">
-                <i class="fas fa-circle-info" style="font-size:11px;"></i>
-              </span>
-                ` : ''}
-                ${hasDeletedSelectionReference ? `
-              <span title="Contains reference to deleted selection"
-                    aria-label="Contains reference to deleted selection"
-                    style="display:inline-flex;align-items:center;justify-content:center;color:#b91c1c;font-size:14px;font-weight:700;line-height:1;flex:0 0 auto;">!</span>
-                ` : ''}
-              </div>
-              <div style="font-size:11px;color:#6b7280;">${item.selectedCount} cells${createdAt ? ` - ${this.escapeHtml(createdAt)}` : ''}</div>
-            </div>
-          </div>
-          <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
-            <div>${this.selectionStatusBadgeHtml(item.status)}</div>
-            <span role="button"
-                    tabindex="0"
-                    title="Delete selection"
-                    aria-label="Delete selection"
-                    data-selection-id="${this.escapeHtml(item.id)}"
-                    style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:#dc2626;cursor:pointer;padding:0;"
-                    data-action="click->visualization#deleteSavedSelection">
-              <i class="fas fa-trash" style="font-size:12px;"></i>
-            </span>
-          </div>
-        </button>
-      `
-    }).join('')
+      const isEditingName = String(this.editingSavedSelectionId || '') === String(item.id)
+      const rowNode = this.buildSavedSelectionRowElement(item, {
+        isChecked,
+        hasSelectionDetails,
+        hasDeletedSelectionReference,
+        isEditingName,
+        trailingMargin,
+        createdAt,
+        selectionPrefix
+      })
+      if (rowNode) fragment.appendChild(rowNode)
+    })
+    list.innerHTML = ''
+    list.appendChild(fragment)
     if (isBulkDeleting) {
-      list.innerHTML += `
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.35);z-index:10;">
-          <div style="display:flex;align-items:center;gap:8px;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;color:#374151;font-size:13px;font-weight:600;">
-            <span style="display:inline-flex;width:14px;height:14px;border:2px solid #d1d5db;border-top-color:#4b5563;border-radius:9999px;animation:spin 1s linear infinite;"></span>
-            <span>Deleting...</span>
-          </div>
-        </div>
-      `
+      list.appendChild(this.buildSavedSelectionsDeletingOverlayNode())
     }
+    this.focusPendingSavedSelectionRenameInput()
+  }
+
+  updateDeSelectionButtonState(items = []) {
+    const deButton = document.getElementById('de-selection-btn')
+    if (!deButton) return
+
+    const hasEnoughSelections = Array.isArray(items) && items.length >= 2
+    deButton.disabled = !hasEnoughSelections
+    deButton.style.opacity = hasEnoughSelections ? '1' : '0.45'
+    deButton.style.cursor = hasEnoughSelections ? 'pointer' : 'not-allowed'
+    deButton.title = hasEnoughSelections
+      ? 'Differential expression'
+      : 'Requires at least 2 saved cell sets'
+  }
+
+  preventSavedSelectionRowClick(event) {
+    event.stopPropagation()
+  }
+
+  trackSavedSelectionRenameInput(event) {
+    event.stopPropagation()
+    this.pendingSavedSelectionName = event.currentTarget?.value || ''
+  }
+
+  startRenameSavedSelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const selectionId = String(event.currentTarget?.dataset?.selectionId || '').trim()
+    if (!selectionId) return
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === selectionId)
+    if (!item) return
+
+    this.editingSavedSelectionId = selectionId
+    this.pendingSavedSelectionName = String(item.name || '')
+    this.pendingSavedSelectionFocusId = selectionId
+    this.renderSavedSelections()
+  }
+
+  cancelRenameSavedSelection(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    this.editingSavedSelectionId = null
+    this.pendingSavedSelectionName = null
+    this.pendingSavedSelectionFocusId = null
+    this.renderSavedSelections()
+  }
+
+  handleSavedSelectionRenameKeydown(event) {
+    event.stopPropagation()
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      this.commitSavedSelectionRename(event)
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      this.cancelRenameSavedSelection(event)
+      return
+    }
+    this.pendingSavedSelectionName = event.currentTarget?.value || ''
+  }
+
+  focusPendingSavedSelectionRenameInput() {
+    const selectionId = String(this.pendingSavedSelectionFocusId || '').trim()
+    if (!selectionId) return
+    this.pendingSavedSelectionFocusId = null
+    setTimeout(() => {
+      const input = document.querySelector(`#saved-selections-list input[data-role="saved-selection-name-input"][data-selection-id="${selectionId.replace(/"/g, '\\"')}"]`)
+      if (input) {
+        input.focus()
+        input.select()
+      }
+    }, 0)
+  }
+
+  async commitSavedSelectionRename(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const closestSelectionNode = event.currentTarget?.closest?.('[data-selection-id]')
+    const selectionId = String(
+      event.currentTarget?.dataset?.selectionId ||
+      closestSelectionNode?.dataset?.selectionId ||
+      this.editingSavedSelectionId ||
+      ''
+    ).trim()
+    if (!selectionId) return
+    const input = document.querySelector(`#saved-selections-list input[data-role="saved-selection-name-input"][data-selection-id="${selectionId.replace(/"/g, '\\"')}"]`)
+    const nextName = input ? String(input.value || '').trim() : String(this.pendingSavedSelectionName || '').trim()
+    if (window.SELECTION_RENAME_DEBUG === true) {
+      console.log('[SelectionRename] commit', {
+        selectionId,
+        inputType: input ? input.type : null,
+        rawInputValue: input ? input.value : null,
+        nextName
+      })
+    }
+    const itemIndex = (this.savedSelections || []).findIndex((entry) => String(entry.id) === selectionId)
+    const item = itemIndex >= 0 ? this.savedSelections[itemIndex] : null
+    const previousName = itemIndex >= 0 ? String(this.savedSelections[itemIndex].name || '') : ''
+
+    try {
+      if (itemIndex >= 0) {
+        this.savedSelections[itemIndex].name = nextName
+      }
+      this.editingSavedSelectionId = null
+      this.pendingSavedSelectionName = null
+      this.pendingSavedSelectionFocusId = null
+      this.renderSavedSelections()
+      await this.renameSavedSelection(selectionId, nextName, {
+        runId: item?.runId || null,
+        metadataId: item?.metadataId || null
+      })
+      this.refreshSelectionStates()
+    } catch (error) {
+      if (itemIndex >= 0) {
+        this.savedSelections[itemIndex].name = previousName
+        this.renderSavedSelections()
+      }
+      alert(`Failed to rename selection: ${error.message}`)
+    }
+  }
+
+  async renameSavedSelection(selectionId, selectionName, options = {}) {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) {
+      throw new Error('project identifier is missing')
+    }
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/rename_selection`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        selection_id: selectionId,
+        selection_name: selectionName,
+        run_id: options?.runId || null,
+        metadata_id: options?.metadataId || null
+      })
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.status !== 'ok') {
+      throw new Error(payload.message || 'rename request failed')
+    }
+    return payload
   }
 
   selectionSourceIconHtml(source) {
@@ -11546,6 +12110,536 @@ export default class extends Controller {
     overlay.style.display = 'none'
   }
 
+  openDeSelectionModal() {
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    if (items.length < 2) return
+
+    window.visualizationController = this
+    const overlay = document.getElementById('de-selection-overlay')
+    if (!overlay) return
+    overlay.style.display = 'flex'
+    const runButton = document.getElementById('de-selection-run-btn')
+    if (runButton) {
+      runButton.onclick = (event) => this.submitDeSelectionRun(event)
+    }
+    this.showDeRunFeedback('')
+
+    this.populateDeSelectionEmbeddings()
+    this.populateDeSelectionOperands()
+    this.populateDeSelectionMethods()
+    this.updateDeSelectionPreview()
+  }
+
+  closeDeSelectionModal() {
+    const overlay = document.getElementById('de-selection-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  populateDeSelectionOperands() {
+    const operandASelect = document.getElementById('de-selection-operand-a')
+    const operandBSelect = document.getElementById('de-selection-operand-b')
+    if (!operandASelect || !operandBSelect) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    this.ensureSavedCellSetSelectionOrder(items)
+    const options = items.map((item) => ({
+      value: `saved:${item.id}`,
+      label: this.composeSelectionOptionLabel(item)
+    }))
+    const optionMarkup = options.map((opt) => `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`).join('')
+    operandASelect.innerHTML = optionMarkup
+    operandBSelect.innerHTML = optionMarkup
+
+    const validValues = new Set(options.map((opt) => opt.value))
+    const checkedValuesInOrder = (this.savedCellSetSelectionOrder || [])
+      .map((id) => `saved:${id}`)
+      .filter((value) => validValues.has(value))
+
+    const firstValue = checkedValuesInOrder[0] || options[0]?.value || ''
+    let secondValue = checkedValuesInOrder[1] || ''
+    if (!secondValue || secondValue === firstValue) {
+      const fallbackDistinct = options.find((opt) => opt.value !== firstValue)
+      secondValue = fallbackDistinct ? fallbackDistinct.value : firstValue
+    }
+
+    operandASelect.value = firstValue
+    operandBSelect.value = secondValue
+  }
+
+  populateDeSelectionEmbeddings() {
+    const embeddingSelect = document.getElementById('de-selection-embedding')
+    if (!embeddingSelect) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const embeddings = (loomFile && this.embeddingsByLoomValue) ? (this.embeddingsByLoomValue[loomFile] || []) : []
+    embeddingSelect.innerHTML = ''
+
+    if (!Array.isArray(embeddings) || embeddings.length === 0) {
+      embeddingSelect.innerHTML = '<option value="">No embeddings available</option>'
+      return
+    }
+
+    embeddings.forEach((embedding) => {
+      const option = document.createElement('option')
+      option.value = String(embedding.id || '')
+      option.textContent = this.getEmbeddingLabel(embedding)
+      embeddingSelect.appendChild(option)
+    })
+
+    const currentEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : ''
+    const hasCurrent = currentEmbeddingId && embeddings.some((embedding) => String(embedding.id || '') === currentEmbeddingId)
+    embeddingSelect.value = hasCurrent ? currentEmbeddingId : String(embeddings[0].id || '')
+  }
+
+  getSelectedDePreviewEmbeddingId() {
+    const embeddingSelect = document.getElementById('de-selection-embedding')
+    if (embeddingSelect && String(embeddingSelect.value || '').trim().length > 0) {
+      return String(embeddingSelect.value).trim()
+    }
+    return this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : ''
+  }
+
+  populateDeSelectionMethods() {
+    const methodSelect = document.getElementById('de-selection-method')
+    if (!methodSelect) return
+
+    const methods = Array.isArray(this.deMethodsValue) ? this.deMethodsValue : []
+    const unavailable = this.deUnavailableMethodsValue || {}
+
+    if (methods.length === 0) {
+      methodSelect.innerHTML = '<option value="">No DE methods available</option>'
+      const attrsContainer = document.getElementById('de-selection-attrs')
+      if (attrsContainer) {
+        attrsContainer.innerHTML = '<div style="font-size:12px;color:#6b7280;">No DE methods available for this project.</div>'
+      }
+      return
+    }
+
+    methodSelect.innerHTML = methods.map((method) => {
+      const methodId = String(method.id)
+      const label = unavailable[methodId] || unavailable[method.id]
+        ? `${method.label} (not available)`
+        : method.label
+      const disabled = (unavailable[methodId] || unavailable[method.id]) ? 'disabled' : ''
+      return `<option value="${this.escapeHtml(methodId)}" ${disabled}>${this.escapeHtml(label)}</option>`
+    }).join('')
+
+    const firstAvailable = methods.find((method) => !(unavailable[String(method.id)] || unavailable[method.id]))
+    if (firstAvailable) {
+      methodSelect.value = String(firstAvailable.id)
+    }
+    this.onDeSelectionMethodChanged()
+  }
+
+  onDeSelectionMethodChanged() {
+    const methodSelect = document.getElementById('de-selection-method')
+    const attrsContainer = document.getElementById('de-selection-attrs')
+    if (!methodSelect || !attrsContainer) return
+
+    const methodId = String(methodSelect.value || '')
+    if (!methodId) {
+      attrsContainer.innerHTML = '<div style="font-size:12px;color:#6b7280;">Select a method to configure DE parameters.</div>'
+      return
+    }
+
+    this.loadDeMethodAttributes(methodId)
+  }
+
+  async loadDeMethodAttributes(stdMethodId) {
+    const attrsContainer = document.getElementById('de-selection-attrs')
+    const status = document.getElementById('de-selection-status')
+    if (!attrsContainer) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    const stepId = Number(this.deStepIdValue)
+    if (!projectIdentifier || !Number.isInteger(stepId) || stepId <= 0) {
+      attrsContainer.innerHTML = '<div style="font-size:12px;color:#991b1b;">Could not load DE attributes.</div>'
+      return
+    }
+
+    attrsContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;padding:12px;font-size:12px;color:#6b7280;"><i class="fa fa-spinner fa-pulse" style="margin-right:6px;"></i>Loading parameters...</div>'
+    if (status) status.style.display = 'none'
+
+    const url = `/projects/${encodeURIComponent(projectIdentifier)}/get_attributes?step_id=${stepId}&obj_id=${encodeURIComponent(stdMethodId)}&format=html`
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/html',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'same-origin'
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const html = await response.text()
+      attrsContainer.innerHTML = html
+      this.removeDeInputFields(attrsContainer)
+      this.filterOutDeAllAgainstComplementaryOption(attrsContainer)
+      this.filterOutDeUnsupportedInstructions(attrsContainer)
+      this.finalizeDeParameterPanel(attrsContainer)
+      this.initializeDeAttributeListeners(attrsContainer)
+    } catch (error) {
+      attrsContainer.innerHTML = `<div style="font-size:12px;color:#991b1b;">Failed to load DE parameters: ${this.escapeHtml(error.message)}</div>`
+    }
+  }
+
+  removeDeInputFields(container) {
+    if (!container) return
+    const selectors = [
+      '[data-attr-widget="input_data"]',
+      '[data-attr-name="groups"]',
+      '[data-attr-name="all_against_compl"]',
+      '[data-attr-name="all_against_all"]',
+      '[data-attr-name="group_pairs"]',
+      '[data-attr-name="group_ref"]',
+      '[data-attr-name="group_comp"]',
+      '[data-attr-name="or_text"]'
+    ]
+    selectors.forEach((selector) => {
+      container.querySelectorAll(selector).forEach((el) => el.remove())
+    })
+  }
+
+  filterOutDeAllAgainstComplementaryOption(container) {
+    if (!container) return
+
+    const blockedLabels = new Set(['all against complementary', 'all against all'])
+    container.querySelectorAll('select').forEach((select) => {
+      const options = Array.from(select.options || [])
+      let removedSelected = false
+      options.forEach((opt) => {
+        const label = String(opt.textContent || '').trim().toLowerCase()
+        if (blockedLabels.has(label)) {
+          if (opt.selected) removedSelected = true
+          opt.remove()
+        }
+      })
+      if (removedSelected && select.options.length > 0) {
+        select.selectedIndex = 0
+      }
+    })
+
+    container.querySelectorAll('label').forEach((labelNode) => {
+      const text = String(labelNode.textContent || '').trim().toLowerCase()
+      if (blockedLabels.has(text)) {
+        const wrapper = labelNode.closest('div') || labelNode
+        wrapper.remove()
+      }
+    })
+  }
+
+  filterOutDeUnsupportedInstructions(container) {
+    if (!container) return
+
+    const blockedRegexes = [
+      /compute all against complementary set differential expression analysis\.?/ig,
+      /all against complementary/ig,
+      /all against all/ig
+    ]
+
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+    const textNodes = []
+    let currentNode = walker.nextNode()
+    while (currentNode) {
+      textNodes.push(currentNode)
+      currentNode = walker.nextNode()
+    }
+
+    textNodes.forEach((textNode) => {
+      let updatedText = String(textNode.nodeValue || '')
+      blockedRegexes.forEach((regex) => {
+        updatedText = updatedText.replace(regex, '')
+      })
+      if (updatedText !== textNode.nodeValue) {
+        textNode.nodeValue = updatedText.replace(/\s{2,}/g, ' ').trim()
+      }
+    })
+  }
+
+  finalizeDeParameterPanel(container) {
+    if (!container) return
+    const hasParameterFields = container.querySelectorAll('[data-attr-name]').length > 0
+    if (!hasParameterFields) {
+      container.innerHTML = '<div style="font-size:12px;color:#6b7280;font-style:italic;">No available parameter for this method.</div>'
+    }
+  }
+
+  initializeDeAttributeListeners(container) {
+    if (!container) return
+    const checkboxes = container.querySelectorAll('.std_form_checkbox')
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', function onCheckboxChange() {
+        const attrName = this.id.replace('checkbox-', '')
+        const hiddenField = container.querySelector(`#attrs_${attrName}`)
+        if (hiddenField) {
+          hiddenField.value = this.checked ? 'true' : 'false'
+        }
+      })
+    })
+  }
+
+  async updateDeSelectionPreview() {
+    const preview = document.getElementById('de-selection-preview')
+    const operandASelect = document.getElementById('de-selection-operand-a')
+    const operandBSelect = document.getElementById('de-selection-operand-b')
+    if (!preview || !operandASelect || !operandBSelect) return
+
+    if (!operandASelect.value || !operandBSelect.value) {
+      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select two saved cell sets to preview.</div>'
+      return
+    }
+
+    try {
+      const [operandA, operandB] = await Promise.all([
+        this.resolveComposeOperandSelection(operandASelect.value),
+        this.resolveComposeOperandSelection(operandBSelect.value)
+      ])
+      if (!operandA || !operandB) return
+
+      const embeddingId = this.getSelectedDePreviewEmbeddingId()
+      const loomFile = this.getCurrentLoomFileForRequest()
+      const coordinates = await this.getComposeSelectionPreviewCoordinates(embeddingId, loomFile)
+      const totalCells = Array.isArray(coordinates) && coordinates.length > 0
+        ? coordinates.length
+        : Math.max(operandA.cellSet.size, operandB.cellSet.size)
+
+      preview.innerHTML = [
+        this.renderComposeSelectionPreviewCard('Cell set A', operandA.label, operandA.cellSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
+        this.renderComposeSelectionPreviewCard('Cell set B', operandB.label, operandB.cellSet.size, totalCells, '#d97706', 'de-preview-canvas-b')
+      ].join('')
+
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, operandA.cellSet, '#2563eb')
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, operandB.cellSet, '#d97706')
+    } catch (_error) {
+      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected cell sets.</div>'
+    }
+  }
+
+  getDeSelectedOperandItems() {
+    const operandASelect = document.getElementById('de-selection-operand-a')
+    const operandBSelect = document.getElementById('de-selection-operand-b')
+    if (!operandASelect || !operandBSelect) return { itemA: null, itemB: null }
+
+    const selectedAId = String(operandASelect.value || '').replace('saved:', '')
+    const selectedBId = String(operandBSelect.value || '').replace('saved:', '')
+    const itemA = (this.savedSelections || []).find((entry) => String(entry.id) === selectedAId) || null
+    const itemB = (this.savedSelections || []).find((entry) => String(entry.id) === selectedBId) || null
+    return { itemA, itemB }
+  }
+
+  collectDeModalAttributes() {
+    const attrsContainer = document.getElementById('de-selection-attrs')
+    const attrs = {}
+    if (!attrsContainer) return attrs
+
+    const fields = attrsContainer.querySelectorAll('input, select, textarea')
+    fields.forEach((field) => {
+      const rawName = String(field.name || '')
+      const match = rawName.match(/^attrs\[(.*?)\]$/)
+      if (!match) return
+      const attrName = match[1]
+      if (!attrName) return
+
+      if (field.type === 'radio' && !field.checked) return
+      if (field.type === 'checkbox') {
+        attrs[attrName] = field.checked ? (field.value || 'true') : 'false'
+        return
+      }
+      attrs[attrName] = field.value
+    })
+
+    return attrs
+  }
+
+  resolveDeInputMatrixFromCurrentEmbedding() {
+    const matrixLink = document.getElementById('matrix-selection-link')
+    if (!matrixLink) return null
+
+    const annotIdRaw = String(matrixLink.dataset.annotId || '').trim()
+    const runIdRaw = String(matrixLink.dataset.runId || '').trim()
+    const annotId = Number(annotIdRaw)
+    const runId = Number(runIdRaw)
+    if (!Number.isInteger(annotId) || annotId <= 0 || !Number.isInteger(runId) || runId <= 0) return null
+
+    return [{
+      annot_id: annotId,
+      run_id: runId
+    }]
+  }
+
+  applyDeSelectedGroupsToAttrs(attrs, itemA, itemB) {
+    const groupsAnnotId = Number(itemA?.metadataId)
+    const groupsRunId = Number(itemA?.runId)
+    if (!Number.isInteger(groupsAnnotId) || groupsAnnotId <= 0 || !Number.isInteger(groupsRunId) || groupsRunId <= 0) {
+      throw new Error('Missing group annotation for selected cell set.')
+    }
+    attrs.groups = [{
+      annot_id: groupsAnnotId,
+      run_id: groupsRunId
+    }]
+    // Cell-selection metadata stores binary values as "1" (selected) and "0" (not selected).
+    attrs.group_ref = '1'
+    attrs.group_comp = '0'
+    delete attrs.group_pairs
+  }
+
+  showDeSelectionStatus(message, tone = 'info') {
+    const status = document.getElementById('de-selection-status')
+    if (!status) return
+    status.style.display = 'block'
+    status.textContent = message
+    if (tone === 'error') {
+      status.style.backgroundColor = '#fef2f2'
+      status.style.color = '#991b1b'
+      status.style.border = '1px solid #fecaca'
+    } else if (tone === 'success') {
+      status.style.backgroundColor = '#ecfdf5'
+      status.style.color = '#065f46'
+      status.style.border = '1px solid #a7f3d0'
+    } else {
+      status.style.backgroundColor = '#eff6ff'
+      status.style.color = '#1e3a8a'
+      status.style.border = '1px solid #bfdbfe'
+    }
+  }
+
+  buildDeResultsUrl() {
+    const projectIdentifier = this.getProjectIdentifier()
+    const stepId = Number(this.deStepIdValue)
+    if (!projectIdentifier || !Number.isInteger(stepId) || stepId <= 0) return ''
+    return `/projects/${encodeURIComponent(projectIdentifier)}?view=analysis&step_id=${stepId}&sub_view=dashboard`
+  }
+
+  showDeRunFeedback(message, options = {}) {
+    const feedback = document.getElementById('de-run-feedback')
+    if (!feedback) return
+    if (this.deRunFeedbackTimeout) {
+      clearTimeout(this.deRunFeedbackTimeout)
+      this.deRunFeedbackTimeout = null
+    }
+    if (!message) {
+      feedback.style.display = 'none'
+      feedback.textContent = ''
+      return
+    }
+    const tone = options.tone || 'info'
+    const autoHideMs = Number(options.autoHideMs || 0)
+    feedback.style.display = 'block'
+    feedback.textContent = message
+    if (tone === 'error') {
+      feedback.style.color = '#991b1b'
+    } else if (tone === 'success') {
+      feedback.style.color = '#065f46'
+    } else {
+      feedback.style.color = '#1d4ed8'
+    }
+    if (autoHideMs > 0) {
+      this.deRunFeedbackTimeout = setTimeout(() => {
+        feedback.style.display = 'none'
+        feedback.textContent = ''
+        this.deRunFeedbackTimeout = null
+      }, autoHideMs)
+    }
+  }
+
+  async submitDeSelectionRun(event = null) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const runButton = document.getElementById('de-selection-run-btn')
+    const methodSelect = document.getElementById('de-selection-method')
+    if (!runButton || !methodSelect) return
+
+    const methodId = String(methodSelect.value || '').trim()
+    const stepId = Number(this.deStepIdValue)
+    const projectIdentifier = this.getProjectIdentifier()
+    const { itemA, itemB } = this.getDeSelectedOperandItems()
+
+    if (!methodId || !Number.isInteger(stepId) || stepId <= 0 || !projectIdentifier) {
+      this.showDeSelectionStatus('Could not submit DE run: missing method or project context.', 'error')
+      alert('Could not submit DE run: missing method or project context.')
+      return
+    }
+    if (!itemA || !itemB || String(itemA.id) === String(itemB.id)) {
+      this.showDeSelectionStatus('Please select two different cell sets.', 'error')
+      alert('Please select two different cell sets.')
+      return
+    }
+
+    const attrs = this.collectDeModalAttributes()
+    const inputMatrix = this.resolveDeInputMatrixFromCurrentEmbedding()
+    if (!inputMatrix) {
+      this.showDeSelectionStatus('Could not submit DE run: missing input matrix for current embedding.', 'error')
+      alert('Could not submit DE run: missing input matrix for current embedding.')
+      return
+    }
+    attrs.input_matrix = inputMatrix
+    try {
+      this.applyDeSelectedGroupsToAttrs(attrs, itemA, itemB)
+    } catch (error) {
+      this.showDeSelectionStatus(error.message || 'Could not prepare DE grouping.', 'error')
+      alert(error.message || 'Could not prepare DE grouping.')
+      return
+    }
+    if (window.DE_SUBMIT_DEBUG === true) {
+      console.log('[DESubmit] request', { stepId, methodId, attrs })
+    }
+
+    const originalLabel = runButton.innerHTML
+    runButton.disabled = true
+    runButton.innerHTML = '<i class="fa fa-spinner fa-pulse"></i> Running'
+    this.closeDeSelectionModal()
+    this.showDeRunFeedback('')
+
+    try {
+      const submitUrl = `/reqs?project_key=${encodeURIComponent(projectIdentifier)}`
+      const response = await fetch(submitUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+          'Accept': 'application/json'
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          req: {
+            step_id: stepId,
+            std_method_id: methodId
+          },
+          attrs
+        })
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (window.DE_SUBMIT_DEBUG === true) {
+        console.log('[DESubmit] response', { status: response.status, payload })
+      }
+      const ok = response.ok && (payload.status === 'success' || payload.status === 'ok')
+      if (!ok) {
+        throw new Error(payload.errors || payload.message || `HTTP ${response.status}`)
+      }
+
+      const duplicateRun = String(payload.errors || '').toLowerCase().includes('already launched')
+      if (duplicateRun) {
+        this.showDeRunFeedback('A DE run already exists for this configuration.', { tone: 'info', autoHideMs: 2500 })
+      } else {
+        this.showDeRunFeedback('DE submitted.', { tone: 'success', autoHideMs: 1800 })
+      }
+    } catch (error) {
+      this.showDeRunFeedback(`Failed to submit DE run: ${error.message}`, { tone: 'error', autoHideMs: 3000 })
+      alert(`Failed to submit DE run: ${error.message}`)
+    } finally {
+      runButton.disabled = false
+      runButton.innerHTML = originalLabel
+    }
+  }
+
   openComposeSelectionDetails(event) {
     event.preventDefault()
     event.stopPropagation()
@@ -11554,7 +12648,7 @@ export default class extends Controller {
     if (!selectionId) return
 
     const item = (this.savedSelections || []).find((entry) => String(entry.id) === String(selectionId))
-    if (!item || (item.selectionSource !== 'compose' && item.selectionSource !== 'visible')) {
+    if (!item) {
       return
     }
 
@@ -11575,11 +12669,17 @@ export default class extends Controller {
     const summary = document.getElementById('compose-selection-details-summary')
     const stepsContainer = document.getElementById('compose-selection-details-steps')
     const sectionTitle = document.getElementById('compose-selection-details-section-title')
+    const detailsSection = sectionTitle ? sectionTitle.parentElement : null
     if (!summary || !stepsContainer) return
 
-    const selectionLabel = `${item.selectionNumber ? `#${item.selectionNumber} ` : ''}${item.name}`
+    const selectionLabel = `${item.selectionNumber ? `#${item.selectionNumber} ` : ''}${this.savedSelectionDisplayName(item)}`
     const createdLabel = item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Unknown'
-    const sourceText = item.selectionSource === 'compose' ? 'Composed selection' : 'Visible filtered cells selection'
+    const hasFilterDetails = Array.isArray(item.filterComponents) && item.filterComponents.length > 0
+    const sourceText = item.selectionSource === 'compose'
+      ? 'Composed selection'
+      : (item.selectionSource === 'lasso'
+          ? (hasFilterDetails ? 'Lasso selection with filters' : 'Lasso selection without filters')
+          : 'Visible filtered cells selection')
 
     summary.innerHTML = `
       <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>
@@ -11588,7 +12688,14 @@ export default class extends Controller {
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Created: ${this.escapeHtml(createdLabel)}</div>
     `
 
-    if (item.selectionSource === 'visible') {
+    if (item.selectionSource === 'lasso' && !hasFilterDetails) {
+      if (detailsSection) detailsSection.style.display = 'none'
+      stepsContainer.innerHTML = ''
+      return
+    }
+
+    if (detailsSection) detailsSection.style.display = 'block'
+    if (hasFilterDetails) {
       if (sectionTitle) sectionTitle.textContent = 'Filter components'
       this.renderVisibleSelectionDetails(item, stepsContainer)
       return
@@ -11732,6 +12839,47 @@ export default class extends Controller {
     if (!Number.isFinite(this.composeSelectionPreviewRequestId)) this.composeSelectionPreviewRequestId = 0
   }
 
+  getPreferredSavedCellSetOptionValues(items) {
+    const normalizedItems = Array.isArray(items) ? items : []
+    if (normalizedItems.length === 0) return []
+    this.ensureSavedCellSetSelectionOrder(normalizedItems)
+
+    const orderedSelectionIds = Array.isArray(this.savedCellSetSelectionOrder) ? this.savedCellSetSelectionOrder : []
+    const preferred = []
+
+    orderedSelectionIds.forEach((selectionId) => {
+      const id = String(selectionId || '').trim()
+      if (!id) return
+      if (normalizedItems.some((item) => String(item.id) === id)) {
+        preferred.push(`saved:${id}`)
+      }
+    })
+
+    if (preferred.length === 0) {
+      const fallback = this.buildDefaultSavedCellSetSelectionOrder(normalizedItems)
+      fallback.forEach((id) => preferred.push(`saved:${id}`))
+    }
+
+    return preferred.slice(-2)
+  }
+
+  applyDefaultSavedCellSetOperands(operandASelect, operandBSelect, options) {
+    if (!operandASelect || !operandBSelect) return
+    const validValues = new Set((Array.isArray(options) ? options : []).map((opt) => opt.value))
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    const preferredValues = this.getPreferredSavedCellSetOptionValues(items).filter((value) => validValues.has(value))
+
+    if (preferredValues[0]) {
+      operandASelect.value = preferredValues[0]
+    }
+    if (preferredValues[1]) {
+      operandBSelect.value = preferredValues[1]
+    } else if (preferredValues[0]) {
+      operandBSelect.value = preferredValues[0]
+    }
+  }
+
   populateComposeSelectionOperands() {
     const operandASelect = document.getElementById('compose-selection-operand-a')
     const operandBSelect = document.getElementById('compose-selection-operand-b')
@@ -11785,6 +12933,8 @@ export default class extends Controller {
     } else if (!operandBSelect.value && options[0]) {
       operandBSelect.value = options[0].value
     }
+
+    this.applyDefaultSavedCellSetOperands(operandASelect, operandBSelect, options)
   }
 
   populateComposeSelectionEmbeddings() {
@@ -11824,10 +12974,26 @@ export default class extends Controller {
     this.updateComposeSelectionPreview()
   }
 
+  savedSelectionDisplayName(item) {
+    const rawName = item && item.name != null ? String(item.name).trim() : ''
+    return rawName.length > 0 ? rawName : 'Unnamed'
+  }
+
+  savedSelectionDisplayNameHtml(item, prefix = '') {
+    const rawName = item && item.name != null ? String(item.name).trim() : ''
+    if (rawName.length > 0) {
+      return this.escapeHtml(`${prefix}${rawName}`)
+    }
+    if (prefix) {
+      return `${this.escapeHtml(prefix)}<span style="font-style:italic;color:#6b7280;">Unnamed</span>`
+    }
+    return '<span style="font-style:italic;color:#6b7280;">Unnamed</span>'
+  }
+
   composeSelectionOptionLabel(item) {
     const numberPrefix = item.selectionNumber ? `#${item.selectionNumber} ` : ''
     const countPart = Number.isFinite(item.selectedCount) ? ` (${item.selectedCount.toLocaleString()} cells)` : ''
-    return `${numberPrefix}${item.name}${countPart}`
+    return `${numberPrefix}${this.savedSelectionDisplayName(item)}${countPart}`
   }
 
   async updateComposeSelectionPreview() {
@@ -12298,7 +13464,7 @@ export default class extends Controller {
 
     const proposedName = `Composed Step ${numericStepIndex}`
     const selectionName = prompt('Enter a name for this composed selection:', proposedName)
-    if (!selectionName) return
+    if (selectionName === null) return
 
     const composeStepsForSave = this.composeBuildStepsForSave(numericStepIndex)
     await this.persistSelection(selectionName.trim(), selectedIndices, {
@@ -12428,6 +13594,11 @@ export default class extends Controller {
   }
 
   async refreshSelectionStates() {
+    const renameInProgress = String(this.editingSavedSelectionId || '').trim().length > 0
+    if (renameInProgress) {
+      return
+    }
+
     try {
       const projectIdentifier = this.getProjectIdentifier()
       if (!projectIdentifier) return

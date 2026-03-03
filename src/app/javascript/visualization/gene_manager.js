@@ -487,46 +487,59 @@ export class GeneManager {
     this.notFoundQueries = []
     this.totalGeneCount = 0 // Store total gene count for badge
     
-    // Initialize add gene set button - use a bound function to ensure correct context
-    const addBtn = document.getElementById('add-gene-set-btn')
-    if (addBtn) {
-      // Store reference to this for the event handler
+    // Initialize add gene set buttons.
+    const addButtons = document.querySelectorAll('[data-gene-set-add-trigger="true"]')
+    if (addButtons.length > 0) {
       const geneManager = this
-      addBtn.addEventListener('click', function(e) {
-        e.preventDefault()
-        e.stopPropagation()
-        
-        // Check for gene divs in the DOM instead of geneTags array
-        const resultsDiv = document.getElementById('gene-expression-results')
-        const geneDivs = resultsDiv ? resultsDiv.querySelectorAll('[id^="gene-result-"]') : []
-        const geneCount = geneDivs.length
-        
-        // console.log('GeneManager: Add button clicked, found', geneCount, 'gene divs in DOM')
-        
-        if (geneCount === 0) {
-          alert('No genes selected. Please select genes before creating a gene set.')
-          return
-        }
-        
-        // Extract gene data from the DOM divs
-        const genes = Array.from(geneDivs).map(div => {
-          const stableId = div.id.replace('gene-result-', '')
-          const geneSymbolEl = div.querySelector('h3')
-          const geneSymbol = geneSymbolEl ? geneSymbolEl.textContent.trim().split(' ')[0] : ''
-          // Try to extract ensembl ID and stable ID from the DOM
-          const stableIdMatch = div.textContent.match(/Stable ID[:\s]+(\d+)/)
-          const ensemblMatch = div.textContent.match(/(FBgn\d+)/)
-          return {
-            symbol: geneSymbol,
-            ensemblId: ensemblMatch ? ensemblMatch[1] : '',
-            stableId: parseInt(stableIdMatch ? stableIdMatch[1] : stableId),
-            query: geneSymbol
+      addButtons.forEach((button) => {
+        if (button.dataset.geneSetAddBound === 'true') return
+        button.dataset.geneSetAddBound = 'true'
+
+        button.addEventListener('click', function(e) {
+          e.preventDefault()
+          e.stopPropagation()
+
+          // Check for gene divs in the DOM instead of geneTags array
+          const resultsDiv = document.getElementById('gene-expression-results')
+          const geneDivs = resultsDiv ? resultsDiv.querySelectorAll('[id^="gene-result-"]') : []
+          const geneCount = geneDivs.length
+
+          if (geneCount === 0) {
+            alert('No genes selected. Please select genes before creating a gene set.')
+            return
           }
+
+          // Extract gene data from the DOM divs
+          const genes = Array.from(geneDivs).map(div => {
+            const stableId = div.id.replace('gene-result-', '')
+            const geneSymbolEl = div.querySelector('h3')
+            const geneSymbol = geneSymbolEl ? geneSymbolEl.textContent.trim().split(' ')[0] : ''
+            // Try to extract ensembl ID and stable ID from the DOM
+            const stableIdMatch = div.textContent.match(/Stable ID[:\s]+(\d+)/)
+            const ensemblMatch = div.textContent.match(/(FBgn\d+)/)
+            return {
+              symbol: geneSymbol,
+              ensemblId: ensemblMatch ? ensemblMatch[1] : '',
+              stableId: parseInt(stableIdMatch ? stableIdMatch[1] : stableId),
+              query: geneSymbol
+            }
+          })
+
+          geneManager.showAddGeneSetModalWithGenes(genes)
         })
-        
-        geneManager.showAddGeneSetModalWithGenes(genes)
       })
     }
+
+    const clearAllBtn = document.getElementById('clear-genes-btn')
+    if (clearAllBtn && clearAllBtn.dataset.bound !== 'true') {
+      clearAllBtn.dataset.bound = 'true'
+      clearAllBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.clearAllGenes()
+      })
+    }
+
   }
 
   updateGeneCountBadge() {
@@ -551,6 +564,178 @@ export class GeneManager {
     if (addBtn) {
       addBtn.style.display = this.geneTags.length > 0 ? 'inline-flex' : 'none'
     }
+
+    const clearAllBtn = document.getElementById('clear-genes-btn')
+    if (clearAllBtn) {
+      clearAllBtn.style.display = this.geneTags.length > 0 ? 'inline-flex' : 'none'
+    }
+  }
+
+  clearGeneMetadataStateForStableIds(stableIds = []) {
+    const controller = this.controller
+    if (!controller) return false
+
+    const normalizedIds = Array.isArray(stableIds)
+      ? stableIds.map((id) => String(id || '').trim()).filter((id) => id.length > 0)
+      : []
+    if (normalizedIds.length === 0) return false
+
+    const matchesGeneMetadataId = (metadataId) => {
+      const id = String(metadataId || '')
+      return normalizedIds.some((geneId) => id === `gene_${geneId}` || id.startsWith(`gene_${geneId}_`))
+    }
+
+    let stateChanged = false
+
+    ;['loadedMetadataVectors', 'inlineRangeSliderData', 'selectedRanges', 'savedRanges'].forEach((collectionName) => {
+      const collection = controller[collectionName]
+      if (!collection || typeof collection !== 'object') return
+      Object.keys(collection).forEach((metadataId) => {
+        if (matchesGeneMetadataId(metadataId)) {
+          delete collection[metadataId]
+          stateChanged = true
+        }
+      })
+    })
+
+    if (controller.disabledFilters instanceof Set) {
+      const toDelete = []
+      controller.disabledFilters.forEach((metadataId) => {
+        if (matchesGeneMetadataId(metadataId)) {
+          toDelete.push(metadataId)
+        }
+      })
+      toDelete.forEach((metadataId) => {
+        controller.disabledFilters.delete(metadataId)
+        stateChanged = true
+      })
+    }
+
+    const currentColoringId = String(controller.currentMetadataVector?.id || controller.currentMetadataId || '')
+    if (matchesGeneMetadataId(currentColoringId) && typeof controller.clearMetadataColoring === 'function') {
+      if (typeof controller.resetAllWaterDropButtons === 'function') {
+        controller.resetAllWaterDropButtons()
+      }
+      if (typeof controller.removeAllCategoryColors === 'function') {
+        controller.removeAllCategoryColors()
+      }
+      controller.clearMetadataColoring()
+      stateChanged = true
+    }
+
+    if (stateChanged) {
+      if (controller.uiManager && typeof controller.uiManager.updateGlobalFilterSummary === 'function') {
+        controller.uiManager.updateGlobalFilterSummary()
+      }
+      if (controller.dataManager && typeof controller.dataManager.updateCellFiltering === 'function') {
+        controller.dataManager.updateCellFiltering(true)
+      }
+    }
+
+    return stateChanged
+  }
+
+  syncGeneExpressionFilterStateForGenes(nextGeneStableIds = []) {
+    const controller = this.controller
+    if (!controller) return
+
+    const normalizedNextGeneIds = new Set(
+      Array.isArray(nextGeneStableIds) ? nextGeneStableIds.map((id) => String(id || '').trim()).filter((id) => id.length > 0) : []
+    )
+    const extractGeneIdFromMetadataId = (metadataId) => {
+      const match = String(metadataId || '').match(/^gene_([^_]+)(?:_|$)/)
+      return match ? String(match[1]) : null
+    }
+    const shouldKeepMetadataId = (metadataId) => {
+      const geneId = extractGeneIdFromMetadataId(metadataId)
+      if (!geneId) return false
+      return normalizedNextGeneIds.has(geneId)
+    }
+
+    // Remove active gene-expression ranges for genes not in the new set.
+    let filtersChanged = false
+    if (controller.selectedRanges && typeof controller.selectedRanges === 'object') {
+      Object.keys(controller.selectedRanges).forEach((metadataId) => {
+        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+          delete controller.selectedRanges[metadataId]
+          filtersChanged = true
+        }
+      })
+    }
+
+    // Remove disabled state tracked for removed gene-expression filters.
+    if (controller.disabledFilters instanceof Set) {
+      const toDelete = []
+      controller.disabledFilters.forEach((metadataId) => {
+        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+          toDelete.push(metadataId)
+        }
+      })
+      toDelete.forEach((metadataId) => {
+        controller.disabledFilters.delete(metadataId)
+        filtersChanged = true
+      })
+    }
+
+    // Drop saved ranges only for removed genes.
+    if (controller.savedRanges && typeof controller.savedRanges === 'object') {
+      Object.keys(controller.savedRanges).forEach((metadataId) => {
+        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+          delete controller.savedRanges[metadataId]
+          filtersChanged = true
+        }
+      })
+    }
+
+    // If coloring is currently gene-based and that gene is removed, revert to no coloring.
+    const currentColoringId = String(controller.currentMetadataVector?.id || controller.currentMetadataId || '')
+    if (currentColoringId.startsWith('gene_') && !shouldKeepMetadataId(currentColoringId) && typeof controller.clearMetadataColoring === 'function') {
+      if (typeof controller.resetAllWaterDropButtons === 'function') {
+        controller.resetAllWaterDropButtons()
+      }
+      if (typeof controller.removeAllCategoryColors === 'function') {
+        controller.removeAllCategoryColors()
+      }
+      controller.clearMetadataColoring()
+    }
+
+    // Keep global filter summary/selection state in sync after removing stale filters.
+    if (filtersChanged) {
+      if (controller.uiManager && typeof controller.uiManager.updateGlobalFilterSummary === 'function') {
+        controller.uiManager.updateGlobalFilterSummary()
+      }
+      if (controller.dataManager && typeof controller.dataManager.updateCellFiltering === 'function') {
+        controller.dataManager.updateCellFiltering(true)
+      }
+    }
+  }
+
+  async replaceGenesFromGeneSet(geneEntries) {
+    const normalizedGenes = Array.isArray(geneEntries)
+      ? geneEntries
+        .map((entry) => {
+          const stableRaw = entry?.stable_id ?? entry?.stableId
+          const stableId = String(stableRaw || '').trim()
+          if (!stableId) return null
+          const symbol = String(entry?.symbol || '').trim()
+          const ensemblRaw = entry?.ensembl_id ?? entry?.ensemblId ?? ''
+          const ensemblId = String(ensemblRaw).trim()
+          return {
+            stableId,
+            symbol: symbol || `Gene ${stableId}`,
+            ensemblId,
+            query: symbol || ensemblId || String(stableId)
+          }
+        })
+        .filter((gene) => !!gene)
+      : []
+
+    const nextGeneStableIds = normalizedGenes.map((gene) => String(gene.stableId))
+    this.syncGeneExpressionFilterStateForGenes(nextGeneStableIds)
+    this.geneTags = normalizedGenes
+    this.notFoundQueries = []
+    this.updateGeneCountBadge()
+    await this.processAllGenes()
   }
 
   resolveCurrentLoomFile() {
@@ -857,42 +1042,10 @@ export class GeneManager {
   }
 
   removeGeneTag(index) {
-    if (index >= 0 && index < this.geneTags.length) {
-      const geneToRemove = this.geneTags[index]
-      const metadataKeys = geneToRemove ? this.getGeneMetadataKeys(String(geneToRemove.stableId), this.currentMatrixAnnotId) : null
-      const metadataIds = metadataKeys ? [metadataKeys.baseKey, metadataKeys.layerKey] : []
-      
-      // Check if this gene is currently being used for coloring
-      const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
-      
-      if (isCurrentlyColoring) {
-        // console.log(`🧬 Removing gene ${geneToRemove.stableId} that is currently being used for coloring - clearing coloring`)
-        // Clear the coloring since the gene is being removed
-        this.controller.resetAllWaterDropButtons()
-        this.controller.removeAllCategoryColors()
-        this.controller.clearMetadataColoring()
-      }
-      
-      // Clear cached data for this gene
-      metadataIds.forEach(id => {
-        if (!id) return
-        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
-          delete this.controller.loadedMetadataVectors[id]
-        }
-        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
-          delete this.controller.inlineRangeSliderData[id]
-        }
-        if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
-          delete this.controller.selectedRanges[id]
-        }
-      })
-      
-      this.geneTags.splice(index, 1)
-      // Update badge when gene is removed
-      this.updateGeneCountBadge()
-      // Don't render tags, just process
-      this.processAllGenes()
-    }
+    if (index < 0 || index >= this.geneTags.length) return
+    const geneToRemove = this.geneTags[index]
+    if (!geneToRemove) return
+    this.removeGeneByStableId(geneToRemove.stableId)
   }
 
   removeGeneByStableId(stableId) {
@@ -900,18 +1053,7 @@ export class GeneManager {
     if (index !== -1) {
       const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
       const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
-      
-      // Check if this gene is currently being used for coloring
-      const isCurrentlyColoring = metadataIds.some(id => id && this.controller?.currentMetadataVector?.id === id)
-      
-      if (isCurrentlyColoring) {
-        // console.log(`🧬 Removing gene ${stableId} that is currently being used for coloring - clearing coloring`)
-        // Clear the coloring since the gene is being removed
-        this.controller.resetAllWaterDropButtons()
-        this.controller.removeAllCategoryColors()
-        this.controller.clearMetadataColoring()
-      }
-      
+
       metadataIds.forEach(id => {
         if (!id) return
         if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
@@ -926,6 +1068,9 @@ export class GeneManager {
       })
       
       this.geneTags.splice(index, 1)
+      this.clearGeneMetadataStateForStableIds([stableId])
+      const remainingGeneIds = this.geneTags.map((gene) => String(gene.stableId))
+      this.syncGeneExpressionFilterStateForGenes(remainingGeneIds)
       // Update badge when gene is removed
       this.updateGeneCountBadge()
       // Remove the gene div from the UI
@@ -940,6 +1085,48 @@ export class GeneManager {
           resultsDiv.innerHTML = ''
         }
       }
+    }
+  }
+
+  clearAllGenes() {
+    if (!Array.isArray(this.geneTags) || this.geneTags.length === 0) return
+
+    const stableIdsToClear = this.geneTags.map((gene) => String(gene.stableId || '').trim()).filter((id) => id.length > 0)
+    const metadataIdsToClear = new Set()
+    stableIdsToClear.forEach((stableId) => {
+      const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
+      if (metadataKeys.baseKey) metadataIdsToClear.add(metadataKeys.baseKey)
+      if (metadataKeys.layerKey) metadataIdsToClear.add(metadataKeys.layerKey)
+    })
+
+    metadataIdsToClear.forEach((metadataId) => {
+      if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[metadataId]) {
+        delete this.controller.loadedMetadataVectors[metadataId]
+      }
+      if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[metadataId]) {
+        delete this.controller.inlineRangeSliderData[metadataId]
+      }
+      if (this.controller?.selectedRanges && this.controller.selectedRanges[metadataId]) {
+        delete this.controller.selectedRanges[metadataId]
+      }
+    })
+
+    this.geneTags = []
+    this.notFoundQueries = []
+    this.clearGeneMetadataStateForStableIds(stableIdsToClear)
+    this.syncGeneExpressionFilterStateForGenes([])
+    this.updateGeneCountBadge()
+
+    const resultsDiv = document.getElementById('gene-expression-results')
+    if (resultsDiv) {
+      while (resultsDiv.firstChild) {
+        resultsDiv.removeChild(resultsDiv.firstChild)
+      }
+    }
+
+    const summaryDiv = document.getElementById('gene-results-summary')
+    if (summaryDiv) {
+      summaryDiv.style.display = 'none'
     }
   }
 

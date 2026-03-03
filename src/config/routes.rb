@@ -38,6 +38,9 @@ Rails.application.routes.draw do
       get :pipeline_runs
       get :search_gene
       get :search_gene_set_items
+      get :gene_set_collection_items
+      get :gene_set_item_genes
+      get :gene_set_item_module_score
       post :cluster_comparison
       post :filter_de_results
       post :filter_ge_results
@@ -49,6 +52,8 @@ Rails.application.routes.draw do
       post :do_import_metadata
       post :save_metadata_from_selection
       post :delete_selection
+      post :rename_selection
+      post :delete_gene_set_collection
       get :selection_states
       get :sample_identifiers
     end

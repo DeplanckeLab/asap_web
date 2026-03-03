@@ -5,7 +5,7 @@ require 'base64'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_item_genes gene_set_item_module_score prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection selection_states delete_gene_set_collection]
 
   # GET /projects or /projects.json
   def index
@@ -193,6 +193,8 @@ class ProjectsController < ApplicationController
     # Set default view type: use visualization if we have visualization data, otherwise use summary
     @view_type = params[:view] || (has_visualization_data ? 'visualization' : 'summary')
     
+    load_gene_set_collections if @view_type == 'visualization'
+
     #@available_embeddings = default_loom_file ? @all_embeddings_by_loom[default_loom_file] : []
 
     # Steps logic for summary and analysis views
@@ -2188,7 +2190,6 @@ class ProjectsController < ApplicationController
 
     loom_file = params[:loom_file].presence || embedding_annot.filepath
     selection_name = params[:selection_name].to_s.strip
-    selection_name = "Selection #{Time.current.strftime('%Y-%m-%d %H:%M:%S')}" if selection_name.blank?
     selected_name = selection_name
     unselected_name = params[:unselected_name].to_s.strip.presence || 'Not selected'
     compose_steps = sanitize_compose_steps(params[:compose_steps])
@@ -2358,6 +2359,532 @@ class ProjectsController < ApplicationController
   rescue StandardError => e
     Rails.logger.error("delete_selection failed for #{selection_id}: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Deletion failed: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/rename_selection
+  def rename_selection
+    unless editable?(@project)
+      render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    selection_id = params[:selection_id].to_s.strip
+    new_name = params[:selection_name].to_s.strip
+    run_id = params[:run_id].to_i
+    metadata_id = params[:metadata_id].to_s.strip
+    Rails.logger.info("[rename_selection] selection_id=#{selection_id.inspect} run_id=#{run_id} metadata_id=#{metadata_id.inspect} new_name=#{new_name.inspect}")
+    if selection_id.blank?
+      render json: { status: 'error', message: 'Missing selection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    if selection_id.start_with?('annot-')
+      annot_id = selection_id.sub('annot-', '').to_i
+      annot = Annot.find_by(id: annot_id, project_id: @project.id)
+      unless annot
+        render json: { status: 'error', message: 'Selection not found' }, status: :not_found
+        return
+      end
+
+      aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
+      aliases['names'] ||= {}
+      aliases['names']['1'] = new_name
+      annot.update!(cat_aliases_json: aliases.to_json)
+
+      if annot.run_id.present?
+        run = @project.runs.find_by(id: annot.run_id)
+        if run
+          run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+          run_attrs['selected_name'] = new_name
+          run.update!(attrs_json: run_attrs.to_json)
+        end
+      end
+
+      render json: { status: 'ok', selection_id: selection_id, name: new_name }
+      return
+    end
+
+    cache_data = selection_session_cache
+    key, entry = cache_data.find { |_cache_key, cache_entry| String(cache_entry['id'] || cache_entry[:id]) == selection_id }
+    if (!key || !entry) && run_id > 0
+      key, entry = cache_data.find { |_cache_key, cache_entry| (cache_entry['run_id'] || cache_entry[:run_id]).to_i == run_id }
+    end
+    unless key && entry
+      annot = nil
+      if metadata_id.start_with?('annot-')
+        annot_id = metadata_id.sub('annot-', '').to_i
+        annot = Annot.find_by(id: annot_id, project_id: @project.id)
+      end
+      unless annot
+        render json: { status: 'error', message: 'Selection not found in cache' }, status: :not_found
+        return
+      end
+
+      aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
+      aliases['names'] ||= {}
+      aliases['names']['1'] = new_name
+      annot.update!(cat_aliases_json: aliases.to_json)
+
+      run = @project.runs.find_by(id: annot.run_id || run_id)
+      if run
+        run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+        run_attrs['selected_name'] = new_name
+        run.update!(attrs_json: run_attrs.to_json)
+      end
+
+      render json: { status: 'ok', selection_id: selection_id, name: new_name }
+      return
+    end
+
+    entry['name'] = new_name
+    entry[:name] = new_name
+    cache_data[key] = entry
+    session[:selection_cache] ||= {}
+    session[:selection_cache][@project.id.to_s] = cache_data
+
+    run_id = (entry['run_id'] || entry[:run_id]).to_i
+    if run_id > 0
+      run = @project.runs.find_by(id: run_id)
+      if run
+        run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+        run_attrs['selected_name'] = new_name
+        run.update!(attrs_json: run_attrs.to_json)
+      end
+    end
+
+    render json: { status: 'ok', selection_id: selection_id, name: new_name }
+  rescue StandardError => e
+    Rails.logger.error("rename_selection failed for #{selection_id}: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Rename failed: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/delete_gene_set_collection
+  def delete_gene_set_collection
+    collection_id = params[:collection_id].to_i
+    if collection_id <= 0
+      render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    current_user_id = current_user&.id
+
+    deleted = false
+
+    RemoteGene.with_remote(db_version) do
+      conn = RemoteGene.connection
+      row = conn.select_one("SELECT id, project_id, user_id, ref_id FROM gene_sets WHERE id = #{collection_id}")
+
+      unless row
+        render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+
+      project_id = row['project_id']&.to_i
+      owner_user_id = row['user_id']&.to_i
+      ref_id = row['ref_id']&.to_i
+      owned_by_project = project_id.present? && project_id == @project.id
+      owned_by_user = current_user_id.present? &&
+                      owner_user_id.present? &&
+                      owner_user_id == current_user_id &&
+                      project_id.blank? &&
+                      ref_id.blank?
+
+      unless owned_by_project || owned_by_user
+        render json: { status: 'error', message: 'Only custom gene set collections can be deleted' }, status: :forbidden
+        return
+      end
+
+      conn.execute("DELETE FROM gene_set_items WHERE gene_set_id = #{collection_id}")
+      conn.execute("DELETE FROM gene_sets WHERE id = #{collection_id}")
+      deleted = true
+    end
+
+    if deleted
+      render json: { status: 'ok', collection_id: collection_id }
+    else
+      render json: { status: 'error', message: 'Deletion failed' }, status: :unprocessable_entity
+    end
+  end
+
+  # GET /projects/:id/gene_set_collection_items
+  def gene_set_collection_items
+    collection_id = params[:collection_id].to_i
+    if collection_id <= 0
+      render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    query = params[:query].to_s.strip
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      render json: { status: 'error', message: 'Missing loom file' }, status: :unprocessable_entity
+      return
+    end
+    limit = 100
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: 'Loom file not found' }, status: :not_found
+      return
+    end
+
+    dataset_stable_by_accession = {}
+    dataset_stable_by_symbol = {}
+    begin
+      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+      dataset_size = [stable_values.length, accession_values.length, gene_values.length].min
+      dataset_size.times do |idx|
+        stable_id = stable_values[idx].to_s.strip
+        next if stable_id.blank?
+        accession = accession_values[idx].to_s.strip.downcase
+        symbol = gene_values[idx].to_s.strip.downcase
+        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
+        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
+      end
+    rescue => e
+      Rails.logger.error("gene_set_collection_items: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
+      render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
+      return
+    end
+
+    payload = nil
+    RemoteGene.with_remote(db_version) do
+      conn = RemoteGene.connection
+
+      collection_row = conn.select_one(
+        "SELECT id, label FROM gene_sets WHERE id = #{collection_id} AND organism_id = #{@project.organism_id.to_i} AND COALESCE(obsolete, FALSE) = FALSE"
+      )
+      unless collection_row
+        render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+
+      where_clause = "gene_set_id = #{collection_id}"
+      if query.present?
+        escaped_query = conn.quote("%#{query.downcase}%")
+        where_clause += " AND LOWER(COALESCE(name, '')) LIKE #{escaped_query}"
+      end
+
+      total_count = conn.select_value("SELECT COUNT(*) FROM gene_set_items WHERE #{where_clause}").to_i
+      rows = conn.select_all(<<~SQL)
+        SELECT
+          id,
+          identifier,
+          name,
+          content,
+          COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(identifier), ''), 'Unnamed gene set') AS display_name,
+          CASE
+            WHEN content IS NULL OR TRIM(content) = '' THEN 0
+            ELSE array_length(string_to_array(content, ','), 1)
+          END AS gene_count
+        FROM gene_set_items
+        WHERE #{where_clause}
+        ORDER BY LOWER(COALESCE(name, ''))
+        LIMIT #{limit}
+      SQL
+
+      all_gene_ids = rows.flat_map do |row|
+        row['content'].to_s.split(',').map { |v| v.to_i }.select { |v| v > 0 }
+      end.uniq
+
+      gene_lookup = {}
+      if all_gene_ids.any?
+        gene_rows = conn.select_all(<<~SQL)
+          SELECT id, ensembl_id, name
+          FROM genes
+          WHERE id IN (#{all_gene_ids.join(',')})
+        SQL
+        gene_rows.each do |gene_row|
+          gene_lookup[gene_row['id'].to_i] = {
+            id: gene_row['id'].to_i,
+            ensembl_id: gene_row['ensembl_id'].to_s,
+            name: gene_row['name'].to_s
+          }
+        end
+      end
+
+      payload = {
+        status: 'ok',
+        collection: {
+          id: collection_row['id'].to_i,
+          label: collection_row['label'].to_s
+        },
+        items: rows.map do |row|
+          gene_ids = row['content'].to_s.split(',').map { |v| v.to_i }.select { |v| v > 0 }
+          in_dataset_count = gene_ids.count do |gene_id|
+            gene_info = gene_lookup[gene_id]
+            next false unless gene_info
+            accession_key = gene_info[:ensembl_id].to_s.strip.downcase
+            symbol_key = gene_info[:name].to_s.strip.downcase
+            (accession_key.present? && dataset_stable_by_accession.key?(accession_key)) ||
+              (symbol_key.present? && dataset_stable_by_symbol.key?(symbol_key))
+          end
+
+          {
+            id: row['id'].to_i,
+            identifier: row['identifier'].to_s,
+            name: row['name'].to_s,
+            display_name: row['display_name'].to_s,
+            gene_count: row['gene_count'].to_i,
+            in_dataset_count: in_dataset_count
+          }
+        end,
+        total_count: total_count,
+        limit: limit
+      }
+    end
+
+    render json: payload
+  end
+
+  # GET /projects/:id/gene_set_item_genes
+  def gene_set_item_genes
+    item_id = params[:item_id].to_i
+    if item_id <= 0
+      render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      render json: { status: 'error', message: 'Missing loom file' }, status: :unprocessable_entity
+      return
+    end
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    current_user_id = current_user&.id
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: 'Loom file not found' }, status: :not_found
+      return
+    end
+
+    dataset_stable_by_accession = {}
+    dataset_stable_by_symbol = {}
+    begin
+      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+      dataset_size = [stable_values.length, accession_values.length, gene_values.length].min
+      dataset_size.times do |idx|
+        stable_id = stable_values[idx].to_s.strip
+        next if stable_id.blank?
+        accession = accession_values[idx].to_s.strip.downcase
+        symbol = gene_values[idx].to_s.strip.downcase
+        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
+        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
+      end
+    rescue => e
+      Rails.logger.error("gene_set_item_genes: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
+      render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
+      return
+    end
+
+    payload = nil
+    RemoteGene.with_remote(db_version) do
+      conn = RemoteGene.connection
+
+      visibility_sql = [
+        "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
+        "gs.project_id = #{@project.id}"
+      ]
+      if current_user_id.present?
+        visibility_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+      end
+
+      item_row = conn.select_one(<<~SQL)
+        SELECT
+          gsi.id,
+          gsi.gene_set_id,
+          gsi.name,
+          gsi.identifier,
+          gsi.content
+        FROM gene_set_items gsi
+        JOIN gene_sets gs ON gs.id = gsi.gene_set_id
+        WHERE gsi.id = #{item_id}
+          AND gs.organism_id = #{@project.organism_id.to_i}
+          AND COALESCE(gs.obsolete, FALSE) = FALSE
+          AND (#{visibility_sql.join(' OR ')})
+      SQL
+
+      unless item_row
+        render json: { status: 'error', message: 'Gene set item not found' }, status: :not_found
+        return
+      end
+
+      gene_ids = item_row['content'].to_s.split(',').map { |v| v.to_i }.select { |v| v > 0 }
+      genes = []
+      missing_genes = []
+
+      if gene_ids.any?
+        ordered_ids_sql = gene_ids.join(',')
+        if ordered_ids_sql.blank?
+          payload = {
+            status: 'ok',
+            item: {
+              id: item_row['id'].to_i,
+              gene_set_id: item_row['gene_set_id'].to_i,
+              name: item_row['name'].to_s,
+              identifier: item_row['identifier'].to_s
+            },
+            genes: []
+          }
+          next
+        end
+
+        gene_rows = conn.select_all(<<~SQL)
+          SELECT
+            g.id AS stable_id,
+            g.name,
+            g.ensembl_id
+          FROM genes g
+          WHERE g.id IN (#{ordered_ids_sql})
+          ORDER BY array_position(ARRAY[#{ordered_ids_sql}], g.id)
+        SQL
+
+        gene_rows.each do |row|
+          ensembl_value = row['ensembl_id'].to_s.strip
+          name_value = row['name'].to_s.strip
+          accession_key = ensembl_value.downcase
+          symbol_key = name_value.downcase
+          selected_stable_id = dataset_stable_by_accession[accession_key]
+          selected_stable_id ||= dataset_stable_by_symbol[symbol_key]
+          if selected_stable_id.present?
+            genes << {
+              symbol: name_value,
+              ensembl_id: ensembl_value,
+              stable_id: selected_stable_id
+            }
+          else
+            missing_genes << {
+              symbol: name_value,
+              ensembl_id: ensembl_value
+            }
+          end
+        end
+      end
+
+      payload = {
+        status: 'ok',
+        item: {
+          id: item_row['id'].to_i,
+          gene_set_id: item_row['gene_set_id'].to_i,
+          name: item_row['name'].to_s,
+          identifier: item_row['identifier'].to_s
+        },
+        genes: genes,
+        missing_genes: missing_genes
+      }
+    end
+
+    render json: payload
+  end
+
+  # GET /projects/:id/gene_set_item_module_score
+  def gene_set_item_module_score
+    item_id = params[:item_id].to_i
+    if item_id <= 0
+      render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      render json: { status: 'error', message: 'Missing loom file' }, status: :unprocessable_entity
+      return
+    end
+
+    dataset_path = params[:dataset].to_s.strip
+    dataset_path = '/matrix' if dataset_path.blank?
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    current_user_id = current_user&.id
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: 'Loom file not found' }, status: :not_found
+      return
+    end
+
+    db_conn = nil
+    RemoteGene.with_remote(db_version) do
+      conn = RemoteGene.connection
+      db_config = RemoteGene.connection_db_config
+      cfg = db_config&.configuration_hash || {}
+      db_host = cfg[:host] || cfg['host'] || ENV.fetch('ASAP2_REMOTE_HOST', 'host.docker.internal')
+      db_port = cfg[:port] || cfg['port'] || ENV.fetch('ASAP2_REMOTE_PORT', 5433)
+      db_name = cfg[:database] || cfg['database'] || db_version
+      db_conn = "#{db_host}:#{db_port}/#{db_name}"
+
+      visibility_sql = [
+        "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
+        "gs.project_id = #{@project.id}"
+      ]
+      if current_user_id.present?
+        visibility_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+      end
+
+      item_row = conn.select_one(<<~SQL)
+        SELECT gsi.id
+        FROM gene_set_items gsi
+        JOIN gene_sets gs ON gs.id = gsi.gene_set_id
+        WHERE gsi.id = #{item_id}
+          AND gs.organism_id = #{@project.organism_id.to_i}
+          AND COALESCE(gs.obsolete, FALSE) = FALSE
+          AND (#{visibility_sql.join(' OR ')})
+      SQL
+      unless item_row
+        render json: { status: 'error', message: 'Gene set item not found' }, status: :not_found
+        return
+      end
+    end
+
+    cmd = [
+      'java',
+      '-jar',
+      "#{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar",
+      '-T', 'ModuleScore',
+      '-loom', loom_path.to_s,
+      '-geneset', item_id.to_s,
+      '-dataset', dataset_path,
+      '-h', db_conn,
+      '-m', 'seurat'
+    ]
+
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      stderr_msg = stderr.to_s.strip
+      stderr_msg = stderr_msg[0..500] if stderr_msg.length > 500
+      Rails.logger.error("gene_set_item_module_score failed (status=#{status.exitstatus}): #{stderr}")
+      render json: {
+        status: 'error',
+        message: stderr_msg.present? ? "ModuleScore execution failed: #{stderr_msg}" : "ModuleScore execution failed (exit status #{status.exitstatus})"
+      }, status: :unprocessable_entity
+      return
+    end
+
+    parsed = Basic.safe_parse_json(stdout, {})
+    scores = parsed['scores']
+    unless scores.is_a?(Array)
+      Rails.logger.error("gene_set_item_module_score invalid output: #{stdout.to_s[0..500]}")
+      render json: { status: 'error', message: 'ModuleScore output is invalid' }, status: :unprocessable_entity
+      return
+    end
+
+    render json: { status: 'ok', scores: scores, dataset: dataset_path }
   end
 
   # GET /projects/1/sample_identifiers?loom_file=...
@@ -4513,6 +5040,104 @@ class ProjectsController < ApplicationController
         @initial_selection_items.sort_by! { |entry| entry[:created_at].to_s }
         @initial_selection_items.reverse!
       end
+
+      load_gene_set_collections
+      prepare_visualization_de_modal_context
+    end
+
+    def load_gene_set_collections
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+      current_user_id = current_user&.id
+
+      @gene_set_collections = []
+
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        where_sql = [
+          "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
+          "gs.project_id = #{@project.id}"
+        ]
+        if current_user_id.present?
+          where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+        end
+
+        query = <<~SQL
+          SELECT
+            gs.id,
+            gs.label,
+            gs.ref_id,
+            gs.project_id,
+            gs.user_id,
+            ds.label AS database_name,
+            COALESCE(gsi_counts.item_count, 0) AS item_count
+          FROM gene_sets gs
+          LEFT JOIN db_sets ds ON ds.id = gs.ref_id
+          LEFT JOIN (
+            SELECT gene_set_id, COUNT(*) AS item_count
+            FROM gene_set_items
+            GROUP BY gene_set_id
+          ) gsi_counts ON gsi_counts.gene_set_id = gs.id
+          WHERE gs.organism_id = #{@project.organism_id.to_i}
+            AND COALESCE(gs.obsolete, FALSE) = FALSE
+            AND (#{where_sql.join(' OR ')})
+          ORDER BY LOWER(COALESCE(ds.label, '')), LOWER(COALESCE(gs.label, ''))
+        SQL
+
+        rows = conn.select_all(query)
+        @gene_set_collections = rows.map do |row|
+          project_id = row['project_id']&.to_i
+          owner_user_id = row['user_id']&.to_i
+          ref_id = row['ref_id']&.to_i
+          custom_for_project = project_id.present? && project_id == @project.id
+          custom_for_user = current_user_id.present? &&
+                            owner_user_id.present? &&
+                            owner_user_id == current_user_id &&
+                            project_id.blank? &&
+                            ref_id.blank?
+          is_custom = custom_for_project || custom_for_user
+
+          {
+            id: row['id'].to_i,
+            label: row['label'].to_s,
+            database_name: row['database_name'].to_s,
+            nb_items: row['item_count'].to_i,
+            custom: is_custom
+          }
+        end
+      end
+    end
+
+    def prepare_visualization_de_modal_context
+      @visualization_de_step_id = nil
+      @visualization_de_methods = []
+      @visualization_de_unavailable_methods = {}
+
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      return unless asap_docker_image
+
+      de_step = Step.find_by(docker_image_id: asap_docker_image.id, name: 'de')
+      return unless de_step
+
+      @visualization_de_step_id = de_step.id
+      project_type_tag = @project.project_type&.tag
+      std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false, step_id: de_step.id).order(:name).to_a
+
+      std_methods.each do |method|
+        method_obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
+        project_types = Array(method_obj_attrs['project_types'])
+        is_project_type_compatible = project_types.empty? || (project_type_tag.present? && project_types.include?(project_type_tag))
+
+        @visualization_de_methods << {
+          id: method.id,
+          label: method.label.presence || method.name,
+          name: method.name,
+          speed_id: method.speed_id,
+          description: method.description,
+          link: (method.respond_to?(:link) ? method.link : '')
+        }
+        @visualization_de_unavailable_methods[method.id] = true unless is_project_type_compatible
+      end
     end
 
     def load_analysis_context
@@ -4974,11 +5599,16 @@ class ProjectsController < ApplicationController
       end
 
       annots.map do |annot|
-        selected_name = 'Selected'
+        run_attrs = run_attrs_by_run_id[annot.run_id] || {}
+        selected_name = (run_attrs['selected_name'] || '').to_s
         unselected_name = 'Not selected'
         if annot.cat_aliases_json.present?
           aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
-          selected_name = aliases.dig('names', '1').presence || selected_name
+          alias_selected_name = aliases.dig('names', '1')
+          if selected_name.blank? && alias_selected_name != nil
+            normalized_alias_name = alias_selected_name.to_s.strip
+            selected_name = normalized_alias_name unless ['selected', 'selection'].include?(normalized_alias_name.downcase)
+          end
           unselected_name = aliases.dig('names', '0').presence || unselected_name
         end
 

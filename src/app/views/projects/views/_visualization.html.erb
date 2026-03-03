@@ -124,6 +124,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      data-visualization-default-loom-file-value="<%= (default_group_key.presence || @default_loom_file || 'parsing/output.loom') %>"
      data-visualization-default-embedding-id-value="<%= default_embedding_id&.to_s %>"
      data-visualization-initial-selections-value="<%= (@initial_selection_items || []).to_json %>"
+     data-visualization-de-step-id-value="<%= @visualization_de_step_id || 0 %>"
+     data-visualization-de-methods-value="<%= (@visualization_de_methods || []).to_json %>"
+     data-visualization-de-unavailable-methods-value="<%= (@visualization_de_unavailable_methods || {}).to_json %>"
      data-visualization-gene-count-value="<%= @project&.gene_count || 0 %>"
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"
@@ -1358,16 +1361,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
     
     <!-- Top Section: Gene Expression Panel -->
     <div id="gene-expression-panel" style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 12px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
-          <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
-          <button id="add-gene-set-btn" style="display: none; align-items: center; justify-content: center; padding: 4px 8px; background-color: #3b82f6; color: white; border: none; border-radius: 12px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;" 
-                  onmouseover="this.style.backgroundColor='#2563eb'" 
-                  onmouseout="this.style.backgroundColor='#3b82f6'"
-                  title="Add gene set">
-            +
-          </button>
+      <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
+            <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
+          </div>
         </div>
         <!-- Gene Tags Container with Input -->
         <div style="position: relative;">
@@ -1396,12 +1395,15 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <% default_layer = default_matrix&.name || '/matrix' %>
         <% default_annot_id = default_matrix&.id ? default_matrix.id.to_s : '' %>
         <% default_label = (default_matrix&.label.presence || default_matrix&.display_name || default_matrix&.name || '/matrix') %>
-        <div style="margin-top: -6px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7280; position: relative;">
-          <span>Values from</span>
-          <a href="#"
+        <% default_run_id = default_matrix&.run_id ? default_matrix.run_id.to_s : '' %>
+        <div style="margin-top: -6px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size: 11px; color: #6b7280;">
+          <div style="display:flex; align-items:center; gap:6px; position:relative; min-width:0;">
+            <span>Values from</span>
+            <a href="#"
              id="matrix-selection-link"
              data-layer="<%= default_layer %>"
              data-annot-id="<%= default_annot_id %>"
+             data-run-id="<%= default_run_id %>"
              style="font-weight: 600; color: #2563eb; text-decoration: none; cursor: pointer;"
              onclick="(function(event){
                event.preventDefault();
@@ -1427,11 +1429,11 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                  document.addEventListener('click', window.__matrixOutsideHandler);
                }
              })(event)">
-            <%= default_label %>
-          </a>
-          <div id="matrix-selection-menu" style="display: none; position: absolute; top: 18px; left: 78px; background: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); z-index: 2000; min-width: 200px;">
-            <div style="max-height: 220px; overflow-y: auto;">
-              <div data-value="/matrix" data-annot-id="<%= base_matrix&.id %>" data-label="/matrix" data-selected="<%= default_layer == '/matrix' %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= default_layer == '/matrix' ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
+              <%= default_label %>
+            </a>
+            <div id="matrix-selection-menu" style="display: none; position: absolute; top: 18px; left: 78px; background: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); z-index: 2000; min-width: 200px;">
+              <div style="max-height: 220px; overflow-y: auto;">
+              <div data-value="/matrix" data-annot-id="<%= base_matrix&.id %>" data-run-id="<%= base_matrix&.run_id %>" data-label="/matrix" data-selected="<%= default_layer == '/matrix' %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= default_layer == '/matrix' ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
                    onmouseover="this.dataset.selected !== 'true' && (this.style.backgroundColor='#f3f4f6')"
                    onmouseout="this.dataset.selected !== 'true' ? this.style.backgroundColor='' : this.style.backgroundColor='#eff6ff'"
                    onclick="(function(item){
@@ -1454,6 +1456,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                        link.textContent = item.dataset.label;
                        link.dataset.layer = item.dataset.value;
                        link.dataset.annotId = item.dataset.annotId || '';
+                       link.dataset.runId = item.dataset.runId || '';
                      }
                      const annotId = item.dataset.annotId || null;
                      const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
@@ -1468,7 +1471,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 <% next if matrix.name == '/matrix' %>
                 <% label = matrix.label.presence || matrix.display_name || matrix.name %>
                 <% selected = default_layer == matrix.name %>
-                <div data-value="<%= matrix.name %>" data-annot-id="<%= matrix.id %>" data-label="<%= label %>" data-selected="<%= selected %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= selected ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
+                <div data-value="<%= matrix.name %>" data-annot-id="<%= matrix.id %>" data-run-id="<%= matrix.run_id %>" data-label="<%= label %>" data-selected="<%= selected %>" style="padding: 8px 12px; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6; <%= selected ? 'background-color: #eff6ff; font-weight: 600;' : '' %>"
                      onmouseover="this.dataset.selected !== 'true' && (this.style.backgroundColor='#f3f4f6')"
                      onmouseout="this.dataset.selected !== 'true' ? this.style.backgroundColor='' : this.style.backgroundColor='#eff6ff'"
                      onclick="(function(item){
@@ -1491,6 +1494,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                          link.textContent = item.dataset.label;
                          link.dataset.layer = item.dataset.value;
                          link.dataset.annotId = item.dataset.annotId || '';
+                         link.dataset.runId = item.dataset.runId || '';
                        }
                        const annotId = item.dataset.annotId || null;
                        const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
@@ -1503,7 +1507,25 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   <span style="color: #9ca3af; font-size: 11px; margin-left: 4px;"><%= matrix.name %></span>
                 </div>
               <% end %>
+              </div>
             </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-shrink:0;">
+            <button id="add-gene-set-btn" data-gene-set-add-trigger="true" style="display:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;transition:background-color 0.2s;" 
+                    onmouseover="this.style.backgroundColor='#1d4ed8'" 
+                    onmouseout="this.style.backgroundColor='#2563eb'"
+                    title="Add gene set">
+              <i class="fas fa-plus" style="font-size:12px;"></i>
+            </button>
+            <button id="clear-genes-btn"
+                    type="button"
+                    style="display:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
+                    title="Clear all genes"
+                    aria-label="Clear all genes"
+                    onmouseover="this.style.backgroundColor='#b91c1c'"
+                    onmouseout="this.style.backgroundColor='#dc2626'">
+              <i class="fas fa-trash" style="font-size:12px;"></i>
+            </button>
           </div>
         </div>
         <script>
@@ -1545,7 +1567,6 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <!-- Selection Tabs -->
       <div style="border-bottom: 1px solid #e5e7eb;">
         <nav style="display: flex; align-items: center; gap: 8px; padding: 0 16px;">
-          <span style="font-size: 14px; font-weight: 600; color: #111827; white-space: nowrap;">Selections</span>
           <button id="cells-tab" 
                   style="padding: 8px 16px; border-bottom: 2px solid #3b82f6; font-weight: 500; font-size: 14px; color: #3b82f6; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer;"
                   data-action="click->visualization#switchSelectionTab"
@@ -1556,7 +1577,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   style="padding: 8px 16px; border-bottom: 2px solid transparent; font-weight: 500; font-size: 14px; color: #6b7280; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;"
                   data-action="click->visualization#switchSelectionTab"
                   data-tab="gene-sets">
-            Gene Sets
+            Gene set collections
           </button>
         </nav>
       </div>
@@ -1600,8 +1621,72 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <!-- Saved Cell Sets List -->
             <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0;">
-                <h3 style="margin: 0; font-size: 14px; font-weight: 500;">Saved Cell Sets</h3>
-                <div style="display:flex;align-items:center;gap:8px;">
+                <input id="saved-selections-name-filter-input"
+                       type="text"
+                       placeholder="Filter by name"
+                       style="flex:1;min-width:0;max-width:220px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
+                <div style="display:flex;align-items:center;gap:8px;position:relative;margin-left:8px;">
+                  <button id="sort-saved-selections-btn"
+                          type="button"
+                          style="display:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                          title="Sort saved cell sets"
+                          aria-label="Sort saved cell sets">
+                    <i class="fas fa-sort" style="font-size:12px;"></i>
+                  </button>
+                  <div id="sort-saved-selections-menu"
+                       style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:10px;">
+                    <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Sort cell sets</div>
+                    <label for="sort-saved-selections-by" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Sort by</label>
+                    <select id="sort-saved-selections-by"
+                            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;margin-bottom:8px;">
+                      <option value="created_at">By creation date</option>
+                      <option value="name">By name</option>
+                      <option value="selected_count">By number of cells</option>
+                    </select>
+                    <label for="sort-saved-selections-order" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Order</label>
+                    <select id="sort-saved-selections-order"
+                            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;">
+                      <option value="asc">Ascending</option>
+                      <option value="desc">Descending</option>
+                    </select>
+                  </div>
+                  <button id="filter-saved-selections-btn"
+                          type="button"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                          title="Filter saved cell sets"
+                          aria-label="Filter saved cell sets">
+                    <i class="fas fa-filter" style="font-size:12px;"></i>
+                  </button>
+                  <div id="filter-saved-selections-menu"
+                       style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:6px;">
+                    <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Filter cell sets</div>
+                    <div style="display:flex;flex-direction:column;gap:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
+                      <button type="button" data-filter-type-option="all" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                        <span>All type sets</span>
+                        <span data-filter-check="all" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                      </button>
+                      <button type="button" data-filter-type-option="lasso" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                        <span>Lasso sets</span>
+                        <span data-filter-check="lasso" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                      </button>
+                      <button type="button" data-filter-type-option="visible" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                        <span>Visible cells sets</span>
+                        <span data-filter-check="visible" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                      </button>
+                      <button type="button" data-filter-type-option="compose" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                        <span>Composed sets</span>
+                        <span data-filter-check="compose" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                      </button>
+                    </div>
+                  </div>
+                  <button id="de-selection-btn"
+                          type="button"
+                          style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
+                          title="Differential expression"
+                          aria-label="Differential expression"
+                          data-action="click->visualization#openDeSelectionModal">
+                    DE
+                  </button>
                   <button id="compose-selection-btn"
                           type="button"
                           style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
@@ -1620,6 +1705,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   </button>
                 </div>
               </div>
+              <div id="de-run-feedback" style="display:none;font-size:12px;color:#1d4ed8;margin:0 0 8px 0;"></div>
               <div id="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
                 <div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">
                   No cell sets yet
@@ -1630,18 +1716,91 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
 
         <!-- Gene Sets Tab Content -->
-        <div id="gene-sets-tab-content" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0; display: none;">
-          <div style="margin-bottom: 16px;">
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
-              <button style="width: 100%; padding: 8px 12px; background-color: #d1d5db; color: #374151; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
-                      onmouseover="this.style.backgroundColor='#9ca3af'"
-                      onmouseout="this.style.backgroundColor='#d1d5db'">
-                Import Gene Set
-              </button>
+        <div id="gene-sets-tab-content" style="flex: 1; padding: 16px 0; min-height: 0; display: none; overflow: hidden;">
+          <div style="display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; width: 100%;">
+            <div id="gene-set-collections-list-view" style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0; width: 100%; padding: 0 16px; box-sizing: border-box;">
+                <input id="gene-set-collections-name-filter-input"
+                       type="text"
+                       placeholder="Filter by name"
+                       style="flex:1;min-width:0;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
+                <div style="display:flex;align-items:center;gap:8px;margin-left:8px;">
+                  <button id="gene-set-collections-add-btn"
+                          type="button"
+                          data-gene-set-add-trigger="true"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
+                          title="Add a new Gene Set Collection"
+                          aria-label="Add a new Gene Set Collection"
+                          onmouseover="this.style.backgroundColor='#1d4ed8'"
+                          onmouseout="this.style.backgroundColor='#2563eb'">
+                    <span style="font-size:14px;font-weight:700;line-height:1;">+</span>
+                  </button>
+                </div>
+              </div>
+              <div id="gene-set-collections-list" style="flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; width: 100%; padding: 0 16px;">
+                <div id="gene-set-collections-table-body" style="display:flex;flex-direction:column;gap:4px;width:100%;">
+                  <% collections = Array(@gene_set_collections) %>
+                  <% if collections.any? %>
+                    <% collections.each do |collection| %>
+                      <div data-gene-set-collection-row="true"
+                           data-collection-id="<%= collection[:id] %>"
+                           data-collection-label="<%= collection[:label] %>"
+                           data-collection-name="<%= collection[:label].to_s.downcase %>"
+                           style="width:100%;display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;">
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
+                            <%= collection[:label] %>
+                          </div>
+                          <div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
+                            <%= collection[:nb_items] %> gene sets
+                          </div>
+                        </div>
+                        <div style="margin-left:8px;display:flex;align-items:flex-start;justify-content:flex-end;min-width:24px;">
+                          <% if collection[:custom] %>
+                            <button type="button"
+                                    data-gene-set-delete-btn="true"
+                                    data-collection-id="<%= collection[:id] %>"
+                                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
+                                    title="Delete custom gene set collection"
+                                    aria-label="Delete custom gene set collection">
+                              <i class="fas fa-trash" style="font-size:12px;"></i>
+                            </button>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  <% end %>
+                </div>
+                <div id="gene-set-collections-empty-message"
+                     style="<%= collections.any? ? 'display:none;' : 'display:block;' %>font-size:12px;color:#6b7280;font-style:italic;padding:8px 0;">
+                  No gene set collections yet
+                </div>
+              </div>
             </div>
-            <div style="height: 1px; background-color: #e5e7eb; margin: 0 0 4px 0;"></div>
-            <h3 style="margin: 8px 0 0 0; font-size: 14px; font-weight: 500;">Saved Gene Sets</h3>
-            <div style="font-size: 12px; color: #6b7280; font-style: italic; margin-top: 8px;">No gene sets yet</div>
+
+            <div id="gene-set-collection-detail-view" style="display:none;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px;box-sizing:border-box;">
+                <div id="gene-set-collection-detail-title" style="font-size:14px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                <button id="gene-set-collection-back-btn"
+                        type="button"
+                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                        title="Back to gene set collections"
+                        aria-label="Back to gene set collections">
+                  <i class="fas fa-arrow-left" style="font-size:12px;"></i>
+                </button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 16px;box-sizing:border-box;">
+                <input id="gene-set-items-name-filter-input"
+                       type="text"
+                       placeholder="Filter gene sets by name"
+                       style="flex:1;min-width:0;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
+                <span id="gene-set-items-count-label" style="display:none;font-size:11px;color:#6b7280;white-space:nowrap;"></span>
+              </div>
+              <div id="gene-set-items-list" style="flex:1;min-height:0;overflow-y:auto;box-sizing:border-box;width:100%;padding:0 16px;display:flex;flex-direction:column;gap:4px;"></div>
+              <div id="gene-set-items-empty-message" style="display:none;font-size:12px;color:#6b7280;font-style:italic;padding:0 16px;">
+                No gene sets found
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1945,7 +2104,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
 </div>
 
 <%= render 'projects/views/compose_selection_modal' %>
+<%= render 'projects/views/de_selection_modal' %>
 <%= render 'projects/views/compose_selection_details_modal' %>
+<%= render 'projects/views/saved_selection_item_template' %>
 
 <div id="checkpoint-loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.35); z-index: 12500; justify-content: center; align-items: center;">
   <div style="background: white; border: 1px solid #d1d5db; border-radius: 10px; padding: 18px 22px; min-width: 220px; display: flex; align-items: center; justify-content: center; gap: 10px;">

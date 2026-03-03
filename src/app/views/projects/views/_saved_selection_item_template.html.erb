@@ -1,0 +1,80 @@
+<template id="saved-selection-item-template">
+  <div role="button"
+       tabindex="0"
+       data-role="saved-selection-row"
+       style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;"
+       data-action="click->visualization#openSavedSelection">
+    <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
+      <input type="checkbox"
+             data-role="saved-selection-checkbox"
+             style="display:none;width:14px;height:14px;cursor:pointer;flex:0 0 auto;margin-top:1px;"
+             data-action="click->visualization#toggleSavedCellSetSelection" />
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+          <span data-role="saved-selection-source-icon"></span>
+          <div data-role="saved-selection-name-display" style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          <input type="text"
+                 data-role="saved-selection-name-input"
+                 placeholder="Unnamed"
+                 style="display:none;font-size:13px;font-weight:600;min-width:0;flex:1;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;"
+                 data-action="click->visualization#preventSavedSelectionRowClick keydown->visualization#handleSavedSelectionRenameKeydown input->visualization#trackSavedSelectionRenameInput" />
+          <span role="button"
+                tabindex="0"
+                title="Rename selection"
+                aria-label="Rename selection"
+                data-role="saved-selection-rename"
+                style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;cursor:pointer;padding:0;flex:0 0 auto;"
+                data-action="click->visualization#startRenameSavedSelection">
+            <i class="fas fa-pen" style="font-size:10px;"></i>
+          </span>
+          <span role="button"
+                tabindex="0"
+                title="Save name"
+                aria-label="Save name"
+                data-role="saved-selection-rename-save"
+                style="display:none;align-items:center;justify-content:center;width:16px;height:16px;color:#16a34a;cursor:pointer;padding:0;flex:0 0 auto;"
+                data-action="click->visualization#commitSavedSelectionRename">
+            <i class="fas fa-check" style="font-size:11px;"></i>
+          </span>
+          <span role="button"
+                tabindex="0"
+                title="Cancel edit"
+                aria-label="Cancel edit"
+                data-role="saved-selection-rename-cancel"
+                style="display:none;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;cursor:pointer;padding:0;flex:0 0 auto;"
+                data-action="click->visualization#cancelRenameSavedSelection">
+            <i class="fas fa-times" style="font-size:11px;"></i>
+          </span>
+          <span title="Contains reference to deleted selection"
+                aria-label="Contains reference to deleted selection"
+                data-role="saved-selection-warning"
+                style="display:none;align-items:center;justify-content:center;color:#b91c1c;font-size:14px;font-weight:700;line-height:1;flex:0 0 auto;">!</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span role="button"
+                tabindex="0"
+                title="Selection details"
+                aria-label="Selection details"
+                data-role="saved-selection-details"
+                style="display:none;align-items:center;justify-content:center;width:14px;height:14px;color:#2563eb;cursor:pointer;padding:0;flex:0 0 auto;"
+                data-action="click->visualization#openComposeSelectionDetails">
+            <i class="fas fa-circle-info" style="font-size:10px;"></i>
+          </span>
+          <div data-role="saved-selection-count" style="font-size:11px;color:#6b7280;"></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+      <div data-role="saved-selection-status"></div>
+      <span role="button"
+              tabindex="0"
+              title="Delete selection"
+              aria-label="Delete selection"
+              data-role="saved-selection-delete"
+              style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:#dc2626;cursor:pointer;padding:0;"
+              data-action="click->visualization#deleteSavedSelection">
+        <i class="fas fa-trash" style="font-size:12px;"></i>
+      </span>
+    </div>
+  </div>
+</template>

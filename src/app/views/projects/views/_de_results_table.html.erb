@@ -187,3 +187,52 @@
 <% else %>
 <div class="text-gray-500 text-center py-4">No completed DE runs found.</div>
 <% end %>
+
+<% failed_runs = @runs&.select { |r| r.status_id == 4 } || [] %>
+<% if failed_runs.any? %>
+  <div class="mt-6">
+    <div class="text-sm font-semibold text-gray-800 mb-2">Failed DE runs</div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">#</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Method</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameters</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Status</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Run view</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <% failed_runs.each do |run| %>
+            <% std_method = @h_std_methods && run.std_method_id ? @h_std_methods[run.std_method_id] : nil %>
+            <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
+            <% h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
+            <tr class="hover:bg-gray-50">
+              <td class="px-3 py-2 text-gray-900 font-semibold">#<%= run.num || run.id %></td>
+              <td class="px-3 py-2 text-gray-900"><%= method_label %></td>
+              <td class="px-3 py-2 text-gray-600 text-xs">
+                <% h_attrs.each do |k, v| %>
+                  <% next if v.is_a?(Array) || v.is_a?(Hash) %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1">
+                    <span class="font-semibold"><%= k %>:</span><span><%= v.to_s.truncate(30) %></span>
+                  </span>
+                <% end %>
+              </td>
+              <td class="px-3 py-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Failed</span>
+              </td>
+              <td class="px-3 py-2">
+                <button type="button"
+                        class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 cursor-pointer"
+                        onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(run) %>', '<%= @step.id %>'); } else { window.location.href = '<%= run_path(run) %>'; }">
+                  Open run view
+                </button>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<% end %>

@@ -150,7 +150,12 @@ class ReqsController < ApplicationController
       puts "Elapsed time 5:" + (Time.now-t).to_s
 
       ### add errors if runs already exists
-      existing_runs =  Run.where(:project_id => @project.id, :step_id => @step.id, :std_method_id =>  @std_method.id).all
+      # Failed runs (status_id == 4) must not block reruns of the same configuration.
+      existing_runs = Run.where(
+        :project_id => @project.id,
+        :step_id => @step.id,
+        :std_method_id => @std_method.id
+      ).where.not(status_id: 4).all
       h_existing_runs_by_attrs_json = {}
       existing_runs.each do |r|
         h_existing_runs_by_attrs_json[r.attrs_json] = 1

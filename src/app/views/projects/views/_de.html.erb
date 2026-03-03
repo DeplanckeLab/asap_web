@@ -253,6 +253,8 @@
 
   <%# === DE FILTER VIEW (default) === %>
   <% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+  <% failed_runs = @runs&.select { |r| r.status_id == 4 } || [] %>
+  <% has_de_runs = completed_runs.any? || failed_runs.any? %>
 
   <%
     @h_de_filter ||= Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
@@ -329,12 +331,12 @@
       <% end %>
     </div>
     <div class="px-6 py-5 flex-1 overflow-y-auto">
-      <% if completed_runs.any? %>
+      <% if has_de_runs %>
         <div data-de-filter-target="resultsContainer">
           <%= render partial: 'projects/views/de_results_table' %>
         </div>
       <% else %>
-        <div class="text-gray-500 text-center py-8">No completed DE runs found.</div>
+        <div class="text-gray-500 text-center py-8">No DE runs found.</div>
       <% end %>
     </div>
   </div>

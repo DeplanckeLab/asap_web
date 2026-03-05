@@ -7,6 +7,7 @@ export class GeneSetCollectionsController {
     this.geneSetGenesCache = new Map()
     this.activeGenesPopover = null
     this.geneDetailsModal = null
+    this.activeCollectionDownloadMenu = null
     this.init()
   }
 
@@ -39,6 +40,7 @@ export class GeneSetCollectionsController {
     this.bindBackButton()
     this.bindDetailFilter()
     this.bindDeleteButtons()
+    this.bindDownloadButtons()
     this.applyListFilter()
   }
 
@@ -51,6 +53,94 @@ export class GeneSetCollectionsController {
       .replace(/'/g, '&#39;')
   }
 
+  confirmDestructiveAction(message) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div')
+      overlay.style.position = 'fixed'
+      overlay.style.inset = '0'
+      overlay.style.background = 'rgba(17, 24, 39, 0.35)'
+      overlay.style.zIndex = '7000'
+      overlay.style.display = 'flex'
+      overlay.style.alignItems = 'center'
+      overlay.style.justifyContent = 'center'
+      overlay.style.padding = '16px'
+
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('aria-modal', 'true')
+      dialog.style.width = '100%'
+      dialog.style.maxWidth = '420px'
+      dialog.style.background = '#ffffff'
+      dialog.style.border = '1px solid #e5e7eb'
+      dialog.style.borderRadius = '8px'
+      dialog.style.boxShadow = '0 18px 38px rgba(15, 23, 42, 0.2)'
+      dialog.style.padding = '14px'
+
+      const body = document.createElement('div')
+      body.style.fontSize = '14px'
+      body.style.color = '#111827'
+      body.style.marginBottom = '12px'
+      body.textContent = String(message || 'Are you sure?')
+
+      const actions = document.createElement('div')
+      actions.style.display = 'flex'
+      actions.style.justifyContent = 'flex-end'
+      actions.style.gap = '8px'
+
+      const cancelButton = document.createElement('button')
+      cancelButton.type = 'button'
+      cancelButton.textContent = 'Cancel'
+      cancelButton.style.padding = '6px 10px'
+      cancelButton.style.fontSize = '12px'
+      cancelButton.style.border = '1px solid #d1d5db'
+      cancelButton.style.borderRadius = '6px'
+      cancelButton.style.background = '#ffffff'
+      cancelButton.style.color = '#374151'
+      cancelButton.style.cursor = 'pointer'
+
+      const confirmButton = document.createElement('button')
+      confirmButton.type = 'button'
+      confirmButton.textContent = 'Delete'
+      confirmButton.style.padding = '6px 10px'
+      confirmButton.style.fontSize = '12px'
+      confirmButton.style.border = '1px solid #dc2626'
+      confirmButton.style.borderRadius = '6px'
+      confirmButton.style.background = '#dc2626'
+      confirmButton.style.color = '#ffffff'
+      confirmButton.style.cursor = 'pointer'
+
+      let closed = false
+      const close = (result) => {
+        if (closed) return
+        closed = true
+        document.removeEventListener('keydown', onKeyDown)
+        overlay.remove()
+        resolve(result)
+      }
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          close(false)
+        }
+      }
+
+      cancelButton.addEventListener('click', () => close(false))
+      confirmButton.addEventListener('click', () => close(true))
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) close(false)
+      })
+
+      actions.appendChild(cancelButton)
+      actions.appendChild(confirmButton)
+      dialog.appendChild(body)
+      dialog.appendChild(actions)
+      overlay.appendChild(dialog)
+      document.body.appendChild(overlay)
+      document.addEventListener('keydown', onKeyDown)
+      confirmButton.focus()
+    })
+  }
+
   applyListFilter() {
     const query = (this.filterInput?.value || '').trim().toLowerCase()
     const rows = Array.from(this.listBody.querySelectorAll('[data-gene-set-collection-row="true"]'))
@@ -59,7 +149,7 @@ export class GeneSetCollectionsController {
     rows.forEach((row) => {
       const name = (row.dataset.collectionName || '').toLowerCase()
       const isVisible = query === '' || name.includes(query)
-      row.style.display = isVisible ? '' : 'none'
+      row.style.display = isVisible ? 'flex' : 'none'
       if (isVisible) visibleCount += 1
     })
 
@@ -92,18 +182,28 @@ export class GeneSetCollectionsController {
       const inDatasetGenes = Number(item.in_dataset_count || 0)
       const geneLabel = totalGenes === 1 ? 'gene' : 'genes'
       const countLabel = `${inDatasetGenes} / ${totalGenes} ${geneLabel} in dataset`
-      const itemId = Number(item.id || 0)
+      const itemId = String(item.id || '').trim()
+      const canColor = item.supports_module_score !== false
+      const canDelete = item.deletable === true
+      let createdAtLabel = ''
+      if (item.created_at) {
+        const parsedDate = new Date(item.created_at)
+        if (!Number.isNaN(parsedDate.getTime())) {
+          createdAtLabel = parsedDate.toLocaleString()
+        }
+      }
+      const identifierLabel = this.escapeHtml(item.identifier || '-')
 
       return `
         <div data-gene-set-item-row="true"
              data-gene-set-item-id="${itemId}"
-             style="width:100%;display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;">
+             style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
               ${titleHtml}
             </div>
             <div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
-              ${this.escapeHtml(item.identifier || '-')} |
+              ${identifierLabel} |
               <button type="button"
                       data-gene-set-genes-preview-btn="true"
                       data-gene-set-item-id="${itemId}"
@@ -115,11 +215,13 @@ export class GeneSetCollectionsController {
                 ${countLabel}
               </button>
             </div>
+            ${createdAtLabel ? `<div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">Created: ${this.escapeHtml(createdAtLabel)}</div>` : ''}
           </div>
-          <div style="margin-left:8px;display:flex;align-items:flex-start;justify-content:flex-end;">
+          <div style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
+            ${canColor ? `
             <button class="gene-set-color-btn"
                     data-action="click->visualization#geneSetWaterDropClicked"
-                    data-gene-set-item-id="${Number(item.id || 0)}"
+                    data-gene-set-item-id="${itemId}"
                     data-gene-set-name="${this.escapeHtml(rawName || 'Unnamed Gene Set')}"
                     data-active="false"
                     style="padding:4px;color:#9ca3af;background:none;border:none;border-radius:4px;cursor:pointer;transition:all 0.2s;"
@@ -129,6 +231,17 @@ export class GeneSetCollectionsController {
                     onclick="event.stopPropagation()">
               <i class="fas fa-palette" style="font-size:16px;"></i>
             </button>
+            ` : ''}
+            ${canDelete ? `
+            <button type="button"
+                    data-manual-gene-set-delete-btn="true"
+                    data-gene-set-item-id="${itemId}"
+                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;margin-left:4px;"
+                    title="Delete manual gene set"
+                    onclick="event.stopPropagation()">
+              <i class="fas fa-trash" style="font-size:12px;"></i>
+            </button>
+            ` : ''}
           </div>
         </div>
       `
@@ -136,6 +249,7 @@ export class GeneSetCollectionsController {
 
     this.bindGeneSetItemClicks()
     this.bindGeneSetCountPreviewButtons()
+    this.bindManualGeneSetDeleteButtons()
   }
 
   async loadGeneSetItemIntoGenePanel(itemId) {
@@ -176,7 +290,7 @@ export class GeneSetCollectionsController {
       row.addEventListener('click', async (event) => {
         if (event.target.closest('.gene-set-color-btn')) return
         if (event.target.closest('[data-gene-set-genes-preview-btn="true"]')) return
-        const itemId = Number(row.dataset.geneSetItemId || 0)
+        const itemId = String(row.dataset.geneSetItemId || '').trim()
         if (!itemId) return
         try {
           await this.loadGeneSetItemIntoGenePanel(itemId)
@@ -196,12 +310,63 @@ export class GeneSetCollectionsController {
       button.addEventListener('click', async (event) => {
         event.preventDefault()
         event.stopPropagation()
-        const itemId = Number(button.dataset.geneSetItemId || 0)
+        const itemId = String(button.dataset.geneSetItemId || '').trim()
         if (!itemId) return
         try {
           await this.toggleGeneSetGenesPopover(button, itemId)
         } catch (error) {
           alert(error.message || 'Failed to load genes from gene set')
+        }
+      })
+    })
+  }
+
+  bindManualGeneSetDeleteButtons() {
+    if (!this.itemsList) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const buttons = this.itemsList.querySelectorAll('[data-manual-gene-set-delete-btn="true"]')
+    buttons.forEach((button) => {
+      if (button.dataset.bound === 'true') return
+      button.dataset.bound = 'true'
+      button.addEventListener('click', async (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const itemId = String(button.dataset.geneSetItemId || '').trim()
+        if (!itemId || !this.projectIdentifier) return
+
+        const shouldDelete = await this.confirmDestructiveAction('Delete this manual gene set?')
+        if (!shouldDelete) return
+
+        button.disabled = true
+        const originalHtml = button.innerHTML
+        button.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>'
+        try {
+          const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+          if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+          const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/delete_manual_gene_set`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers,
+            body: JSON.stringify({ item_id: itemId })
+          })
+          const payload = await response.json()
+          if (!response.ok || payload.status !== 'ok') {
+            throw new Error(payload.message || 'Failed to delete manual gene set')
+          }
+
+          if (this.selectedCollectionId) {
+            await this.fetchCollectionItems(this.selectedCollectionId, this.itemsFilterInput?.value || '')
+          }
+          if (payload.collection) {
+            this.upsertCollectionFromPayload(payload.collection)
+          }
+        } catch (error) {
+          alert(error.message || 'Failed to delete manual gene set')
+          button.disabled = false
+          button.innerHTML = originalHtml
         }
       })
     })
@@ -636,6 +801,106 @@ export class GeneSetCollectionsController {
     if (this.listView) this.listView.style.display = 'flex'
   }
 
+  upsertCollectionFromPayload(collection) {
+    if (!this.listBody || !collection || typeof collection !== 'object') return
+    const collectionId = String(collection.id || '').trim()
+    if (!collectionId) return
+
+    const label = String(collection.label || '').trim() || 'Manual Gene Sets'
+    const itemCount = Number(collection.nb_items || collection.item_count || 0)
+    const itemLabel = itemCount === 1 ? 'gene set' : 'gene sets'
+    const isCustom = collection.custom === true
+    const isImportPending = collection.import_pending === true
+    const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
+    if (row) {
+      row.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;'
+      row.dataset.collectionLabel = label
+      row.dataset.collectionName = label.toLowerCase()
+      const titleEl = row.querySelector('[data-role="collection-label"]') || row.querySelector('div > div')
+      const countEl = row.querySelector('[data-role="collection-count"]') || row.querySelector('div > div:nth-child(2)')
+      const actionsEl = row.querySelector('[data-role="collection-actions"]') || row.lastElementChild
+      if (titleEl) titleEl.textContent = label
+      if (countEl) countEl.textContent = `${itemCount} ${itemLabel}`
+      if (actionsEl) {
+        actionsEl.style.display = 'flex'
+        actionsEl.style.alignItems = 'center'
+        actionsEl.style.justifyContent = 'flex-end'
+        actionsEl.style.flex = '0 0 auto'
+        actionsEl.innerHTML = isImportPending ? `
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
+            <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
+          </span>
+        ` : `
+          ${isCustom ? `
+          <button type="button"
+                  data-gene-set-delete-btn="true"
+                  data-collection-id="${collectionId}"
+                  style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
+                  title="Delete custom gene set collection"
+                  aria-label="Delete custom gene set collection">
+            <i class="fas fa-trash" style="font-size:12px;"></i>
+          </button>
+          ` : ''}
+          <button type="button"
+                  data-gene-set-download-btn="true"
+                  data-collection-id="${collectionId}"
+                  data-collection-label="${this.escapeHtml(label)}"
+                  style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
+                  title="Download gene set collection"
+                  aria-label="Download gene set collection">
+            <i class="fas fa-download" style="font-size:11px;"></i>
+          </button>
+        `
+      }
+    } else {
+      const newRow = document.createElement('div')
+      newRow.setAttribute('data-gene-set-collection-row', 'true')
+      newRow.setAttribute('data-collection-id', collectionId)
+      newRow.setAttribute('data-collection-label', label)
+      newRow.setAttribute('data-collection-name', label.toLowerCase())
+      newRow.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;'
+      newRow.innerHTML = `
+        <div style="flex:1;min-width:0;">
+          <div data-role="collection-label" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">${this.escapeHtml(label)}</div>
+          <div data-role="collection-count" style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${itemCount} ${itemLabel}</div>
+        </div>
+        <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
+          ${isImportPending ? `
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
+              <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
+            </span>
+          ` : `
+            ${isCustom ? `
+            <button type="button"
+                    data-gene-set-delete-btn="true"
+                    data-collection-id="${collectionId}"
+                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
+                    title="Delete custom gene set collection"
+                    aria-label="Delete custom gene set collection">
+              <i class="fas fa-trash" style="font-size:12px;"></i>
+            </button>
+            ` : ''}
+            <button type="button"
+                    data-gene-set-download-btn="true"
+                    data-collection-id="${collectionId}"
+                    data-collection-label="${this.escapeHtml(label)}"
+                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
+                    title="Download gene set collection"
+                    aria-label="Download gene set collection">
+              <i class="fas fa-download" style="font-size:11px;"></i>
+            </button>
+          `}
+        </div>
+      `
+      this.listBody.prepend(newRow)
+    }
+
+    this.bindCollectionRowClicks()
+    this.bindDeleteButtons()
+    this.bindDownloadButtons()
+    this.applyListFilter()
+  }
+
   bindCollectionRowClicks() {
     const rows = this.listBody.querySelectorAll('[data-gene-set-collection-row="true"]')
     rows.forEach((row) => {
@@ -696,7 +961,7 @@ export class GeneSetCollectionsController {
         const collectionId = button.dataset.collectionId
         if (!collectionId || !this.projectIdentifier) return
 
-        const shouldDelete = window.confirm('Delete this custom gene set collection?')
+        const shouldDelete = await this.confirmDestructiveAction('Delete this custom gene set collection?')
         if (!shouldDelete) return
 
         button.disabled = true
@@ -736,5 +1001,138 @@ export class GeneSetCollectionsController {
         }
       })
     })
+  }
+
+  bindDownloadButtons() {
+    const buttons = this.listBody.querySelectorAll('[data-gene-set-download-btn="true"]')
+    buttons.forEach((button) => {
+      if (button.dataset.boundDownload === 'true') return
+      button.dataset.boundDownload = 'true'
+      button.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const collectionId = String(button.dataset.collectionId || '').trim()
+        const collectionLabel = String(button.dataset.collectionLabel || '').trim()
+        if (!collectionId || !this.projectIdentifier) return
+        this.toggleCollectionDownloadMenu(button, collectionId, collectionLabel)
+      })
+    })
+  }
+
+  toggleCollectionDownloadMenu(anchorEl, collectionId, collectionLabel) {
+    if (
+      this.activeCollectionDownloadMenu &&
+      this.activeCollectionDownloadMenu.collectionId === String(collectionId) &&
+      this.activeCollectionDownloadMenu.element
+    ) {
+      this.closeCollectionDownloadMenu()
+      return
+    }
+
+    this.closeCollectionDownloadMenu()
+    this.openCollectionDownloadMenu(anchorEl, collectionId, collectionLabel)
+  }
+
+  openCollectionDownloadMenu(anchorEl, collectionId, collectionLabel) {
+    if (!anchorEl) return
+    const menu = document.createElement('div')
+    menu.setAttribute('data-gene-set-download-menu', 'true')
+    menu.style.position = 'fixed'
+    menu.style.zIndex = '6500'
+    menu.style.minWidth = '190px'
+    menu.style.background = '#ffffff'
+    menu.style.border = '1px solid #d1d5db'
+    menu.style.borderRadius = '6px'
+    menu.style.boxShadow = '0 10px 24px rgba(15, 23, 42, 0.12)'
+    menu.style.padding = '4px'
+
+    const options = [
+      { id: 'json', label: 'JSON' },
+      { id: 'gmt_ensembl', label: 'GMT ensemblID' },
+      { id: 'gmt_symbol', label: 'GMT gene symbols' }
+    ]
+
+    options.forEach((option) => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.textContent = option.label
+      btn.style.display = 'block'
+      btn.style.width = '100%'
+      btn.style.textAlign = 'left'
+      btn.style.border = 'none'
+      btn.style.background = 'none'
+      btn.style.padding = '6px 8px'
+      btn.style.fontSize = '12px'
+      btn.style.color = '#111827'
+      btn.style.cursor = 'pointer'
+      btn.addEventListener('mouseover', () => { btn.style.background = '#f3f4f6' })
+      btn.addEventListener('mouseout', () => { btn.style.background = 'none' })
+      btn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        this.downloadCollectionFile(collectionId, option.id)
+        this.closeCollectionDownloadMenu()
+      })
+      menu.appendChild(btn)
+    })
+
+    document.body.appendChild(menu)
+    const anchorRect = anchorEl.getBoundingClientRect()
+    let left = anchorRect.right - menu.offsetWidth
+    let top = anchorRect.bottom + 6
+    if (left < 8) left = 8
+    if (top + menu.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, anchorRect.top - menu.offsetHeight - 6)
+    }
+    menu.style.left = `${left}px`
+    menu.style.top = `${top}px`
+
+    const onDocumentPointerDown = (event) => {
+      if (!menu.contains(event.target) && !anchorEl.contains(event.target)) {
+        this.closeCollectionDownloadMenu()
+      }
+    }
+    const onWindowResize = () => this.closeCollectionDownloadMenu()
+
+    document.addEventListener('mousedown', onDocumentPointerDown)
+    window.addEventListener('resize', onWindowResize)
+
+    this.activeCollectionDownloadMenu = {
+      collectionId: String(collectionId),
+      collectionLabel: String(collectionLabel || ''),
+      element: menu,
+      onDocumentPointerDown,
+      onWindowResize
+    }
+  }
+
+  closeCollectionDownloadMenu() {
+    if (!this.activeCollectionDownloadMenu) return
+    const { element, onDocumentPointerDown, onWindowResize } = this.activeCollectionDownloadMenu
+    if (element?.parentNode) {
+      element.parentNode.removeChild(element)
+    }
+    if (onDocumentPointerDown) {
+      document.removeEventListener('mousedown', onDocumentPointerDown)
+    }
+    if (onWindowResize) {
+      window.removeEventListener('resize', onWindowResize)
+    }
+    this.activeCollectionDownloadMenu = null
+  }
+
+  downloadCollectionFile(collectionId, exportFormat) {
+    if (!this.projectIdentifier || !collectionId || !exportFormat) return
+    const currentLoomFile = this.controller?.getCurrentLoomFileForRequest?.() || this.controller?.currentLoomFile || ''
+    if (!currentLoomFile) {
+      alert('Missing loom file context for export')
+      return
+    }
+    const params = new URLSearchParams({
+      collection_id: String(collectionId),
+      export_format: String(exportFormat),
+      loom_file: String(currentLoomFile)
+    })
+    window.location.assign(`/projects/${encodeURIComponent(this.projectIdentifier)}/download_gene_set_collection?${params.toString()}`)
   }
 }

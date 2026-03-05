@@ -1,11 +1,17 @@
 require 'open3'
 require 'zlib'
 require 'base64'
+require 'fileutils'
+require 'securerandom'
+require 'set'
 
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_item_genes gene_set_item_module_score prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection selection_states delete_gene_set_collection]
+  MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
+  MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
+  LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
 
   # GET /projects or /projects.json
   def index
@@ -2302,6 +2308,7 @@ class ProjectsController < ApplicationController
     session[:selection_cache][@project.id.to_s] = cache_data
 
     SelectionMetadataImportJob.perform_later(run.id)
+    broadcast_selection_states_changed(loom_file: loom_file, reason: 'queued')
 
     render json: {
       status: 'ok',
@@ -2339,6 +2346,8 @@ class ProjectsController < ApplicationController
 
       RunsController.destroy_run_call(@project, run)
       cleanup_selection_cache_for_run_id(run_id)
+      run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      broadcast_selection_states_changed(loom_file: run_attrs['loom_file'], reason: 'deleted')
 
       render json: { status: 'ok', deleted_run: true, run_id: run_id }
       return
@@ -2355,6 +2364,7 @@ class ProjectsController < ApplicationController
       return
     end
 
+    broadcast_selection_states_changed(reason: 'deleted')
     render json: { status: 'ok', deleted_run: false, selection_id: selection_id }
   rescue StandardError => e
     Rails.logger.error("delete_selection failed for #{selection_id}: #{e.class} - #{e.message}")
@@ -2400,6 +2410,7 @@ class ProjectsController < ApplicationController
         end
       end
 
+      broadcast_selection_states_changed(loom_file: annot.filepath, reason: 'renamed')
       render json: { status: 'ok', selection_id: selection_id, name: new_name }
       return
     end
@@ -2432,6 +2443,7 @@ class ProjectsController < ApplicationController
         run.update!(attrs_json: run_attrs.to_json)
       end
 
+      broadcast_selection_states_changed(loom_file: annot.filepath, reason: 'renamed')
       render json: { status: 'ok', selection_id: selection_id, name: new_name }
       return
     end
@@ -2452,17 +2464,241 @@ class ProjectsController < ApplicationController
       end
     end
 
+    broadcast_selection_states_changed(loom_file: (entry['loom_file'] || entry[:loom_file]), reason: 'renamed')
     render json: { status: 'ok', selection_id: selection_id, name: new_name }
   rescue StandardError => e
     Rails.logger.error("rename_selection failed for #{selection_id}: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Rename failed: #{e.message}" }, status: :unprocessable_entity
   end
 
+  # POST /projects/:id/save_manual_gene_set
+  def save_manual_gene_set
+    name = params[:name].to_s.strip
+    if name.blank?
+      render json: { status: 'error', message: 'Missing gene set name' }, status: :unprocessable_entity
+      return
+    end
+
+    submitted_genes = Array(params[:genes]).map do |gene|
+      next unless gene.is_a?(ActionController::Parameters) || gene.is_a?(Hash)
+      raw = if gene.is_a?(ActionController::Parameters)
+              gene.permit(:symbol, :ensembl_id, :stable_id).to_h
+            else
+              gene.to_h.slice('symbol', 'ensembl_id', 'stable_id', :symbol, :ensembl_id, :stable_id)
+            end
+      symbol = raw['symbol'].to_s.strip
+      ensembl_id = raw['ensembl_id'].to_s.strip
+      stable_id = raw['stable_id'].to_s.strip
+      next if symbol.blank? && ensembl_id.blank? && stable_id.blank?
+      {
+        symbol: symbol,
+        ensembl_id: ensembl_id,
+        stable_id: stable_id
+      }
+    end.compact
+
+    if submitted_genes.empty?
+      render json: { status: 'error', message: 'No genes to save' }, status: :unprocessable_entity
+      return
+    end
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    genes_with_ids = resolve_manual_gene_ids(submitted_genes, db_version)
+    ensure_manual_gene_set_collection_record!
+
+    payload = load_manual_gene_set_collection_payload
+    items = Array(payload['items'])
+    timestamp = Time.now.utc.iso8601
+    item_identifier = "manual_#{SecureRandom.hex(6)}"
+    item_id = "manual_local:#{item_identifier}"
+    new_item = {
+      'id' => item_id,
+      'identifier' => item_identifier,
+      'name' => name,
+      'genes' => genes_with_ids,
+      'created_at' => timestamp,
+      'updated_at' => timestamp
+    }
+    items << new_item
+    payload['collection'] = MANUAL_GENE_SET_COLLECTION_LABEL
+    payload['items'] = items
+    payload['updated_at'] = timestamp
+
+    write_manual_gene_set_collection_payload(payload)
+
+    render json: {
+      status: 'ok',
+      collection: {
+        id: MANUAL_GENE_SET_COLLECTION_ID,
+        label: MANUAL_GENE_SET_COLLECTION_LABEL,
+        nb_items: items.length,
+        custom: true
+      },
+      item: {
+        id: item_id,
+        identifier: item_identifier,
+        name: name,
+        gene_count: genes_with_ids.length
+      }
+    }
+  rescue StandardError => e
+    Rails.logger.error("save_manual_gene_set failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to save manual gene set: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/import_gene_set_collection
+  def import_gene_set_collection
+    collection_name = params[:name].to_s.strip
+    if collection_name.blank?
+      render json: { status: 'error', message: 'Missing gene set collection name' }, status: :unprocessable_entity
+      return
+    end
+
+    uploaded_file = params[:file]
+    unless uploaded_file.respond_to?(:read)
+      render json: { status: 'error', message: 'Missing file to import' }, status: :unprocessable_entity
+      return
+    end
+
+    extension = File.extname(uploaded_file.original_filename.to_s).to_s.downcase
+    source_kind = extension == '.gmt' ? 'gmt' : ''
+    if source_kind.blank?
+      render json: { status: 'error', message: 'Unsupported file format. Please upload a .gmt file.' }, status: :unprocessable_entity
+      return
+    end
+
+    uploaded_path = uploaded_file.respond_to?(:path) ? uploaded_file.path.to_s : ''
+    if uploaded_path.blank? || !File.exist?(uploaded_path) || File.size(uploaded_path).to_i <= 0
+      render json: { status: 'error', message: 'Uploaded file is empty' }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      render json: { status: 'error', message: 'Missing loom file' }, status: :unprocessable_entity
+      return
+    end
+
+    import_id = params[:import_id].to_s.strip
+    import_id = SecureRandom.uuid if import_id.blank?
+    staged_upload_path = stage_gene_set_collection_upload!(uploaded_path, import_id: import_id)
+    collection_record = GeneSetCollection.create!(
+      project_id: @project.id,
+      user_id: current_user&.id,
+      name: collection_name,
+      file_key: "gene_set_collection_#{SecureRandom.hex(12)}",
+      source_kind: source_kind
+    )
+    GeneSetCollectionImportJob.perform_later(
+      @project.id,
+      collection_record.id,
+      staged_upload_path,
+      import_id,
+      loom_file
+    )
+
+    render json: {
+      status: 'queued',
+      import_id: import_id,
+      collection: {
+        id: local_gene_set_collection_id(collection_record),
+        label: collection_record.name.to_s,
+        nb_items: 0,
+        custom: true,
+        import_pending: true
+      }
+    }
+  rescue JSON::ParserError => e
+    Rails.logger.error("import_gene_set_collection failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Invalid JSON format: #{e.message}" }, status: :unprocessable_entity
+  rescue StandardError => e
+    Rails.logger.error("import_gene_set_collection failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to import gene set collection: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/delete_manual_gene_set
+  def delete_manual_gene_set
+    item_id = params[:item_id].to_s.strip
+    if item_id.blank? || !item_id.start_with?("#{MANUAL_GENE_SET_COLLECTION_ID}:")
+      render json: { status: 'error', message: 'Missing manual gene set identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    payload = load_manual_gene_set_collection_payload
+    items = Array(payload['items'])
+    index = items.index { |raw_item| normalize_manual_gene_set_item(raw_item)&.dig(:id).to_s == item_id }
+    if index.nil?
+      render json: { status: 'error', message: 'Manual gene set not found' }, status: :not_found
+      return
+    end
+
+    removed_item = normalize_manual_gene_set_item(items[index]) || {}
+    items.delete_at(index)
+    payload['items'] = items
+    payload['updated_at'] = Time.now.utc.iso8601
+    write_manual_gene_set_collection_payload(payload)
+
+    deleted_runs_count = delete_related_manual_module_score_runs(removed_item)
+
+    render json: {
+      status: 'ok',
+      item_id: item_id,
+      deleted_runs_count: deleted_runs_count,
+      collection: {
+        id: MANUAL_GENE_SET_COLLECTION_ID,
+        label: MANUAL_GENE_SET_COLLECTION_LABEL,
+        nb_items: items.length,
+        custom: true
+      }
+    }
+  rescue StandardError => e
+    Rails.logger.error("delete_manual_gene_set failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to delete manual gene set: #{e.message}" }, status: :unprocessable_entity
+  end
+
   # POST /projects/:id/delete_gene_set_collection
   def delete_gene_set_collection
-    collection_id = params[:collection_id].to_i
-    if collection_id <= 0
+    collection_id_raw = params[:collection_id].to_s.strip
+    if collection_id_raw.blank?
       render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    if collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      payload = load_manual_gene_set_collection_payload
+      items = Array(payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
+      deleted_runs_count = items.sum { |item| delete_related_manual_module_score_runs(item) }
+
+      payload['items'] = []
+      payload['updated_at'] = Time.now.utc.iso8601
+      write_manual_gene_set_collection_payload(payload)
+
+      manual_collection = GeneSetCollection.find_by(project_id: @project.id, source_kind: 'manual')
+      manual_collection&.destroy
+
+      render json: { status: 'ok', collection_id: collection_id_raw, deleted_runs_count: deleted_runs_count }
+      return
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+    if local_collection_id
+      local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      unless local_collection
+        render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+
+      local_path = local_gene_set_collection_file_path(local_collection.file_key)
+      File.delete(local_path) if File.exist?(local_path)
+      local_collection.destroy!
+      render json: { status: 'ok', collection_id: collection_id_raw }
+      return
+    end
+
+    collection_id = collection_id_raw.to_i
+    if collection_id <= 0
+      render json: { status: 'error', message: 'Invalid gene set collection identifier' }, status: :unprocessable_entity
       return
     end
 
@@ -2510,8 +2746,8 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/gene_set_collection_items
   def gene_set_collection_items
-    collection_id = params[:collection_id].to_i
-    if collection_id <= 0
+    collection_id_raw = params[:collection_id].to_s.strip
+    if collection_id_raw.blank?
       render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
       return
     end
@@ -2552,6 +2788,128 @@ class ProjectsController < ApplicationController
     rescue => e
       Rails.logger.error("gene_set_collection_items: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
       render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
+      return
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+    if local_collection_id
+      local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      unless local_collection
+        render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+
+      local_payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+      local_items = Array(local_payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
+      filtered_items = if query.present?
+        query_downcase = query.downcase
+        local_items.select do |item|
+          item[:name].to_s.downcase.include?(query_downcase) || item[:identifier].to_s.downcase.include?(query_downcase)
+        end
+      else
+        local_items
+      end
+
+      total_count = filtered_items.length
+      limited_items = filtered_items.first(limit)
+
+      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
+      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
+
+      items_payload = limited_items.map do |item|
+        genes = item[:genes]
+        in_dataset_count = genes.count do |gene|
+          manual_gene_in_dataset?(
+            gene,
+            dataset_stable_by_accession: dataset_stable_by_accession,
+            dataset_stable_by_symbol: dataset_stable_by_symbol,
+            dataset_stable_ids: stable_ids
+          )
+        end
+
+        {
+          id: item[:id],
+          identifier: item[:identifier],
+          name: item[:name],
+          display_name: item[:name].presence || item[:identifier],
+          gene_count: genes.length,
+          in_dataset_count: in_dataset_count,
+          supports_module_score: false,
+          created_at: item[:created_at],
+          deletable: false
+        }
+      end
+
+      render json: {
+        status: 'ok',
+        collection: {
+          id: local_gene_set_collection_id(local_collection),
+          label: local_collection.name.to_s
+        },
+        items: items_payload,
+        total_count: total_count,
+        limit: limit
+      }
+      return
+    end
+
+    if collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      manual_payload = load_manual_gene_set_collection_payload
+      manual_items = Array(manual_payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
+
+      filtered_items = if query.present?
+        query_downcase = query.downcase
+        manual_items.select { |item| item[:name].to_s.downcase.include?(query_downcase) }
+      else
+        manual_items
+      end
+
+      total_count = filtered_items.length
+      limited_items = filtered_items.first(limit)
+
+      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
+      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
+
+      items_payload = limited_items.map do |item|
+        genes = item[:genes]
+        in_dataset_count = genes.count do |gene|
+          manual_gene_in_dataset?(
+            gene,
+            dataset_stable_by_accession: dataset_stable_by_accession,
+            dataset_stable_by_symbol: dataset_stable_by_symbol,
+            dataset_stable_ids: stable_ids
+          )
+        end
+
+        {
+          id: item[:id],
+          identifier: item[:identifier],
+          name: item[:name],
+          display_name: item[:name].presence || item[:identifier],
+          gene_count: genes.length,
+          in_dataset_count: in_dataset_count,
+          supports_module_score: false,
+          created_at: item[:created_at],
+          deletable: true
+        }
+      end
+
+      render json: {
+        status: 'ok',
+        collection: {
+          id: MANUAL_GENE_SET_COLLECTION_ID,
+          label: MANUAL_GENE_SET_COLLECTION_LABEL
+        },
+        items: items_payload,
+        total_count: total_count,
+        limit: limit
+      }
+      return
+    end
+
+    collection_id = collection_id_raw.to_i
+    if collection_id <= 0
+      render json: { status: 'error', message: 'Invalid gene set collection identifier' }, status: :unprocessable_entity
       return
     end
 
@@ -2634,7 +2992,8 @@ class ProjectsController < ApplicationController
             name: row['name'].to_s,
             display_name: row['display_name'].to_s,
             gene_count: row['gene_count'].to_i,
-            in_dataset_count: in_dataset_count
+            in_dataset_count: in_dataset_count,
+            supports_module_score: true
           }
         end,
         total_count: total_count,
@@ -2645,10 +3004,59 @@ class ProjectsController < ApplicationController
     render json: payload
   end
 
+  # GET /projects/:id/gene_set_collection_status
+  def gene_set_collection_status
+    collection_id_raw = params[:collection_id].to_s.strip
+    if collection_id_raw.blank?
+      render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+    if local_collection_id
+      collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      unless collection
+        render json: { status: 'failed', message: 'Gene set collection not found' }
+        return
+      end
+
+      payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+      items = Array(payload['items'])
+      if items.any?
+        render json: {
+          status: 'completed',
+          collection: {
+            id: local_gene_set_collection_id(collection),
+            label: collection.name.to_s,
+            nb_items: items.length,
+            custom: true
+          }
+        }
+      else
+        render json: {
+          status: 'pending',
+          collection: {
+            id: local_gene_set_collection_id(collection),
+            label: collection.name.to_s,
+            nb_items: 0,
+            custom: true,
+            import_pending: true
+          }
+        }
+      end
+      return
+    end
+
+    render json: { status: 'completed' }
+  rescue StandardError => e
+    Rails.logger.error("gene_set_collection_status failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to get collection status: #{e.message}" }, status: :unprocessable_entity
+  end
+
   # GET /projects/:id/gene_set_item_genes
   def gene_set_item_genes
-    item_id = params[:item_id].to_i
-    if item_id <= 0
+    item_id_raw = params[:item_id].to_s.strip
+    if item_id_raw.blank?
       render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
       return
     end
@@ -2688,6 +3096,115 @@ class ProjectsController < ApplicationController
     rescue => e
       Rails.logger.error("gene_set_item_genes: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
       render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
+      return
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id_from_item_id(item_id_raw)
+    if local_collection_id
+      local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      unless local_collection
+        render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+
+      local_payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+      local_item = Array(local_payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact.find do |item|
+        item[:id].to_s == item_id_raw
+      end
+
+      unless local_item
+        render json: { status: 'error', message: 'Gene set item not found' }, status: :not_found
+        return
+      end
+
+      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
+      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
+
+      genes_found = []
+      missing_genes = []
+      local_item[:genes].each do |gene|
+        payload = {
+          symbol: gene[:symbol],
+          ensembl_id: gene[:ensembl_id],
+          stable_id: gene[:stable_id]
+        }
+        if manual_gene_in_dataset?(
+          gene,
+          dataset_stable_by_accession: dataset_stable_by_accession,
+          dataset_stable_by_symbol: dataset_stable_by_symbol,
+          dataset_stable_ids: stable_ids
+        )
+          genes_found << payload
+        else
+          missing_genes << payload
+        end
+      end
+
+      render json: {
+        status: 'ok',
+        item_id: item_id_raw,
+        source: 'local',
+        gene_set_id: local_gene_set_collection_id(local_collection),
+        genes: genes_found,
+        missing_genes: missing_genes
+      }
+      return
+    end
+
+    if item_id_raw.start_with?("#{MANUAL_GENE_SET_COLLECTION_ID}:")
+      manual_item = find_manual_gene_set_item(item_id_raw)
+      unless manual_item
+        render json: { status: 'error', message: 'Gene set item not found' }, status: :not_found
+        return
+      end
+
+      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
+      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
+
+      genes = []
+      missing_genes = []
+      manual_item[:genes].each do |gene|
+        symbol_value = gene[:symbol].to_s.strip
+        ensembl_value = gene[:ensembl_id].to_s.strip
+        stable_value = gene[:stable_id].to_s.strip
+        accession_key = ensembl_value.downcase
+        symbol_key = symbol_value.downcase
+        selected_stable_id = nil
+        selected_stable_id = stable_value if stable_value.present? && stable_ids.include?(stable_value)
+        selected_stable_id ||= dataset_stable_by_accession[accession_key] if accession_key.present?
+        selected_stable_id ||= dataset_stable_by_symbol[symbol_key] if symbol_key.present?
+
+        if selected_stable_id.present?
+          genes << {
+            symbol: symbol_value,
+            ensembl_id: ensembl_value,
+            stable_id: selected_stable_id
+          }
+        else
+          missing_genes << {
+            symbol: symbol_value,
+            ensembl_id: ensembl_value
+          }
+        end
+      end
+
+      render json: {
+        status: 'ok',
+        item: {
+          id: manual_item[:id],
+          gene_set_id: MANUAL_GENE_SET_COLLECTION_ID,
+          name: manual_item[:name],
+          identifier: manual_item[:identifier]
+        },
+        genes: genes,
+        missing_genes: missing_genes
+      }
+      return
+    end
+
+    item_id = item_id_raw.to_i
+    if item_id <= 0
+      render json: { status: 'error', message: 'Invalid gene set item identifier' }, status: :unprocessable_entity
       return
     end
 
@@ -2789,6 +3306,74 @@ class ProjectsController < ApplicationController
     end
 
     render json: payload
+  end
+
+  # GET /projects/:id/download_gene_set_collection
+  def download_gene_set_collection
+    collection_id_raw = params[:collection_id].to_s.strip
+    if collection_id_raw.blank?
+      render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    export_format = params[:export_format].to_s.strip
+    unless %w[json gmt_ensembl gmt_symbol].include?(export_format)
+      render json: { status: 'error', message: 'Unsupported export format' }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      render json: { status: 'error', message: 'Missing loom file' }, status: :unprocessable_entity
+      return
+    end
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    current_user_id = current_user&.id
+    dataset_stable_by_accession, dataset_stable_by_symbol = build_dataset_stable_lookup_for_export(loom_file)
+    collection_payload = load_gene_set_collection_for_export(
+      collection_id_raw,
+      db_version: db_version,
+      current_user_id: current_user_id,
+      dataset_stable_by_accession: dataset_stable_by_accession,
+      dataset_stable_by_symbol: dataset_stable_by_symbol
+    )
+
+    collection_label = collection_payload[:label].to_s
+    safe_name = sanitize_collection_export_filename(collection_label)
+    case export_format
+    when 'json'
+      data = JSON.pretty_generate({
+        collection: collection_label,
+        id: collection_payload[:id],
+        items: collection_payload[:items].map do |item|
+          {
+            id: item[:id],
+            identifier: item[:identifier],
+            name: item[:name],
+            genes: item[:genes].map do |gene|
+              {
+                symbol: gene[:symbol].to_s,
+                ensembl_id: gene[:ensembl_id].to_s,
+                stable_id: gene[:stable_id].to_s,
+                gene_id: gene[:gene_id]
+              }
+            end
+          }
+        end
+      })
+      send_data data, filename: "#{safe_name}.json", type: 'application/json; charset=utf-8', disposition: 'attachment'
+    when 'gmt_ensembl'
+      data = build_gene_set_collection_gmt_export(collection_payload, mode: :ensembl)
+      send_data data, filename: "#{safe_name}_ensembl.gmt", type: 'text/plain; charset=utf-8', disposition: 'attachment'
+    when 'gmt_symbol'
+      data = build_gene_set_collection_gmt_export(collection_payload, mode: :symbol)
+      send_data data, filename: "#{safe_name}_symbols.gmt", type: 'text/plain; charset=utf-8', disposition: 'attachment'
+    end
+  rescue StandardError => e
+    Rails.logger.error("download_gene_set_collection failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to download gene set collection: #{e.message}" }, status: :unprocessable_entity
   end
 
   # GET /projects/:id/gene_set_item_module_score
@@ -5106,6 +5691,644 @@ class ProjectsController < ApplicationController
           }
         end
       end
+
+      local_collections = GeneSetCollection.where(project_id: @project.id).where.not(source_kind: 'manual').order(created_at: :desc)
+      if local_collections.any?
+        local_collection_payloads = local_collections.map do |collection|
+          payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+          {
+            id: local_gene_set_collection_id(collection),
+            label: collection.name.to_s,
+            database_name: '',
+            nb_items: Array(payload['items']).length,
+            custom: true
+          }
+        end
+        @gene_set_collections = local_collection_payloads + @gene_set_collections
+      end
+
+      manual_payload = load_manual_gene_set_collection_payload
+      manual_items = Array(manual_payload['items'])
+      if manual_items.any?
+        @gene_set_collections.unshift({
+          id: MANUAL_GENE_SET_COLLECTION_ID,
+          label: MANUAL_GENE_SET_COLLECTION_LABEL,
+          database_name: '',
+          nb_items: manual_items.length,
+          custom: true
+        })
+      end
+    end
+
+    def manual_gene_set_collections_dir
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key + 'gene_set_collections'
+    end
+
+    def manual_gene_set_collection_file_path
+      manual_gene_set_collections_dir + 'manual_gene_sets.json'
+    end
+
+    def ensure_manual_gene_set_collection_record!
+      expected_file_key = "manual_gene_sets_#{@project.id}"
+      manual_collection = GeneSetCollection.find_or_initialize_by(project_id: @project.id, source_kind: 'manual')
+      manual_collection.user_id ||= current_user&.id
+      manual_collection.name = MANUAL_GENE_SET_COLLECTION_LABEL
+      manual_collection.file_key = expected_file_key
+      manual_collection.save! if manual_collection.new_record? || manual_collection.changed?
+      manual_collection
+    end
+
+    def gene_set_collection_imports_dir
+      Rails.root.join('tmp', 'gene_set_collection_imports')
+    end
+
+    def stage_gene_set_collection_upload!(source_path, import_id:)
+      directory = gene_set_collection_imports_dir
+      FileUtils.mkdir_p(directory) unless File.directory?(directory)
+      staged_filename = "#{@project.id}_#{import_id}.gmt"
+      staged_path = directory.join(staged_filename)
+      FileUtils.cp(source_path, staged_path)
+      staged_path.to_s
+    end
+
+    def load_manual_gene_set_collection_payload
+      path = manual_gene_set_collection_file_path
+      return { 'collection' => MANUAL_GENE_SET_COLLECTION_LABEL, 'items' => [] } unless File.exist?(path)
+      parsed = Basic.safe_parse_json(File.read(path), {})
+      parsed = {} unless parsed.is_a?(Hash)
+      parsed['collection'] = MANUAL_GENE_SET_COLLECTION_LABEL
+      parsed['items'] = Array(parsed['items'])
+      parsed
+    end
+
+    def write_manual_gene_set_collection_payload(payload)
+      directory = manual_gene_set_collections_dir
+      FileUtils.mkdir_p(directory) unless File.directory?(directory)
+      File.write(manual_gene_set_collection_file_path, JSON.pretty_generate(payload))
+    end
+
+    def local_gene_set_collection_id(collection_record)
+      "#{LOCAL_GENE_SET_COLLECTION_ID_PREFIX}:#{collection_record.id}"
+    end
+
+    def parse_local_gene_set_collection_id(raw_id)
+      match = raw_id.to_s.strip.match(/\A#{Regexp.escape(LOCAL_GENE_SET_COLLECTION_ID_PREFIX)}:(\d+)\z/)
+      match ? match[1].to_i : nil
+    end
+
+    def parse_local_gene_set_collection_id_from_item_id(item_id)
+      match = item_id.to_s.strip.match(/\A#{Regexp.escape(LOCAL_GENE_SET_COLLECTION_ID_PREFIX)}:(\d+):/)
+      match ? match[1].to_i : nil
+    end
+
+    def local_gene_set_collection_file_path(file_key)
+      normalized_key = file_key.to_s.strip
+      raise ArgumentError, 'Invalid collection file key' unless normalized_key.match?(/\A[a-zA-Z0-9_-]+\z/)
+      manual_gene_set_collections_dir + "#{normalized_key}.json"
+    end
+
+    def load_local_gene_set_collection_payload(file_key, collection_label)
+      path = local_gene_set_collection_file_path(file_key)
+      return { 'collection' => collection_label.to_s, 'items' => [] } unless File.exist?(path)
+      parsed = Basic.safe_parse_json(File.read(path), {})
+      parsed = {} unless parsed.is_a?(Hash)
+      parsed['collection'] = collection_label.to_s
+      parsed['items'] = Array(parsed['items'])
+      parsed
+    end
+
+    def write_local_gene_set_collection_payload(file_key, payload)
+      directory = manual_gene_set_collections_dir
+      FileUtils.mkdir_p(directory) unless File.directory?(directory)
+      File.write(local_gene_set_collection_file_path(file_key), JSON.pretty_generate(payload))
+    end
+
+    def parse_uploaded_gene_set_collection_items!(source_kind, file_content)
+      case source_kind
+      when 'gmt'
+        parse_uploaded_gmt_items!(file_content)
+      when 'json'
+        parse_uploaded_json_items!(file_content)
+      else
+        raise ArgumentError, "Unsupported source kind: #{source_kind}"
+      end
+    end
+
+    def parse_uploaded_gmt_items!(file_content)
+      items = []
+      lines = file_content.to_s.split(/\r?\n/)
+      lines.each_with_index do |line, index|
+        next if line.strip.blank?
+        parts = line.split("\t")
+        if parts.length < 3
+          raise ArgumentError, "Invalid GMT format on line #{index + 1}: expected at least 3 tab-separated columns"
+        end
+
+        raw_name = parts[0].to_s.strip
+        raw_description = parts[1].to_s.strip
+        gene_tokens = parts[2..].map { |value| value.to_s.strip }.reject(&:blank?).uniq
+        if raw_name.blank?
+          raise ArgumentError, "Invalid GMT format on line #{index + 1}: missing gene set name"
+        end
+        if gene_tokens.empty?
+          raise ArgumentError, "Invalid GMT format on line #{index + 1}: no genes provided"
+        end
+
+        items << {
+          identifier: raw_name,
+          name: raw_name,
+          description: raw_description,
+          genes: gene_tokens.map { |token| parse_uploaded_gene_token(token) }
+        }
+      end
+      items
+    end
+
+    def parse_uploaded_json_items!(file_content)
+      parsed = JSON.parse(file_content)
+      raw_items = if parsed.is_a?(Hash)
+        Array(parsed['items'])
+      elsif parsed.is_a?(Array)
+        parsed
+      else
+        raise ArgumentError, 'Invalid JSON format. Expected an array of gene sets or an object with an items array.'
+      end
+
+      raw_items.each_with_index.map do |raw_item, index|
+        unless raw_item.is_a?(Hash)
+          raise ArgumentError, "Invalid JSON format for gene set at index #{index}"
+        end
+
+        identifier = raw_item['identifier'].to_s.strip
+        name = raw_item['name'].to_s.strip
+        genes = raw_item['genes']
+        unless genes.is_a?(Array)
+          raise ArgumentError, "Invalid genes value for gene set at index #{index}. Expected an array."
+        end
+
+        parsed_genes = genes.map.with_index do |entry, gene_index|
+          parse_uploaded_gene_entry(entry, index, gene_index)
+        end.compact
+        if parsed_genes.empty?
+          raise ArgumentError, "Gene set at index #{index} has no valid genes"
+        end
+
+        {
+          identifier: identifier,
+          name: name,
+          genes: parsed_genes
+        }
+      end
+    end
+
+    def parse_uploaded_gene_entry(entry, item_index, gene_index)
+      if entry.is_a?(String)
+        return parse_uploaded_gene_token(entry)
+      end
+
+      unless entry.is_a?(Hash)
+        raise ArgumentError, "Invalid gene entry at gene set #{item_index}, gene #{gene_index}"
+      end
+
+      symbol = entry['symbol'].to_s.strip
+      ensembl_id = entry['ensembl_id'].to_s.strip
+      stable_id = entry['stable_id'].to_s.strip
+      if symbol.blank? && ensembl_id.blank? && stable_id.blank?
+        raise ArgumentError, "Invalid gene entry at gene set #{item_index}, gene #{gene_index}: empty symbol, ensembl_id and stable_id"
+      end
+
+      {
+        symbol: symbol,
+        ensembl_id: ensembl_id,
+        stable_id: stable_id
+      }
+    end
+
+    def parse_uploaded_gene_token(token)
+      value = token.to_s.strip
+      if value.blank?
+        raise ArgumentError, 'Invalid gene token: empty value'
+      end
+
+      if token_looks_like_accession?(value)
+        { symbol: '', ensembl_id: value, stable_id: '' }
+      else
+        { symbol: value, ensembl_id: '', stable_id: '' }
+      end
+    end
+
+    def token_looks_like_accession?(value)
+      token = value.to_s.strip
+      return false if token.blank?
+      return true if token.match?(/\AENS[A-Z0-9]+\z/i)
+      token.match?(/\A(?=.{6,}$)(?=(?:.*\d){3,})[A-Za-z0-9_.-]+\z/)
+    end
+
+    def normalize_uploaded_collection_items_for_storage(parsed_items, db_version:, collection_id:, timestamp:)
+      normalized_identifiers = Set.new
+      all_genes = parsed_items.flat_map { |item| Array(item[:genes]) }
+      ensembl_lookup, symbol_lookup = build_manual_gene_id_lookups(all_genes, db_version)
+      parsed_items.each_with_index.map do |item, index|
+        token_seed = item[:identifier].presence || item[:name].presence || "item_#{index + 1}"
+        item_identifier = normalize_uploaded_item_identifier(token_seed)
+        suffix_index = 2
+        while normalized_identifiers.include?(item_identifier)
+          item_identifier = "#{normalize_uploaded_item_identifier(token_seed)}_#{suffix_index}"
+          suffix_index += 1
+        end
+        normalized_identifiers.add(item_identifier)
+
+        item_name = item[:name].presence || item[:identifier].presence || "Gene set #{index + 1}"
+        genes_with_ids = resolve_manual_gene_ids_with_lookups(Array(item[:genes]), ensembl_lookup, symbol_lookup)
+        {
+          'id' => "#{collection_id}:#{item_identifier}",
+          'identifier' => item_identifier,
+          'name' => item_name,
+          'genes' => genes_with_ids,
+          'created_at' => timestamp,
+          'updated_at' => timestamp
+        }
+      end
+    end
+
+    def normalize_uploaded_item_identifier(raw_value)
+      normalized = raw_value.to_s.strip.gsub(/[^a-zA-Z0-9]+/, '_').gsub(/\A_+|_+\z/, '').downcase
+      normalized.presence || "item_#{SecureRandom.hex(4)}"
+    end
+
+    def sanitize_collection_export_filename(label)
+      normalized = label.to_s.strip.gsub(/[^a-zA-Z0-9]+/, '_').gsub(/\A_+|_+\z/, '').downcase
+      normalized.presence || 'gene_set_collection'
+    end
+
+    def build_gene_set_collection_gmt_export(collection_payload, mode:)
+      lines = collection_payload[:items].map do |item|
+        item_identifier = item[:identifier].to_s.strip
+        item_name = item[:name].to_s.strip
+        if item_identifier.blank? && item_name.blank?
+          item_identifier = 'unnamed_gene_set'
+          item_name = 'Unnamed gene set'
+        elsif item_identifier.blank?
+          item_identifier = item_name.gsub(/[^a-zA-Z0-9]+/, '_').gsub(/\A_+|_+\z/, '').downcase
+          item_identifier = 'unnamed_gene_set' if item_identifier.blank?
+        elsif item_name.blank?
+          item_name = item_identifier
+        end
+        gene_values = item[:genes].map do |gene|
+          symbol = gene[:symbol].to_s.strip
+          ensembl_id = gene[:ensembl_id].to_s.strip
+          if mode == :symbol
+            symbol.presence || ensembl_id
+          else
+            ensembl_id.presence || symbol
+          end
+        end.reject(&:blank?).uniq
+        ([item_identifier, item_name] + gene_values).join("\t")
+      end
+      "#{lines.join("\n")}\n"
+    end
+
+    def load_gene_set_collection_for_export(collection_id_raw, db_version:, current_user_id:, dataset_stable_by_accession:, dataset_stable_by_symbol:)
+      if collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+        manual_payload = load_manual_gene_set_collection_payload
+        items = Array(manual_payload['items']).map { |raw_item| normalize_manual_gene_set_item(raw_item) }.compact
+        return {
+          id: MANUAL_GENE_SET_COLLECTION_ID,
+          label: MANUAL_GENE_SET_COLLECTION_LABEL,
+          items: items.map do |item|
+            {
+              id: item[:id],
+              identifier: item[:identifier],
+              name: item[:name],
+              genes: enrich_export_genes_with_dataset_stable_id(
+                item[:genes],
+                dataset_stable_by_accession: dataset_stable_by_accession,
+                dataset_stable_by_symbol: dataset_stable_by_symbol
+              )
+            }
+          end
+        }
+      end
+
+      local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+      if local_collection_id
+        local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+        raise ArgumentError, 'Gene set collection not found' unless local_collection
+
+        local_payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+        items = Array(local_payload['items']).map { |raw_item| normalize_manual_gene_set_item(raw_item) }.compact
+        return {
+          id: local_gene_set_collection_id(local_collection),
+          label: local_collection.name.to_s,
+          items: items.map do |item|
+            {
+              id: item[:id],
+              identifier: item[:identifier],
+              name: item[:name],
+              genes: enrich_export_genes_with_dataset_stable_id(
+                item[:genes],
+                dataset_stable_by_accession: dataset_stable_by_accession,
+                dataset_stable_by_symbol: dataset_stable_by_symbol
+              )
+            }
+          end
+        }
+      end
+
+      collection_id = collection_id_raw.to_i
+      raise ArgumentError, 'Invalid gene set collection identifier' if collection_id <= 0
+
+      payload = nil
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        where_sql = [
+          "(project_id IS NULL AND ref_id IS NOT NULL)",
+          "project_id = #{@project.id}"
+        ]
+        if current_user_id.present?
+          where_sql << "(project_id IS NULL AND user_id = #{current_user_id.to_i} AND ref_id IS NULL)"
+        end
+
+        collection_row = conn.select_one(<<~SQL)
+          SELECT id, label
+          FROM gene_sets
+          WHERE id = #{collection_id}
+            AND organism_id = #{@project.organism_id.to_i}
+            AND COALESCE(obsolete, FALSE) = FALSE
+            AND (#{where_sql.join(' OR ')})
+        SQL
+        raise ArgumentError, 'Gene set collection not found' unless collection_row
+
+        item_rows = conn.select_all(<<~SQL)
+          SELECT id, identifier, name, content
+          FROM gene_set_items
+          WHERE gene_set_id = #{collection_id}
+          ORDER BY LOWER(COALESCE(name, '')), LOWER(COALESCE(identifier, ''))
+        SQL
+
+        gene_ids = item_rows.flat_map do |row|
+          row['content'].to_s.split(',').map { |value| value.to_i }.select { |value| value > 0 }
+        end.uniq
+        gene_lookup = {}
+        if gene_ids.any?
+          gene_rows = conn.select_all(<<~SQL)
+            SELECT id, name, ensembl_id
+            FROM genes
+            WHERE id IN (#{gene_ids.join(',')})
+          SQL
+          gene_rows.each do |gene_row|
+            gene_lookup[gene_row['id'].to_i] = {
+              symbol: gene_row['name'].to_s,
+              ensembl_id: gene_row['ensembl_id'].to_s,
+              stable_id: resolve_dataset_stable_id_for_export(
+                symbol: gene_row['name'].to_s,
+                ensembl_id: gene_row['ensembl_id'].to_s,
+                existing_stable_id: '',
+                dataset_stable_by_accession: dataset_stable_by_accession,
+                dataset_stable_by_symbol: dataset_stable_by_symbol
+              ),
+              gene_id: gene_row['id'].to_i
+            }
+          end
+        end
+
+        payload = {
+          id: collection_row['id'].to_i,
+          label: collection_row['label'].to_s,
+          items: item_rows.map do |row|
+            item_gene_ids = row['content'].to_s.split(',').map { |value| value.to_i }.select { |value| value > 0 }
+            genes = item_gene_ids.map { |gene_id| gene_lookup[gene_id] }.compact
+            {
+              id: row['id'].to_i,
+              identifier: row['identifier'].to_s,
+              name: row['name'].to_s,
+              genes: genes
+            }
+          end
+        }
+      end
+
+      payload
+    end
+
+    def build_dataset_stable_lookup_for_export(loom_file)
+      user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+      loom_path = project_dir + loom_file
+      raise ArgumentError, 'Loom file not found' unless File.exist?(loom_path)
+
+      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+      size = [stable_values.length, accession_values.length, gene_values.length].min
+
+      dataset_stable_by_accession = {}
+      dataset_stable_by_symbol = {}
+      size.times do |idx|
+        stable_id = stable_values[idx].to_s.strip
+        next if stable_id.blank?
+        accession = accession_values[idx].to_s.strip.downcase
+        symbol = gene_values[idx].to_s.strip.downcase
+        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
+        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
+      end
+
+      [dataset_stable_by_accession, dataset_stable_by_symbol]
+    end
+
+    def resolve_dataset_stable_id_for_export(symbol:, ensembl_id:, existing_stable_id:, dataset_stable_by_accession:, dataset_stable_by_symbol:)
+      stable_id = existing_stable_id.to_s.strip
+      return stable_id if stable_id.present?
+      ensembl_key = ensembl_id.to_s.strip.downcase
+      symbol_key = symbol.to_s.strip.downcase
+      stable_id = dataset_stable_by_accession[ensembl_key] if ensembl_key.present?
+      stable_id ||= dataset_stable_by_symbol[symbol_key] if symbol_key.present?
+      stable_id.to_s
+    end
+
+    def enrich_export_genes_with_dataset_stable_id(genes, dataset_stable_by_accession:, dataset_stable_by_symbol:)
+      Array(genes).map do |gene|
+        next unless gene.is_a?(Hash)
+        symbol = gene[:symbol].to_s
+        ensembl_id = gene[:ensembl_id].to_s
+        stable_id = resolve_dataset_stable_id_for_export(
+          symbol: symbol,
+          ensembl_id: ensembl_id,
+          existing_stable_id: gene[:stable_id].to_s,
+          dataset_stable_by_accession: dataset_stable_by_accession,
+          dataset_stable_by_symbol: dataset_stable_by_symbol
+        )
+        {
+          symbol: symbol,
+          ensembl_id: ensembl_id,
+          stable_id: stable_id,
+          gene_id: (gene[:gene_id].to_i > 0 ? gene[:gene_id].to_i : nil)
+        }
+      end.compact
+    end
+
+    def normalize_manual_gene_set_item(raw_item)
+      return nil unless raw_item.is_a?(Hash)
+      item_id = raw_item['id'].to_s.strip
+      item_identifier = raw_item['identifier'].to_s.strip
+      item_name = raw_item['name'].to_s.strip
+      item_id = "manual_local:#{item_identifier.presence || SecureRandom.hex(6)}" if item_id.blank?
+      item_identifier = item_id.split(':', 2).last if item_identifier.blank?
+      genes = Array(raw_item['genes']).filter_map do |gene|
+        next unless gene.is_a?(Hash)
+        symbol = gene['symbol'].to_s.strip
+        ensembl_id = gene['ensembl_id'].to_s.strip
+        stable_id = gene['stable_id'].to_s.strip
+        next if symbol.blank? && ensembl_id.blank? && stable_id.blank?
+        {
+          symbol: symbol,
+          ensembl_id: ensembl_id,
+          stable_id: stable_id,
+          gene_id: gene['gene_id'].to_i > 0 ? gene['gene_id'].to_i : nil
+        }
+      end
+      {
+        id: item_id,
+        identifier: item_identifier,
+        name: item_name,
+        genes: genes,
+        created_at: raw_item['created_at'].to_s,
+        updated_at: raw_item['updated_at'].to_s
+      }
+    end
+
+    def find_manual_gene_set_item(item_id)
+      payload = load_manual_gene_set_collection_payload
+      Array(payload['items']).each do |raw_item|
+        normalized = normalize_manual_gene_set_item(raw_item)
+        next unless normalized
+        return normalized if normalized[:id].to_s == item_id.to_s
+      end
+      nil
+    end
+
+    def resolve_manual_gene_ids(genes, db_version)
+      return [] unless genes.is_a?(Array)
+      ensembl_lookup, symbol_lookup = build_manual_gene_id_lookups(genes, db_version)
+      resolve_manual_gene_ids_with_lookups(genes, ensembl_lookup, symbol_lookup)
+    end
+
+    def build_manual_gene_id_lookups(genes, db_version)
+      return [{}, {}] unless genes.is_a?(Array)
+      ensembl_keys = genes.map { |gene| gene[:ensembl_id].to_s.strip.downcase }
+                          .reject(&:blank?)
+                          .uniq
+      symbol_keys = genes.map { |gene| gene[:symbol].to_s.strip.downcase }
+                         .reject(&:blank?)
+                         .uniq
+
+      ensembl_lookup = {}
+      symbol_lookup = {}
+
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        if ensembl_keys.any?
+          quoted = ensembl_keys.map { |value| conn.quote(value) }.join(',')
+          ensembl_rows = conn.select_all("SELECT id, LOWER(COALESCE(ensembl_id, '')) AS key FROM genes WHERE LOWER(COALESCE(ensembl_id, '')) IN (#{quoted})")
+          ensembl_rows.each do |row|
+            key = row['key'].to_s
+            next if key.blank?
+            ensembl_lookup[key] ||= row['id'].to_i
+          end
+        end
+
+        if symbol_keys.any?
+          quoted = symbol_keys.map { |value| conn.quote(value) }.join(',')
+          symbol_rows = conn.select_all("SELECT id, LOWER(COALESCE(name, '')) AS key FROM genes WHERE LOWER(COALESCE(name, '')) IN (#{quoted})")
+          symbol_rows.each do |row|
+            key = row['key'].to_s
+            next if key.blank?
+            symbol_lookup[key] ||= row['id'].to_i
+          end
+        end
+      end
+
+      [ensembl_lookup, symbol_lookup]
+    end
+
+    def resolve_manual_gene_ids_with_lookups(genes, ensembl_lookup, symbol_lookup)
+      genes.map do |gene|
+        symbol = gene[:symbol].to_s.strip
+        ensembl_id = gene[:ensembl_id].to_s.strip
+        stable_id = gene[:stable_id].to_s.strip
+        gene_id = nil
+
+        if ensembl_id.present?
+          gene_id = ensembl_lookup[ensembl_id.downcase]
+          if gene_id.nil? && symbol.blank?
+            fallback_symbol_id = symbol_lookup[ensembl_id.downcase]
+            if fallback_symbol_id
+              gene_id = fallback_symbol_id
+              symbol = ensembl_id
+              ensembl_id = ''
+            end
+          end
+        end
+
+        if gene_id.nil? && symbol.present?
+          gene_id = symbol_lookup[symbol.downcase]
+          if gene_id.nil?
+            fallback_ensembl_id = ensembl_lookup[symbol.downcase]
+            if fallback_ensembl_id
+              gene_id = fallback_ensembl_id
+              ensembl_id = symbol
+              symbol = ''
+            end
+          end
+        end
+
+        {
+          symbol: symbol,
+          ensembl_id: ensembl_id,
+          stable_id: stable_id,
+          gene_id: gene_id
+        }
+      end
+    end
+
+    def manual_gene_in_dataset?(gene, dataset_stable_by_accession:, dataset_stable_by_symbol:, dataset_stable_ids:)
+      return false unless gene.is_a?(Hash)
+      symbol = gene[:symbol].to_s.strip.downcase
+      ensembl_id = gene[:ensembl_id].to_s.strip.downcase
+      stable_id = gene[:stable_id].to_s.strip
+      return true if stable_id.present? && dataset_stable_ids.include?(stable_id)
+      return true if ensembl_id.present? && dataset_stable_by_accession.key?(ensembl_id)
+      return true if symbol.present? && dataset_stable_by_symbol.key?(symbol)
+      false
+    end
+
+    def delete_related_manual_module_score_runs(removed_item)
+      return 0 unless removed_item.is_a?(Hash)
+      item_id = removed_item[:id].to_s
+      item_identifier = removed_item[:identifier].to_s
+      item_name = removed_item[:name].to_s
+      candidate_run_ids = []
+
+      module_score_method_ids = StdMethod
+        .where("LOWER(COALESCE(name, '')) LIKE ? OR LOWER(COALESCE(label, '')) LIKE ?", '%modulescore%', '%module score%')
+        .pluck(:id)
+
+      runs_scope = Run.where(project_id: @project.id)
+      runs_scope = runs_scope.where(std_method_id: module_score_method_ids) if module_score_method_ids.any?
+
+      runs_scope.find_each do |run|
+        attrs = Basic.safe_parse_json(run.attrs_json, {})
+        attrs_text = attrs.to_json.downcase
+        match = false
+        match ||= item_id.present? && attrs_text.include?(item_id.downcase)
+        match ||= item_identifier.present? && attrs_text.include?(item_identifier.downcase)
+        match ||= item_name.present? && attrs_text.include?(item_name.downcase)
+        candidate_run_ids << run.id if match
+      end
+
+      return 0 if candidate_run_ids.empty?
+      Run.where(id: candidate_run_ids).delete_all
     end
 
     def prepare_visualization_de_modal_context
@@ -5525,6 +6748,21 @@ class ProjectsController < ApplicationController
       keys_to_remove.each { |key| cache_data.delete(key) }
       session[:selection_cache] ||= {}
       session[:selection_cache][@project.id.to_s] = cache_data
+    end
+
+    def broadcast_selection_states_changed(loom_file: nil, reason: nil)
+      return unless @project&.id
+
+      ActionCable.server.broadcast(
+        "project_#{@project.id}",
+        {
+          event: 'selection_states_changed',
+          loom_file: loom_file.to_s,
+          reason: reason.to_s
+        }
+      )
+    rescue StandardError => e
+      Rails.logger.warn("broadcast_selection_states_changed failed: #{e.class} - #{e.message}")
     end
 
     def selection_cache_items_for_loom(loom_file = nil, cleanup_completed: false)

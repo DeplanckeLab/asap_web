@@ -1370,13 +1370,13 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
         <!-- Gene Tags Container with Input -->
         <div style="position: relative;">
-          <div id="gene-tags-container" style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; min-height: 42px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; align-items: center; transition: border-color 0.2s; cursor: text;"
+          <div id="gene-tags-container" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;min-height:34px;border:1px solid #d1d5db;border-radius:6px;background-color:#fff;align-items:center;transition:border-color 0.2s;cursor:text;"
                onclick="document.getElementById('gene-autocomplete-input').focus()">
             <input 
               type="text" 
               id="gene-autocomplete-input" 
               placeholder="Type or paste gene names (comma, space, or Enter to add)..."
-              style="flex: 1; min-width: 120px; padding: 0; border: none; border-radius: 0; font-size: 14px; outline: none; background: transparent;"
+              style="flex:1;min-width:120px;padding:0;border:none;border-radius:0;font-size:12px;color:#111827;outline:none;background:transparent;"
               onfocus="document.getElementById('gene-tags-container').style.borderColor='#3b82f6'"
               onblur="document.getElementById('gene-tags-container').style.borderColor='#d1d5db'"
             />

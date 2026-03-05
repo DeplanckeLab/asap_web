@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_27_203500) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -691,6 +691,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_27_203500) do
     t.integer "project_id"
     t.integer "status_id"
     t.integer "user_id"
+  end
+
+  create_table "gene_set_collections", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "file_key", null: false
+    t.string "name", null: false
+    t.integer "project_id", null: false
+    t.string "source_kind", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["file_key"], name: "index_gene_set_collections_on_file_key", unique: true
+    t.index ["project_id", "source_kind"], name: "index_gene_set_collections_on_project_id_and_source_kind"
+    t.index ["project_id"], name: "index_gene_set_collections_on_project_id"
+    t.index ["user_id"], name: "index_gene_set_collections_on_user_id"
   end
 
   create_table "heatmaps", id: :serial, force: :cascade do |t|

@@ -39,8 +39,13 @@ Rails.application.routes.draw do
       get :search_gene
       get :search_gene_set_items
       get :gene_set_collection_items
+      get :gene_set_collection_status
       get :gene_set_item_genes
       get :gene_set_item_module_score
+      get :download_gene_set_collection
+      post :save_manual_gene_set
+      post :import_gene_set_collection
+      post :delete_manual_gene_set
       post :cluster_comparison
       post :filter_de_results
       post :filter_ge_results

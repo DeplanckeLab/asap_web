@@ -1,3 +1,5 @@
+import consumer from "channels/consumer"
+
 // GeneManager - Handles gene autocomplete and expression visualization
 export class GeneManager {
   constructor(controller) {
@@ -18,6 +20,10 @@ export class GeneManager {
     this.defaultGeneTagsDisplay = null
     this.defaultMatrixSelectionDisplay = null
     this.matrixSelectionWrapper = null
+    this.collectionImportSubscription = null
+    this.projectChannelId = null
+    this.pendingCollectionImportIds = new Set()
+    this.pendingCollectionImportPollers = new Map()
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
     // console.log('GeneManager: Constructor initialized, window.geneManager set')
@@ -349,17 +355,21 @@ export class GeneManager {
 
   init() {
     // console.log('GeneManager: Initializing...')
+    const visualizationElement = document.querySelector('[data-controller="visualization"]')
+    const projectIdValue = visualizationElement?.dataset?.projectId
+    this.projectChannelId = projectIdValue ? String(projectIdValue).trim() : null
+
     // Extract project identifier from URL (could be ID, key, or public_id like ASAP49)
     const pathMatch = window.location.pathname.match(/\/projects\/([^\/]+)/)
     if (pathMatch) {
       this.projectIdentifier = pathMatch[1] // Use identifier instead of just ID
       // console.log('GeneManager: Project identifier extracted:', this.projectIdentifier)
+      this.setupGeneSetCollectionImportSubscription()
     } else {
       console.warn('GeneManager: Could not extract project identifier from URL:', window.location.pathname)
     }
     
     // Check if user is admin from data attribute
-    const visualizationElement = document.querySelector('[data-controller="visualization"]')
     this.isAdmin = visualizationElement && visualizationElement.dataset.isAdmin === 'true'
     // console.log('GeneManager: Is admin:', this.isAdmin)
 
@@ -499,31 +509,18 @@ export class GeneManager {
           e.preventDefault()
           e.stopPropagation()
 
-          // Check for gene divs in the DOM instead of geneTags array
-          const resultsDiv = document.getElementById('gene-expression-results')
-          const geneDivs = resultsDiv ? resultsDiv.querySelectorAll('[id^="gene-result-"]') : []
-          const geneCount = geneDivs.length
+          if (button.id === 'gene-set-collections-add-btn') {
+            geneManager.showAddGeneSetCollectionModal()
+            return
+          }
+
+          const genes = Array.isArray(geneManager.geneTags) ? [...geneManager.geneTags] : []
+          const geneCount = genes.length
 
           if (geneCount === 0) {
             alert('No genes selected. Please select genes before creating a gene set.')
             return
           }
-
-          // Extract gene data from the DOM divs
-          const genes = Array.from(geneDivs).map(div => {
-            const stableId = div.id.replace('gene-result-', '')
-            const geneSymbolEl = div.querySelector('h3')
-            const geneSymbol = geneSymbolEl ? geneSymbolEl.textContent.trim().split(' ')[0] : ''
-            // Try to extract ensembl ID and stable ID from the DOM
-            const stableIdMatch = div.textContent.match(/Stable ID[:\s]+(\d+)/)
-            const ensemblMatch = div.textContent.match(/(FBgn\d+)/)
-            return {
-              symbol: geneSymbol,
-              ensemblId: ensemblMatch ? ensemblMatch[1] : '',
-              stableId: parseInt(stableIdMatch ? stableIdMatch[1] : stableId),
-              query: geneSymbol
-            }
-          })
 
           geneManager.showAddGeneSetModalWithGenes(genes)
         })
@@ -540,6 +537,113 @@ export class GeneManager {
       })
     }
 
+  }
+
+  setupGeneSetCollectionImportSubscription() {
+    if (!this.projectChannelId || this.collectionImportSubscription) return
+    if (!consumer || !consumer.subscriptions) return
+
+    this.collectionImportSubscription = consumer.subscriptions.create(
+      { channel: "ProjectChannel", project_id: this.projectChannelId },
+      {
+        received: (data) => {
+          if (!data || data.event !== 'gene_set_collection_import') return
+          const importId = String(data.import_id || '').trim()
+          const hasTrackedImport = importId && this.pendingCollectionImportIds.has(importId)
+          const shouldHandle = !importId || hasTrackedImport
+          if (!shouldHandle) return
+
+          if (importId) this.pendingCollectionImportIds.delete(importId)
+          if (data.status === 'completed' && data.collection) {
+            const collectionsController = this.controller?.geneSetCollectionsController
+            if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+              collectionsController.upsertCollectionFromPayload(data.collection)
+            }
+            this.stopCollectionImportPolling(String(data.collection.id || ''))
+            if (this.controller && typeof this.controller.setSelectionTab === 'function') {
+              this.controller.setSelectionTab('gene-sets')
+            }
+            return
+          }
+
+          if (data.status === 'failed') {
+            const failedCollectionId = String(data.collection_id || '').trim()
+            if (failedCollectionId) {
+              const row = document.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="local_collection:${failedCollectionId}"]`)
+              if (row) row.remove()
+              this.stopCollectionImportPolling(`local_collection:${failedCollectionId}`)
+              const collectionsController = this.controller?.geneSetCollectionsController
+              if (collectionsController && typeof collectionsController.applyListFilter === 'function') {
+                collectionsController.applyListFilter()
+              }
+            }
+            alert(data.message || 'Failed to import gene set collection')
+          }
+        }
+      }
+    )
+  }
+
+  stopCollectionImportPolling(collectionId) {
+    const key = String(collectionId || '').trim()
+    if (!key) return
+    const timerId = this.pendingCollectionImportPollers.get(key)
+    if (timerId) {
+      clearInterval(timerId)
+      this.pendingCollectionImportPollers.delete(key)
+    }
+  }
+
+  startCollectionImportPolling(collectionId) {
+    const key = String(collectionId || '').trim()
+    if (!key || !this.projectIdentifier) return
+    this.stopCollectionImportPolling(key)
+    let attempts = 0
+    const maxAttempts = 120
+    const poll = async () => {
+      attempts += 1
+      try {
+        const params = new URLSearchParams({ collection_id: key })
+        const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/gene_set_collection_status?${params.toString()}`, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' }
+        })
+        const payload = await response.json()
+        if (!response.ok) return
+
+        if (payload.status === 'completed' && payload.collection) {
+          const collectionsController = this.controller?.geneSetCollectionsController
+          if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+            collectionsController.upsertCollectionFromPayload(payload.collection)
+          }
+          this.stopCollectionImportPolling(key)
+          return
+        }
+
+        if (payload.status === 'failed') {
+          const row = document.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${key}"]`)
+          if (row) row.remove()
+          this.stopCollectionImportPolling(key)
+          if (payload.message) alert(payload.message)
+          return
+        }
+
+        if (attempts >= maxAttempts) {
+          this.stopCollectionImportPolling(key)
+          const row = document.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${key}"]`)
+          if (row) row.remove()
+          alert('Import timed out while waiting for completion')
+        }
+      } catch (error) {
+        if (attempts >= maxAttempts) {
+          this.stopCollectionImportPolling(key)
+        }
+      }
+    }
+    const timerId = setInterval(poll, 2000)
+    this.pendingCollectionImportPollers.set(key, timerId)
+    poll()
   }
 
   updateGeneCountBadge() {
@@ -2791,6 +2895,336 @@ export class GeneManager {
     this.showAddGeneSetModalWithGenes(this.geneTags)
   }
 
+  showAddGeneSetCollectionModal() {
+    const existingOverlay = document.getElementById('gene-set-collection-modal-overlay')
+    if (existingOverlay) existingOverlay.remove()
+    const template = document.getElementById('add-gene-set-collection-modal-template')
+    if (!template || !template.content || !template.content.firstElementChild) {
+      console.error('GeneManager: add gene set collection modal template not found')
+      return
+    }
+
+    const overlay = template.content.firstElementChild.cloneNode(true)
+    const modal = overlay.querySelector('#gene-set-collection-modal-content')
+    const form = overlay.querySelector('#add-gene-set-collection-form')
+    const nameInput = overlay.querySelector('#gene-set-collection-name-input')
+    const fileInput = overlay.querySelector('#gene-set-collection-file-input')
+    const dropzone = overlay.querySelector('#gene-set-collection-dropzone')
+    const browseBtn = overlay.querySelector('#gene-set-collection-browse-btn')
+    const selectedFileEl = overlay.querySelector('#gene-set-collection-selected-file')
+    const closeBtn = overlay.querySelector('#close-add-gene-set-collection-modal')
+    const cancelBtn = overlay.querySelector('#cancel-add-gene-set-collection-btn')
+    const submitBtn = overlay.querySelector('#submit-add-gene-set-collection-btn')
+    const feedbackEl = overlay.querySelector('#gene-set-collection-upload-feedback')
+    const progressWrapEl = overlay.querySelector('#gene-set-collection-upload-progress-wrap')
+    const progressBarEl = overlay.querySelector('#gene-set-collection-upload-progress-bar')
+    const progressTextEl = overlay.querySelector('#gene-set-collection-upload-progress-text')
+    let selectedCollectionFile = null
+    let activeUploadXhr = null
+
+    if (!modal || !form || !nameInput || !fileInput || !submitBtn) {
+      console.error('GeneManager: add gene set collection modal elements are missing')
+      return
+    }
+
+    const setFeedback = (message = '', isError = false) => {
+      if (!feedbackEl) return
+      const text = String(message || '').trim()
+      feedbackEl.textContent = text
+      feedbackEl.style.display = text ? 'block' : 'none'
+      feedbackEl.style.color = isError ? '#dc2626' : '#1d4ed8'
+    }
+
+    const updateSelectedFile = (file) => {
+      if (!selectedFileEl) return
+      const fileName = file?.name ? String(file.name) : ''
+      selectedFileEl.textContent = fileName || 'No file selected'
+      selectedFileEl.style.color = fileName ? '#111827' : '#6b7280'
+    }
+
+    const isGmtFile = (file) => {
+      const name = String(file?.name || '').trim().toLowerCase()
+      return name.endsWith('.gmt')
+    }
+
+    const setDropzoneActive = (isActive) => {
+      if (!dropzone) return
+      dropzone.style.borderColor = isActive ? '#2563eb' : '#9ca3af'
+      dropzone.style.backgroundColor = isActive ? '#eff6ff' : '#f9fafb'
+    }
+
+    const assignFileToInput = (file) => {
+      if (!file || !fileInput) return false
+      if (!isGmtFile(file)) {
+        setFeedback('Only GMT files are allowed.', true)
+        return false
+      }
+      selectedCollectionFile = file
+      try {
+        const transfer = new DataTransfer()
+        transfer.items.add(file)
+        fileInput.files = transfer.files
+      } catch (error) {
+        // Some browsers do not allow setting input.files programmatically.
+      }
+      updateSelectedFile(file)
+      setFeedback('')
+      return true
+    }
+
+    const setSubmitting = (isSubmitting) => {
+      submitBtn.disabled = Boolean(isSubmitting)
+      submitBtn.textContent = isSubmitting ? 'Uploading...' : 'Upload'
+      if (!isSubmitting) return
+      setFeedback('')
+    }
+
+    const setSubmitButtonLabel = (label) => {
+      if (!submitBtn) return
+      submitBtn.textContent = String(label || '').trim() || 'Upload'
+    }
+
+    const setUploadProgress = (percent, visible = true) => {
+      const normalized = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)))
+      if (progressWrapEl) progressWrapEl.style.display = visible ? 'block' : 'none'
+      if (progressBarEl) progressBarEl.style.width = `${normalized}%`
+      if (progressTextEl) progressTextEl.textContent = `${normalized}%`
+    }
+
+    const uploadGeneSetCollectionWithProgress = ({ projectIdentifier, csrfToken, formData, onProgress }) => (
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        activeUploadXhr = xhr
+        xhr.open('POST', `/projects/${encodeURIComponent(projectIdentifier)}/import_gene_set_collection`, true)
+        xhr.withCredentials = true
+        xhr.timeout = 180000
+        xhr.setRequestHeader('Accept', 'application/json')
+        if (csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken)
+
+        const cleanupXhrReference = () => {
+          if (activeUploadXhr === xhr) activeUploadXhr = null
+        }
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (!event.lengthComputable) return
+          const percent = Math.round((event.loaded / event.total) * 100)
+          if (typeof onProgress === 'function') onProgress(percent)
+        })
+
+        xhr.addEventListener('load', () => {
+          cleanupXhrReference()
+          let payload = null
+          try {
+            payload = JSON.parse(xhr.responseText || '{}')
+          } catch (error) {
+            reject(new Error('Invalid server response during upload'))
+            return
+          }
+          if (xhr.status < 200 || xhr.status >= 300 || !['ok', 'queued'].includes(payload.status)) {
+            reject(new Error(payload.message || 'Failed to import gene set collection'))
+            return
+          }
+          resolve(payload)
+        })
+
+        xhr.addEventListener('error', () => {
+          cleanupXhrReference()
+          reject(new Error('Upload failed due to a network error'))
+        })
+        xhr.addEventListener('abort', () => {
+          cleanupXhrReference()
+          reject(new Error('Upload was cancelled'))
+        })
+        xhr.addEventListener('timeout', () => {
+          cleanupXhrReference()
+          reject(new Error('Upload request timed out while processing'))
+        })
+        xhr.send(formData)
+      })
+    )
+
+    const closeModal = () => {
+      if (activeUploadXhr) {
+        activeUploadXhr.abort()
+      }
+      const current = document.getElementById('gene-set-collection-modal-overlay')
+      if (current) current.remove()
+    }
+
+    document.body.appendChild(overlay)
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        closeModal()
+      })
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        closeModal()
+      })
+    }
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) closeModal()
+    })
+
+    modal.addEventListener('click', (event) => {
+      event.stopPropagation()
+    })
+
+    if (browseBtn) {
+      browseBtn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        fileInput.click()
+      })
+    }
+
+    if (dropzone) {
+      dropzone.addEventListener('click', () => {
+        fileInput.click()
+      })
+      ;['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setDropzoneActive(true)
+        })
+      })
+      ;['dragleave', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setDropzoneActive(false)
+        })
+      })
+      dropzone.addEventListener('drop', (event) => {
+        const droppedFile = event.dataTransfer?.files?.[0]
+        if (!droppedFile) return
+        assignFileToInput(droppedFile)
+      })
+    }
+
+    fileInput.addEventListener('change', () => {
+      const selectedFile = fileInput.files && fileInput.files[0]
+      if (!selectedFile) {
+        selectedCollectionFile = null
+        updateSelectedFile(null)
+        return
+      }
+      if (!isGmtFile(selectedFile)) {
+        fileInput.value = ''
+        selectedCollectionFile = null
+        updateSelectedFile(null)
+        setFeedback('Only GMT files are allowed.', true)
+        return
+      }
+      selectedCollectionFile = selectedFile
+      updateSelectedFile(selectedFile)
+      setFeedback('')
+    })
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setFeedback('')
+
+      const collectionName = String(nameInput.value || '').trim()
+      if (!collectionName) {
+        setFeedback('Please enter a collection name.', true)
+        nameInput.focus()
+        return
+      }
+
+      const file = selectedCollectionFile || (fileInput.files && fileInput.files[0])
+      if (!file) {
+        setFeedback('Please choose a GMT file to upload.', true)
+        return
+      }
+      if (!isGmtFile(file)) {
+        setFeedback('Only GMT files are allowed.', true)
+        return
+      }
+
+      const projectIdentifier = this.controller?.getProjectIdentifier?.() || this.projectIdentifier
+      if (!projectIdentifier) {
+        setFeedback('Project context is missing.', true)
+        return
+      }
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      const currentLoomFile = this.controller?.getCurrentLoomFileForRequest?.() || this.controller?.currentLoomFile || ''
+      if (!currentLoomFile) {
+        setFeedback('Loom file context is missing.', true)
+        return
+      }
+      const formData = new FormData()
+      formData.append('name', collectionName)
+      formData.append('file', file)
+      formData.append('loom_file', currentLoomFile)
+
+      setSubmitting(true)
+      setUploadProgress(0, true)
+      try {
+        const payload = await uploadGeneSetCollectionWithProgress({
+          projectIdentifier,
+          csrfToken,
+          formData,
+          onProgress: (percent) => {
+            setUploadProgress(percent, true)
+            if (percent >= 100) {
+              setSubmitButtonLabel('Processing...')
+            }
+          }
+        })
+        setUploadProgress(100, true)
+
+        if (payload.status === 'queued') {
+          const importId = String(payload.import_id || '').trim()
+          if (importId) this.pendingCollectionImportIds.add(importId)
+          if (payload.collection) {
+            const collectionsController = this.controller?.geneSetCollectionsController
+            if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+              collectionsController.upsertCollectionFromPayload(payload.collection)
+            }
+            this.startCollectionImportPolling(String(payload.collection.id || ''))
+          }
+          if (this.controller && typeof this.controller.setSelectionTab === 'function') {
+            this.controller.setSelectionTab('gene-sets')
+          }
+          closeModal()
+          return
+        }
+
+        if (payload.collection) {
+          const collectionsController = this.controller?.geneSetCollectionsController
+          if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+            collectionsController.upsertCollectionFromPayload(payload.collection)
+          }
+        }
+        closeModal()
+      } catch (error) {
+        setFeedback(error.message || 'Failed to import gene set collection', true)
+      } finally {
+        if (progressWrapEl && progressWrapEl.style.display !== 'none') {
+          setTimeout(() => setUploadProgress(0, false), 250)
+        } else {
+          setUploadProgress(0, false)
+        }
+        setSubmitting(false)
+      }
+    })
+
+    setTimeout(() => {
+      nameInput.focus()
+    }, 100)
+  }
+
   showAddGeneSetModalWithGenes(genes) {
     // This method accepts genes as a parameter, so it works even if geneTags is not updated
     if (!genes || genes.length === 0) {
@@ -2809,88 +3243,41 @@ export class GeneManager {
       }
     }
 
-    // Create modal overlay
-    const overlay = document.createElement('div')
-    overlay.id = 'gene-set-modal-overlay'
-    overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;'
-    
-    const modal = document.createElement('div')
-    modal.id = 'gene-set-modal-content'
-    modal.style.cssText = 'background: white; border-radius: 8px; padding: 24px; max-width: 600px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative;'
-    
-    modal.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Add Gene Set</h3>
-        <button type="button" id="close-add-gene-set-modal" style="background: none; border: none; font-size: 24px; color: #6b7280; cursor: pointer; padding: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 4px;" 
-                onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'" 
-                onmouseout="this.style.backgroundColor=''; this.style.color='#6b7280'">×</button>
-      </div>
-      
-      <form id="add-gene-set-form" style="display: flex; flex-direction: column; gap: 20px;">
-        <div>
-          <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px;">
-            Gene Set Name <span style="color: #dc2626;">*</span>
-          </label>
-          <input 
-            type="text" 
-            id="gene-set-name-input" 
-            required
-            placeholder="Enter gene set name..."
-            style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s;"
-            onfocus="this.style.borderColor='#3b82f6'"
-            onblur="this.style.borderColor='#d1d5db'"
-          />
-        </div>
-        
-        <div>
-          <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px;">
-            Genes (${genes.length})
-          </label>
-          <div style="border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; max-height: 400px; overflow-y: auto;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead style="background-color: #f9fafb; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0;">
-                <tr>
-                  <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Gene Symbol</th>
-                  <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Ensembl ID</th>
-                  <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Stable ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${genes.map((gene, index) => `
-                  <tr style="border-bottom: 1px solid #f3f4f6; ${index % 2 === 0 ? 'background-color: #ffffff;' : 'background-color: #f9fafb;'}">
-                    <td style="padding: 12px; font-size: 13px; color: #111827;">${gene.symbol}</td>
-                    <td style="padding: 12px; font-size: 13px; color: #6b7280; font-family: monospace;">${gene.ensemblId}</td>
-                    <td style="padding: 12px; font-size: 13px; color: #6b7280; font-family: monospace;">${gene.stableId}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        
-        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px;">
-          <button 
-            type="button"
-            id="cancel-add-gene-set-btn" 
-            style="padding: 10px 20px; background-color: #e5e7eb; color: #374151; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;"
-            onmouseover="this.style.backgroundColor='#d1d5db'"
-            onmouseout="this.style.backgroundColor='#e5e7eb'"
-            >
-            Cancel
-          </button>
-          <button 
-            type="submit"
-            id="submit-add-gene-set-btn" 
-            style="padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;"
-            onmouseover="this.style.backgroundColor='#2563eb'"
-            onmouseout="this.style.backgroundColor='#3b82f6'">
-            Submit
-          </button>
-        </div>
-      </form>
-    `
-    
-    overlay.appendChild(modal)
+    const template = document.getElementById('save-manual-gene-set-modal-template')
+    if (!template || !template.content || !template.content.firstElementChild) {
+      console.error('GeneManager: save manual gene set modal template not found')
+      return
+    }
+    const overlay = template.content.firstElementChild.cloneNode(true)
+    const modal = overlay.querySelector('#gene-set-modal-content')
+    if (!modal) {
+      console.error('GeneManager: modal content missing in template')
+      return
+    }
+
+    const escapeHtml = (value) => String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+
+    const genesCountEl = overlay.querySelector('#gene-set-genes-count')
+    if (genesCountEl) genesCountEl.textContent = String(genes.length)
+    const genesTableBody = overlay.querySelector('#gene-set-genes-table-body')
+    if (genesTableBody) {
+      genesTableBody.innerHTML = genes.map((gene, index) => {
+        const rowBg = index % 2 === 0 ? '#ffffff' : '#f9fafb'
+        return `
+          <tr style="border-bottom:1px solid #f3f4f6;background-color:${rowBg};">
+            <td style="padding:12px;font-size:13px;color:#111827;">${escapeHtml(gene?.symbol)}</td>
+            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${escapeHtml(gene?.ensemblId || gene?.ensembl_id)}</td>
+            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${escapeHtml(gene?.stableId || gene?.stable_id)}</td>
+          </tr>
+        `
+      }).join('')
+    }
+
     document.body.appendChild(overlay)
     
     // Simple close function
@@ -2954,7 +3341,7 @@ export class GeneManager {
     })
     
     // Form submission - genes is in scope from the function parameter
-    document.getElementById('add-gene-set-form').addEventListener('submit', (e) => {
+    document.getElementById('add-gene-set-form').addEventListener('submit', async (e) => {
       e.preventDefault()
       const nameInput = document.getElementById('gene-set-name-input')
       const geneSetName = nameInput.value.trim()
@@ -2965,22 +3352,49 @@ export class GeneManager {
         return
       }
       
-      // Create gene set object
-      const geneSet = {
-        name: geneSetName,
-        genes: genes.map(gene => ({
-          symbol: gene.symbol,
-          ensemblId: gene.ensemblId,
-          stableId: gene.stableId
-        }))
+      const normalizedGenes = genes.map((gene) => ({
+        symbol: String(gene?.symbol || '').trim(),
+        ensembl_id: String(gene?.ensemblId || gene?.ensembl_id || '').trim(),
+        stable_id: String(gene?.stableId || gene?.stable_id || '').trim()
+      }))
+
+      const projectIdentifier = this.controller?.getProjectIdentifier?.() || this.projectIdentifier
+      if (!projectIdentifier) {
+        alert('Project context is missing.')
+        return
       }
-      
-      // console.log('GeneManager: Submitting gene set:', geneSet)
-      
-      // TODO: Implement API call to save gene set
-      // For now, just log and close
-      alert(`Gene set "${geneSetName}" with ${geneSet.genes.length} genes would be saved.`)
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
       closeModal()
+
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+        const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_manual_gene_set`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers,
+          body: JSON.stringify({
+            name: geneSetName,
+            genes: normalizedGenes
+          })
+        })
+        const payload = await response.json()
+        if (!response.ok || payload.status !== 'ok') {
+          throw new Error(payload.message || 'Failed to save manual gene set')
+        }
+
+        const collectionsController = this.controller?.geneSetCollectionsController
+        if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+          collectionsController.upsertCollectionFromPayload(payload.collection)
+        }
+      } catch (error) {
+        alert(error.message || 'Failed to save manual gene set')
+      }
     })
     
     // Focus on name input

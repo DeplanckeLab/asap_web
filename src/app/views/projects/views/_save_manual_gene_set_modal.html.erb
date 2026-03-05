@@ -1,0 +1,66 @@
+<template id="save-manual-gene-set-modal-template">
+  <div id="gene-set-modal-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div id="gene-set-modal-content" style="background:white;border-radius:8px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Save manual gene set</h3>
+        <button type="button" id="close-add-gene-set-modal" style="background:none;border:none;font-size:24px;color:#6b7280;cursor:pointer;padding:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;"
+                onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                onmouseout="this.style.backgroundColor=''; this.style.color='#6b7280'">x</button>
+      </div>
+
+      <form id="add-gene-set-form" style="display:flex;flex-direction:column;gap:20px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
+            Gene Set Name <span style="color:#dc2626;">*</span>
+          </label>
+          <input
+            type="text"
+            id="gene-set-name-input"
+            required
+            placeholder="Enter gene set name..."
+            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#3b82f6'"
+            onblur="this.style.borderColor='#d1d5db'"
+          />
+        </div>
+
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
+            Genes (<span id="gene-set-genes-count">0</span>)
+          </label>
+          <div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;max-height:400px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead style="background-color:#f9fafb;border-bottom:1px solid #e5e7eb;position:sticky;top:0;">
+                <tr>
+                  <th style="padding:12px;text-align:left;font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:0.5px;">Gene Symbol</th>
+                  <th style="padding:12px;text-align:left;font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:0.5px;">Ensembl ID</th>
+                  <th style="padding:12px;text-align:left;font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:0.5px;">Stable ID</th>
+                </tr>
+              </thead>
+              <tbody id="gene-set-genes-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:8px;">
+          <button
+            type="button"
+            id="cancel-add-gene-set-btn"
+            style="padding:10px 20px;background-color:#e5e7eb;color:#374151;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;"
+            onmouseover="this.style.backgroundColor='#d1d5db'"
+            onmouseout="this.style.backgroundColor='#e5e7eb'">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            id="submit-add-gene-set-btn"
+            style="padding:10px 20px;background-color:#3b82f6;color:white;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;"
+            onmouseover="this.style.backgroundColor='#2563eb'"
+            onmouseout="this.style.backgroundColor='#3b82f6'">
+            Submit
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>

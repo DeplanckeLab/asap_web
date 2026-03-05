@@ -1,0 +1,89 @@
+<template id="add-gene-set-collection-modal-template">
+  <div id="gene-set-collection-modal-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div id="gene-set-collection-modal-content" style="background:white;border-radius:8px;padding:24px;max-width:600px;width:100%;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Add gene set collection</h3>
+        <button type="button" id="close-add-gene-set-collection-modal" style="background:none;border:none;font-size:22px;color:#6b7280;cursor:pointer;padding:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;"
+                onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                onmouseout="this.style.backgroundColor=''; this.style.color='#6b7280'">x</button>
+      </div>
+
+      <form id="add-gene-set-collection-form" style="display:flex;flex-direction:column;gap:16px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
+            Collection name <span style="color:#dc2626;">*</span>
+          </label>
+          <input
+            type="text"
+            id="gene-set-collection-name-input"
+            required
+            placeholder="Enter collection name"
+            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#3b82f6'"
+            onblur="this.style.borderColor='#d1d5db'"
+          />
+        </div>
+
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
+            File <span style="color:#dc2626;">*</span>
+          </label>
+          <input
+            type="file"
+            id="gene-set-collection-file-input"
+            accept=".gmt,text/plain"
+            required
+            style="display:none;"
+          />
+          <div id="gene-set-collection-dropzone"
+               style="border:1px dashed #9ca3af;border-radius:8px;background:#f9fafb;padding:14px;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;text-align:center;cursor:pointer;transition:border-color 0.15s, background-color 0.15s;">
+            <div style="font-size:12px;color:#4b5563;line-height:1.4;">
+              Drop a GMT file here
+            </div>
+            <div id="gene-set-collection-selected-file"
+                 style="font-size:12px;color:#6b7280;line-height:1.3;max-width:100%;word-break:break-word;">
+              No file selected
+            </div>
+            <button type="button"
+                    id="gene-set-collection-browse-btn"
+                    style="display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;border:1px solid #2563eb;background:#2563eb;color:#ffffff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;line-height:1;"
+                    onmouseover="this.style.backgroundColor='#1d4ed8'; this.style.borderColor='#1d4ed8'"
+                    onmouseout="this.style.backgroundColor='#2563eb'; this.style.borderColor='#2563eb'">
+              Browse GMT file
+            </button>
+          </div>
+          <div style="margin-top:6px;font-size:12px;color:#6b7280;line-height:1.4;">
+            Supported format: GMT only.
+          </div>
+        </div>
+
+        <div id="gene-set-collection-upload-feedback" style="display:none;font-size:12px;color:#dc2626;"></div>
+        <div id="gene-set-collection-upload-progress-wrap" style="display:none;">
+          <div style="height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden;">
+            <div id="gene-set-collection-upload-progress-bar" style="width:0%;height:100%;background:#2563eb;transition:width 0.15s ease;"></div>
+          </div>
+          <div id="gene-set-collection-upload-progress-text" style="margin-top:4px;font-size:12px;color:#374151;">0%</div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:8px;">
+          <button
+            type="button"
+            id="cancel-add-gene-set-collection-btn"
+            style="padding:10px 20px;background-color:#e5e7eb;color:#374151;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;"
+            onmouseover="this.style.backgroundColor='#d1d5db'"
+            onmouseout="this.style.backgroundColor='#e5e7eb'">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            id="submit-add-gene-set-collection-btn"
+            style="padding:10px 20px;background-color:#2563eb;color:white;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;"
+            onmouseover="this.style.backgroundColor='#1d4ed8'"
+            onmouseout="this.style.backgroundColor='#2563eb'">
+            Upload
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>

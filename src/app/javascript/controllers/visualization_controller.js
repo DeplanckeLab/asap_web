@@ -12,6 +12,7 @@ import { DownloadManager } from "visualization/download_manager"
 import { GeneManager } from "visualization/gene_manager"
 import { CustomPlotManager } from "visualization/custom_plot_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
+import consumer from "channels/consumer"
 
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
@@ -518,6 +519,8 @@ export default class extends Controller {
     this.composeSelectionCoordinatesCache = new Map()
     this.composeSelectionPreviewRequestId = 0
     this.selectionStatusPollingTimer = null
+    this.selectionStatesSubscription = null
+    this.selectionStatesRefreshTimer = null
     this.lastSelectionCompletionSignature = null
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
@@ -558,6 +561,7 @@ export default class extends Controller {
     this.panStartBounds = null
     
     // Initialize interaction system after DOM is ready
+    this.setupSelectionStatesSubscription()
     setTimeout(() => {
       this.uiManager.initializeTooltip()
       this.initializeResizers()
@@ -566,7 +570,6 @@ export default class extends Controller {
       // Initialize the selection count display
       this.uiManager.updateSelectedCellsCount()
       this.renderSavedSelections()
-      this.startSelectionStatusPolling()
       this.refreshSelectionStates()
     }, 100)
     
@@ -753,6 +756,14 @@ export default class extends Controller {
     if (this.selectionStatusPollingTimer) {
       window.clearInterval(this.selectionStatusPollingTimer)
       this.selectionStatusPollingTimer = null
+    }
+    if (this.selectionStatesRefreshTimer) {
+      window.clearTimeout(this.selectionStatesRefreshTimer)
+      this.selectionStatesRefreshTimer = null
+    }
+    if (this.selectionStatesSubscription) {
+      this.selectionStatesSubscription.unsubscribe()
+      this.selectionStatesSubscription = null
     }
 
     if (this.boundCheckpointTraceClick) {
@@ -8481,6 +8492,7 @@ export default class extends Controller {
     this.boundMouseDown = this.onInteractionMouseDown.bind(this)
     this.boundMouseMove = this.onInteractionMouseMove.bind(this)
     this.boundMouseUp = this.onInteractionMouseUp.bind(this)
+    this.boundPointerLeave = this.onInteractionPointerLeave.bind(this)
     this.boundWheel = this.onInteractionWheel.bind(this)
     this.boundDoubleClick = this.onInteractionDoubleClick.bind(this)
     
@@ -8490,6 +8502,7 @@ export default class extends Controller {
     
     canvas.addEventListener('pointerdown', this.boundMouseDown)
     canvas.addEventListener('pointerup', this.boundMouseUp)
+    canvas.addEventListener('pointerleave', this.boundPointerLeave)
     canvas.addEventListener('wheel', this.boundWheel, { passive: false })
     canvas.addEventListener('dblclick', this.boundDoubleClick)
     
@@ -8549,6 +8562,9 @@ export default class extends Controller {
     }
     if (this.boundMouseUp) {
       canvas.removeEventListener('pointerup', this.boundMouseUp)
+    }
+    if (this.boundPointerLeave) {
+      canvas.removeEventListener('pointerleave', this.boundPointerLeave)
     }
     if (this.boundWheel) {
       canvas.removeEventListener('wheel', this.boundWheel, { passive: false })
@@ -8674,6 +8690,12 @@ export default class extends Controller {
       this.onLassoMouseUp(event)
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseUp(event)
+    }
+  }
+
+  onInteractionPointerLeave() {
+    if (this.interactionMode === 'pick' && !this.isTooltipFixed) {
+      this.hideSimpleTooltip()
     }
   }
 
@@ -13593,6 +13615,47 @@ export default class extends Controller {
     }, 3000)
   }
 
+  getProjectChannelId() {
+    const fromDataset = this.element?.dataset?.projectId
+    if (fromDataset && String(fromDataset).trim().length > 0) {
+      return String(fromDataset).trim()
+    }
+    return this.getProjectIdentifier()
+  }
+
+  setupSelectionStatesSubscription() {
+    if (this.selectionStatesSubscription) return
+    const projectChannelId = this.getProjectChannelId()
+    if (!projectChannelId) return
+
+    this.selectionStatesSubscription = consumer.subscriptions.create(
+      { channel: "ProjectChannel", project_id: projectChannelId },
+      {
+        connected: () => {
+          this.scheduleSelectionStatesRefresh(100)
+        },
+        received: (data) => {
+          if (!data || data.event !== 'selection_states_changed') return
+          const messageLoomFile = String(data.loom_file || '')
+          const currentLoomFile = String(this.getCurrentLoomFileForRequest() || '')
+          if (messageLoomFile && currentLoomFile && messageLoomFile !== currentLoomFile) return
+          this.scheduleSelectionStatesRefresh(100)
+        }
+      }
+    )
+  }
+
+  scheduleSelectionStatesRefresh(delayMs = 0) {
+    if (this.selectionStatesRefreshTimer) {
+      window.clearTimeout(this.selectionStatesRefreshTimer)
+      this.selectionStatesRefreshTimer = null
+    }
+    this.selectionStatesRefreshTimer = window.setTimeout(() => {
+      this.selectionStatesRefreshTimer = null
+      this.refreshSelectionStates()
+    }, Math.max(0, Number(delayMs) || 0))
+  }
+
   async refreshSelectionStates() {
     const renameInProgress = String(this.editingSavedSelectionId || '').trim().length > 0
     if (renameInProgress) {
@@ -14640,9 +14703,14 @@ export default class extends Controller {
     // In pick mode, keep the inspector fixed at the bottom-right corner.
     let tooltipLeft, tooltipTop
     if (this.interactionMode === 'pick') {
-      const margin = 16
-      tooltipLeft = viewportRight - estimatedTooltipWidth - margin
-      tooltipTop = viewportBottom - estimatedTooltipHeight - margin
+      if (this.lastTooltipPosition && Number.isFinite(Number(this.lastTooltipPosition.left)) && Number.isFinite(Number(this.lastTooltipPosition.top))) {
+        tooltipLeft = Number(this.lastTooltipPosition.left)
+        tooltipTop = Number(this.lastTooltipPosition.top)
+      } else {
+        const margin = 16
+        tooltipLeft = viewportRight - estimatedTooltipWidth - margin
+        tooltipTop = viewportBottom - estimatedTooltipHeight - margin
+      }
     } else if (isFixed && this.lastTooltipPosition) {
       // For fixed tooltips, use saved position if available (from manual drag)
       tooltipLeft = this.lastTooltipPosition.left

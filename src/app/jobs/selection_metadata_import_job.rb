@@ -31,6 +31,7 @@ class SelectionMetadataImportJob < ApplicationJob
     if loom_file.blank? || metadata_name.blank? || selected_file.blank?
       raise StandardError, 'Missing selection metadata parameters'
     end
+    broadcast_selection_states_changed(project, loom_file: loom_file, status: 'running', run_id: run.id)
 
     loom_path = project_dir + loom_file
     unless File.exist?(loom_path)
@@ -88,6 +89,7 @@ class SelectionMetadataImportJob < ApplicationJob
     )
     Basic.upd_project_step(project, step.id)
     project.broadcast(step.id) if project.respond_to?(:broadcast)
+    broadcast_selection_states_changed(project, loom_file: loom_file, status: 'completed', run_id: run.id)
   rescue StandardError => e
     Rails.logger.error("[SelectionMetadataImportJob] Run##{run_id} failed: #{e.class} - #{e.message}")
     if run
@@ -96,6 +98,26 @@ class SelectionMetadataImportJob < ApplicationJob
         Basic.upd_project_step(project, step.id)
         project.broadcast(step.id) if project.respond_to?(:broadcast)
       end
+      failure_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      broadcast_selection_states_changed(project, loom_file: failure_attrs['loom_file'], status: 'failed', run_id: run.id) if project
     end
+  end
+
+  private
+
+  def broadcast_selection_states_changed(project, loom_file:, status:, run_id:)
+    return unless project&.id
+
+    ActionCable.server.broadcast(
+      "project_#{project.id}",
+      {
+        event: 'selection_states_changed',
+        loom_file: loom_file.to_s,
+        status: status.to_s,
+        run_id: run_id.to_i
+      }
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[SelectionMetadataImportJob] selection websocket broadcast failed for run##{run_id}: #{e.class} - #{e.message}")
   end
 end

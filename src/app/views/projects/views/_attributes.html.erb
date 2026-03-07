@@ -33,192 +33,104 @@
                 
                 <% case attr['widget'] %>
                 <% when 'input_data' %>
-                  <%# Input data widget - for selecting loom files or other input datasets %>
-                  <% if attr['valid_types'] && attr['source_steps'] %>
-                    <%# Get available runs from source steps %>
+                  <% if attr['valid_types'].present? && attr['source_steps'].present? %>
                     <% source_step_ids = attr['source_steps'].map { |ssn| @h_steps.values.find { |s| s.name == ssn }&.id }.compact %>
-                    <% available_runs = @h_runs.values.select { |r| source_step_ids.include?(r.step_id) } %>
-                    
-                    <% if available_runs.any? %>
-                      <%# Get std_methods for runs %>
-                      <% std_method_ids = available_runs.map(&:std_method_id).compact.uniq %>
-                      <% h_std_methods = {} %>
-                      <% StdMethod.where(id: std_method_ids).each { |m| h_std_methods[m.id] = m } %>
-                      
-                      <%# For input_data with req_data_structure array, we need to store as JSON array in hidden field %>
-                      <%# Use a custom multi-select dropdown with enriched information %>
-                      <% min_items = attr['min_nber_items'] || 0 %>
-                      <% max_items = attr['max_nber_items'] %>
-                      <% is_multiple = attr['req_data_structure'] == 'array' && (max_items.nil? || max_items > 1) %>
-                      <% is_required = min_items && min_items > 0 %>
-                      
-                      <div class="input_data_widget relative" 
+                    <% source_runs = @h_runs.values.select { |r| source_step_ids.include?(r.step_id) } %>
+                    <% source_run_ids = source_runs.map(&:id) %>
+                    <% h_data_classes = {} %>
+                    <% DataClass.all.each { |dc| h_data_classes[dc.id] = dc.name } %>
+                    <% candidate_annots = Annot.where(project_id: @project.id)
+                                              .where(
+                                                "step_id IN (:step_ids) OR ori_step_id IN (:step_ids) OR run_id IN (:run_ids) OR ori_run_id IN (:run_ids)",
+                                                step_ids: source_step_ids.presence || [-1],
+                                                run_ids: source_run_ids.presence || [-1]
+                                              )
+                                              .order(:name, :id)
+                                              .to_a %>
+                    <% matching_annots = candidate_annots.select do |annot|
+                         next false if annot.data_class_ids.blank?
+                         annot_data_class_names = annot.data_class_ids.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact
+                         attr['valid_types'].all? do |or_group|
+                           Array(or_group).any? { |valid_type| annot_data_class_names.include?(valid_type) }
+                         end
+                       end %>
+                    <% min_items = attr['min_nber_items'] || 0 %>
+                    <% max_items = attr['max_nber_items'] %>
+                    <% is_multiple = attr['req_data_structure'] == 'array' && (max_items.nil? || max_items > 1) %>
+                    <% initial_hidden_value = if attr_val.present?
+                                               attr_val.is_a?(String) ? attr_val : attr_val.to_json
+                                             else
+                                               ''
+                                             end %>
+                    <% annot_run_ids = matching_annots.flat_map { |a| [a.run_id, a.ori_run_id, a.store_run_id] }.compact.uniq %>
+                    <% h_runs_by_id = Run.where(id: annot_run_ids).index_by(&:id) %>
+
+                    <% if matching_annots.any? %>
+                      <div class="input_data_widget relative"
                            data-controller="input-data-selector"
                            data-input-data-selector-attr-name-value="<%= attr_name %>"
                            data-input-data-selector-is-array-value="<%= attr['req_data_structure'] == 'array' ? 'true' : 'false' %>"
                            data-input-data-selector-min-items-value="<%= min_items %>"
                            data-input-data-selector-max-items-value="<%= max_items || '' %>"
                            data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>">
-                        <%# Custom dropdown button %>
-                        <button type="button" 
+                        <button type="button"
                                 data-input-data-selector-target="dropdownButton"
                                 data-action="click->input-data-selector#toggleDropdown"
                                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-left shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white flex items-center justify-between">
                           <span class="text-gray-500" data-input-data-selector-target="dropdownText">-- Select <%= attr['label'] || attr_name.humanize %> --</span>
                           <span class="ml-2 text-gray-400">▼</span>
                         </button>
-                        <%# Dropdown menu - positioned directly under the button with no gap %>
                         <div data-input-data-selector-target="dropdownMenu"
                              class="hidden absolute z-50 top-full left-0 w-full max-h-96 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg">
                           <div class="py-1">
-                            <% options_count = 0 %>
-                            <% available_runs.each do |run| %>
-                              <% step = @h_steps[run.step_id] %>
-                              <% next unless step %>
-                              
-                              <%# Build the proper structure for input_data attribute %>
-                              <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
-                              <% step_dir = project_dir + step.name %>
-                              <% output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir %>
-                              <% loom_file = output_dir + 'output.loom' %>
-                              
-                              <%# Skip if loom file doesn't exist %>
-                              <% next unless File.exist?(loom_file) %>
-                              
-                              <%# Get annotations for this run - try to find /matrix annotation %>
-                              <%# Search by dim=3 (EXPRESSION_MATRIX) instead of data_type_id, as matrix annotations may have different data_type_ids %>
-                              <% annots = Annot.where(run_id: run.id, dim: 3).all %>
-                              <% matrix_annot = annots.find { |a| a.name == '/matrix' } || annots.first %>
-                              
-                              <%# DEBUG: Log annotation search %>
-                              <% debug_info = [] %>
-                              <% debug_info << "Run ID: #{run.id}" %>
-                              <% debug_info << "Run status_id: #{run.status_id}" %>
-                              <% debug_info << "Project ID: #{@project.id}" %>
-                              <% debug_info << "Total annots for project: #{Annot.where(project_id: @project.id).count}" %>
-                              <% debug_info << "Annots found (run_id=#{run.id}, dim=3): #{annots.count}" %>
-                              <% annots.each_with_index { |a, i| debug_info << "  Annot[#{i}]: id=#{a.id}, name=#{a.name}, dim=#{a.dim}, data_type_id=#{a.data_type_id}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
-                              
-                              <%# If no annotation found, try searching by ori_run_id as well %>
-                              <% unless matrix_annot %>
-                                <% debug_info << "No annot found with run_id, trying ori_run_id" %>
-                                <% ori_annots = Annot.where(ori_run_id: run.id, dim: 3).all %>
-                                <% debug_info << "Annots found (ori_run_id=#{run.id}, dim=3): #{ori_annots.count}" %>
-                                <% ori_annots.each_with_index { |a, i| debug_info << "  OriAnnot[#{i}]: id=#{a.id}, name=#{a.name}, run_id=#{a.run_id}, ori_run_id=#{a.ori_run_id}, dim=#{a.dim}, data_type_id=#{a.data_type_id}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
-                                <% matrix_annot = ori_annots.find { |a| a.name == '/matrix' } || ori_annots.first %>
-                              <% end %>
-                              
-                              <%# If still no annotation found, try broader search %>
-                              <% unless matrix_annot %>
-                                <% debug_info << "No annot found with dim=3, trying broader search" %>
-                                <%# Try to find any annotation for this run %>
-                                <% any_annot = Annot.where(run_id: run.id).where("dim = 3 OR name LIKE '/matrix%' OR name = '/matrix'").first %>
-                                <% if any_annot %>
-                                  <% matrix_annot = any_annot %>
-                                  <% debug_info << "Fallback annot found: id=#{any_annot.id}, name=#{any_annot.name}, dim=#{any_annot.dim}, data_type_id=#{any_annot.data_type_id}" %>
-                                <% else %>
-                                  <% debug_info << "No fallback annot found" %>
-                                  <% all_annots_for_run = Annot.where(run_id: run.id).all %>
-                                  <% debug_info << "All annots for run (run_id=#{run.id}): #{all_annots_for_run.count}" %>
-                                  <% all_annots_for_run.each_with_index { |a, i| debug_info << "  AllAnnot[#{i}]: id=#{a.id}, name=#{a.name}, data_type_id=#{a.data_type_id}, dim=#{a.dim}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
-                                  <% all_ori_annots = Annot.where(ori_run_id: run.id).all %>
-                                  <% debug_info << "All annots for run (ori_run_id=#{run.id}): #{all_ori_annots.count}" %>
-                                  <% all_ori_annots.each_with_index { |a, i| debug_info << "  AllOriAnnot[#{i}]: id=#{a.id}, name=#{a.name}, run_id=#{a.run_id}, ori_run_id=#{a.ori_run_id}, data_type_id=#{a.data_type_id}, dim=#{a.dim}, nber_rows=#{a.nber_rows}, nber_cols=#{a.nber_cols}" } %>
-                                <% end %>
-                              <% else %>
-                                <% debug_info << "matrix_annot found: id=#{matrix_annot.id}, name=#{matrix_annot.name}, dim=#{matrix_annot.dim}, data_type_id=#{matrix_annot.data_type_id}" %>
-                              <% end %>
-                              
-                              <%# Get matrix dimensions from annot object %>
-                              <% matrix_size = nil %>
-                              <% if matrix_annot %>
-                                <% nber_rows = matrix_annot.nber_rows %>
-                                <% nber_cols = matrix_annot.nber_cols %>
-                                <% debug_info << "matrix_annot.nber_rows=#{nber_rows.inspect}, matrix_annot.nber_cols=#{nber_cols.inspect}" %>
-                                <% if nber_rows.present? && nber_cols.present? && nber_rows.to_i > 0 && nber_cols.to_i > 0 %>
-                                  <% matrix_size = "#{nber_cols.to_i} cells × #{nber_rows.to_i} genes" %>
-                                  <% debug_info << "matrix_size set to: #{matrix_size}" %>
-                                <% else %>
-                                  <% debug_info << "Dimensions not valid: rows=#{nber_rows.inspect}, cols=#{nber_cols.inspect}" %>
-                                <% end %>
-                              <% else %>
-                                <% debug_info << "No matrix_annot object available" %>
-                              <% end %>
-                              
-                              <%# For display purposes, handle the fallback case %>
-                              <% unless matrix_annot %>
-                                <% matrix_annot_name = '/matrix' %>
-                              <% else %>
-                                <% matrix_annot_name = matrix_annot.respond_to?(:name) ? matrix_annot.name : '/matrix' %>
-                              <% end %>
-                              
-                              <%# Get method name %>
-                              <% method_name = (run.std_method_id && h_std_methods[run.std_method_id]) ? h_std_methods[run.std_method_id].name : 'N/A' %>
-                              
-                              <%# Get step/run number %>
-                              <% step_run_info = step.name.humanize %>
-                              <% if step.multiple_runs %>
-                                <% step_run_info += " ##{run.num || run.id}" %>
-                              <% end %>
-                              
-                              <% relative_path = loom_file.to_s.gsub(project_dir.to_s + '/', '') %>
-                              <%# Build data hash - use annot_id only if annotation exists %>
-                              <% if matrix_annot && matrix_annot.respond_to?(:id) && matrix_annot.id %>
-                                <% data_hash = { run_id: run.id, annot_id: matrix_annot.id, output_filename: relative_path, output_dataset: matrix_annot_name, output_attr_name: 'output_matrix' } %>
-                              <% else %>
-                                <%# Fallback: use run_id only, ASAP will find the matrix automatically %>
-                                <% data_hash = { run_id: run.id, output_filename: relative_path, output_dataset: matrix_annot_name, output_attr_name: 'output_matrix' } %>
-                              <% end %>
+                            <% matching_annots.each do |annot| %>
+                              <% run_id = annot.run_id || annot.ori_run_id || annot.store_run_id %>
+                              <% run = run_id ? (@h_runs[run_id] || h_runs_by_id[run_id]) : nil %>
+                              <% step = run ? @h_steps[run.step_id] : @h_steps[annot.step_id] || @h_steps[annot.ori_step_id] %>
+                              <% categories = Basic.safe_parse_json(annot.categories_json, {}) %>
+                              <% data_hash = {
+                                   run_id: run_id,
+                                   annot_id: annot.id,
+                                   output_filename: annot.filepath,
+                                   output_dataset: annot.name,
+                                   output_attr_name: annot.attr_name,
+                                   categories: categories
+                                 } %>
                               <% data_value = data_hash.to_json %>
-                              <% options_count += 1 %>
-                              
-                              <label class="flex items-start px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0" 
-                                     data-run-id="<%= run.id %>" 
-                                     data-annot-id="<%= matrix_annot && matrix_annot.respond_to?(:id) ? matrix_annot.id : '' %>"
+                              <% display_label = [step&.label.presence || step&.name&.humanize, annot.display_name].compact.join(' - ') %>
+                              <label class="flex items-start px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                     data-run-id="<%= run_id %>"
+                                     data-annot-id="<%= annot.id %>"
                                      data-data-value="<%= data_value.to_json %>">
-                                <input type="<%= is_multiple ? 'checkbox' : 'radio' %>" 
-                                       name="attrs_<%= attr_name %>_options" 
+                                <input type="<%= is_multiple ? 'checkbox' : 'radio' %>"
+                                       name="attrs_<%= attr_name %>_options"
                                        value="<%= data_value %>"
                                        class="mt-1 mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                                        data-input-data-selector-target="option"
                                        data-action="change->input-data-selector#optionChanged">
                                 <div class="flex-1">
-                                  <div class="font-medium text-gray-900"><%= step_run_info %></div>
+                                  <div class="font-medium text-gray-900"><%= display_label %></div>
                                   <div class="text-sm text-gray-600 mt-1">
-                                    <span class="inline-block mr-3"><strong>Method:</strong> <%= method_name %></span>
-                                    <span class="inline-block mr-3"><strong>Matrix:</strong> <%= matrix_annot_name %><% if matrix_size.present? %> (<%= matrix_size %>)<% end %></span>
-                                    <span class="inline-block text-gray-500 text-xs"><%= relative_path %></span>
-                                  </div>
-                                  <%# DEBUG: Show debug information %>
-                                  <!--<div class="text-xs text-red-600 mt-1 font-mono" style="background-color: #fee; padding: 4px; border: 1px solid #fcc;">
-                                    <strong>DEBUG:</strong><br>
-                                    <% debug_info.each do |info| %>
-                                      <% info %><br>
+                                    <span class="inline-block mr-3"><strong>Dataset:</strong> <%= annot.name %></span>
+                                    <% if annot.nber_cats.to_i > 0 %>
+                                      <span class="inline-block mr-3"><strong>Categories:</strong> <%= annot.nber_cats %></span>
+                                    <% end %>
+                                    <% if annot.filepath.present? %>
+                                      <span class="inline-block text-gray-500 text-xs"><%= annot.filepath %></span>
                                     <% end %>
                                   </div>
-                                  -->
                                 </div>
                               </label>
                             <% end %>
-                            <% if options_count == 0 %>
-                              <div class="px-4 py-3 text-sm text-gray-500 text-center">
-                                No datasets available
-                              </div>
-                            <% end %>
                           </div>
                         </div>
-                        
-                        <%# Selected items display - shown after dropdown when closed %>
+
                         <div data-input-data-selector-target="selectedDiv" class="mt-2 space-y-1 hidden"></div>
-                        
-                        <%# Hidden field to store the actual value (array if req_data_structure is array) %>
-                        <%= hidden_field_tag form_attr_name, '', { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
-                        
-                        <%# Validation message - only shows errors, not count %>
+                        <%= hidden_field_tag form_attr_name, initial_hidden_value, { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
                         <div data-input-data-selector-target="validationDiv" class="mt-1 text-xs"></div>
                       </div>
                     <% else %>
-                      <p class="text-sm text-red-600">No available datasets found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>
+                      <p class="text-sm text-red-600">No matching metadata found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>
                     <% end %>
                   <% else %>
                     <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 

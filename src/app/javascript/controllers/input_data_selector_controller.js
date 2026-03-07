@@ -32,6 +32,8 @@ export default class extends Controller {
     this.boundCloseDropdown = this.closeDropdown.bind(this)
     document.addEventListener('click', this.boundCloseDropdown, true)
     
+    this.restoreSelectionFromHiddenField()
+    this.updateSelectedItems()
     this.validateSelection()
   }
 
@@ -156,6 +158,8 @@ export default class extends Controller {
     } else {
       this.hiddenFieldTarget.value = selectedValues.length > 0 ? JSON.stringify(selectedValues[0]) : ''
     }
+
+    this.updateDependentCategorySelect(selectedValues)
     
     // Update display
     if (selectedValues.length > 0) {
@@ -227,5 +231,117 @@ export default class extends Controller {
     this.element.dispatchEvent(event)
     
     return isValid
+  }
+
+  restoreSelectionFromHiddenField() {
+    if (!this.hasHiddenFieldTarget || !this.hiddenFieldTarget.value) {
+      return
+    }
+
+    let parsedValue = null
+    try {
+      parsedValue = JSON.parse(this.hiddenFieldTarget.value)
+    } catch (error) {
+      return
+    }
+
+    const selectedItems = Array.isArray(parsedValue) ? parsedValue : [parsedValue]
+    if (selectedItems.length === 0) {
+      return
+    }
+
+    this.optionTargets.forEach((optionInput) => {
+      let optionValue = null
+      try {
+        optionValue = JSON.parse(optionInput.value)
+      } catch (error) {
+        optionValue = null
+      }
+
+      if (!optionValue) {
+        optionInput.checked = false
+        return
+      }
+
+      optionInput.checked = selectedItems.some((selectedItem) => this.valuesMatch(selectedItem, optionValue))
+    })
+
+    if (!this.isMultipleValue) {
+      let foundChecked = false
+      this.optionTargets.forEach((optionInput) => {
+        if (optionInput.checked && !foundChecked) {
+          foundChecked = true
+        } else if (optionInput.checked) {
+          optionInput.checked = false
+        }
+      })
+    }
+  }
+
+  valuesMatch(a, b) {
+    if (!a || !b) {
+      return false
+    }
+
+    if (a.annot_id && b.annot_id) {
+      return String(a.annot_id) === String(b.annot_id)
+    }
+
+    if (a.run_id && b.run_id && a.output_dataset && b.output_dataset) {
+      return String(a.run_id) === String(b.run_id) && String(a.output_dataset) === String(b.output_dataset)
+    }
+
+    return false
+  }
+
+  updateDependentCategorySelect(selectedValues) {
+    const dependentSelect = document.getElementById(`attrs_${this.attrNameValue}_sel`)
+    if (!dependentSelect) {
+      return
+    }
+    const currentValue = dependentSelect.value
+
+    const selected = selectedValues.length > 0 ? selectedValues[0] : null
+    const categories = selected && selected.categories && typeof selected.categories === 'object'
+      ? selected.categories
+      : null
+
+    dependentSelect.innerHTML = ''
+
+    if (!categories) {
+      const option = document.createElement('option')
+      option.value = ''
+      option.textContent = 'Select a category'
+      dependentSelect.appendChild(option)
+      dependentSelect.value = ''
+      dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      return
+    }
+
+    const categoryNames = Object.keys(categories).filter((name) => name !== '').sort()
+    if (categoryNames.length === 0) {
+      const option = document.createElement('option')
+      option.value = ''
+      option.textContent = 'No category available'
+      dependentSelect.appendChild(option)
+      dependentSelect.value = ''
+      dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      return
+    }
+
+    categoryNames.forEach((categoryName, index) => {
+      const count = categories[categoryName]
+      const option = document.createElement('option')
+      option.value = categoryName
+      option.textContent = Number.isFinite(Number(count))
+        ? `${categoryName} (${count})`
+        : categoryName
+      if ((currentValue && categoryName === currentValue) || (!currentValue && index === 0)) {
+        option.selected = true
+      }
+      dependentSelect.appendChild(option)
+    })
+
+    dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
   }
 }

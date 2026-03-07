@@ -14,7 +14,7 @@ module AdminAuthorization
 
   def authorize_admin
     unless admin?
-      redirect_to root_path, alert: 'Access denied'
+      redirect_to unauthorized_path
     end
   end
 end 

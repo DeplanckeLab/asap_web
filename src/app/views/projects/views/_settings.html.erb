@@ -1,3 +1,4 @@
+<% if editable?(@project) %>
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
   <div class="mb-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
@@ -371,4 +372,70 @@ document.addEventListener('DOMContentLoaded', function() {
     return re.test(email);
   }
 });
+<% end %>
+
+<% else %>
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
+    <p class="text-gray-600">Read-only project settings</p>
+  </div>
+
+  <div class="space-y-6">
+    <div class="bg-gray-50 rounded-lg p-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Privacy Settings</h3>
+      <div class="space-y-2 text-sm text-gray-700">
+        <div>
+          <span class="font-medium">Public access:</span>
+          <span><%= @project.is_public? ? 'Enabled' : 'Disabled' %></span>
+        </div>
+        <% if @project.is_public? %>
+          <div>
+            <span class="font-medium">Public ID:</span>
+            <span>ASAP<%= @project.public_id %></span>
+          </div>
+          <div>
+            <span class="font-medium">Published on:</span>
+            <span><%= @project.public_at&.strftime("%B %d, %Y") || 'N/A' %></span>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 rounded-lg p-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">User Rights</h3>
+      <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+        <p class="text-sm text-blue-800">You can view settings but cannot modify them with your current permissions.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">View</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Analyze</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Export</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <tr class="bg-blue-50">
+              <td class="px-4 py-3 text-sm font-medium text-gray-900">Owner</td>
+              <td class="px-4 py-3 text-center"><input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600"></td>
+              <td class="px-4 py-3 text-center"><input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600"></td>
+              <td class="px-4 py-3 text-center"><input type="checkbox" checked disabled class="rounded border-gray-300 text-blue-600"></td>
+            </tr>
+            <% (@shares || []).each do |share| %>
+              <tr>
+                <td class="px-4 py-3 text-sm text-gray-900"><%= share.user&.email || share.email %></td>
+                <td class="px-4 py-3 text-center"><input type="checkbox" <%= 'checked' if share.view_perm? %> disabled class="rounded border-gray-300 text-blue-600"></td>
+                <td class="px-4 py-3 text-center"><input type="checkbox" <%= 'checked' if share.analyze_perm? %> disabled class="rounded border-gray-300 text-blue-600"></td>
+                <td class="px-4 py-3 text-center"><input type="checkbox" <%= 'checked' if share.export_perm? %> disabled class="rounded border-gray-300 text-blue-600"></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 <% end %>

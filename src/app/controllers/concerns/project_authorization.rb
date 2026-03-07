@@ -1,6 +1,18 @@
 module ProjectAuthorization
   extend ActiveSupport::Concern
 
+  # Matches original owner/admin/sandbox/IP access semantics.
+  def authorized?(project = @project)
+    return false unless project
+
+    return true if admin?
+    return true if project.sandbox? && session[:sandbox] == project.key
+    return true if current_user && current_user.id == project.user_id
+    return true if ip_restricted_access?(project)
+
+    false
+  end
+
   # Check if user can read/view a project
   # Allows: admins, owners, public projects, sandbox projects (via session), shared projects, IP-restricted access
   def readable?(project)
@@ -64,24 +76,7 @@ module ProjectAuthorization
 
   # Check if user can clone/duplicate a project
   def clonable?(project)
-    return false unless project
-
-    return true if admin?
-    return true if ip_restricted_access?(project)
-
-    if project.sandbox? && session[:sandbox] == project.key
-      return true
-    end
-
-    return true if project.public?
-    return true if current_user && project.user_id == current_user.id
-
-    if current_user
-      share = project.shares.find_by(user_id: current_user.id)
-      return true if share&.clone_perm?
-    end
-
-    false
+    exportable?(project)
   end
 
   # Check if user can export a specific item (run, etc.)
@@ -97,27 +92,41 @@ module ProjectAuthorization
     false
   end
 
-  # Check if user can edit a project
-  def editable?(project)
+  # Check if user can analyze a project
+  def analyzable?(project)
     return false unless project
 
     return true if admin?
-
-    # Sandbox projects with session key
-    if project.sandbox? && session[:sandbox] == project.key
-      return true
-    end
-
-    # Owner access
+    return true if project.sandbox? && session[:sandbox] == project.key
     return true if current_user && project.user_id == current_user.id
 
-    # Shared project with analyze permission
     if current_user
       share = project.shares.find_by(user_id: current_user.id)
       return true if share&.analyze_perm?
     end
 
     false
+  end
+
+  # Check if user can analyze an item in a project
+  def analyzable_item?(project, item)
+    return false unless project && item
+    return true if admin? || analyzable?(project)
+    return false unless analyzable?(project) && current_user
+
+    item.respond_to?(:user_id) && item.user_id == current_user.id
+  end
+
+  # Check if user can edit a project
+  def editable?(project)
+    return false unless project
+
+    owner_or_admin?(project)
+  end
+
+  # Check if user can download project data
+  def downloadable?(project)
+    exportable?(project)
   end
 
   # Check if user can delete a project (only owners and admins)
@@ -149,6 +158,12 @@ module ProjectAuthorization
     current_user && object.respond_to?(:user_id) && object.user_id == current_user.id
   end
 
+  # Check if current user is project owner or admin
+  def owner_or_admin?(project)
+    return false unless project
+    admin? || owner?(project)
+  end
+
   # Check if project is read-only for current user
   def read_only?(project)
     return true unless project
@@ -176,12 +191,15 @@ module ProjectAuthorization
 
   # Check IP-restricted access (if implemented)
   def ip_restricted_access?(project)
-    # This would check if the request IP matches an allowed IP for the project
-    # For now, return false - can be implemented later if needed
-    # Example: Ip.joins('join ips_users on (ips.id = ip_id)')
-    #   .where(:ip => request.remote_ip, :key => params[:ip_restricted_access_key], 
-    #          :ips_users => {:user_id => [project.user_id, 1]}).count > 0
-    false
+    return false unless request && project
+
+    Ip.joins('join ips_users on (ips.id = ip_id)')
+      .where(
+        ip: request.remote_ip,
+        key: params[:ip_restricted_access_key],
+        ips_users: { user_id: [project.user_id, 1] }
+      )
+      .exists?
   end
 end
 

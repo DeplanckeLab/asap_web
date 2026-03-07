@@ -2,6 +2,10 @@ class HomeController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
   before_action :authenticate_user!, only: [:contact, :contact_submit, :rate, :rate_submit]
 
+  def unauthorized
+    render 'shared/unauthorized'
+  end
+
   def welcome
   end
 

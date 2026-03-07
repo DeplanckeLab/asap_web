@@ -11,6 +11,7 @@ class User < ApplicationRecord
   has_many :shares, dependent: :destroy
   has_many :checkpoints, dependent: :destroy
   has_many :ratings, dependent: :destroy
+  has_and_belongs_to_many :ips
 
   # Validations
   validates :email, presence: true, uniqueness: true

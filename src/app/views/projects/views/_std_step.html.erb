@@ -57,7 +57,7 @@
                 <% end %>
               <% end %>
               <!-- Compare Clusters Button -->
-              <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
+              <% if analyzable?(@project) && @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
                 <button type="button"
                         class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
@@ -66,7 +66,7 @@
                 </button>
               <% end %>
               <!-- New Run Button -->
-              <% if @step.has_std_form && @step.multiple_runs %>
+              <% if analyzable?(@project) && @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 
                         class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
@@ -95,7 +95,7 @@
                 <% end %>
               <% end %>
               <!-- Restart Button -->
-              <% if @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
+              <% if editable?(@project) && @project_step && @step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4) %>
                 <button type="button" 
                         class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
                         data-controller="restart-step"
@@ -153,7 +153,7 @@
                 <% end %>
               <% end %>
               <!-- Compare Clusters Button -->
-              <% if @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
+              <% if analyzable?(@project) && @step.name == 'clustering' && @runs&.select { |r| r.status_id == 3 }&.size.to_i >= 2 %>
                 <button type="button"
                         class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
@@ -162,7 +162,7 @@
                 </button>
               <% end %>
               <!-- New Run Button -->
-              <% if @step.has_std_form && @step.multiple_runs %>
+              <% if analyzable?(@project) && @step.has_std_form && @step.multiple_runs %>
                 <button type="button" 
                         class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"

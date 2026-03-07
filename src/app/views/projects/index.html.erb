@@ -285,8 +285,12 @@
             <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
               <div class="flex space-x-2">
                 <%= link_to "View", project_path(project), class: "flex-1 text-center px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none" %>
-                <% if project.is_public? %>
-                  <%= link_to "Clone", "#", class: "flex-1 text-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-700 focus:outline-none" %>
+                <% if clonable?(project) %>
+                  <%= button_to "Clone",
+                      clone_project_path(project),
+                      method: :post,
+                      class: "flex-1 text-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-700 focus:outline-none bg-transparent border-0 cursor-pointer",
+                      form: { class: "flex-1" } %>
                 <% end %>
               </div>
             </div>

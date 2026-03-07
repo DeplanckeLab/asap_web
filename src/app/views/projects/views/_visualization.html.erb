@@ -97,6 +97,8 @@ has_visualization_data = @default_loom_file.present? && (
 
 <%
 default_embedding_id = default_embedding_record&.id
+can_edit_project = editable?(@project)
+can_analyze_project = analyzable?(@project)
 
 possible_names = []
 possible_names << default_embedding_record.display_name if default_embedding_record&.display_name.present?
@@ -147,12 +149,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= categorical_count %>
             </span>
-            <button type="button" onclick="openAddMetadataModal()"
-                    style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
-                    onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
-                    title="Add metadata">
-              <i class="fas fa-plus" style="font-size: 14px;"></i>
-            </button>
+            <% if can_edit_project %>
+              <button type="button" onclick="openAddMetadataModal()"
+                      style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                      onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
+                      title="Add metadata">
+                <i class="fas fa-plus" style="font-size: 14px;"></i>
+              </button>
+            <% end %>
           </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
@@ -488,12 +492,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= continuous_count %>
             </span>
-            <button type="button" onclick="openAddMetadataModal()"
-                    style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
-                    onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
-                    title="Add metadata">
-              <i class="fas fa-plus" style="font-size: 14px;"></i>
-            </button>
+            <% if can_edit_project %>
+              <button type="button" onclick="openAddMetadataModal()"
+                      style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                      onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
+                      title="Add metadata">
+                <i class="fas fa-plus" style="font-size: 14px;"></i>
+              </button>
+            <% end %>
           </div>
         </div>
         <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
@@ -1210,13 +1216,15 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   General
                 </div>
                 <div class="save-dropdown-list">
-                  <button type="button"
-                          class="save-dropdown-item"
-                          data-save-type="checkpoint"
-                          data-plot-target="main"
-                          data-action="click->visualization#handleSaveOption">
-                    Save checkpoint
-                  </button>
+                  <% if can_edit_project %>
+                    <button type="button"
+                            class="save-dropdown-item"
+                            data-save-type="checkpoint"
+                            data-plot-target="main"
+                            data-action="click->visualization#handleSaveOption">
+                      Save checkpoint
+                    </button>
+                  <% end %>
                 </div>
               </div>
               <div class="save-dropdown-section">
@@ -1598,14 +1606,16 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               <!-- Action buttons (icons only) -->
               <div style="display: flex; gap: 8px;">
                 <!-- Save Selection Button (Icon Only) -->
-                <button id="save-selection-btn"
-                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border-radius:6px;border:none;cursor:pointer;transition:background-color 0.2s;"
-                        title="Save Selection"
-                        data-action="click->visualization#saveSelection"
-                        onmouseover="this.style.backgroundColor='#1d4ed8'"
-                        onmouseout="this.style.backgroundColor='#2563eb'">
-                  <i class="fas fa-save" style="font-size: 14px;"></i>
-                </button>
+                <% if can_analyze_project %>
+                  <button id="save-selection-btn"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border-radius:6px;border:none;cursor:pointer;transition:background-color 0.2s;"
+                          title="Save Selection"
+                          data-action="click->visualization#saveSelection"
+                          onmouseover="this.style.backgroundColor='#1d4ed8'"
+                          onmouseout="this.style.backgroundColor='#2563eb'">
+                    <i class="fas fa-save" style="font-size: 14px;"></i>
+                  </button>
+                <% end %>
                 
                 <!-- Cancel Selection Button (Icon Only) -->
                 <button id="cancel-selection-btn"
@@ -1681,30 +1691,32 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                       </button>
                     </div>
                   </div>
-                  <button id="de-selection-btn"
-                          type="button"
-                          style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
-                          title="Differential expression"
-                          aria-label="Differential expression"
-                          data-action="click->visualization#openDeSelectionModal">
-                    DE
-                  </button>
-                  <button id="compose-selection-btn"
-                          type="button"
-                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
-                          title="Compose selection"
-                          aria-label="Compose selection"
-                          data-action="click->visualization#openComposeSelectionModal">
-                    <%= image_tag 'compose_icon.svg', alt: '', 'aria-hidden': true, style: 'width:14px;height:14px;display:block;' %>
-                  </button>
-                  <button id="delete-all-saved-selections-btn"
-                          type="button"
-                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
-                          title="Delete all saved cell sets"
-                          aria-label="Delete all saved cell sets"
-                          data-action="click->visualization#deleteAllSavedSelections">
-                    <i class="fas fa-trash" style="font-size:12px;"></i>
-                  </button>
+                  <% if can_analyze_project %>
+                    <button id="de-selection-btn"
+                            type="button"
+                            style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
+                            title="Differential expression"
+                            aria-label="Differential expression"
+                            data-action="click->visualization#openDeSelectionModal">
+                      DE
+                    </button>
+                    <button id="compose-selection-btn"
+                            type="button"
+                            style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"
+                            title="Compose selection"
+                            aria-label="Compose selection"
+                            data-action="click->visualization#openComposeSelectionModal">
+                      <%= image_tag 'compose_icon.svg', alt: '', 'aria-hidden': true, style: 'width:14px;height:14px;display:block;' %>
+                    </button>
+                    <button id="delete-all-saved-selections-btn"
+                            type="button"
+                            style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
+                            title="Delete all saved cell sets"
+                            aria-label="Delete all saved cell sets"
+                            data-action="click->visualization#deleteAllSavedSelections">
+                      <i class="fas fa-trash" style="font-size:12px;"></i>
+                    </button>
+                  <% end %>
                 </div>
               </div>
               <div id="de-run-feedback" style="display:none;font-size:12px;color:#1d4ed8;margin:0 0 8px 0;"></div>
@@ -1762,7 +1774,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           <% icon_class = collection[:type_icon].to_s %>
                           <% icon_color = collection[:type_icon_color].to_s.presence || '#6b7280' %>
                           <% type_label = collection[:type_label].to_s.presence || 'Collection type' %>
-                          <% if renameable_collection %>
+                          <% if can_edit_project && renameable_collection %>
                             <div style="display:flex;align-items:center;gap:4px;min-width:0;">
                               <span title="<%= type_label %>"
                                     aria-label="<%= type_label %>"
@@ -1806,7 +1818,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           </div>
                         </div>
                         <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
-                          <% if collection[:custom] %>
+                          <% if can_edit_project && collection[:custom] %>
                             <button type="button"
                                     data-gene-set-delete-btn="true"
                                     data-collection-id="<%= collection[:id] %>"

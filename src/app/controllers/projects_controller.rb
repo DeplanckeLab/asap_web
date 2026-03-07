@@ -9,6 +9,8 @@ class ProjectsController < ApplicationController
   include ComplianceHelpers
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step cluster_comparison filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
@@ -89,6 +91,7 @@ class ProjectsController < ApplicationController
       with_request_profile('projects#show', view: params[:view]) do
         @project.ensure_project_steps
         @view_type = resolve_project_view_type(params[:view])
+        return unless authorize_requested_view_access!(@view_type)
         load_view_context_for(@view_type)
         respond_to do |format|
           format.html
@@ -202,7 +205,9 @@ class ProjectsController < ApplicationController
     end
     
     # Set default view type: use visualization if we have visualization data, otherwise use summary
-    @view_type = params[:view] || (has_visualization_data ? 'visualization' : 'summary')
+    default_view = has_visualization_data ? 'visualization' : 'summary'
+    @view_type = resolve_project_view_type(params[:view].presence || default_view)
+    return unless authorize_requested_view_access!(@view_type)
     
     load_gene_set_collections if @view_type == 'visualization'
 
@@ -5602,6 +5607,34 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def authorize_project_read_access
+      return if readable?(@project)
+
+      handle_project_unauthorized_access
+    end
+
+    def authorize_project_edit_access
+      return if editable?(@project)
+
+      handle_project_unauthorized_access
+    end
+
+    def handle_project_unauthorized_access
+      respond_to do |format|
+        format.html { redirect_to unauthorized_path }
+        format.json { render json: { error: 'Not authorized' }, status: :forbidden }
+        format.any { render plain: 'Not authorized', status: :forbidden }
+      end
+    end
+
+    def authorize_requested_view_access!(view_type)
+      return true unless view_type == 'settings'
+      return true if editable?(@project) || analyzable?(@project) || exportable?(@project)
+
+      handle_project_unauthorized_access
+      false
+    end
+
     def selective_project_view_loading_enabled?
       ENV.fetch('PROJECT_SELECTIVE_VIEW_LOADING', '1') != '0'
     end

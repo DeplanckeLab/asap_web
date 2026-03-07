@@ -21,7 +21,7 @@ class CheckpointsController < ApplicationController
 
   def create
     return if performed?
-    return unless ensure_editable!
+    return unless ensure_analyzable!
 
     checkpoint = @project.checkpoints.new
     checkpoint.user = current_user
@@ -48,7 +48,7 @@ class CheckpointsController < ApplicationController
 
   def update
     return if performed?
-    return unless ensure_editable!
+    return unless ensure_analyzable!
 
     if checkpoint_title.present?
       @checkpoint.title = checkpoint_title
@@ -104,7 +104,7 @@ class CheckpointsController < ApplicationController
 
   def destroy
     return if performed?
-    return unless ensure_editable!
+    return unless ensure_analyzable!
 
     @checkpoint.destroy
     render json: { success: true }
@@ -176,8 +176,8 @@ class CheckpointsController < ApplicationController
     false
   end
 
-  def ensure_editable!
-    return true if @project && editable?(@project)
+  def ensure_analyzable!
+    return true if @project && analyzable?(@project)
 
     render json: { error: 'Not authorized' }, status: :forbidden
     false

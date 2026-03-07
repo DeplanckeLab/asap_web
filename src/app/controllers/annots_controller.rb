@@ -270,7 +270,7 @@ class AnnotsController < ApplicationController
   def set_annot
     @annot = Annot.find(params[:id])
     unless readable?(@annot.project)
-      redirect_to projects_path, alert: 'Not authorized'
+      redirect_to unauthorized_path
     end
   end
 

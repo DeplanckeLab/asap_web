@@ -182,6 +182,7 @@ Rails.application.routes.draw do
   # Defines the root path route ("/")
   # root "posts#index"
 
+  get '/unauthorized', to: 'home#unauthorized', as: :unauthorized
   root "home#welcome"
 
 end

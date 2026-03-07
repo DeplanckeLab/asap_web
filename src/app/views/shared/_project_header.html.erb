@@ -365,10 +365,12 @@
             <% end %>
             
             <!-- Settings -->
-            <%= link_to project_path(@project, view: 'settings'), 
-                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'settings' ? 'bg-gray-100 font-medium' : ''}" do %>
-              <i class="fas fa-cog text-lg mr-3"></i>
-              Settings
+            <% if editable?(@project) %>
+              <%= link_to project_path(@project, view: 'settings'), 
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'settings' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-cog text-lg mr-3"></i>
+                Settings
+              <% end %>
             <% end %>
             
             <!-- Compliance -->
@@ -467,8 +469,8 @@
             class: "p-2 rounded-lg #{@view_type == 'summary' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Summary" do %><i class="fas fa-info-circle text-lg"></i><% end %><%= link_to project_path(@project, view: 'visualization'), 
             class: "p-2 rounded-lg #{@view_type == 'visualization' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Visualization" do %><i class="fas fa-chart-line text-lg"></i><% end %><%= link_to project_path(@project, view: 'analysis'), 
             class: "p-2 rounded-lg #{@view_type == 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Analysis" do %><i class="fas fa-sitemap text-lg"></i><% end %><%= link_to project_path(@project, view: 'data'), 
-            class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><%= link_to project_path(@project, view: 'settings'), 
-            class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %><% if @project.compliance_schemas.any? %><%= link_to project_path(@project, view: 'compliance'),
+            class: "p-2 rounded-lg #{@view_type == 'data' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Data" do %><i class="fas fa-database text-lg"></i><% end %><% if editable?(@project) %><%= link_to project_path(@project, view: 'settings'), 
+            class: "p-2 rounded-lg #{@view_type == 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Settings" do %><i class="fas fa-cog text-lg"></i><% end %><% end %><% if @project.compliance_schemas.any? %><%= link_to project_path(@project, view: 'compliance'),
             class: "p-2 rounded-lg #{@view_type == 'compliance' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}", title: "Compliance" do %><i class="fas fa-check-circle text-lg"></i><% end %><% end %><% if clonable?(@project) %><%= button_to clone_project_path(@project), 
             method: :post,
             class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",

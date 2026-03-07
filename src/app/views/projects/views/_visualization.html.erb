@@ -91,6 +91,8 @@ has_visualization_data = @default_loom_file.present? && (
       </div>
     </div>
   </div>
+  <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
+  <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
 <% else %>
 
 <%
@@ -1746,16 +1748,64 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                            data-collection-id="<%= collection[:id] %>"
                            data-collection-label="<%= collection[:label] %>"
                            data-collection-name="<%= collection[:label].to_s.downcase %>"
-                           style="width:100%;display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;">
+                           data-collection-count="<%= collection[:nb_items] %>"
+                           data-collection-custom="<%= collection[:custom] ? 'true' : 'false' %>"
+                           data-collection-import-pending="<%= collection[:import_pending] ? 'true' : 'false' %>"
+                           data-collection-type-key="<%= collection[:type_key].to_s %>"
+                           data-collection-type-label="<%= collection[:type_label].to_s %>"
+                           data-collection-type-icon="<%= collection[:type_icon].to_s %>"
+                           data-collection-type-icon-color="<%= collection[:type_icon_color].to_s %>"
+                           style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
                         <div style="flex:1;min-width:0;">
-                          <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
-                            <%= collection[:label] %>
-                          </div>
+                          <% collection_id = collection[:id].to_s %>
+                          <% renameable_collection = collection[:custom] && collection_id.start_with?('local_collection:') %>
+                          <% icon_class = collection[:type_icon].to_s %>
+                          <% icon_color = collection[:type_icon_color].to_s.presence || '#6b7280' %>
+                          <% type_label = collection[:type_label].to_s.presence || 'Collection type' %>
+                          <% if renameable_collection %>
+                            <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+                              <span title="<%= type_label %>"
+                                    aria-label="<%= type_label %>"
+                                    style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:<%= icon_color %>;flex:0 0 auto;">
+                                <% if icon_class == 'DE' %>
+                                  <span style="font-size:10px;font-weight:700;line-height:1;">DE</span>
+                                <% else %>
+                                  <i class="<%= icon_class %>" style="font-size:10px;"></i>
+                                <% end %>
+                              </span>
+                              <span style="display:block;max-width:calc(100% - 40px);min-width:0;font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
+                                <%= collection[:label] %>
+                              </span>
+                              <button type="button"
+                                      data-gene-set-collection-rename-trigger="true"
+                                      data-collection-id="<%= collection[:id] %>"
+                                      style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#374151;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;"
+                                      title="Rename imported gene set collection"
+                                      aria-label="Rename imported gene set collection">
+                                <i class="fas fa-pen" style="font-size:9px;"></i>
+                              </button>
+                            </div>
+                          <% else %>
+                            <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+                              <span title="<%= type_label %>"
+                                    aria-label="<%= type_label %>"
+                                    style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:<%= icon_color %>;flex:0 0 auto;">
+                                <% if icon_class == 'DE' %>
+                                  <span style="font-size:10px;font-weight:700;line-height:1;">DE</span>
+                                <% else %>
+                                  <i class="<%= icon_class %>" style="font-size:10px;"></i>
+                                <% end %>
+                              </span>
+                              <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;min-width:0;">
+                                <%= collection[:label] %>
+                              </div>
+                            </div>
+                          <% end %>
                           <div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
-                            <%= collection[:nb_items] %> gene sets
+                            <%= collection[:nb_items] %> <%= collection[:nb_items].to_i == 1 ? 'gene set' : 'gene sets' %>
                           </div>
                         </div>
-                        <div style="margin-left:8px;display:flex;align-items:flex-start;justify-content:flex-end;min-width:24px;">
+                        <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
                           <% if collection[:custom] %>
                             <button type="button"
                                     data-gene-set-delete-btn="true"
@@ -1766,6 +1816,15 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <i class="fas fa-trash" style="font-size:12px;"></i>
                             </button>
                           <% end %>
+                          <button type="button"
+                                  data-gene-set-download-btn="true"
+                                  data-collection-id="<%= collection[:id] %>"
+                                  data-collection-label="<%= collection[:label] %>"
+                                  style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
+                                  title="Download gene set collection"
+                                  aria-label="Download gene set collection">
+                            <i class="fas fa-download" style="font-size:11px;"></i>
+                          </button>
                         </div>
                       </div>
                     <% end %>
@@ -3391,5 +3450,7 @@ function renderAnnotationPanel() {
 </script>
 
 <%= render 'projects/views/annotation_popup' %>
+<%= render partial: 'projects/views/save_manual_gene_set_modal' %>
+<%= render partial: 'projects/views/add_gene_set_collection_modal' %>
 
 <% end %>

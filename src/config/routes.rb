@@ -58,6 +58,7 @@ Rails.application.routes.draw do
       post :save_metadata_from_selection
       post :delete_selection
       post :rename_selection
+      post :rename_gene_set_collection
       post :delete_gene_set_collection
       get :selection_states
       get :sample_identifiers

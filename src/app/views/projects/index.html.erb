@@ -221,6 +221,12 @@
                   <%= link_to project.display_name, project_path(project), class: "hover:text-blue-600" %>
                 </h3>
                 <div class="flex items-center gap-1.5 shrink-0">
+                  <% if project.archive_status.present? && project.archive_status.icon_class.present? %>
+                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-700"
+                          title="Archive status: <%= project.archive_status.display_name %>">
+                      <i class="<%= project.archive_status.icon_class %>"></i>
+                    </span>
+                  <% end %>
                   <% if project.project_type.present? && project.project_type.tag.present? %>
                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
                           title="<%= project.project_type.name %>">
@@ -359,6 +365,12 @@
                         <%= project.display_name %>
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
+                        <% if project.archive_status.present? && project.archive_status.icon_class.present? %>
+                          <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-700"
+                                title="Archive status: <%= project.archive_status.display_name %>">
+                            <i class="<%= project.archive_status.icon_class %> text-xs"></i>
+                          </span>
+                        <% end %>
                         <% if project.key.present? %>
                           <span class="text-xs text-gray-400 font-mono"><%= project.key %></span>
                         <% end %>

@@ -3,15 +3,15 @@
       <table>
         <tbody>
           <tr><td width='170px'>
-              <%= link_to image_tag('epfl-logo.svg', :height => '35px' ), "http://epfl.ch", {:style => 'padding-left:20px'} %>
-            </td><td style="text-align:left">
+              <%= link_to image_tag('epfl-logo.svg', :height => '35px' ), "http://epfl.ch", {:class => 'epfl-footer-logo-link'} %>
+            </td><td class='footer-meta-text' style="text-align:center">
               &copy;2016-<%= Time.now.year %> EPFL, 1015 Lausanne<br>
-              <a href="mailto:bioinfo.epfl@gmail.com,fabrice.david@epfl.ch,vincent.gardeux@epfl.ch?subject=ASAP feedback">Contact</a>
+              <%= link_to "Contact", contact_home_index_path %>
               |    
               <a href="https://www.sib.swiss/privacy-policy">Privacy policy</a>
             </td><td  class='pr-2' width='350px'>
        
-              <span style='margin-right:10px;font-style:italic;color:grey;font-size:10px'>
+              <span class='footer-note-text'>
                 The ASAP platform is developed by EPFL and SIB and made openly available to the scientific community
                  with the support of the Swiss State Secretariat for Education, Research and Innovation SERI.
               </span>

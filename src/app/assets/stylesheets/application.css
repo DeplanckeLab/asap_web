@@ -17,6 +17,36 @@
   width: 100%;
 }
 
+.epfl-footer-logo-link {
+  display: inline-block;
+  margin: 0 10px 0 20px;
+}
+
+.footer-meta-text {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #4b5563;
+}
+
+.footer-meta-text a {
+  color: #374151;
+  text-decoration: none;
+}
+
+.footer-meta-text a:hover {
+  text-decoration: underline;
+}
+
+.footer-note-text {
+  display: inline-block;
+  margin-right: 10px;
+  font-style: italic;
+  color: grey;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
 #footer {
   margin-bottom: 50px;
   text-align: center;
@@ -37,4 +67,11 @@
   position:fixed;
   z-index:10;
   background-color:white
+}
+
+@media (min-width: 768px) {
+  header .menu-item.menu-item-default:hover,
+  header .menu-item.menu-item-default:focus {
+    color: #374151 !important;
+  }
 }

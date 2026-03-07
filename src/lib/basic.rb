@@ -2289,6 +2289,12 @@ module Basic
           h_cmd['docker_call'].gsub!(/(-v\s+\/data\/asap2:\/data\/asap2)/, "\\1 -v /data/asap2_test:/data/asap2_test")
         end
 
+        # On Linux Docker, host.docker.internal is not always available by default.
+        # Add an explicit host-gateway mapping when commands target that hostname.
+        if core_cmd.include?('host.docker.internal') && !h_cmd['docker_call'].include?('host.docker.internal:host-gateway')
+          h_cmd['docker_call'].sub!(/^docker run\s+/, 'docker run --add-host=host.docker.internal:host-gateway ')
+        end
+
         cmd = h_cmd['docker_call'] + " \"" + core_cmd + "\""
       end
       return cmd

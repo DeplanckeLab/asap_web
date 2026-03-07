@@ -96,7 +96,11 @@ class GeneSetCollectionImportJob < ApplicationJob
         id: "local_collection:#{collection_record.id}",
         label: collection_record.name.to_s,
         nb_items: normalized_items.length,
-        custom: true
+        custom: true,
+        type_key: collection_record.gene_set_collection_type&.key.to_s.presence || 'imported',
+        type_label: collection_record.gene_set_collection_type&.label.to_s.presence || 'Imported',
+        type_icon: collection_record.gene_set_collection_type&.icon.to_s.presence || 'fas fa-file-import',
+        type_icon_color: collection_record.gene_set_collection_type&.icon_color.to_s.presence || '#6b7280'
       }
     })
   rescue JSON::ParserError => e

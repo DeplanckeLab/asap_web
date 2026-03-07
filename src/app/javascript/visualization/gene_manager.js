@@ -3255,6 +3255,24 @@ export class GeneManager {
       return
     }
 
+    const collectionSelect = overlay.querySelector('#gene-set-collection-select')
+    if (collectionSelect) {
+      const rowsById = new Map(
+        Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]')).map((row) => [
+          String(row.dataset.collectionId || '').trim(),
+          String(row.dataset.collectionLabel || '').trim()
+        ])
+      )
+      Array.from(collectionSelect.options || []).forEach((option) => {
+        const optionId = String(option.value || '').trim()
+        if (!optionId) return
+        const updatedLabel = rowsById.get(optionId)
+        if (updatedLabel) {
+          option.textContent = updatedLabel
+        }
+      })
+    }
+
     const escapeHtml = (value) => String(value || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -3344,11 +3362,18 @@ export class GeneManager {
     document.getElementById('add-gene-set-form').addEventListener('submit', async (e) => {
       e.preventDefault()
       const nameInput = document.getElementById('gene-set-name-input')
+      const collectionSelect = document.getElementById('gene-set-collection-select')
       const geneSetName = nameInput.value.trim()
+      const targetCollectionId = String(collectionSelect?.value || '').trim()
       
       if (!geneSetName) {
         alert('Please enter a gene set name.')
         nameInput.focus()
+        return
+      }
+      if (!targetCollectionId) {
+        alert('Please select a gene set collection.')
+        if (collectionSelect) collectionSelect.focus()
         return
       }
       
@@ -3380,7 +3405,8 @@ export class GeneManager {
           headers,
           body: JSON.stringify({
             name: geneSetName,
-            genes: normalizedGenes
+            genes: normalizedGenes,
+            collection_id: targetCollectionId
           })
         })
         const payload = await response.json()

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_05_173000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -308,18 +308,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
     t.datetime "created_at", null: false
     t.string "field_group_id", null: false
     t.integer "ontology_term_type_id"
-    t.bigint "project_id", null: false
+    t.integer "project_id", null: false
     t.text "resolve_map_json"
     t.string "set_value"
-    t.bigint "source_annot_id"
+    t.integer "source_annot_id"
     t.string "source_path"
     t.string "target_path", null: false
     t.datetime "updated_at", null: false
     t.index ["compliance_schema_id"], name: "index_compliance_mappings_on_compliance_schema_id"
     t.index ["ontology_term_type_id"], name: "index_compliance_mappings_on_ontology_term_type_id"
     t.index ["project_id", "field_group_id"], name: "index_compliance_mappings_on_project_id_and_field_group_id"
-    t.index ["project_id"], name: "index_compliance_mappings_on_project_id"
-    t.index ["source_annot_id"], name: "index_compliance_mappings_on_source_annot_id"
   end
 
   create_table "compliance_schemas", force: :cascade do |t|
@@ -342,14 +340,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
   end
 
   create_table "compliance_term_replacements", force: :cascade do |t|
-    t.bigint "cell_ontology_term_id"
+    t.integer "cell_ontology_term_id"
     t.bigint "compliance_mapping_id", null: false
     t.datetime "created_at", null: false
     t.string "original_value", null: false
     t.string "replacement_identifier"
     t.string "replacement_name"
     t.datetime "updated_at", null: false
-    t.index ["cell_ontology_term_id"], name: "index_compliance_term_replacements_on_cell_ontology_term_id"
     t.index ["compliance_mapping_id"], name: "index_compliance_term_replacements_on_compliance_mapping_id"
     t.index ["original_value"], name: "index_compliance_term_replacements_on_original_value"
   end
@@ -693,15 +690,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
     t.integer "user_id"
   end
 
+  create_table "gene_set_collection_types", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "icon", null: false
+    t.string "icon_color", null: false
+    t.string "key", null: false
+    t.string "label", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_gene_set_collection_types_on_key", unique: true
+  end
+
   create_table "gene_set_collections", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "file_key", null: false
+    t.bigint "gene_set_collection_type_id", null: false
     t.string "name", null: false
     t.integer "project_id", null: false
     t.string "source_kind", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.index ["file_key"], name: "index_gene_set_collections_on_file_key", unique: true
+    t.index ["gene_set_collection_type_id"], name: "index_gene_set_collections_on_gene_set_collection_type_id"
+    t.index ["project_id", "gene_set_collection_type_id"], name: "index_gene_set_collections_on_project_and_type"
     t.index ["project_id", "source_kind"], name: "index_gene_set_collections_on_project_id_and_source_kind"
     t.index ["project_id"], name: "index_gene_set_collections_on_project_id"
     t.index ["user_id"], name: "index_gene_set_collections_on_user_id"
@@ -826,7 +836,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
     t.datetime "created_at", precision: nil
     t.text "description"
     t.integer "display_order", default: 99
-    t.string "field_group_id"
+    t.text "field_group_id"
     t.string "field_type", default: "col_attr"
     t.text "free_text_json"
     t.text "in_lineage_term_ids"
@@ -1436,10 +1446,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
   add_foreign_key "clusters", "statuses", name: "clusters_status_id_fkey"
   add_foreign_key "clusters", "steps", name: "clusters_step_id_fkey"
   add_foreign_key "clusters", "users", name: "clusters_user_id_fkey"
-  add_foreign_key "compliance_mappings", "annots", column: "source_annot_id"
   add_foreign_key "compliance_mappings", "ontology_term_types", name: "compliance_mappings_ontology_term_type_id_fkey"
-  add_foreign_key "compliance_mappings", "projects"
-  add_foreign_key "compliance_term_replacements", "cell_ontology_terms"
   add_foreign_key "compliance_term_replacements", "compliance_mappings"
   add_foreign_key "correlations", "jobs", name: "correlations_job_id_fkey"
   add_foreign_key "correlations", "projects", name: "correlations_project_id_fkey"
@@ -1486,6 +1493,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_02_103000) do
   add_foreign_key "gene_filterings", "projects", name: "filterings_project_id_fkey"
   add_foreign_key "gene_filterings", "statuses", name: "filterings_status_id_fkey"
   add_foreign_key "gene_filterings", "users", name: "filterings_user_id_fkey"
+  add_foreign_key "gene_set_collections", "gene_set_collection_types"
   add_foreign_key "heatmaps", "jobs", name: "heatmaps_job_id_fkey"
   add_foreign_key "heatmaps", "projects", name: "heatmaps_project_id_fkey"
   add_foreign_key "heatmaps", "statuses", name: "heatmaps_status_id_fkey"

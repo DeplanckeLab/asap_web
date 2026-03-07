@@ -26,6 +26,23 @@
 
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
+            Gene Set Collection <span style="color:#dc2626;">*</span>
+          </label>
+          <select id="gene-set-collection-select"
+                  style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;background:#fff;">
+            <% manual_options = Array(@manual_gene_set_collection_options) %>
+            <% if manual_options.empty? %>
+              <option value="manual_local">Manual Gene Sets</option>
+            <% else %>
+              <% manual_options.each do |option| %>
+                <option value="<%= option[:id] %>"><%= option[:label] %></option>
+              <% end %>
+            <% end %>
+          </select>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
             Genes (<span id="gene-set-genes-count">0</span>)
           </label>
           <div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;max-height:400px;overflow-y:auto;">

@@ -41,7 +41,14 @@ task :parse, [:project_key] => [:environment] do |t, args|
     exit 1
   end
   
-  db_conn = "postgres:5434/asap2_data_v" + h_env['asap_data_db_version'].to_s
+  asap_data_db_name = if ENV["ASAP2_REMOTE_DB"].present?
+                        ENV["ASAP2_REMOTE_DB"]
+                      else
+                        "asap2_data_v#{h_env['asap_data_db_version']}"
+                      end
+  asap_data_db_host = ENV.fetch("ASAP2_REMOTE_HOST", "host.docker.internal")
+  asap_data_db_port = ENV.fetch("ASAP2_REMOTE_PORT", 5433).to_s
+  db_conn = "#{asap_data_db_host}:#{asap_data_db_port}/#{asap_data_db_name}"
   
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   tmp_dir = project_dir + 'parsing'
@@ -71,6 +78,12 @@ task :parse, [:project_key] => [:environment] do |t, args|
     logger.error("[ParseRake] No run found for project #{project_key}")
     exit 1
   end
+  
+  fu = if project.fu_id
+         Fu.find_by(id: project.fu_id)
+       else
+         Fu.where(:project_id => project.id, :upload_type => 1).first
+       end
 
   if reset_mode
     phase_start.call('reset_cleanup')
@@ -198,13 +211,18 @@ task :parse, [:project_key] => [:environment] do |t, args|
   DataClass.all.map{|dt| h_data_classes[dt.name] = dt; h_data_classes[dt.id] = dt}
 
   if project
-    puts "parse"
+    begin
+      puts "parse"
   
     p = Basic.safe_parse_json(project.parsing_attrs_json, {})
 
     output_json_file = project_dir + 'parsing' + "output.json"
     
-    filepath = project_dir + ("input." + project.extension)
+    filepath = if project.input_filename.present?
+                 project_dir + project.input_filename
+               else
+                 project_dir + ("input." + project.extension)
+               end
     
     ### write file from hca
     h_output_hca = nil
@@ -225,13 +243,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
     if !h_output_hca or h_output_hca['status_id'] != 4
 
       ### update run with predictions
-      # Try to find Fu by project.fu_id first, then fall back to project_id lookup
-      fu = if project.fu_id
-             Fu.find_by(id: project.fu_id)
-           else
-             Fu.where(:project_id => project.id, :upload_type => 1).first
-           end
-      
       if fu.nil?
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), skipping prediction update")
       else
@@ -421,7 +432,32 @@ task :parse, [:project_key] => [:environment] do |t, args|
         puts h_cmd_parse
         cmd_parse = Basic.build_cmd(h_cmd_parse)
         puts "CMD_PYTHON:" + cmd_parse
-        `#{cmd_parse}`
+        phase_start.call('parse_python_command')
+        parse_stdout = `#{cmd_parse} 2>&1`
+        cmd_exitstatus = $?.exitstatus
+        logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} python parse command finished with exitstatus=#{cmd_exitstatus}")
+
+        output_json_v8 = tmp_dir + 'output.json'
+        if File.exist?(output_json_v8)
+          logger.info("[ParseRake][Debug] project=#{project.key} run=#{run.id} output_json size=#{File.size(output_json_v8)} mtime=#{File.mtime(output_json_v8)}")
+        else
+          logger.error("[ParseRake][Debug] project=#{project.key} run=#{run.id} expected output_json missing at #{output_json_v8}")
+        end
+        phase_end.call('parse_python_command')
+
+        unless cmd_exitstatus == 0
+          begin
+            error_payload = {
+              displayed_error: parse_stdout.present? ? parse_stdout : "Python parser failed with exit status #{cmd_exitstatus}"
+            }
+            File.open(output_json_v8, 'w') { |fw| fw.write(error_payload.to_json) }
+          rescue => write_err
+            logger.error("[ParseRake] Failed to persist parser error output to #{output_json_v8}: #{write_err.class} - #{write_err.message}")
+          end
+          logger.error("[ParseRake] Python parsing command failed for project #{project.key} run #{run.id} with exitstatus=#{cmd_exitstatus}")
+          logger.error("[ParseRake] Python parser output: #{parse_stdout}") if parse_stdout.present?
+          exit cmd_exitstatus
+        end
         exit 0
       end
 
@@ -592,13 +628,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
           h_parsing_metadata[meta['name']] = 1
         end
       end
-      # Try to find Fu by project.fu_id first, then fall back to project_id lookup
-      fu = if project.fu_id
-             Fu.find_by(id: project.fu_id)
-           else
-             Fu.where(:project_id => project.id, :upload_type => 1).first
-           end
-      
       if fu.nil?
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), cannot proceed with metadata copying")
       else
@@ -776,6 +805,25 @@ task :parse, [:project_key] => [:environment] do |t, args|
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
       logger.error("[ParseRake] HCA error occurred, broadcasting failure")
     end
-    
+    ensure
+      if fu
+        begin
+          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                              ENV["UPLOAD_DATA_DIR"]
+                            elsif ENV["DATA_DIR"]
+                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                            else
+                              '/data/asap2/fus'
+                            end
+          upload_dir_to_cleanup = Pathname.new(upload_base_dir) + fu.id.to_s
+          if File.exist?(upload_dir_to_cleanup)
+            FileUtils.rm_rf(upload_dir_to_cleanup)
+            logger.info("[ParseRake] Cleaned upload directory #{upload_dir_to_cleanup} after parsing")
+          end
+        rescue => e
+          logger.error("[ParseRake] Failed to clean upload directory for Fu##{fu.id}: #{e.class} - #{e.message}")
+        end
+      end
+    end
   end
 end

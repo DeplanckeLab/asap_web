@@ -8,6 +8,9 @@ export class GeneSetCollectionsController {
     this.activeGenesPopover = null
     this.geneDetailsModal = null
     this.activeCollectionDownloadMenu = null
+    this.editingCollectionId = null
+    this.pendingCollectionName = null
+    this.pendingCollectionFocusId = null
     this.init()
   }
 
@@ -39,6 +42,8 @@ export class GeneSetCollectionsController {
     this.bindCollectionRowClicks()
     this.bindBackButton()
     this.bindDetailFilter()
+    this.bindCollectionRenameTriggers()
+    this.bindCollectionRenameInputs()
     this.bindDeleteButtons()
     this.bindDownloadButtons()
     this.applyListFilter()
@@ -51,6 +56,94 @@ export class GeneSetCollectionsController {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;')
+  }
+
+  isRenameableCollection(collectionId, isCustom) {
+    return isCustom === true && String(collectionId || '').startsWith('local_collection:')
+  }
+
+  renderCollectionLabelHtml(collectionId, label, { isRenameable = false, isEditingName = false, typeLabel = '', typeIcon = '', typeIconColor = '' } = {}) {
+    const normalizedTypeIcon = String(typeIcon || '').trim()
+    const iconHtml = normalizedTypeIcon.toUpperCase() === 'DE'
+      ? '<span style="font-size:10px;font-weight:700;line-height:1;">DE</span>'
+      : (normalizedTypeIcon.length > 0
+        ? `<i class="${this.escapeHtml(normalizedTypeIcon)}" style="font-size:10px;"></i>`
+        : '<i class="fas fa-layer-group" style="font-size:10px;"></i>')
+    const iconColor = String(typeIconColor || '').trim() || '#6b7280'
+    const typeTitle = String(typeLabel || '').trim() || 'Collection type'
+
+    if (isEditingName) {
+      return `
+        <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+          <span title="${this.escapeHtml(typeTitle)}"
+                aria-label="${this.escapeHtml(typeTitle)}"
+                style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:${this.escapeHtml(iconColor)};flex:0 0 auto;">${iconHtml}</span>
+          <input type="text"
+                 data-role="collection-name-input"
+                 data-collection-id="${collectionId}"
+                 value="${this.escapeHtml(label)}"
+                 style="width:100%;padding:2px 6px;border:1px solid #93c5fd;border-radius:4px;font-size:13px;font-weight:600;color:#111827;line-height:1.2;background:#ffffff;" />
+        </div>
+      `
+    }
+    if (isRenameable) {
+      return `
+        <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+          <span title="${this.escapeHtml(typeTitle)}"
+                aria-label="${this.escapeHtml(typeTitle)}"
+                style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:${this.escapeHtml(iconColor)};flex:0 0 auto;">${iconHtml}</span>
+          <span style="display:block;max-width:calc(100% - 40px);min-width:0;font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">${this.escapeHtml(label)}</span>
+          <button type="button"
+                  data-gene-set-collection-rename-trigger="true"
+                  data-collection-id="${collectionId}"
+                  style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#374151;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;"
+                  title="Rename imported gene set collection"
+                  aria-label="Rename imported gene set collection">
+            <i class="fas fa-pen" style="font-size:9px;"></i>
+          </button>
+        </div>
+      `
+    }
+    return `
+      <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+        <span title="${this.escapeHtml(typeTitle)}"
+              aria-label="${this.escapeHtml(typeTitle)}"
+              style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:${this.escapeHtml(iconColor)};flex:0 0 auto;">${iconHtml}</span>
+        <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;min-width:0;">${this.escapeHtml(label)}</div>
+      </div>
+    `
+  }
+
+  renderCollectionActionsHtml(collectionId, label, { isCustom = false, isImportPending = false } = {}) {
+    if (isImportPending) {
+      return `
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
+          <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
+        </span>
+      `
+    }
+
+    return `
+      ${isCustom ? `
+      <button type="button"
+              data-gene-set-delete-btn="true"
+              data-collection-id="${collectionId}"
+              style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
+              title="Delete custom gene set collection"
+              aria-label="Delete custom gene set collection">
+        <i class="fas fa-trash" style="font-size:12px;"></i>
+      </button>
+      ` : ''}
+      <button type="button"
+              data-gene-set-download-btn="true"
+              data-collection-id="${collectionId}"
+              data-collection-label="${this.escapeHtml(label)}"
+              style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
+              title="Download gene set collection"
+              aria-label="Download gene set collection">
+        <i class="fas fa-download" style="font-size:11px;"></i>
+      </button>
+    `
   }
 
   confirmDestructiveAction(message) {
@@ -811,94 +904,66 @@ export class GeneSetCollectionsController {
     const itemLabel = itemCount === 1 ? 'gene set' : 'gene sets'
     const isCustom = collection.custom === true
     const isImportPending = collection.import_pending === true
+    const typeKey = String(collection.type_key || '').trim()
+    const typeLabel = String(collection.type_label || '').trim()
+    const typeIcon = String(collection.type_icon || '').trim()
+    const typeIconColor = String(collection.type_icon_color || '').trim()
+    const isRenameable = this.isRenameableCollection(collectionId, isCustom)
+    const isEditingName = isRenameable && String(this.editingCollectionId || '') === collectionId
     const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
     if (row) {
       row.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;'
       row.dataset.collectionLabel = label
       row.dataset.collectionName = label.toLowerCase()
-      const titleEl = row.querySelector('[data-role="collection-label"]') || row.querySelector('div > div')
-      const countEl = row.querySelector('[data-role="collection-count"]') || row.querySelector('div > div:nth-child(2)')
-      const actionsEl = row.querySelector('[data-role="collection-actions"]') || row.lastElementChild
-      if (titleEl) titleEl.textContent = label
-      if (countEl) countEl.textContent = `${itemCount} ${itemLabel}`
-      if (actionsEl) {
-        actionsEl.style.display = 'flex'
-        actionsEl.style.alignItems = 'center'
-        actionsEl.style.justifyContent = 'flex-end'
-        actionsEl.style.flex = '0 0 auto'
-        actionsEl.innerHTML = isImportPending ? `
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
-            <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
-          </span>
-        ` : `
-          ${isCustom ? `
-          <button type="button"
-                  data-gene-set-delete-btn="true"
-                  data-collection-id="${collectionId}"
-                  style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
-                  title="Delete custom gene set collection"
-                  aria-label="Delete custom gene set collection">
-            <i class="fas fa-trash" style="font-size:12px;"></i>
-          </button>
-          ` : ''}
-          <button type="button"
-                  data-gene-set-download-btn="true"
-                  data-collection-id="${collectionId}"
-                  data-collection-label="${this.escapeHtml(label)}"
-                  style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
-                  title="Download gene set collection"
-                  aria-label="Download gene set collection">
-            <i class="fas fa-download" style="font-size:11px;"></i>
-          </button>
-        `
-      }
+      row.dataset.collectionCount = String(itemCount)
+      row.dataset.collectionCustom = isCustom ? 'true' : 'false'
+      row.dataset.collectionImportPending = isImportPending ? 'true' : 'false'
+      row.dataset.collectionTypeKey = typeKey
+      row.dataset.collectionTypeLabel = typeLabel
+      row.dataset.collectionTypeIcon = typeIcon
+      row.dataset.collectionTypeIconColor = typeIconColor
+      row.innerHTML = `
+        <div style="flex:1;min-width:0;">
+          <div data-role="collection-label">${this.renderCollectionLabelHtml(collectionId, label, { isRenameable, isEditingName, typeLabel, typeIcon, typeIconColor })}</div>
+          <div data-role="collection-count" style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${itemCount} ${itemLabel}</div>
+        </div>
+        <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
+          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending })}
+        </div>
+      `
     } else {
       const newRow = document.createElement('div')
       newRow.setAttribute('data-gene-set-collection-row', 'true')
       newRow.setAttribute('data-collection-id', collectionId)
       newRow.setAttribute('data-collection-label', label)
       newRow.setAttribute('data-collection-name', label.toLowerCase())
+      newRow.setAttribute('data-collection-count', String(itemCount))
+      newRow.setAttribute('data-collection-custom', isCustom ? 'true' : 'false')
+      newRow.setAttribute('data-collection-import-pending', isImportPending ? 'true' : 'false')
+      newRow.setAttribute('data-collection-type-key', typeKey)
+      newRow.setAttribute('data-collection-type-label', typeLabel)
+      newRow.setAttribute('data-collection-type-icon', typeIcon)
+      newRow.setAttribute('data-collection-type-icon-color', typeIconColor)
       newRow.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;'
       newRow.innerHTML = `
         <div style="flex:1;min-width:0;">
-          <div data-role="collection-label" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">${this.escapeHtml(label)}</div>
+          <div data-role="collection-label">${this.renderCollectionLabelHtml(collectionId, label, { isRenameable, isEditingName, typeLabel, typeIcon, typeIconColor })}</div>
           <div data-role="collection-count" style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${itemCount} ${itemLabel}</div>
         </div>
         <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
-          ${isImportPending ? `
-            <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
-              <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
-            </span>
-          ` : `
-            ${isCustom ? `
-            <button type="button"
-                    data-gene-set-delete-btn="true"
-                    data-collection-id="${collectionId}"
-                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;"
-                    title="Delete custom gene set collection"
-                    aria-label="Delete custom gene set collection">
-              <i class="fas fa-trash" style="font-size:12px;"></i>
-            </button>
-            ` : ''}
-            <button type="button"
-                    data-gene-set-download-btn="true"
-                    data-collection-id="${collectionId}"
-                    data-collection-label="${this.escapeHtml(label)}"
-                    style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#374151;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;margin-left:4px;"
-                    title="Download gene set collection"
-                    aria-label="Download gene set collection">
-              <i class="fas fa-download" style="font-size:11px;"></i>
-            </button>
-          `}
+          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending })}
         </div>
       `
       this.listBody.prepend(newRow)
     }
 
     this.bindCollectionRowClicks()
+    this.bindCollectionRenameTriggers()
+    this.bindCollectionRenameInputs()
     this.bindDeleteButtons()
     this.bindDownloadButtons()
     this.applyListFilter()
+    this.focusPendingCollectionRenameInput()
   }
 
   bindCollectionRowClicks() {
@@ -907,6 +972,8 @@ export class GeneSetCollectionsController {
       if (row.dataset.openBound === 'true') return
       row.dataset.openBound = 'true'
       row.addEventListener('click', async (event) => {
+        if (event.target.closest('[data-gene-set-collection-rename-trigger="true"]')) return
+        if (event.target.closest('[data-role="collection-name-input"]')) return
         if (event.target.closest('[data-gene-set-delete-btn="true"]')) return
         const collectionId = row.dataset.collectionId
         const collectionLabel = row.dataset.collectionLabel || ''
@@ -918,6 +985,199 @@ export class GeneSetCollectionsController {
         }
       })
     })
+  }
+
+  bindCollectionRenameTriggers() {
+    const buttons = this.listBody.querySelectorAll('[data-gene-set-collection-rename-trigger="true"]')
+    buttons.forEach((button) => {
+      if (button.dataset.boundRenameTrigger === 'true') return
+      button.dataset.boundRenameTrigger = 'true'
+      button.addEventListener('click', (event) => this.startInlineCollectionRename(event))
+    })
+  }
+
+  bindCollectionRenameInputs() {
+    const inputs = this.listBody.querySelectorAll('[data-role="collection-name-input"]')
+    inputs.forEach((input) => {
+      if (input.dataset.boundRenameInput === 'true') return
+      input.dataset.boundRenameInput = 'true'
+      input.addEventListener('input', (event) => {
+        event.stopPropagation()
+        this.pendingCollectionName = event.currentTarget?.value || ''
+      })
+      input.addEventListener('keydown', (event) => this.handleInlineCollectionRenameKeydown(event))
+      input.addEventListener('click', (event) => event.stopPropagation())
+      input.addEventListener('blur', (event) => this.commitInlineCollectionRename(event))
+    })
+  }
+
+  startInlineCollectionRename(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const collectionId = String(event.currentTarget?.dataset?.collectionId || '').trim()
+    if (!collectionId) return
+    const row = event.currentTarget.closest('[data-gene-set-collection-row="true"]')
+    if (!row) return
+    const currentLabel = String(row.dataset.collectionLabel || '').trim()
+    const isCustom = row.dataset.collectionCustom === 'true'
+    if (!this.isRenameableCollection(collectionId, isCustom)) return
+
+    this.editingCollectionId = collectionId
+    this.pendingCollectionName = currentLabel
+    this.pendingCollectionFocusId = collectionId
+    this.upsertCollectionFromPayload({
+      id: collectionId,
+      label: currentLabel,
+      nb_items: Number(row.dataset.collectionCount || 0),
+      custom: isCustom,
+      import_pending: row.dataset.collectionImportPending === 'true',
+      type_key: row.dataset.collectionTypeKey || '',
+      type_label: row.dataset.collectionTypeLabel || '',
+      type_icon: row.dataset.collectionTypeIcon || '',
+      type_icon_color: row.dataset.collectionTypeIconColor || ''
+    })
+  }
+
+  handleInlineCollectionRenameKeydown(event) {
+    event.stopPropagation()
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      this.commitInlineCollectionRename(event)
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      this.cancelInlineCollectionRename(event)
+      return
+    }
+    this.pendingCollectionName = event.currentTarget?.value || ''
+  }
+
+  focusPendingCollectionRenameInput() {
+    const collectionId = String(this.pendingCollectionFocusId || '').trim()
+    if (!collectionId) return
+    this.pendingCollectionFocusId = null
+    setTimeout(() => {
+      const input = this.listBody.querySelector(`[data-role="collection-name-input"][data-collection-id="${collectionId.replace(/"/g, '\\"')}"]`)
+      if (input) {
+        input.focus()
+        input.select()
+      }
+    }, 0)
+  }
+
+  cancelInlineCollectionRename(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const collectionId = String(this.editingCollectionId || '').trim()
+    if (!collectionId) return
+    const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
+    if (!row) return
+    this.editingCollectionId = null
+    this.pendingCollectionName = null
+    this.pendingCollectionFocusId = null
+    this.upsertCollectionFromPayload({
+      id: collectionId,
+      label: String(row.dataset.collectionLabel || ''),
+      nb_items: Number(row.dataset.collectionCount || 0),
+      custom: row.dataset.collectionCustom === 'true',
+      import_pending: row.dataset.collectionImportPending === 'true',
+      type_key: row.dataset.collectionTypeKey || '',
+      type_label: row.dataset.collectionTypeLabel || '',
+      type_icon: row.dataset.collectionTypeIcon || '',
+      type_icon_color: row.dataset.collectionTypeIconColor || ''
+    })
+  }
+
+  async commitInlineCollectionRename(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const input = event.currentTarget
+    const collectionId = String(input?.dataset?.collectionId || this.editingCollectionId || '').trim()
+    if (!collectionId) return
+
+    const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
+    if (!row) return
+    const previousLabel = String(row.dataset.collectionLabel || '').trim()
+    const nextName = String(input?.value || this.pendingCollectionName || '').trim()
+
+    if (!nextName) {
+      this.cancelInlineCollectionRename(event)
+      return
+    }
+    if (nextName === previousLabel) {
+      this.cancelInlineCollectionRename(event)
+      return
+    }
+
+    const itemCount = Number(row.dataset.collectionCount || 0)
+    const isCustom = row.dataset.collectionCustom === 'true'
+    const isImportPending = row.dataset.collectionImportPending === 'true'
+    const typeKey = row.dataset.collectionTypeKey || ''
+    const typeLabel = row.dataset.collectionTypeLabel || ''
+    const typeIcon = row.dataset.collectionTypeIcon || ''
+    const typeIconColor = row.dataset.collectionTypeIconColor || ''
+
+    try {
+      this.editingCollectionId = null
+      this.pendingCollectionName = null
+      this.pendingCollectionFocusId = null
+      this.upsertCollectionFromPayload({
+        id: collectionId,
+        label: nextName,
+        nb_items: itemCount,
+        custom: isCustom,
+        import_pending: isImportPending,
+        type_key: typeKey,
+        type_label: typeLabel,
+        type_icon: typeIcon,
+        type_icon_color: typeIconColor
+      })
+      await this.renameCollectionRequest(collectionId, nextName)
+      if (this.selectedCollectionId && String(this.selectedCollectionId) === String(collectionId) && this.detailTitle) {
+        this.detailTitle.textContent = nextName
+      }
+    } catch (error) {
+      this.upsertCollectionFromPayload({
+        id: collectionId,
+        label: previousLabel,
+        nb_items: itemCount,
+        custom: isCustom,
+        import_pending: isImportPending,
+        type_key: typeKey,
+        type_label: typeLabel,
+        type_icon: typeIcon,
+        type_icon_color: typeIconColor
+      })
+      alert(error.message || 'Failed to rename gene set collection')
+    }
+  }
+
+  async renameCollectionRequest(collectionId, nextName) {
+    if (!this.projectIdentifier) {
+      throw new Error('project identifier is missing')
+    }
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+    const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/rename_gene_set_collection`, {
+      method: 'POST',
+      headers,
+      credentials: 'same-origin',
+      body: JSON.stringify({ collection_id: collectionId, name: nextName })
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.status !== 'ok') {
+      throw new Error(payload.message || 'Failed to rename gene set collection')
+    }
+    return payload
   }
 
   bindBackButton() {

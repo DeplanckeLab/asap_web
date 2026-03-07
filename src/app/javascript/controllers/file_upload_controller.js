@@ -51,6 +51,7 @@ export default class extends Controller {
     this.preparsingStatusPollInterval = null  // For polling preparsing status
     this.downloadStatusPollInterval = null
     this.downloadCompletionHandled = false
+    this.isDownloadInProgress = false
     this.isPreparsingComplete = false
     this.hasMatrixData = false  // Track if we have actual matrix/dataset data
     this.selectedDatasetIndex = null
@@ -679,9 +680,16 @@ export default class extends Controller {
   }
 
   resetDownloadButtonState() {
+    this.isDownloadInProgress = false
     if (this.hasDownloadUrlButtonTarget) {
       this.downloadUrlButtonTarget.disabled = false
+      this.downloadUrlButtonTarget.classList.remove('pointer-events-none', 'opacity-60', 'cursor-not-allowed')
+      this.downloadUrlButtonTarget.removeAttribute('aria-disabled')
       this.downloadUrlButtonTarget.textContent = 'Download'
+    }
+    if (this.hasUrlInputTarget) {
+      this.urlInputTarget.disabled = false
+      this.urlInputTarget.readOnly = false
     }
   }
 
@@ -2211,6 +2219,10 @@ export default class extends Controller {
   }
 
   async downloadFromUrl() {
+    if (this.isDownloadInProgress) {
+      return
+    }
+
     if (!this.hasUrlInputTarget || !this.urlInputTarget.value) {
       alert('Please enter a valid URL')
       return
@@ -2231,8 +2243,11 @@ export default class extends Controller {
       return
     }
 
+    this.isDownloadInProgress = true
     if (this.hasDownloadUrlButtonTarget) {
       this.downloadUrlButtonTarget.disabled = true
+      this.downloadUrlButtonTarget.setAttribute('aria-disabled', 'true')
+      this.downloadUrlButtonTarget.classList.add('pointer-events-none', 'opacity-60', 'cursor-not-allowed')
       // Ensure spinner animation is available
       this.ensureSpinnerAnimation()
       this.downloadUrlButtonTarget.innerHTML = `
@@ -2246,6 +2261,10 @@ export default class extends Controller {
           Downloading...
         </span>
       `
+    }
+    if (this.hasUrlInputTarget) {
+      this.urlInputTarget.disabled = true
+      this.urlInputTarget.readOnly = true
     }
 
     if (this.hasStatusTarget) {

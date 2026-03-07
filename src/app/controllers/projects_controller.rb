@@ -8,10 +8,15 @@ require 'set'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
+  GENE_SET_COLLECTION_TYPE_MANUAL = 'manual'.freeze
+  GENE_SET_COLLECTION_TYPE_IMPORTED = 'imported'.freeze
+  GENE_SET_COLLECTION_TYPE_GLOBAL = 'global'.freeze
+  GENE_SET_COLLECTION_TYPE_FROM_DE = 'from_de'.freeze
+  GENE_SET_COLLECTION_TYPE_FROM_FIND_MARKERS = 'from_find_markers'.freeze
 
   # GET /projects or /projects.json
   def index
@@ -33,7 +38,7 @@ class ProjectsController < ApplicationController
     search_results = Project.search(@query, @filters)
     
     # Extract projects from search results with preloaded associations
-    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots)
+    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
@@ -1066,6 +1071,26 @@ class ProjectsController < ApplicationController
             return
           end
         end
+
+        # Persist detected file format from preparsing so parsing does not depend
+        # on the temporary fus directory after project creation.
+        if input_file && input_file.id
+          begin
+            preparsing_output_file = upload_dir + 'output.json'
+            if File.exist?(preparsing_output_file)
+              h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
+              detected_format = h_preparsing['detected_format']
+              if detected_format.present?
+                h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {})
+                h_parsing_attrs['file_type'] = detected_format
+                @project.parsing_attrs_json = h_parsing_attrs.to_json
+                Rails.logger.info("[ProjectsController#create] Stored detected file_type '#{detected_format}' in parsing_attrs_json")
+              end
+            end
+          rescue => e
+            Rails.logger.warn("[ProjectsController#create] Could not persist preparsing detected_format: #{e.class} - #{e.message}")
+          end
+        end
         
         # Get all valid extensions from FileFormat model
         valid_extensions = FileFormat.all.flat_map do |ff|
@@ -1076,20 +1101,20 @@ class ProjectsController < ApplicationController
           end
         end.compact.uniq.map(&:downcase)
         
-        # Determine extension from the filename
-        ext = input_filename.split(".").last.downcase
-        unless valid_extensions.include?(ext)
-          ext = 'txt'
-        end
-        
-        @project.input_filename = input_filename
+        # Determine extension from the uploaded filename and persist the project copy
+        # with a fixed canonical name.
+        ext = File.extname(input_filename.to_s).delete_prefix('.').downcase
+        has_accepted_extension = ext.present? && valid_extensions.include?(ext)
+        canonical_project_input_filename = has_accepted_extension ? "input_file.#{ext}" : 'input_file'
+
+        @project.input_filename = canonical_project_input_filename
         @project.fu_id = input_file&.id  # Use safe navigation operator
-        @project.extension = ext
+        @project.extension = has_accepted_extension ? ext : nil
         @project.save
-        
-        # Create symlink from upload directory to project directory
+
+        # Resolve the uploaded source path.
         upload_path = upload_dir + input_filename
-        symlink_path = project_dir + ('input.' + ext)
+        project_input_backup_path = project_dir + canonical_project_input_filename
         
         # Check if there's an uncompressed version of the file (for compressed files like .bz2, .gz)
         # Prefer uncompressed file if it exists, as Java parsing command may need it
@@ -1103,15 +1128,27 @@ class ProjectsController < ApplicationController
           end
         end
         
-        # Remove existing symlink if it exists
-        File.delete(symlink_path) if File.exist?(symlink_path) || File.symlink?(symlink_path)
-        
-        # Create symlink
-        if File.exist?(upload_path)
-          File.symlink(upload_path, symlink_path)
-          Rails.logger.info "Created symlink from #{upload_path} to #{symlink_path}"
-        else
-          Rails.logger.error "Upload file not found at #{upload_path}"
+        # Persist a canonical copy in the project directory.
+        # This copy is used to restore fus/<fu_id>/input_file.<ext> during parsing reset.
+        canonical_upload_path = upload_dir + input_filename
+        unless File.exist?(canonical_upload_path)
+          Rails.logger.error("[ProjectsController#create] Canonical uploaded file not found at #{canonical_upload_path}")
+          @project.errors.add(:base, "Uploaded file not found")
+          format.html { render template: 'projects/new', status: :unprocessable_entity }
+          format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
+          format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+          return
+        end
+        File.delete(project_input_backup_path) if File.exist?(project_input_backup_path) || File.symlink?(project_input_backup_path)
+        FileUtils.cp(canonical_upload_path, project_input_backup_path)
+        Rails.logger.info("[ProjectsController#create] Stored canonical upload copy at #{project_input_backup_path}")
+
+        # Keep backward compatibility for legacy paths that still expect input.<ext>.
+        if has_accepted_extension
+          symlink_path = project_dir + "input.#{ext}"
+          File.delete(symlink_path) if File.exist?(symlink_path) || File.symlink?(symlink_path)
+          File.symlink(project_input_backup_path, symlink_path)
+          Rails.logger.info "Created symlink from #{project_input_backup_path} to #{symlink_path}"
         end
         
         # Update Fu record with project info (if it exists)
@@ -2505,13 +2542,17 @@ class ProjectsController < ApplicationController
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
     db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
     genes_with_ids = resolve_manual_gene_ids(submitted_genes, db_version)
-    ensure_manual_gene_set_collection_record!
+    manual_collection = resolve_target_manual_collection(params[:collection_id])
+    unless manual_collection
+      render json: { status: 'error', message: 'Target manual gene set collection not found' }, status: :unprocessable_entity
+      return
+    end
 
-    payload = load_manual_gene_set_collection_payload
+    payload = load_local_gene_set_collection_payload(manual_collection.file_key, manual_collection.name)
     items = Array(payload['items'])
     timestamp = Time.now.utc.iso8601
     item_identifier = "manual_#{SecureRandom.hex(6)}"
-    item_id = "manual_local:#{item_identifier}"
+    item_id = "#{local_gene_set_collection_id(manual_collection)}:#{item_identifier}"
     new_item = {
       'id' => item_id,
       'identifier' => item_identifier,
@@ -2521,17 +2562,17 @@ class ProjectsController < ApplicationController
       'updated_at' => timestamp
     }
     items << new_item
-    payload['collection'] = MANUAL_GENE_SET_COLLECTION_LABEL
+    payload['collection'] = manual_collection.name.to_s
     payload['items'] = items
     payload['updated_at'] = timestamp
 
-    write_manual_gene_set_collection_payload(payload)
+    write_local_gene_set_collection_payload(manual_collection.file_key, payload)
 
     render json: {
       status: 'ok',
       collection: {
-        id: MANUAL_GENE_SET_COLLECTION_ID,
-        label: MANUAL_GENE_SET_COLLECTION_LABEL,
+        id: local_gene_set_collection_id(manual_collection),
+        label: manual_collection.name.to_s,
         nb_items: items.length,
         custom: true
       },
@@ -2541,7 +2582,7 @@ class ProjectsController < ApplicationController
         name: name,
         gene_count: genes_with_ids.length
       }
-    }
+    }.deep_merge(collection_type_presentation_for_collection(manual_collection))
   rescue StandardError => e
     Rails.logger.error("save_manual_gene_set failed: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Failed to save manual gene set: #{e.message}" }, status: :unprocessable_entity
@@ -2588,7 +2629,8 @@ class ProjectsController < ApplicationController
       user_id: current_user&.id,
       name: collection_name,
       file_key: "gene_set_collection_#{SecureRandom.hex(12)}",
-      source_kind: source_kind
+      source_kind: source_kind,
+      gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_IMPORTED)
     )
     GeneSetCollectionImportJob.perform_later(
       @project.id,
@@ -2608,7 +2650,7 @@ class ProjectsController < ApplicationController
         custom: true,
         import_pending: true
       }
-    }
+    }.deep_merge(collection_type_presentation_for_collection(collection_record))
   rescue JSON::ParserError => e
     Rails.logger.error("import_gene_set_collection failed: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Invalid JSON format: #{e.message}" }, status: :unprocessable_entity
@@ -2620,12 +2662,33 @@ class ProjectsController < ApplicationController
   # POST /projects/:id/delete_manual_gene_set
   def delete_manual_gene_set
     item_id = params[:item_id].to_s.strip
-    if item_id.blank? || !item_id.start_with?("#{MANUAL_GENE_SET_COLLECTION_ID}:")
+    if item_id.blank?
       render json: { status: 'error', message: 'Missing manual gene set identifier' }, status: :unprocessable_entity
       return
     end
 
-    payload = load_manual_gene_set_collection_payload
+    collection_id_raw = if item_id.start_with?("#{LOCAL_GENE_SET_COLLECTION_ID_PREFIX}:")
+      parts = item_id.split(':')
+      parts.length >= 3 ? "#{parts[0]}:#{parts[1]}" : ''
+    else
+      MANUAL_GENE_SET_COLLECTION_ID
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+    if local_collection_id
+      local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      unless local_collection
+        render json: { status: 'error', message: 'Manual gene set collection not found' }, status: :not_found
+        return
+      end
+      payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+    elsif collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      payload = load_manual_gene_set_collection_payload
+    else
+      render json: { status: 'error', message: 'Invalid manual gene set identifier' }, status: :unprocessable_entity
+      return
+    end
+
     items = Array(payload['items'])
     index = items.index { |raw_item| normalize_manual_gene_set_item(raw_item)&.dig(:id).to_s == item_id }
     if index.nil?
@@ -2637,7 +2700,11 @@ class ProjectsController < ApplicationController
     items.delete_at(index)
     payload['items'] = items
     payload['updated_at'] = Time.now.utc.iso8601
-    write_manual_gene_set_collection_payload(payload)
+    if local_collection_id
+      write_local_gene_set_collection_payload(local_collection.file_key, payload)
+    else
+      write_manual_gene_set_collection_payload(payload)
+    end
 
     deleted_runs_count = delete_related_manual_module_score_runs(removed_item)
 
@@ -2646,15 +2713,61 @@ class ProjectsController < ApplicationController
       item_id: item_id,
       deleted_runs_count: deleted_runs_count,
       collection: {
-        id: MANUAL_GENE_SET_COLLECTION_ID,
-        label: MANUAL_GENE_SET_COLLECTION_LABEL,
+        id: local_collection_id ? local_gene_set_collection_id(local_collection) : MANUAL_GENE_SET_COLLECTION_ID,
+        label: local_collection_id ? local_collection.name.to_s : MANUAL_GENE_SET_COLLECTION_LABEL,
         nb_items: items.length,
         custom: true
       }
-    }
+    }.deep_merge(collection_type_presentation_for_collection(local_collection))
   rescue StandardError => e
     Rails.logger.error("delete_manual_gene_set failed: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Failed to delete manual gene set: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/delete_gene_set_collection
+  def rename_gene_set_collection
+    collection_id_raw = params[:collection_id].to_s.strip
+    new_name = params[:name].to_s.strip
+    if collection_id_raw.blank?
+      render json: { status: 'error', message: 'Missing gene set collection identifier' }, status: :unprocessable_entity
+      return
+    end
+    if new_name.blank?
+      render json: { status: 'error', message: 'Missing gene set collection name' }, status: :unprocessable_entity
+      return
+    end
+
+    local_collection_id = parse_local_gene_set_collection_id(collection_id_raw)
+    unless local_collection_id
+      render json: { status: 'error', message: 'Only imported gene set collections can be renamed' }, status: :forbidden
+      return
+    end
+
+    local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+    unless local_collection
+      render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+      return
+    end
+
+    local_collection.update!(name: new_name)
+    local_payload = load_local_gene_set_collection_payload(local_collection.file_key, new_name)
+    local_payload['collection'] = new_name
+    local_payload['updated_at'] = Time.current.utc.iso8601
+    write_local_gene_set_collection_payload(local_collection.file_key, local_payload)
+
+    render json: {
+      status: 'ok',
+      collection: {
+        id: local_gene_set_collection_id(local_collection),
+        label: local_collection.name.to_s,
+        nb_items: Array(local_payload['items']).length,
+        custom: true,
+        import_pending: false
+      }
+    }.deep_merge(collection_type_presentation_for_collection(local_collection))
+  rescue StandardError => e
+    Rails.logger.error("rename_gene_set_collection failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to rename gene set collection: #{e.message}" }, status: :unprocessable_entity
   end
 
   # POST /projects/:id/delete_gene_set_collection
@@ -2674,7 +2787,7 @@ class ProjectsController < ApplicationController
       payload['updated_at'] = Time.now.utc.iso8601
       write_manual_gene_set_collection_payload(payload)
 
-      manual_collection = GeneSetCollection.find_by(project_id: @project.id, source_kind: 'manual')
+      manual_collection = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find { |collection| gene_set_collection_manual?(collection) }
       manual_collection&.destroy
 
       render json: { status: 'ok', collection_id: collection_id_raw, deleted_runs_count: deleted_runs_count }
@@ -2689,10 +2802,16 @@ class ProjectsController < ApplicationController
         return
       end
 
+      if gene_set_collection_manual?(local_collection)
+        payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+        items = Array(payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
+        deleted_runs_count = items.sum { |item| delete_related_manual_module_score_runs(item) }
+      end
+
       local_path = local_gene_set_collection_file_path(local_collection.file_key)
       File.delete(local_path) if File.exist?(local_path)
       local_collection.destroy!
-      render json: { status: 'ok', collection_id: collection_id_raw }
+      render json: { status: 'ok', collection_id: collection_id_raw, deleted_runs_count: deleted_runs_count.to_i }
       return
     end
 
@@ -3031,7 +3150,7 @@ class ProjectsController < ApplicationController
             nb_items: items.length,
             custom: true
           }
-        }
+        }.deep_merge(collection_type_presentation_for_collection(collection))
       else
         render json: {
           status: 'pending',
@@ -3042,7 +3161,7 @@ class ProjectsController < ApplicationController
             custom: true,
             import_pending: true
           }
-        }
+        }.deep_merge(collection_type_presentation_for_collection(collection))
       end
       return
     end
@@ -5276,7 +5395,7 @@ class ProjectsController < ApplicationController
       return
     end
     
-    # Set up session with existing file upload data
+    # Restore fus/<fu_id>/input_file.<ext> from the canonical project copy, then rerun preparsing.
     upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
                         ENV["UPLOAD_DATA_DIR"]
                       elsif ENV["DATA_DIR"]
@@ -5286,11 +5405,33 @@ class ProjectsController < ApplicationController
                       end
     upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
     upload_file_path = upload_dir + fu.upload_file_name
-    
-    unless File.exist?(upload_file_path)
-      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Uploaded file not found. Cannot reset parsing.'
+
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + @original_project.user_id.to_s + @original_project.key
+    canonical_project_input_filename = @original_project.input_filename.presence || fu.upload_file_name
+    canonical_project_input_file_path = project_dir + canonical_project_input_filename
+
+    unless File.exist?(canonical_project_input_file_path)
+      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project input file copy not found. Cannot reset parsing.'
       return
     end
+
+    FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
+    FileUtils.mkdir_p(upload_dir)
+    FileUtils.cp(canonical_project_input_file_path, upload_file_path)
+    restored_file_size = File.size(upload_file_path)
+    Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{canonical_project_input_file_path}")
+
+    preparsing_options = {
+      organism_id: @original_project.organism_id,
+      version_id: @original_project.version_id
+    }.compact
+    fu.update!(
+      upload_file_size: restored_file_size,
+      status: 'preparsing'
+    )
+    FuPreparsingJob.perform_later(fu.id, preparsing_options)
+    Rails.logger.info("[reset_parsing] Restarted preparsing for Fu##{fu.id} with options #{preparsing_options.inspect}")
 
     # Set up session with file upload info
     session[:file_upload] = {
@@ -5298,8 +5439,8 @@ class ProjectsController < ApplicationController
       original_filename: fu.name || fu.upload_file_name,
       input_filename: fu.upload_file_name,
       path: upload_file_path.to_s,
-      size: fu.upload_file_size || File.size(upload_file_path),
-      total_size: fu.upload_file_size || File.size(upload_file_path),
+      size: restored_file_size,
+      total_size: restored_file_size,
       complete: true,
       organism_id: @original_project.organism_id,
       version_id: @original_project.version_id
@@ -5329,45 +5470,12 @@ class ProjectsController < ApplicationController
     # Store parsing attributes in instance variable for form pre-filling
     @parsing_attrs = h_attrs
     
-    # Check if preparsing is already complete by checking for output.json
-    output_file = upload_dir + 'output.json'
-    if File.exist?(output_file) && File.size(output_file) > 0
-      # Preparsing is complete - ensure Fu status reflects this
-      # This prevents the JavaScript from thinking preparsing is still running
-      if fu.status != 'preparsed'
-        begin
-          # Try to load the output to verify it's valid
-          output_content = File.read(output_file)
-          output_json = Basic.safe_parse_json(output_content, {})
-          if output_json.present? && output_json.is_a?(Hash)
-            fu.update!(status: 'preparsed')
-            Rails.logger.info("[reset_parsing] Set Fu##{fu.id} status to 'preparsed' (preparsing already complete)")
-          else
-            Rails.logger.warn("[reset_parsing] Output file exists but is invalid, keeping Fu##{fu.id} status as: #{fu.status}")
-          end
-        rescue => e
-          Rails.logger.error("[reset_parsing] Error checking preparsing output: #{e.message}")
-          # If we can't read the file, don't change the status
-        end
-      end
-    else
-      # Preparsing output doesn't exist - if status is 'preparsing', it might be stuck
-      # Set to 'uploaded' so it can be detected properly
-      if fu.status == 'preparsing'
-        fu.update!(status: 'uploaded')
-        Rails.logger.info("[reset_parsing] Set Fu##{fu.id} status to 'uploaded' (preparsing output missing, may need to rerun)")
-      end
-    end
-    
     # Store fu_id for the form to detect existing upload
     @existing_fu_id = fu.id
     @existing_filename = fu.name || fu.upload_file_name
     
     # Flag to indicate we're resetting parsing (for button text)
     @is_resetting_parsing = true
-    
-    # Note: We don't rerun preparsing - the existing preparsing results will be used
-    # The file upload controller will detect the existing fu_id and show preparsing results
     
     # Render the new project form
     render :new
@@ -5634,6 +5742,8 @@ class ProjectsController < ApplicationController
       h_env = Basic.safe_parse_json(@project.version.env_json, {})
       db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
       current_user_id = current_user&.id
+      global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
+      imported_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_IMPORTED)
 
       @gene_set_collections = []
 
@@ -5681,43 +5791,54 @@ class ProjectsController < ApplicationController
                             project_id.blank? &&
                             ref_id.blank?
           is_custom = custom_for_project || custom_for_user
-
           {
             id: row['id'].to_i,
             label: row['label'].to_s,
             database_name: row['database_name'].to_s,
             nb_items: row['item_count'].to_i,
             custom: is_custom
-          }
+          }.merge(project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation)
         end
       end
 
-      local_collections = GeneSetCollection.where(project_id: @project.id).where.not(source_kind: 'manual').order(created_at: :desc)
-      if local_collections.any?
-        local_collection_payloads = local_collections.map do |collection|
-          payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
-          {
-            id: local_gene_set_collection_id(collection),
-            label: collection.name.to_s,
-            database_name: '',
-            nb_items: Array(payload['items']).length,
-            custom: true
-          }
+      legacy_manual_payload_items = Array(load_manual_gene_set_collection_payload['items'])
+      ensure_default_manual_gene_set_collection_record!
+      local_collections = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc)
+      manual_local_payloads = []
+      non_manual_local_payloads = []
+
+      local_collections.each do |collection|
+        payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+        collection_payload = {
+          id: local_gene_set_collection_id(collection),
+          label: collection.name.to_s,
+          database_name: '',
+          nb_items: Array(payload['items']).length,
+          custom: true
+        }.merge(gene_set_collection_type_presentation(gene_set_collection_type_key(collection)))
+        if gene_set_collection_manual?(collection)
+          manual_local_payloads << collection_payload
+        else
+          non_manual_local_payloads << collection_payload
         end
-        @gene_set_collections = local_collection_payloads + @gene_set_collections
       end
 
-      manual_payload = load_manual_gene_set_collection_payload
-      manual_items = Array(manual_payload['items'])
-      if manual_items.any?
+      if non_manual_local_payloads.any?
+        @gene_set_collections = non_manual_local_payloads + @gene_set_collections
+      end
+      if manual_local_payloads.any?
+        @gene_set_collections = manual_local_payloads + @gene_set_collections
+      elsif legacy_manual_payload_items.any?
         @gene_set_collections.unshift({
           id: MANUAL_GENE_SET_COLLECTION_ID,
           label: MANUAL_GENE_SET_COLLECTION_LABEL,
           database_name: '',
-          nb_items: manual_items.length,
+          nb_items: legacy_manual_payload_items.length,
           custom: true
-        })
+        }.merge(gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_MANUAL)))
       end
+
+      @manual_gene_set_collection_options = manual_gene_set_collections_for_dropdown
     end
 
     def manual_gene_set_collections_dir
@@ -5729,14 +5850,105 @@ class ProjectsController < ApplicationController
       manual_gene_set_collections_dir + 'manual_gene_sets.json'
     end
 
-    def ensure_manual_gene_set_collection_record!
-      expected_file_key = "manual_gene_sets_#{@project.id}"
-      manual_collection = GeneSetCollection.find_or_initialize_by(project_id: @project.id, source_kind: 'manual')
-      manual_collection.user_id ||= current_user&.id
-      manual_collection.name = MANUAL_GENE_SET_COLLECTION_LABEL
-      manual_collection.file_key = expected_file_key
-      manual_collection.save! if manual_collection.new_record? || manual_collection.changed?
+    def ensure_default_manual_gene_set_collection_record!
+      existing_manual = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find do |collection|
+        gene_set_collection_manual?(collection)
+      end
+      return existing_manual if existing_manual
+
+      create_manual_gene_set_collection!(name: MANUAL_GENE_SET_COLLECTION_LABEL)
+    end
+
+    def create_manual_gene_set_collection!(name:)
+      file_key = "manual_gene_sets_#{@project.id}_#{SecureRandom.hex(6)}"
+      manual_collection = GeneSetCollection.create!(
+        project_id: @project.id,
+        user_id: current_user&.id,
+        name: name.to_s.strip.presence || MANUAL_GENE_SET_COLLECTION_LABEL,
+        file_key: file_key,
+        source_kind: 'manual',
+        gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_MANUAL)
+      )
+      write_local_gene_set_collection_payload(manual_collection.file_key, {
+        'collection' => manual_collection.name.to_s,
+        'items' => [],
+        'created_at' => Time.current.utc.iso8601,
+        'updated_at' => Time.current.utc.iso8601
+      })
       manual_collection
+    end
+
+    def resolve_target_manual_collection(collection_id_param)
+      requested_id = collection_id_param.to_s.strip
+      return ensure_default_manual_gene_set_collection_record! if requested_id.blank? || requested_id == MANUAL_GENE_SET_COLLECTION_ID
+
+      local_collection_id = parse_local_gene_set_collection_id(requested_id)
+      return nil unless local_collection_id
+
+      collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      return nil unless collection
+      return nil unless gene_set_collection_manual?(collection)
+
+      collection
+    end
+
+    def manual_gene_set_collections_for_dropdown
+      collections = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc).select do |collection|
+        gene_set_collection_manual?(collection)
+      end
+      collections.map do |collection|
+        {
+          id: local_gene_set_collection_id(collection),
+          label: collection.name.to_s
+        }
+      end
+    end
+
+    def gene_set_collection_type_key(collection)
+      type_key = collection&.gene_set_collection_type&.key.to_s.strip
+      return type_key if type_key.present?
+      legacy_kind = collection&.source_kind.to_s.strip
+      return GENE_SET_COLLECTION_TYPE_MANUAL if legacy_kind == 'manual'
+      GENE_SET_COLLECTION_TYPE_IMPORTED
+    end
+
+    def gene_set_collection_manual?(collection)
+      gene_set_collection_type_key(collection) == GENE_SET_COLLECTION_TYPE_MANUAL
+    end
+
+    def gene_set_collection_type_id_for!(type_key)
+      type = GeneSetCollectionType.find_by(key: type_key.to_s.strip)
+      raise ArgumentError, "Unknown gene set collection type: #{type_key}" unless type
+      type.id
+    end
+
+    def gene_set_collection_types_by_key
+      @gene_set_collection_types_by_key ||= GeneSetCollectionType.all.index_by { |row| row.key.to_s }
+    end
+
+    def gene_set_collection_type_presentation(type_key)
+      normalized_key = type_key.to_s.strip
+      type_row = gene_set_collection_types_by_key[normalized_key]
+      if type_row
+        {
+          type_key: type_row.key.to_s,
+          type_label: type_row.label.to_s,
+          type_icon: type_row.icon.to_s,
+          type_icon_color: type_row.icon_color.to_s
+        }
+      else
+        {
+          type_key: GENE_SET_COLLECTION_TYPE_IMPORTED,
+          type_label: 'Imported',
+          type_icon: 'fas fa-file-import',
+          type_icon_color: '#6b7280'
+        }
+      end
+    end
+
+    def collection_type_presentation_for_collection(collection)
+      type_key = collection ? gene_set_collection_type_key(collection) : GENE_SET_COLLECTION_TYPE_MANUAL
+      { collection: gene_set_collection_type_presentation(type_key) }
     end
 
     def gene_set_collection_imports_dir

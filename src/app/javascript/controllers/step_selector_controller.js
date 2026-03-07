@@ -514,6 +514,7 @@ export default class extends Controller {
     console.log('[StepSelectorController] Selected step ID:', selectedStepId)
     
     const controller = this
+    let preservedScrollTop = 0
     
     return fetch(url, {
       method: 'GET',
@@ -554,9 +555,17 @@ export default class extends Controller {
         const panelWrapper = stepsPanelContainer.querySelector('.bg-white.rounded-lg.shadow-sm.border')
         console.log('[StepSelectorController] Panel wrapper found:', !!panelWrapper)
         if (panelWrapper) {
+          const previousScrollContainer = panelWrapper.querySelector('.flex-1.overflow-y-auto')
+          preservedScrollTop = previousScrollContainer ? previousScrollContainer.scrollTop : 0
+
           // Replace the steps panel content with fresh HTML from server
           panelWrapper.innerHTML = html
           console.log('[StepSelectorController] Steps panel content updated from server')
+
+          const refreshedScrollContainer = panelWrapper.querySelector('.flex-1.overflow-y-auto')
+          if (refreshedScrollContainer) {
+            refreshedScrollContainer.scrollTop = preservedScrollTop
+          }
           
           // Re-attach event listeners to the new step elements
           const stepElements = panelWrapper.querySelectorAll('[data-step-id]')

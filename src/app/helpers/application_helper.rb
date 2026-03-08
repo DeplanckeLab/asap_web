@@ -278,6 +278,110 @@ module ApplicationHelper
     "#{key}: #{parts.join(' ')}"
   end
 
+  def param_badge_palette(attr_key)
+    key = attr_key.to_s
+    is_input_data = key.start_with?('input_matrix', 'input_de')
+    if is_input_data
+      {
+        container: 'bg-blue-100 text-blue-700 border-blue-200',
+        key: 'text-blue-800',
+        value: 'text-blue-600'
+      }
+    else
+      {
+        container: 'bg-purple-100 text-purple-700 border-purple-200',
+        key: 'text-purple-800',
+        value: 'text-purple-600'
+      }
+    end
+  end
+
+  def render_run_param_badge(run:, key:, value:, h_method_attrs:, context: {}, clickable: true)
+    tooltip = param_tooltip(key, h_method_attrs)
+    h_annots = context[:h_annots] || {}
+    h_runs = context[:h_runs] || {}
+    h_steps = context[:h_steps] || @h_steps || {}
+
+    dataset_items = []
+    candidate_items = if value.is_a?(Hash)
+                        [value]
+                      elsif value.is_a?(Array) && value.first.is_a?(Hash)
+                        value
+                      else
+                        []
+                      end
+
+    candidate_items.each do |item|
+      annot_id = item['annot_id'] || item[:annot_id]
+      run_id = item['run_id'] || item[:run_id]
+      output_dataset = item['output_dataset'] || item[:output_dataset]
+
+      annot = nil
+      if annot_id.present?
+        annot = h_annots[annot_id.to_i]
+        if annot.nil? && defined?(Annot)
+          annot = Annot.find_by(id: annot_id)
+        end
+      end
+
+      label = if annot
+                clean_metadata_path(annot.name)
+              elsif output_dataset.present?
+                clean_metadata_path(output_dataset)
+              else
+                nil
+              end
+      next if label.blank?
+
+      dataset_items << {
+        label: label,
+        annot_id: annot&.id || annot_id,
+        run_id: run_id
+      }
+    end
+
+    if dataset_items.any?
+      palette = param_badge_palette(key)
+      uniq_items = dataset_items.uniq { |e| [e[:label], e[:annot_id].to_s, e[:run_id].to_s] }
+      key_txt = ERB::Util.html_escape(key.to_s)
+      tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
+      pipeline_url = run ? pipeline_runs_project_path(run.project) : nil
+      badges = uniq_items.map do |item|
+        item_label = ERB::Util.html_escape(item[:label].to_s)
+        clickable_attrs = ''
+        if clickable && pipeline_url
+          if item[:annot_id].present?
+            clickable_attrs = " data-controller='pipeline-runs' data-pipeline-runs-annot-id-value='#{item[:annot_id]}' data-pipeline-runs-url-value='#{pipeline_url}' data-action='click->pipeline-runs#showPipeline' onclick='event.stopPropagation();'"
+          elsif item[:run_id].present?
+            clickable_attrs = " data-controller='pipeline-runs' data-pipeline-runs-run-id-value='#{item[:run_id]}' data-pipeline-runs-url-value='#{pipeline_url}' data-action='click->pipeline-runs#showPipeline' onclick='event.stopPropagation();'"
+          end
+        end
+
+        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]}#{clickable_attrs.present? ? ' cursor-pointer' : ''}' title='#{tooltip_txt}'#{clickable_attrs}>" \
+          "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
+          "<span class='#{palette[:value]}'>#{item_label}</span>" \
+          "</span>"
+      end
+      return badges.join('')
+    end
+
+    value_str = if value.is_a?(Array) || value.is_a?(Hash)
+                  value.to_json
+                else
+                  value.to_s
+                end
+    value_str = value_str.to_s
+    truncated = value_str.length > 80 ? "#{value_str[0..76]}..." : value_str
+    key_txt = ERB::Util.html_escape(key.to_s)
+    val_txt = ERB::Util.html_escape(truncated)
+    tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
+
+    "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' title='#{tooltip_txt}'>" \
+      "<span class='font-semibold text-gray-800'>#{key_txt}:</span>" \
+      "<span class='text-gray-600'>#{val_txt}</span>" \
+      "</span>"
+  end
+
   # Display run attributes
   def display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
     return { datasets: [], attrs: [] } unless run && h_attrs
@@ -308,87 +412,20 @@ module ApplicationHelper
        (attr_default = sma['default']) &&
        attr_default.to_s == h_attrs[attr].to_s)
     }.map { |attr|
-      v = h_attrs[attr]
-      txt = ''
-      list_datasets_by_attr_name = {}
-      
-      if v.is_a?(Hash) && v['run_id']
-        list_datasets_by_attr_name[attr] ||= []
-        list_datasets_by_attr_name[attr].push(v)
-      elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
-        list_datasets_by_attr_name[attr] = v
-      else
-        tooltip_text = param_tooltip(attr, method_attrs_map)
-        txt = "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' " \
-          "title=\"#{tooltip_text}\">" \
-          "<span class='font-semibold text-gray-800'>#{attr}:</span>" \
-          "<span class='text-gray-600'>#{v.to_s}</span>" \
-          "</span>"
-      end
-      
-      # Get annots for datasets
-      annot_ids = list_datasets_by_attr_name.values.flatten.map { |e| e['annot_id'] }.compact.uniq
-      h_annots = {}
-      if annot_ids.any? && defined?(Annot)
-        Annot.where(id: annot_ids).each { |a| h_annots[a.id] = a }
-      end
-      
-      list_datasets_by_attr_name.each_key do |attr_name|
-        if list_datasets_by_attr_name[attr_name].size < 10
-          list_datasets_by_attr_name[attr_name].each do |v|
-            if v['annot_id'] && h_annots[v['annot_id']]
-              v['output_dataset'] = h_annots[v['annot_id']].name
-            end
-            tmp_run = (defined?(Run) && v['run_id']) ? Run.find_by(id: v['run_id']) : nil
-            tmp_step = (tmp_run && @h_steps) ? @h_steps[tmp_run.step_id] : nil
-            if tmp_run && tmp_step
-              displayed_val = ''
-              if v['output_dataset'] && m = v['output_dataset'].match(/^\/.{3}_attrs\/(.+)/)
-                displayed_val = m[1]
-              else
-                displayed_val = "#{tmp_step.name}" + ((tmp_step.multiple_runs) ? " ##{tmp_run.num}" : "")
-              end
-              # Use Tailwind-style clickable badge with pipeline-runs Stimulus controller
-              pipeline_url = pipeline_runs_project_path(run.project)
-              annot_id = v['annot_id']
-              
-              if annot_id.present?
-                # Use annot_id for pipeline lookup
-                array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
-                  "data-controller='pipeline-runs' " \
-                  "data-pipeline-runs-annot-id-value='#{annot_id}' " \
-                  "data-pipeline-runs-url-value='#{pipeline_url}' " \
-                  "data-action='click->pipeline-runs#showPipeline' " \
-                  "onclick='event.stopPropagation();' " \
-                  "title='#{displayed_val} - Click to view pipeline'>" \
-                  "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
-                  "<span class='text-blue-600'>#{displayed_val}</span>" \
-                  "</span>"
-              else
-                array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer hover:bg-blue-200 transition-colors' " \
-                  "data-controller='pipeline-runs' " \
-                  "data-pipeline-runs-run-id-value='#{tmp_run.id}' " \
-                  "data-pipeline-runs-url-value='#{pipeline_url}' " \
-                  "data-action='click->pipeline-runs#showPipeline' " \
-                  "onclick='event.stopPropagation();' " \
-                  "title='#{displayed_val} - Click to view pipeline'>" \
-                  "<span class='font-semibold text-blue-800'>#{attr}:</span>" \
-                  "<span class='text-blue-600'>#{displayed_val}</span>" \
-                  "</span>"
-              end
-            else
-              array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>#{attr}:NA</span>"
-            end
-          end
-        else
-          array_dataset.push "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'>#{attr}:#{list_datasets_by_attr_name[attr_name].size} datasets</span>"
-        end
-      end
-      
-      txt
-    }
-    
-    { datasets: array_dataset, attrs: array }
+      render_run_param_badge(
+        run: run,
+        key: attr,
+        value: h_attrs[attr],
+        h_method_attrs: method_attrs_map,
+        context: {
+          h_annots: opt[:h_annots] || {},
+          h_runs: opt[:h_runs] || {},
+          h_steps: opt[:h_steps] || {}
+        }
+      )
+    }.reject(&:blank?)
+
+    { datasets: [], attrs: array }
   end
   
   def display_run_attrs(run, h_attrs, h_std_method_attrs, opt)

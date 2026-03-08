@@ -248,7 +248,30 @@ export default class extends Controller {
     })
     
     // Initial validation
+    this.syncDeGroupVisibility()
     this.validateForm()
+  }
+
+  syncDeGroupVisibility() {
+    const toggle = this.attrsContainerTarget.querySelector('#checkbox-all_against_compl')
+    const refContainer = this.attrsContainerTarget.querySelector('#form-container_group_ref')
+    const compContainer = this.attrsContainerTarget.querySelector('#form-container_group_comp')
+
+    if (!toggle || !refContainer || !compContainer) {
+      return
+    }
+
+    const applyVisibility = () => {
+      // Legacy behavior requested by user:
+      // when "All against complementary" is checked, hide both selectors.
+      const hideGroupSelectors = !!toggle.checked
+      refContainer.style.display = hideGroupSelectors ? 'none' : ''
+      compContainer.style.display = hideGroupSelectors ? 'none' : ''
+      this.validateForm()
+    }
+
+    toggle.addEventListener('change', applyVisibility)
+    applyVisibility()
   }
   
   validateForm() {
@@ -291,6 +314,9 @@ export default class extends Controller {
     const attrContainers = this.attrsContainerTarget.querySelectorAll('[data-attr-name]')
     
     attrContainers.forEach(container => {
+      if (container.offsetParent === null) {
+        return
+      }
       const attrName = container.getAttribute('data-attr-name')
       const widget = container.getAttribute('data-attr-widget')
       const notNull = container.getAttribute('data-attr-not-null') === 'true'

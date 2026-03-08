@@ -16,7 +16,7 @@ export default class extends Controller {
   static targets = ["result", "filtered", "plot", "matrixDatasetSelect", "matrixDatasetHidden", "inputMatrixHidden", "submitButton", "submitSpinner"]
 
   isFilterEnabled(disableBtn) {
-    return disableBtn && disableBtn.classList.contains("text-red-700") && !disableBtn.classList.contains("bg-red-50");
+    return disableBtn && disableBtn.classList.contains("bg-white") && disableBtn.classList.contains("text-red-700");
   }
 
   connect() {
@@ -581,9 +581,9 @@ export default class extends Controller {
     const isEnabled = btn.classList.contains("text-red-700") && !btn.classList.contains("bg-red-50");
     
     if (isEnabled) {
-      // Disable the filter - change to disabled state with light red background
+      // Disable the filter - keep button visually active in plain red
       btn.classList.remove("text-red-700", "border-red-300", "hover:bg-red-50", "hover:border-red-400", "bg-white");
-      btn.classList.add("text-red-600", "bg-red-50", "border-red-200", "cursor-not-allowed", "opacity-75");
+      btn.classList.add("text-white", "bg-red-600", "border-red-600", "hover:bg-red-700");
       btn.innerHTML = "Disabled";
       saved.value = input.value;
       input.value = '';
@@ -596,7 +596,7 @@ export default class extends Controller {
       }
     } else {
       // Enable the filter - restore to enabled state
-      btn.classList.remove("text-red-600", "bg-red-50", "border-red-200", "cursor-not-allowed", "opacity-75");
+      btn.classList.remove("text-white", "bg-red-600", "border-red-600", "hover:bg-red-700");
       btn.classList.add("text-red-700", "border-red-300", "hover:bg-red-50", "hover:border-red-400", "bg-white");
       btn.innerHTML = "Disable";
       input.value = saved.value;
@@ -623,7 +623,7 @@ export default class extends Controller {
       if (!input || !saved) return;
 
       btn.classList.remove("text-red-700", "border-red-300", "hover:bg-red-50", "hover:border-red-400", "bg-white");
-      btn.classList.add("text-red-600", "bg-red-50", "border-red-200", "cursor-not-allowed", "opacity-75");
+      btn.classList.add("text-white", "bg-red-600", "border-red-600", "hover:bg-red-700");
       btn.innerHTML = "Disabled";
       input.value = "";
       input.disabled = true;

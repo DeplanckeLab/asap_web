@@ -41,6 +41,13 @@ export default class extends Controller {
     if (this.boundCloseDropdown) {
       document.removeEventListener('click', this.boundCloseDropdown, true)
     }
+    if (this._boundGroupRefChangeHandler) {
+      const refSelect = document.getElementById("attrs_group_ref")
+      if (refSelect) {
+        refSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
+      }
+      this._boundGroupRefChangeHandler = null
+    }
   }
 
   toggleDropdown(event) {
@@ -106,6 +113,15 @@ export default class extends Controller {
     }
     
     this.updateSelectedItems()
+
+    // UX: for single-select widgets (radio), close dropdown immediately after selection
+    if (!this.isMultipleValue && input.checked) {
+      this.dropdownMenuTarget.classList.add('hidden')
+      this.dropdownMenuTarget.style.display = 'none'
+      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
+        this.selectedDivTarget.classList.remove('hidden')
+      }
+    }
   }
 
   removeSelected(event) {
@@ -160,6 +176,7 @@ export default class extends Controller {
     }
 
     this.updateDependentCategorySelect(selectedValues)
+    this.updateDeGroupSelects(selectedValues)
     
     // Update display
     if (selectedValues.length > 0) {
@@ -343,5 +360,137 @@ export default class extends Controller {
     })
 
     dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  async updateDeGroupSelects(selectedValues) {
+    // DE form specific behavior (legacy parity):
+    // when selecting "groups" (clustering metadata), update both
+    // "Reference group" and "Compared group" selects.
+    if (this.attrNameValue !== "groups") {
+      return
+    }
+
+    const refSelect = document.getElementById("attrs_group_ref")
+    const compSelect = document.getElementById("attrs_group_comp")
+    if (!refSelect || !compSelect) {
+      return
+    }
+
+    const selected = selectedValues.length > 0 ? selectedValues[0] : null
+    let categories = this.normalizeCategories(selected ? selected.categories : null)
+    if ((!categories || Object.keys(categories).length === 0) && selected && selected.annot_id) {
+      categories = await this.fetchCategoriesForAnnot(selected.annot_id)
+    }
+
+    const categoryNames = categories
+      ? Object.keys(categories).filter((name) => name !== "").sort()
+      : []
+
+    const previousRef = refSelect.value
+    const previousComp = compSelect.value
+
+    if (categoryNames.length === 0) {
+      refSelect.innerHTML = ""
+      compSelect.innerHTML = ""
+      const emptyRef = document.createElement("option")
+      emptyRef.value = ""
+      emptyRef.textContent = "Select a reference group"
+      refSelect.appendChild(emptyRef)
+      const emptyComp = document.createElement("option")
+      emptyComp.value = ""
+      emptyComp.textContent = "Select a compared group"
+      compSelect.appendChild(emptyComp)
+      refSelect.value = ""
+      compSelect.value = ""
+      refSelect.dispatchEvent(new Event("change", { bubbles: true }))
+      compSelect.dispatchEvent(new Event("change", { bubbles: true }))
+      return
+    }
+
+    const buildCategoryOptions = (select, names, keepValue, placeholderText) => {
+      select.innerHTML = ""
+      if (names.length === 0) {
+        const emptyOption = document.createElement("option")
+        emptyOption.value = ""
+        emptyOption.textContent = placeholderText
+        select.appendChild(emptyOption)
+        select.value = ""
+        return
+      }
+
+      names.forEach((name) => {
+        const count = categories[name]
+        const option = document.createElement("option")
+        option.value = name
+        option.textContent = Number.isFinite(Number(count))
+          ? `${name} (${count})`
+          : name
+        select.appendChild(option)
+      })
+
+      if (keepValue && names.includes(keepValue)) {
+        select.value = keepValue
+      } else {
+        select.value = names[0]
+      }
+    }
+
+    buildCategoryOptions(refSelect, categoryNames, previousRef, "Select a reference group")
+
+    const refreshComparedSelect = () => {
+      const selectedRef = refSelect.value
+      const comparedNames = categoryNames.filter((name) => name !== selectedRef)
+      buildCategoryOptions(compSelect, comparedNames, previousComp, "Select a compared group")
+      compSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    }
+
+    if (!this._boundGroupRefChangeHandler) {
+      this._boundGroupRefChangeHandler = () => {
+        refreshComparedSelect()
+      }
+      refSelect.addEventListener("change", this._boundGroupRefChangeHandler)
+    }
+
+    refreshComparedSelect()
+    refSelect.dispatchEvent(new Event("change", { bubbles: true }))
+  }
+
+  normalizeCategories(rawCategories) {
+    if (!rawCategories) {
+      return null
+    }
+    if (Array.isArray(rawCategories)) {
+      // Supports payloads like [{name, count, indices}, ...]
+      const map = {}
+      rawCategories.forEach((entry) => {
+        if (!entry || typeof entry !== "object") return
+        const name = entry.name == null ? "" : String(entry.name)
+        if (name === "") return
+        const count = Number(entry.count)
+        map[name] = Number.isFinite(count) ? count : 0
+      })
+      return map
+    }
+    if (typeof rawCategories === "object") {
+      return rawCategories
+    }
+    return null
+  }
+
+  async fetchCategoriesForAnnot(annotId) {
+    try {
+      const response = await fetch(`/annots/${annotId}/categories.json`, {
+        method: "GET",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        credentials: "same-origin"
+      })
+      if (!response.ok) {
+        return null
+      }
+      const payload = await response.json()
+      return this.normalizeCategories(payload.categories)
+    } catch (_error) {
+      return null
+    }
   }
 }

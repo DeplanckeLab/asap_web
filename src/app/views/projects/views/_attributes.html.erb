@@ -34,14 +34,26 @@
                 <% case attr['widget'] %>
                 <% when 'input_data' %>
                   <% if attr['valid_types'].present? && attr['source_steps'].present? %>
-                    <% source_step_ids = attr['source_steps'].map { |ssn| @h_steps.values.find { |s| s.name == ssn }&.id }.compact %>
+                    <% project_type_name = @project.project_type&.name %>
+                    <% project_type_tag = @project.project_type&.tag %>
+                    <% all_steps = (@h_steps.respond_to?(:values) ? @h_steps.values : Array(@h_steps)).compact %>
+                    <% applicable_steps = all_steps.select { |step_record|
+                         step_attrs = Basic.safe_parse_json(step_record.attrs_json, {})
+                         step_project_types = step_attrs['project_types']
+                         if project_type_name.present? && step_project_types.present? && step_project_types.any?
+                           step_project_types.include?(project_type_name) || (project_type_tag.present? && step_project_types.include?(project_type_tag))
+                         else
+                           true
+                         end
+                       } %>
+                    <% source_step_ids = attr['source_steps'].flat_map { |ssn| applicable_steps.select { |s| s.name == ssn }.map(&:id) }.compact.uniq %>
                     <% source_runs = @h_runs.values.select { |r| source_step_ids.include?(r.step_id) } %>
                     <% source_run_ids = source_runs.map(&:id) %>
                     <% h_data_classes = {} %>
                     <% DataClass.all.each { |dc| h_data_classes[dc.id] = dc.name } %>
                     <% candidate_annots = Annot.where(project_id: @project.id)
                                               .where(
-                                                "step_id IN (:step_ids) OR ori_step_id IN (:step_ids) OR run_id IN (:run_ids) OR ori_run_id IN (:run_ids)",
+                                                "step_id IN (:step_ids) OR ori_step_id IN (:step_ids) OR run_id IN (:run_ids) OR ori_run_id IN (:run_ids) OR store_run_id IN (:run_ids)",
                                                 step_ids: source_step_ids.presence || [-1],
                                                 run_ids: source_run_ids.presence || [-1]
                                               )

@@ -105,6 +105,11 @@ export default class extends Controller {
     // Track currently displayed step
     this.currentStepId = null
     console.log('[StepSelectorController] Initial currentStepId set to:', this.currentStepId)
+    this._refreshingStepsPanel = false
+    this._refreshingStepsPanelPromise = null
+    this.statusUpdateDebounceMs = 350
+    this.statusUpdateTimer = null
+    this.pendingStatusUpdate = null
     
     // Remove any blue background from server-rendered steps (all should be white)
     // This ensures consistency with the new design
@@ -267,6 +272,10 @@ export default class extends Controller {
   }
 
   disconnect() {
+    if (this.statusUpdateTimer) {
+      clearTimeout(this.statusUpdateTimer)
+      this.statusUpdateTimer = null
+    }
     this.unsubscribeFromProject()
   }
 
@@ -310,7 +319,7 @@ export default class extends Controller {
           console.log(`[StepSelectorController] h_nber_analyses:`, data.h_nber_analyses)
           console.log(`[StepSelectorController] Current step ID:`, this.currentStepId, `(type: ${typeof this.currentStepId})`)
           console.log(`[StepSelectorController] Will call handleStatusUpdate now...`)
-          this.handleStatusUpdate(data)
+          this.scheduleStatusUpdate(data)
           console.log(`[StepSelectorController] handleStatusUpdate completed`)
         }
       }
@@ -325,6 +334,21 @@ export default class extends Controller {
       this.subscription.unsubscribe()
       this.subscription = null
     }
+  }
+
+  scheduleStatusUpdate(data) {
+    this.pendingStatusUpdate = data
+    if (this.statusUpdateTimer) {
+      clearTimeout(this.statusUpdateTimer)
+    }
+    this.statusUpdateTimer = setTimeout(() => {
+      const update = this.pendingStatusUpdate
+      this.pendingStatusUpdate = null
+      this.statusUpdateTimer = null
+      if (update) {
+        this.handleStatusUpdate(update)
+      }
+    }, this.statusUpdateDebounceMs)
   }
 
   handleStatusUpdate(data) {
@@ -509,6 +533,10 @@ export default class extends Controller {
 
   refreshStepsPanel() {
     console.log('[StepSelectorController] ===== REFRESHING STEPS PANEL FROM SERVER =====')
+    if (this._refreshingStepsPanel) {
+      return this._refreshingStepsPanelPromise || Promise.resolve()
+    }
+    this._refreshingStepsPanel = true
     // Send selected_step_id so the server can render the blue border correctly
     const selectedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
     let url = `/projects/${this.projectIdentifier}/refresh_steps_panel.html`
@@ -521,7 +549,7 @@ export default class extends Controller {
     const controller = this
     let preservedScrollTop = 0
     
-    return fetch(url, {
+    const refreshPromise = fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'text/html',
@@ -607,23 +635,25 @@ export default class extends Controller {
           console.log('[StepSelectorController] Re-attached event listeners to', stepElements.length, 'step elements')
           console.log('[StepSelectorController] Border is already rendered by server - no client-side modification needed')
           
-          // Clear the refreshing flag
-          controller._refreshingStepsPanel = false
         } else {
           console.warn('[StepSelectorController] Steps panel wrapper not found')
-          controller._refreshingStepsPanel = false
         }
       } else {
         console.warn('[StepSelectorController] Steps panel container (.w-1/4) not found')
-        controller._refreshingStepsPanel = false
       }
     })
     .catch((error) => {
       console.error('[StepSelectorController] ===== ERROR REFRESHING STEPS PANEL =====')
       console.error('[StepSelectorController] Error:', error)
-      controller._refreshingStepsPanel = false
       throw error // Re-throw so handleStatusUpdate can catch it
     })
+    .finally(() => {
+      controller._refreshingStepsPanel = false
+      controller._refreshingStepsPanelPromise = null
+    })
+
+    this._refreshingStepsPanelPromise = refreshPromise
+    return refreshPromise
   }
 
   updateStepStatusBadge(stepId, data) {

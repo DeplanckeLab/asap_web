@@ -26,10 +26,7 @@
       <% end %>
     <% end %>
     
-    <!-- Standard Dashboard (for multiple runs) -->
-    <% if @show_dashboard %>
-      <%= render 'projects/views/std_dashboard' %>
-    <% end %>
+    <!-- Standard Dashboard (for multiple runs) now uses the same table layout below -->
     
     <!-- Standard Run View (for single run) -->
     <% if @show_view %>
@@ -127,8 +124,8 @@
       </div>
     <% end %>
 
-    <!-- Runs Section (fallback if no standard dashboard/view/form) -->
-    <% unless @show_dashboard || @show_view || @show_form || @show_custom_form %>
+    <!-- Runs Section (used for dashboard mode and fallback when no other mode is active) -->
+    <% unless @show_view || @show_form || @show_custom_form %>
       <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;" data-controller="run-selection">
         <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
           <div class="flex items-center justify-between">
@@ -319,194 +316,16 @@
                     </td>
                     <td class="px-3 py-4">
                       <% if params_array.any? %>
-                        <div class="flex flex-wrap gap-1.5 items-center">
-                          <% params_array.each_with_index do |(key, value), index| %>
-                            <span class="run-param-badge">
-                              <%# Check if value is a dataset (annot object) or array of datasets %>
-                              <% annot_id = nil %>
-                              <% if value.is_a?(Hash) %>
-                                <% annot_id = value['annot_id'] || value[:annot_id] %>
-                              <% end %>
-                              <% if annot_id.present? %>
-                                <% annot = @h_annots_for_params[annot_id.to_i] if defined?(@h_annots_for_params) %>
-                                <% if annot %>
-                                  <% ori_run = @h_ori_runs_for_params[annot.ori_run_id] if annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
-                                  <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
-                                  <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
-                                  <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                    <% tooltip_full = "#{step_name} ##{ori_run.num || ori_run.id} #{annot.name}" %>
-                                  <% else %>
-                                    <% tooltip_full = "#{step_name} #{annot.name}" %>
-                                  <% end %>
-                                  <% short_name = clean_metadata_path(annot.name) %>
-                                  <% is_input_matrix = key.to_s.start_with?('input_matrix') %>
-                                  <% badge_bg = is_input_matrix ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
-                                  <% badge_label_cls = is_input_matrix ? 'text-blue-800' : 'text-purple-800' %>
-                                  <% badge_value_cls = is_input_matrix ? 'text-blue-600' : 'text-purple-600' %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg %>"
-                                        data-controller="pipeline-runs"
-                                        data-pipeline-runs-annot-id-value="<%= annot_id %>"
-                                        data-pipeline-runs-project-id-value="<%= @project.id %>"
-                                        data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
-                                        data-action="click->pipeline-runs#showPipeline"
-                                        onclick="event.stopPropagation();"
-                                        title="<%= param_tooltip(key, h_method_attrs) %>">
-                                    <span class="font-semibold <%= badge_label_cls %>"><%= key %>:</span>
-                                    <span class="<%= badge_value_cls %>"><%= short_name %></span>
-                                  </span>
-                                <% else %>
-                                  <%# annot_id present but annot not found - check if run_id is available %>
-                                  <% direct_run_id = value['run_id'] || value[:run_id] %>
-                                  <% if direct_run_id.present? %>
-                                    <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
-                                    <% if direct_run %>
-                                      <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
-                                      <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
-                                      <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
-                                      <% short_name2 = clean_metadata_path(dataset_name) %>
-                                      <% if direct_step && direct_step.multiple_runs %>
-                                        <% tooltip_full2 = "#{step_name} ##{direct_run.num || direct_run.id} #{dataset_name}" %>
-                                      <% else %>
-                                        <% tooltip_full2 = "#{step_name} #{dataset_name}" %>
-                                      <% end %>
-                                      <% is_input_matrix2 = key.to_s.start_with?('input_matrix') %>
-                                      <% badge_bg2 = is_input_matrix2 ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
-                                      <% badge_label_cls2 = is_input_matrix2 ? 'text-blue-800' : 'text-purple-800' %>
-                                      <% badge_value_cls2 = is_input_matrix2 ? 'text-blue-600' : 'text-purple-600' %>
-                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg2 %>"
-                                            data-controller="pipeline-runs"
-                                            data-pipeline-runs-run-id-value="<%= direct_run_id %>"
-                                            data-pipeline-runs-project-id-value="<%= @project.id %>"
-                                            data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
-                                            data-action="click->pipeline-runs#showPipeline"
-                                            onclick="event.stopPropagation();"
-                                            title="<%= param_tooltip(key, h_method_attrs) %>">
-                                        <span class="font-semibold <%= badge_label_cls2 %>"><%= key %>:</span>
-                                        <span class="<%= badge_value_cls2 %>"><%= short_name2 %></span>
-                                      </span>
-                                    <% else %>
-                                      <% value_str = value.to_json %>
-                                      <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                        <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                        <span class="text-gray-600"><%= truncated_value %></span>
-                                      </span>
-                                    <% end %>
-                                  <% else %>
-                                    <% value_str = value.to_json %>
-                                    <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                      <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                      <span class="text-gray-600"><%= truncated_value %></span>
-                                    </span>
-                                  <% end %>
-                                <% end %>
-                              <% elsif value.is_a?(Hash) && (value['run_id'].present? || value[:run_id].present?) %>
-                                <%# Hash with run_id but no annot_id %>
-                                <% direct_run_id = value['run_id'] || value[:run_id] %>
-                                <% direct_run = @h_ori_runs_for_params[direct_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
-                                <% if direct_run %>
-                                  <% direct_step = @h_steps_for_params[direct_run.step_id] if direct_run.step_id.present? && defined?(@h_steps_for_params) %>
-                                  <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
-                                  <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
-                                  <% short_name3 = clean_metadata_path(dataset_name) %>
-                                  <% if direct_step && direct_step.multiple_runs %>
-                                    <% tooltip_full3 = "#{step_name} ##{direct_run.num || direct_run.id} #{dataset_name}" %>
-                                  <% else %>
-                                    <% tooltip_full3 = "#{step_name} #{dataset_name}" %>
-                                  <% end %>
-                                  <% is_input_matrix3 = key.to_s.start_with?('input_matrix') %>
-                                  <% badge_bg3 = is_input_matrix3 ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
-                                  <% badge_label_cls3 = is_input_matrix3 ? 'text-blue-800' : 'text-purple-800' %>
-                                  <% badge_value_cls3 = is_input_matrix3 ? 'text-blue-600' : 'text-purple-600' %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= badge_bg3 %>"
-                                        data-controller="pipeline-runs"
-                                        data-pipeline-runs-run-id-value="<%= direct_run_id %>"
-                                        data-pipeline-runs-project-id-value="<%= @project.id %>"
-                                        data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
-                                        data-action="click->pipeline-runs#showPipeline"
-                                        onclick="event.stopPropagation();"
-                                        title="<%= param_tooltip(key, h_method_attrs) %>">
-                                    <span class="font-semibold <%= badge_label_cls3 %>"><%= key %>:</span>
-                                    <span class="<%= badge_value_cls3 %>"><%= short_name3 %></span>
-                                  </span>
-                                <% else %>
-                                  <% value_str = value.to_json %>
-                                  <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                    <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                    <span class="text-gray-600"><%= truncated_value %></span>
-                                  </span>
-                                <% end %>
-                              <% elsif value.is_a?(Array) && value.any? && value.first.is_a?(Hash) %>
-                                <%# Array of dataset refs - use first element %>
-                                <% first_item = value.first %>
-                                <% first_annot_id = first_item['annot_id'] || first_item[:annot_id] %>
-                                <% first_run_id = first_item['run_id'] || first_item[:run_id] %>
-                                <% is_im = key.to_s.start_with?('input_matrix') %>
-                                <% abg = is_im ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' %>
-                                <% alc = is_im ? 'text-blue-800' : 'text-purple-800' %>
-                                <% avc = is_im ? 'text-blue-600' : 'text-purple-600' %>
-                                <% if first_annot_id.present? %>
-                                  <% first_annot = @h_annots_for_params[first_annot_id.to_i] if defined?(@h_annots_for_params) %>
-                                  <% if first_annot %>
-                                    <% ori_run = @h_ori_runs_for_params[first_annot.ori_run_id] if first_annot.ori_run_id.present? && defined?(@h_ori_runs_for_params) %>
-                                    <% ori_step = (ori_run && ori_run.step_id && defined?(@h_steps_for_params) && @h_steps_for_params[ori_run.step_id]) ? @h_steps_for_params[ori_run.step_id] : nil %>
-                                    <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
-                                    <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                      <% arr_tooltip = "#{step_name} ##{ori_run.num || ori_run.id} #{first_annot.name}" %>
-                                    <% else %>
-                                      <% arr_tooltip = "#{step_name} #{first_annot.name}" %>
-                                    <% end %>
-                                    <% arr_short = clean_metadata_path(first_annot.name) %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= abg %>"
-                                          data-controller="pipeline-runs"
-                                          data-pipeline-runs-annot-id-value="<%= first_annot_id %>"
-                                          data-pipeline-runs-project-id-value="<%= @project.id %>"
-                                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
-                                          data-action="click->pipeline-runs#showPipeline"
-                                          onclick="event.stopPropagation();"
-                                          title="<%= param_tooltip(key, h_method_attrs) %>">
-                                      <span class="font-semibold <%= alc %>"><%= key %>:</span>
-                                      <span class="<%= avc %>"><%= arr_short %></span>
-                                    </span>
-                                  <% end %>
-                                <% elsif first_run_id.present? %>
-                                  <% arr_run = @h_ori_runs_for_params[first_run_id.to_i] if defined?(@h_ori_runs_for_params) %>
-                                  <% if arr_run %>
-                                    <% arr_step = @h_steps_for_params[arr_run.step_id] if arr_run.step_id.present? && defined?(@h_steps_for_params) %>
-                                    <% step_name = arr_step ? (arr_step.label.presence || arr_step.name.presence || 'N/A') : 'N/A' %>
-                                    <% dataset_name = first_item['output_dataset'] || first_item[:output_dataset] || '' %>
-                                    <% arr_short = clean_metadata_path(dataset_name) %>
-                                    <% if arr_step && arr_step.multiple_runs %>
-                                      <% arr_tooltip = "#{step_name} ##{arr_run.num || arr_run.id} #{dataset_name}".strip %>
-                                    <% else %>
-                                      <% arr_tooltip = "#{step_name} #{dataset_name}".strip %>
-                                    <% end %>
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors <%= abg %>"
-                                          data-controller="pipeline-runs"
-                                          data-pipeline-runs-run-id-value="<%= first_run_id %>"
-                                          data-pipeline-runs-project-id-value="<%= @project.id %>"
-                                          data-pipeline-runs-url-value="<%= pipeline_runs_project_path(@project) %>"
-                                          data-action="click->pipeline-runs#showPipeline"
-                                          onclick="event.stopPropagation();"
-                                          title="<%= param_tooltip(key, h_method_attrs) %>">
-                                      <span class="font-semibold <%= alc %>"><%= key %>:</span>
-                                      <span class="<%= avc %>"><%= arr_short %></span>
-                                    </span>
-                                  <% end %>
-                                <% end %>
-                              <% else %>
-                                <% value_str = value.to_s %>
-                                <% truncated_value = value_str.length > 20 ? value_str[0..16] + "..." : value_str %>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                  <span class="font-semibold text-gray-800"><%= key %>:</span>
-                                  <span class="text-gray-600"><%= truncated_value %></span>
-                                </span>
-                              <% end %>
-                            </span>
-                          <% end %>
-                        </div>
+                        <%= raw display_run_attrs(
+                          run,
+                          h_run_attrs,
+                          { run.std_method_id => h_method_attrs },
+                          {
+                            h_annots: (defined?(@h_annots_for_params) ? @h_annots_for_params : {}),
+                            h_runs: (defined?(@h_ori_runs_for_params) ? @h_ori_runs_for_params : {}),
+                            h_steps: (defined?(@h_steps_for_params) ? @h_steps_for_params : {})
+                          }
+                        ) %>
                       <% else %>
                         <span class="text-gray-400 text-xs">-</span>
                       <% end %>

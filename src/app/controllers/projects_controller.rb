@@ -9758,7 +9758,16 @@ class ProjectsController < ApplicationController
       @h_el = {
         "card-params" => {
           card_header: 'Parameters',
-          card_body: display_run_attrs(run, @h_run_attrs, @h_std_method_attrs, {})
+          card_body: display_run_attrs(
+            run,
+            @h_run_attrs,
+            @h_std_method_attrs,
+            {
+              h_annots: (@h_annots_for_params || {}),
+              h_runs: (@h_ori_runs_for_params || {}),
+              h_steps: (@h_steps_for_params || {})
+            }
+          )
         },
         "card-downloads" => {
           card_header: 'Downloads',
@@ -9867,23 +9876,23 @@ class ProjectsController < ApplicationController
                        when 4 then 'Failed'
                        else 'Unknown'
                        end)
-        status_badge = case run.status_id
-        when 1 then 'warning'
-        when 2 then 'info'
-        when 3 then 'success'
-        when 4 then 'danger'
-        else 'secondary'
+        status_badge_classes = case run.status_id
+        when 1 then 'bg-yellow-100 text-yellow-800'
+        when 2 then 'bg-blue-100 text-blue-800'
+        when 3 then 'bg-green-100 text-green-800'
+        when 4 then 'bg-red-100 text-red-800'
+        else 'bg-gray-100 text-gray-800'
         end
         
         run_time = (run.start_time && run.duration) ? (run.start_time + run.duration) : Time.now
-        estimated_time_txt = (run.pred_process_duration) ? "Estimated #{duration(run.pred_process_duration)} - " : ''
+        estimated_time_txt = (run.pred_process_duration) ? "Estimated #{helpers.duration(run.pred_process_duration)} - " : ''
         
         card_body = [
-          "<p class='card-title'><span class='badge badge-#{status_badge}'>#{status_name}</span> #{display_run(run)}</p>",
-          "<p class='sub-run_card'>Parameters</p>",
-          display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
-          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='sub-run_card'>Output summary</p><p class='card-text'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res[e["key"]] }.map { |e| "<span class='badge badge-info'>#{e["label"]}:#{(h_res[e["key"]]) ? h_res[e["key"]] : 'NA'}</span>" }.join(" ") + "</p>") : ''),
-          ((h_files.keys.size > 0) ? ("<p class='sub-run_card'>Results</p><p class='card-text'>" + h_files.keys.map { |k| display_download_btn(run, h_files[k]) }.join(" ") + "</p>") : ""),
+          "<div class='flex items-center justify-between mb-2'><div class='font-semibold text-gray-900'>#{helpers.display_run(run)}</div><span class='inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium #{status_badge_classes}'>#{status_name}</span></div>",
+          "<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2'>Parameters</p>",
+          helpers.display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
+          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Output summary</p><div class='flex flex-wrap gap-1.5'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res[e["key"]] }.map { |e| "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200'>#{e["label"]}:#{(h_res[e["key"]]) ? h_res[e["key"]] : 'NA'}</span>" }.join(" ") + "</div>") : ''),
+          ((h_files.keys.size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Results</p><div class='flex flex-wrap gap-1.5'>" + h_files.keys.map { |k| helpers.display_download_btn(run, h_files[k]) }.join(" ") + "</div>") : ""),
           ((run.status_id == 3 && h_res['warnings']) ? h_res['warnings'].map { |e|
             if e.is_a?(Hash)
               "<p class='text-warning text-truncate' title=\"#{e['name']}. #{e['description']}\">#{e['name']}</p>"
@@ -9897,13 +9906,13 @@ class ProjectsController < ApplicationController
           }.join(" ") : '') + "</p>") : '')
         ].join("")
         
-        card_footer = "<small class='text-muted'>" +
+        card_footer = "<small class='text-gray-500'>" +
           "##{run.id}, " +
           [
             "<span class='nowrap'>#{run.created_at&.strftime("%Y-%m-%d %H:%M") || 'N/A'}</span>",
-            ((run.waiting_duration) ? "<span class='nowrap'>Wait #{duration(run.waiting_duration.to_i)}</span>" : ((run.status_id == 1) ? "<span id='ongoing_wait_#{run.id}' class='nowrap'>Wait #{duration((Time.now - (run.submitted_at || run.created_at)).to_i)}</span>" : nil)),
-            ((run.duration && run.status_id != 2) ? "<span class='nowrap'>Run #{duration(run.duration.to_i)}</span>" : (([1, 2].include?(run.status_id)) ? "<br/>#{estimated_time_txt}<span id='ongoing_run_#{run.id}' class='nowrap'>Run #{duration((run.start_time) ? (Time.now - run.start_time).to_i : 0)}</span>" : nil)),
-            ((run.max_ram) ? "<span class='nowrap'>Max. RAM #{display_mem(run.max_ram * 1000)}</span>" : nil),
+            ((run.waiting_duration) ? "<span class='nowrap'>Wait #{helpers.duration(run.waiting_duration.to_i)}</span>" : ((run.status_id == 1) ? "<span id='ongoing_wait_#{run.id}' class='nowrap'>Wait #{helpers.duration((Time.now - (run.submitted_at || run.created_at)).to_i)}</span>" : nil)),
+            ((run.duration && run.status_id != 2) ? "<span class='nowrap'>Run #{helpers.duration(run.duration.to_i)}</span>" : (([1, 2].include?(run.status_id)) ? "<br/>#{estimated_time_txt}<span id='ongoing_run_#{run.id}' class='nowrap'>Run #{helpers.duration((run.start_time) ? (Time.now - run.start_time).to_i : 0)}</span>" : nil)),
+            ((run.max_ram) ? "<span class='nowrap'>Max. RAM #{helpers.display_mem(run.max_ram * 1000)}</span>" : nil),
             "created by #{(admin? && @h_users[run.user_id]) ? 'Admin' : (@h_users[run.user_id]&.email&.split(/\@/)&.first || 'Unknown')}"
           ].compact.join(", ") +
           "</small>"
@@ -10068,10 +10077,63 @@ class ProjectsController < ApplicationController
             exec_files_html = exec_files.join("")
           end
 
+          # Build parameter context before rendering card-params so badges are consistent
+          # with the run list (same labels/colors for dataset-like values such as covariates).
+          @h_annots_for_params = {}
+          @h_ori_runs_for_params = {}
+          @h_steps_for_params = {}
+          annot_ids = []
+          direct_run_ids = []
+          @h_run_attrs.each_value do |v|
+            if v.is_a?(Hash)
+              annot_ids << (v['annot_id'] || v[:annot_id]) if v['annot_id'].present? || v[:annot_id].present?
+              direct_run_ids << (v['run_id'] || v[:run_id]) if v['run_id'].present? || v[:run_id].present?
+            elsif v.is_a?(Array)
+              v.each do |item|
+                next unless item.is_a?(Hash)
+                annot_ids << (item['annot_id'] || item[:annot_id]) if item['annot_id'].present? || item[:annot_id].present?
+                direct_run_ids << (item['run_id'] || item[:run_id]) if item['run_id'].present? || item[:run_id].present?
+              end
+            end
+          end
+          if annot_ids.any?
+            Annot.where(id: annot_ids.uniq).each do |annot|
+              @h_annots_for_params[annot.id] = annot
+              if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
+                ori_run = Run.find_by(id: annot.ori_run_id)
+                if ori_run
+                  @h_ori_runs_for_params[annot.ori_run_id] = ori_run
+                  if ori_run.step_id.present? && !@h_steps_for_params[ori_run.step_id]
+                    s = Step.find_by(id: ori_run.step_id)
+                    @h_steps_for_params[ori_run.step_id] = s if s
+                  end
+                end
+              end
+            end
+          end
+          if direct_run_ids.any?
+            Run.where(id: direct_run_ids.uniq).each do |dr|
+              @h_ori_runs_for_params[dr.id] = dr unless @h_ori_runs_for_params[dr.id]
+              if dr.step_id.present? && !@h_steps_for_params[dr.step_id]
+                s = Step.find_by(id: dr.step_id)
+                @h_steps_for_params[dr.step_id] = s if s
+              end
+            end
+          end
+
           @h_el = {
             "card-params" => {
               card_header: 'Parameters',
-              card_body: helpers.display_run_attrs(run, @h_run_attrs, @h_std_method_attrs, {})
+              card_body: helpers.display_run_attrs(
+                run,
+                @h_run_attrs,
+                @h_std_method_attrs,
+                {
+                  h_annots: @h_annots_for_params,
+                  h_runs: @h_ori_runs_for_params,
+                  h_steps: @h_steps_for_params
+                }
+              )
             },
             "card-downloads" => {
               card_header: 'Downloads',

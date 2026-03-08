@@ -20,7 +20,7 @@
     <% else %>
       <%= render 'projects/views/std_step' %>
     <% end %>
-  <% elsif @show_form || @show_custom_form %>
+  <% elsif @show_dashboard || @show_view || @show_form || @show_custom_form %>
     <%= render 'projects/views/std_step' %>
   <% else %>
     <% if @show_specific_view %>

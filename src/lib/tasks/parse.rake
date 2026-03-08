@@ -1,3 +1,5 @@
+require 'zlib'
+
 desc 'Parse project data (executed by SLURM)'
 task :parse, [:project_key] => [:environment] do |t, args|
   puts 'Executing parse...'
@@ -288,7 +290,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
       opts = []
       p['sel_name'] = 'mtx' if p["file_type"] == 'MEX'
-      opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name'] 
       
       # Get file_type to determine if we need to add -col and -header defaults
       # Get file_type from parsing_attrs_json, or fall back to detected_format from preparsing
@@ -318,7 +319,85 @@ task :parse, [:project_key] => [:environment] do |t, args|
           logger.warn("[ParseRake] Could not read preparsing output to get detected_format: #{e.message}")
         end
       end
+
+      # Legacy parsing compatibility (< v8): reuse the historical conversion path
+      # used by the original application to handle archives/compressed/MTX inputs.
+      if version.id < 8
+        begin
+          conv_res = Basic.convert_other_formats(filepath, logger)
+          if conv_res && conv_res[:file_path].present? && conv_res[:file_path].to_s != filepath.to_s
+            filepath = conv_res[:file_path]
+            logger.info("[ParseRake] Legacy conversion changed input path to #{filepath}")
+          end
+
+          converted_type = conv_res && conv_res[:type]
+          if converted_type.present?
+            # Respect explicit type when already meaningful; otherwise adopt converted type.
+            if file_type.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(file_type)
+              file_type = converted_type
+              p['file_type'] = converted_type
+              logger.info("[ParseRake] Legacy conversion set file_type to #{file_type}")
+            end
+          end
+        rescue => e
+          logger.error("[ParseRake] Legacy conversion failed for #{filepath}: #{e.class} - #{e.message}")
+          raise
+        end
+      end
+
+      # Java H5AD parser expects an actual HDF5 file. If the uploaded input is
+      # gzipped (common for *.h5ad.gz), unpack it before launching parsing.
+      if version.id < 8 && file_type == 'H5AD'
+        begin
+          magic = File.open(filepath.to_s, 'rb') { |f| f.read(2) }
+          if magic&.bytes == [0x1f, 0x8b]
+            ungzipped_h5ad = tmp_dir + 'input_file.uncompressed.h5ad'
+            Zlib::GzipReader.open(filepath.to_s) do |gz|
+              File.open(ungzipped_h5ad.to_s, 'wb') do |out|
+                IO.copy_stream(gz, out)
+              end
+            end
+            filepath = ungzipped_h5ad
+            logger.info("[ParseRake] Detected gzipped H5AD input, unpacked to #{filepath}")
+          end
+        rescue => e
+          logger.error("[ParseRake] Failed to prepare H5AD input file #{filepath}: #{e.class} - #{e.message}")
+          raise
+        end
+      end
       
+      # Ensure H5AD selection is always explicit for Java parsing.
+      # Java H5AD parser crashes with a NullPointerException if selection is missing.
+      if version.id < 8 && file_type == 'H5AD' && p['sel_name'].blank?
+        begin
+          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
+                              ENV["UPLOAD_DATA_DIR"]
+                            elsif ENV["DATA_DIR"]
+                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
+                            else
+                              '/data/asap2/fus'
+                            end
+          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          output_file = upload_dir + "output.json"
+          h_preparsing = File.exist?(output_file) ? Basic.safe_parse_json(File.read(output_file), {}) : {}
+          list_groups = Array(h_preparsing['list_groups'])
+          group_names = list_groups.map { |g| g['group'].to_s }.reject(&:blank?)
+
+          if group_names.include?('X')
+            p['sel_name'] = 'X'
+          elsif group_names.size == 1
+            p['sel_name'] = group_names.first
+          else
+            raise "Missing H5AD matrix selection: please select a matrix group before parsing."
+          end
+        rescue => e
+          logger.error("[ParseRake] Could not determine H5AD selection for project #{project.key}: #{e.class} - #{e.message}")
+          raise
+        end
+      end
+      p['sel_name'] = 'mtx' if version.id < 8 && file_type == 'MEX' && p['sel_name'].blank?
+      opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name']
+
       # Only add -col and -header for RAW_TEXT file type
       if file_type == 'RAW_TEXT'
         # -col parameter: gene name column (default: "first" if not specified)

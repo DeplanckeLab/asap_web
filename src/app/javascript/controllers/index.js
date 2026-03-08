@@ -71,6 +71,10 @@ import CellFilteringController from "controllers/cell_filtering_controller"
 application.register("cell-filtering", CellFilteringController)
 console.log('Cell filtering controller registered')
 
+import CellFilteringMetadataController from "controllers/cell_filtering_metadata_controller"
+application.register("cell-filtering-metadata", CellFilteringMetadataController)
+console.log('Cell filtering metadata controller registered')
+
 import FormReqController from "controllers/form_req_controller"
 application.register("form-req", FormReqController)
 console.log('Form req controller registered')

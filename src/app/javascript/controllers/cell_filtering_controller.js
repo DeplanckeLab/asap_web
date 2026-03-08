@@ -5,12 +5,25 @@ export default class extends Controller {
     hData: Object,
     hFloat: Object,
     listP: Array,
-    nberCells: Number
+    nberCells: Number,
+    readOnly: Boolean,
+    discardedCols: Array,
+    parsingRunId: Number,
+    outputAttrName: String,
+    outputFilename: String
   }
 
-  static targets = ["result", "filtered", "plot"]
+  static targets = ["result", "filtered", "plot", "matrixDatasetSelect", "matrixDatasetHidden", "inputMatrixHidden", "submitButton", "submitSpinner"]
+
+  isFilterEnabled(disableBtn) {
+    return disableBtn && disableBtn.classList.contains("text-red-700") && !disableBtn.classList.contains("bg-red-50");
+  }
 
   connect() {
+    this.isRecomputing = false;
+    this.lastDiscardedCount = 0;
+    this.toggleSubmitSpinner(false);
+
     console.log("=== CELL FILTERING CONTROLLER CONNECTED ===");
     console.log("Element:", this.element);
     console.log("Element HTML (first 500 chars):", this.element.outerHTML.substring(0, 500));
@@ -83,6 +96,8 @@ export default class extends Controller {
   }
   
   initialize() {
+    this.updateInputMatrixPayload()
+
     // Get data from window object (set by script tag in the view)
     let hData, hFloat, listP, nberCells;
     
@@ -120,8 +135,24 @@ export default class extends Controller {
     this.waitForPako(() => {
       // Decompress data
       this.decompressData();
-      
-      // Initialize UI
+
+      // Read-only mode for results pages: use persisted discarded cells from run attrs
+      // and render plots without relying on editable form fields.
+      if (this.readOnlyValue) {
+        const discarded = Array.isArray(this.discardedColsValue) ? this.discardedColsValue : [];
+        this.h_discarded = {};
+        discarded.forEach((idx) => {
+          const i = parseInt(idx, 10);
+          if (!Number.isNaN(i)) this.h_discarded[i] = 1;
+        });
+        const discardedCount = Object.keys(this.h_discarded).length;
+        const keptCount = Math.max(0, this.nber_cells - discardedCount);
+        this.updateCounts(keptCount, discardedCount);
+        this.plot(1);
+        return;
+      }
+
+      // Editable form mode
       this.changeCutoff(false);
       this.plot(1);
     });
@@ -271,105 +302,165 @@ export default class extends Controller {
   }
 
   changeCutoff(update_manually_discarded) {
+    this.beginRecompute();
     console.log("changeCutoff called");
-    
-    if (!this.h_data || !this.h_data.depth || !this.h_data.depth.values) {
-      console.error("changeCutoff: Data not available");
-      return;
-    }
+    try {
+      if (!this.h_data || !this.h_data.depth || !this.h_data.depth.values) {
+        console.error("changeCutoff: Data not available");
+        this.updateCounts(0, 0);
+        return;
+      }
 
-    this.h_manually_discarded = {};
-    this.h_discarded = {};
-    
-    // Handle manually discarded from metadata checkboxes
-    const checkboxes = document.querySelectorAll('#list_of_cats input[type="checkbox"]');
-    checkboxes.forEach(checkbox => {
-      if (!checkbox.checked) {
-        const cat = checkbox.id.split("_").slice(1).join("_");
-        if (typeof h_cats !== 'undefined' && h_cats[cat]) {
-          h_cats[cat].forEach(i => {
-            this.h_manually_discarded[i] = 1;
+      this.h_manually_discarded = {};
+      this.h_discarded = {};
+      
+      // Handle manually discarded from metadata checkboxes
+      const checkboxes = document.querySelectorAll('#list_of_cats input[type="checkbox"]');
+      checkboxes.forEach(checkbox => {
+        if (!checkbox.checked) {
+          let indices = [];
+          try {
+            indices = JSON.parse(checkbox.dataset.cellIndices || "[]");
+          } catch (e) {
+            indices = [];
+          }
+          indices.forEach((i) => {
+            const idx = parseInt(i, 10);
+            if (!Number.isNaN(idx)) {
+              this.h_manually_discarded[idx] = 1;
+            }
           });
         }
+      });
+      
+      const list_manually_discarded = [];
+      const depth_values_length = this.h_data.depth.values ? this.h_data.depth.values.length : 0;
+      console.log("Processing", depth_values_length, "cells");
+      
+      for (let i = 0; i < depth_values_length; i++) {
+        if (this.h_manually_discarded[i]) {
+          list_manually_discarded.push(i);
+          this.h_discarded[i] = 1;
+        }
       }
-    });
-    
-    const list_manually_discarded = [];
-    const depth_values_length = this.h_data.depth.values ? this.h_data.depth.values.length : 0;
-    console.log("Processing", depth_values_length, "cells");
-    
-    for (let i = 0; i < depth_values_length; i++) {
-      if (this.h_manually_discarded[i]) {
-        list_manually_discarded.push(i);
-        this.h_discarded[i] = 1;
-      }
-    }
-    
-    // Get filter parameters
-    const list_p = this.list_p || [];
-    const list_p_lower = list_p.filter(p => p.type === 'lower').map(p => p.name);
-    const list_p_greater = list_p.filter(p => p.type === 'greater').map(p => p.name);
-    
-    // Apply filters
-    for (let i = 0; i < list_p_lower.length; i++) {
-      const param_name = list_p_lower[i];
-      const disableBtn = document.getElementById('disable-btn-' + param_name);
-      if (disableBtn && !disableBtn.classList.contains('btn-outline-danger')) {
-        if (this.h_data[param_name]) {
-          const threshold = parseFloat(document.getElementById(param_name + '_value').value);
-          const values = this.h_data[param_name].values;
-          for (let j = 0; j < values.length; j++) {
-            if (values[j] <= threshold) {
-              this.h_discarded[j] = 1;
+      
+      // Get filter parameters
+      const list_p = this.list_p || [];
+      const list_p_lower = list_p.filter(p => p.type === 'lower').map(p => p.name);
+      const list_p_greater = list_p.filter(p => p.type === 'greater').map(p => p.name);
+      
+      // Apply filters
+      for (let i = 0; i < list_p_lower.length; i++) {
+        const param_name = list_p_lower[i];
+        const disableBtn = document.getElementById('disable-btn-' + param_name);
+        if (this.isFilterEnabled(disableBtn)) {
+          if (this.h_data[param_name]) {
+            const threshold = parseFloat(document.getElementById(param_name + '_value').value);
+            const values = this.h_data[param_name].values;
+            for (let j = 0; j < values.length; j++) {
+              if (values[j] <= threshold) {
+                this.h_discarded[j] = 1;
+              }
             }
           }
         }
       }
-    }
-    
-    for (let i = 0; i < list_p_greater.length; i++) {
-      const param_name = list_p_greater[i];
-      const disableBtn = document.getElementById('disable-btn-' + param_name);
-      if (disableBtn && !disableBtn.classList.contains('btn-outline-danger')) {
-        if (this.h_data[param_name]) {
-          const threshold = parseFloat(document.getElementById(param_name + '_value').value);
-          const values = this.h_data[param_name].values;
-          for (let j = 0; j < values.length; j++) {
-            if (values[j] >= threshold) {
-              this.h_discarded[j] = 1;
+      
+      for (let i = 0; i < list_p_greater.length; i++) {
+        const param_name = list_p_greater[i];
+        const disableBtn = document.getElementById('disable-btn-' + param_name);
+        if (this.isFilterEnabled(disableBtn)) {
+          if (this.h_data[param_name]) {
+            const threshold = parseFloat(document.getElementById(param_name + '_value').value);
+            const values = this.h_data[param_name].values;
+            for (let j = 0; j < values.length; j++) {
+              if (values[j] >= threshold) {
+                this.h_discarded[j] = 1;
+              }
             }
           }
         }
       }
-    }
-    
-    const list_discarded = Object.keys(this.h_discarded);
-    const kept_count = this.nber_cells - list_discarded.length;
-    
-    console.log("changeCutoff: Updating UI - Kept:", kept_count, "Discarded:", list_discarded.length);
-    
-    // Update hidden fields
-    document.getElementById('attrs_discarded_cols').value = JSON.stringify({discarded_cols: list_discarded});
-    document.getElementById('attrs_manually_discarded_cols').value = JSON.stringify({manually_discarded_cols: list_manually_discarded});
-    document.getElementById('attrs_nber_manually_discarded_cols').value = list_manually_discarded.length;
-    
-    // Update UI
-    this.updateCounts(kept_count, list_discarded.length);
-    
-    // Update plot
-    const plotSelect = document.getElementById('sel_plot');
-    if (plotSelect) {
-      this.plot(parseInt(plotSelect.value) || 1);
+      
+      const list_discarded = Object.keys(this.h_discarded);
+      const kept_count = this.nber_cells - list_discarded.length;
+      
+      console.log("changeCutoff: Updating UI - Kept:", kept_count, "Discarded:", list_discarded.length);
+      
+      // Update hidden fields
+      const discardedColsInput = document.getElementById('attrs_discarded_cols');
+      if (discardedColsInput) {
+        discardedColsInput.value = JSON.stringify({ discarded_cols: list_discarded });
+      }
+      const manuallyDiscardedInput = document.getElementById('attrs_manually_discarded_cols');
+      if (manuallyDiscardedInput) {
+        manuallyDiscardedInput.value = JSON.stringify({ manually_discarded_cols: list_manually_discarded });
+      }
+      const nberManuallyDiscardedInput = document.getElementById('attrs_nber_manually_discarded_cols');
+      if (nberManuallyDiscardedInput) {
+        nberManuallyDiscardedInput.value = list_manually_discarded.length;
+      }
+      
+      // Update UI
+      this.updateCounts(kept_count, list_discarded.length);
+      
+      // Update plot
+      const plotSelect = document.getElementById('sel_plot');
+      if (plotSelect) {
+        this.plot(parseInt(plotSelect.value) || 1);
+      }
+    } finally {
+      this.endRecompute();
     }
   }
 
   updateCounts(kept, discarded) {
+    this.lastDiscardedCount = discarded;
     if (this.hasResultTarget) {
       this.resultTarget.innerHTML = `${kept.toLocaleString()}`;
     }
     if (this.hasFilteredTarget) {
       this.filteredTarget.innerHTML = `${discarded.toLocaleString()}`;
     }
+    if (this.hasSubmitButtonTarget) {
+      if (this.isRecomputing) {
+        this.setSubmitButtonState(true, "Recomputing...", "Recomputing filters...");
+      } else {
+        this.applySubmitAvailability();
+      }
+    }
+  }
+
+  setSubmitButtonState(disabled, titleText = "") {
+    if (!this.hasSubmitButtonTarget) return;
+    this.submitButtonTarget.disabled = disabled;
+    this.submitButtonTarget.classList.toggle("opacity-50", disabled);
+    this.submitButtonTarget.classList.toggle("cursor-not-allowed", disabled);
+    this.submitButtonTarget.classList.toggle("cursor-pointer", !disabled);
+    this.submitButtonTarget.title = titleText;
+  }
+
+  toggleSubmitSpinner(show) {
+    if (!this.hasSubmitSpinnerTarget) return;
+    this.submitSpinnerTarget.classList.toggle("hidden", !show);
+  }
+
+  beginRecompute() {
+    this.isRecomputing = true;
+    this.toggleSubmitSpinner(true);
+    this.setSubmitButtonState(true, "Recomputing filters...");
+  }
+
+  endRecompute() {
+    this.isRecomputing = false;
+    this.toggleSubmitSpinner(false);
+    this.applySubmitAvailability();
+  }
+
+  applySubmitAvailability() {
+    if (!this.hasSubmitButtonTarget) return;
+    const disabled = this.lastDiscardedCount <= 0;
+    this.setSubmitButtonState(disabled, disabled ? "At least one discarded cell is required." : "");
   }
 
   plot(plot_i) {
@@ -386,7 +477,7 @@ export default class extends Controller {
     if (plot_i == 1) {
       const vals = this.h_data.depth.values;
       const sorted_indices = [...vals.keys()].sort((a, b) => vals[b] - vals[a]);
-      const color_vector = sorted_indices.map((i, e) => (this.h_discarded[e]) ? '#CCCCCC' : 'red');
+      const color_vector = sorted_indices.map((i) => (this.h_discarded[i]) ? '#CCCCCC' : 'red');
       traces.push({
         x: [...Array(vals.length).keys()],
         y: sorted_indices.map(x => vals[x]),
@@ -520,9 +611,65 @@ export default class extends Controller {
     this.changeCutoff(false);
   }
 
+  resetFilters() {
+    const disableButtons = this.element.querySelectorAll(".disabled-btn");
+    disableButtons.forEach((btn) => {
+      const parts = btn.id.split("-");
+      const name = parts[2];
+      if (!name) return;
+      const input = document.getElementById(`${name}_value`);
+      const saved = document.getElementById(`${name}_saved`);
+      const row = document.getElementById(`param_row_${name}`);
+      if (!input || !saved) return;
+
+      btn.classList.remove("text-red-700", "border-red-300", "hover:bg-red-50", "hover:border-red-400", "bg-white");
+      btn.classList.add("text-red-600", "bg-red-50", "border-red-200", "cursor-not-allowed", "opacity-75");
+      btn.innerHTML = "Disabled";
+      input.value = "";
+      input.disabled = true;
+      input.classList.add("bg-gray-100", "cursor-not-allowed", "opacity-60");
+      input.classList.remove("focus:ring-blue-500", "focus:border-blue-500");
+      if (row) row.classList.add("opacity-60");
+    });
+
+    this.element.querySelectorAll(".check_box_cat").forEach((checkbox) => {
+      checkbox.checked = true;
+    });
+
+    const manualSelection = document.getElementById("attrs_manual_selection");
+    if (manualSelection) manualSelection.value = "";
+    const discardedMetadata = document.getElementById("attrs_discarded_metadata_json");
+    if (discardedMetadata) discardedMetadata.value = "{}";
+
+    this.changeCutoff(false);
+  }
+
   plotSelectChange(event) {
     const plot_i = parseInt(event.currentTarget.value);
     this.plot(plot_i);
+  }
+
+  matrixDatasetChange() {
+    this.updateInputMatrixPayload()
+  }
+
+  updateInputMatrixPayload() {
+    if (!this.hasInputMatrixHiddenTarget || !this.hasMatrixDatasetSelectTarget || !this.hasParsingRunIdValue) {
+      return
+    }
+
+    const datasetPath = this.matrixDatasetSelectTarget.value || "/matrix"
+    if (this.hasMatrixDatasetHiddenTarget) {
+      this.matrixDatasetHiddenTarget.value = datasetPath
+    }
+    const payload = [{
+      run_id: this.parsingRunIdValue,
+      output_attr_name: this.outputAttrNameValue || "output_matrix",
+      output_filename: this.outputFilenameValue || "parsing/output.loom",
+      output_dataset: datasetPath
+    }]
+
+    this.inputMatrixHiddenTarget.value = JSON.stringify(payload)
   }
 }
 

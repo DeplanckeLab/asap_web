@@ -117,7 +117,7 @@
     <% end %>
     
     <!-- Debug info: Show what display mode is active -->
-    <% if Rails.env.development? && (@show_dashboard || @show_view || @show_form || @show_custom_form) %>
+    <% if Rails.env.development? && admin? && (@show_dashboard || @show_view || @show_form || @show_custom_form) %>
       <div class="mb-3">
         <div class="alert alert-secondary">
           <strong>Step Configuration:</strong> multiple_runs=<%= @step.multiple_runs %>, has_std_view=<%= @step.has_std_view %>, has_std_dashboard=<%= @step.has_std_dashboard %>, has_std_form=<%= @step.has_std_form %> | 

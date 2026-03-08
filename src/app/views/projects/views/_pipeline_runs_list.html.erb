@@ -25,9 +25,26 @@
             <div class="font-semibold text-gray-900"><%= run_title %></div>
           </div>
           <div class="flex items-center gap-3">
-            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
-              <%= run_status[:name].humanize %>
-            </span>
+            <div class="flex flex-col items-end gap-1">
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
+                <%= run_status[:name].humanize %>
+              </span>
+              <% if run.status_id == 1 && run.slurm_job_id.present? %>
+                <div class="text-xs text-gray-500"
+                     data-controller="queue-position"
+                     data-queue-position-run-id-value="<%= run.id %>"
+                     data-queue-position-slurm-job-id-value="<%= run.slurm_job_id %>"
+                     data-queue-position-project-id-value="<%= @project.key %>"
+                     <% if run.submitted_at %>
+                       data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
+                     <% end %>>
+                  <span class="text-gray-400">Queue: </span>
+                  <span data-queue-position-target="position" class="font-mono text-xs">
+                    <i class="fas fa-spinner fa-spin"></i>
+                  </span>
+                </div>
+              <% end %>
+            </div>
             <% if run.created_at %>
               <span class="text-xs text-gray-500"><%= run.created_at.strftime("%Y-%m-%d %H:%M") %></span>
             <% end %>

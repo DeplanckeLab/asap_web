@@ -1,0 +1,175 @@
+<% run_for_view = @run || @current_run || (@runs.respond_to?(:first) ? @runs.first : nil) %>
+<% run_attrs = run_for_view&.attrs_json.present? ? Basic.safe_parse_json(run_for_view.attrs_json, {}) : {} %>
+<% run_status_id = run_for_view&.status_id.to_i if run_for_view %>
+<%
+  discarded_cols_payload = run_attrs['discarded_cols'] || run_attrs[:discarded_cols]
+  if discarded_cols_payload.is_a?(String)
+    discarded_cols_payload = Basic.safe_parse_json(discarded_cols_payload, {})
+  end
+  discarded_cols = if discarded_cols_payload.is_a?(Hash)
+    discarded_cols_payload['discarded_cols'] || discarded_cols_payload[:discarded_cols] || []
+  elsif discarded_cols_payload.is_a?(Array)
+    discarded_cols_payload
+  else
+    []
+  end
+  manually_discarded_payload = run_attrs['manually_discarded_cols'] || run_attrs[:manually_discarded_cols]
+  if manually_discarded_payload.is_a?(String)
+    manually_discarded_payload = Basic.safe_parse_json(manually_discarded_payload, {})
+  end
+  manually_discarded_cols = if manually_discarded_payload.is_a?(Hash)
+    manually_discarded_payload['manually_discarded_cols'] || manually_discarded_payload[:manually_discarded_cols] || []
+  elsif manually_discarded_payload.is_a?(Array)
+    manually_discarded_payload
+  else
+    []
+  end
+  discarded_cols = discarded_cols.to_a
+  discarded_indices = discarded_cols.filter_map { |v| Integer(v) rescue nil }
+  if discarded_indices.empty?
+    discarded_indices = manually_discarded_cols.to_a.filter_map { |v| Integer(v) rescue nil }
+  end
+  if discarded_indices.empty? && @cell_filtering_discarded_indices.present?
+    discarded_indices = @cell_filtering_discarded_indices.to_a.filter_map { |v| Integer(v) rescue nil }
+  end
+  total_cells_count = @project&.nber_cols.to_i
+  kept_cells_count = (@h_res && @h_res['nber_cols']) ? @h_res['nber_cols'].to_i : nil
+  discarded_cells_count = discarded_indices.size
+  if discarded_cells_count.zero? && kept_cells_count && total_cells_count.positive?
+    discarded_cells_count = [total_cells_count - kept_cells_count, 0].max
+  end
+%>
+
+<div class="bg-white rounded-lg shadow-sm flex flex-col" id="result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden; width: 100%;">
+  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between min-w-0">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <h3 class="text-lg font-semibold text-gray-900 min-w-0 truncate">
+          <%= @step.label.presence || @step.name %> results
+        </h3>
+        <% if run_for_view && run_for_view.status_id %>
+          <% status_name = run_for_view.status&.name&.humanize || 'Unknown' %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= case run_for_view.status_id
+                                                                                                      when 1 then 'bg-yellow-100 text-yellow-800'
+                                                                                                      when 2 then 'bg-blue-100 text-blue-800'
+                                                                                                      when 3 then 'bg-green-100 text-green-800'
+                                                                                                      when 4 then 'bg-red-100 text-red-800'
+                                                                                                      else 'bg-gray-100 text-gray-800'
+                                                                                                      end %>">
+            <%= status_name %>
+          </span>
+        <% end %>
+      </div>
+      <% if editable?(@project) %>
+        <button type="button"
+                class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                data-controller="restart-step"
+                data-restart-step-project-id-value="<%= @project.id %>"
+                data-restart-step-step-id-value="<%= @step.id %>"
+                data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
+                data-action="click->restart-step#restart">
+          Reset
+        </button>
+      <% end %>
+    </div>
+  </div>
+
+  <% if run_for_view %>
+    <div id="run_metadata_sticky_cell_filtering" class="sticky z-10 flex-shrink-0 bg-white" style="top: 57px;">
+      <%= render partial: 'projects/views/run_metadata', locals: { run: run_for_view, results: @h_res, queue_position: @queue_position } %>
+    </div>
+  <% end %>
+
+  <div class="px-6 py-5 space-y-6 flex-1 min-w-0 overflow-x-hidden">
+    <% if run_for_view && run_status_id == 4 %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-6 py-8 text-center">
+          <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-red-900 mb-2">Cell filtering failed</h3>
+          <p class="text-gray-600 mb-4">
+            <%= run_for_view.error.presence || 'The cell filtering job failed. Please review the logs or restart this step.' %>
+          </p>
+        </div>
+      </div>
+    <% else %>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Filtering summary</h4>
+        <div class="flex flex-wrap gap-3">
+          <% if kept_cells_count %>
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
+              <span class="text-sm font-medium text-green-900">Kept cells: <span class="font-bold"><%= number_with_delimiter(kept_cells_count) %></span></span>
+            </div>
+          <% end %>
+          <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+            <span class="text-sm font-medium text-gray-900">Discarded cells: <span class="font-bold"><%= number_with_delimiter(discarded_cells_count) %></span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6">
+        <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Filtering parameters</h4>
+        <% if @list_p.present? %>
+          <div class="space-y-2">
+            <% @list_p.each do |param| %>
+              <% value = run_attrs[param[:attr_name]] || run_attrs[param[:attr_name].to_s] %>
+              <div class="flex items-center gap-2 py-2 px-3 border-b border-gray-100 last:border-b-0">
+                <span class="text-sm font-medium text-gray-700 w-24 text-right flex-shrink-0">
+                  <%= (param[:type] == :greater) ? 'LESS than' : 'MORE than' %>
+                </span>
+                <span class="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-center bg-gray-50">
+                  <%= value.present? ? value : '-' %>
+                </span>
+                <span class="text-sm text-gray-700"><%= param[:label] %></span>
+              </div>
+            <% end %>
+          </div>
+        <% else %>
+          <p class="text-sm text-gray-600">No filtering parameters available.</p>
+        <% end %>
+      </div>
+
+      <%
+        has_qc_data = (@h_data && !@h_data.empty? && @h_data.keys.any?) || @h_data_json.present?
+        h_data_for_stimulus = (@h_data_json.present?) ? @h_data_json : (@h_data.present? ? @h_data.to_json : '{}')
+        h_float_for_stimulus = @h_float.to_json
+        list_p_for_stimulus = @list_p.to_a.map { |e| { name: e[:name], type: e[:type].to_s } }.to_json
+      %>
+
+      <% if has_qc_data %>
+        <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+        <script>
+          (function() {
+            window.cellFilteringData = {
+              hData: <%= raw h_data_for_stimulus %>,
+              hFloat: <%= raw h_float_for_stimulus %>,
+              listP: <%= raw list_p_for_stimulus %>,
+              nberCells: <%= @project.nber_cols || 0 %>
+            };
+          })();
+        </script>
+
+        <div data-controller="cell-filtering"
+             data-cell-filtering-nber-cells-value="<%= @project.nber_cols || 0 %>"
+             data-cell-filtering-read-only-value="true"
+             data-cell-filtering-discarded-cols-value='<%= raw discarded_indices.to_json %>'
+             class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6">
+          <h4 class="text-lg font-semibold text-gray-900 mb-4">QC plots</h4>
+          <% plot_options = [["Ordered depth by cell", 1], ["Detected genes", 2], ["Depth", 3], ["Percent protein-coding genes", 4], ["Percent mitochondrial genes", 5], ["Percent ribosomal genes", 6], ["Depth vs. Percent mitochondrial genes", 7], ["Depth vs Detected genes", 8]] %>
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Select plot type</label>
+            <%= select_tag "sel_plot",
+                options_for_select(plot_options),
+                {
+                  class: 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                  data: { action: 'change->cell-filtering#plotSelectChange' }
+                } %>
+          </div>
+          <div id="cell_filtering_plotly_plot" class="bg-gray-50 border border-gray-200 rounded-md p-4 w-full overflow-x-auto" style="min-height: 400px;"></div>
+        </div>
+      <% else %>
+        <div class="alert alert-info">QC data is not available for this run.</div>
+      <% end %>
+    <% end %>
+  </div>
+</div>

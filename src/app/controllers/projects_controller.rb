@@ -77,10 +77,22 @@ class ProjectsController < ApplicationController
     end
     dims = ['cell', 'gene', 'expression','global']
     available_metadata.each do |metadata|
+      dim_key = dims[metadata.dim.to_i - 1]
+      unless dim_key
+        Rails.logger.warn("[organize_metadata] Skipping annot ##{metadata.id}: invalid dim=#{metadata.dim.inspect}")
+        next
+      end
+
+      data_type = h_data_types[metadata.data_type_id] || metadata.data_type
+      unless data_type&.name.present?
+        Rails.logger.warn("[organize_metadata] Skipping annot ##{metadata.id}: missing data_type for data_type_id=#{metadata.data_type_id.inspect}")
+        next
+      end
+
       h_metadata[metadata.filepath]||={}
-      h_metadata[metadata.filepath][dims[metadata.dim-1]] ||= {}
-      h_metadata[metadata.filepath][dims[metadata.dim-1]][h_data_types[metadata.data_type_id].name] ||= []
-      h_metadata[metadata.filepath][dims[metadata.dim-1]][h_data_types[metadata.data_type_id].name] << metadata
+      h_metadata[metadata.filepath][dim_key] ||= {}
+      h_metadata[metadata.filepath][dim_key][data_type.name] ||= []
+      h_metadata[metadata.filepath][dim_key][data_type.name] << metadata
     end
     h_metadata
   end
@@ -4578,6 +4590,23 @@ class ProjectsController < ApplicationController
       
       # Get runs for this step
       @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+
+      # Enforce single-run invariant for steps configured with multiple_runs = false.
+      # Keep the most recent run and remove older duplicates.
+      if @step && !@step.multiple_runs && @runs.size > 1
+        runs_to_keep = @runs.first
+        runs_to_delete = @runs.drop(1)
+        Rails.logger.warn("[step_results] Found #{runs_to_delete.size} extra run(s) for single-run step #{@step.name} in project #{@project.id}; deleting older runs and keeping run #{runs_to_keep.id}")
+        runs_to_delete.each do |run|
+          begin
+            RunsController.destroy_run_call(@project, run)
+          rescue => e
+            Rails.logger.error("[step_results] Failed to delete duplicate run #{run.id}: #{e.class} - #{e.message}")
+            raise
+          end
+        end
+        @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+      end
       
       # Get project step status (ensure it exists)
       @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
@@ -4767,7 +4796,7 @@ class ProjectsController < ApplicationController
       
       # Prepare data for standard dashboard and view
       # Skip for parsing step as it has its own special handling
-      if @step.name != 'parsing' && (@step.has_std_dashboard || @step.has_std_view || @step.has_std_form)
+      if @step.name != 'parsing' && (@step.has_std_dashboard || @step.has_std_view || @step.has_std_form || !@step.multiple_runs)
         begin
           Rails.logger.info("[step_results] Calling prepare_std_step_data for step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}, runs_count: #{@runs&.count || 0}")
           prepare_std_step_data
@@ -4780,6 +4809,7 @@ class ProjectsController < ApplicationController
           @show_view = false
           @show_form = false
           @show_custom_form = false
+          @show_specific_view = false
         end
       else
         Rails.logger.info("[step_results] Skipping prepare_std_step_data - step: #{@step.name}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}")
@@ -4788,6 +4818,7 @@ class ProjectsController < ApplicationController
         @show_view = false
         @show_form = false
         @show_custom_form = false
+        @show_specific_view = false
         # If step has std_form and no runs, show the form
         if @step.has_std_form && @runs.empty?
           Rails.logger.info("[step_results] Step has std_form and no runs - setting show_form = true")
@@ -4823,8 +4854,11 @@ class ProjectsController < ApplicationController
             render partial: 'projects/views/cluster_comparison', layout: false
             return
           end
-          # If show_form is requested, return just the form (for AJAX or new page)
-          if params[:show_form].present? && params[:show_form].to_s == '1'
+          # If show_form is requested, return just the form (for AJAX or new page),
+          # except for single-run steps with a specific view and existing runs:
+          # these must always render the summary/view, not the form.
+          force_specific_single_run_view = !@step.multiple_runs && !@step.has_std_view && @runs.present? && @runs.any?
+          if params[:show_form].present? && params[:show_form].to_s == '1' && !force_specific_single_run_view
             if @show_form
               if request.xhr?
                 # AJAX request - return just the form partial
@@ -4832,6 +4866,19 @@ class ProjectsController < ApplicationController
               else
                 # Regular page request - render full page with just the form
                 render 'projects/views/form_only', layout: 'application'
+              end
+            elsif @show_custom_form
+              if request.xhr?
+                # AJAX request - return custom step form partial
+                custom_form_partial = "projects/views/#{@step.name}"
+                if lookup_context.template_exists?(custom_form_partial, [], true)
+                  render partial: custom_form_partial, layout: false
+                else
+                  render partial: 'projects/views/step_results', layout: false
+                end
+              else
+                # Regular request fallback
+                render partial: 'projects/views/step_results', layout: false
               end
             else
               render plain: '<div class="p-4 text-center text-red-600">Form not available for this step.</div>', status: :not_found
@@ -5169,8 +5216,12 @@ class ProjectsController < ApplicationController
           redirect_to step_results_project_path(@project, step_id: @step.id, show_form: 1), alert: 'Step restarted successfully, but failed to rerun preparsing. Please try again.'
         end
       else
-        # Redirect without step_id - websockets will handle the UI updates
-        redirect_to project_path(@project, view: 'analysis'), notice: 'Step restarted successfully. All subsequent steps have been reset.'
+        if params[:return_to_form].to_s == '1'
+          redirect_to project_path(@project, view: 'analysis', step_id: @step.id, show_form: 1), notice: 'Step reset successfully.'
+        else
+          # Redirect without step_id - websockets will handle the UI updates
+          redirect_to project_path(@project, view: 'analysis'), notice: 'Step restarted successfully. All subsequent steps have been reset.'
+        end
       end
     rescue => e
       Rails.logger.error("Error in restart_step: #{e.class} - #{e.message}")
@@ -9133,6 +9184,19 @@ class ProjectsController < ApplicationController
         Rails.logger.error("[prepare_cell_filtering_data] No docker image found for project version #{@project.version}")
         return
       end
+
+      # Resolve the std method used by the cell filtering custom form.
+      @h_step_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step&.attrs_json.present?
+      @h_step_attrs ||= {}
+      default_method_names = Array(@h_step_attrs['default_std_method'])
+      available_cell_filtering_methods = StdMethod.where(
+        docker_image_id: asap_docker_image.id,
+        obsolete: false,
+        step_id: @step.id
+      ).order(:name).to_a
+      @cell_filtering_std_method =
+        default_method_names.map { |name| available_cell_filtering_methods.find { |m| m.name == name } }.compact.first ||
+        available_cell_filtering_methods.first
       
       # Find the parsing step for this docker image
       parsing_step = Step.where(name: 'parsing', docker_image_id: asap_docker_image.id).first
@@ -9165,22 +9229,50 @@ class ProjectsController < ApplicationController
       if gene_filtering_step
         @gene_filtering_runs = Run.where(project_id: @project.id, step_id: gene_filtering_step.id).order(created_at: :desc).to_a
       end
+
+      # Matrix selector for cell filtering:
+      # default to /matrix and optionally allow imported layers from parsing output.
+      @cell_filtering_matrix_options = ['/matrix']
+      if @parsing_run
+        layer_paths = Annot.where(project_id: @project.id, run_id: @parsing_run.id, dim: 3)
+                           .pluck(:name)
+                           .select { |name| name.to_s.start_with?('/layers/') }
+                           .uniq
+                           .sort
+        @cell_filtering_matrix_options.concat(layer_paths)
+      end
+      @cell_filtering_matrix_options = @cell_filtering_matrix_options.uniq
+      @cell_filtering_default_matrix = '/matrix'
       
-      # Get annotations for metadata filtering
+      # Get annotations for metadata filtering, grouped by source run
+      metadata_store_run_ids = ([@parsing_run&.id] + @cell_filtering_runs.map(&:id) + @gene_filtering_runs.map(&:id)).compact.uniq
+      metadata_annots = if metadata_store_run_ids.any?
+        Annot.where(project_id: @project.id, store_run_id: metadata_store_run_ids, data_type_id: 3, dim: 1).order(:name).to_a
+      else
+        []
+      end
+      @metadata_annots_by_run = {}
+      metadata_annots.each do |annot|
+        run_id = annot.store_run_id || annot.run_id
+        next unless run_id
+        @metadata_annots_by_run[run_id] ||= []
+        @metadata_annots_by_run[run_id] << { id: annot.id, name: annot.name }
+      end
+
       store_run_id = @parsing_run&.id
-      @annots = Annot.where(project_id: @project.id, store_run_id: store_run_id, data_type_id: 3, dim: 1).all if store_run_id
-      @annots ||= []
+      @annots = (store_run_id && @metadata_annots_by_run[store_run_id]) ? @metadata_annots_by_run[store_run_id] : []
       
       @h_annots = {}
       @h_annot_runs = {}
-      @annots.each { |a| @h_annots[a.id] = { name: a.name } }
-      annot_run_ids = @annots.map(&:run_id).compact.uniq
+      metadata_annots.each { |a| @h_annots[a.id] = { name: a.name } }
+      annot_run_ids = metadata_annots.map(&:run_id).compact.uniq
       Run.where(id: annot_run_ids).each { |r| @h_annot_runs[r.id] = r } if annot_run_ids.any?
       
       # Prepare QC data from parsing output
       @h_float = { "mito" => 1, "ribo" => 1, "protein_coding" => 1 }
       @h_data = {}
       @h_data_json = nil
+      @cell_filtering_discarded_indices = []
       
       if @parsing_run
         project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
@@ -9281,6 +9373,32 @@ class ProjectsController < ApplicationController
       else
         Rails.logger.warn("[prepare_cell_filtering_data] No parsing run, cannot load QC data")
       end
+
+      # For completed cell filtering runs, derive discarded cell indices by comparing
+      # parsing and filtered CellID vectors. This keeps result plots accurate even when
+      # run attrs do not store discarded indices in a directly usable format.
+      begin
+        if @current_run && @current_run.status_id == 3 && @parsing_run
+          parsing_loom = project_dir + 'parsing' + 'output.loom'
+          filtered_loom = project_dir + 'cell_filtering' + 'output.loom'
+
+          if File.exist?(parsing_loom) && File.exist?(filtered_loom)
+            parsing_cells = H5DataService.get_metadata_vector(parsing_loom.to_s, '/col_attrs/CellID')
+            filtered_cells = H5DataService.get_metadata_vector(filtered_loom.to_s, '/col_attrs/CellID')
+
+            if parsing_cells.is_a?(Array) && filtered_cells.is_a?(Array) && parsing_cells.any?
+              kept = Set.new(filtered_cells.map { |v| v.to_s })
+              @cell_filtering_discarded_indices = []
+              parsing_cells.each_with_index do |cell_id, idx|
+                @cell_filtering_discarded_indices << idx unless kept.include?(cell_id.to_s)
+              end
+            end
+          end
+        end
+      rescue => e
+        Rails.logger.warn("[prepare_cell_filtering_data] Could not derive discarded indices from loom files: #{e.class} - #{e.message}")
+        @cell_filtering_discarded_indices ||= []
+      end
       
       # Define filter parameters
       @list_p = [
@@ -9341,6 +9459,7 @@ class ProjectsController < ApplicationController
       @show_view = false
       @show_form = false
       @show_custom_form = false
+      @show_specific_view = false
       
       # Convert runs to array for consistent checking
       runs_array = @runs.to_a
@@ -9351,8 +9470,9 @@ class ProjectsController < ApplicationController
       # Check if show_form parameter is set (for "New run" button)
       force_show_form = params[:show_form].present? && params[:show_form].to_s == '1'
       
-      # If show_form is requested and step has std_form, show form
-      if force_show_form && @step.has_std_form
+      # If show_form is requested and step has std_form, show form.
+      # For single-run steps, only allow this when no run exists.
+      if force_show_form && @step.has_std_form && (@step.multiple_runs || runs_count == 0)
         @show_form = true
         prepare_std_form_data
       # For steps with only one run authorized (multiple_runs == false) that are just unlocked (no runs yet)
@@ -9375,9 +9495,11 @@ class ProjectsController < ApplicationController
         @show_dashboard = true
         # Prepare dashboard data
         @h_cards = create_run_cards(runs_array, nil)
-      # When multiple_runs == false, has_std_view == true, and at least one run exists, show standard view
-      elsif !@step.multiple_runs && @step.has_std_view && runs_count > 0
+      # For single-run steps with existing runs, always show a single-run panel.
+      # If has_std_view is false, a step-specific _<step>_view partial can take over.
+      elsif !@step.multiple_runs && runs_count > 0
         @show_view = true
+        @show_specific_view = !@step.has_std_view
         # Prepare view data for single run
         @run = runs_array.first
         if @run

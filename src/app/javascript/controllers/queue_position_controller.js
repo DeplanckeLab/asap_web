@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import consumer from "channels/consumer"
 
 export default class extends Controller {
   static values = {
@@ -54,9 +55,8 @@ export default class extends Controller {
       console.warn(`[QueuePositionController] WARNING: emptyQueue target not found!`)
     }
     
-    console.log(`[QueuePositionController] Starting polling...`)
-    this.startPolling()
-    console.log(`[QueuePositionController] Polling started, pollInterval:`, this.pollInterval ? 'set' : 'not set')
+    this.subscribeToProject()
+    this.updateQueuePosition()
     
     // Start waiting timer if submittedAt is available
     if (this.hasSubmittedAtValue && this.hasWaitingTimeTarget) {
@@ -67,28 +67,42 @@ export default class extends Controller {
 
   disconnect() {
     console.log(`[QueuePositionController] Disconnected`)
-    this.stopPolling()
+    this.unsubscribeFromProject()
     this.stopWaitingTimer()
   }
 
-  startPolling() {
-    console.log(`[QueuePositionController] startPolling() called`)
-    // Poll every 5 seconds for queue position
-    this.pollInterval = setInterval(() => {
-      console.log(`[QueuePositionController] Polling interval triggered`)
-      this.updateQueuePosition()
-    }, 5000)
-    
-    console.log(`[QueuePositionController] Poll interval set, triggering initial update...`)
-    // Initial update
-    this.updateQueuePosition()
+  subscribeToProject() {
+    if (!this.projectIdValue) {
+      return
+    }
+
+    this.subscription = consumer.subscriptions.create(
+      {
+        channel: "ProjectChannel",
+        project_id: this.projectIdValue
+      },
+      {
+        received: (data) => this.handleProjectBroadcast(data)
+      }
+    )
   }
 
-  stopPolling() {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval)
-      this.pollInterval = null
+  unsubscribeFromProject() {
+    if (this.subscription) {
+      this.subscription.unsubscribe()
+      this.subscription = null
     }
+  }
+
+  handleProjectBroadcast(data) {
+    if (!data || data.event !== 'queue_position_changed') {
+      return
+    }
+    if (!data.run_id || Number(data.run_id) !== Number(this.runIdValue)) {
+      return
+    }
+
+    this.applyQueuePosition(data.queue_position)
   }
 
   startWaitingTimer() {
@@ -185,56 +199,7 @@ export default class extends Controller {
       console.log(`[QueuePositionController] Queue position data received:`, data)
       console.log(`[QueuePositionController] queue_position value:`, data.queue_position, `(type: ${typeof data.queue_position})`)
       console.log(`[QueuePositionController] wait_time value:`, data.wait_time)
-      
-      if (data.queue_position !== null && data.queue_position !== undefined) {
-        console.log(`[QueuePositionController] Processing queue_position: ${data.queue_position}`)
-        if (data.queue_position === 0) {
-          // Position 0 means queue is empty - show empty queue message, hide position info
-          console.log(`[QueuePositionController] Queue is empty, showing empty queue message`)
-          if (this.hasQueueInfoTarget) {
-            this.queueInfoTarget.classList.add('hidden')
-          }
-          if (this.hasEmptyQueueTarget) {
-            this.emptyQueueTarget.classList.remove('hidden')
-          }
-        } else if (data.queue_position > 0) {
-          // Show actual queue position
-          const currentPosition = this.hasPositionTarget ? this.positionTarget.textContent.trim() : null
-          console.log(`[QueuePositionController] Updating queue position: ${currentPosition} -> ${data.queue_position}`)
-          
-          if (this.hasQueueInfoTarget) {
-            this.queueInfoTarget.classList.remove('hidden')
-          }
-          if (this.hasEmptyQueueTarget) {
-            this.emptyQueueTarget.classList.add('hidden')
-          }
-          if (this.hasPositionTarget) {
-            const oldPosition = this.positionTarget.textContent.trim()
-            this.positionTarget.textContent = data.queue_position
-            if (oldPosition !== String(data.queue_position) && oldPosition !== '') {
-              console.log(`[QueuePositionController] Position updated from ${oldPosition} to ${data.queue_position}`)
-            }
-          }
-        } else {
-          // Invalid position - show spinner (keep loading)
-          console.log(`[QueuePositionController] Invalid position, showing spinner`)
-          if (this.hasPositionTarget) {
-            this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'
-          }
-        }
-      } else {
-        // No queue position data yet - show spinner (keep loading)
-        console.log(`[QueuePositionController] No queue position data, showing spinner`)
-        if (this.hasQueueInfoTarget) {
-          this.queueInfoTarget.classList.remove('hidden')
-        }
-        if (this.hasEmptyQueueTarget) {
-          this.emptyQueueTarget.classList.add('hidden')
-        }
-        if (this.hasPositionTarget) {
-          this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'
-        }
-      }
+      this.applyQueuePosition(data.queue_position)
 
       // Also update wait time if available
       if (data.wait_time !== null && data.wait_time !== undefined && this.hasWaitTimeTarget) {
@@ -262,6 +227,43 @@ export default class extends Controller {
       return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
     } else {
       return `${minutes}:${String(secs).padStart(2, '0')}`
+    }
+  }
+
+  applyQueuePosition(queuePosition) {
+    if (queuePosition !== null && queuePosition !== undefined) {
+      if (queuePosition === 0) {
+        if (this.hasQueueInfoTarget) {
+          this.queueInfoTarget.classList.add('hidden')
+        }
+        if (this.hasEmptyQueueTarget) {
+          this.emptyQueueTarget.classList.remove('hidden')
+        }
+        return
+      }
+
+      if (queuePosition > 0) {
+        if (this.hasQueueInfoTarget) {
+          this.queueInfoTarget.classList.remove('hidden')
+        }
+        if (this.hasEmptyQueueTarget) {
+          this.emptyQueueTarget.classList.add('hidden')
+        }
+        if (this.hasPositionTarget) {
+          this.positionTarget.textContent = queuePosition
+        }
+        return
+      }
+    }
+
+    if (this.hasQueueInfoTarget) {
+      this.queueInfoTarget.classList.remove('hidden')
+    }
+    if (this.hasEmptyQueueTarget) {
+      this.emptyQueueTarget.classList.add('hidden')
+    }
+    if (this.hasPositionTarget) {
+      this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'
     }
   }
 }

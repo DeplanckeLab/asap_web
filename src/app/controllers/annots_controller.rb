@@ -1,7 +1,7 @@
 require 'open3'
 
 class AnnotsController < ApplicationController
-  before_action :set_annot, only: [:show, :download]
+  before_action :set_annot, only: [:show, :download, :categories]
 
   # GET /annots/:id
   def show
@@ -191,6 +191,48 @@ class AnnotsController < ApplicationController
         @categories = {}
       end
     end
+  end
+
+  # GET /annots/:id/categories.json
+  def categories
+    project = @annot.project
+    unless project && (admin? || readable?(project))
+      render json: { error: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    unless @annot.data_type_id == 3
+      render json: { categories: [] }
+      return
+    end
+
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
+    loom_path = project_dir + @annot.filepath.to_s
+    unless File.exist?(loom_path)
+      render json: { error: "Loom file not found for annotation #{@annot.id}" }, status: :not_found
+      return
+    end
+
+    values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+    h_indexes_by_cat = Hash.new { |h, k| h[k] = [] }
+    values.each_with_index do |value, idx|
+      cat = (value.nil? || value.to_s.empty?) ? 'NA' : value.to_s
+      h_indexes_by_cat[cat] << idx
+    end
+
+    categories = h_indexes_by_cat.keys.sort.map do |cat|
+      {
+        name: cat,
+        count: h_indexes_by_cat[cat].size,
+        indices: h_indexes_by_cat[cat]
+      }
+    end
+
+    render json: { categories: categories }
+  rescue => e
+    Rails.logger.error("[annots#categories] Error for annot #{@annot&.id}: #{e.class} - #{e.message}")
+    render json: { error: 'Failed to load annotation categories' }, status: :internal_server_error
   end
 
   # GET /annots/:id/download?format_type=tsv|json

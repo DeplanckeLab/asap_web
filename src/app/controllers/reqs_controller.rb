@@ -1,3 +1,5 @@
+require 'open3'
+
 class ReqsController < ApplicationController
 
   before_action :set_project, only: [:create]
@@ -176,6 +178,24 @@ class ReqsController < ApplicationController
 
       ### delete already existing runs
       list_of_runs2 = list_of_runs.reject.with_index { |e, run_i| list_already_existing_run_i.include? run_i } 
+
+      # For single-run steps, ensure we create at most one run and remove existing ones first.
+      if !@step.multiple_runs
+        if list_of_runs2.size > 1
+          logger.warn("[create_runs] single-run step #{@step.name} produced #{list_of_runs2.size} runs; keeping only the first one")
+          list_of_runs2 = [list_of_runs2.first]
+        end
+
+        existing_step_runs = Run.where(project_id: @project.id, step_id: @step.id).order(created_at: :desc).to_a
+        existing_step_runs.each do |existing_run|
+          begin
+            RunsController.destroy_run_call(@project, existing_run)
+          rescue => e
+            logger.error("[create_runs] failed to delete existing run #{existing_run.id} for single-run step #{@step.name}: #{e.class} - #{e.message}")
+            raise
+          end
+        end
+      end
 
       ### define num for each run after creation                                                                                                                               
       last_run = Run.where(:project_id => @project.id, :step_id => @step.id).order(:id).last
@@ -365,6 +385,34 @@ class ReqsController < ApplicationController
         end
       end
     end
+
+    # Enforce deterministic input_matrix payload for cell_filtering.
+    # This prevents unexpected /attrs/* datasets from being used as matrix input.
+    if @step&.name == 'cell_filtering'
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      parsing_step = Step.where(name: 'parsing', docker_image_id: asap_docker_image&.id).first
+      parsing_runs = parsing_step ? Run.where(project_id: @project.id, step_id: parsing_step.id).order(created_at: :desc) : Run.none
+      parsing_run = parsing_runs.where(status_id: 3).first || parsing_runs.first
+
+      selected_dataset = tmp_attrs && (tmp_attrs['input_matrix_dataset'] || tmp_attrs[:input_matrix_dataset])
+      selected_dataset = selected_dataset.to_s
+      selected_dataset = '/matrix' unless selected_dataset == '/matrix' || selected_dataset.start_with?('/layers/')
+
+      if parsing_run
+        sanitized_output_filename = sanitize_cell_filtering_input_loom(project_dir)
+        tmp_attrs ||= {}
+        tmp_attrs['input_matrix'] = [{
+          'run_id' => parsing_run.id,
+          'output_attr_name' => 'output_matrix',
+          'output_filename' => sanitized_output_filename,
+          'output_dataset' => selected_dataset
+        }]
+      end
+
+      tmp_attrs.delete('input_matrix_dataset') if tmp_attrs
+      tmp_attrs.delete(:input_matrix_dataset) if tmp_attrs
+    end
+
     @req.attrs_json = (tmp_attrs) ? tmp_attrs.to_json : "{}"
     @req.user_id = (current_user) ? current_user.id : 1
 
@@ -434,4 +482,66 @@ class ReqsController < ApplicationController
     def req_params
       params.fetch(:req).permit(:step_id, :std_method_id) 
     end
+
+    def sanitize_cell_filtering_input_loom(project_dir)
+      source = project_dir + 'parsing' + 'output.loom'
+      target = project_dir + 'parsing' + 'output_cell_filtering_input.loom'
+
+      raise "Cell filtering input loom not found: #{source}" unless File.exist?(source)
+
+      attrs_to_copy = []
+      removed_attrs = []
+      attrs_list_stdout, attrs_list_stderr, attrs_list_status = Open3.capture3('h5dump', '-n', source.to_s)
+      unless attrs_list_status.success?
+        raise "Failed to list datasets in loom: #{attrs_list_stderr.presence || attrs_list_stdout.presence || 'unknown error'}"
+      end
+
+      attrs_dataset_paths = attrs_list_stdout
+        .each_line
+        .map(&:strip)
+        .filter_map { |line| (m = line.match(%r{\Adataset\s+(/attrs/[^\s]+)\z})) ? m[1] : nil }
+
+      attrs_dataset_paths.each do |dataset_path|
+        shape_stdout, shape_stderr, shape_status = Open3.capture3('h5dump', '-H', '-d', dataset_path, source.to_s)
+        unless shape_status.success?
+          raise "Failed to inspect #{dataset_path} in loom: #{shape_stderr.presence || shape_stdout.presence || 'unknown error'}"
+        end
+
+        dataspaces = shape_stdout.scan(/DATASPACE\s+([^\n]+)/).flatten
+        dataspaces = dataspaces.map(&:strip)
+        shape_desc = dataspaces.last
+        unless shape_desc
+          raise "Unexpected shape output for #{dataset_path}: #{shape_stdout}"
+        end
+
+        if shape_desc.include?('SCALAR') || shape_desc.match?(/\(\s*\d+\s*\)/)
+          attrs_to_copy << dataset_path
+        else
+          removed_attrs << dataset_path
+        end
+      end
+
+      File.delete(target) if File.exist?(target)
+
+      base_objects = ['/matrix', '/col_attrs', '/row_attrs', '/layers', '/col_graphs', '/row_graphs']
+      copied_any = false
+
+      (base_objects + attrs_to_copy).each do |obj_path|
+        _out, err, status = Open3.capture3('h5copy', '-p', '-i', source.to_s, '-o', target.to_s, '-s', obj_path, '-d', obj_path)
+        unless status.success?
+          Rails.logger.debug("[cell_filtering] Skip copy for #{obj_path}: #{err.presence || 'not found or not copyable'}")
+          next
+        end
+        copied_any = true
+      end
+
+      raise 'Sanitized loom creation failed: no objects were copied.' unless copied_any && File.exist?(target)
+
+      if removed_attrs.any?
+        Rails.logger.warn("[cell_filtering] Excluded multidimensional /attrs datasets from sanitized loom: #{removed_attrs.join(', ')}")
+      end
+
+      'parsing/output_cell_filtering_input.loom'
+    end
+
 end

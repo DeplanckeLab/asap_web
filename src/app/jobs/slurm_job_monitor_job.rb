@@ -181,6 +181,7 @@ class SlurmJobMonitorJob < ApplicationJob
         # This ensures the running status is set before checking for output.json
         if status == :running && run.status_id == 1
           Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} SLURM reports running, updating status from waiting to running")
+          broadcast_queue_position_cleared(run)
           
           # Calculate waiting_duration from submitted_at to now
           start_time = Time.now
@@ -198,6 +199,11 @@ class SlurmJobMonitorJob < ApplicationJob
           project.update(status_id: 2) if project.status_id != 2
 
           project.broadcast(step.id) if project.respond_to?(:broadcast)
+        end
+
+        # While waiting in queue, push queue position updates via websocket.
+        if status == :pending && run.status_id == 1
+          broadcast_queue_position_if_changed(run, slurm_service)
         end
         
         # Then check if output.json exists (job might have completed)
@@ -258,6 +264,51 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   private
+
+  def queue_position_cache_key(run_id)
+    "queue_position:last:run:#{run_id}"
+  end
+
+  def broadcast_queue_position_if_changed(run, slurm_service)
+    return unless run&.project_id && run&.slurm_job_id
+
+    queue_position = slurm_service.get_job_queue_position(run.slurm_job_id, run.status_id)
+    previous_position = Rails.cache.read(queue_position_cache_key(run.id))
+    return if previous_position == queue_position
+
+    Rails.cache.write(queue_position_cache_key(run.id), queue_position, expires_in: 12.hours)
+
+    ActionCable.server.broadcast("project_#{run.project_id}", {
+      event: 'queue_position_changed',
+      project_id: run.project_id,
+      step_id: run.step_id,
+      run_id: run.id,
+      slurm_job_id: run.slurm_job_id,
+      queue_position: queue_position
+    })
+  rescue StandardError => e
+    Rails.logger.warn("[SlurmJobMonitorJob] queue position broadcast failed for run #{run&.id}: #{e.class} - #{e.message}")
+  end
+
+  def broadcast_queue_position_cleared(run)
+    return unless run&.project_id
+
+    key = queue_position_cache_key(run.id)
+    had_cached_position = Rails.cache.exist?(key)
+    Rails.cache.delete(key)
+    return unless had_cached_position
+
+    ActionCable.server.broadcast("project_#{run.project_id}", {
+      event: 'queue_position_changed',
+      project_id: run.project_id,
+      step_id: run.step_id,
+      run_id: run.id,
+      slurm_job_id: run.slurm_job_id,
+      queue_position: nil
+    })
+  rescue StandardError => e
+    Rails.logger.warn("[SlurmJobMonitorJob] queue position clear broadcast failed for run #{run&.id}: #{e.class} - #{e.message}")
+  end
 
   def extract_error_message(run)
     return nil unless run
@@ -376,6 +427,8 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   def finish_run_successfully(run, slurm_service, slurm_job_id)
+    Rails.cache.delete(queue_position_cache_key(run.id))
+
     # Reload run to get latest status
     run.reload
     
@@ -465,6 +518,8 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   def finish_run_with_error(run, error_message)
+    Rails.cache.delete(queue_position_cache_key(run.id))
+
     # Don't mark as failed if the run is already complete and has valid output
     if run.status_id == 3
       project = run.project

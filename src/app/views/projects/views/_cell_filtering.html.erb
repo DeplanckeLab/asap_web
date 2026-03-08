@@ -1,6 +1,39 @@
 <%# Cell Filtering View - Based on form_cell_filtering_scalable.html.erb from original app %>
 
-<div id="cell_filtering_form_container" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 w-full max-w-full overflow-x-hidden">
+<%
+  @h_step_attrs ||= {}
+  default_method_names = Array(@h_step_attrs['default_std_method'])
+  default_std_method = if default_method_names.any? && defined?(@h_std_methods_by_name) && @h_std_methods_by_name
+                         default_method_names.map { |name| @h_std_methods_by_name[name] }.compact.first
+                       end
+  default_std_method ||= @cell_filtering_std_method if defined?(@cell_filtering_std_method)
+  default_std_method ||= @std_methods&.first
+  default_std_method_id = default_std_method&.id
+%>
+
+<%= form_with url: reqs_path,
+    method: :post,
+    scope: :req,
+    local: true,
+    html: {
+      id: @step.name + '_form',
+      'data-controller' => 'form-req',
+      'data-form-req-project-id-value' => @project.id,
+      'data-form-req-project-key-value' => @project.key,
+      'data-form-req-step-id-value' => @step.id,
+      'data-form-req-step-name-value' => @step.name,
+      'data-form-req-action-button-label-value' => (@h_step_attrs['action_button_label'] || 'Filter Cells'),
+      'data-form-req-submit-url-value' => reqs_path,
+      'data-form-req-step-results-url-value' => step_results_project_path(@project),
+      'data-form-req-unavailable-methods-value' => {}.to_json,
+      'data-form-req-methods-value' => {}.to_json
+    } do %>
+<%= hidden_field_tag 'req[std_method_id]', default_std_method_id %>
+<%= hidden_field_tag 'req[step_id]', @step.id %>
+<%= hidden_field_tag :format, 'json' %>
+
+<div id="cell_filtering_form_container"
+     class="bg-white rounded-lg shadow-sm border border-gray-200 w-full max-w-full overflow-x-hidden">
   <% if @parsing_run.nil? %>
     <div class="alert alert-warning">
       <i class="fas fa-exclamation-triangle me-2"></i>
@@ -70,21 +103,50 @@
     </script>
     <div data-controller="cell-filtering"
          data-cell-filtering-nber-cells-value="<%= @project.nber_cols || 0 %>"
-         class="w-full max-w-full overflow-x-hidden"
-         style="width: 100%; max-width: 100%; box-sizing: border-box;">
+         data-cell-filtering-parsing-run-id-value="<%= @parsing_run&.id %>"
+         data-cell-filtering-output-attr-name-value="output_matrix"
+         data-cell-filtering-output-filename-value="parsing/output.loom"
+         data-action="metadata-categories-changed->cell-filtering#filterInputChange"
+         class="w-full max-w-full overflow-x-hidden flex flex-col"
+         style="width: 100%; max-width: 100%; box-sizing: border-box; max-height: calc(100vh - 200px); overflow-y: auto;">
     
-    <div class="grid grid-cols-2 gap-4 mb-6 w-full max-w-full">
-      <div class='bg-green-50 border-2 border-green-200 rounded-lg p-4 shadow-sm w-full min-w-0'>
-        <h4 class='text-sm font-semibold text-green-700 uppercase tracking-wide mb-1'>Kept</h4>
-        <p class='text-2xl font-bold text-green-900'><span data-cell-filtering-target="result"><i class='fa fa-spinner fa-pulse'></i></span></p>
-      </div>
-      <div class='bg-gray-50 border-2 border-gray-200 rounded-lg p-4 shadow-sm w-full min-w-0'>
-        <h4 class='text-sm font-semibold text-gray-700 uppercase tracking-wide mb-1'>Discarded</h4>
-        <p class='text-2xl font-bold text-gray-900'><span data-cell-filtering-target="filtered"><i class='fa fa-spinner fa-pulse'></i></span></p>
+    <div class="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 mb-4 w-full max-w-full flex-shrink-0"
+         style="position: sticky; top: 0; z-index: 30;">
+      <div class="flex items-center justify-between gap-3 flex-wrap lg:flex-nowrap w-full">
+        <div class="flex items-center gap-2 min-w-0">
+          <h4 class="text-sm font-semibold text-gray-900 whitespace-nowrap">Cell filtering</h4>
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-green-50 text-green-800 border border-green-200 whitespace-nowrap">
+            Kept: <span data-cell-filtering-target="result"><i class='fa fa-spinner fa-pulse'></i></span>
+          </span>
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-800 border border-gray-200 whitespace-nowrap">
+            Discarded: <span data-cell-filtering-target="filtered"><i class='fa fa-spinner fa-pulse'></i></span>
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <% if analyzable?(@project) && default_std_method_id.present? %>
+            <button id="<%= @step.name %>_button"
+                    type="button"
+                    disabled
+                    class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors req_submit opacity-50 cursor-not-allowed"
+                    data-form-req-target="submitButton"
+                    data-cell-filtering-target="submitButton"
+                    data-action="click->form-req#submit">
+              <span data-cell-filtering-target="submitSpinner" class="hidden mr-1"><i class="fa fa-spinner fa-pulse"></i></span>
+              <%= @h_step_attrs['action_button_label'] || 'Filter Cells' %>
+            </button>
+          <% else %>
+            <span class="text-sm text-gray-500">Filter submission is not available for your permissions.</span>
+          <% end %>
+          <button type="button"
+                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  data-action="click->cell-filtering#resetFilters">
+            Reset filters
+          </button>
+        </div>
       </div>
     </div>
 
-    <div class="space-y-6 w-full max-w-full">
+    <div class="space-y-6 w-full max-w-full px-4 sm:px-6 pb-6">
       <div class='bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 w-full max-w-full overflow-x-hidden'>
         <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter with QC parameters</h4>
         <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
@@ -93,7 +155,7 @@
         <div class='space-y-2 w-full overflow-x-hidden'>
           <% @list_p.each_index do |i| %>
           <% e = @list_p[i] %>
-          <div id='param_row_<%= e[:name] %>' class='flex items-center gap-1.5 sm:gap-2 py-2 px-2 sm:px-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors w-full overflow-hidden'>
+          <div id='param_row_<%= e[:name] %>' class='flex items-center gap-1.5 sm:gap-2 py-2 px-2 sm:px-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors w-full overflow-hidden opacity-60'>
             <div class='w-8 sm:w-10 text-center flex items-center justify-center flex-shrink-0'>
               <% if i > 0 %>
                 <span class='text-xs font-bold text-gray-500'>AND</span>
@@ -101,10 +163,10 @@
             </div>
             <div class='flex-1 flex items-center gap-1.5 sm:gap-2 min-w-0 overflow-hidden w-full pr-1'>
               <span class='text-xs sm:text-sm font-medium text-gray-700 w-16 sm:w-20 text-right flex-shrink-0'><%= (e[:type] == :greater) ? 'LESS' : 'MORE' %> than</span>
-              <input id="<%= e[:name] %>_value" name="attrs[<%= e[:attr_name] %>]" value="<%= e[:threshold] %>" type="text" class='w-16 sm:w-20 px-1.5 sm:px-2 py-1.5 border border-gray-300 rounded-md text-xs sm:text-sm text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 filter_input transition-colors flex-shrink-0' data-action="change->cell-filtering#filterInputChange keyup->cell-filtering#filterInputChange"/>
+              <input id="<%= e[:name] %>_value" name="attrs[<%= e[:attr_name] %>]" value="" type="text" disabled class='w-16 sm:w-20 px-1.5 sm:px-2 py-1.5 border border-gray-300 rounded-md text-xs sm:text-sm text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 filter_input transition-colors flex-shrink-0 bg-gray-100 cursor-not-allowed opacity-60' data-action="change->cell-filtering#filterInputChange keyup->cell-filtering#filterInputChange"/>
               <%= hidden_field_tag e[:name] + "_saved", e[:threshold] %>
               <span class='text-xs sm:text-sm text-gray-700 flex-1 font-medium min-w-0 truncate'><%= e[:label] %></span>
-              <button id='disable-btn-<%= e[:name] %>' class='px-2 sm:px-3 py-1.5 text-xs font-semibold text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled-btn transition-all duration-200 flex items-center justify-center flex-shrink-0 whitespace-nowrap mr-0.5' type='button' data-action="click->cell-filtering#disableButtonClick">Disable</button>
+              <button id='disable-btn-<%= e[:name] %>' class='px-2 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 disabled-btn transition-all duration-200 flex items-center justify-center flex-shrink-0 whitespace-nowrap mr-0.5 cursor-not-allowed opacity-75' type='button' data-action="click->cell-filtering#disableButtonClick">Disabled</button>
             </div>
           </div>
           <% end %>
@@ -115,12 +177,33 @@
           <input id='attrs_discarded_cols' type="hidden" name="attrs[discarded_cols]"/>
           
           <% if @parsing_run %>
-            <% h_run = {:run_id => @parsing_run.id, :output_attr_name => "output_matrix", :output_filename => "parsing/output.loom", :output_dataset => "/matrix"} %>
-            <%= hidden_field_tag 'attrs[input_matrix]', "[#{h_run.to_json}]" %>
+            <% selected_matrix_dataset = @cell_filtering_default_matrix || '/matrix' %>
+            <% h_run = {:run_id => @parsing_run.id, :output_attr_name => "output_matrix", :output_filename => "parsing/output.loom", :output_dataset => selected_matrix_dataset} %>
+            <%= hidden_field_tag 'attrs[input_matrix]', "[#{h_run.to_json}]", data: { 'cell-filtering-target': 'inputMatrixHidden' } %>
+
+            <% if @cell_filtering_matrix_options.present? %>
+              <div class='mt-6 pt-6 border-t border-gray-200'>
+                <h4 class='text-lg font-semibold text-gray-900 mb-4'>Input matrix</h4>
+                <div>
+                  <label class='block text-sm font-medium text-gray-700 mb-1'>Matrix dataset</label>
+                  <%= select_tag 'cell_filtering_input_matrix_dataset',
+                      options_for_select(@cell_filtering_matrix_options, selected_matrix_dataset),
+                      {
+                        class: 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                        data: {
+                          action: 'change->cell-filtering#matrixDatasetChange',
+                          'cell-filtering-target': 'matrixDatasetSelect'
+                        }
+                      } %>
+                  <%= hidden_field_tag 'attrs[input_matrix_dataset]', selected_matrix_dataset, data: { 'cell-filtering-target': 'matrixDatasetHidden' } %>
+                  <p class='text-xs text-gray-500 mt-2'>Default is /matrix. You can select a matrix from /layers/* when available.</p>
+                </div>
+              </div>
+            <% end %>
           <% end %>
           
-          <%= hidden_field_tag 'attrs[manual_selection]', '', {:placeholder => '', :class => 'form-control'} %>
-          <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}' %>
+          <%= hidden_field_tag 'attrs[manual_selection]', '', {:placeholder => '', :class => 'form-control', data: { 'cell-filtering-metadata-target': 'manualSelectionHidden' }} %>
+          <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}', data: { 'cell-filtering-metadata-target': 'discardedMetadataHidden' } %>
           
           <% if @annots && @annots.size > 0 %>
             <div class='mt-6 pt-6 border-t border-gray-200'>
@@ -128,19 +211,38 @@
               <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>
                 <p class='text-sm text-green-800'><span class='font-semibold'>Keep</span> <%= col_label(@project) %> that belong to selected metadata categories:</p>
               </div>
-              <div class='space-y-3'>
+              <div class='space-y-3'
+                   data-controller="cell-filtering-metadata"
+                   data-cell-filtering-metadata-project-key-value="<%= @project.key %>"
+                   data-cell-filtering-metadata-annots-by-run-value='<%= raw (@metadata_annots_by_run || {}).to_json %>'>
                 <% l = ([@parsing_run] + @cell_filtering_runs + @gene_filtering_runs).compact.map{|r| [display_run(r), r.id]} %>
                 <div>
                   <label class='block text-sm font-medium text-gray-700 mb-1'>Run</label>
-                  <%= select_tag 'store_run_id', options_for_select(l, @parsing_run&.id), {:class => 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} %>
+                  <%= select_tag 'store_run_id',
+                      options_for_select(l, @parsing_run&.id),
+                      {
+                        class: 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                        data: {
+                          action: 'change->cell-filtering-metadata#storeRunChanged',
+                          'cell-filtering-metadata-target': 'storeRunSelect'
+                        }
+                      } %>
                 </div>
-                <% l = @annots.map{|a| [a.name + " ", a.id]}.sort %>
+                <% l = @annots.map{|a| [a[:name].to_s + " ", a[:id]]}.sort %>
                 <% l.unshift ["Select an annotation", nil] %>
                 <div>
                   <label class='block text-sm font-medium text-gray-700 mb-1'>Annotation</label>
-                  <%= select_tag 'annot_id', options_for_select(l, nil), {:class => 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} %>
+                  <%= select_tag 'annot_id',
+                      options_for_select(l, nil),
+                      {
+                        class: 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                        data: {
+                          action: 'change->cell-filtering-metadata#annotChanged',
+                          'cell-filtering-metadata-target': 'annotSelect'
+                        }
+                      } %>
                 </div>
-                <div id='annot_categories' class='mt-3'></div>
+                <div id='annot_categories' class='mt-3' data-cell-filtering-metadata-target="categoriesContainer"></div>
               </div>
             </div>
           <% end %>
@@ -180,3 +282,4 @@
   <% end %> <%# end if @parsing_run.nil? %>
 </div>
 
+<% end %>

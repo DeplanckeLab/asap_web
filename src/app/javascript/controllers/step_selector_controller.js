@@ -128,6 +128,7 @@ export default class extends Controller {
     const urlParams = new URLSearchParams(window.location.search)
     const runIdFromUrl = urlParams.get('run_id')
     const stepIdFromUrl = urlParams.get('step_id')
+    const showFormFromUrl = urlParams.get('show_form')
     
     // Check if server says to load run panel (false when step has a custom partial like _parsing.html.erb)
     const shouldLoadRunPanel = this.hasLoadRunPanelValue ? this.loadRunPanelValue : false
@@ -183,7 +184,8 @@ export default class extends Controller {
           console.log('[StepSelectorController] Loading step results for step_id:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
-          controller.loadStepResults(stepId, stepElement, true)
+          const extraQuery = showFormFromUrl === '1' ? '&show_form=1' : ''
+          controller.loadStepResults(stepId, stepElement, true, extraQuery)
           return true
         } else {
           console.warn('[StepSelectorController] Step element not found for step_id:', stepIdFromUrl)
@@ -297,6 +299,9 @@ export default class extends Controller {
           console.error(`[StepSelectorController] Subscription rejected for project ${this.projectIdValue}`)
         },
         received: (data) => {
+          if (data && data.event === 'queue_position_changed') {
+            return
+          }
           console.log(`[StepSelectorController] ===== WEBSOCKET MESSAGE RECEIVED =====`)
           console.log(`[StepSelectorController] Timestamp:`, new Date().toISOString())
           console.log(`[StepSelectorController] Full data object:`, JSON.stringify(data, null, 2))
@@ -919,7 +924,7 @@ export default class extends Controller {
     }
   }
 
-  loadStepResults(stepId, stepElement, showLoading = true) {
+  loadStepResults(stepId, stepElement, showLoading = true, extraQuery = '') {
     console.log('[StepSelectorController] ===== LOADING STEP RESULTS =====')
     console.log('[StepSelectorController] Step ID:', stepId, 'type:', typeof stepId)
     console.log('[StepSelectorController] Step Element:', stepElement)
@@ -960,7 +965,7 @@ export default class extends Controller {
     // Load step results via AJAX
     // Add cache-busting parameter to ensure fresh data on page reload
     const cacheBuster = new Date().getTime()
-    const url = `/projects/${this.projectIdentifier}/step_results.html?step_id=${stepId}&_t=${cacheBuster}`
+    const url = `/projects/${this.projectIdentifier}/step_results.html?step_id=${stepId}&_t=${cacheBuster}${extraQuery}`
     console.log('[StepSelectorController] Fetching URL:', url)
     
     // Store controller reference and stepId to preserve in promise chain

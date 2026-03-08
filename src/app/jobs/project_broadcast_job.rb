@@ -1,3 +1,5 @@
+require 'digest'
+
 class ProjectBroadcastJob < ApplicationJob
   queue_as :default
   include Rails.application.routes.url_helpers
@@ -42,7 +44,23 @@ class ProjectBroadcastJob < ApplicationJob
       h_data.merge!(get_creation_status(project, step_id))
     end
     
-    ActionCable.server.broadcast "project_#{project.id}", h_data
+    if should_broadcast_payload?(project.id, step_id, h_data)
+      ActionCable.server.broadcast "project_#{project.id}", h_data
+    else
+      Rails.logger.debug("[ProjectBroadcastJob] Skip duplicate broadcast for project=#{project.id} step=#{step_id}")
+    end
+  end
+
+  private
+
+  def should_broadcast_payload?(project_id, step_id, payload)
+    key = "project_broadcast_signature:#{project_id}:#{step_id}"
+    signature = Digest::SHA256.hexdigest(JSON.generate(payload.as_json))
+    previous_signature = Rails.cache.read(key)
+    return false if previous_signature == signature
+
+    Rails.cache.write(key, signature, expires_in: 12.hours)
+    true
   end
 
   def get_results(project, step_id)

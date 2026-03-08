@@ -1990,13 +1990,17 @@ module Basic
                 dt['output_dataset'] = linked_annot.name
                 dt['output_attr_name'] = (oa = linked_annot.output_attr) ? oa.name : nil
               end
+
+              if dt['output_dataset'].to_s.start_with?('/attrs/')
+                raise RuntimeError("Dataset path under /attrs is not allowed for run inputs: #{dt['output_dataset']}")
+              end
               
               linked_run = Run.where(:id => dt['run_id']).first
               h_parent_runs[linked_run.id] = linked_run
               
               lineage_runs = Run.where(:id => linked_run.lineage_run_ids.split(",")).all
-              norm_dataset = Annot.joins(:step).where(:run_id => lineage_runs, :steps => {:name => "normalization"}).first
-              h_var['norm_matrix_dataset'] = norm_dataset.name  if norm_dataset              
+              norm_dataset = Annot.joins(:step).where(:run_id => lineage_runs, :steps => {:name => "normalization"}, :dim => 3).first
+              h_var['norm_matrix_dataset'] = norm_dataset.name if norm_dataset
 
               h_linked_run_outputs = nil
               if !linked_run

@@ -59,6 +59,12 @@ export default class extends Controller {
     }
   }
 
+  isCellFilteringManagedSubmit() {
+    return this.stepNameValue === 'cell_filtering' &&
+      this.hasSubmitButtonTarget &&
+      this.submitButtonTarget.hasAttribute('data-cell-filtering-target')
+  }
+
   disconnect() {
     console.log("[FormReqController] Disconnected")
   }
@@ -121,7 +127,9 @@ export default class extends Controller {
 
       // Update button state
       if (this.hasSubmitButtonTarget) {
-        this.submitButtonTarget.disabled = isUnavailable || false
+        if (!this.isCellFilteringManagedSubmit()) {
+          this.submitButtonTarget.disabled = isUnavailable || false
+        }
       }
 
       // Update method description
@@ -245,6 +253,12 @@ export default class extends Controller {
   
   validateForm() {
     if (!this.hasSubmitButtonTarget) {
+      return true
+    }
+
+    // Cell filtering submit button state is managed exclusively by cell_filtering_controller
+    // to avoid transient enable/disable flicker during recomputation.
+    if (this.isCellFilteringManagedSubmit()) {
       return true
     }
     

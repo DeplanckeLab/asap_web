@@ -92,6 +92,7 @@ Rails.application.routes.draw do
   resources :annots, only: [:show] do
     member do
       get :download
+      get :categories
     end
   end
   resources :runs do

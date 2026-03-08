@@ -1,0 +1,54 @@
+<% step_label = @step&.label.presence || @step&.name.to_s.humanize %>
+<% run_status_id = run&.status_id.to_i %>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+  <div class="px-6 py-8 text-center">
+    <% if [1, 6].include?(run_status_id) %>
+      <div class="flex flex-col items-center justify-center"
+           <% if run.slurm_job_id.present? %>
+             data-controller="queue-position"
+             data-queue-position-run-id-value="<%= run.id %>"
+             data-queue-position-slurm-job-id-value="<%= run.slurm_job_id %>"
+             data-queue-position-project-id-value="<%= @project.key %>"
+             <% if run.submitted_at %>
+               data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
+             <% end %>
+           <% end %>>
+        <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+        <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_label %> is waiting</h3>
+        <p class="text-gray-600 mb-4">The <%= step_label.downcase %> job is queued and will start shortly.</p>
+        <% if run.slurm_job_id.present? %>
+          <% if run.submitted_at %>
+            <div class="text-sm text-gray-600 mb-3">
+              <span class="font-medium">Waiting time:</span>
+              <span data-queue-position-target="waitingTime" class="ml-2 font-mono">--:--</span>
+            </div>
+          <% end %>
+          <div data-queue-position-target="queueInfo" class="text-gray-600">
+            <span>Position in the queue: </span>
+            <span data-queue-position-target="position" class="inline-block">
+              <i class="fas fa-spinner fa-spin"></i>
+            </span>
+          </div>
+          <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
+            Nothing in the queue, will start shortly...
+          </div>
+        <% end %>
+      </div>
+    <% elsif run_status_id == 2 %>
+      <div class="flex flex-col items-center justify-center"
+           data-controller="run-timer"
+           <% if run.start_time %>
+             data-run-timer-start-time-value="<%= run.start_time.iso8601 %>"
+           <% end %>>
+        <i class="fas fa-spinner fa-spin text-blue-500 text-5xl mb-4"></i>
+        <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_label %> is running</h3>
+        <p class="text-gray-600 mb-4">The <%= step_label.downcase %> job is currently processing your data. Results will appear here when complete.</p>
+        <div class="text-sm text-gray-700">
+          <span class="font-medium">Elapsed time:</span>
+          <span data-run-timer-target="elapsedTime" class="ml-2 font-mono">--:--</span>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

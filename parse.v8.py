@@ -509,7 +509,7 @@ class H5ADHandler:
                         val = val.decode("utf-8")
                     elif isinstance(val, np.ndarray) and val.dtype.kind in ("S", "U"):
                         val = np.array([v.decode("utf-8") if isinstance(v, bytes) else str(v) for v in val.flatten()]).reshape(val.shape)
-                    
+
                     meta = loom.write_metadata(val, loom_path, n_cells=n_cells, n_genes=n_genes, imported=1)
                     result["metadata"].append(meta)
                     existing_paths.add(loom_path)

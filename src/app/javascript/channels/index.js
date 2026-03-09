@@ -1,2 +1,1 @@
-// Import all the channels to be used by Action Cable
-import "channels/project_channel"
+// Channels are subscribed explicitly by Stimulus controllers with required params.

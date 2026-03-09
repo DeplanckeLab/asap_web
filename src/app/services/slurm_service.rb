@@ -95,6 +95,9 @@ class SlurmService
     
     # Run squeue directly (SLURM client tools are installed in this container)
     result = `squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
+    if result.match?(/Invalid job id specified/i)
+      return :invalid_job
+    end
     
     if $?.success? && !result.strip.empty?
       status = result.strip
@@ -102,6 +105,9 @@ class SlurmService
     else
       # Try sacct if squeue doesn't return results
       result = `sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
+      if result.match?(/Invalid job id specified/i)
+        return :invalid_job
+      end
       if $?.success? && !result.strip.empty?
         status = result.strip.split.first
         return normalize_status(status)

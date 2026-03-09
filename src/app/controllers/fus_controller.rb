@@ -1,11 +1,6 @@
 class FusController < ApplicationController
   # POST /fus/upload_chunk
   def upload_chunk
-    unless user_signed_in?
-      render json: { error: 'Authentication required' }, status: :unauthorized
-      return
-    end
-
     filename = params[:filename].presence || 'uploaded_file'
     chunk = params[:chunk]
     chunk_index = params[:chunk_index].to_i
@@ -26,12 +21,12 @@ class FusController < ApplicationController
     # Find or create Fu record for tracking resumable upload
     # Project key will be set later when project is created
     fu = if fu_id.present?
-           Fu.find_by(id: fu_id, user_id: current_user.id)
+           fu_scope_for_current_actor.find_by(id: fu_id)
          else
            # Create new Fu record on first chunk
            Fu.new(
-             user_id: current_user.id,
-             project_key: nil, # Will be set when project is created
+            user_id: current_user&.id,
+            project_key: current_user ? nil : session[:sandbox],
              upload_file_name: input_filename,
              upload_file_size: file_size,
              status: 'uploading',
@@ -212,11 +207,6 @@ class FusController < ApplicationController
   
   # GET /fus/upload_status
   def upload_status
-    unless user_signed_in?
-      render json: { error: 'Authentication required' }, status: :unauthorized
-      return
-    end
-    
     filename = params[:filename]
     fu_id = params[:fu_id]
     
@@ -234,11 +224,10 @@ class FusController < ApplicationController
     end
     
     fu = if fu_id.present?
-           Fu.find_by(id: fu_id, user_id: current_user.id)
+           fu_scope_for_current_actor.find_by(id: fu_id)
          else
            # Find most recent incomplete upload for this user and filename
-           Fu.where(
-             user_id: current_user.id,
+           fu_scope_for_current_actor.where(
              upload_file_name: input_filename,
              status: ['uploading', 'downloading', 'uploaded'],
              project_id: nil
@@ -271,11 +260,6 @@ class FusController < ApplicationController
 
   # POST /fus/download_from_url
   def download_from_url
-    unless user_signed_in?
-      render json: { error: 'Authentication required' }, status: :unauthorized
-      return
-    end
-
     # Parse JSON body
     request_body = JSON.parse(request.body.read) rescue {}
     url = request_body['url'] || params[:url]
@@ -311,7 +295,7 @@ class FusController < ApplicationController
       input_filename = "input_file#{file_ext}"
 
       # Temporary reuse optimization: if same URL was already downloaded by this user, reuse it.
-      reusable_fu = Fu.where(user_id: current_user.id, url: normalized_url)
+      reusable_fu = fu_scope_for_current_actor.where(url: normalized_url)
                       .where(status: %w[downloading uploaded preparsing preparsed completed])
                       .order(updated_at: :desc)
                       .detect do |candidate|
@@ -354,8 +338,8 @@ class FusController < ApplicationController
       end
 
       fu = Fu.create!(
-        user_id: current_user.id,
-        project_key: nil,
+        user_id: current_user&.id,
+        project_key: current_user ? nil : session[:sandbox],
         upload_file_name: input_filename,
         upload_file_size: 0,
         status: 'downloading',
@@ -418,12 +402,7 @@ class FusController < ApplicationController
 
   # POST /fus/:id/rerun_preparsing
   def rerun_preparsing
-    unless user_signed_in?
-      render json: { error: 'Authentication required' }, status: :unauthorized
-      return
-    end
-
-    fu = Fu.find_by(id: params[:id], user_id: current_user.id)
+    fu = fu_scope_for_current_actor.find_by(id: params[:id])
     unless fu
       render json: { error: 'Upload record not found' }, status: :not_found
       return
@@ -458,7 +437,18 @@ class FusController < ApplicationController
     Rails.logger.info("[FusController#rerun_preparsing] Request body keys: #{request_body.keys.inspect}")
     Rails.logger.info("[FusController#rerun_preparsing] Request body version_id: #{request_body['version_id'].inspect}")
     
-    # Fallback to getting from session if not in request
+    # Prefer project-bound values for reruns when request does not pass them.
+    # This avoids using stale session values from a different flow.
+    if organism_id.blank? || version_id.blank?
+      project = fu.project
+      if project
+        organism_id ||= project.organism_id
+        version_id ||= project.version_id
+      end
+      Rails.logger.info("[FusController#rerun_preparsing] After project fallback - organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
+    end
+
+    # Fallback to getting from session if still missing.
     if organism_id.blank? || version_id.blank?
       # Try to get from session if available
       session_organism_id = session[:file_upload]&.dig(:organism_id)
@@ -486,8 +476,11 @@ class FusController < ApplicationController
     options[:has_header] = has_header if has_header.present?
 
     # Re-run preparsing with selected dataset or parsing parameters
+    enqueued_at = Time.current
+    options[:enqueued_at] = enqueued_at.iso8601
     fu.update!(status: 'preparsing')
-    FuPreparsingJob.perform_later(fu.id, options.compact)
+    job = FuPreparsingJob.perform_later(fu.id, options.compact)
+    Rails.logger.info("[FusController#rerun_preparsing] Enqueued FuPreparsingJob for Fu##{fu.id} job_id=#{job.job_id} enqueued_at=#{enqueued_at.utc.iso8601}")
 
     message = if sel.present?
                 "Preparsing restarted for dataset: #{sel}"
@@ -510,15 +503,15 @@ class FusController < ApplicationController
 
   # GET /fus/:id/preparsing_status
   def preparsing_status
-    unless user_signed_in?
-      render json: { error: 'Authentication required' }, status: :unauthorized
-      return
-    end
-
-    fu = Fu.find_by(id: params[:id], user_id: current_user.id)
+    fu = fu_scope_for_current_actor.find_by(id: params[:id])
     unless fu
       render json: { error: 'Upload record not found' }, status: :not_found
       return
+    end
+
+    if fu.status == 'uploaded' && fu.complete?
+      enqueue_preparsing_job(fu)
+      fu.reload
     end
 
     # Return status and preparsing results if available
@@ -563,6 +556,14 @@ class FusController < ApplicationController
     # 3. Params (as fallback)
     organism_id ||= safe_integer_param(:organism_id)
     version_id ||= safe_integer_param(:version_id)
+
+    if organism_id.blank? || version_id.blank?
+      project = fu.project
+      if project
+        organism_id ||= project.organism_id
+        version_id ||= project.version_id
+      end
+    end
     
     if organism_id.blank? || version_id.blank?
       session_data = session[:file_upload] || {}
@@ -570,19 +571,22 @@ class FusController < ApplicationController
       version_id ||= session_data[:version_id]
     end
     
-    Rails.logger.info("[FusController#enqueue_preparsing_job] Enqueueing preparsing for Fu##{fu.id}")
+    enqueue_started_at = Time.current
+    Rails.logger.info("[FusController#enqueue_preparsing_job] Enqueueing preparsing for Fu##{fu.id} at=#{enqueue_started_at.utc.iso8601}")
     Rails.logger.info("[FusController#enqueue_preparsing_job] organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
     
     options = {}
     options[:organism_id] = organism_id if organism_id.present?
     options[:version_id] = version_id if version_id.present?
+    options[:enqueued_at] = enqueue_started_at.iso8601
     
     Rails.logger.info("[FusController#enqueue_preparsing_job] Options hash: #{options.inspect}")
     
     fu.update!(status: 'preparsing')
-    FuPreparsingJob.perform_later(fu.id, options)
+    job = FuPreparsingJob.perform_later(fu.id, options)
     
-    Rails.logger.info("[FusController#enqueue_preparsing_job] Job enqueued successfully")
+    enqueue_elapsed_ms = ((Time.current - enqueue_started_at) * 1000).round
+    Rails.logger.info("[FusController#enqueue_preparsing_job] Job enqueued successfully job_id=#{job.job_id} enqueue_elapsed_ms=#{enqueue_elapsed_ms}")
   end
 
   def safe_integer_param_from_body(key)
@@ -601,5 +605,13 @@ class FusController < ApplicationController
     Integer(value)
   rescue ArgumentError, TypeError
     nil
+  end
+
+  def fu_scope_for_current_actor
+    if user_signed_in?
+      Fu.where(user_id: current_user.id)
+    else
+      Fu.where(user_id: nil, project_key: session[:sandbox])
+    end
   end
 end

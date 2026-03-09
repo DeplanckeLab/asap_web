@@ -10,6 +10,7 @@ export default class extends Controller {
     console.log('[HeaderRunStatus] Has cellCount target:', this.hasCellCountTarget)
     console.log('[HeaderRunStatus] statusCount targets:', this.statusCountTargets.length)
     this.subscribeToProject()
+    this.syncCountsFromServer()
   }
 
   disconnect() {
@@ -30,6 +31,7 @@ export default class extends Controller {
       {
         connected: () => {
           console.log(`[HeaderRunStatus] Connected to ProjectChannel for project ${this.projectIdValue}`)
+          this.syncCountsFromServer()
         },
         disconnected: () => {
           console.log(`[HeaderRunStatus] Disconnected from ProjectChannel`)
@@ -54,7 +56,12 @@ export default class extends Controller {
   }
 
   handleStatusUpdate(data) {
-    console.log('[HeaderRunStatus] handleStatusUpdate with broadcast data')
+    console.log('[HeaderRunStatus] handleStatusUpdate payload:', {
+      step_id: data?.step_id,
+      step_name: data?.step_name,
+      parsing_status: data?.parsing_status,
+      has_project_run_totals: !!data?.project_run_totals
+    })
     if (data && data.project_unarchived === true) {
       console.log('[HeaderRunStatus] Project unarchive completed, reloading page')
       window.location.reload()
@@ -77,9 +84,11 @@ export default class extends Controller {
     // project_run_totals is { waiting: N, running: N, completed: N, failed: N }
     const totals = data.project_run_totals
     if (!totals) {
-      console.log('[HeaderRunStatus] No project_run_totals in broadcast, skipping status update')
+      console.log('[HeaderRunStatus] No project_run_totals in broadcast, syncing from server')
+      this.syncCountsFromServer()
       return
     }
+    console.log('[HeaderRunStatus] Applying project_run_totals:', totals)
 
     this.statusCountTargets.forEach(countEl => {
       const statusKey = countEl.dataset.statusKey
@@ -92,6 +101,34 @@ export default class extends Controller {
         this.updateIconState(statusKey, newCount)
       }
     })
+  }
+
+  syncCountsFromServer() {
+    if (!this.projectIdValue) return
+
+    const url = `/projects/${this.projectIdValue}/run_counts`
+    console.log('[HeaderRunStatus] syncCountsFromServer request:', url)
+    fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        return response.json()
+      })
+      .then((counts) => {
+        console.log('[HeaderRunStatus] syncCountsFromServer response:', counts)
+        this.updateFromBroadcast({ project_run_totals: counts, cell_count: counts.cell_count, col_label: counts.col_label })
+      })
+      .catch((error) => {
+        console.warn('[HeaderRunStatus] Failed to sync run counts from server:', error)
+      })
   }
 
   updateIconState(statusKey, count) {

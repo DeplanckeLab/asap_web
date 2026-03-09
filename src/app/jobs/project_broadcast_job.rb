@@ -25,6 +25,9 @@ class ProjectBroadcastJob < ApplicationJob
       project_id: project.id,
       step_id: step_id,
       new_status: project.status_id,
+      # Include a monotonic-ish marker so repeated lifecycle transitions
+      # on the same project/step are not dropped as "duplicates".
+      project_updated_at: project.updated_at&.to_f,
       stage: stage,
       cell_count: project.cell_count,
       gene_count: project.gene_count,
@@ -37,7 +40,7 @@ class ProjectBroadcastJob < ApplicationJob
     })
     
     # Always include parsing status information (useful for summary page)
-    h_data.merge!(get_parsing_status(project))
+    h_data.merge!(get_parsing_status(project, step_id))
     
     # Add creation status information if in creation stage
     if stage == 'creation'
@@ -125,14 +128,26 @@ class ProjectBroadcastJob < ApplicationJob
     return h_res
   end
 
-  def get_parsing_status(project)
+  def get_parsing_status(project, current_step_id = nil)
     status_info = {
       parsing_status: 'complete',
       parsing_complete: true
     }
     
+    # Resolve the parsing step for this project/version context.
+    # Prefer the currently broadcasted step when it is parsing, otherwise find
+    # the parsing step tied to the project's ASAP docker image.
+    parsing_step = Step.find_by(id: current_step_id)
+    unless parsing_step&.name == 'parsing'
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      parsing_step = if asap_docker_image
+                       Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+                     else
+                       Step.where(name: 'parsing').order(:id).last
+                     end
+    end
+
     # Check parsing step status
-    parsing_step = Step.where(name: 'parsing').first
     if parsing_step
       project_step = ProjectStep.find_by(project_id: project.id, step_id: parsing_step.id)
       if project_step

@@ -338,6 +338,7 @@ export default class extends Controller {
         connected: () => {
           console.log(`[StepSelectorController] ===== WEBSOCKET CONNECTED =====`)
           console.log(`[StepSelectorController] Connected to ProjectChannel for project ${this.projectIdValue}`)
+          this.reconcileCurrentStepOnConnect()
         },
         disconnected: () => {
           console.warn(`[StepSelectorController] ===== WEBSOCKET DISCONNECTED =====`)
@@ -377,6 +378,32 @@ export default class extends Controller {
   }
 
   scheduleStatusUpdate(data) {
+    console.log('[StepSelectorController] scheduleStatusUpdate payload:', {
+      step_id: data?.step_id,
+      step_name: data?.step_name,
+      parsing_status: data?.parsing_status,
+      has_h_nber_analyses: !!data?.h_nber_analyses,
+      has_project_run_totals: !!data?.project_run_totals
+    })
+
+    // Do not debounce terminal updates (completed/failed): they must be applied
+    // immediately so left/right panels switch as soon as a step ends.
+    const isTerminal = this.isTerminalStepUpdate(data)
+    console.log('[StepSelectorController] scheduleStatusUpdate decision:', {
+      isTerminalStepUpdate: isTerminal,
+      debounceMs: this.statusUpdateDebounceMs
+    })
+    if (isTerminal) {
+      if (this.statusUpdateTimer) {
+        clearTimeout(this.statusUpdateTimer)
+        this.statusUpdateTimer = null
+      }
+      this.pendingStatusUpdate = null
+      console.log('[StepSelectorController] Applying terminal update immediately')
+      this.handleStatusUpdate(data)
+      return
+    }
+
     this.pendingStatusUpdate = data
     if (this.statusUpdateTimer) {
       clearTimeout(this.statusUpdateTimer)
@@ -391,6 +418,88 @@ export default class extends Controller {
     }, this.statusUpdateDebounceMs)
   }
 
+  reconcileCurrentStepOnConnect() {
+    // Reconciliation pass for cases where terminal updates were missed during
+    // websocket reconnects: pull current aggregate state and refresh parsing UI.
+    const currentStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
+    if (!currentStepId) return
+
+    const currentStepEl = this.element.querySelector(`[data-step-id="${currentStepId}"]`)
+    if (!currentStepEl) return
+
+    const currentStepName = (currentStepEl.getAttribute('data-step-name') || '').toString().toLowerCase()
+    if (currentStepName !== 'parsing') return
+
+    const url = `/projects/${this.projectIdentifier}/run_counts`
+    console.log('[StepSelectorController] reconcileCurrentStepOnConnect request:', {
+      url,
+      currentStepId,
+      currentStepName
+    })
+
+    fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        return response.json()
+      })
+      .then((counts) => {
+        console.log('[StepSelectorController] reconcileCurrentStepOnConnect response:', counts)
+        const running = parseInt(counts.running ?? 0, 10) || 0
+        const completed = parseInt(counts.completed ?? 0, 10) || 0
+        const failed = parseInt(counts.failed ?? 0, 10) || 0
+        const isTerminal = running === 0 && (completed > 0 || failed > 0)
+        if (!isTerminal) return
+
+        console.log('[StepSelectorController] reconcileCurrentStepOnConnect forcing refresh for terminal parsing state', {
+          currentStepId,
+          running,
+          completed,
+          failed
+        })
+        this.loadStepResults(currentStepId, currentStepEl, false)
+      })
+      .catch((error) => {
+        console.warn('[StepSelectorController] reconcileCurrentStepOnConnect failed:', error)
+      })
+  }
+
+  isTerminalStepUpdate(data) {
+    if (!data) return false
+
+    const parsingStatus = (data.parsing_status || '').toString().toLowerCase()
+    if (parsingStatus === 'complete' || parsingStatus === 'failed') {
+      console.log('[StepSelectorController] Terminal by parsing_status:', parsingStatus)
+      return true
+    }
+
+    const counts = data.h_nber_analyses
+    if (!counts) return false
+
+    const waiting = parseInt(counts[1] ?? counts['1'] ?? 0, 10) || 0
+    const running = parseInt(counts[2] ?? counts['2'] ?? 0, 10) || 0
+    const completed = parseInt(counts[3] ?? counts['3'] ?? 0, 10) || 0
+    const failed = parseInt(counts[4] ?? counts['4'] ?? 0, 10) || 0
+
+    const isTerminal = waiting === 0 && running === 0 && (completed > 0 || failed > 0)
+    console.log('[StepSelectorController] Terminal by h_nber_analyses check:', {
+      waiting,
+      running,
+      completed,
+      failed,
+      isTerminal
+    })
+    return isTerminal
+  }
+
   handleStatusUpdate(data) {
     console.log('[StepSelectorController] ===== HANDLE STATUS UPDATE =====')
     console.log('[StepSelectorController] handleStatusUpdate called with data:', data)
@@ -398,6 +507,11 @@ export default class extends Controller {
     console.log('[StepSelectorController] data.parsing_status:', data.parsing_status)
     console.log('[StepSelectorController] data.h_nber_analyses:', data.h_nber_analyses)
     console.log('[StepSelectorController] Current step ID before update:', this.currentStepId)
+
+    // Keep the top header status summary synchronized from the same websocket payload.
+    // This avoids stale header icons when another controller misses an update.
+    this.updateHeaderStatusSummary(data)
+    this.forceRefreshParsingPanelOnTerminalStatus(data)
     
     // Check if right panel is displaying a form (new run form)
     const hasFormInRightPanel = this.hasContentTarget && this.contentTarget.querySelector('.std-form') !== null
@@ -472,7 +586,21 @@ export default class extends Controller {
       // run rows and would trigger an unnecessary full reload each time.
       // The parsing_status check further below handles the complete/failed transitions.
       if (data.parsing_status && data.parsing_status !== 'complete' && data.parsing_status !== 'failed') {
-        console.log(`[StepSelectorController] Parsing step in progress (${data.parsing_status}), skipping content reload`)
+        // Keep in-progress parsing lightweight, but force a reload when the current
+        // panel still shows a failed state so failed -> waiting/running is visible.
+        const parsingStatusPanel = this.contentTarget.querySelector('[data-parsing-status-panel="true"]')
+        const shownStatusId = parsingStatusPanel ? parseInt(parsingStatusPanel.dataset.currentStatusId || '', 10) : null
+        const isShowingFailedPanel = shownStatusId === 4
+
+        if (isShowingFailedPanel && (data.parsing_status === 'waiting' || data.parsing_status === 'running')) {
+          console.log(`[StepSelectorController] Parsing recovered (${data.parsing_status}) from failed panel, reloading content`)
+          clearTimeout(this.reloadTimeout)
+          this.reloadTimeout = setTimeout(() => {
+            this.loadStepResults(this.currentStepId, currentStepElement, false)
+          }, 300)
+        } else {
+          console.log(`[StepSelectorController] Parsing step in progress (${data.parsing_status}), skipping content reload`)
+        }
       } else if (this.hasContentTarget) {
         // Search for run rows - they might be in a table or nested in the content
         const runRows = this.contentTarget.querySelectorAll('tr[data-run-id]')
@@ -539,6 +667,85 @@ export default class extends Controller {
         }
       }
     }
+  }
+
+  forceRefreshParsingPanelOnTerminalStatus(data) {
+    if (!data) return
+    const status = data.parsing_status
+    const stepName = (data.step_name || '').toString().toLowerCase()
+    console.log('[StepSelectorController] forceRefreshParsingPanelOnTerminalStatus input:', {
+      step_id: data.step_id,
+      step_name: stepName,
+      parsing_status: status,
+      currentStepId: this.currentStepId
+    })
+    if (stepName !== 'parsing') return
+    if (status !== 'complete' && status !== 'failed') return
+
+    const stepId = data.step_id ? parseInt(data.step_id, 10) : null
+    if (!stepId) return
+
+    const stepElement = this.element.querySelector(`[data-step-id="${stepId}"]`)
+    console.log('[StepSelectorController] forceRefreshParsingPanelOnTerminalStatus target lookup:', {
+      stepId,
+      stepElementFound: !!stepElement
+    })
+    if (!stepElement) return
+
+    this.currentStepId = stepId.toString()
+    this.element.setAttribute('data-current-step-id', this.currentStepId)
+
+    clearTimeout(this.reloadTimeout)
+    console.log('[StepSelectorController] Triggering loadStepResults from terminal parsing update:', {
+      stepId,
+      status
+    })
+    this.reloadTimeout = setTimeout(() => {
+      this.loadStepResults(stepId, stepElement, false)
+    }, 250)
+  }
+
+  updateHeaderStatusSummary(data) {
+    const totals = data && data.project_run_totals
+    if (!totals) return
+
+    const headerRoot = document.querySelector('[data-controller~="header-run-status"]')
+    if (!headerRoot) return
+
+    const statusKeys = ['waiting', 'running', 'completed', 'failed']
+    statusKeys.forEach((statusKey) => {
+      const count = parseInt(totals[statusKey]) || 0
+
+      const countEl = headerRoot.querySelector(`[data-header-run-status-target="statusCount"][data-status-key="${statusKey}"]`)
+      if (countEl) {
+        countEl.textContent = `${count}`
+      }
+
+      const iconEl = headerRoot.querySelector(`[data-header-run-status-target="statusIcon"][data-status-key="${statusKey}"]`)
+      if (iconEl) {
+        const iconBase = iconEl.dataset.iconBase || ''
+        const iconSpin = iconEl.dataset.iconSpin || ''
+        const activeColor = iconEl.dataset.activeColor || ''
+        const inactiveColor = iconEl.dataset.inactiveColor || ''
+        const isActive = count > 0
+        const colorClass = isActive ? activeColor : inactiveColor
+        const spinClass = isActive && iconSpin ? ` ${iconSpin}` : ''
+        iconEl.className = `${iconBase}${spinClass} text-base ${colorClass}`
+      }
+
+      const btnEl = headerRoot.querySelector(`[data-header-run-status-target="statusButton"][data-status-key="${statusKey}"]`)
+      if (btnEl) {
+        const isActive = count > 0
+        const label = iconEl?.dataset.label || statusKey
+        btnEl.title = `${label} (${count})`
+        btnEl.disabled = !isActive
+        if (isActive) {
+          btnEl.classList.remove('cursor-default')
+        } else {
+          btnEl.classList.add('cursor-default')
+        }
+      }
+    })
   }
 
   isAnyFormOpen() {

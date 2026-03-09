@@ -13,7 +13,9 @@
      else
        "Parsing"
      end %>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden"
+       data-parsing-status-panel="true"
+       data-current-status-id="<%= status_id || '' %>">
     <div class="px-6 py-8 text-center">
       <% if status_id.nil? || status_id == 1 %>
         <div class="flex flex-col items-center justify-center"

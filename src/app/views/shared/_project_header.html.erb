@@ -19,11 +19,13 @@
         <% owner_user = @project.user %>
         <% organism = @project.organism %>
         <% owned_by_current_user = user_signed_in? && owner_user&.id == current_user.id %>
-        <% share_record = user_signed_in? && !owned_by_current_user ? @project.shares.find_by(user_id: current_user.id) : nil %>
+        <% owned_by_sandbox_session = !user_signed_in? && @project.sandbox? && session[:sandbox] == @project.key %>
+        <% owned_by_me = owned_by_current_user || owned_by_sandbox_session %>
+        <% share_record = user_signed_in? && !owned_by_me ? @project.shares.find_by(user_id: current_user.id) : nil %>
         <% owner_email = owner_user&.email.to_s
            owner_email_part = owner_email.split('@').first if owner_email.present?
            project_status_label =
-            if owned_by_current_user
+            if owned_by_me
               'Owned by me'
             elsif share_record.present?
               "Shared by #{owner_email_part || 'unknown'}"
@@ -310,6 +312,7 @@
               </div>
             </div>
             <% if @sandbox_self_destruct_at.present? %>
+              <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i %>
               <% countdown = sandbox_self_destruct_countdown(@sandbox_self_destruct_at) %>
               <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300">
                 <div class="flex flex-col justify-center">
@@ -317,7 +320,9 @@
                   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/40 text-xs mt-1 w-fit"
                         data-controller="countdown"
                         data-countdown-end-ms-value="<%= (@sandbox_self_destruct_at.to_f * 1000).to_i %>"
-                        title="This sandbox project will self-destroy in <%= countdown %>.">
+                        data-countdown-idle-days-value="<%= sandbox_idle_days %>"
+                        data-countdown-lock-title-value="true"
+                        title="Sandbox projects self-destroy after <%= sandbox_idle_days %> days of inactivity">
                     <i class="fas fa-bomb text-[11px]"></i>
                     <span data-countdown-target="display"><%= countdown %></span>
                   </span>

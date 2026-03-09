@@ -242,6 +242,22 @@ class SlurmJobMonitorJob < ApplicationJob
         error_message = extract_error_message(run)
         finish_run_with_error(run, error_message || "SLURM job finished with status: #{status}")
 
+      when :invalid_job
+        Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has invalid SLURM job id: #{slurm_job_id}")
+        project = run.project
+        step = run.step
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+        step_dir = project_dir + step.name
+        output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        output_json_filename = output_dir + 'output.json'
+
+        if File.exist?(output_json_filename)
+          finish_run_successfully(run, slurm_service, slurm_job_id)
+        else
+          error_message = extract_error_message(run) || "SLURM job #{slurm_job_id} is no longer available and no output was produced"
+          finish_run_with_error(run, error_message)
+        end
+
       else
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has unknown status: #{status}, will retry")
         if attempt < MAX_MONITOR_ATTEMPTS

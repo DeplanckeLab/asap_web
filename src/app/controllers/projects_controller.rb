@@ -780,6 +780,9 @@ class ProjectsController < ApplicationController
   # POST /projects or /projects.json
   def create
     @project = Project.new(project_params)
+
+    # Guest sandbox projects must use the session sandbox key so access checks pass.
+    @project.key = session[:sandbox] unless current_user
     
     # Get file formats for parsing attributes handling
     @h_formats = {}
@@ -841,7 +844,7 @@ class ProjectsController < ApplicationController
     @project.sandbox = current_user ? false : true
     @project.modified_at = Time.now
     
-    # Generate unique project key if not provided
+    # Generate unique project key only for signed-in users if not provided.
     unless @project.key.present?
       loop do
         @project.key = SecureRandom.alphanumeric(7).downcase
@@ -1317,6 +1320,25 @@ class ProjectsController < ApplicationController
             ps.status_id = 1
           end
         end
+
+        # Move the latest parsing run out of failed immediately so header summaries
+        # reflect the restart request without waiting for async job execution.
+        parsing_run = @project.runs.where(step_id: parsing_step.id).order(id: :desc).first
+        if parsing_run
+          parsing_run.update!(
+            status_id: 1,
+            error: nil,
+            slurm_job_id: nil,
+            pid: nil,
+            start_time: nil,
+            duration: nil
+          )
+        end
+
+        # Keep aggregated counters in sync and push websocket update now.
+        Basic.upd_project_step(@project, parsing_step.id)
+        @project.reload
+        @project.broadcast(parsing_step.id) if @project.respond_to?(:broadcast)
       end
       
       respond_to do |format|
@@ -1509,6 +1531,15 @@ class ProjectsController < ApplicationController
   # Toggle the public status of a project
   # Requires compliance validation (as configured in Version env_json) to make public
   def toggle_public
+    if @project.sandbox?
+      message = "Sandbox projects cannot be made public. Clone the project into a regular account project first."
+      respond_to do |format|
+        format.html { redirect_to project_path(@project, view: 'settings'), alert: message }
+        format.json { render json: { success: false, error: message }, status: :unprocessable_entity }
+      end
+      return
+    end
+
     # Check permissions - only owner or admin can change public status
     unless @project.user_id == current_user&.id || admin?
       respond_to do |format|

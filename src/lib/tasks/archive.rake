@@ -111,7 +111,7 @@ def delete_sandbox_project!(project, s3b:, dry_run: false)
   archive_file = Pathname.new("#{project_dir}.tgz")
 
   if dry_run
-    puts "[sandbox_cleanup][dry-run] would delete project=#{project.id} key=#{project.key}"
+    puts "[sandbox_cleanup][dry-run] would delete project=#{project.id} key=#{project.key} title=#{project.name.inspect} user_email=#{project.user&.email.inspect} updated_at=#{project.updated_at&.utc&.iso8601.inspect}"
     return :dry_run
   end
 
@@ -224,7 +224,7 @@ namespace :projects do
       s3b = archive_s3_bucket_config
       counts = Hash.new(0)
 
-      scope = Project.where(sandbox: true)
+      scope = Project.where(sandbox: true).includes(:user)
       candidates = scope.where("COALESCE(viewed_at, updated_at, created_at) < ?", cutoff_time)
 
       candidates.find_each do |project|

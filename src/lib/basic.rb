@@ -790,11 +790,15 @@ module Basic
       if File.exist? input_dir
         FileUtils.rm_r input_dir
       end
-      #`cp #{file_path} #{tmp_file_path}` 
-      FileUtils.cp file_path, tmp_file_path
-      f_out = File.open("log/toto", 'a')
+      # Avoid self-copy when the canonical input already is `input_file`.
+      source_path = File.expand_path(file_path.to_s)
+      target_path = File.expand_path(tmp_file_path.to_s)
+      same_source_and_target = source_path == target_path
+      if !same_source_and_target && File.exist?(file_path.to_s) && File.exist?(tmp_file_path.to_s)
+        same_source_and_target = File.identical?(file_path.to_s, tmp_file_path.to_s)
+      end
+      FileUtils.cp(file_path, tmp_file_path) unless same_source_and_target
       logger.debug("CONVERT_TO_MTX")
-      f_out.write('CONVERT_TO_MTX')
       ## check if the file is a zip or tar.gz file
       # cmd = "unzip"
       z_file_path = base_dir + 'input_file.gz'
@@ -908,7 +912,6 @@ module Basic
       if File.exist? input_dir and File.exist? input_dir + 'matrix.mtx'     
         cmd = "#{ENV.fetch('DOCKER_CALL')} 'Rscript --vanilla /srv/mtx_to_h5.R #{input_dir} #{h5_file_path}'"
         logger.debug("CMD_CONVERT:" + cmd)
-        f_out.write("CMD_CONVERT:" + cmd)
         `#{cmd}`
         if File.exist? h5_file_path and File.size(h5_file_path) > 0
           file_path = h5_file_path
@@ -916,8 +919,6 @@ module Basic
         end
       end
       
-      f_out.close
-
       logger.debug("#{init_file_path} == #{file_path}")
       
       if init_file_path == file_path

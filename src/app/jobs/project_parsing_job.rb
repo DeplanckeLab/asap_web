@@ -62,9 +62,10 @@ class ProjectParsingJob < ApplicationJob
     # The Java command in the Docker container runs as HOST_USER_ID (1006), so make it world-writable
     FileUtils.chmod(0777, tmp_dir) if File.exist?(tmp_dir)
 
-    # Update project step status to waiting (will be set to running when SLURM job starts)
-    project_step.update(status_id: 1) # 1 = waiting
-    project.update(status_id: 1)
+    # Update project/step status to waiting and clear stale errors from previous failed runs.
+    # This ensures the UI does not keep showing a failed state while a rerun is being queued.
+    project_step.update(status_id: 1, error_message: nil) # 1 = waiting
+    project.update(status_id: 1, error_message: nil)
 
     begin
       # Build command hash for parsing (similar to how parse.rake builds it)
@@ -184,6 +185,8 @@ class ProjectParsingJob < ApplicationJob
         command_json: h_cmd.to_json,
         attrs_json: project.parsing_attrs_json,
         output_json: h_outputs.to_json,
+        error: nil,
+        slurm_job_id: nil,
         async: true # Execute through SLURM via exec_run
       }
       
@@ -231,6 +234,9 @@ class ProjectParsingJob < ApplicationJob
       # Update project step details (this may set resource requirements from predictions)
       h_project_step = Basic.get_project_step_details(project, parsing_step.id)
       project_step.update(h_project_step)
+      # Keep aggregated counts in sync immediately so header status icons update from failed -> waiting/running.
+      Basic.upd_project_step(project, parsing_step.id)
+      project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
       
       # Reload run to get updated resource predictions if any
       run.reload

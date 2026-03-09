@@ -421,6 +421,10 @@ export default class extends Controller {
           // Always re-subscribe after upload completes to ensure fresh connection
           this.teardownPreparsingSubscription()
           this.subscribeToPreparsing(this.fuId)
+          // Start polling immediately to avoid missing early websocket broadcasts.
+          this.startPreparsingStatusPoll(this.fuId)
+          // Immediate status fetch gives fast UI feedback without waiting for websocket.
+          this.checkPreparsingStatus(this.fuId)
         } else {
           console.error('[FileUpload] Cannot subscribe to preparsing: fuId is not set')
         }

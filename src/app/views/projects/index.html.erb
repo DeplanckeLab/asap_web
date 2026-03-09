@@ -1,4 +1,5 @@
 <% content_for :title, "Browse Projects" %>
+<% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i %>
 
 <div class="min-h-screen bg-gray-50">
   <div class="w-full mx-auto px-3 sm:px-4 lg:px-6 py-8">
@@ -284,6 +285,21 @@
                   <span>Updated <%= time_ago_in_words(project.updated_at) %> ago</span>
                   <span><%= pluralize(project.view_count, 'view') %></span>
                 </div>
+                <% if project.sandbox? %>
+                  <% sandbox_last_seen_at = project.viewed_at || project.updated_at || project.created_at || Time.current %>
+                  <% sandbox_destroy_at = sandbox_last_seen_at + sandbox_idle_days.days %>
+                  <% countdown = sandbox_self_destruct_countdown(sandbox_destroy_at) %>
+                  <div class="mt-2">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-xs"
+                          data-controller="countdown"
+                          data-countdown-end-ms-value="<%= (sandbox_destroy_at.to_f * 1000).to_i %>"
+                          data-countdown-idle-days-value="<%= sandbox_idle_days %>"
+                          title="Sandbox project auto-delete countdown">
+                      <i class="fas fa-bomb text-[11px]"></i>
+                      <span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
+                    </span>
+                  </div>
+                <% end %>
               </div>
             </div>
 
@@ -396,6 +412,19 @@
                           <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-gray-100 text-gray-700"
                                 title="ASAP release">
                             v<%= project.version_id %>
+                          </span>
+                        <% end %>
+                        <% if project.sandbox? %>
+                          <% sandbox_last_seen_at = project.viewed_at || project.updated_at || project.created_at || Time.current %>
+                          <% sandbox_destroy_at = sandbox_last_seen_at + sandbox_idle_days.days %>
+                          <% countdown = sandbox_self_destruct_countdown(sandbox_destroy_at) %>
+                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200"
+                                data-controller="countdown"
+                                data-countdown-end-ms-value="<%= (sandbox_destroy_at.to_f * 1000).to_i %>"
+                                data-countdown-idle-days-value="<%= sandbox_idle_days %>"
+                                title="Sandbox project auto-delete countdown">
+                            <i class="fas fa-bomb text-[11px]"></i>
+                            <span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
                           </span>
                         <% end %>
                       </div>

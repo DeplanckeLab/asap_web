@@ -10,11 +10,9 @@ export default class extends Controller {
 
   connect() {
     console.log(`[ParsingStatusController] Connected for project ${this.projectIdValue}, initial status: ${this.initialStatusValue}`)
-    
-    // Only subscribe if parsing is in progress
-    if (this.initialStatusValue === 'running' || this.initialStatusValue === 'waiting') {
-      this.subscribeToProject()
-    }
+    // Always subscribe while this widget is mounted so transitions
+    // like failed -> waiting/running are received after a restart.
+    this.subscribeToProject()
   }
 
   disconnect() {
@@ -127,9 +125,6 @@ export default class extends Controller {
       <strong>Parsing failed</strong>
       <div class='small mt-1'>There was an error parsing your project file. Please try again or contact support.</div>
     `
-    
-    // Unsubscribe since parsing failed
-    this.unsubscribeFromProject()
   }
 }
 

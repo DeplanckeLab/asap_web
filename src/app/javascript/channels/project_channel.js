@@ -1,19 +1,14 @@
 import consumer from "channels/consumer"
 
-consumer.subscriptions.create("ProjectChannel", {
-  connected() {
-    console.log('[ProjectChannel] Connected (generic)')
-  },
-
-  disconnected() {
-    console.log('[ProjectChannel] Disconnected (generic)')
-  },
-
-  rejected() {
-    console.log('[ProjectChannel] Rejected (generic, no project_id)')
-  },
-
-  received(data) {
-    console.log('[ProjectChannel] Received (generic):', data)
+// Intentionally no side-effect subscription here.
+// Project subscriptions must always include a concrete `project_id`.
+export function subscribeToProjectChannel(projectId, callbacks = {}) {
+  if (!projectId) {
+    throw new Error("subscribeToProjectChannel requires projectId")
   }
-});
+
+  return consumer.subscriptions.create(
+    { channel: "ProjectChannel", project_id: projectId },
+    callbacks
+  )
+}

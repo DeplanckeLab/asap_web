@@ -10,6 +10,7 @@ class FuPreparsingService
   end
 
   def call
+    service_started_at = Time.current
     @logger.info("[FuPreparsingService] Starting preparsing for Fu##{@fu.id}")
     @logger.info("[FuPreparsingService] Upload complete? #{@fu.complete?}")
     @logger.info("[FuPreparsingService] Upload status: #{@fu.status}")
@@ -35,12 +36,15 @@ class FuPreparsingService
     # Reload output after writing to ensure we have the latest data
     output = load_output_json
 
-    {
+    result_payload = {
       summary: summary,
       warnings: collect_warnings(output),
       raw_output: output,  # Include raw Python script output (now with predictions)
       prediction_debug: summary[:prediction_debug]  # Include prediction debug data
     }
+    service_elapsed_ms = ((Time.current - service_started_at) * 1000).round
+    @logger.info("[FuPreparsingService] Completed preparsing for Fu##{@fu.id} service_elapsed_ms=#{service_elapsed_ms}")
+    result_payload
   end
 
   private
@@ -69,9 +73,12 @@ class FuPreparsingService
     @command = cmd  # Store command for JSON output
     @logger.info("[FuPreparsingService] Running preparsing: #{cmd}")
     
+    command_started_at = Time.current
     stdout_str, stderr_str, status = Open3.capture3(cmd)
+    command_elapsed_ms = ((Time.current - command_started_at) * 1000).round
 
     @logger.info("[FuPreparsingService] Command exit status: #{status.exitstatus}")
+    @logger.info("[FuPreparsingService] Command elapsed_ms: #{command_elapsed_ms}")
     @logger.info("[FuPreparsingService] STDOUT: #{stdout_str}") unless stdout_str.blank?
     @logger.info("[FuPreparsingService] STDERR: #{stderr_str}") unless stderr_str.blank?
     File.write(error_file, stderr_str.to_s) unless stderr_str.blank?
@@ -483,7 +490,8 @@ class FuPreparsingService
     std_method = nil
     
     begin
-      # Try to get version_id from options, or use default (latest) version
+      # Resolve version_id from explicit options first, then from the bound project.
+      # Do not auto-pick a "latest" version, as that can point to the wrong model set.
       attempted_version_id = @options[:version_id]
       
       if @options[:version_id].present?
@@ -498,16 +506,17 @@ class FuPreparsingService
           early_return_reason = "Version with id #{version_id} not found"
           raise early_return_reason
         end
-      else
-        # No version_id in options - try to get default (latest) version for command preview
-        version = Version.order(release_date: :desc).first
-        if version
-          version_id = version.id
-          @logger.info("[FuPreparsingService] Using default version #{version_id} for command preview")
-        else
-          early_return_reason = "version_id not present in options and no default version found"
+      elsif @fu.project&.version_id.present?
+        version_id = @fu.project.version_id
+        version = Version.find_by(id: version_id)
+        unless version
+          early_return_reason = "Project version with id #{version_id} not found"
           raise early_return_reason
         end
+        @logger.info("[FuPreparsingService] Using project version #{version_id} for predictions")
+      else
+        early_return_reason = "version_id is missing in options and project context"
+        raise early_return_reason
       end
       
       # Get docker image for this version
@@ -541,12 +550,15 @@ class FuPreparsingService
       r_script_cmd = "Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
       @logger.info("[FuPreparsingService] R script command: #{r_script_cmd}")
       
+      prediction_host_root = prediction_models_host_root
+      @logger.info("[FuPreparsingService] Prediction host root: #{prediction_host_root}")
+
       # Build Docker command
       docker_cmd = [
         'docker', 'run',
         '--entrypoint', '/bin/sh',
         '--rm',
-        '-v', '/data/asap2:/data/asap2',
+        '-v', "#{prediction_host_root}:/data/asap2",
         '-v', '/srv/asap_run/srv:/srv',
         docker_image,
         '-c', r_script_cmd
@@ -603,19 +615,6 @@ class FuPreparsingService
       @logger.warn("[FuPreparsingService] Failed to get predictions: #{error_message}")
       @logger.warn(e.backtrace.join("\n")) if e.backtrace
       
-      # If we don't have version_id yet, try to get a default version for command preview
-      unless version_id
-        begin
-          default_version = Version.order(release_date: :desc).first
-          if default_version
-            version_id = default_version.id
-            @logger.info("[FuPreparsingService] Using default version #{version_id} for command preview in rescue block")
-          end
-        rescue => version_lookup_error
-          @logger.warn("[FuPreparsingService] Could not get default version: #{version_lookup_error.message}")
-        end
-      end
-      
       # Try to get std_method_id even if we had an error earlier
       # This helps us build a more accurate command preview
       if version_id && std_method_id.nil?
@@ -650,6 +649,7 @@ class FuPreparsingService
       
       # Build docker command preview if we can
       begin
+        prediction_host_root = prediction_models_host_root
         if version_id
           docker_image_tag = if asap_docker_image
                                asap_docker_image.tag || "v#{version_id}"
@@ -662,7 +662,7 @@ class FuPreparsingService
             'docker', 'run',
             '--entrypoint', '/bin/sh',
             '--rm',
-            '-v', '/data/asap2:/data/asap2',
+            '-v', "#{prediction_host_root}:/data/asap2",
             '-v', '/srv/asap_run/srv:/srv',
             docker_image,
             '-c', r_script_cmd
@@ -694,6 +694,10 @@ class FuPreparsingService
         }
       }
     end
+  end
+
+  def prediction_models_host_root
+    ENV.fetch('ASAP_PREDICTION_DATA_ROOT')
   end
 end
 

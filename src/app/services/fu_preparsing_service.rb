@@ -151,7 +151,7 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] File path to pass to Python: #{file_path}")
     @logger.info("[FuPreparsingService] Python script: #{python_script_name}")
     
-    # Use docker exec on the existing asap_run container from docker-compose
+    # Use docker exec on the configured ASAP run container
     # Run as rvmuser (UID 1006) which is the default user in the Dockerfile
     # This ensures files are created with the correct ownership
     # Set working directory to output directory so extracted files go there
@@ -159,7 +159,7 @@ class FuPreparsingService
       'docker', 'exec',
       '--user', '1006:1006',  # rvmuser:rvmuser (matches Dockerfile USER directive)
       '--workdir', upload_dir_str,  # Set working directory to output directory
-      'asap_run',
+      ENV.fetch('ASAP_RUN_CONTAINER'),
       '/bin/sh', '-c', script_cmd
      ]
 
@@ -453,7 +453,7 @@ class FuPreparsingService
     fix_permissions_cmd = [
       'docker', 'exec',
       '--user', 'root',
-      'asap_run',
+      ENV.fetch('ASAP_RUN_CONTAINER'),
       '/bin/sh', '-c',
       "chmod 775 '#{upload_dir_str}' && chown rvmuser:rvmuser '#{upload_dir_str}'"
     ]

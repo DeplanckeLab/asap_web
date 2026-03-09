@@ -349,7 +349,7 @@ module Basic
       PY
 
       require 'open3'
-      out, err, status = Open3.capture3('docker', 'exec', '-i', 'asap_run', 'python', '-', stdin_data: py_script)
+      out, err, status = Open3.capture3('docker', 'exec', '-i', ENV.fetch('ASAP_RUN_CONTAINER'), 'python', '-', stdin_data: py_script)
       if !status.success?
         raise "Failed to ensure /row_attrs/Original_Gene in loom file #{loom_filename}: #{out} #{err}"
       end

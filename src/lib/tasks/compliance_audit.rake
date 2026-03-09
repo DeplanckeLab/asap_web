@@ -449,7 +449,7 @@ namespace :compliance do
         print(json.dumps(paths))
       PY
 
-      container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+      container = ENV.fetch('ASAP_RUN_CONTAINER')
       stdout, stderr, status = Open3.capture3(
         'docker', 'exec', '-i', container, 'python3', '-c', python_script,
         loom_path

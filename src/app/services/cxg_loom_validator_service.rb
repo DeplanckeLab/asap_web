@@ -32,7 +32,7 @@ class CxgLoomValidatorService
   include CxgSchemaRules
 
   SCHEMA_VERSION = '7.1.0'
-  ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run').freeze
+  ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
   # Valid ontology prefixes for different field types
   VALID_ONTOLOGY_PREFIXES = {

@@ -3,7 +3,7 @@ require 'json'
 require 'shellwords'
 
 class H5DataService
-  ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run').freeze
+  ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
   def self.asap_command(*args)
     ['docker', 'exec', ASAP_RUN_CONTAINER, 'java', '-jar', '/srv/ASAP.jar'] + args

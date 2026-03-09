@@ -81,7 +81,7 @@ module ComplianceHelpers
   def batch_read_field_values(loom_path, field_paths, paired_paths: [])
     return {} if field_paths.blank? || loom_path.blank?
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     fields_json = field_paths.to_json
     pairs_json = paired_paths.to_json
 

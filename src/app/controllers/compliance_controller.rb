@@ -1267,7 +1267,7 @@ class ComplianceController < ApplicationController
   def batch_read_field_values(loom_path, field_paths, paired_paths: [])
     return {} if field_paths.blank? || loom_path.blank?
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     fields_json = field_paths.to_json
     pairs_json = paired_paths.to_json
 
@@ -1338,7 +1338,7 @@ class ComplianceController < ApplicationController
   def read_field_categories(loom_path, field_paths)
     return {} if field_paths.blank? || loom_path.blank?
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     fields_json = field_paths.to_json
 
     script = <<~PY
@@ -2095,7 +2095,7 @@ class ComplianceController < ApplicationController
               print('NOT_FOUND')
     PYTHON
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-', loom_path, field]
 
     begin
@@ -2287,7 +2287,7 @@ class ComplianceController < ApplicationController
 
   # Execute a Python script inside the ASAP run container via stdin
   def run_python_in_container(script, *args)
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-'] + args
 
     begin
@@ -2452,7 +2452,7 @@ class ComplianceController < ApplicationController
       print(json.dumps(results))
     PYTHON
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-', loom_path, ops_b64]
 
     begin
@@ -2579,7 +2579,7 @@ class ComplianceController < ApplicationController
       print(json.dumps(all_results))
     PYTHON
 
-    container = ENV.fetch('ASAP_RUN_CONTAINER', 'asap_run')
+    container = ENV.fetch('ASAP_RUN_CONTAINER')
     cmd_parts = ['docker', 'exec', '-i', container, 'python3', '-', payload_b64]
 
     total_ops = file_ops.values.sum(&:size)

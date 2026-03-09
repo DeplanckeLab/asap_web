@@ -3,14 +3,16 @@ import consumer from "channels/consumer"
 
 export default class extends Controller {
   static targets = ["statusText", "progressBar", "retrievingStep", "unpackingStep", "completedStep", "errorText"]
-  static values = { projectId: Number, initialState: String }
+  static values = { projectId: Number, initialState: String, statusUrl: String }
 
   connect() {
     this.applyState(this.initialStateValue || "queued")
+    this.startStatusPolling()
     this.subscribe()
   }
 
   disconnect() {
+    this.stopStatusPolling()
     this.unsubscribe()
   }
 
@@ -20,6 +22,7 @@ export default class extends Controller {
     this.subscription = consumer.subscriptions.create(
       { channel: "ProjectChannel", project_id: this.projectIdValue },
       {
+        connected: () => this.syncCurrentStatus(),
         received: (data) => this.received(data)
       }
     )
@@ -32,14 +35,49 @@ export default class extends Controller {
     }
   }
 
+  startStatusPolling() {
+    this.syncCurrentStatus()
+    this.statusPollTimer = setInterval(() => this.syncCurrentStatus(), 2000)
+  }
+
+  stopStatusPolling() {
+    if (this.statusPollTimer) {
+      clearInterval(this.statusPollTimer)
+      this.statusPollTimer = null
+    }
+  }
+
   received(data) {
-    if (!data || data.project_id !== this.projectIdValue) return
-    if (!data.unarchive_status) return
+    if (!data) return
 
-    this.applyState(data.unarchive_status)
+    // ActionCable payloads can carry project_id as string or number.
+    if (data.project_id !== undefined && Number(data.project_id) !== this.projectIdValue) return
 
-    if (data.unarchive_status === "completed" || data.project_unarchived === true) {
+    if (data.unarchive_status) {
+      this.applyState(data.unarchive_status)
+    }
+
+    if (data.project_unarchived === true || data.unarchive_status === "completed") {
       setTimeout(() => window.location.reload(), 600)
+    }
+  }
+
+  async syncCurrentStatus() {
+    if (!this.hasStatusUrlValue || !this.statusUrlValue) return
+
+    try {
+      const response = await fetch(this.statusUrlValue, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin"
+      })
+
+      if (!response.ok) return
+
+      const data = await response.json()
+      this.received(data)
+    } catch (_error) {
+      // Ignore sync errors and keep live updates via ActionCable.
     }
   }
 

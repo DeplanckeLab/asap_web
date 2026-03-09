@@ -63,6 +63,7 @@ gem "solid_cache"
 gem "solid_queue"
 gem "solid_cable"
 gem "redis", "~> 5.2"
+gem "aws-sdk-s3"
 
 # Reduces boot times through caching; required in config/boot.rb
 #gem "bootsnap", require: false

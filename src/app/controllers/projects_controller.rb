@@ -99,6 +99,8 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1 or /projects/1.json
   def show
+    queue_unarchive_if_project_files_missing
+
     if selective_project_view_loading_enabled?
       with_request_profile('projects#show', view: params[:view]) do
         @project.ensure_project_steps
@@ -5802,6 +5804,31 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def queue_unarchive_if_project_files_missing
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      @project_files_missing = !File.exist?(project_dir)
+      @project_unarchive_state = nil
+      return unless @project_files_missing
+
+      if @project.queue_unarchive_if_needed!
+        @project_unarchive_state = 'queued'
+        flash.now[:notice] = "Project files are archived. Unarchive has been queued and data will appear once extraction is complete."
+      elsif @project.being_unarchived?
+        @project_unarchive_state = 'in_progress'
+        flash.now[:notice] = "Project files are currently being unarchived. If this state is stale, it will be re-queued automatically."
+      elsif @project.archived_on_s3?
+        @project_unarchive_state = 'queue_failed'
+        flash.now[:alert] = "Project is archived on S3 but could not be restored automatically. Verify S3 settings and try again."
+      elsif @project.disk_size_archived.present?
+        @project_unarchive_state = 'archived_missing'
+        flash.now[:notice] = "Project files are stored in archive and are being prepared."
+      end
+    rescue StandardError => e
+      Rails.logger.error("[projects#show] Failed to queue unarchive for project #{@project.id}: #{e.message}")
+      @project_unarchive_state = 'queue_failed'
+      flash.now[:alert] = "Project files are archived and unarchive queueing failed."
+    end
+
     def authorize_project_read_access
       return if readable?(@project)
 

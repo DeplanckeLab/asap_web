@@ -227,9 +227,19 @@ module Basic
     end
     
     def get_s3_settings
-      s3_settings_file = Pathname.new(Rails.root) + 'config' + '.s3.json'
-      h_s3_settings = JSON.parse(File.read(s3_settings_file))
-      return h_s3_settings
+      if ENV['S3_SETTINGS_JSON'].present?
+        return JSON.parse(ENV['S3_SETTINGS_JSON'])
+      end
+
+      candidate_files = []
+      candidate_files << ENV['S3_SETTINGS_FILE'] if ENV['S3_SETTINGS_FILE'].present?
+      candidate_files << (Pathname.new(Rails.root) + 'config' + '.s3.json').to_s
+      candidate_files << '/srv/asap2_2026_03_09/config/.s3.json'
+
+      settings_file = candidate_files.compact.find { |path| File.exist?(path) }
+      raise "S3 settings file not found. Checked: #{candidate_files.compact.join(', ')}" unless settings_file
+
+      JSON.parse(File.read(settings_file))
     end
     
     
@@ -255,24 +265,65 @@ module Basic
     
     
     def write_file_from_s3 s3, bucket_id, project, filepath
-      d = filepath.to_s.split("/")
-      filename = d.pop
-      FileUtils.mkpath d.join("/")
-      return_val = false
-      File.open(filepath, 'wb') do |file|
-        begin
-          puts "METADATA: " + s3.get_object(bucket: bucket_id, key: project.key).metadata.to_json
-          s3.get_object(bucket: bucket_id, key: project.key) do |chunk, headers|
-            # headers['content-length']                                                                                                                               
-            file.write(chunk)
-            return_val = true
-          end
-        rescue Exception => e
-          puts e.message + " : " + e.backtrace.to_json
-          return_val = false
+      parent_dir = File.dirname(filepath.to_s)
+      FileUtils.mkdir_p(parent_dir) unless File.exist?(parent_dir)
+
+      begin
+        head = s3.head_object(bucket: bucket_id, key: project.key)
+        puts "METADATA: " + head.metadata.to_json
+
+        content_length = head.content_length.to_i
+        return false if content_length <= 0
+
+        # Use concurrent ranged GET requests for faster retrieval.
+        thread_count = ENV.fetch('S3_DOWNLOAD_THREADS', '16').to_i
+        thread_count = 1 if thread_count < 1
+        thread_count = 64 if thread_count > 64
+        chunk_size_mb = ENV.fetch('S3_DOWNLOAD_CHUNK_MB', '16').to_i
+        chunk_size_mb = 5 if chunk_size_mb < 5
+        chunk_size = chunk_size_mb * 1024 * 1024
+
+        File.open(filepath.to_s, 'wb') { |f| f.truncate(content_length) }
+
+        ranges = Queue.new
+        start_byte = 0
+        while start_byte < content_length
+          end_byte = [start_byte + chunk_size - 1, content_length - 1].min
+          ranges << [start_byte, end_byte]
+          start_byte = end_byte + 1
         end
+
+        workers = [thread_count, ranges.size].min
+        threads = workers.times.map do
+          Thread.new do
+            loop do
+              begin
+                range_start, range_end = ranges.pop(true)
+              rescue ThreadError
+                break
+              end
+
+              response = s3.get_object(
+                bucket: bucket_id,
+                key: project.key,
+                range: "bytes=#{range_start}-#{range_end}"
+              )
+              chunk = response.body.read
+
+              File.open(filepath.to_s, 'rb+') do |f|
+                f.seek(range_start)
+                f.write(chunk)
+              end
+            end
+          end
+        end
+        threads.each(&:join)
+
+        File.exist?(filepath) && File.size(filepath).to_i == content_length
+      rescue => e
+        Rails.logger.error("[Basic.write_file_from_s3] #{e.class}: #{e.message}")
+        false
       end
-      return return_val
     end
     
     def write_file_on_s3 s3b, filepath, metadata
@@ -1134,41 +1185,66 @@ module Basic
       return load
     end
 
-    def unarchive k
-      h_s3_settings = get_s3_settings()
-      s3b = {
-        :key => '20000-af8a16d143d9920a26869b30700c3da4',
-        :endpoint => 'https://s3.epfl.ch',
-        :region => 'us-west-2'
-      }
-      s3 = connect_s3 s3b, h_s3_settings
-      
+    def unarchive k, progress_callback: nil
+      require 'shellwords'
+
       p = Project.find_by_key(k)
-      if p
-        p.update({:archive_status_id => 4})
-        project_archive = p.key + '.tgz'
+      return false unless p
+
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
+      return true if p.archive_status_id == 1 && File.exist?(project_dir)
+
+      begin
+        h_s3_settings = get_s3_settings()
+        s3b = {
+          :key => '20000-af8a16d143d9920a26869b30700c3da4',
+          :endpoint => 'https://s3.epfl.ch',
+          :region => 'us-west-2'
+        }
+        s3 = connect_s3(s3b, h_s3_settings)
+
+        p.update(:archive_status_id => 4)
         user_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s
+        FileUtils.mkdir_p(user_dir) unless File.exist?(user_dir)
+
+        project_archive = "#{p.key}.tgz"
         filepath = user_dir + project_archive
 
-        ## get file from s3
-        if !File.exist? filepath
-          
-          r = write_file_from_s3 s3, s3b[:key], p, filepath
-          while r == false and !File.exist? filepath
+        progress_callback.call('retrieving') if progress_callback
+        if !File.exist?(filepath) || File.size(filepath).to_i == 0
+          File.delete(filepath) if File.exist?(filepath) && File.size(filepath).to_i == 0
+
+          downloaded = false
+          3.times do
+            downloaded = write_file_from_s3(s3, s3b[:key], p, filepath)
+            break if downloaded && File.exist?(filepath) && File.size(filepath).to_i > 0
             sleep 2
-            r = write_file_from_s3 s3, s3b[:key], p, filepath
+          end
+
+          unless downloaded && File.exist?(filepath) && File.size(filepath).to_i > 0
+            p.update(:archive_status_id => 3)
+            return false
           end
         end
-        
-        ## tar and pigz
-        cmd = "cd #{user_dir} && pigz -p 32 -dc #{project_archive} | tar -xv"
+
+        progress_callback.call('unpacking') if progress_callback
+        cmd = "cd #{Shellwords.escape(user_dir.to_s)} && pigz -p 32 -dc #{Shellwords.escape(project_archive)} | tar -xv"
         puts "CMD: #{cmd}"
         `#{cmd}`
-        ## delete archive
-        if File.exist? user_dir + p.key and `du -s #{user_dir + p.key}`.to_i > 10 #and `du -s #{user_dir + p.key}`.to_i == p.disk_size ### IDEALLY should uncomment
-          File.delete user_dir + project_archive
+        extraction_ok = $?.success? && File.exist?(project_dir) && `du -s #{Shellwords.escape(project_dir.to_s)}`.to_i > 10
+
+        unless extraction_ok
+          p.update(:archive_status_id => 3)
+          return false
         end
+
+        File.delete(filepath) if File.exist?(filepath)
         p.update(:archive_status_id => 1, :disk_size_archived => nil)
+        true
+      rescue => e
+        Rails.logger.error("[Basic.unarchive] #{e.class}: #{e.message}")
+        p.update(:archive_status_id => 3) if p
+        false
       end
     end
     

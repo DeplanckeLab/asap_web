@@ -294,6 +294,39 @@ class Project < ApplicationRecord
     ProjectBroadcastJob.perform_later(id, step_id)
   end
 
+  def storage_dir
+    Pathname.new(ENV.fetch('USER_DATA_DIR')) + user_id.to_s + key
+  end
+
+  def archived_on_s3?
+    archive_status_id == 3
+  end
+
+  def being_unarchived?
+    archive_status_id == 4
+  end
+
+  def queue_unarchive_if_needed!
+    with_lock do
+      reload
+      if archive_status_id == 1 && disk_size_archived.present? && !File.exist?(storage_dir)
+        update!(archive_status_id: 3)
+      end
+
+      if being_unarchived?
+        stale_unarchive = updated_at.present? && updated_at < 15.minutes.ago
+        return false unless stale_unarchive
+        update!(archive_status_id: 3)
+      end
+
+      return false unless archived_on_s3?
+
+      update!(archive_status_id: 4)
+      ProjectUnarchiveJob.perform_later(id)
+      true
+    end
+  end
+
   def integrate
     logger = Rails.logger
     v = self.version

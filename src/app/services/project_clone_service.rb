@@ -116,7 +116,9 @@ class ProjectCloneService
     
     # Unarchive source if needed
     if source_project.archive_status_id == 3
-      Basic.unarchive(source_project.key)
+      unless Basic.unarchive(source_project.key)
+        raise "Could not unarchive source project #{source_project.key} before cloning"
+      end
     end
     
     # Copy directory if they're different

@@ -167,6 +167,10 @@ import GeFilterController from "controllers/ge_filter_controller"
 application.register("ge-filter", GeFilterController)
 console.log('GE filter controller registered')
 
+import UnarchiveStatusController from "controllers/unarchive_status_controller"
+application.register("unarchive-status", UnarchiveStatusController)
+console.log('Unarchive status controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

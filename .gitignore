@@ -3,6 +3,7 @@ docker-compose.dev.yml
 docker-compose.prod.yml
 docker-compose.test.yml
 
+src/config/.s3.json
 .env
 .env.test
 .env.dev

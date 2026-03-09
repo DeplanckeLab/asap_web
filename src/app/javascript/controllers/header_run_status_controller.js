@@ -55,6 +55,11 @@ export default class extends Controller {
 
   handleStatusUpdate(data) {
     console.log('[HeaderRunStatus] handleStatusUpdate with broadcast data')
+    if (data && data.project_unarchived === true) {
+      console.log('[HeaderRunStatus] Project unarchive completed, reloading page')
+      window.location.reload()
+      return
+    }
     this.updateFromBroadcast(data)
   }
 

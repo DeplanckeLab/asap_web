@@ -4,6 +4,8 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
+  static LIVE_COUNT_UPDATE_MAX_CELLS = 100000
+
   static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas", "adaptColorRangeButton"]
   static values = { 
     metadataId: String,
@@ -289,7 +291,9 @@ export default class extends Controller {
     // Update UI immediately for responsive feel
     const uiStartTime = performance.now()
     this.updateSliderUI()
-    this.updateSelectedCellsCount()
+    if (this.shouldUpdateCountDuringDrag()) {
+      this.updateSelectedCellsCount()
+    }
     const uiTime = performance.now() - uiStartTime
     // console.log(`🚀 [PERF] UI update took ${uiTime.toFixed(2)}ms`)
     
@@ -324,10 +328,17 @@ export default class extends Controller {
     document.removeEventListener('touchend', this.stopDrag.bind(this))
     
     // Ensure final update is performed when dragging stops
+    this.updateSelectedCellsCount()
     this.updateMainPlot()
     this.drawDensityPlot()
     
     // console.log('🎚️ Drag stopped')
+  }
+
+  shouldUpdateCountDuringDrag() {
+    const sliderData = this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]
+    const totalCells = sliderData?.values?.length || 0
+    return totalCells <= this.constructor.LIVE_COUNT_UPDATE_MAX_CELLS
   }
 
   // Update the slider UI elements

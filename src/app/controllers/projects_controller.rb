@@ -7726,6 +7726,22 @@ class ProjectsController < ApplicationController
         }
       end
 
+      marker_run.reload
+      if Basic.safe_parse_json(marker_run.command_json, {}).empty?
+        res = Basic.find_markers(Rails.logger, @project, annot, current_user&.id || @project.user_id)
+        marker_run = res[:run]
+        marker_run&.reload
+        if marker_run && Basic.safe_parse_json(marker_run.command_json, {}).empty?
+          return {
+            run: marker_run,
+            started: started,
+            submitted: false,
+            resubmitted: false,
+            error: 'FindMarkers command could not be built. Please retry or contact support.'
+          }
+        end
+      end
+
       if marker_run.status_id.to_i == 1
         Basic.exec_run(Rails.logger, marker_run)
         submitted = true

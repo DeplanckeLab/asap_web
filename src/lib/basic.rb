@@ -625,7 +625,8 @@ module Basic
                             :attrs_json => h_attrs.to_json
                           }).where.not(status_id: 4).order(id: :desc).first
           if run
-            run.update(h_run)
+            # Do not overwrite command_json when reusing; set_run will build it.
+            run.update(h_run.except(:command_json))
           else
             run = Run.new(h_run)
             logger.debug("H_RUN2 => #{h_run.to_json}")
@@ -2162,7 +2163,9 @@ module Basic
 
 #      puts "!H_VAR:" + h_var.to_json
 #      logger.debug("!H_VAR:" + h_var.to_json)
-      File.open("/data/asap2/tmp/toto.txt", "w") do |f|
+      toto_path = project_dir + "tmp" + "toto.txt"
+      FileUtils.mkdir_p((project_dir + "tmp").to_s)
+      File.open(toto_path.to_s, "w") do |f|
         f.write(h_var.to_json + "\n")
         f.write(h_p.to_json + "\n")
       end

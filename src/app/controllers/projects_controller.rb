@@ -59,6 +59,7 @@ class ProjectsController < ApplicationController
     @total_count = search_results.response['hits']['total']['value']
     @current_page = (params[:page] || 1).to_i
     @per_page = 20
+    @v8_active_for_integration = Version.where(id: 8, activated: true).exists?
     
     # Store the current browse URL for "back to projects" links
     session[:projects_browse_url] = request.fullpath

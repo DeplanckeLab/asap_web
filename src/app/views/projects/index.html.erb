@@ -318,14 +318,16 @@
             </button>
           </div>
           <div class="flex items-center gap-2">
-            <button type="button"
-                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 hover:bg-green-700"
-                    data-project-selection-target="integrateButton"
-                    data-action="click->integrate-projects#integrateSelected"
-                    disabled>
-              <i class="fas fa-object-group mr-2"></i>
-              <span data-project-selection-target="integrateButtonText">Integrate selected</span>
-            </button>
+            <% if @v8_active_for_integration %>
+              <button type="button"
+                      class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 hover:bg-green-700"
+                      data-project-selection-target="integrateButton"
+                      data-action="click->integrate-projects#integrateSelected"
+                      disabled>
+                <i class="fas fa-object-group mr-2"></i>
+                <span data-project-selection-target="integrateButtonText">Integrate selected</span>
+              </button>
+            <% end %>
             <button type="button"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600 hover:bg-red-700"
                     data-project-selection-target="deleteButton"

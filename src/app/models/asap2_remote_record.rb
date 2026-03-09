@@ -37,7 +37,11 @@ class Asap2RemoteRecord < ApplicationRecord
       return if value.nil?
       name = value.to_s.strip
       return if name.empty?
-      normalized = name.start_with?("asap2_data") ? name.to_sym : :"asap2_data_#{name}"
+      normalized = if name.start_with?("asap_data", "asap2_data")
+                     name.to_sym
+                   else
+                     :"asap2_data_#{name}"
+                   end
       normalized if remote_db_names.include?(normalized)
     end
 
@@ -51,7 +55,13 @@ class Asap2RemoteRecord < ApplicationRecord
       .split(",")
       .map { |name| name.to_s.strip }
       .reject(&:empty?)
-      .map { |name| name.start_with?("asap2_data") ? name.to_sym : :"asap2_data_#{name}" }
+      .map do |name|
+        if name.start_with?("asap_data", "asap2_data")
+          name.to_sym
+        else
+          :"asap2_data_#{name}"
+        end
+      end
       .uniq
   end.freeze
 

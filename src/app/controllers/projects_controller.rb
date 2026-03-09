@@ -40,7 +40,7 @@ class ProjectsController < ApplicationController
     search_results = Project.search(@query, @filters)
     
     # Extract projects from search results with preloaded associations
-    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status)
+    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status, :user)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
@@ -839,7 +839,7 @@ class ProjectsController < ApplicationController
     # Generate unique project key if not provided
     unless @project.key.present?
       loop do
-        @project.key = SecureRandom.alphanumeric(10).downcase
+        @project.key = SecureRandom.alphanumeric(7).downcase
         break unless Project.exists?(key: @project.key)
       end
     end

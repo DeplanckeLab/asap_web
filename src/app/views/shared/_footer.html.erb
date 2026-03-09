@@ -1,4 +1,4 @@
-<% if controller_name == 'home' and action_name == 'welcome' %>
+<% if controller_name == 'home' && ['welcome', 'unauthorized'].include?(action_name) %>
  <div id="main_footer">
       <table>
         <tbody>

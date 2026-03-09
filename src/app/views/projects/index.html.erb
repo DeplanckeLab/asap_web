@@ -187,7 +187,7 @@
             <button type="button" 
                     data-view-toggle-target="cardBtn" 
                     data-action="click->view-toggle#showCards"
-                    class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white focus:outline-none" 
+                    class="px-3 py-1.5 text-sm font-medium bg-white text-gray-600 hover:bg-gray-50 focus:outline-none" 
                     title="Card View">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
@@ -196,7 +196,7 @@
             <button type="button" 
                     data-view-toggle-target="listBtn" 
                     data-action="click->view-toggle#showList"
-                    class="px-3 py-1.5 text-sm font-medium bg-white text-gray-600 hover:bg-gray-50 focus:outline-none" 
+                    class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white focus:outline-none" 
                     title="List View">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
@@ -211,7 +211,7 @@
       <!-- Projects Container -->
     <% if @projects.any? %>
       <!-- Cards View -->
-      <div data-view-toggle-target="cardView" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div data-view-toggle-target="cardView" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <% @projects.each do |project| %>
           <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
             <!-- Project Header -->
@@ -305,7 +305,7 @@
       </div>
 
       <!-- List View -->
-      <div data-view-toggle-target="listView" class="hidden" data-controller="project-selection delete-projects integrate-projects" data-delete-projects-url-value="<%= bulk_destroy_projects_path %>" data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
+      <div data-view-toggle-target="listView" class="" data-controller="project-selection delete-projects integrate-projects" data-delete-projects-url-value="<%= bulk_destroy_projects_path %>" data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
         <!-- Action Bar -->
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-3">

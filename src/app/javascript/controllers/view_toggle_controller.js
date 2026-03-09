@@ -6,7 +6,9 @@ export default class extends Controller {
   connect() {
     // Load saved preference from localStorage
     const savedView = localStorage.getItem("projectsViewPreference")
-    if (savedView === "list") {
+    if (savedView === "cards") {
+      this.showCards()
+    } else {
       this.showList()
     }
   }

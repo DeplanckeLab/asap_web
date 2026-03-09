@@ -6,6 +6,8 @@ docker-compose.test.yml
 .env
 .env.test
 .env.dev
+.env.prod
+nginx.prod.conf
 data
 postgres-data
 postgres-data_old

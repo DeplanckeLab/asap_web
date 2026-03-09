@@ -1,5 +1,5 @@
 <!-- Run panel - for display in right panel and standalone show view -->
-<div class="bg-white rounded-lg shadow-sm flex flex-col" id="run_result_summary_panel" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; min-width: 0; width: 100% !important;">
+<div class="bg-white rounded-lg shadow-sm flex flex-col" id="run_result_summary_panel" data-run-id="<%= @run&.id %>" data-step-id="<%= @step&.id %>" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; min-width: 0; width: 100% !important;">
   <!-- Header with title and status - Sticky -->
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
     <div class="flex items-center justify-between min-w-0">
@@ -21,13 +21,14 @@
       </div>
       <div class="flex items-center gap-2 flex-shrink-0">
         <% if @run && @step %>
-          <button type="button"
-                  class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
-                  title="Copy direct link to clipboard"
-                  style="flex-shrink: 0;"
-                  onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, run_id: @run.id) %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
-            <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
-          </button>
+          <% if analyzable?(@project) && @step.name == 'clustering' && Run.where(project_id: @project.id, step_id: @step.id, status_id: 3).count >= 2 %>
+            <button type="button"
+                    class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    style="flex-shrink: 0;"
+                    onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')">
+              <i class="fas fa-arrows-alt-h sm:mr-1"></i><span class="hidden sm:inline"> Compare clusters</span>
+            </button>
+          <% end %>
           <button type="button"
                   class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
                   title="Refresh"

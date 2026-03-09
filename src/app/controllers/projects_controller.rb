@@ -9,8 +9,8 @@ class ProjectsController < ApplicationController
   include ComplianceHelpers
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step cluster_comparison filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
@@ -1724,20 +1724,23 @@ class ProjectsController < ApplicationController
   # POST /projects/1/cluster_comparison
   def cluster_comparison
     session[:clust_comparison] ||= {}
-    session[:clust_comparison][@project.id] ||= {}
-    session[:clust_comparison][@project.id][:op] ||= "1"
+    project_session_key = @project.id.to_s
+    session[:clust_comparison][project_session_key] ||= (session[:clust_comparison][@project.id] || {})
+    session[:clust_comparison][project_session_key]['op'] ||= "1"
 
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
 
-    [:run_id1, :run_id2, :op].each { |e| session[:clust_comparison][@project.id][e] = params[e] }
+    %w[run_id1 run_id2 op].each do |key|
+      session[:clust_comparison][project_session_key][key] = params[key] if params[key].present?
+    end
 
     @res = []
-    p = session[:clust_comparison][@project.id]
+    p = session[:clust_comparison][project_session_key]
     @vals = []
     @h_runs = {}
 
-    if p[:run_id1].present? && p[:run_id2].present? && p[:op].present?
-      list_run_ids = [p[:run_id1], p[:run_id2]]
+    if p['run_id1'].present? && p['run_id2'].present? && p['op'].present?
+      list_run_ids = [p['run_id1'], p['run_id2']]
       Run.where(id: list_run_ids).each { |r| @h_runs[r.id.to_s] = r }
       annots = Annot.where(run_id: list_run_ids).to_a
       @h_annots = {}
@@ -1745,33 +1748,49 @@ class ProjectsController < ApplicationController
 
       @list_cats = []
       list_run_ids.each do |e|
-        cats = Basic.safe_parse_json(@h_annots[e].list_cat_json, [])
-        @list_cats.push(cats)
-        loom_file = @project_dir + @h_annots[e].filepath
-        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_file} -meta \"#{@h_annots[e].name}\" -names"
+        annot = @h_annots[e.to_s]
+        unless annot
+          @list_cats.push([])
+          @vals.push({})
+          next
+        end
+
+        loom_file = @project_dir + annot.filepath
+        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_file} -meta \"#{annot.name}\" -names"
         tmp_res = Basic.safe_parse_json(`#{cmd}`, {})
+
+        cats = Basic.safe_parse_json(annot.list_cat_json, [])
+        if cats.blank? && tmp_res['values'].is_a?(Array)
+          cats = tmp_res['values'].compact.map(&:to_s).uniq.sort
+        end
+        @list_cats.push(cats)
+
         h_vals = {}
         cats.each { |cat| h_vals[cat] = [] }
         if tmp_res['values'] && tmp_res['cells']
           tmp_res['values'].each_index do |i|
-            h_vals[tmp_res['values'][i]]&.push(tmp_res['cells'][i])
+            key = tmp_res['values'][i].to_s
+            h_vals[key] ||= []
+            h_vals[key] << tmp_res['cells'][i]
           end
         end
         @vals.push(h_vals)
       end
 
-      @list_cats[0].each_index do |i|
+      if @list_cats[0].present? && @list_cats[1].present?
+        @list_cats[0].each_index do |i|
         @res[i] = []
         set1 = @vals[0][@list_cats[0][i]]
         next unless set1
         @list_cats[1].each_index do |j|
           set2 = @vals[1][@list_cats[1][j]]
-          @res[i][j] = case p[:op]
+          @res[i][j] = case p['op']
                         when "1" then set1 - set2
                         when "2" then set2 - set1
                         else          set1 & set2
                         end
         end
+      end
       end
     end
 
@@ -3737,9 +3756,46 @@ class ProjectsController < ApplicationController
   def graph
     # Get only successful (completed) runs for the project with step and std_method information
     # status_id == 3 means completed/successful
-    @runs = @project.runs.includes(:step, :std_method, :annots)
-                      .where(status_id: 3)
-                      .order(:step_id, :num, :id)
+    runs_scope = @project.runs.includes(:step, :std_method, :annots)
+                        .where(status_id: 3)
+
+    # Apply loom-file context filter when available (same as analysis view)
+    selected_loom_file = nil
+    begin
+      all_annots_for_loom = load_loom_file_list_context
+      if @available_loom_files.present?
+        session[:analysis_loom_file] ||= {}
+        project_session_key = @project.id.to_s
+        param_loom = params[:loom_file]
+        stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+        candidate_loom = if param_loom.present?
+                           param_loom
+                         elsif stored_loom.present?
+                           stored_loom
+                         else
+                           @available_loom_files.first
+                         end
+        if candidate_loom == '__all__'
+          selected_loom_file = nil
+          session[:analysis_loom_file][project_session_key] = '__all__'
+        elsif @available_loom_files.include?(candidate_loom)
+          selected_loom_file = candidate_loom
+          session[:analysis_loom_file][project_session_key] = selected_loom_file
+        else
+          selected_loom_file = @available_loom_files.first
+          session[:analysis_loom_file][project_session_key] = selected_loom_file if selected_loom_file.present?
+        end
+
+        if selected_loom_file && all_annots_for_loom
+          loom_run_ids = all_annots_for_loom.select { |a| a.filepath == selected_loom_file }.map(&:run_id).compact.uniq
+          runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
+        end
+      end
+    rescue => e
+      Rails.logger.error("[graph] Error applying loom file context: #{e.class} - #{e.message}")
+    end
+
+    @runs = runs_scope.order(:step_id, :num, :id)
     
     # Get steps hash
     asap_docker_image = Basic.get_asap_docker(@project.version)
@@ -4569,6 +4625,40 @@ class ProjectsController < ApplicationController
       # Ensure project steps exist (safeguard for existing projects)
       @project.ensure_project_steps
       Rails.logger.info("Project steps ensured")
+
+      # Load loom file context for filtering runs and inputs (analysis-style context)
+      selected_loom_file = nil
+      all_annots_for_loom = nil
+      begin
+        all_annots_for_loom = load_loom_file_list_context
+        if @available_loom_files.present?
+          session[:analysis_loom_file] ||= {}
+          project_session_key = @project.id.to_s
+          param_loom = params[:loom_file]
+          stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+          candidate_loom = if param_loom.present?
+                             param_loom
+                           elsif stored_loom.present?
+                             stored_loom
+                           else
+                             @available_loom_files.first
+                           end
+
+          if candidate_loom == '__all__'
+            selected_loom_file = nil
+            session[:analysis_loom_file][project_session_key] = '__all__'
+          elsif @available_loom_files.include?(candidate_loom)
+            selected_loom_file = candidate_loom
+            session[:analysis_loom_file][project_session_key] = selected_loom_file
+          else
+            selected_loom_file = @available_loom_files.first
+            session[:analysis_loom_file][project_session_key] = selected_loom_file if selected_loom_file.present?
+          end
+        end
+      rescue => e
+        Rails.logger.error("[step_results] Error loading loom file context: #{e.class} - #{e.message}")
+      end
+      @selected_loom_file ||= selected_loom_file
       
       step_id = params[:step_id]
       if step_id.blank?
@@ -4588,8 +4678,14 @@ class ProjectsController < ApplicationController
       
       Rails.logger.info("Step found: #{@step.name} (ID: #{@step.id})")
       
-      # Get runs for this step
-      @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+      # Get runs for this step, optionally filtered by selected loom file context
+      runs_scope = @project.runs.where(step_id: step_id)
+      if @selected_loom_file.present? && all_annots_for_loom
+        loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
+        runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
+      end
+      @runs = runs_scope.includes(:annots).order(created_at: :desc)
+      Rails.logger.info("[step_results][debug] step_id=#{step_id} step_name=#{@step&.name} selected_loom_file=#{@selected_loom_file.inspect} show_form_param=#{params[:show_form].inspect} prefer_runs_list_param=#{params[:prefer_runs_list].inspect} runs_count=#{@runs.size} run_ids=#{@runs.map(&:id).join(',')}")
 
       # Enforce single-run invariant for steps configured with multiple_runs = false.
       # Keep the most recent run and remove older duplicates.
@@ -4801,6 +4897,7 @@ class ProjectsController < ApplicationController
           Rails.logger.info("[step_results] Calling prepare_std_step_data for step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}, runs_count: #{@runs&.count || 0}")
           prepare_std_step_data
           Rails.logger.info("[step_results] After prepare_std_step_data: show_dashboard=#{@show_dashboard}, show_view=#{@show_view}, show_form=#{@show_form}, show_custom_form=#{@show_custom_form}")
+          Rails.logger.info("[step_results][debug] post_prepare flags step_id=#{@step.id} show_form=#{@show_form} show_dashboard=#{@show_dashboard} show_view=#{@show_view} show_custom_form=#{@show_custom_form} params_show_form=#{params[:show_form].inspect} params_prefer_runs_list=#{params[:prefer_runs_list].inspect}")
         rescue => e
           Rails.logger.error("[step_results] Error preparing std step data: #{e.class} - #{e.message}")
           Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
@@ -4849,6 +4946,13 @@ class ProjectsController < ApplicationController
     respond_to do |format|
       format.html { 
         begin
+          # DE has dedicated sub-views (de_filter, markers, dashboard) that must
+          # bypass generic std_step rendering flags.
+          if @step&.name == 'de' && %w[de_filter markers dashboard].include?(params[:view].to_s)
+            render partial: 'projects/views/de', layout: false
+            return
+          end
+
           # If compare_clusters view is requested, return the comparison UI
           if params[:view] == 'compare_clusters'
             render partial: 'projects/views/cluster_comparison', layout: false
@@ -4858,7 +4962,9 @@ class ProjectsController < ApplicationController
           # except for single-run steps with a specific view and existing runs:
           # these must always render the summary/view, not the form.
           force_specific_single_run_view = !@step.multiple_runs && !@step.has_std_view && @runs.present? && @runs.any?
-          if params[:show_form].present? && params[:show_form].to_s == '1' && !force_specific_single_run_view
+          prefer_runs_list = params[:prefer_runs_list].present? && params[:prefer_runs_list].to_s == '1'
+          Rails.logger.info("[step_results][debug] render_branch show_form_param=#{params[:show_form].inspect} prefer_runs_list=#{prefer_runs_list} force_specific_single_run_view=#{force_specific_single_run_view} show_form_flag=#{@show_form} show_custom_form_flag=#{@show_custom_form}")
+          if params[:show_form].present? && params[:show_form].to_s == '1' && !prefer_runs_list && !force_specific_single_run_view
             if @show_form
               if request.xhr?
                 # AJAX request - return just the form partial
@@ -5634,6 +5740,44 @@ class ProjectsController < ApplicationController
     # Get available runs for input selection
     @h_runs = {}
     successful_runs = Run.where(project_id: @project.id, status_id: 3) # status_id 3 = success
+
+    # Apply analysis loom-file context to input candidates
+    @selected_loom_file = nil
+    begin
+      all_annots_for_loom = load_loom_file_list_context
+      if @available_loom_files.present?
+        session[:analysis_loom_file] ||= {}
+        project_session_key = @project.id.to_s
+        param_loom = params[:loom_file]
+        stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+        candidate_loom = if param_loom.present?
+                           param_loom
+                         elsif stored_loom.present?
+                           stored_loom
+                         else
+                           @available_loom_files.first
+                         end
+
+        if candidate_loom == '__all__'
+          @selected_loom_file = nil
+          session[:analysis_loom_file][project_session_key] = '__all__'
+        elsif @available_loom_files.include?(candidate_loom)
+          @selected_loom_file = candidate_loom
+          session[:analysis_loom_file][project_session_key] = @selected_loom_file
+        else
+          @selected_loom_file = @available_loom_files.first
+          session[:analysis_loom_file][project_session_key] = @selected_loom_file if @selected_loom_file.present?
+        end
+
+        if @selected_loom_file && all_annots_for_loom
+          loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
+          successful_runs = successful_runs.where(id: loom_run_ids) if loom_run_ids.any?
+        end
+      end
+    rescue => e
+      Rails.logger.error("[get_attributes] Error applying loom file context: #{e.class} - #{e.message}")
+    end
+
     successful_runs.each { |run| @h_runs[run.id] = run }
     
       # Get steps for lookups
@@ -6661,6 +6805,102 @@ class ProjectsController < ApplicationController
 
     def load_analysis_context
       @project_type = @project.project_type
+
+      # Load loom file list for contextual dropdowns in analysis views
+      load_loom_file_list_context
+
+      # Persist selected loom file in session (per project)
+      session[:analysis_loom_file] ||= {}
+      project_session_key = @project.id.to_s
+      param_loom = params[:loom_file]
+      stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+
+      candidate_loom = if param_loom.present?
+                         param_loom
+                       elsif stored_loom.present?
+                         stored_loom
+                       else
+                         @available_loom_files&.first
+                       end
+
+      if candidate_loom == '__all__'
+        @selected_loom_file = nil
+        session[:analysis_loom_file][project_session_key] = '__all__'
+      elsif @available_loom_files&.include?(candidate_loom)
+        @selected_loom_file = candidate_loom
+        session[:analysis_loom_file][project_session_key] = @selected_loom_file
+      else
+        @selected_loom_file = @available_loom_files&.first
+        session[:analysis_loom_file][project_session_key] = @selected_loom_file if @selected_loom_file.present?
+      end
+
+      # Warning context for header: indicate when loom filter hides runs
+      @loom_filter_hidden_runs_count = 0
+      @loom_filter_total_runs_count = 0
+      @loom_filter_visible_runs_count = 0
+      @loom_filter_warning_message = nil
+      @loom_filter_hidden_runs_by_step = {}
+      @loom_filter_total_runs_by_step = {}
+      @loom_filter_visible_runs_by_step = {}
+      @loom_filter_hidden_runs_by_step_name = {}
+      @loom_filter_total_runs_by_step_name = {}
+      @loom_filter_visible_runs_by_step_name = {}
+      @analysis_step_id_to_name = {}
+      if @selected_loom_file.present?
+        all_runs_scope = @project.runs
+        @loom_filter_total_runs_count = all_runs_scope.count
+        loom_run_ids = Annot.where(project_id: @project.id, filepath: @selected_loom_file)
+                            .where.not(run_id: nil)
+                            .distinct
+                            .pluck(:run_id)
+        visible_runs_scope = all_runs_scope.where(id: loom_run_ids)
+        @loom_filter_visible_runs_count = visible_runs_scope.count
+        @loom_filter_hidden_runs_count = [@loom_filter_total_runs_count - @loom_filter_visible_runs_count, 0].max
+        @loom_filter_total_runs_by_step = all_runs_scope.group(:step_id).count
+        @loom_filter_visible_runs_by_step = visible_runs_scope.group(:step_id).count
+        @loom_filter_hidden_runs_by_step = {}
+        @loom_filter_total_runs_by_step.each do |step_id, total_count|
+          visible_count = @loom_filter_visible_runs_by_step[step_id].to_i
+          @loom_filter_hidden_runs_by_step[step_id] = [total_count.to_i - visible_count, 0].max
+        end
+
+        step_ids_for_warning = (@loom_filter_total_runs_by_step.keys + @loom_filter_visible_runs_by_step.keys).compact.uniq
+        step_names_by_id = {}
+        step_aliases_by_id = {}
+        if step_ids_for_warning.any?
+          Step.where(id: step_ids_for_warning).pluck(:id, :name, :label).each do |sid, sname, slabel|
+            normalized_name = sname.to_s.strip.downcase
+            normalized_label = slabel.to_s.strip.downcase
+            aliases = [normalized_name, normalized_label].reject(&:blank?).uniq
+            step_names_by_id[sid] = normalized_name.presence || normalized_label
+            step_aliases_by_id[sid] = aliases
+          end
+        end
+        @analysis_step_id_to_name = step_names_by_id
+
+        @loom_filter_total_runs_by_step.each do |step_id, total_count|
+          aliases = step_aliases_by_id[step_id] || []
+          aliases.each do |step_key|
+            @loom_filter_total_runs_by_step_name[step_key] ||= 0
+            @loom_filter_total_runs_by_step_name[step_key] += total_count.to_i
+          end
+        end
+        @loom_filter_visible_runs_by_step.each do |step_id, visible_count|
+          aliases = step_aliases_by_id[step_id] || []
+          aliases.each do |step_key|
+            @loom_filter_visible_runs_by_step_name[step_key] ||= 0
+            @loom_filter_visible_runs_by_step_name[step_key] += visible_count.to_i
+          end
+        end
+        @loom_filter_total_runs_by_step_name.each do |step_name, total_count|
+          visible_count = @loom_filter_visible_runs_by_step_name[step_name].to_i
+          @loom_filter_hidden_runs_by_step_name[step_name] = [total_count.to_i - visible_count, 0].max
+        end
+        if @loom_filter_hidden_runs_count > 0
+          @loom_filter_warning_message = "#{@loom_filter_hidden_runs_count} run(s) are hidden by the current loom filter. Showing #{@loom_filter_visible_runs_count} of #{@loom_filter_total_runs_count} run(s)."
+        end
+      end
+
       @runs = @project.runs.includes(:annots)
       prepare_steps_with_status
       @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
@@ -6817,6 +7057,51 @@ class ProjectsController < ApplicationController
           Rails.logger.error(e.backtrace.first(10).join("\n"))
         end
       end
+    end
+
+    def load_loom_file_list_context
+      all_annots = Annot.where(project_id: @project.id)
+                        .where.not(filepath: nil)
+                        .includes(:step, run: [:std_method])
+                        .order(:name)
+
+      filepath_info = {}
+      all_annots.each do |annot|
+        next unless annot.filepath.present?
+
+        filepath = annot.filepath
+        step_rank = annot.step&.rank
+        run_id = annot.run_id
+
+        if filepath_info[filepath]
+          existing = filepath_info[filepath]
+          existing_step_rank = existing[:step_rank] || 9999
+          existing_run_id = existing[:run_id] || 999999
+          current_step_rank = step_rank || 9999
+          current_run_id = run_id || 999999
+
+          should_update = false
+          should_update = true if current_step_rank < existing_step_rank
+          should_update = true if current_step_rank == existing_step_rank && current_run_id < existing_run_id
+          if should_update
+            existing[:step_rank] = step_rank
+            existing[:run_id] = run_id
+          end
+        else
+          filepath_info[filepath] = { step_rank: step_rank, run_id: run_id }
+        end
+      end
+
+      @available_loom_files = filepath_info.keys.sort_by do |filepath|
+        info = filepath_info[filepath]
+        [info[:step_rank] || 9999, info[:run_id] || 999999]
+      end
+      @filepath_info = filepath_info
+      run_ids = filepath_info.values.map { |info| info[:run_id] }.compact.uniq
+      @loom_file_runs = Run.where(id: run_ids).includes(:step, :std_method).index_by(&:id) if run_ids.any?
+      @loom_file_runs ||= {}
+
+      all_annots
     end
 
     def load_data_context
@@ -8970,6 +9255,12 @@ class ProjectsController < ApplicationController
     # Generate klay data for pipeline visualization (runs only)
     def generate_klay_data
       data = []
+      debug_graph_edges = (@project&.key.to_s == 'eab0uvmrod')
+      emit_graph_debug = lambda do |message|
+        return unless debug_graph_edges
+        Rails.logger.warn(message)
+        puts(message)
+      end
       
       # Only include runs that exist
       return data if @runs.blank?
@@ -8979,7 +9270,7 @@ class ProjectsController < ApplicationController
       
       # Add nodes for each run
       @runs.each do |run|
-        step = @h_steps[run.step_id]
+        step = run.step || @h_steps[run.step_id]
         
         # Create label: #run_number std_method_name (only show #run_number if multiple_runs == true)
         label_parts = []
@@ -9011,13 +9302,44 @@ class ProjectsController < ApplicationController
             label: label,
             color: get_step_color(run.step_id),
             run_id: run.id,
-            step_id: run.step_id
+            run_num: run.num || run.id,
+            step_id: run.step_id,
+            step_rank: step&.rank,
+            step_name: (step&.name.presence || step&.label.presence || run.step_id.to_s).to_s.strip.downcase
           }
         }
       end
       
       # Create a hash of run IDs for quick lookup
       run_ids_set = @runs.map(&:id).to_set
+      runs_by_id = @runs.index_by(&:id)
+      normalize_step_name = lambda do |raw_name|
+        raw_name.to_s.strip.downcase
+      end
+      step_name_for_run = lambda do |run_obj|
+        step = run_obj&.step || @h_steps[run_obj&.step_id]
+        raw_name = step&.name.presence || step&.label.presence || run_obj&.step_id.to_s
+        normalize_step_name.call(raw_name)
+      end
+      classify_edge_type = lambda do |parent_payload|
+        input_attr = (parent_payload.is_a?(Hash) ? (parent_payload[:input_attr_name] || parent_payload['input_attr_name']) : nil).to_s.downcase
+        output_attr = (parent_payload.is_a?(Hash) ? (parent_payload[:output_attr_name] || parent_payload['output_attr_name']) : nil).to_s.downcase
+        combined = "#{input_attr} #{output_attr}"
+
+        return 'expression_matrix' if combined.include?('matrix')
+
+        # Cell metadata (covariates, clustering/groups and QC metadata)
+        if combined.match?(/mdata|covariate|group|clust|metadata|cell|selection|depth|mito|ribo|protein_coding|detected_genes/)
+          return 'cell_metadata'
+        end
+
+        # Gene metadata (gene sets, markers, HVG, gene lists)
+        if combined.match?(/gene_set|hvg|variable_genes|marker|input_genes|output_genes|gene_list|row_attrs/)
+          return 'gene_metadata'
+        end
+
+        'unknown'
+      end
       
       # Add edges based on run_parents_json (most reliable source)
       edges_added = false
@@ -9033,13 +9355,23 @@ class ProjectsController < ApplicationController
               
               # Check if parent run exists in our runs list
               if parent_id && run_ids_set.include?(parent_id)
+                parent_run = runs_by_id[parent_id]
+                # Avoid same logical-step edges (e.g. scaling -> scaling)
+                if parent_run && step_name_for_run.call(parent_run) == step_name_for_run.call(run)
+                  emit_graph_debug.call("[graph_debug][run_parents_json][skip_same_step] parent_run=#{parent_id} child_run=#{run.id} parent_step_id=#{parent_run.step_id} child_step_id=#{run.step_id} parent_step_name=#{step_name_for_run.call(parent_run)} child_step_name=#{step_name_for_run.call(run)}")
+                  next
+                end
+
                 data << {
                   data: {
                     id: "edge_#{parent_id}_#{run.id}",
                     source: "run_#{parent_id}",
-                    target: "run_#{run.id}"
+                    target: "run_#{run.id}",
+                    edge_type: classify_edge_type.call(parent)
                   }
                 }
+                parent_step_name = parent_run ? step_name_for_run.call(parent_run) : 'unknown'
+                emit_graph_debug.call("[graph_debug][run_parents_json][add_edge] parent_run=#{parent_id} child_run=#{run.id} parent_step_id=#{parent_run&.step_id} child_step_id=#{run.step_id} parent_step_name=#{parent_step_name} child_step_name=#{step_name_for_run.call(run)}")
                 edges_added = true
               end
             end
@@ -9058,13 +9390,23 @@ class ProjectsController < ApplicationController
           parent_ids.each do |parent_id|
             # Check if parent run exists in our runs list
             if run_ids_set.include?(parent_id)
+              parent_run = runs_by_id[parent_id]
+              # Avoid same logical-step edges (e.g. scaling -> scaling)
+              if parent_run && step_name_for_run.call(parent_run) == step_name_for_run.call(run)
+                emit_graph_debug.call("[graph_debug][pipeline_parent_run_ids][skip_same_step] parent_run=#{parent_id} child_run=#{run.id} parent_step_id=#{parent_run.step_id} child_step_id=#{run.step_id} parent_step_name=#{step_name_for_run.call(parent_run)} child_step_name=#{step_name_for_run.call(run)}")
+                next
+              end
+
               data << {
                 data: {
                   id: "edge_#{parent_id}_#{run.id}",
                   source: "run_#{parent_id}",
-                  target: "run_#{run.id}"
+                  target: "run_#{run.id}",
+                  edge_type: 'unknown'
                 }
               }
+              parent_step_name = parent_run ? step_name_for_run.call(parent_run) : 'unknown'
+              emit_graph_debug.call("[graph_debug][pipeline_parent_run_ids][add_edge] parent_run=#{parent_id} child_run=#{run.id} parent_step_id=#{parent_run&.step_id} child_step_id=#{run.step_id} parent_step_name=#{parent_step_name} child_step_name=#{step_name_for_run.call(run)}")
               edges_added = true
             end
           end
@@ -9075,11 +9417,31 @@ class ProjectsController < ApplicationController
       if !edges_added
         # Group runs by step and sort by step rank, then by creation time
         runs_by_step_id = runs_by_step.keys.sort_by { |step_id| @h_steps[step_id]&.rank || 9999 }
+        step_name_for = lambda do |sid|
+          step = @h_steps[sid]
+          if step.nil?
+            sample_run = (runs_by_step[sid] || []).first
+            step = sample_run&.step
+          end
+          raw_name = step&.name.presence || step&.label.presence || sid.to_s
+          normalize_step_name.call(raw_name)
+        end
         
         runs_by_step_id.each_with_index do |step_id, index|
           next if index == 0
-          
-          prev_step_id = runs_by_step_id[index - 1]
+
+          current_step_name = step_name_for.call(step_id)
+
+          # Find previous step with a different logical step name.
+          # This avoids artificial links like scaling#1 -> scaling#2 when
+          # multiple internal step IDs represent the same step.
+          prev_idx = index - 1
+          while prev_idx >= 0 && step_name_for.call(runs_by_step_id[prev_idx]) == current_step_name
+            prev_idx -= 1
+          end
+          next if prev_idx < 0
+
+          prev_step_id = runs_by_step_id[prev_idx]
           prev_runs = (runs_by_step[prev_step_id] || []).sort_by { |r| [r.created_at || Time.at(0), r.id] }
           current_runs = (runs_by_step[step_id] || []).sort_by { |r| [r.created_at || Time.at(0), r.id] }
           
@@ -9098,14 +9460,19 @@ class ProjectsController < ApplicationController
                   data: {
                     id: edge_id,
                     source: "run_#{prev_run.id}",
-                    target: "run_#{current_run.id}"
+                    target: "run_#{current_run.id}",
+                    edge_type: 'unknown'
                   }
                 }
+                emit_graph_debug.call("[graph_debug][fallback][add_edge] parent_run=#{prev_run.id} child_run=#{current_run.id} parent_step_id=#{prev_run.step_id} child_step_id=#{current_run.step_id} parent_step_name=#{step_name_for_run.call(prev_run)} child_step_name=#{step_name_for_run.call(current_run)}")
               end
             end
           end
         end
       end
+
+      edge_count = data.count { |item| item[:data] && item[:data][:source] && item[:data][:target] }
+      emit_graph_debug.call("[graph_debug][summary] project=#{@project.key} total_nodes=#{@runs.size} total_edges=#{edge_count}")
       
       data
     end
@@ -9469,10 +9836,21 @@ class ProjectsController < ApplicationController
       
       # Check if show_form parameter is set (for "New run" button)
       force_show_form = params[:show_form].present? && params[:show_form].to_s == '1'
+      prefer_runs_list = params[:prefer_runs_list].present? && params[:prefer_runs_list].to_s == '1'
+      Rails.logger.info("[prepare_std_step_data][debug] step_id=#{@step.id} step_name=#{@step.name} multiple_runs=#{@step.multiple_runs} runs_count=#{runs_count} force_show_form=#{force_show_form} prefer_runs_list=#{prefer_runs_list} has_std_form=#{@step.has_std_form} has_std_dashboard=#{@step.has_std_dashboard} has_std_view=#{@step.has_std_view}")
+
+      # Explicit override used when returning from Pipeline Graph:
+      # for multi-run steps with existing runs, always show runs list/dashboard.
+      if prefer_runs_list && @step.multiple_runs && runs_count > 0
+        Rails.logger.info("[prepare_std_step_data][debug] prefer_runs_list override activated -> show_dashboard=true")
+        @show_dashboard = true
+        @h_cards = create_run_cards(runs_array, nil)
+        return
+      end
       
       # If show_form is requested and step has std_form, show form.
       # For single-run steps, only allow this when no run exists.
-      if force_show_form && @step.has_std_form && (@step.multiple_runs || runs_count == 0)
+      if force_show_form && !prefer_runs_list && @step.has_std_form && (@step.multiple_runs || runs_count == 0)
         @show_form = true
         prepare_std_form_data
       # For steps with only one run authorized (multiple_runs == false) that are just unlocked (no runs yet)

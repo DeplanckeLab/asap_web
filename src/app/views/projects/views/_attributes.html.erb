@@ -59,6 +59,9 @@
                                               )
                                               .order(:name, :id)
                                               .to_a %>
+                    <% if defined?(@selected_loom_file) && @selected_loom_file.present? %>
+                      <% candidate_annots = candidate_annots.select { |annot| annot.filepath == @selected_loom_file } %>
+                    <% end %>
                     <% matching_annots = candidate_annots.select do |annot|
                          next false if annot.data_class_ids.blank?
                          annot_data_class_names = annot.data_class_ids.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact

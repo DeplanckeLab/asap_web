@@ -19,7 +19,7 @@
     </thead>
     <tbody class="bg-white divide-y divide-gray-200">
       <% @list_cats[0].each_index do |i| %>
-        <% if @vals[1][@list_cats[1][i]] %>
+        <% if @vals[0][@list_cats[0][i]] %>
           <tr>
             <td class="px-3 py-2 font-medium text-gray-900">
               <%= @h_runs[params['run_id2']]&.num %>.<%= @list_cats[0][i] %>
@@ -85,4 +85,8 @@
 })();
 </script>
 
+<% elsif @list_cats.present? && @vals.present? %>
+  <div class="text-gray-500 text-sm py-3">
+    No comparable clusters found for the selected runs.
+  </div>
 <% end %>

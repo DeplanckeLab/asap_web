@@ -1,6 +1,7 @@
 <% if @step %>
   <div class="step-results h-full flex flex-col" 
        data-step-id="<%= @step.id %>"
+       data-step-name="<%= @step.name %>"
        data-project-id="<%= @project.id %>">
     <% unless @show_form %>
     <!-- Step Results Section -->
@@ -60,6 +61,21 @@
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
                         style="flex-shrink: 0;">
                   <i class="fas fa-arrows-alt-h sm:mr-1"></i><span class="hidden sm:inline"> Compare clusters</span>
+                </button>
+              <% end %>
+              <!-- DE Special Views -->
+              <% if analyzable?(@project) && @step.name == 'de' %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'de_filter', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> DE table</span>
+                </button>
+                <button type="button"
+                        class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'markers', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
                 </button>
               <% end %>
               <!-- New Run Button -->
@@ -156,6 +172,21 @@
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>')"
                         style="flex-shrink: 0;">
                   <i class="fas fa-arrows-alt-h sm:mr-1"></i><span class="hidden sm:inline"> Compare clusters</span>
+                </button>
+              <% end %>
+              <!-- DE Special Views -->
+              <% if analyzable?(@project) && @step.name == 'de' %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'de_filter', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> DE table</span>
+                </button>
+                <button type="button"
+                        class="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'markers', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
                 </button>
               <% end %>
               <!-- New Run Button -->
@@ -261,6 +292,18 @@
                    class="form-input rounded border border-gray-300 bg-white text-sm w-full px-3 py-1.5 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
           </div>
           <div class="flex-1 min-h-0 px-6 pb-5 overflow-x-auto">
+            <% h_clusters_count_by_run_id = {} %>
+            <% if @step.name == 'clustering' && @runs.present? %>
+              <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
+              <% @runs.each do |run| %>
+                <% output_file = project_dir + 'clustering' + run.id.to_s + 'output.json' %>
+                <% if File.exist?(output_file) %>
+                  <% output_data = Basic.safe_parse_json(File.read(output_file), {}) %>
+                  <% clusters_count = output_data['nber_clusters'].to_i %>
+                  <% h_clusters_count_by_run_id[run.id] = clusters_count if clusters_count > 0 %>
+                <% end %>
+              <% end %>
+            <% end %>
             <table id="runs-table" class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
               <thead class="bg-gray-50">
                 <tr>
@@ -273,6 +316,11 @@
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16 cursor-pointer whitespace-nowrap select-none" data-sort-col="0" data-sort-numeric="true" onclick="sortRunsTable(this)"># <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer whitespace-nowrap select-none" data-sort-col="1" onclick="sortRunsTable(this)">Method <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameters</th>
+                  <% if @step.name == 'clustering' %>
+                    <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Clusters
+                    </th>
+                  <% end %>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer whitespace-nowrap select-none" data-sort-col="3" onclick="sortRunsTable(this)">Status <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32 cursor-pointer whitespace-nowrap select-none" data-sort-col="4" onclick="sortRunsTable(this)">Created <span class="sort-indicator"></span></th>
                   <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
@@ -330,6 +378,18 @@
                         <span class="text-gray-400 text-xs">-</span>
                       <% end %>
                     </td>
+                    <% if @step.name == 'clustering' %>
+                      <% clusters_count = h_clusters_count_by_run_id[run.id].to_i %>
+                      <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= clusters_count %>">
+                        <% if clusters_count > 0 %>
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                            <%= clusters_count %>
+                          </span>
+                        <% else %>
+                          <span class="text-gray-400 text-xs">-</span>
+                        <% end %>
+                      </td>
+                    <% end %>
                     <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.status_id %>">
                       <div class="flex flex-col gap-1">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">

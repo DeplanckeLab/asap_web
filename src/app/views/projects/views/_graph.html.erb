@@ -48,6 +48,62 @@
     }
     
     var data = <%= raw @klay_data.to_json %>;
+    // Safety guard: never draw edges between runs of the same logical step.
+    // This protects the UI even if upstream lineage fields are inconsistent.
+    var nodeById = {};
+    data.forEach(function(item) {
+      if (item && item.data && item.data.id && !item.data.source && !item.data.target) {
+        nodeById[item.data.id] = item.data;
+      }
+    });
+    var removedSameStepEdges = 0;
+    data = data.filter(function(item) {
+      if (!item || !item.data || !item.data.source || !item.data.target) {
+        return true;
+      }
+      var sourceNode = nodeById[item.data.source];
+      var targetNode = nodeById[item.data.target];
+      if (!sourceNode || !targetNode) {
+        return true;
+      }
+      var sourceStepName = sourceNode.step_name != null ? String(sourceNode.step_name).trim().toLowerCase() : '';
+      var targetStepName = targetNode.step_name != null ? String(targetNode.step_name).trim().toLowerCase() : '';
+      var sourceStepId = sourceNode.step_id != null ? String(sourceNode.step_id) : '';
+      var targetStepId = targetNode.step_id != null ? String(targetNode.step_id) : '';
+      var sameLogicalStep = sourceStepName !== '' && targetStepName !== '' && sourceStepName === targetStepName;
+      var sameInternalStep = sourceStepId !== '' && sourceStepId === targetStepId;
+      if (sameLogicalStep || sameInternalStep) {
+        removedSameStepEdges += 1;
+        return false;
+      }
+      return true;
+    });
+    if (removedSameStepEdges > 0) {
+      console.warn('[Graph] Removed same-step edges:', removedSameStepEdges);
+    }
+    // Debug: list edges that will actually be rendered in the browser
+    try {
+      var edgesForDebug = data.filter(function(item) {
+        return item && item.data && item.data.source && item.data.target;
+      });
+      console.log('[Graph][debug] rendered_edges_count=', edgesForDebug.length);
+      edgesForDebug.forEach(function(edgeItem) {
+        var sourceNode = nodeById[edgeItem.data.source] || {};
+        var targetNode = nodeById[edgeItem.data.target] || {};
+        console.log(
+          '[Graph][debug][edge]',
+          edgeItem.data.id,
+          'source_run=', sourceNode.run_id,
+          'source_step_id=', sourceNode.step_id,
+          'source_step_name=', sourceNode.step_name,
+          'target_run=', targetNode.run_id,
+          'target_step_id=', targetNode.step_id,
+          'target_step_name=', targetNode.step_name
+        );
+      });
+    } catch (e) {
+      console.warn('[Graph][debug] failed to log rendered edges', e);
+    }
 
     var style = [
       {
@@ -75,6 +131,23 @@
         }
       },
       {
+        selector: 'node.selected-step-node',
+        style: {
+          'border-width': '6px',
+          'border-color': '#facc15',
+          'border-opacity': '1',
+          'opacity': '1',
+          'text-outline-width': '4px',
+          'text-outline-color': '#ffffff',
+          // Yellow glow (layered tones for gradient-like effect)
+          'shadow-color': '#fde047',
+          'shadow-blur': '64',
+          'shadow-opacity': '1',
+          'shadow-offset-x': '0',
+          'shadow-offset-y': '0'
+        }
+      },
+      {
         selector: 'node:active',
         style: {
           'cursor': 'pointer'
@@ -90,30 +163,89 @@
           'opacity': 0.5,
           'width': 2
         }
+      },
+      {
+        selector: 'edge[edge_type = "expression_matrix"]',
+        style: {
+          'line-color': '#3b82f6',
+          'target-arrow-color': '#3b82f6',
+          'opacity': 0.9,
+          'width': 3
+        }
+      },
+      {
+        selector: 'edge[edge_type = "cell_metadata"]',
+        style: {
+          'line-color': '#22c55e',
+          'target-arrow-color': '#22c55e',
+          'opacity': 0.9,
+          'width': 3
+        }
+      },
+      {
+        selector: 'edge[edge_type = "gene_metadata"]',
+        style: {
+          'line-color': '#f59e0b',
+          'target-arrow-color': '#f59e0b',
+          'opacity': 0.9,
+          'width': 3
+        }
       }
     ];
 
     try {
-      // Use breadthfirst layout (built-in, no extension needed)
-      // This creates a hierarchical layout similar to klay
+      // Build a lane-style preset layout: one horizontal lane per logical step
+      // to avoid visual ambiguity from crossing edges.
+      var nodeElements = data.filter(function(item) {
+        return item && item.data && item.data.id && !item.data.source && !item.data.target;
+      });
+      var stepMetaByName = {};
+      nodeElements.forEach(function(item) {
+        var stepName = (item.data.step_name || '').toString();
+        if (!stepName) return;
+        var rank = item.data.step_rank == null ? 9999 : Number(item.data.step_rank);
+        if (!stepMetaByName[stepName]) {
+          stepMetaByName[stepName] = { rank: rank, nodes: [] };
+        }
+        if (rank < stepMetaByName[stepName].rank) {
+          stepMetaByName[stepName].rank = rank;
+        }
+        stepMetaByName[stepName].nodes.push(item.data);
+      });
+      var orderedSteps = Object.keys(stepMetaByName).sort(function(a, b) {
+        var ar = stepMetaByName[a].rank;
+        var br = stepMetaByName[b].rank;
+        if (ar !== br) return ar - br;
+        return a.localeCompare(b);
+      });
+      var positionsByNodeId = {};
+      var laneYStart = 110;
+      var laneYGap = 130;
+      var laneXStart = 130;
+      var laneXGap = 210;
+      orderedSteps.forEach(function(stepName, stepIdx) {
+        var laneNodes = stepMetaByName[stepName].nodes.slice().sort(function(a, b) {
+          var an = Number(a.run_num || a.run_id || 0);
+          var bn = Number(b.run_num || b.run_id || 0);
+          if (an !== bn) return an - bn;
+          return Number(a.run_id || 0) - Number(b.run_id || 0);
+        });
+        laneNodes.forEach(function(nodeData, nodeIdx) {
+          positionsByNodeId[nodeData.id] = {
+            x: laneXStart + (nodeIdx * laneXGap),
+            y: laneYStart + (stepIdx * laneYGap)
+          };
+        });
+      });
+
       var cy = window.cy = cytoscape({
         container: container,
         layout: {
-          name: 'breadthfirst',
-          animate: true,
+          name: 'preset',
           fit: true,
-          spacingFactor: 1.5,
-          directed: true,
-          roots: function(eles) {
-            // Find root nodes (nodes with no incoming edges)
-            var roots = [];
-            eles.nodes().forEach(function(node) {
-              var incoming = node.incomers('edge');
-              if (incoming.length === 0) {
-                roots.push(node);
-              }
-            });
-            return roots.length > 0 ? roots : eles.nodes().first();
+          padding: 30,
+          positions: function(node) {
+            return positionsByNodeId[node.id()] || { x: 100, y: 100 };
           }
         },
         style: style,
@@ -130,10 +262,20 @@
       // Add hover styles for better interactivity and clickability indication
       cy.nodes().on('mouseover', function(e){
         var node = e.target;
-        // Make border more prominent and change to bright blue
-        node.style('border-width', '4px');
-        node.style('border-color', '#2563eb');
-        node.style('border-opacity', '1');
+        if (node.hasClass('selected-step-node')) {
+          // Keep selected nodes in yellow highlight mode, with stronger glow on hover
+          node.style('border-width', '7px');
+          node.style('border-color', '#facc15');
+          node.style('border-opacity', '1');
+          node.style('shadow-color', '#fef08a');
+          node.style('shadow-blur', '76');
+          node.style('shadow-opacity', '1');
+        } else {
+          // Non-selected node hover style
+          node.style('border-width', '4px');
+          node.style('border-color', '#2563eb');
+          node.style('border-opacity', '1');
+        }
         // Enhance text outline for better readability
         node.style('text-outline-width', '4px');
         node.style('text-outline-color', '#ffffff');
@@ -151,11 +293,25 @@
       cy.nodes().on('mouseout', function(e){
         var node = e.target;
         // Reset to default styles
-        node.style('border-width', '2px');
-        node.style('border-color', '#ffffff');
-        node.style('border-opacity', '0.8');
-        node.style('text-outline-width', '3px');
-        node.style('opacity', '0.95');
+        if (node.hasClass('selected-step-node')) {
+          node.style('border-width', '6px');
+          node.style('border-color', '#facc15');
+          node.style('border-opacity', '1');
+          node.style('text-outline-width', '4px');
+          node.style('opacity', '1');
+          node.style('shadow-color', '#fde047');
+          node.style('shadow-blur', '64');
+          node.style('shadow-opacity', '1');
+          node.style('shadow-offset-x', '0');
+          node.style('shadow-offset-y', '0');
+        } else {
+          node.style('border-width', '2px');
+          node.style('border-color', '#ffffff');
+          node.style('border-opacity', '0.8');
+          node.style('text-outline-width', '3px');
+          node.style('opacity', '0.95');
+          node.style('shadow-opacity', '0');
+        }
         node.style('font-size', '20px');
         // Reset size to label-based
         node.style('width', 'label');
@@ -223,6 +379,42 @@
           }
         }
       });
+
+      function applySelectedStepHighlight(stepId) {
+        cy.nodes().removeClass('selected-step-node');
+        if (!stepId) return;
+        const normalizedSelectedStepId = String(stepId);
+
+        // Some logical steps (e.g. scaling) can exist with multiple internal step IDs.
+        // Resolve all step IDs that share the same step name in the current left menu.
+        const stepItems = Array.from(document.querySelectorAll('[data-step-id][data-step-name]'));
+        const selectedStepItem = stepItems.find((el) => String(el.getAttribute('data-step-id')) === normalizedSelectedStepId);
+        const selectedStepName = selectedStepItem ? selectedStepItem.getAttribute('data-step-name') : null;
+        const relatedStepIds = new Set([normalizedSelectedStepId]);
+        if (selectedStepName) {
+          stepItems.forEach((el) => {
+            if (el.getAttribute('data-step-name') === selectedStepName) {
+              relatedStepIds.add(String(el.getAttribute('data-step-id')));
+            }
+          });
+        }
+
+        cy.nodes().forEach(function(node) {
+          if (relatedStepIds.has(String(node.data('step_id')))) {
+            node.addClass('selected-step-node');
+          }
+        });
+      }
+
+      // Expose a global updater so left-panel step changes can refresh highlight in graph mode
+      window.updatePipelineGraphStepHighlight = function(stepId) {
+        applySelectedStepHighlight(stepId);
+      };
+
+      // Highlight graph nodes that belong to the currently selected step in analysis view
+      var stepSelectorElement = document.querySelector('[data-controller*="step-selector"]');
+      var selectedStepId = stepSelectorElement ? stepSelectorElement.getAttribute('data-current-step-id') : null;
+      applySelectedStepHighlight(selectedStepId);
     } catch (error) {
       console.error('Error initializing Cytoscape graph:', error);
       container.innerHTML = '<div class="p-4 text-red-600">Error loading graph visualization: ' + error.message + '</div>';

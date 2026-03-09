@@ -31,8 +31,15 @@ export default class extends Controller {
     // Add click outside listener
     this.boundCloseDropdown = this.closeDropdown.bind(this)
     document.addEventListener('click', this.boundCloseDropdown, true)
+
+    this.formElement = this.element.closest('form')
+    this.boundMatrixContextChanged = this.handleMatrixContextChanged.bind(this)
+    if (this.formElement) {
+      this.formElement.addEventListener('input-data:matrix-context-changed', this.boundMatrixContextChanged)
+    }
     
     this.restoreSelectionFromHiddenField()
+    this.applyCurrentMatrixContextFromForm()
     this.updateSelectedItems()
     this.validateSelection()
   }
@@ -47,6 +54,9 @@ export default class extends Controller {
         refSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
       }
       this._boundGroupRefChangeHandler = null
+    }
+    if (this.formElement && this.boundMatrixContextChanged) {
+      this.formElement.removeEventListener('input-data:matrix-context-changed', this.boundMatrixContextChanged)
     }
   }
 
@@ -177,6 +187,7 @@ export default class extends Controller {
 
     this.updateDependentCategorySelect(selectedValues)
     this.updateDeGroupSelects(selectedValues)
+    this.broadcastMatrixContextIfNeeded(selectedValues)
     
     // Update display
     if (selectedValues.length > 0) {
@@ -215,6 +226,85 @@ export default class extends Controller {
     
     // Validate and trigger form validation
     this.validateSelection()
+  }
+
+  broadcastMatrixContextIfNeeded(selectedValues) {
+    if (this.attrNameValue !== 'input_matrix' || !this.formElement) {
+      return
+    }
+
+    const selected = selectedValues.length > 0 ? selectedValues[0] : null
+    const loomFile = selected && selected.output_filename ? String(selected.output_filename) : ''
+    const event = new CustomEvent('input-data:matrix-context-changed', {
+      bubbles: true,
+      detail: { loomFile: loomFile }
+    })
+    this.formElement.dispatchEvent(event)
+  }
+
+  handleMatrixContextChanged(event) {
+    if (this.attrNameValue !== 'groups') {
+      return
+    }
+    const loomFile = event && event.detail && event.detail.loomFile ? String(event.detail.loomFile) : ''
+    this.filterOptionsByLoomFile(loomFile)
+    this.updateSelectedItems()
+  }
+
+  applyCurrentMatrixContextFromForm() {
+    if (this.attrNameValue !== 'groups') {
+      return
+    }
+    const loomFile = this.getSelectedMatrixLoomFromForm()
+    this.filterOptionsByLoomFile(loomFile)
+  }
+
+  getSelectedMatrixLoomFromForm() {
+    if (!this.formElement) {
+      return ''
+    }
+    const hidden = this.formElement.querySelector('#attrs_input_matrix, [name="attrs[input_matrix]"]')
+    if (!hidden || !hidden.value) {
+      return ''
+    }
+
+    try {
+      const parsed = JSON.parse(hidden.value)
+      if (Array.isArray(parsed)) {
+        const first = parsed[0]
+        return first && first.output_filename ? String(first.output_filename) : ''
+      }
+      if (parsed && typeof parsed === 'object') {
+        return parsed.output_filename ? String(parsed.output_filename) : ''
+      }
+    } catch (_error) {
+      return ''
+    }
+    return ''
+  }
+
+  filterOptionsByLoomFile(loomFile) {
+    this.optionTargets.forEach((input) => {
+      let optionValue = null
+      try {
+        optionValue = JSON.parse(input.value)
+      } catch (_error) {
+        optionValue = null
+      }
+
+      const optionLabel = input.closest('label')
+      if (!optionLabel || !optionValue) {
+        return
+      }
+
+      const optionLoom = optionValue.output_filename ? String(optionValue.output_filename) : ''
+      const shouldShow = !loomFile || optionLoom === loomFile
+
+      optionLabel.style.display = shouldShow ? '' : 'none'
+      if (!shouldShow && input.checked) {
+        input.checked = false
+      }
+    })
   }
 
   validateSelection() {

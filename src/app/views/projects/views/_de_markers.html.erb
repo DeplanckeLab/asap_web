@@ -169,6 +169,10 @@
     editor = editor_id ? h_users[editor_id] : nil
 
     enrichments = h_ge_by_de_run[run.id] || []
+    annot = h_annots_by_run_id[clust_run_id]
+    cat_name = h_attrs['group_ref'].to_s
+    cat_idx_match = cat_name.match(/\d+/)
+    cat_idx = cat_idx_match ? [cat_idx_match[0].to_i - 1, 0].max : 0
 
     markers_data << {
       run: run,
@@ -180,7 +184,10 @@
       nber_down: nber_down,
       cluster_name: cluster_name,
       editor: editor,
-      enrichments: enrichments
+      enrichments: enrichments,
+      annotation_metadata_id: annot&.id,
+      annotation_cat_idx: cat_idx,
+      annotation_cat_name: cat_name
     }
   end
 %>
@@ -195,8 +202,7 @@
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="2">Comp cluster <span class="sort-indicator"></span></th>
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top up-regulated genes</th>
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top down-regulated genes</th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="5">Cluster name <span class="sort-indicator"></span></th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Edited by</th>
+        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Annotation</th>
       </tr>
     </thead>
     <tbody class="bg-white divide-y divide-gray-200">
@@ -206,13 +212,17 @@
           <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:group_ref].to_s.gsub(/\D/, '') %>"><%= md[:group_ref] || '-' %></td>
           <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:group_comp].to_s == 'all others' ? '99999' : md[:group_comp].to_s.gsub(/\D/, '') %>"><%= md[:group_comp] %></td>
           <td class="px-3 py-2">
-            <div class="mb-1 text-xs text-gray-500"><%= md[:nber_up] %> gene<%= md[:nber_up] != 1 ? 's' : '' %></div>
+            <% up_count = md[:nber_up].to_i %>
+            <div class="mb-1 text-xs text-gray-500"><%= up_count %> gene<%= up_count != 1 ? 's' : '' %></div>
             <div class="flex flex-wrap gap-1">
               <% md[:up_genes].each do |g| %>
                 <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
                       data-ensembl-id="<%= g[1] %>"
                       title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
+              <% end %>
+              <% if up_count == 0 %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">0</span>
               <% end %>
             </div>
             <% if md[:enrichments].any? %>
@@ -233,13 +243,17 @@
             <% end %>
           </td>
           <td class="px-3 py-2">
-            <div class="mb-1 text-xs text-gray-500"><%= md[:nber_down] %> gene<%= md[:nber_down] != 1 ? 's' : '' %></div>
+            <% down_count = md[:nber_down].to_i %>
+            <div class="mb-1 text-xs text-gray-500"><%= down_count %> gene<%= down_count != 1 ? 's' : '' %></div>
             <div class="flex flex-wrap gap-1">
               <% md[:down_genes].each do |g| %>
                 <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
                       data-ensembl-id="<%= g[1] %>"
                       title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
+              <% end %>
+              <% if down_count == 0 %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">0</span>
               <% end %>
             </div>
             <% if md[:enrichments].any? %>
@@ -259,8 +273,22 @@
               </div>
             <% end %>
           </td>
-          <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:cluster_name].to_s.downcase %>"><%= md[:cluster_name] %></td>
-          <td class="px-3 py-2 text-gray-500 whitespace-nowrap text-xs"><%= md[:editor] ? (md[:editor].id == current_user.id ? 'me' : md[:editor].email) : '' %></td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            <% has_metadata = md[:annotation_metadata_id].present? %>
+            <button class="category-annot-btn"
+                    data-metadata-id="<%= md[:annotation_metadata_id] %>"
+                    data-cat-idx="<%= md[:annotation_cat_idx] %>"
+                    data-cat-name="<%= md[:annotation_cat_name] %>"
+                    data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
+                    data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
+                    style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_metadata ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'"
+                    onmouseout="this.style.backgroundColor=''"
+                    title="<%= has_metadata ? 'View annotations' : 'No annotations yet' %>"
+                    onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl); }">
+              <i class="fas fa-bookmark" style="font-size: 11px;"></i>
+            </button>
+          </td>
         </tr>
       <% end %>
     </tbody>
@@ -525,7 +553,227 @@ function closeEnrichmentModal() {
 document.getElementById('markers-enrichment-modal-overlay').addEventListener('click', function(e) {
   if (e.target === this) closeEnrichmentModal();
 });
+
+if (typeof openAnnotationPopup !== 'function') {
+  window._annotPopupData = {
+    catName: '',
+    catIdx: 0,
+    metadataId: null,
+    evidencesUrl: '',
+    clas: [],
+    activeTab: 'existing',
+    evidences: {
+      state: 'idle',
+      loading: false,
+      message: '',
+      runId: null,
+      rowsUp: [],
+      rowsDown: []
+    }
+  };
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function templateHtml(templateId) {
+    var tpl = document.getElementById(templateId);
+    return tpl ? tpl.innerHTML : '';
+  }
+
+  window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl) {
+    var overlay = document.getElementById('annotation-popup-overlay');
+    var dialog = document.getElementById('annotation-popup-dialog');
+    var panel = document.getElementById('annot-popup-panel');
+    var titleEl = document.getElementById('annot-popup-title');
+    if (!overlay || !dialog || !panel || !titleEl) return;
+
+    var colors = window.CATEGORY_COLORS || [];
+    var color = colors.length > 0 ? (colors[catIdx % colors.length] || '#9ca3af') : '#9ca3af';
+    titleEl.innerHTML = '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ' + color + '; margin-right: 8px;"></span>' + escapeHtml(catName);
+
+    _annotPopupData.catName = catName;
+    _annotPopupData.catIdx = catIdx;
+    _annotPopupData.metadataId = metadataId;
+    _annotPopupData.evidencesUrl = evidencesUrl || '';
+    _annotPopupData.clas = [];
+    _annotPopupData.activeTab = 'existing';
+    _annotPopupData.evidences = {
+      state: 'idle',
+      loading: false,
+      message: '',
+      runId: null,
+      rowsUp: [],
+      rowsDown: []
+    };
+
+    panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>';
+    overlay.style.display = 'flex';
+    dialog.style.left = '';
+    dialog.style.top = '';
+    dialog.style.position = '';
+    dialog.style.margin = '';
+    dialog.style.transform = '';
+
+    var url = baseUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx) + '&cat_name=' + encodeURIComponent(catName);
+    fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        _annotPopupData.clas = data.clas || [];
+        _annotPopupData.activeTab = 'existing';
+        renderAnnotationPanel();
+      })
+      .catch(function(err) {
+        panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + escapeHtml(err.message) + '</div>';
+      });
+  };
+
+  window.closeAnnotationPopup = function() {
+    var overlay = document.getElementById('annotation-popup-overlay');
+    if (overlay) overlay.style.display = 'none';
+  };
+
+  window.setAnnotationTab = function(tabName) {
+    _annotPopupData.activeTab = tabName;
+    if (tabName === 'evidences') loadAnnotationEvidences();
+    renderAnnotationPanel();
+  };
+
+  function renderExistingAnnotationsTab(clas) {
+    var content = '';
+    if (!clas || clas.length === 0) {
+      content += '<div style="text-align: center; padding: 40px 20px; color: #9ca3af;">';
+      content += '<i class="fas fa-clipboard" style="font-size: 32px; margin-bottom: 12px; display: block;"></i>';
+      content += '<div style="font-size: 14px;">No annotations yet for this category.</div>';
+      content += '</div>';
+    } else {
+      clas.forEach(function(cla) {
+        content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">';
+        content += '<div style="font-weight: 600; font-size: 13px; color: #374151; margin-bottom: 6px;">#' + escapeHtml(cla.num || cla.id) + '</div>';
+        if (cla.name) content += '<div style="font-size: 12px; color: #374151; margin-bottom: 4px;"><strong>Name:</strong> ' + escapeHtml(cla.name) + '</div>';
+        if (cla.comment) content += '<div style="font-size: 12px; color: #374151;"><strong>Comment:</strong> ' + escapeHtml(cla.comment) + '</div>';
+        content += '</div>';
+      });
+    }
+    return templateHtml('annot-existing-tab-template')
+      .replace('__TOTAL__', String((clas || []).length))
+      .replace('__CONTENT__', content);
+  }
+
+  function renderEvidenceRowsTable(rows, title, tone) {
+    if (!rows || rows.length === 0) return '';
+    var borderColor = tone === 'up' ? '#bbf7d0' : '#fecaca';
+    var textColor = tone === 'up' ? '#166534' : '#991b1b';
+    var html = '';
+    html += '<div style="border:1px solid ' + borderColor + ';border-radius:8px;background:#fff;overflow:hidden;">';
+    html += '<div style="padding:8px 10px;font-size:12px;font-weight:600;color:' + textColor + ';border-bottom:1px solid ' + borderColor + ';background:#fff;">' + escapeHtml(title) + ' (' + rows.length + ')</div>';
+    html += '<div style="max-height:220px;overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#fff;color:#4b5563;text-align:left;">';
+    html += '<th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">Gene</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">log2FC</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">FDR</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">P value</th>';
+    html += '</tr></thead><tbody>';
+    rows.forEach(function(row) {
+      html += '<tr>';
+      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(row.gene || row.gene_id || '-') + '</td>';
+      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.log2fc || '')) + '</td>';
+      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.fdr || '')) + '</td>';
+      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.p_value || '')) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+
+  function renderEvidencesTab() {
+    var ev = _annotPopupData.evidences || {};
+    var content = '';
+    if (ev.state === 'loading') {
+      content += '<div style="display:flex;align-items:center;gap:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;"><i class="fas fa-spinner fa-spin"></i><span>' + escapeHtml(ev.message || 'Loading evidences...') + '</span></div>';
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    if (ev.state === 'completed') {
+      var upRows = Array.isArray(ev.rowsUp) ? ev.rowsUp : [];
+      var downRows = Array.isArray(ev.rowsDown) ? ev.rowsDown : [];
+      if (upRows.length === 0 && downRows.length === 0) {
+        content += '<div style="text-align:center;padding:18px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;">No marker evidence matched the current thresholds.</div>';
+      } else {
+        content += '<div style="display:grid;grid-template-columns:1fr;gap:10px;">';
+        content += renderEvidenceRowsTable(upRows, 'Up-regulated markers', 'up');
+        content += renderEvidenceRowsTable(downRows, 'Down-regulated markers', 'down');
+        content += '</div>';
+      }
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    if (ev.state === 'running' || ev.state === 'queued') {
+      content += '<div style="padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;">' + escapeHtml(ev.message || 'FindMarkers is processing for this category.') + '</div>';
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    if (ev.state === 'error' || ev.state === 'failed' || ev.state === 'unsupported') {
+      content += '<div style="padding:12px;border:1px solid #fecaca;border-radius:8px;color:#991b1b;background:#fff;">' + escapeHtml(ev.message || 'Failed to load evidences.') + '</div>';
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    content += '<div style="text-align:center;padding:18px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;">No evidence request has been made yet.</div>';
+    return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+  }
+
+  function loadAnnotationEvidences() {
+    if (!_annotPopupData.evidencesUrl || !_annotPopupData.metadataId) return;
+    _annotPopupData.evidences = { state: 'loading', loading: true, message: 'Checking FindMarkers run...', runId: null, rowsUp: [], rowsDown: [] };
+    renderAnnotationPanel();
+    var url = _annotPopupData.evidencesUrl + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) + '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx);
+    fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        _annotPopupData.evidences = {
+          state: data.state || 'error',
+          loading: false,
+          message: data.message || '',
+          runId: data.run_id || null,
+          rowsUp: Array.isArray(data.rows_up) ? data.rows_up : [],
+          rowsDown: Array.isArray(data.rows_down) ? data.rows_down : []
+        };
+        renderAnnotationPanel();
+      })
+      .catch(function(err) {
+        _annotPopupData.evidences = { state: 'error', loading: false, message: 'Error loading evidences: ' + err.message, runId: null, rowsUp: [], rowsDown: [] };
+        renderAnnotationPanel();
+      });
+  }
+
+  function renderAnnotationPanel() {
+    var panel = document.getElementById('annot-popup-panel');
+    if (!panel) return;
+    var clas = _annotPopupData.clas || [];
+    var activeTab = _annotPopupData.activeTab || 'existing';
+    var navButtonStyle = function(tab) {
+      var isActive = activeTab === tab;
+      var color = isActive ? '#1d4ed8' : '#6b7280';
+      var border = isActive ? '2px solid #1d4ed8' : '2px solid transparent';
+      return 'background:none;border:none;color:' + color + ';font-size:12px;font-weight:600;padding:8px 10px;cursor:pointer;border-bottom:' + border + ';';
+    };
+    var html = '';
+    html += '<div style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;padding:0 12px;background:#fff;">';
+    html += '<button type="button" onclick="setAnnotationTab(\'existing\')" style="' + navButtonStyle('existing') + '">Existing annotations <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;line-height:1;">' + clas.length + '</span></button>';
+    html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '">Identify markers</button>';
+    html += '</div>';
+    html += '<div style="overflow-y:auto;flex:1;padding:12px 16px;">';
+    html += activeTab === 'evidences' ? renderEvidencesTab() : renderExistingAnnotationsTab(clas);
+    html += '</div>';
+    panel.innerHTML = html;
+  }
+}
 </script>
+
+<%= render 'projects/views/annotation_popup' %>
 
 <% else %>
   <div class="text-gray-500 text-center py-8">No marker genes found with the current filter criteria.</div>

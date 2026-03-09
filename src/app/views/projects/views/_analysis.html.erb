@@ -1,4 +1,12 @@
-<div class="flex flex-col h-full" data-controller="step-selector" data-step-selector-project-id-value="<%= @project.id %>" data-step-selector-project-key-value="<%= @project.key %>" data-step-selector-status-icons-value="<%= status_icons_json %>" data-step-selector-load-run-panel-value="<%= @load_run_panel %>" data-step-selector-load-sub-view-value="<%= @load_sub_view %>" data-step-selector-sub-view-step-id-value="<%= @selected_step_id %>">
+<div class="flex flex-col h-full"
+     data-controller="step-selector"
+     data-step-selector-project-id-value="<%= @project.id %>"
+     data-step-selector-project-key-value="<%= @project.key %>"
+     data-step-selector-status-icons-value="<%= status_icons_json %>"
+     data-step-selector-load-run-panel-value="<%= @load_run_panel %>"
+     data-step-selector-load-sub-view-value="<%= @load_sub_view %>"
+     data-step-selector-sub-view-step-id-value="<%= @selected_step_id %>"
+     data-step-selector-loom-file-value="<%= @selected_loom_file.to_s %>">
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-2">
@@ -11,10 +19,91 @@
         <% end %>
       </div>
       <div class="flex items-center gap-3 flex-shrink-0">
-        <button type="button" 
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer inline-block"
-                onclick="loadFormInRightPanel('<%= graph_project_path(@project) %>')">
-          Graph
+        <div id="analysis-direct-link-container" class="relative">
+          <button type="button"
+                  class="h-9 px-3 bg-white hover:bg-gray-100 text-gray-700 rounded-md text-sm font-medium transition-colors cursor-pointer border border-gray-300 inline-flex items-center gap-2"
+                  title="Show direct link"
+                  onclick="toggleAnalysisDirectLinkPopover()">
+            <i class="fas fa-link text-sm"></i>
+            <span>Direct link</span>
+          </button>
+          <div id="analysis-direct-link-popover"
+               class="hidden absolute right-0 top-full mt-2 w-[38rem] max-w-[85vw] z-30 bg-white border border-gray-300 rounded-md shadow-lg p-3">
+            <div class="text-xs font-medium text-gray-600 mb-2">Share this URL</div>
+            <div class="flex items-center gap-2">
+              <div id="analysis-direct-link-value"
+                   class="flex-1 min-w-0 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-2 break-all"></div>
+              <button type="button"
+                      class="h-8 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-2"
+                      onclick="copyAnalysisDirectLinkFromPopover()"
+                      title="Copy link">
+                <i class="fas fa-copy text-xs"></i>
+                <span>Copy</span>
+              </button>
+            </div>
+            <div id="analysis-direct-link-copied"
+                 class="hidden mt-2 text-xs font-medium text-green-700">
+              Copied!
+            </div>
+          </div>
+        </div>
+
+        <% if defined?(@available_loom_files) && @available_loom_files.present? %>
+          <div class="inline-flex items-center h-9">
+            <div class="inline-flex h-9 items-center px-3 border border-gray-300 rounded-l-md bg-gray-50 text-sm font-medium text-gray-700">
+              <i class="fa fa-filter mr-1"></i>
+              <span>Filter runs</span>
+              <span id="loom-filter-warning-icon"
+                    class="ml-2 text-amber-600 cursor-help <%= (defined?(@loom_filter_hidden_runs_count) && @loom_filter_hidden_runs_count.to_i > 0) ? '' : 'hidden' %>"
+                    title="<%= @loom_filter_warning_message %>"
+                    data-global-hidden-runs-count="<%= @loom_filter_hidden_runs_count.to_i %>"
+                    data-global-visible-runs-count="<%= @loom_filter_visible_runs_count.to_i %>"
+                    data-global-total-runs-count="<%= @loom_filter_total_runs_count.to_i %>"
+                    data-hidden-by-step-json="<%= (@loom_filter_hidden_runs_by_step || {}).to_json %>"
+                    data-visible-by-step-json="<%= (@loom_filter_visible_runs_by_step || {}).to_json %>"
+                    data-total-by-step-json="<%= (@loom_filter_total_runs_by_step || {}).to_json %>"
+                    data-step-id-name-json="<%= (@analysis_step_id_to_name || {}).to_json %>"
+                    data-hidden-by-step-name-json="<%= (@loom_filter_hidden_runs_by_step_name || {}).to_json %>"
+                    data-visible-by-step-name-json="<%= (@loom_filter_visible_runs_by_step_name || {}).to_json %>"
+                    data-total-by-step-name-json="<%= (@loom_filter_total_runs_by_step_name || {}).to_json %>">
+                <i class="fa fa-exclamation-triangle"></i>
+              </span>
+              <span id="loom-filter-warning-count"
+                    class="ml-1 text-amber-700 text-xs font-medium <%= (defined?(@loom_filter_hidden_runs_count) && @loom_filter_hidden_runs_count.to_i > 0) ? '' : 'hidden' %>">
+                <%= @loom_filter_visible_runs_count.to_i %> of <%= @loom_filter_total_runs_count.to_i %>
+              </span>
+            </div>
+            <label for="analysis-loom-select" class="sr-only">Loom file</label>
+            <select id="analysis-loom-select"
+                    class="-ml-px h-9 px-3 border border-gray-300 rounded-r-md text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onchange="onAnalysisLoomFilterChange(this.value)">
+              <% all_url_params = { view: 'analysis', loom_file: '__all__' } %>
+              <% all_url_params[:step_id] = @selected_step_id if defined?(@selected_step_id) && @selected_step_id.present? %>
+              <% all_url_params[:run_id] = @selected_run_id if defined?(@selected_run_id) && @selected_run_id.present? %>
+              <% all_url_params[:sub_view] = params[:sub_view] if params[:sub_view].present? %>
+              <option value="<%= project_path(@project, all_url_params) %>" <%= @selected_loom_file.blank? ? 'selected' : '' %>>
+                All LOOM files
+              </option>
+              <% @available_loom_files.each do |filepath| %>
+                <% url_params = { view: 'analysis', loom_file: filepath } %>
+                <% url_params[:step_id] = @selected_step_id if defined?(@selected_step_id) && @selected_step_id.present? %>
+                <% url_params[:run_id] = @selected_run_id if defined?(@selected_run_id) && @selected_run_id.present? %>
+                <% url_params[:sub_view] = params[:sub_view] if params[:sub_view].present? %>
+                <% option_url = project_path(@project, url_params) %>
+                <option value="<%= option_url %>" <%= (defined?(@selected_loom_file) && @selected_loom_file == filepath) ? 'selected' : '' %>>
+                  <%= loom_file_label(filepath) %>
+                </option>
+              <% end %>
+            </select>
+          </div>
+        <% end %>
+
+        <button id="analysis-pipeline-toggle-button"
+                type="button" 
+                class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors cursor-pointer inline-block"
+                data-mode="graph"
+                onclick="openPipelineGraphOrRunDetails()">
+          Pipeline Graph
         </button>
       </div>
     </div>
@@ -67,8 +156,299 @@
 
 
 <script>
+  function updateAnalysisLoomFilterWarning() {
+    const warningIcon = document.getElementById('loom-filter-warning-icon')
+    const warningCount = document.getElementById('loom-filter-warning-count')
+    if (!warningIcon) return
+
+    const parseJsonMap = (raw) => {
+      if (!raw) return {}
+      try {
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed === 'object' ? parsed : {}
+      } catch (_e) {
+        return {}
+      }
+    }
+
+    const hiddenByStep = parseJsonMap(warningIcon.dataset.hiddenByStepJson)
+    const visibleByStep = parseJsonMap(warningIcon.dataset.visibleByStepJson)
+    const totalByStep = parseJsonMap(warningIcon.dataset.totalByStepJson)
+    const stepIdToName = parseJsonMap(warningIcon.dataset.stepIdNameJson)
+    const hiddenByStepName = parseJsonMap(warningIcon.dataset.hiddenByStepNameJson)
+    const visibleByStepName = parseJsonMap(warningIcon.dataset.visibleByStepNameJson)
+    const totalByStepName = parseJsonMap(warningIcon.dataset.totalByStepNameJson)
+
+    const graphToggleButton = document.getElementById('analysis-pipeline-toggle-button')
+    const mode = graphToggleButton && graphToggleButton.dataset ? graphToggleButton.dataset.mode : 'graph'
+    const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+    const currentStepId = stepSelectorElement ? stepSelectorElement.getAttribute('data-current-step-id') : null
+    const renderedStepElement = document.querySelector('[data-step-selector-target="content"] .step-results[data-step-id]')
+    const renderedStepId = renderedStepElement ? renderedStepElement.getAttribute('data-step-id') : null
+    const renderedStepName = renderedStepElement ? renderedStepElement.getAttribute('data-step-name') : null
+    const selectedStepMenuElement = currentStepId
+      ? document.querySelector(`[data-step-selector-target="stepsPanel"] [data-step-id="${currentStepId}"], [data-dropdown-target="menu"] [data-step-id="${currentStepId}"]`)
+      : null
+    const selectedStepMenuName = selectedStepMenuElement ? selectedStepMenuElement.getAttribute('data-step-name') : null
+
+    console.log('[Analysis][warning][debug] mode=', mode,
+      'currentStepId=', currentStepId,
+      'renderedStepId=', renderedStepId,
+      'renderedStepName=', renderedStepName,
+      'selectedStepMenuName=', selectedStepMenuName)
+
+    // Button mode mapping:
+    // - mode "details" => currently in Graph view (button says "Run details")
+    // - mode "graph"   => currently in Run details view (button says "Pipeline Graph")
+    // In run-details view, warning must be step-scoped.
+    if (mode === 'graph' && (renderedStepId || currentStepId)) {
+      const stepIdForWarning = renderedStepId || currentStepId
+      let hiddenCount = Number(hiddenByStep[String(stepIdForWarning)] || 0)
+      let visibleCount = Number(visibleByStep[String(stepIdForWarning)] || 0)
+      let totalCount = Number(totalByStep[String(stepIdForWarning)] || 0)
+
+      // Fallback to step-name aggregation when step-id mapping differs
+      if (totalCount === 0) {
+        const rawStepName = renderedStepName || selectedStepMenuName || stepIdToName[String(stepIdForWarning)]
+        const stepName = rawStepName ? String(rawStepName).trim().toLowerCase() : ''
+        if (stepName) {
+          hiddenCount = Number(hiddenByStepName[String(stepName)] || 0)
+          visibleCount = Number(visibleByStepName[String(stepName)] || 0)
+          totalCount = Number(totalByStepName[String(stepName)] || 0)
+        }
+      }
+
+      console.log('[Analysis][warning][debug] step-scope decision stepIdForWarning=', stepIdForWarning,
+        'hiddenCount=', hiddenCount, 'visibleCount=', visibleCount, 'totalCount=', totalCount)
+
+      if (hiddenCount > 0) {
+        warningIcon.classList.remove('hidden')
+        warningIcon.title = `${hiddenCount} run(s) are hidden by the current loom filter for this step. Showing ${visibleCount} of ${totalCount} run(s).`
+        if (warningCount) {
+          warningCount.classList.remove('hidden')
+          warningCount.textContent = `${visibleCount} of ${totalCount}`
+        }
+      } else {
+        warningIcon.classList.add('hidden')
+        warningIcon.title = ''
+        if (warningCount) {
+          warningCount.classList.add('hidden')
+          warningCount.textContent = ''
+        }
+      }
+      console.log('[Analysis][warning][debug] step-scope iconHidden=', warningIcon.classList.contains('hidden'), 'title=', warningIcon.title)
+      return
+    }
+
+    const globalHidden = Number(warningIcon.dataset.globalHiddenRunsCount || 0)
+    const globalVisible = Number(warningIcon.dataset.globalVisibleRunsCount || 0)
+    const globalTotal = Number(warningIcon.dataset.globalTotalRunsCount || 0)
+    if (globalHidden > 0) {
+      warningIcon.classList.remove('hidden')
+      warningIcon.title = `${globalHidden} run(s) are hidden by the current loom filter. Showing ${globalVisible} of ${globalTotal} run(s).`
+      if (warningCount) {
+        warningCount.classList.remove('hidden')
+        warningCount.textContent = `${globalVisible} of ${globalTotal}`
+      }
+    } else {
+      warningIcon.classList.add('hidden')
+      warningIcon.title = ''
+      if (warningCount) {
+        warningCount.classList.add('hidden')
+        warningCount.textContent = ''
+      }
+    }
+    console.log('[Analysis][warning][debug] global-scope hidden=', globalHidden, 'visible=', globalVisible, 'total=', globalTotal,
+      'iconHidden=', warningIcon.classList.contains('hidden'), 'title=', warningIcon.title)
+  }
+
+  function buildAnalysisDirectLink() {
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', 'analysis')
+
+    const toggleButton = document.getElementById('analysis-pipeline-toggle-button')
+    const buttonMode = toggleButton && toggleButton.dataset ? toggleButton.dataset.mode : 'graph'
+    // Button mode mapping:
+    // - "details" => currently in graph view
+    // - "graph"   => currently in run-details view
+    const currentPanelMode = buttonMode === 'details' ? 'graph' : 'run_details'
+    url.searchParams.set('panel_mode', currentPanelMode)
+
+    const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+    const currentStepId = stepSelectorElement ? stepSelectorElement.getAttribute('data-current-step-id') : null
+    if (currentStepId) {
+      url.searchParams.set('step_id', String(currentStepId))
+    } else {
+      url.searchParams.delete('step_id')
+    }
+
+    const runPanel = document.getElementById('run_result_summary_panel')
+    const runIdFromPanel = runPanel ? runPanel.getAttribute('data-run-id') : null
+    const stepIdFromPanel = runPanel ? runPanel.getAttribute('data-step-id') : null
+    const effectiveStepId = stepIdFromPanel || currentStepId
+    if (effectiveStepId) {
+      url.searchParams.set('step_id', String(effectiveStepId))
+    }
+    if (runIdFromPanel) {
+      url.searchParams.set('run_id', String(runIdFromPanel))
+      url.searchParams.set('panel_mode', 'run_details')
+    } else {
+      url.searchParams.delete('run_id')
+    }
+
+    const loomSelect = document.getElementById('analysis-loom-select')
+    if (loomSelect && loomSelect.value) {
+      try {
+        const selectedUrl = new URL(loomSelect.value, window.location.origin)
+        const selectedLoom = selectedUrl.searchParams.get('loom_file')
+        if (selectedLoom) {
+          url.searchParams.set('loom_file', selectedLoom)
+        }
+      } catch (_e) {
+        // no-op
+      }
+    }
+
+    return url.toString()
+  }
+
+  function buildRunDetailsDirectLink(stepId, runId) {
+    const url = new URL(buildAnalysisDirectLink())
+    if (stepId) {
+      url.searchParams.set('step_id', String(stepId))
+    }
+    if (runId) {
+      url.searchParams.set('run_id', String(runId))
+    }
+    url.searchParams.set('panel_mode', 'run_details')
+    return url.toString()
+  }
+
+  function toggleAnalysisDirectLinkPopover(forceOpen) {
+    const popover = document.getElementById('analysis-direct-link-popover')
+    const valueEl = document.getElementById('analysis-direct-link-value')
+    const copiedEl = document.getElementById('analysis-direct-link-copied')
+    if (!popover || !valueEl) return
+
+    const shouldOpen = forceOpen === true || (forceOpen !== false && popover.classList.contains('hidden'))
+    if (!shouldOpen) {
+      popover.classList.add('hidden')
+      if (copiedEl) copiedEl.classList.add('hidden')
+      return
+    }
+
+    valueEl.textContent = buildAnalysisDirectLink()
+    popover.classList.remove('hidden')
+    if (copiedEl) copiedEl.classList.add('hidden')
+  }
+
+  function copyAnalysisDirectLinkFromPopover() {
+    const valueEl = document.getElementById('analysis-direct-link-value')
+    const copiedEl = document.getElementById('analysis-direct-link-copied')
+    if (!valueEl) return
+
+    const url = (valueEl.textContent || '').trim()
+    if (!url) return
+
+    navigator.clipboard.writeText(url)
+      .then(() => {
+        if (!copiedEl) return
+        copiedEl.classList.remove('hidden')
+        setTimeout(() => {
+          copiedEl.classList.add('hidden')
+        }, 1500)
+      })
+      .catch((_e) => {
+        if (!copiedEl) return
+        copiedEl.textContent = 'Copy failed'
+        copiedEl.classList.remove('hidden')
+        setTimeout(() => {
+          copiedEl.textContent = 'Copied!'
+          copiedEl.classList.add('hidden')
+        }, 1500)
+      })
+  }
+
+  function onAnalysisLoomFilterChange(targetUrl) {
+    if (!targetUrl) return
+
+    try {
+      const url = new URL(targetUrl, window.location.origin)
+      const toggleButton = document.getElementById('analysis-pipeline-toggle-button')
+      const buttonMode = toggleButton && toggleButton.dataset ? toggleButton.dataset.mode : 'graph'
+      // Button mode mapping:
+      // - "details" => currently in graph view
+      // - "graph"   => currently in run-details view
+      const currentPanelMode = buttonMode === 'details' ? 'graph' : 'run_details'
+      url.searchParams.set('panel_mode', currentPanelMode)
+      window.location.href = url.pathname + url.search + url.hash
+    } catch (_e) {
+      window.location.href = targetUrl
+    }
+  }
+
+  function setPipelineHeaderButtonMode(mode) {
+    const button = document.getElementById('analysis-pipeline-toggle-button')
+    if (!button) return
+
+    if (mode === 'details') {
+      button.dataset.mode = 'details'
+      button.textContent = 'Run details'
+    } else {
+      button.dataset.mode = 'graph'
+      button.textContent = 'Pipeline Graph'
+    }
+    updateAnalysisLoomFilterWarning()
+  }
+
+  function openPipelineGraphOrRunDetails() {
+    const button = document.getElementById('analysis-pipeline-toggle-button')
+    const mode = button && button.dataset ? button.dataset.mode : 'graph'
+    console.log('[Analysis][debug] openPipelineGraphOrRunDetails mode=', mode)
+
+    if (mode === 'details') {
+      const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+      if (!stepSelectorElement || !window.Stimulus) return
+
+      const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
+      if (!controller || !controller.currentStepId || typeof controller.loadStepResults !== 'function') return
+
+      const stepId = controller.currentStepId.toString()
+      console.log('[Analysis][debug] run-details click currentStepId=', stepId, 'buttonMode=', mode)
+      const stepElement = stepSelectorElement.querySelector(`[data-step-id="${stepId}"]`) || { getAttribute: () => stepId }
+      controller.loadStepResults(stepId, stepElement, true, '&prefer_runs_list=1')
+      return
+    }
+
+    loadFormInRightPanel('<%= graph_project_path(@project) %>')
+  }
+
+  function appendLoomContextToUrl(url) {
+    try {
+      const dropdown = document.getElementById('analysis-loom-select')
+      if (!dropdown) return url
+
+      const selectedOption = dropdown.options[dropdown.selectedIndex]
+      if (!selectedOption || !selectedOption.value) return url
+
+      const selectedUrl = new URL(selectedOption.value, window.location.origin)
+      const selectedLoom = selectedUrl.searchParams.get('loom_file')
+      if (!selectedLoom) return url
+
+      const targetUrl = new URL(url, window.location.origin)
+      if (!targetUrl.searchParams.get('loom_file')) {
+        targetUrl.searchParams.set('loom_file', selectedLoom)
+      }
+      return targetUrl.pathname + targetUrl.search + targetUrl.hash
+    } catch (e) {
+      return url
+    }
+  }
+
   function loadFormInRightPanel(formUrl) {
-    console.log('[loadFormInRightPanel] Loading form from:', formUrl)
+    formUrl = appendLoomContextToUrl(formUrl)
+    const isGraphRequest = /\/graph(\?|$)/.test(formUrl)
+    console.log('[loadFormInRightPanel] Loading form from:', formUrl, 'isGraphRequest=', isGraphRequest)
     
     // Find the step-selector controller and its content target
     const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
@@ -184,6 +564,12 @@
               window.Stimulus.router.scan()
             }, 100)
           }
+
+          if (isGraphRequest) {
+            setPipelineHeaderButtonMode('details')
+          } else {
+            setPipelineHeaderButtonMode('graph')
+          }
         }
       }
       
@@ -212,6 +598,12 @@
             window.Stimulus.router.scan()
           }, 100)
         }
+
+        if (isGraphRequest) {
+          setPipelineHeaderButtonMode('details')
+        } else {
+          setPipelineHeaderButtonMode('graph')
+        }
       }
     })
     .catch(error => {
@@ -230,6 +622,7 @@
   }
 
   function loadRunInRightPanel(runUrl, stepId) {
+    setPipelineHeaderButtonMode('graph')
     console.log('[loadRunInRightPanel] Loading run from:', runUrl, 'stepId:', stepId)
     
     // Find the step-selector controller and its content target
@@ -358,5 +751,30 @@
   }
 
   console.log('[Analysis] selected_run_id=<%= @selected_run_id.inspect %>, selected_step_id=<%= @selected_step_id.inspect %>, load_run_panel=<%= @load_run_panel.inspect %>, load_sub_view=<%= @load_sub_view.inspect %>')
+  updateAnalysisLoomFilterWarning()
+
+  ;(function restorePanelModeAfterLoomSwitch() {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const panelMode = params.get('panel_mode')
+      if (panelMode === 'graph') {
+        // Keep graph mode after loom filter change
+        setTimeout(() => {
+          loadFormInRightPanel('<%= graph_project_path(@project) %>')
+        }, 120)
+      }
+    } catch (_e) {
+      // no-op
+    }
+  })()
+
+  document.addEventListener('click', function(event) {
+    const container = document.getElementById('analysis-direct-link-container')
+    const popover = document.getElementById('analysis-direct-link-popover')
+    if (!container || !popover || popover.classList.contains('hidden')) return
+    if (!container.contains(event.target)) {
+      toggleAnalysisDirectLinkPopover(false)
+    }
+  })
 
 </script>

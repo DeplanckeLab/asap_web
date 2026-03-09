@@ -29,7 +29,7 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
-  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean, loadSubView: Boolean, subViewStepId: Number }
+  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean, loadSubView: Boolean, subViewStepId: Number, loomFile: String }
 
   get projectIdentifier() {
     return this.projectKeyValue || this.projectIdValue
@@ -134,6 +134,28 @@ export default class extends Controller {
     const runIdFromUrl = urlParams.get('run_id')
     const stepIdFromUrl = urlParams.get('step_id')
     const showFormFromUrl = urlParams.get('show_form')
+    const panelModeFromUrl = urlParams.get('panel_mode')
+    const loomFileFromUrl = urlParams.get('loom_file')
+    const hasTransientUrlParams = !!(
+      runIdFromUrl ||
+      stepIdFromUrl ||
+      showFormFromUrl ||
+      panelModeFromUrl ||
+      loomFileFromUrl ||
+      urlParams.get('sub_view') ||
+      urlParams.get('de_fdr') ||
+      urlParams.get('de_fc') ||
+      urlParams.get('markers_fdr') ||
+      urlParams.get('markers_fc') ||
+      urlParams.get('markers_max_genes') ||
+      urlParams.get('markers_highlight') ||
+      urlParams.get('markers_analysis') ||
+      urlParams.get('ge_fdr') ||
+      urlParams.get('gene_list_run_id') ||
+      urlParams.get('gene_list_type') ||
+      urlParams.get('geneset_list_run_id') ||
+      urlParams.get('geneset_list_type')
+    )
     
     // Check if server says to load run panel (false when step has a custom partial like _parsing.html.erb)
     const shouldLoadRunPanel = this.hasLoadRunPanelValue ? this.loadRunPanelValue : false
@@ -168,6 +190,17 @@ export default class extends Controller {
     }
     
     // Normal flow: load step results
+    // If panel_mode=graph is requested, do not auto-load a step here.
+    // The analysis view script will load the graph into the right panel.
+    if (panelModeFromUrl === 'graph') {
+      console.log('[StepSelectorController] panel_mode=graph detected, skipping initial auto step load')
+      if (hasTransientUrlParams) {
+        this._cleanUrlParams()
+      }
+      this.subscribeToProject()
+      return
+    }
+
     // Wait for steps panel to be loaded before trying to select a step
     // The steps panel might be loaded asynchronously via refreshStepsPanel
     const controller = this
@@ -260,6 +293,13 @@ export default class extends Controller {
           controller.selectFirstAvailableStep()
         }
       }, 500)
+    }
+
+    // Ensure deep-link/transient params are always cleaned, including non-server-rendered flows.
+    if (hasTransientUrlParams) {
+      setTimeout(() => {
+        this._cleanUrlParams()
+      }, 300)
     }
     
       // Subscribe to websocket updates for this project
@@ -509,6 +549,7 @@ export default class extends Controller {
   _cleanUrlParams() {
     const url = new URL(window.location.href)
     const keysToRemove = ['step_id', 'run_id', 'sub_view',
+      'panel_mode', 'show_form', 'loom_file',
       'de_fdr', 'de_fc',
       'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis',
       'ge_fdr',
@@ -853,6 +894,17 @@ export default class extends Controller {
     // Update selected step in dropdown list
     this.updateDropdownListSelection(stepId)
 
+    // If graph mode is active, keep graph view and only update node highlighting
+    if (this.isGraphModeActive()) {
+      if (typeof window.updatePipelineGraphStepHighlight === 'function') {
+        window.updatePipelineGraphStepHighlight(stepId)
+      }
+      if (typeof window.updateAnalysisLoomFilterWarning === 'function') {
+        window.updateAnalysisLoomFilterWarning()
+      }
+      return
+    }
+
     this.loadStepResults(stepId, stepElement)
   }
 
@@ -892,7 +944,23 @@ export default class extends Controller {
       this.updateDropdownButton(stepElement)
     }
 
+    // If graph mode is active, keep graph view and only update node highlighting
+    if (this.isGraphModeActive()) {
+      if (typeof window.updatePipelineGraphStepHighlight === 'function') {
+        window.updatePipelineGraphStepHighlight(stepId)
+      }
+      if (typeof window.updateAnalysisLoomFilterWarning === 'function') {
+        window.updateAnalysisLoomFilterWarning()
+      }
+      return
+    }
+
     this.loadStepResults(stepId, stepElement)
+  }
+
+  isGraphModeActive() {
+    const graphToggleButton = document.getElementById('analysis-pipeline-toggle-button')
+    return !!(graphToggleButton && graphToggleButton.dataset && graphToggleButton.dataset.mode === 'details')
   }
 
   updateDropdownButton(stepElement) {
@@ -959,6 +1027,7 @@ export default class extends Controller {
     console.log('[StepSelectorController] Step ID:', stepId, 'type:', typeof stepId)
     console.log('[StepSelectorController] Step Element:', stepElement)
     console.log('[StepSelectorController] Show Loading:', showLoading)
+    console.log('[StepSelectorController][debug] extraQuery:', extraQuery)
     console.log('[StepSelectorController] Previous currentStepId:', this.currentStepId)
     
     // Track current step (ensure it's stored as string for consistency)
@@ -995,7 +1064,18 @@ export default class extends Controller {
     // Load step results via AJAX
     // Add cache-busting parameter to ensure fresh data on page reload
     const cacheBuster = new Date().getTime()
-    const url = `/projects/${this.projectIdentifier}/step_results.html?step_id=${stepId}&_t=${cacheBuster}${extraQuery}`
+    let query = `step_id=${encodeURIComponent(stepId)}&_t=${cacheBuster}`
+    if (extraQuery) {
+      if (extraQuery.startsWith('&')) {
+        query += extraQuery
+      } else {
+        query += `&${extraQuery}`
+      }
+    }
+    if (this.hasLoomFileValue && this.loomFileValue && !query.includes('loom_file=')) {
+      query += `&loom_file=${encodeURIComponent(this.loomFileValue)}`
+    }
+    const url = `/projects/${this.projectIdentifier}/step_results.html?${query}`
     console.log('[StepSelectorController] Fetching URL:', url)
     
     // Store controller reference and stepId to preserve in promise chain
@@ -1135,6 +1215,9 @@ export default class extends Controller {
         controller.emptyStateTarget.style.display = 'none'
       }
       controller.contentTarget.style.display = 'block'
+      if (typeof window.setPipelineHeaderButtonMode === 'function') {
+        window.setPipelineHeaderButtonMode('graph')
+      }
       
       // Log information about controllers in the loaded content for debugging
       // Stimulus's MutationObserver should automatically detect and connect them

@@ -30,6 +30,7 @@ class ProjectUnarchiveJob < ApplicationJob
       unarchive_status: status
     }
     payload[:project_unarchived] = project_unarchived unless project_unarchived.nil?
+    Rails.logger.info("[ProjectUnarchiveJob] Broadcasting unarchive status for project #{project.id} (#{project.key}): #{payload.inspect}")
     ActionCable.server.broadcast("project_#{project.id}", payload)
   end
 end

@@ -30,11 +30,17 @@ Rails.application.configure do
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = true
 
-  config.action_cable.url = ENV.fetch("ACTION_CABLE_FRONTEND_URL", ENV.fetch("ACTION_CABLE_URL", "/websocket"))
-  config.action_cable.allowed_request_origins = [
-    "https://asap-test.epfl.ch",
-    "https://asap.epfl.ch"
-  ]
+  config.action_cable.url = ENV.fetch("ACTION_CABLE_FRONTEND_URL")
+  cable_origins = ENV.fetch("ACTION_CABLE_ALLOWED_REQUEST_ORIGINS", "").to_s
+  if cable_origins.present?
+    origin_patterns = cable_origins.split(",").map(&:strip).reject(&:blank?)
+    config.action_cable.allowed_request_origins = origin_patterns.map { |origin| /#{origin}/ }
+  else
+    config.action_cable.allowed_request_origins = [
+      "https://asap-test.epfl.ch",
+      "https://asap.epfl.ch"
+    ]
+  end
 
   # Allow HTTPS requests that are terminated by an upstream proxy with mismatched Origin/Base URLs.
   config.action_controller.forgery_protection_origin_check = false

@@ -23,7 +23,6 @@ Rails.application.routes.draw do
       get :get_autocomplete_genes
       get :creating
       get :creation_status
-      get :unarchive_status
       get :step_results
       get :refresh_steps_panel
       get :queue_position

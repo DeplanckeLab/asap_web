@@ -309,6 +309,21 @@
                 </div>
               </div>
             </div>
+            <% if @sandbox_self_destruct_at.present? %>
+              <% countdown = sandbox_self_destruct_countdown(@sandbox_self_destruct_at) %>
+              <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300">
+                <div class="flex flex-col justify-center">
+                  <span class="text-xs text-gray-300">Sandbox</span>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/40 text-xs mt-1 w-fit"
+                        data-controller="countdown"
+                        data-countdown-end-ms-value="<%= (@sandbox_self_destruct_at.to_f * 1000).to_i %>"
+                        title="This sandbox project will self-destroy in <%= countdown %>.">
+                    <i class="fas fa-bomb text-[11px]"></i>
+                    <span data-countdown-target="display"><%= countdown %></span>
+                  </span>
+                </div>
+              </div>
+            <% end %>
           </div>
         </div>
       

@@ -171,6 +171,10 @@ import UnarchiveStatusController from "controllers/unarchive_status_controller"
 application.register("unarchive-status", UnarchiveStatusController)
 console.log('Unarchive status controller registered')
 
+import CountdownController from "controllers/countdown_controller"
+application.register("countdown", CountdownController)
+console.log('Countdown controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

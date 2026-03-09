@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_05_173000) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_09_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -971,6 +971,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_05_173000) do
     t.datetime "updated_at", precision: nil
   end
 
+  create_table "project_view_logs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.date "viewed_on", null: false
+    t.string "viewer_token", limit: 128, null: false
+    t.index ["project_id", "viewed_on"], name: "index_project_view_logs_on_project_id_and_viewed_on"
+    t.index ["project_id", "viewer_token", "viewed_on"], name: "idx_pvl_on_project_viewer_day", unique: true
+    t.index ["project_id"], name: "index_project_view_logs_on_project_id"
+  end
+
   create_table "projects", id: :serial, force: :cascade do |t|
     t.integer "archive_status_id", default: 1
     t.boolean "being_deleted", default: false
@@ -1536,6 +1547,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_05_173000) do
   add_foreign_key "project_steps", "steps", name: "project_steps_step_id_fkey"
   add_foreign_key "project_tags_projects", "project_tags", name: "project_tags_projects_project_tag_id_fkey"
   add_foreign_key "project_tags_projects", "projects", name: "project_tags_projects_project_id_fkey"
+  add_foreign_key "project_view_logs", "projects"
   add_foreign_key "projects", "archive_statuses", name: "projects_archive_status_id_fkey"
   add_foreign_key "projects", "filter_methods", column: "filter_id", name: "projects_filter_id_fkey"
   add_foreign_key "projects", "filter_methods", name: "projects_filter_method_id_fkey"

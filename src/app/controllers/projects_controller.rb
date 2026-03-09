@@ -100,6 +100,8 @@ class ProjectsController < ApplicationController
   # GET /projects/1 or /projects/1.json
   def show
     queue_unarchive_if_project_files_missing
+    track_project_view!
+    set_sandbox_self_destruct_at!
 
     if selective_project_view_loading_enabled?
       with_request_profile('projects#show', view: params[:view]) do
@@ -5828,6 +5830,26 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def set_sandbox_self_destruct_at!
+      @sandbox_self_destruct_at = nil
+      return unless @project.sandbox? && !current_user
+
+      sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i
+      last_seen_at = @project.viewed_at || @project.updated_at || @project.created_at || Time.current
+      @sandbox_self_destruct_at = last_seen_at + sandbox_idle_days.days
+    end
+
+    def track_project_view!
+      return if admin?
+
+      ProjectViewTracker.track!(
+        project: @project,
+        current_user: current_user,
+        session_id: session.id,
+        viewed_at: Time.current
+      )
+    end
+
     def queue_unarchive_if_project_files_missing
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
       @project_files_missing = !File.exist?(project_dir)

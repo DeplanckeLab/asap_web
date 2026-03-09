@@ -38,6 +38,16 @@ module ApplicationHelper
     end
   end
 
+  def sandbox_self_destruct_countdown(destroy_at)
+    return nil unless destroy_at
+
+    remaining_seconds = [(destroy_at - Time.current).to_i, 0].max
+    hours = remaining_seconds / 3600
+    minutes = (remaining_seconds % 3600) / 60
+    seconds = remaining_seconds % 60
+    format('%02d:%02d:%02d', hours, minutes, seconds)
+  end
+
   # Format number with thousand delimiters
   def number_with_delimiter(number)
     return "0" if number.nil?

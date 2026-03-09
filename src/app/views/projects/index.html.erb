@@ -221,6 +221,12 @@
                   <%= link_to project.display_name, project_path(project), class: "hover:text-blue-600" %>
                 </h3>
                 <div class="flex items-center gap-1.5 shrink-0">
+                  <% if project.version_id.present? %>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
+                          title="ASAP release">
+                      v<%= project.version_id %>
+                    </span>
+                  <% end %>
                   <% if project.archive_status.present? && project.archive_status.icon_class.present? %>
                     <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-700"
                           title="Archive status: <%= project.archive_status.display_name %>">
@@ -383,6 +389,12 @@
                         <% end %>
                         <% if project.public_id.present? %>
                           <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800">ASAP<%= project.public_id %></span>
+                        <% end %>
+                        <% if project.version_id.present? %>
+                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-gray-100 text-gray-700"
+                                title="ASAP release">
+                            v<%= project.version_id %>
+                          </span>
                         <% end %>
                       </div>
                     </div>

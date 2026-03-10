@@ -81,6 +81,32 @@ export default class extends Controller {
     console.log(`[CheckpointTrace ${timestamp}] ${message}`, data)
   }
 
+  isVisualizationPerfLoggingEnabled() {
+    if (this.visualizationPerfLogsEnabled === true) {
+      return true
+    }
+
+    if (typeof window !== 'undefined' && window.VISUALIZATION_PERF_LOGS === true) {
+      return true
+    }
+
+    return false
+  }
+
+  shouldLogVisualizationPerf(cellCount = 0) {
+    const threshold = 200000
+    return this.isVisualizationPerfLoggingEnabled() || Number(cellCount) >= threshold
+  }
+
+  perfLog(eventName, payload = {}, options = {}) {
+    const { force = false, cellCount = 0 } = options
+    if (!force && !this.shouldLogVisualizationPerf(cellCount)) {
+      return
+    }
+
+    console.info(`[perf-viz] ${eventName}`, payload)
+  }
+
   collectCheckpointUiBlockers() {
     const overlayIds = [
       'checkpoint-history-overlay',
@@ -2262,6 +2288,12 @@ export default class extends Controller {
             hasCurrentCoordinates: !!this.currentCoordinates,
             currentCoordinatesLength: this.currentCoordinates?.length || 0
           })
+          this.perfLog('load_metadata_coordinates', {
+            metadataId: normalizedMetadataId,
+            source: 'memory-cache',
+            durationMs: Number((performance.now() - fetchStart).toFixed(2)),
+            coordinatesCount: this.currentCoordinates?.length || 0
+          }, { cellCount: this.currentCoordinates?.length || 0 })
           return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
         }
         
@@ -2280,6 +2312,12 @@ export default class extends Controller {
             hasCurrentCoordinates: !!this.currentCoordinates,
             currentCoordinatesLength: this.currentCoordinates?.length || 0
           })
+          this.perfLog('load_metadata_coordinates', {
+            metadataId: normalizedMetadataId,
+            source: 'indexeddb',
+            durationMs: Number((performance.now() - fetchStart).toFixed(2)),
+            coordinatesCount: this.currentCoordinates?.length || 0
+          }, { cellCount: this.currentCoordinates?.length || 0 })
           return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
         }
         
@@ -2300,14 +2338,13 @@ export default class extends Controller {
           console.warn('CSRF token not found, request may fail authentication')
         }
         
+        const networkStart = performance.now()
         const response = await fetch(url, {
           method: 'GET',
           headers: headers,
           credentials: 'same-origin'
         })
-        
-        const fetchTime = performance.now() - fetchStart
-        // console.log(`⏱️ [PERF] Step 1: Network fetch completed in ${fetchTime.toFixed(2)}ms`)
+        const networkMs = performance.now() - networkStart
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
@@ -2325,7 +2362,9 @@ export default class extends Controller {
         const metadataName = response.headers.get('X-Metadata-Name')
         const cellCount = parseInt(response.headers.get('X-Cell-Count'))
         
+        const bufferStart = performance.now()
         const arrayBuffer = await response.arrayBuffer()
+        const bufferMs = performance.now() - bufferStart
         const dataObject = {
           id: headerMetadataId,
           name: metadataName,
@@ -2338,7 +2377,9 @@ export default class extends Controller {
           console.warn('Failed to store coordinates in IndexedDB:', error)
         })
         
+        const renderStart = performance.now()
         await this.dataManager.storeBinaryMetadataData(dataObject)
+        const renderMs = performance.now() - renderStart
         this.syncEmbeddingUiToLoadedEmbedding(headerMetadataId || normalizedMetadataId, metadataName || null)
         this.checkpointDebug('loadMetadataCoordinates:success', {
           metadataId: normalizedMetadataId,
@@ -2354,6 +2395,17 @@ export default class extends Controller {
           currentCoordinatesLength: this.currentCoordinates?.length || 0,
           hasRenderer: !!this.reglRenderer
         })
+        this.perfLog('load_metadata_coordinates', {
+          metadataId: normalizedMetadataId,
+          source: 'network',
+          networkMs: Number(networkMs.toFixed(2)),
+          responseBufferMs: Number(bufferMs.toFixed(2)),
+          renderMs: Number(renderMs.toFixed(2)),
+          totalMs: Number((performance.now() - fetchStart).toFixed(2)),
+          responseBytes: arrayBuffer.byteLength,
+          cellCount: Number.isFinite(cellCount) ? cellCount : null,
+          loomFile: requestedLoomFile
+        }, { cellCount })
         return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
       } catch (error) {
         this.checkpointDebug('loadMetadataCoordinates:error', {
@@ -2473,8 +2525,10 @@ export default class extends Controller {
     const startTime = performance.now()
     // console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
     
+    const boundsStart = performance.now()
     // Calculate bounds for normalization
     const originalBounds = this.dataManager.calculateBounds(coordinates)
+    const boundsMs = performance.now() - boundsStart
     //const bounds = originalBounds
     this.currentBounds = originalBounds
     // ALWAYS preserve currentCoordinates - this is critical for filtering
@@ -2509,6 +2563,7 @@ export default class extends Controller {
     
     // console.log(`🎯 [ReGL] Initialized display order (identity: 0, 1, 2, ...)`)
     
+    const normalizeStart = performance.now()
     // Normalize coordinates to screen space (0 to canvas size)
     const canvas = this.canvas
     const screenCoordinates = new Float32Array(coordinates.length * 2)
@@ -2518,6 +2573,7 @@ export default class extends Controller {
       screenCoordinates[i * 2] = this.interactionHandler.normalizeX(x, originalBounds)
       screenCoordinates[i * 2 + 1] = this.interactionHandler.normalizeY(y, originalBounds)
     }
+    const normalizeMs = performance.now() - normalizeStart
     
     // console.log('🔍 DEBUG: Coordinate normalization:', {
       // numPoints: coordinates.length,
@@ -2527,6 +2583,7 @@ export default class extends Controller {
       // firstFewScreenCoords: Array.from(screenCoordinates.slice(0, 6))
     // })
     
+    const rendererStart = performance.now()
     // Set positions in ReGL renderer
     this.reglRenderer.setPositions(screenCoordinates)
     
@@ -2553,6 +2610,7 @@ export default class extends Controller {
     this.rendererManager.renderGrid()
     this.rendererManager.renderAxes()
     this.rendererManager.renderCategoryLabels() // ✅ Category labels work in ReGL mode!
+    const rendererMs = performance.now() - rendererStart
     
     // Update point count display
     const pointCountElement = document.getElementById('point-count')
@@ -2568,7 +2626,15 @@ export default class extends Controller {
     this.updateSelectionCount()
     
     const elapsed = performance.now() - startTime
-    // console.log(`🎯 [ReGL] Rendered in ${elapsed.toFixed(2)}ms`)
+    this.perfLog('render_scatter_plot', {
+      points: coordinates.length,
+      totalMs: Number(elapsed.toFixed(2)),
+      boundsMs: Number(boundsMs.toFixed(2)),
+      normalizeMs: Number(normalizeMs.toFixed(2)),
+      rendererMs: Number(rendererMs.toFixed(2)),
+      canvasWidth: this.canvas?.width || null,
+      canvasHeight: this.canvas?.height || null
+    }, { cellCount: coordinates.length })
   }
 
 

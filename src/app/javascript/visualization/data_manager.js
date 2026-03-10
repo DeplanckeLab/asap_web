@@ -8,6 +8,12 @@ export class DataManager {
     this.controller = controller
   }
 
+  perfLog(eventName, payload = {}, options = {}) {
+    if (typeof this.controller.perfLog === 'function') {
+      this.controller.perfLog(eventName, payload, options)
+    }
+  }
+
   // Data decompression methods
   decompressBinaryCoordinates(arrayBuffer) {
     // OPTIMIZED: Use Int16Array for much faster decompression
@@ -46,8 +52,15 @@ export class DataManager {
     const decompressTime = performance.now() - decompressStart
     const pairsPerSec = Math.round(numPairs / decompressTime * 1000)
     
-    // console.log(`[PERF] Binary decompression: ${numPairs.toLocaleString()} pairs in ${decompressTime.toFixed(2)}ms (${pairsPerSec.toLocaleString()} pairs/sec)`) */
-    // console.log(`Decompression range: X[${xMin.toFixed(2)}, ${xMax.toFixed(2)}] Y[${yMin.toFixed(2)}, ${yMax.toFixed(2)}]`) */
+    this.perfLog('decompress_binary_coordinates', {
+      pairs: numPairs,
+      durationMs: Number(decompressTime.toFixed(2)),
+      pairsPerSecond: pairsPerSec,
+      xMin,
+      xMax,
+      yMin,
+      yMax
+    }, { cellCount: numPairs })
     
     return coordinates
   }
@@ -233,6 +246,11 @@ export class DataManager {
       decompressedCoords = this.controller.decompressedCoordinatesCache.get(embeddingId)
       const cacheTime = performance.now() - decompressStart
       // console.log(`⏱️ [PERF] Step 2a: Cache retrieval: ${cacheTime.toFixed(2)}ms`) */
+      this.perfLog('embedding_coordinates_cache_hit', {
+        embeddingId,
+        cacheLookupMs: Number(cacheTime.toFixed(2)),
+        points: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0
+      }, { cellCount: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0 })
     } else {
       // console.log(`⏱️ [PERF] Step 2a: CACHE MISS - Decompressing ${embeddingId}`) */
       // Decompress and cache (this method has its own internal logging)
@@ -240,6 +258,11 @@ export class DataManager {
       this.controller.decompressedCoordinatesCache.set(embeddingId, decompressedCoords)
       const decompressTime = performance.now() - decompressStart
       // console.log(`⏱️ [PERF] Step 2a: Total decompress + cache: ${decompressTime.toFixed(2)}ms`) */
+      this.perfLog('embedding_coordinates_cache_miss', {
+        embeddingId,
+        decompressAndCacheMs: Number(decompressTime.toFixed(2)),
+        points: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0
+      }, { cellCount: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0 })
     }
     
     // Initialize scatter plot
@@ -249,6 +272,12 @@ export class DataManager {
     // console.log(`⏱️ [PERF] Plot initialization completed in ${plotTime.toFixed(2)}ms`) */
     const vizTime = performance.now() - vizStart
     // console.log(`⏱️ [PERF] Step 2: updateVisualizationWithMetadata completed in ${vizTime.toFixed(2)}ms`) */
+    this.perfLog('update_visualization_with_metadata', {
+      embeddingId,
+      points: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0,
+      plotInitMs: Number(plotTime.toFixed(2)),
+      totalMs: Number(vizTime.toFixed(2))
+    }, { cellCount: Array.isArray(decompressedCoords) ? decompressedCoords.length : 0 })
   }
 
   // Load a single metadata vector on demand
@@ -605,6 +634,7 @@ export class DataManager {
 
   // Load and visualize metadata vector for a specific metadata ID
   async loadAndVisualizeMetadataVector(metadataId, options = {}) {
+    const startedAt = performance.now()
     this.controller.checkpointTrace('loadAndVisualizeMetadataVector:start', {
       metadataId: metadataId ? String(metadataId) : null,
       isApplyingCheckpointState: !!this.controller.isApplyingCheckpointState
@@ -878,6 +908,13 @@ export class DataManager {
       currentMetadataId: this.controller.currentMetadataId ? String(this.controller.currentMetadataId) : null,
       metadataType: this.controller.currentMetadataVector?.data_type || null
     })
+    this.perfLog('load_and_visualize_metadata_vector', {
+      metadataId: metadataId ? String(metadataId) : null,
+      metadataName: vectorData?.name || null,
+      dataType: vectorData?.data_type || null,
+      valuesCount: Array.isArray(values) ? values.length : 0,
+      totalMs: Number((performance.now() - startedAt).toFixed(2))
+    }, { cellCount: Array.isArray(values) ? values.length : 0 })
   }
 
   // Update cell filtering with performance optimization

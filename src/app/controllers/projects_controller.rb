@@ -5993,81 +5993,119 @@ class ProjectsController < ApplicationController
     end
 
     def load_visualization_context
-      all_loom_files = Annot.available_loom_files(@project.id)
-      available_metadata = Annot.available_metadata(@project.id)
+      perf_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      perf_steps = {}
+      timed_step = lambda do |name|
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        result = yield
+        perf_steps[name] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0).round(1)
+        result
+      end
+
+      all_loom_files = timed_step.call('available_loom_files') { Annot.available_loom_files(@project.id) }
+      available_metadata = timed_step.call('available_metadata') { Annot.available_metadata(@project.id) }
 
       @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-      existing_loom_files = all_loom_files.select do |filepath|
+      existing_loom_files = timed_step.call('filter_existing_loom_files') do
+        all_loom_files.select do |filepath|
         full_path = @project_dir + filepath
         exists = File.exist?(full_path)
         Rails.logger.debug "[show] Checking loom file existence: #{full_path} -> #{exists}"
         exists
       end
-
-      existing_metadata = available_metadata.select { |metadata| existing_loom_files.include?(metadata.filepath) }
-      @h_metadata = organize_metadata(existing_metadata)
-
-      @available_loom_files = existing_loom_files.select do |filepath|
-        @h_metadata[filepath] &&
-          @h_metadata[filepath]['cell'] &&
-          @h_metadata[filepath]['cell']['NUMERIC'] &&
-          @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
       end
 
-      @default_loom_file = @available_loom_files.first || existing_loom_files.first
-      @all_embeddings_by_loom = {}
-      @available_loom_files.each do |filepath|
-        numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
-        @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
-          metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+      existing_metadata = timed_step.call('filter_existing_metadata') { available_metadata.select { |metadata| existing_loom_files.include?(metadata.filepath) } }
+      @h_metadata = timed_step.call('organize_metadata') { organize_metadata(existing_metadata) }
+
+      @available_loom_files = timed_step.call('filter_visualizable_loom_files') do
+        existing_loom_files.select do |filepath|
+          @h_metadata[filepath] &&
+            @h_metadata[filepath]['cell'] &&
+            @h_metadata[filepath]['cell']['NUMERIC'] &&
+            @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
         end
       end
 
-      if params[:embedding_id].present?
-        requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-        if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
-          @default_embedding = requested_embedding
-          @default_embedding_loom_file = requested_embedding.filepath
-          @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
+      @default_loom_file = @available_loom_files.first || existing_loom_files.first
+      @all_embeddings_by_loom = timed_step.call('build_embeddings_by_loom') do
+        h_res = {}
+        @available_loom_files.each do |filepath|
+          numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
+          h_res[filepath] = numeric_metadata.select do |metadata|
+            metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+          end
+        end
+        h_res
+      end
+
+      timed_step.call('resolve_default_embedding') do
+        if params[:embedding_id].present?
+          requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
+          if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
+            @default_embedding = requested_embedding
+            @default_embedding_loom_file = requested_embedding.filepath
+            @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
+          else
+            @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
+            @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
+          end
         else
           @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
           @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
         end
-      else
-        @default_embedding = @all_embeddings_by_loom[@default_loom_file]&.first
-        @default_embedding_loom_file = @default_embedding ? @default_loom_file : nil
-      end
 
-      unless @default_embedding
-        fallback_entry = @all_embeddings_by_loom.find { |_path, embeddings| embeddings.present? }
-        if fallback_entry
-          @default_embedding_loom_file = fallback_entry[0]
-          @default_embedding = fallback_entry[1].first
+        unless @default_embedding
+          fallback_entry = @all_embeddings_by_loom.find { |_path, embeddings| embeddings.present? }
+          if fallback_entry
+            @default_embedding_loom_file = fallback_entry[0]
+            @default_embedding = fallback_entry[1].first
+          end
         end
       end
 
-      @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)
-                                          .order(id: :asc)
-                                          .group_by(&:filepath)
-
-      categorical_metadata = []
-      @h_metadata.each_value do |dimension_hash|
-        next unless dimension_hash
-        discrete = dimension_hash.dig('cell', 'DISCRETE')
-        categorical_metadata.concat(discrete) if discrete.present?
+      @expression_matrices_by_loom = timed_step.call('load_expression_matrices') do
+        Annot.where(project_id: @project.id, dim: 3)
+             .order(id: :asc)
+             .group_by(&:filepath)
       end
-      build_best_cla_category_map(categorical_metadata)
+
+      categorical_metadata = timed_step.call('collect_categorical_metadata') do
+        values = []
+        @h_metadata.each_value do |dimension_hash|
+          next unless dimension_hash
+          discrete = dimension_hash.dig('cell', 'DISCRETE')
+          values.concat(discrete) if discrete.present?
+        end
+        values
+      end
+      timed_step.call('build_best_cla_category_map') { build_best_cla_category_map(categorical_metadata) }
 
       @initial_selection_items = []
       if @default_loom_file.present?
-        @initial_selection_items = selection_cache_items_for_loom(@default_loom_file, cleanup_completed: true)
-        @initial_selection_items.concat(selection_items_from_annots(@default_loom_file))
-        @initial_selection_items.sort_by! { |entry| entry[:created_at].to_s }
-        @initial_selection_items.reverse!
+        timed_step.call('load_initial_selection_items') do
+          @initial_selection_items = selection_cache_items_for_loom(@default_loom_file, cleanup_completed: true)
+          @initial_selection_items.concat(selection_items_from_annots(@default_loom_file))
+          @initial_selection_items.sort_by! { |entry| entry[:created_at].to_s }
+          @initial_selection_items.reverse!
+        end
       end
 
-      load_gene_set_collections
-      prepare_visualization_de_modal_context
+      timed_step.call('load_gene_set_collections') { load_gene_set_collections }
+      timed_step.call('prepare_visualization_de_modal_context') { prepare_visualization_de_modal_context }
+
+      total_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - perf_started) * 1000.0).round(1)
+      embedding_count = @all_embeddings_by_loom.values.sum { |entries| entries.size }
+      max_embedding_cells = @all_embeddings_by_loom.values.flatten.map { |embedding| embedding.nber_cols.to_i }.max || 0
+      steps_str = perf_steps.map { |name, duration| "#{name}=#{duration}" }.join(' ')
+      Rails.logger.info(
+        "[perf][visualization_context] project_id=#{@project.id} view=visualization total_ms=#{total_ms} " \
+        "loom_files_total=#{all_loom_files.size} loom_files_existing=#{existing_loom_files.size} " \
+        "metadata_total=#{available_metadata.size} metadata_existing=#{existing_metadata.size} " \
+        "embedding_count=#{embedding_count} default_embedding_id=#{@default_embedding&.id} " \
+        "default_embedding_cells=#{@default_embedding&.nber_cols.to_i} max_embedding_cells=#{max_embedding_cells} " \
+        "initial_selection_items=#{@initial_selection_items.size} #{steps_str}"
+      )
     end
 
     def load_gene_set_collections

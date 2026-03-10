@@ -25,9 +25,9 @@
     <i class="fas fa-user-cog text-lg mr-3 <%= user_icon_color %>"></i>
     My Account
   </a>
-  <%= link_to destroy_user_session_path, method: :delete,
-      class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}",
-      data: { "turbo-method": :delete } do %>
+  <%= button_to destroy_user_session_path, method: :delete,
+      class: "flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}",
+      form: { class: "w-full" } do %>
     <i class="fas fa-sign-out-alt text-lg mr-3 <%= user_icon_color %>"></i>
     Sign Out
   <% end %>

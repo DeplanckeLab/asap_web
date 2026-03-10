@@ -8,12 +8,21 @@
         </h3>
         <div class="flex items-center gap-2">
           <% if @step.has_std_form %>
-            <button type="button" 
-                    class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
-                    onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
-                    style="flex-shrink: 0;">
-              <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
-            </button>
+            <% if analyzable?(@project) %>
+              <button type="button" 
+                      class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
+                      onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
+                      style="flex-shrink: 0;">
+                <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
+              </button>
+            <% else %>
+              <button type="button" disabled
+                      class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                      style="flex-shrink: 0;"
+                      title="You need analysis rights to run new analyses">
+                <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
+              </button>
+            <% end %>
           <% end %>
           <!-- Delete All Button -->
           <% if editable?(@project) && @runs && @runs.any? %>

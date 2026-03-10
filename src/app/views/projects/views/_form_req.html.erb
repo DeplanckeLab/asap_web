@@ -151,12 +151,20 @@
   <% unless @h_step_attrs["hide_submit_btns"] %>
     <div class="flex items-center gap-3 pt-4 border-t border-gray-200">
       <div id="prevent_req_messages" class="alert alert-danger hidden flex items-start gap-3" data-form-req-target="errorMessages"></div>
-      <button id="<%= @step.name %>_button" type="button" 
-              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer req_submit"
-              data-form-req-target="submitButton"
-              data-action="click->form-req#submit">
-        <%= @h_step_attrs['action_button_label'] || 'Submit' %>
-      </button>
+      <% if analyzable?(@project) %>
+        <button id="<%= @step.name %>_button" type="button" 
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer req_submit"
+                data-form-req-target="submitButton"
+                data-action="click->form-req#submit">
+          <%= @h_step_attrs['action_button_label'] || 'Submit' %>
+        </button>
+      <% else %>
+        <button id="<%= @step.name %>_button" type="button" disabled
+                class="px-4 py-2 bg-gray-300 text-gray-500 rounded-md font-medium cursor-not-allowed"
+                title="You need analysis rights to run new analyses">
+          <%= @h_step_attrs['action_button_label'] || 'Submit' %>
+        </button>
+      <% end %>
       <button id="form_req_cancel" type="button" 
               class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer"
               data-action="click->form-req#cancel">Cancel</button>

@@ -77,11 +77,17 @@
           </div>
 
           <div class="mt-6">
-            <%= button_to 'Stop',
-                  stop_parsing_project_path(@project),
-                  method: :post,
-                  form: { data: { turbo_confirm: 'Stop parsing now? The run will be marked as failed.' } },
-                  class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer' %>
+            <% if editable?(@project) %>
+              <%= button_to 'Stop',
+                    stop_parsing_project_path(@project),
+                    method: :post,
+                    form: { data: { turbo_confirm: 'Stop parsing now? The run will be marked as failed.' } },
+                    class: 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer' %>
+            <% else %>
+              <button type="button" disabled class="px-4 py-2 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed" title="You need edit rights to stop parsing">
+                Stop
+              </button>
+            <% end %>
           </div>
         </div>
       <% elsif status_id == 3 %>
@@ -111,9 +117,15 @@
             <% end %>
           </p>
           <% if can_reset_parsing %>
-            <%= link_to reset_parsing_project_path(@project),
-                  class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block" do %>
-              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            <% if editable?(@project) %>
+              <%= link_to reset_parsing_project_path(@project),
+                    class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block" do %>
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              <% end %>
+            <% else %>
+              <span class="mt-2 px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" title="You need edit rights to reset parsing">
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              </span>
             <% end %>
           <% end %>
         </div>
@@ -183,10 +195,16 @@
         <div class="flex items-center gap-2 flex-shrink-0">
           <!-- Reset Button -->
           <% if can_reset_parsing %>
-            <%= link_to reset_parsing_project_path(@project),
-                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
-                  style: "flex-shrink: 0;" do %>
-              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            <% if editable?(@project) %>
+              <%= link_to reset_parsing_project_path(@project),
+                    class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
+                    style: "flex-shrink: 0;" do %>
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              <% end %>
+            <% else %>
+              <span class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" style="flex-shrink: 0;" title="You need edit rights to reset parsing">
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              </span>
             <% end %>
           <% end %>
         </div>
@@ -478,10 +496,16 @@
           Parsing Error
         </h3>
         <% if can_reset_parsing %>
-          <%= link_to reset_parsing_project_path(@project),
-                class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
-                style: "flex-shrink: 0;" do %>
-            <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+          <% if editable?(@project) %>
+            <%= link_to reset_parsing_project_path(@project),
+                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
+                  style: "flex-shrink: 0;" do %>
+              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            <% end %>
+          <% else %>
+            <span class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" style="flex-shrink: 0;" title="You need edit rights to reset parsing">
+              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            </span>
           <% end %>
         <% end %>
       </div>

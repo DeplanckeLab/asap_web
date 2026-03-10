@@ -1,5 +1,5 @@
 <!-- Annotation Popup Overlay -->
-<div id="annotation-popup-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.15); z-index: 10000; align-items: center; justify-content: center;" onclick="if(event.target === this) closeAnnotationPopup()">
+<div id="annotation-popup-overlay" data-annotable="<%= annotable?(@project) %>" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.15); z-index: 10000; align-items: center; justify-content: center;" onclick="if(event.target === this) closeAnnotationPopup()">
   <div id="annotation-popup-dialog" style="width: 560px; max-width: 90vw; height: 500px; max-height: 80vh; background-color: white; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden;">
     <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: grab; user-select: none; border-radius: 12px 12px 0 0;">
       <div id="annot-popup-title" style="font-size: 15px; font-weight: 600; color: #111827; display: flex; align-items: center;">Annotations</div>
@@ -39,8 +39,8 @@
     <textarea id="annot-new-comment-input" placeholder="Comment" style="margin-top: 8px; width: 100%; min-height: 64px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background:#fff;">__COMMENT__</textarea>
     <!--<div style="margin-top: 8px; font-size: 11px; color: #6b7280;">Use this form as guidance with evidences in the dedicated tab.</div>
     <div style="margin-top: 8px; font-size: 11px; color: #6b7280;">Autocomplete uses the same gene index and ontology search as the original annotation workflow.</div>-->
-    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-      <button type="button" onclick="submitNewAnnotation()" style="background:#2563eb;border:1px solid #2563eb;color:#fff;cursor:pointer;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">Submit annotation</button>
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px;">
+      __SUBMIT_SECTION__
     </div>
     __STATUS__
   </div>

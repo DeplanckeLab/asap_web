@@ -117,6 +117,22 @@ module ProjectAuthorization
     item.respond_to?(:user_id) && item.user_id == current_user.id
   end
 
+  # Check if user can annotate a project (same as analyzable but requires registered ORCID, no guest access)
+  def annotable?(project)
+    return false unless project
+    return false unless current_user && current_user.orcid_user_id.present?
+    analyzable?(project)
+  end
+
+  # Check if user can annotate an item in a project
+  def annotable_item?(project, item)
+    return false unless project && item
+    return true if admin? || annotable?(project)
+    return false unless annotable?(project) && current_user
+
+    item.respond_to?(:user_id) && item.user_id == current_user.id
+  end
+
   # Check if user can edit a project
   def editable?(project)
     return false unless project

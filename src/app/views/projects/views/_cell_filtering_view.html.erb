@@ -60,7 +60,7 @@
           </span>
         <% end %>
       </div>
-      <% if editable?(@project) %>
+      <% if analyzable?(@project) && editable?(@project) %>
         <button type="button"
                 class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                 data-controller="restart-step"
@@ -68,6 +68,18 @@
                 data-restart-step-step-id-value="<%= @step.id %>"
                 data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
                 data-action="click->restart-step#restart">
+          Reset
+        </button>
+      <% elsif analyzable?(@project) %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="You need edit rights to reset this step">
+          Reset
+        </button>
+      <% else %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="You need analysis rights to reset analyses">
           Reset
         </button>
       <% end %>

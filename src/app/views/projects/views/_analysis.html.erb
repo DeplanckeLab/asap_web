@@ -374,13 +374,41 @@
 
     try {
       const url = new URL(targetUrl, window.location.origin)
+      const selectedLoom = url.searchParams.get('loom_file') || '__all__'
+      const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+      const currentStepId = stepSelectorElement ? stepSelectorElement.getAttribute('data-current-step-id') : null
       const toggleButton = document.getElementById('analysis-pipeline-toggle-button')
       const buttonMode = toggleButton && toggleButton.dataset ? toggleButton.dataset.mode : 'graph'
-      // Button mode mapping:
-      // - "details" => currently in graph view
-      // - "graph"   => currently in run-details view
       const currentPanelMode = buttonMode === 'details' ? 'graph' : 'run_details'
+
+      if (stepSelectorElement && window.Stimulus && currentStepId) {
+        const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
+        if (controller && typeof controller.loadStepResults === 'function') {
+          controller.loomFileValue = selectedLoom === '__all__' ? '' : selectedLoom
+          const stepElement = stepSelectorElement.querySelector(`[data-step-id="${currentStepId}"]`) || { getAttribute: () => currentStepId }
+          controller.loadStepResults(currentStepId, stepElement, false, `loom_file=${encodeURIComponent(selectedLoom)}`)
+
+          const newUrl = new URL(window.location.href)
+          newUrl.searchParams.set('view', 'analysis')
+          newUrl.searchParams.set('step_id', String(currentStepId))
+          newUrl.searchParams.set('loom_file', selectedLoom)
+          newUrl.searchParams.set('panel_mode', currentPanelMode)
+          newUrl.searchParams.delete('run_id')
+          newUrl.searchParams.delete('sub_view')
+          newUrl.searchParams.delete('show_form')
+          newUrl.searchParams.delete('prefer_runs_list')
+          window.history.replaceState({}, '', newUrl.pathname + newUrl.search + newUrl.hash)
+          return
+        }
+      }
+
+      // Fallback when step selector context is unavailable.
+      if (currentStepId) url.searchParams.set('step_id', String(currentStepId))
       url.searchParams.set('panel_mode', currentPanelMode)
+      url.searchParams.delete('run_id')
+      url.searchParams.delete('sub_view')
+      url.searchParams.delete('show_form')
+      url.searchParams.delete('prefer_runs_list')
       window.location.href = url.pathname + url.search + url.hash
     } catch (_e) {
       window.location.href = targetUrl

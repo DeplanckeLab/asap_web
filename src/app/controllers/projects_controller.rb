@@ -483,7 +483,7 @@ class ProjectsController < ApplicationController
       @loom_file_runs ||= {}
       
       # Get selected loom file from params or use first available
-      @selected_loom_file = params[:loom_file].presence || @available_loom_files.first
+      @selected_loom_file = params[:loom_file].presence
       
       # Group annotations by loom file and type
       @annots_by_loom_and_type = {}
@@ -3809,7 +3809,7 @@ class ProjectsController < ApplicationController
                          elsif stored_loom.present?
                            stored_loom
                          else
-                           @available_loom_files.first
+                           '__all__'
                          end
         if candidate_loom == '__all__'
           selected_loom_file = nil
@@ -4677,7 +4677,7 @@ class ProjectsController < ApplicationController
                            elsif stored_loom.present?
                              stored_loom
                            else
-                             @available_loom_files.first
+                             '__all__'
                            end
 
           if candidate_loom == '__all__'
@@ -4687,8 +4687,8 @@ class ProjectsController < ApplicationController
             selected_loom_file = candidate_loom
             session[:analysis_loom_file][project_session_key] = selected_loom_file
           else
-            selected_loom_file = @available_loom_files.first
-            session[:analysis_loom_file][project_session_key] = selected_loom_file if selected_loom_file.present?
+            selected_loom_file = nil
+            session[:analysis_loom_file][project_session_key] = '__all__'
           end
         end
       rescue => e
@@ -4714,14 +4714,28 @@ class ProjectsController < ApplicationController
       
       Rails.logger.info("Step found: #{@step.name} (ID: #{@step.id})")
       
-      # Get runs for this step, optionally filtered by selected loom file context
-      runs_scope = @project.runs.where(step_id: step_id)
+      # Get runs for this step, optionally filtered by selected loom file context.
+      # For multi-run steps, treat same-name step IDs within the same docker image
+      # as one logical step and load their runs together.
+      step_ids_for_runs =
+        if @step.multiple_runs
+          Step.where(docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        else
+          [@step.id]
+        end
+      runs_scope = @project.runs.where(step_id: step_ids_for_runs)
       if @selected_loom_file.present? && all_annots_for_loom
         loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
         runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
       end
       @runs = runs_scope.includes(:annots).order(created_at: :desc)
       Rails.logger.info("[step_results][debug] step_id=#{step_id} step_name=#{@step&.name} selected_loom_file=#{@selected_loom_file.inspect} show_form_param=#{params[:show_form].inspect} prefer_runs_list_param=#{params[:prefer_runs_list].inspect} runs_count=#{@runs.size} run_ids=#{@runs.map(&:id).join(',')}")
+      @missing_single_run_in_loom_context =
+        @step &&
+        !@step.multiple_runs &&
+        @selected_loom_file.present? &&
+        @runs.empty? &&
+        @project.runs.where(step_id: @step.id).exists?
 
       # Enforce single-run invariant for steps configured with multiple_runs = false.
       # Keep the most recent run and remove older duplicates.
@@ -5801,8 +5815,8 @@ class ProjectsController < ApplicationController
           @selected_loom_file = candidate_loom
           session[:analysis_loom_file][project_session_key] = @selected_loom_file
         else
-          @selected_loom_file = @available_loom_files.first
-          session[:analysis_loom_file][project_session_key] = @selected_loom_file if @selected_loom_file.present?
+          @selected_loom_file = nil
+          session[:analysis_loom_file][project_session_key] = '__all__'
         end
 
         if @selected_loom_file && all_annots_for_loom
@@ -6910,7 +6924,7 @@ class ProjectsController < ApplicationController
                        elsif stored_loom.present?
                          stored_loom
                        else
-                         @available_loom_files&.first
+                         '__all__'
                        end
 
       if candidate_loom == '__all__'
@@ -6920,8 +6934,8 @@ class ProjectsController < ApplicationController
         @selected_loom_file = candidate_loom
         session[:analysis_loom_file][project_session_key] = @selected_loom_file
       else
-        @selected_loom_file = @available_loom_files&.first
-        session[:analysis_loom_file][project_session_key] = @selected_loom_file if @selected_loom_file.present?
+        @selected_loom_file = nil
+        session[:analysis_loom_file][project_session_key] = '__all__'
       end
 
       # Warning context for header: indicate when loom filter hides runs
@@ -9937,13 +9951,27 @@ class ProjectsController < ApplicationController
       # Convert runs to array for consistent checking
       runs_array = @runs.to_a
       runs_count = runs_array.size
+      # Total runs for this step without UI filtering (loom filter, etc.).
+      # We only show the std form for multi-run steps when there are truly no runs at all.
+      total_run_step_ids =
+        if @step.multiple_runs
+          Step.where(docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        else
+          [@step.id]
+        end
+      total_runs_count = @project.runs.where(step_id: total_run_step_ids).count
       
       Rails.logger.info("[prepare_std_step_data] Step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, runs_count: #{runs_count}")
       
       # Check if show_form parameter is set (for "New run" button)
-      force_show_form = params[:show_form].present? && params[:show_form].to_s == '1'
+      show_form_requested = params[:show_form].present? && params[:show_form].to_s == '1'
+      explicit_show_form = params[:force_show_form].present? && params[:force_show_form].to_s == '1'
+      force_show_form = show_form_requested && (explicit_show_form || !@step.multiple_runs || runs_count == 0)
       prefer_runs_list = params[:prefer_runs_list].present? && params[:prefer_runs_list].to_s == '1'
-      Rails.logger.info("[prepare_std_step_data][debug] step_id=#{@step.id} step_name=#{@step.name} multiple_runs=#{@step.multiple_runs} runs_count=#{runs_count} force_show_form=#{force_show_form} prefer_runs_list=#{prefer_runs_list} has_std_form=#{@step.has_std_form} has_std_dashboard=#{@step.has_std_dashboard} has_std_view=#{@step.has_std_view}")
+      # When multiple_runs step has existing runs and user did not explicitly request the form,
+      # prefer showing the runs list (avoids stale show_form=1 in URL showing form instead of runs)
+      prefer_runs_list = prefer_runs_list || (@step.multiple_runs && runs_count > 0 && !force_show_form)
+      Rails.logger.info("[prepare_std_step_data][debug] step_id=#{@step.id} step_name=#{@step.name} multiple_runs=#{@step.multiple_runs} runs_count=#{runs_count} show_form_requested=#{show_form_requested} explicit_show_form=#{explicit_show_form} force_show_form=#{force_show_form} prefer_runs_list=#{prefer_runs_list} has_std_form=#{@step.has_std_form} has_std_dashboard=#{@step.has_std_dashboard} has_std_view=#{@step.has_std_view}")
 
       # Explicit override used when returning from Pipeline Graph:
       # for multi-run steps with existing runs, always show runs list/dashboard.
@@ -9961,7 +9989,13 @@ class ProjectsController < ApplicationController
         prepare_std_form_data
       # For steps with only one run authorized (multiple_runs == false) that are just unlocked (no runs yet)
       elsif !@step.multiple_runs && runs_count == 0
-        if @step.has_std_form
+        if @selected_loom_file.present? && total_runs_count > 0
+          # Run exists, but not in the selected loom context: keep empty-state panel.
+          @show_dashboard = false
+          @show_view = false
+          @show_form = false
+          @show_custom_form = false
+        elsif @step.has_std_form
           # Show standard form if std_form option is activated
           @show_form = true
           prepare_std_form_data
@@ -9969,8 +10003,9 @@ class ProjectsController < ApplicationController
           # Show specific partial _<step_name>_form.html.erb if std_form == false
           @show_custom_form = true
         end
-      # If no runs and has_std_form (for multiple_runs steps), show form
-      elsif runs_count == 0 && @step.has_std_form
+      # If no runs at all and has_std_form (for multiple_runs steps), show form.
+      # If runs are merely filtered out in the current view, keep the runs list panel.
+      elsif runs_count == 0 && total_runs_count == 0 && @step.has_std_form
         @show_form = true
         prepare_std_form_data
       # When multiple_runs == true, has_std_dashboard == true, and at least one run exists, show standard dashboard

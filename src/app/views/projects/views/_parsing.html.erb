@@ -28,25 +28,30 @@
                  data-queue-position-submitted-at-value="<%= @parsing_run.submitted_at.iso8601 %>"
                <% end %>
              <% end %>>
-          <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
-          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job is queued and will start shortly.</p>
-          <% if @parsing_run && @parsing_run.slurm_job_id %>
-            <% if @parsing_run.submitted_at %>
-              <div class="text-sm text-gray-600 mb-3">
-                <span class="font-medium">Waiting time:</span>
-                <span data-queue-position-target="waitingTime" class="ml-2 font-mono">--:--</span>
+          <% if @missing_single_run_in_loom_context %>
+            <i class="fas fa-info-circle text-blue-500 text-5xl mb-4"></i>
+            <h3 class="text-xl font-semibold text-gray-900 mb-2">No <%= step_display_name %> job found in the context of LOOM file <%= loom_file_label(@selected_loom_file) %></h3>
+          <% else %>
+            <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
+            <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
+            <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job is queued and will start shortly.</p>
+            <% if @parsing_run && @parsing_run.slurm_job_id %>
+              <% if @parsing_run.submitted_at %>
+                <div class="text-sm text-gray-600 mb-3">
+                  <span class="font-medium">Waiting time:</span>
+                  <span data-queue-position-target="waitingTime" class="ml-2 font-mono">--:--</span>
+                </div>
+              <% end %>
+              <div data-queue-position-target="queueInfo" class="text-gray-600">
+                <span>Position in the queue: </span>
+                <span data-queue-position-target="position" class="inline-block">
+                  <i class="fas fa-spinner fa-spin"></i>
+                </span>
+              </div>
+              <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
+                Nothing in the queue, will start shortly...
               </div>
             <% end %>
-            <div data-queue-position-target="queueInfo" class="text-gray-600">
-              <span>Position in the queue: </span>
-              <span data-queue-position-target="position" class="inline-block">
-                <i class="fas fa-spinner fa-spin"></i>
-              </span>
-            </div>
-            <div data-queue-position-target="emptyQueue" class="text-gray-600 hidden">
-              Nothing in the queue, will start shortly...
-            </div>
           <% end %>
         </div>
       <% elsif status_id == 2 %>
@@ -91,11 +96,11 @@
           </div>
         </div>
       <% elsif status_id == 3 %>
-        <%# Status says complete but no results - likely after restart %>
+        <%# Status is complete but parsed output is not currently available in the panel. %>
         <div class="flex flex-col items-center justify-center">
-          <i class="fas fa-clock text-yellow-500 text-5xl mb-4"></i>
-          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is waiting</h3>
-          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job has been restarted and is queued. Results will appear here when complete.</p>
+          <i class="fas fa-check-circle text-green-500 text-5xl mb-4"></i>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_display_name %> is complete</h3>
+          <p class="text-gray-600 mb-4">The <%= step_display_name.downcase %> job completed successfully, but results are not available in this panel yet.</p>
         </div>
       <% elsif status_id == 4 %>
         <%# Parsing failed - show error message %>

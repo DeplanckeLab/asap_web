@@ -83,7 +83,7 @@
                 <% if analyzable?(@project) %>
                   <button type="button" 
                           class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
-                          onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
+                          onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, force_show_form: 1, format: :html) %>')"
                           style="flex-shrink: 0;">
                     <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
                   </button>
@@ -212,7 +212,7 @@
                 <% if analyzable?(@project) %>
                   <button type="button" 
                           class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer" 
-                          onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, format: :html) %>')"
+                          onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, force_show_form: 1, format: :html) %>')"
                           style="flex-shrink: 0;">
                     <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
                   </button>
@@ -635,10 +635,20 @@
           })();
           </script>
         <% else %>
-          <div class="flex-1 flex items-center justify-center">
+          <div class="flex-1 min-h-[50vh] flex items-center justify-center">
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
               <i class="fas fa-info-circle text-blue-600 mb-2"></i>
-              <p class="text-blue-800 mb-0">No runs found for this step.</p>
+              <p class="text-blue-800 mb-0">
+                <% if @missing_single_run_in_loom_context %>
+                  No <%= @step.label.presence || @step.name.humanize %> job found in the context of LOOM file <%= loom_file_label(@selected_loom_file) %>.
+                <% else %>
+                  No runs found for this step.
+                  <br><br>
+                  Some runs may be associated to other LOOM file.
+                  <br><br>
+                  If you want to access them please change accordingly the LOOM file filter at the top of this page.
+                <% end %>
+              </p>
             </div>
           </div>
         <% end %>

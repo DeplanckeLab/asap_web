@@ -10,7 +10,8 @@ class ProjectsController < ApplicationController
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
@@ -704,7 +705,7 @@ class ProjectsController < ApplicationController
   def organisms_for_version
     version_id = params[:version_id].presence
     organisms = fetch_organisms_for_version(version_id)
-    grouped_organisms = group_organisms(organisms)
+    grouped_organisms = group_organisms(organisms, version_id: version_id)
     
     render json: {
       organisms: grouped_organisms.map do |domain, orgs|
@@ -733,7 +734,7 @@ class ProjectsController < ApplicationController
     @project.version_id = @versions.first&.id if @versions.any?
     # Fetch organisms based on selected version (default to latest)
     @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
-    @grouped_organisms = group_organisms(@organisms)
+    @grouped_organisms = group_organisms(@organisms, version_id: @project.version_id || @versions.first&.id)
 
     # Handle integration mode
     # Source keys can arrive via URL params (from reset_parsing redirect) or session
@@ -983,7 +984,7 @@ class ProjectsController < ApplicationController
         @project_types = ProjectType.order(:name)
         @versions = available_versions
         @file_formats = FileFormat.ordered
-        @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id))
+        @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
         @project.errors.add(:base, "An input file is required to create a project. Please upload a file first.")
         format.html { 
           Rails.logger.info("[ProjectsController#create] Rendering :new template (HTML format)")
@@ -1361,7 +1362,7 @@ class ProjectsController < ApplicationController
           @versions = available_versions
           @file_formats = FileFormat.ordered
           @organisms = fetch_organisms_for_version(@project.version_id)
-          @grouped_organisms = group_organisms(@organisms)
+          @grouped_organisms = group_organisms(@organisms, version_id: @project.version_id)
           format.html { render :new, status: :unprocessable_entity }
           format.json { render json: @project.errors, status: :unprocessable_entity }
         end
@@ -2285,7 +2286,7 @@ class ProjectsController < ApplicationController
 
   # POST /projects/:id/save_metadata_from_selection
   def save_metadata_from_selection
-    unless editable?(@project)
+    unless analyzable?(@project)
       render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
       return
     end
@@ -2449,7 +2450,13 @@ class ProjectsController < ApplicationController
     if run_id > 0
       run = @project.runs.find_by(id: run_id)
       unless run
-        render json: { status: 'error', message: 'Run not found' }, status: :not_found
+        deleted = selection_id.present? ? remove_selection_from_cache_by_id(selection_id) : false
+        if deleted
+          broadcast_selection_states_changed(reason: 'deleted')
+          render json: { status: 'ok', deleted_run: false, selection_id: selection_id, recovered_from_missing_run: true }
+        else
+          render json: { status: 'error', message: 'Run not found' }, status: :not_found
+        end
         return
       end
 
@@ -4561,8 +4568,9 @@ class ProjectsController < ApplicationController
     raise ArgumentError, "Missing asap_data_db_name in version env_json#{source}"
   end
 
-  def group_organisms(organisms)
+  def group_organisms(organisms, version_id: nil)
     groups = Hash.new { |h, k| h[k] = [] }
+    grouped_seen = Hash.new { |h, k| h[k] = {} }
     
     # Define model organisms - only these specific ones
     model_organisms = ['Homo sapiens', 'Mus musculus', 'Rattus norvegicus', 'Danio rerio', 
@@ -4571,13 +4579,16 @@ class ProjectsController < ApplicationController
     # Handle both ActiveRecord relations (local) and arrays of hashes (remote)
     organisms_list = organisms.is_a?(Array) ? organisms : organisms.to_a
     
+    show_short_name = !version_v8_or_later?(version_id)
+
     organisms_list.each do |organism|
       # Handle both ActiveRecord objects and hash objects
       if organism.is_a?(Hash)
         # Remote organism (hash)
         organism_name = organism['name']
         organism_id = organism['id']
-        display_name = organism['short_name'].presence || organism['name'] || 'Unknown'
+        short_name = organism['short_name']
+        display_name = show_short_name && short_name.present? ? "#{organism_name} (#{short_name})" : organism_name
         tax_id = organism['tax_id']
         
         # Get domain name from hash (already fetched in RemoteOrganism.list_for_version)
@@ -4586,7 +4597,8 @@ class ProjectsController < ApplicationController
         # Local organism (ActiveRecord)
         organism_name = organism.name
         organism_id = organism.id
-        display_name = organism.display_name.presence || organism.name || 'Unknown'
+        short_name = organism.short_name
+        display_name = show_short_name && short_name.present? ? "#{organism_name} (#{short_name})" : organism_name
         tax_id = organism.tax_id
         
         # Get domain name from local database
@@ -4608,8 +4620,8 @@ class ProjectsController < ApplicationController
       if model_organisms.include?(organism_name)
         # For Mouse and Rat, only include the base species (not subspecies)
         if organism_name == 'Mus musculus' || organism_name == 'Rattus norvegicus'
-          # Only include if display_name is exactly "Mouse" or "Rat"
-          if display_name == 'Mouse' || display_name == 'Rat'
+          # Only include if short_name is exactly "Mouse" or "Rat"
+          if short_name == 'Mouse' || short_name == 'Rat'
             is_model_organism = true
           end
         else
@@ -4618,13 +4630,16 @@ class ProjectsController < ApplicationController
         end
       end
       
-      # Add to domain group (all organisms go to their domain)
-      groups[formatted_domain] << [display_name, organism_id, tax_id]
-      
-      # Also add to Main model organisms group if applicable (model organisms appear in both groups)
-      if is_model_organism
-        groups['Main model organisms'] << [display_name, organism_id, tax_id]
-      end
+      # Keep each organism in a single group to avoid duplicates in the selector.
+      # Model organisms are surfaced in the dedicated group; all others stay in domain groups.
+      target_group = is_model_organism ? 'Main model organisms' : formatted_domain
+      group_entry = [display_name, organism_id, tax_id]
+
+      # Remote v8+ lists can contain duplicate rows; keep only one entry per group.
+      next if grouped_seen[target_group][group_entry]
+
+      grouped_seen[target_group][group_entry] = true
+      groups[target_group] << group_entry
     end
     
     # Sort each group alphabetically by display name
@@ -4639,6 +4654,10 @@ class ProjectsController < ApplicationController
       end
     end.to_h
     sorted_groups
+  end
+
+  def version_v8_or_later?(version_id)
+    version_id.to_i >= 8
   end
 
   # Deprecated: Use @project.ensure_project_steps instead
@@ -5682,7 +5701,7 @@ class ProjectsController < ApplicationController
     @versions = available_versions
     @file_formats = FileFormat.ordered
     @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
-    @grouped_organisms = group_organisms(@organisms)
+    @grouped_organisms = group_organisms(@organisms, version_id: @project.version_id || @versions.first&.id)
     
     # Store parsing attributes in instance variable for form pre-filling
     @parsing_attrs = h_attrs
@@ -5919,6 +5938,12 @@ class ProjectsController < ApplicationController
 
     def authorize_project_edit_access
       return if editable?(@project)
+
+      handle_project_unauthorized_access
+    end
+
+    def authorize_project_analyze_access
+      return if analyzable?(@project)
 
       handle_project_unauthorized_access
     end

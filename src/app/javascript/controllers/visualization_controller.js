@@ -172,6 +172,9 @@ export default class extends Controller {
         // console.log(`🚀 [CONNECT] Reconnection detected with renderer state - skipping initializeCanvas() to preserve state`)
         // Don't call initializeCanvas() if renderer already has state and modules are initialized
         // This prevents destroying the renderer during Stimulus reconnection
+        this.setupSelectionStatesSubscription()
+        this.startSelectionStatusPolling()
+        this.scheduleSelectionStatesRefresh(100)
         return // Skip the rest of connect() initialization that might recreate the renderer
       }
     }
@@ -588,6 +591,7 @@ export default class extends Controller {
     
     // Initialize interaction system after DOM is ready
     this.setupSelectionStatesSubscription()
+    this.startSelectionStatusPolling()
     setTimeout(() => {
       this.uiManager.initializeTooltip()
       this.initializeResizers()
@@ -13788,11 +13792,15 @@ export default class extends Controller {
     try {
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
       await this.executeSavedSelectionDeletion(item, selectionId, csrfToken)
+      const removedFilter = this.clearFiltersForDeletedSelectionMetadata(item, { deferFilteringUpdate: true })
 
       this.savedSelections = (this.savedSelections || []).filter((entry) => String(entry.id) !== String(selectionId))
       if (Array.isArray(this.savedCellSetSelectionOrder)) {
         this.savedCellSetSelectionOrder = this.savedCellSetSelectionOrder.filter((id) => id !== String(selectionId))
         this.saveSavedCellSetSelectionOrderToSession(this.savedCellSetSelectionSessionKey, this.savedCellSetSelectionOrder)
+      }
+      if (removedFilter && this.dataManager) {
+        this.dataManager.updateCellFiltering()
       }
       this.renderSavedSelections()
       this.refreshSelectionStates()
@@ -13804,40 +13812,68 @@ export default class extends Controller {
 
   async executeSavedSelectionDeletion(item, selectionId, csrfToken) {
     const hasAssociatedRun = item && Number.isInteger(item.runId) && item.runId > 0
-    let response = null
-
-    if (hasAssociatedRun) {
-      response = await fetch(`/runs/${encodeURIComponent(String(item.runId))}`, {
-        method: 'DELETE',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        credentials: 'same-origin'
-      })
-    } else {
-      const projectIdentifier = this.getProjectIdentifier()
-      if (!projectIdentifier) {
-        throw new Error('Cannot delete selection: project identifier is missing.')
-      }
-      response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/delete_selection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify({ selection_id: selectionId })
-      })
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) {
+      throw new Error('Cannot delete selection: project identifier is missing.')
     }
+
+    const requestBody = {
+      selection_id: selectionId
+    }
+    if (hasAssociatedRun) {
+      requestBody.run_id = item.runId
+    }
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/delete_selection`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify(requestBody)
+    })
 
     const payload = await response.json().catch(() => ({}))
     const okStatus = payload.status === 'ok' || payload.status === 'success'
     if (!response.ok || !okStatus) {
       throw new Error(payload.message || 'Failed to delete selection')
     }
+  }
+
+  clearFiltersForDeletedSelectionMetadata(item, options = {}) {
+    const metadataId = String(item?.metadataId || '').trim()
+    if (!metadataId) return false
+
+    let changed = false
+    if (this.selectedCategories && this.selectedCategories[metadataId]) {
+      delete this.selectedCategories[metadataId]
+      changed = true
+    }
+    if (this.selectedRanges && this.selectedRanges[metadataId]) {
+      delete this.selectedRanges[metadataId]
+      changed = true
+    }
+    if (this.savedCategorySelections && this.savedCategorySelections[metadataId]) {
+      delete this.savedCategorySelections[metadataId]
+    }
+    if (this.savedRanges && this.savedRanges[metadataId]) {
+      delete this.savedRanges[metadataId]
+    }
+    if (this.uncheckedMetadata instanceof Set) {
+      this.uncheckedMetadata.delete(metadataId)
+    }
+    if (this.disabledFilters instanceof Set) {
+      this.disabledFilters.delete(metadataId)
+    }
+
+    if (!changed) return false
+    if (options.deferFilteringUpdate === true) return true
+
+    if (this.dataManager) {
+      this.dataManager.updateCellFiltering()
+    }
+    return true
   }
 
   async deleteAllSavedSelections(event) {
@@ -13858,8 +13894,12 @@ export default class extends Controller {
     this.renderSavedSelections()
     try {
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
+      let removedAnyFilter = false
       for (const item of items) {
         await this.executeSavedSelectionDeletion(item, item.id, csrfToken)
+        if (this.clearFiltersForDeletedSelectionMetadata(item, { deferFilteringUpdate: true })) {
+          removedAnyFilter = true
+        }
       }
 
       const deletedIds = new Set(items.map((item) => String(item.id)))
@@ -13873,6 +13913,9 @@ export default class extends Controller {
         this.recentlyCreatedSavedCellSetName = null
         this.recentlyCreatedSavedCellSetCount = null
         this.recentlyCreatedSavedCellSetRunId = null
+      }
+      if (removedAnyFilter && this.dataManager) {
+        this.dataManager.updateCellFiltering()
       }
 
       this.renderSavedSelections()

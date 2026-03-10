@@ -6,8 +6,12 @@ module AdminAuthorization
   def admin?
     user = Array(current_user).compact.first
     return false unless user.respond_to?(:email)
+    email = user.email.to_s.strip.downcase
+    return false if email.empty?
 
-    EnvHelpers.email_list('ADMIN_EMAILS').include?(user.email)
+    EnvHelpers.email_list('ADMIN_EMAILS')
+      .map { |value| value.to_s.strip.downcase }
+      .include?(email)
   end
 
   private

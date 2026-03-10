@@ -5995,9 +5995,9 @@ class ProjectsController < ApplicationController
     def load_visualization_context
       perf_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       perf_steps = {}
-      timed_step = lambda do |name|
+      timed_step = lambda do |name, &block|
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        result = yield
+        result = block.call
         perf_steps[name] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0).round(1)
         result
       end

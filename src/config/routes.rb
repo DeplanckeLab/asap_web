@@ -184,6 +184,8 @@ Rails.application.routes.draw do
   # root "posts#index"
 
   get '/unauthorized', to: 'home#unauthorized', as: :unauthorized
+  get '/orcid_authentication', to: 'home#orcid_authentication', as: :orcid_authentication
+  get '/associate_orcid', to: 'home#associate_orcid', as: :associate_orcid
   root "home#welcome"
 
 end

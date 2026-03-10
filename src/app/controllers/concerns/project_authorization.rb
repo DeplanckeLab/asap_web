@@ -122,6 +122,7 @@ module ProjectAuthorization
   # - Private projects: analyzable rights + logged-in user with registered ORCID
   def annotable?(project)
     return false unless project
+    return true if admin?
     return false unless current_user && current_user.orcid_user_id.present?
     return true if project.public?
     analyzable?(project)

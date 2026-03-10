@@ -12,6 +12,7 @@ class User < ApplicationRecord
   has_many :checkpoints, dependent: :destroy
   has_many :ratings, dependent: :destroy
   has_and_belongs_to_many :ips
+  belongs_to :orcid_user, optional: true
 
   # Validations
   validates :email, presence: true, uniqueness: true

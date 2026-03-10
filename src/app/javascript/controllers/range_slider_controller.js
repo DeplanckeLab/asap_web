@@ -4,7 +4,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static LIVE_COUNT_UPDATE_MAX_CELLS = 100000
+  static LIVE_COUNT_UPDATE_MAX_CELLS = 10000
 
   static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas", "adaptColorRangeButton"]
   static values = { 

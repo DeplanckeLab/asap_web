@@ -1,3 +1,7 @@
+require 'json'
+require 'net/http'
+require 'uri'
+
 class HomeController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
   before_action :authenticate_user!, only: [:contact, :contact_submit, :rate, :rate_submit]
@@ -10,6 +14,79 @@ class HomeController < ApplicationController
   end
 
   def contact
+  end
+
+  def orcid_authentication
+    authenticate_user!
+
+    client_id = orcid_client_id
+    if client_id.blank?
+      redirect_to edit_user_registration_path, alert: "ORCID is not configured yet. Missing ORCID client ID."
+      return
+    end
+
+    redirect_uri = orcid_redirect_uri
+    query = URI.encode_www_form(
+      client_id: client_id,
+      response_type: 'code',
+      scope: '/authenticate',
+      redirect_uri: redirect_uri
+    )
+
+    redirect_to "https://orcid.org/oauth/authorize?#{query}", allow_other_host: true
+  end
+
+  def associate_orcid
+    authenticate_user!
+
+    code = params[:code].to_s
+    if code.blank?
+      redirect_to edit_user_registration_path, alert: "ORCID association failed: missing authorization code."
+      return
+    end
+
+    client_id = orcid_client_id
+    client_secret = orcid_client_secret
+    if client_id.blank? || client_secret.blank?
+      redirect_to edit_user_registration_path, alert: "ORCID is not configured yet. Missing ORCID client credentials."
+      return
+    end
+
+    redirect_uri = orcid_redirect_uri
+    token_uri = URI.parse('https://orcid.org/oauth/token')
+    response = Net::HTTP.post_form(
+      token_uri,
+      {
+        client_id: client_id,
+        client_secret: client_secret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirect_uri,
+        code: code
+      }
+    )
+
+    payload = JSON.parse(response.body)
+    orcid_key = payload['orcid'].to_s
+    orcid_name = payload['name'].to_s
+
+    if !response.is_a?(Net::HTTPSuccess) || orcid_key.blank?
+      Rails.logger.error("[ORCID] Association failed: status=#{response.code} body=#{response.body}")
+      redirect_to edit_user_registration_path, alert: "ORCID association failed."
+      return
+    end
+
+    orcid_user = OrcidUser.find_or_initialize_by(key: orcid_key)
+    orcid_user.name = orcid_name if orcid_name.present?
+    orcid_user.save!
+
+    current_user.update!(orcid_user_id: orcid_user.id)
+    redirect_to edit_user_registration_path, notice: "ORCID associated: #{orcid_user.name.presence || 'Unknown'} [#{orcid_user.key}]"
+  rescue JSON::ParserError => e
+    Rails.logger.error("[ORCID] Invalid token response: #{e.message}")
+    redirect_to edit_user_registration_path, alert: "ORCID association failed."
+  rescue StandardError => e
+    Rails.logger.error("[ORCID] Unexpected error: #{e.class} - #{e.message}")
+    redirect_to edit_user_registration_path, alert: "ORCID association failed."
   end
 
   def contact_submit
@@ -129,5 +206,23 @@ class HomeController < ApplicationController
   end
 
   def faq
+  end
+
+  private
+
+  def orcid_client_id
+    Rails.application.credentials.dig(:orcid, :client_id).to_s.presence ||
+      ENV['ORCID_CLIENT_ID'].to_s.presence
+  end
+
+  def orcid_client_secret
+    Rails.application.credentials.dig(:orcid, :client_secret).to_s.presence ||
+      ENV['ORCID_CLIENT_SECRET'].to_s.presence
+  end
+
+  def orcid_redirect_uri
+    Rails.application.credentials.dig(:orcid, :redirect_uri).to_s.presence ||
+      ENV['ORCID_REDIRECT_URI'].to_s.presence ||
+      associate_orcid_url
   end
 end

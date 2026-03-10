@@ -35,9 +35,10 @@
               'Read only access'
             end %>
         <% rights_summary = {
-             'Edit' => editable?(@project),
+             'Analyze' => analyzable?(@project),
+             'Annotate/Comment' => annotable?(@project),
              'Clone' => clonable?(@project),
-             'Export' => exportable?(@project)
+             'Edit' => editable?(@project)
            } %>
         <%
           # Get run counts from project_steps (more efficient than counting runs)
@@ -109,14 +110,14 @@
             <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2 min-w-0">
               <span class="block truncate max-w-[10rem] sm:max-w-[14rem] md:max-w-xs lg:max-w-sm xl:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>
-              <%= link_to (@project.version ? version_path(@project.version) : versions_path), class: "inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide text-gray-100 bg-gray-700 rounded-full border border-gray-600 hover:bg-gray-600 transition-colors", title: "ASAP release" do %>
-                v<%= version_label %>
-              <% end %>
               <% if @project.public? %>
                 <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide text-emerald-200 bg-emerald-600/30 rounded-full border border-emerald-400/40"
                       title="Public project key">
                   ASAP<%= @project.public_id %>
                 </span>
+              <% end %>
+              <%= link_to (@project.version ? version_path(@project.version) : versions_path), class: "inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide text-gray-100 bg-gray-700 rounded-full border border-gray-600 hover:bg-gray-600 transition-colors", title: "ASAP release" do %>
+                v<%= version_label %>
               <% end %>
             </h1>
               <div class="flex items-center space-x-4 text-sm text-gray-300 min-w-0">
@@ -302,11 +303,91 @@
                   <% icon_map = {
                     'Edit' => 'fa-edit',
                     'Clone' => 'fa-clone',
-                    'Export' => 'fa-download'
+                    'Analyze' => 'fa-chart-bar',
+                    'Annotate/Comment' => 'fa-bookmark'
                   } %>
+                  <% tooltip_label_map = {
+                    'Analyze' => 'Analyze',
+                    'Annotate/Comment' => 'Annotate/Comment',
+                    'Clone' => 'Clone/Download',
+                    'Edit' => 'Edit'
+                  } %>
+                  <% clone_allowed = clonable?(@project) %>
+                  <% clone_solution_text = clone_allowed ? ' Another solution is to clone the project.' : '' %>
                   <% rights_summary.each do |label, allowed| %>
-                    <i class="fas <%= icon_map[label] %> text-base <%= allowed ? 'text-emerald-300' : 'text-gray-400' %>" 
-                       title="<%= label %>: <%= allowed ? 'Allowed' : 'Not allowed' %>"></i>
+                    <% remediation_text = case label
+                      when 'Analyze'
+                        if @project.public?
+                          "Sign in and ask the project owner for Analyze permission in project sharing settings.#{clone_solution_text}"
+                        else
+                          "Sign in and ask the project owner for Analyze permission in project sharing settings for this private project.#{clone_solution_text}"
+                        end
+                      when 'Annotate/Comment'
+                        if @project.public?
+                          "Sign in and use an account linked to ORCID.#{clone_solution_text}"
+                        else
+                          "Sign in and use an account linked to ORCID, then ask the project owner for Analyze permission in project sharing settings for this private project.#{clone_solution_text}"
+                        end
+                      when 'Clone'
+                        if @project.public?
+                          "Sign in and, if access is still blocked, ask the project owner for Export permission in project sharing settings.#{clone_solution_text}"
+                        else
+                          "Sign in and ask the project owner for Export permission in project sharing settings for this private project.#{clone_solution_text}"
+                        end
+                      when 'Edit'
+                        if @project.public?
+                          "Sign in and ask the owner to make the change. Editing is limited to project owners.#{clone_solution_text}"
+                        else
+                          "Sign in and ask the owner to make the change. Editing this private project is limited to project owners.#{clone_solution_text}"
+                        end
+                      end %>
+                    <% blocked_reasons = [] %>
+                    <% unless allowed %>
+                      <% blocked_reasons << 'Not signed in.' unless user_signed_in? %>
+                      <% case label
+                        when 'Analyze'
+                          blocked_reasons << (@project.public? ? 'Analyze permission was not granted by the project owner.' : 'Project is private and Analyze permission was not granted by the project owner.')
+                        when 'Annotate/Comment'
+                          blocked_reasons << 'ORCID ID missing in the user profile.' if user_signed_in? && current_user&.orcid_user_id.blank?
+                          blocked_reasons << 'Project is private and Analyze permission is required for annotation.' if !@project.public? && !analyzable?(@project)
+                        when 'Clone'
+                          blocked_reasons << (@project.public? ? 'Clone/Download permission was not granted by the project owner.' : 'Project is private and Export permission was not granted by the project owner.')
+                        when 'Edit'
+                          blocked_reasons << 'Editing is restricted to project owners.'
+                        end %>
+                      <% blocked_reasons << 'Access constraints are not satisfied for this permission.' if blocked_reasons.empty? %>
+                    <% end %>
+                    <% granted_reasons = [] %>
+                    <% if allowed %>
+                      <% case label
+                        when 'Analyze'
+                          granted_reasons << (admin? ? 'Admin access.' : (@project.public? ? 'Project access is available with current sharing rights.' : 'Analyze permission is granted for this private project.'))
+                        when 'Annotate/Comment'
+                          granted_reasons << 'ORCID ID is linked in the user profile.' if user_signed_in? && current_user&.orcid_user_id.present?
+                          granted_reasons << (@project.public? ? 'Project is public.' : 'Analyze permission is granted for this private project.')
+                        when 'Clone'
+                          granted_reasons << (@project.public? ? 'Project is public.' : 'Export permission is granted for this private project.')
+                        when 'Edit'
+                          granted_reasons << 'You are the project owner.'
+                        end %>
+                      <% granted_reasons << 'Access constraints are satisfied for this permission.' if granted_reasons.empty? %>
+                    <% end %>
+                    <div class="relative group flex items-center">
+                      <i class="fas <%= icon_map[label] %> text-base <%= allowed ? 'text-emerald-300' : 'text-gray-400' %>"
+                         title="<%= "#{tooltip_label_map[label]}: #{allowed ? 'Allowed' : 'Not allowed'}" %>"></i>
+                      <div class="hidden group-hover:block absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-3 rounded-lg border <%= allowed ? 'border-emerald-300/60' : 'border-rose-300/60' %> bg-gray-900 text-gray-100 shadow-xl z-[10000]">
+                        <p class="text-xs font-semibold <%= allowed ? 'text-emerald-200' : 'text-rose-200' %>"><%= tooltip_label_map[label] %> <%= allowed ? 'allowed' : 'not allowed' %></p>
+                        <p class="mt-2 text-[11px] uppercase tracking-wide text-gray-400"><%= allowed ? 'Granted by' : 'Blocked by' %></p>
+                        <div class="mt-1 space-y-1">
+                          <% (allowed ? granted_reasons : blocked_reasons).each do |reason| %>
+                            <p class="text-[11px] leading-4 <%= allowed ? 'text-emerald-100' : 'text-rose-100' %>"><%= reason %></p>
+                          <% end %>
+                        </div>
+                        <% unless allowed %>
+                          <p class="mt-2 text-[11px] leading-4 text-emerald-100"><%= remediation_text %></p>
+                        <% end %>
+                      </div>
+                    </div>
                   <% end %>
                 </div>
               </div>

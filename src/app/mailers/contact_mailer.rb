@@ -11,12 +11,25 @@ class ContactMailer < ApplicationMailer
       }
     end
 
-    recipients = ENV.fetch('FEEDBACK_EMAILS').split(',').map(&:strip)
+    recipients = feedback_recipients
 
     mail(
       to: recipients,
       reply_to: sender_email,
       subject: "[ASAP Feedback] #{subject}"
     )
+  end
+
+  private
+
+  def feedback_recipients
+    raw_recipients = ENV.fetch('FEEDBACK_EMAILS').to_s
+    recipients = raw_recipients.split(',').map(&:strip).reject(&:blank?)
+
+    if recipients.empty?
+      raise ArgumentError, "FEEDBACK_EMAILS is configured but empty."
+    end
+
+    recipients
   end
 end

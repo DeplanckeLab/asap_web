@@ -4,6 +4,13 @@ module Basic
 
   class << self
 
+    def asap_data_db_name_from_env!(h_env)
+      db_name = h_env['asap_data_db_name'].to_s.strip
+      raise ArgumentError, "Missing asap_data_db_name in version env_json" if db_name.empty?
+
+      db_name
+    end
+
     def generate_project_json p
 
       h_references = {}
@@ -28,7 +35,7 @@ module Basic
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       
       h_env = h_envs[p.version_id]
-      asap_data_db = "asap_data_v#{h_env['asap_data_db_version']}"
+      asap_data_db = Basic.asap_data_db_name_from_env!(h_env)
 
       clas = Cla.where(:project_id => p.id).all.map{|e|
 
@@ -92,7 +99,7 @@ module Basic
         lineage_runs = Run.where(:id => run.lineage_run_ids.split(",")).all + [run]
         h_command = Basic.safe_parse_json(run.command_json, {})
         #  command = (h_command['docker_call']) ? h_command['docker_call'].gsub(project_dir.to_s, "$PROJECT_DIR") : nil
-        command = Basic.build_cmd(h_command).gsub(project_dir.to_s, "$PROJECT_DIR").gsub(/postgres\:\d+\/asap2_data_v\d+/, ('$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/' + asap_data_db))
+        command = Basic.build_cmd(h_command).gsub(project_dir.to_s, "$PROJECT_DIR").gsub(/postgres\:\d+\/asap_data_v\d+/, ('$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/' + asap_data_db))
         docker_container = ""
         if h_command['docker_call'] and m = h_command['docker_call'].match(/([\w\d\:\/]+) -c$/)
           docker_container = m[1]
@@ -972,7 +979,7 @@ module Basic
 #      puts query
       h_cmd = {
         :asap_development => "psql -h postgres -p 5434 -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap2_development",
-        :asap_data => "psql -h postgres -p 5434 -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap2_data_v#{version}"
+        :asap_data => "psql -h postgres -p 5434 -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap_data_v#{version}"
       }
       
  
@@ -1982,8 +1989,8 @@ module Basic
         'step_tag' => h_p[:step].tag,
         'step_name' => h_p[:step].name,
         'run_num' => run.num,
-        'asap_data_docker_db_conn' => 'postgres:5434/asap2_data_v' + h_p[:h_env]['asap_data_db_version'].to_s, #h_p[:project].version_id.to_s,
-        'asap_data_direct_db_conn' => 'postgres:5433/asap2_data_v' + h_p[:h_env]['asap_data_db_version'].to_s #h_p[:project].version_id.to_s,
+        'asap_data_docker_db_conn' => 'postgres:5434/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
+        'asap_data_direct_db_conn' => 'postgres:5433/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]) #h_p[:project].version_id.to_s,
       }
 
  #      puts "Elapsed time 9b:" + (Time.now-h_p[:el_time]).to_s

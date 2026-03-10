@@ -1905,7 +1905,7 @@ class ProjectsController < ApplicationController
   # GET /projects/1/search_gene
   def search_gene
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "search_gene")
 
     @gene = nil
     if params[:ensembl_id].present?
@@ -1919,7 +1919,7 @@ class ProjectsController < ApplicationController
   def search_gene_set_items
     require 'ostruct'
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "search_gene_set_items")
 
     @gsi = nil
     @genes = []
@@ -2612,7 +2612,7 @@ class ProjectsController < ApplicationController
     end
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "save_manual_gene_set")
     genes_with_ids = resolve_manual_gene_ids(submitted_genes, db_version)
     manual_collection = resolve_target_manual_collection(params[:collection_id])
     unless manual_collection
@@ -2894,7 +2894,7 @@ class ProjectsController < ApplicationController
     end
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "delete_manual_gene_set")
     current_user_id = current_user&.id
 
     deleted = false
@@ -2952,7 +2952,7 @@ class ProjectsController < ApplicationController
     limit = 100
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "download_gene_set_collection")
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
     loom_path = project_dir + loom_file
@@ -3259,7 +3259,7 @@ class ProjectsController < ApplicationController
     end
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "gene_set_item_genes")
     current_user_id = current_user&.id
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
@@ -3520,7 +3520,7 @@ class ProjectsController < ApplicationController
     end
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "gene_set_collection_items")
     current_user_id = current_user&.id
     dataset_stable_by_accession, dataset_stable_by_symbol = build_dataset_stable_lookup_for_export(loom_file)
     collection_payload = load_gene_set_collection_for_export(
@@ -3585,7 +3585,7 @@ class ProjectsController < ApplicationController
     dataset_path = '/matrix' if dataset_path.blank?
 
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = asap_data_db_name_for_env(h_env, context: "gene_set_item_module_score")
     current_user_id = current_user&.id
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
@@ -4531,29 +4531,34 @@ class ProjectsController < ApplicationController
 
   def fetch_organisms_for_version(version_id)
     # Get organisms based on the selected ASAP version
-    # Database version is stored in version.env_json['asap_data_db_version']
-    # Always use remote asap2_data_vX databases - if one doesn't exist, it's a database configuration issue
+    # Remote DB name is stored in version.env_json['asap_data_db_name']
+    # Always use remote asap_data_vX databases - if one doesn't exist, it's a database configuration issue
     return [] unless version_id
 
     version = Version.find_by(id: version_id)
     return [] unless version
 
-    # Get database version from env_json
+    # Get remote database name from env_json
     env_data = Basic.safe_parse_json(version.env_json, {})
-    db_version = env_data['asap_data_db_version']
-    
-    unless db_version
-      Rails.logger.error("[ProjectsController] Version #{version_id} does not have asap_data_db_version in env_json")
+    db_name = env_data['asap_data_db_name']
+
+    unless db_name
+      Rails.logger.error("[ProjectsController] Version #{version_id} does not have asap_data_db_name in env_json")
       return []
     end
-    
-    # Map to remote database name
-    db_name = "asap2_data_v#{db_version}"
     
     # Fetch from remote database - returns array of hashes
     # If database doesn't exist, RemoteOrganism.list_for_version will raise an ArgumentError
     # This indicates a database configuration issue that should be fixed
     RemoteOrganism.list_for_version(db_name)
+  end
+
+  def asap_data_db_name_for_env(h_env, context: nil)
+    db_name = h_env['asap_data_db_name'].to_s.strip
+    return db_name if db_name.present?
+
+    source = context.present? ? " (#{context})" : ""
+    raise ArgumentError, "Missing asap_data_db_name in version env_json#{source}"
   end
 
   def group_organisms(organisms)
@@ -6110,7 +6115,7 @@ class ProjectsController < ApplicationController
 
     def load_gene_set_collections
       h_env = Basic.safe_parse_json(@project.version.env_json, {})
-      db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+      db_version = asap_data_db_name_for_env(h_env, context: "load_gene_set_collections")
       current_user_id = current_user&.id
       global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
       imported_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_IMPORTED)

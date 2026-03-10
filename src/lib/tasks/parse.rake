@@ -46,8 +46,12 @@ task :parse, [:project_key] => [:environment] do |t, args|
   asap_data_db_name = if ENV["ASAP2_REMOTE_DB"].present?
                         ENV["ASAP2_REMOTE_DB"]
                       else
-                        "asap2_data_v#{h_env['asap_data_db_version']}"
+                        h_env['asap_data_db_name'].to_s
                       end
+  if asap_data_db_name.blank?
+    logger.error("[ParseRake] Missing asap_data_db_name in version env_json for version #{version.id}")
+    exit 1
+  end
   asap_data_db_host = ENV.fetch("ASAP2_REMOTE_HOST", "host.docker.internal")
   asap_data_db_port = ENV.fetch("ASAP2_REMOTE_PORT", 5433).to_s
   db_conn = "#{asap_data_db_host}:#{asap_data_db_port}/#{asap_data_db_name}"

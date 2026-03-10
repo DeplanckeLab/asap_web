@@ -221,7 +221,7 @@ class ParsingTest < TestBaseWithoutFixtures
         # This matches how parse.rake connects to the database
         db_host = ENV.fetch('ASAP2_REMOTE_HOST', 'postgres')
         db_port = ENV.fetch('ASAP2_REMOTE_PORT', '5434')  # Container port when on same network
-        db_url = "#{db_host}:#{db_port}/asap2_data_v#{@db_version}"
+        db_url = "#{db_host}:#{db_port}/asap_data_v#{@db_version}"
         
         # Create output directory named after the dataset
         # Use the filename (without extension) as the directory name
@@ -451,7 +451,7 @@ class ParsingTest < TestBaseWithoutFixtures
     sel_value = first_entry[:sel]
     db_host = ENV.fetch('ASAP2_REMOTE_HOST', 'postgres')
     db_port = ENV.fetch('ASAP2_REMOTE_PORT', '5434')  # Container port when on same network
-    db_url = "#{db_host}:#{db_port}/asap2_data_v#{@db_version}"
+    db_url = "#{db_host}:#{db_port}/asap_data_v#{@db_version}"
     
     puts "\nTesting wrong organism_id for #{filename}..."
     puts "  Correct organism_id: #{correct_organism_id}"
@@ -480,7 +480,7 @@ class ParsingTest < TestBaseWithoutFixtures
     sel_value = first_entry[:sel]
     db_host = ENV.fetch('ASAP2_REMOTE_HOST', 'postgres')
     db_port = ENV.fetch('ASAP2_REMOTE_PORT', '5434')  # Container port when on same network
-    db_url = "#{db_host}:#{db_port}/asap2_data_v#{@db_version}"
+    db_url = "#{db_host}:#{db_port}/asap_data_v#{@db_version}"
     
     puts "\nTesting wrong filetype for #{filename}..."
     puts "  Correct filetype: #{correct_filetype}"
@@ -510,7 +510,7 @@ class ParsingTest < TestBaseWithoutFixtures
     wrong_sel = "/nonexistent/dataset"  # Use a non-existent dataset name
     db_host = ENV.fetch('ASAP2_REMOTE_HOST', 'postgres')
     db_port = ENV.fetch('ASAP2_REMOTE_PORT', '5434')  # Container port when on same network
-    db_url = "#{db_host}:#{db_port}/asap2_data_v#{@db_version}"
+    db_url = "#{db_host}:#{db_port}/asap_data_v#{@db_version}"
     
     puts "\nTesting wrong sel parameter for #{filename}..."
     puts "  Correct sel: #{correct_sel}"

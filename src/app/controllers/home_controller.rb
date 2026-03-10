@@ -120,6 +120,9 @@ class HomeController < ApplicationController
       ).deliver_now
 
       flash[:notice] = "Your message has been sent. Thank you for your feedback!"
+    rescue KeyError, ArgumentError => e
+      Rails.logger.error("[ContactForm] Invalid mail configuration: #{e.class} - #{e.message}")
+      flash[:alert] = "Contact form is temporarily unavailable. Please email us directly at bioinfo.epfl@gmail.com."
     rescue => e
       Rails.logger.error("[ContactForm] Failed to send email: #{e.class} - #{e.message}")
       flash[:alert] = "Failed to send your message. Please try again later or email us directly."

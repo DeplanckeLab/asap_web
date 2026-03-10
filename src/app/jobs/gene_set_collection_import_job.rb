@@ -47,7 +47,8 @@ class GeneSetCollectionImportJob < ApplicationJob
     end
 
     h_env = Basic.safe_parse_json(project.version&.env_json, {})
-    db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+    db_version = h_env['asap_data_db_name'].to_s.strip
+    raise ArgumentError, 'Missing asap_data_db_name in project version env_json' if db_version.blank?
     dataset_stable_by_accession, dataset_stable_by_symbol = build_dataset_stable_lookup(project, loom_file)
     timestamp = Time.now.utc.iso8601
     normalized_items = []

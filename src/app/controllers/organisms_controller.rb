@@ -27,7 +27,7 @@ class OrganismsController < ApplicationController
       organisms = RemoteOrganism.list_for_version(source)
       # Filter out organisms without names (hashes where 'name' is nil or empty)
       organisms = organisms.select { |org| org['name'].present? } if organisms.is_a?(Array)
-      label = source.sub(/^asap2_data_/, "").upcase
+      label = source.sub(/^asap_data_/, "").upcase
       [organisms, "Remote #{label}", nil]
     end
   rescue StandardError => e
@@ -37,7 +37,7 @@ class OrganismsController < ApplicationController
 
   def source_label_for(source)
     return "Local database" if source == :local
-    "Remote #{source.sub(/^asap2_data_/, "").upcase}"
+    "Remote #{source.sub(/^asap_data_/, "").upcase}"
   end
 end
 

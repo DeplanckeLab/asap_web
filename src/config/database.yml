@@ -75,15 +75,15 @@ development:
     <<: *sqlite
     database: solid/cable_development.sqlite3
     migrations_paths: db/cable_migrate
-  asap2_data:
+  asap_data:
     <<: *asap2_remote
-    database: <%= ENV.fetch("ASAP2_REMOTE_DB", "asap2_data_v8") %>
+    database: <%= ENV.fetch("ASAP2_REMOTE_DB", "asap_data_v8") %>
     migrations_paths: db/asap2_data_migrate
 
 <%
-  asap2_data_versions = ENV.fetch("ASAP2_DATA_VERSIONS", "asap2_data_v4,asap2_data_v5,asap2_data_v6,asap2_data_v8").split(",").map(&:strip).reject(&:empty?)
+  asap_data_versions = ENV.fetch("ASAP2_DATA_VERSIONS", "asap_data_v4,asap_data_v5,asap_data_v6,asap_data_v8").split(",").map(&:strip).reject(&:empty?)
 %>
-<% asap2_data_versions.each do |db_name| %>
+<% asap_data_versions.each do |db_name| %>
 <%= db_name %>:
   <<: *asap2_remote
   database: <%= db_name %>

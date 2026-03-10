@@ -151,6 +151,151 @@ namespace :db do
       puts ""
     end
   end
+
+  desc "Replace asap2_data_* references with asap_data_* across all public tables/columns"
+  task replace_asap2_data_references: :environment do
+    target_db = ENV.fetch('TARGET_DB', 'asap_production')
+    dry_run = ENV['DRY_RUN'].to_s == '1'
+    old_prefix = 'asap2_data_'
+    new_prefix = 'asap_data_'
+
+    connection = ActiveRecord::Base.connection
+    current_db = connection.select_value('SELECT current_database()')
+
+    if current_db != target_db
+      puts "Error: connected to '#{current_db}', expected '#{target_db}'."
+      puts "Run this task against the correct database or override TARGET_DB."
+      exit 1
+    end
+
+    columns_sql = <<~SQL
+      SELECT table_name, column_name, data_type, udt_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (
+          data_type IN ('text', 'character varying', 'character', 'json', 'jsonb')
+          OR udt_name IN ('_text', '_varchar', '_bpchar')
+        )
+      ORDER BY table_name, ordinal_position;
+    SQL
+
+    columns = connection.exec_query(columns_sql).to_a
+    if columns.empty?
+      puts 'No eligible columns found in public schema.'
+      exit 0
+    end
+
+    puts "Database: #{current_db}"
+    puts "Mode: #{dry_run ? 'DRY RUN' : 'APPLY'}"
+    puts "Columns scanned: #{columns.count}"
+    puts ''
+
+    touched_columns = 0
+    touched_rows_total = 0
+    errors = 0
+
+    columns.each do |column|
+      table_name = column['table_name']
+      column_name = column['column_name']
+      data_type = column['data_type']
+      udt_name = column['udt_name']
+
+      quoted_table = connection.quote_table_name(table_name)
+      quoted_column = connection.quote_column_name(column_name)
+
+      expression =
+        case data_type
+        when 'json'
+          "(#{quoted_column})::text"
+        when 'jsonb'
+          "(#{quoted_column})::text"
+        else
+          quoted_column
+        end
+
+      where_sql = "#{expression} LIKE '%#{old_prefix}%'"
+      count_sql = "SELECT COUNT(*) FROM #{quoted_table} WHERE #{where_sql}"
+      match_count = connection.select_value(count_sql).to_i
+      next if match_count.zero?
+
+      touched_columns += 1
+      touched_rows_total += match_count
+
+      if dry_run
+        puts "[DRY RUN] #{table_name}.#{column_name} (#{data_type}/#{udt_name}) -> #{match_count} row(s)"
+        next
+      end
+
+      begin
+        update_sql =
+          case data_type
+          when 'json'
+            <<~SQL
+              UPDATE #{quoted_table}
+              SET #{quoted_column} = replace((#{quoted_column})::text, '#{old_prefix}', '#{new_prefix}')::json
+              WHERE #{where_sql}
+            SQL
+          when 'jsonb'
+            <<~SQL
+              UPDATE #{quoted_table}
+              SET #{quoted_column} = replace((#{quoted_column})::text, '#{old_prefix}', '#{new_prefix}')::jsonb
+              WHERE #{where_sql}
+            SQL
+          when 'ARRAY'
+            <<~SQL
+              UPDATE #{quoted_table}
+              SET #{quoted_column} = ARRAY(
+                SELECT replace(elem, '#{old_prefix}', '#{new_prefix}')
+                FROM unnest(#{quoted_column}) AS elem
+              )
+              WHERE #{where_sql}
+            SQL
+          else
+            <<~SQL
+              UPDATE #{quoted_table}
+              SET #{quoted_column} = replace(#{quoted_column}, '#{old_prefix}', '#{new_prefix}')
+              WHERE #{where_sql}
+            SQL
+          end
+
+        result = connection.exec_update(update_sql, "replace_asap2_data_references_#{table_name}_#{column_name}")
+        puts "[UPDATED] #{table_name}.#{column_name} (#{data_type}/#{udt_name}) -> #{result} row(s)"
+      rescue StandardError => e
+        errors += 1
+        puts "[ERROR] #{table_name}.#{column_name} (#{data_type}/#{udt_name}) -> #{e.class}: #{e.message}"
+      end
+    end
+
+    puts ''
+    puts 'Summary:'
+    puts "  Columns with matches: #{touched_columns}"
+    puts "  Rows with matches:    #{touched_rows_total}"
+    puts "  Errors:               #{errors}"
+
+    unless dry_run
+      remaining = 0
+      columns.each do |column|
+        table_name = column['table_name']
+        column_name = column['column_name']
+        data_type = column['data_type']
+        quoted_table = connection.quote_table_name(table_name)
+        quoted_column = connection.quote_column_name(column_name)
+
+        expression =
+          case data_type
+          when 'json', 'jsonb'
+            "(#{quoted_column})::text"
+          else
+            quoted_column
+          end
+
+        count_sql = "SELECT COUNT(*) FROM #{quoted_table} WHERE #{expression} LIKE '%#{old_prefix}%'"
+        remaining += connection.select_value(count_sql).to_i
+      end
+      puts "  Remaining matches:    #{remaining}"
+      exit 1 if errors.positive?
+    end
+  end
 end
 
 namespace :versions do

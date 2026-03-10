@@ -19,7 +19,8 @@
     if go_ids
       begin
         h_env = Basic.safe_parse_json(@project.version.env_json, {})
-        db_version = "asap2_data_v#{h_env['asap_data_db_version']}"
+        db_version = h_env['asap_data_db_name'].to_s
+        raise "Missing asap_data_db_name in version env_json" if db_version.blank?
         RemoteGene.with_remote(db_version) do
           conn = RemoteGene.connection
           go_quoted = go_ids.map { |g| conn.quote(g) }.join(', ')
@@ -77,7 +78,8 @@
     end
     if gene_set_ids.any?
       h_env ||= Basic.safe_parse_json(@project.version.env_json, {})
-      db_version ||= "asap2_data_v#{h_env['asap_data_db_version']}"
+      db_version ||= h_env['asap_data_db_name'].to_s
+      raise "Missing asap_data_db_name in version env_json" if db_version.blank?
       RemoteGene.with_remote(db_version) do
         conn = RemoteGene.connection
         conn.select_all("SELECT id, label FROM gene_sets WHERE id IN (#{gene_set_ids.keys.join(',')})").each do |row|

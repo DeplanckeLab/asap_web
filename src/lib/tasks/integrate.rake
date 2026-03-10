@@ -31,7 +31,12 @@ task :integrate, [:project_key] => [:environment] do |t, args|
   h_env_docker_image = h_env['docker_images']['asap_run']
   image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
 
-  db_conn = "postgres:5434/asap2_data_v" + h_env['asap_data_db_version'].to_s
+  asap_data_db_name = h_env['asap_data_db_name'].to_s
+  if asap_data_db_name.blank?
+    logger.error("[IntegrateRake] Missing asap_data_db_name in version env_json for version #{version.id}")
+    exit 1
+  end
+  db_conn = "postgres:5434/#{asap_data_db_name}"
 
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   tmp_dir = project_dir + 'parsing'

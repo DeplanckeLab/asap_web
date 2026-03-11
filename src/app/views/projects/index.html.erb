@@ -10,26 +10,55 @@
     <% end %>
 
     <!-- Header -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
-      <p class="text-gray-600">Search and explore ASAP projects</p>
+    <div class="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
+        <p class="text-gray-600">Search and explore ASAP projects</p>
+      </div>
+      <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap" %>
     </div>
 
     <!-- Search Form -->
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-      <%= form_with url: projects_path, method: :get, local: true, class: "space-y-6" do |form| %>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8 relative">
+      <%= form_with url: projects_path, method: :get, local: true, class: "space-y-6", data: { controller: "search-form" } do |form| %>
+        <div class="absolute top-6 right-6">
+          <%= link_to "Clear form", projects_path, class: "text-xs text-gray-500 hover:text-gray-700 underline" %>
+        </div>
         <!-- Search Bar -->
-        <div>
-          <label for="q" class="block text-sm font-medium text-gray-700 mb-2">Search Projects</label>
-          <div class="relative">
-            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-              </svg>
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <div class="<%= current_user.present? ? 'md:col-span-8' : 'md:col-span-12' %>">
+            <label for="q" class="block text-sm font-medium text-gray-700 mb-2">Search Projects</label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+              </div>
+              <%= form.text_field :q, value: @query, placeholder: "Search by name, description, technology...",
+                  data: { action: "input->search-form#submitDebounced" },
+                  class: "block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500" %>
             </div>
-            <%= form.text_field :q, value: @query, placeholder: "Search by name, description, technology...", 
-                class: "block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500" %>
           </div>
+          <% if current_user.present? %>
+            <div class="md:col-span-4">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
+              <% visibility = @filters[:visibility].presence || 'all' %>
+              <div class="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden">
+                <label class="cursor-pointer">
+                  <%= form.radio_button :visibility, 'all', checked: visibility == 'all', class: "sr-only peer", data: { action: "change->search-form#submitNow" } %>
+                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border-r border-gray-300 peer-checked:bg-blue-600 peer-checked:text-white">All</span>
+                </label>
+                <label class="cursor-pointer">
+                  <%= form.radio_button :visibility, 'private', checked: visibility == 'private', class: "sr-only peer", data: { action: "change->search-form#submitNow" } %>
+                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border-r border-gray-300 peer-checked:bg-blue-600 peer-checked:text-white">Private</span>
+                </label>
+                <label class="cursor-pointer">
+                  <%= form.radio_button :visibility, 'public', checked: visibility == 'public', class: "sr-only peer", data: { action: "change->search-form#submitNow" } %>
+                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white peer-checked:bg-blue-600 peer-checked:text-white">Public</span>
+                </label>
+              </div>
+            </div>
+          <% end %>
         </div>
 
         <!-- Filters Row -->
@@ -39,7 +68,7 @@
             <label class="block text-sm font-medium text-gray-700 mb-2">Organism</label>
             <div class="relative" data-test="organism-selector-container">
               <% selected_organism_id = @filters[:organism_id].present? ? @filters[:organism_id].to_i : nil %>
-              <input type="hidden" name="organism_id" value="<%= selected_organism_id || '' %>" data-organism-selector-target="hiddenInput" />
+              <input type="hidden" name="organism_id" value="<%= selected_organism_id || '' %>" data-organism-selector-target="hiddenInput" data-action="change->search-form#submitNow" />
 
               <!-- Dropdown button -->
               <button type="button"
@@ -127,7 +156,7 @@
             <%= form.select :technology, 
                 options_for_select(@technologies, @filters[:technology]), 
                 { prompt: "All technologies" }, 
-                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500", data: { action: "change->search-form#submitNow" } } %>
           </div>
 
           <!-- Tissue Filter -->
@@ -136,7 +165,7 @@
             <%= form.select :tissue, 
                 options_for_select(@tissues, @filters[:tissue]), 
                 { prompt: "All tissues" }, 
-                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500", data: { action: "change->search-form#submitNow" } } %>
           </div>
 
           <!-- Status Filter -->
@@ -145,60 +174,19 @@
             <%= form.select :status_id, 
                 options_from_collection_for_select(@statuses, :id, :display_name, @filters[:status_id]), 
                 { prompt: "All statuses" }, 
-                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
+                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500", data: { action: "change->search-form#submitNow" } } %>
           </div>
         </div>
 
         <!-- Additional Filters Row -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <!-- Public Only Filter -->
-          <% if current_user.present? %>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
-              <% visibility = @filters[:visibility].presence || 'all' %>
-              <div class="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden">
-                <label class="cursor-pointer">
-                  <%= form.radio_button :visibility, 'all', checked: visibility == 'all', class: "sr-only peer" %>
-                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border-r border-gray-300 peer-checked:bg-blue-600 peer-checked:text-white">All</span>
-                </label>
-                <label class="cursor-pointer">
-                  <%= form.radio_button :visibility, 'private', checked: visibility == 'private', class: "sr-only peer" %>
-                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border-r border-gray-300 peer-checked:bg-blue-600 peer-checked:text-white">Private</span>
-                </label>
-                <label class="cursor-pointer">
-                  <%= form.radio_button :visibility, 'public', checked: visibility == 'public', class: "sr-only peer" %>
-                  <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white peer-checked:bg-blue-600 peer-checked:text-white">Public</span>
-                </label>
-              </div>
-            </div>
-          <% end %>
-
-          <!-- Sort Options -->
-          <div>
-            <label for="sort" class="block text-sm font-medium text-gray-700 mb-2">Sort by</label>
-            <%= form.select :sort, 
-                options_for_select([
-                  ['Most Recent', 'created_at'],
-                  ['Name (A-Z)', 'name'],
-                  ['Most Views', 'views'],
-                  ['Last Updated', 'updated_at']
-                ], @filters[:sort]), 
-                {}, 
-                { class: "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" } %>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="flex items-end space-x-3">
-            <%= form.submit "Search", class: "px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" %>
-            <%= link_to "Clear", projects_path, class: "px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2" %>
-          </div>
-        </div>
       <% end %>
     </div>
 
     <!-- Results Header and Projects Container -->
-    <div data-controller="view-toggle">
-      <div class="flex justify-between items-center mb-6">
+    <div data-controller="view-toggle project-selection delete-projects integrate-projects"
+         data-delete-projects-url-value="<%= bulk_destroy_projects_path %>"
+         data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
+      <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center mb-6">
         <div class="text-sm text-gray-600">
           <% if @projects.any? %>
             Showing <%= (@current_page - 1) * @per_page + 1 %>-<%= [@current_page * @per_page, @total_count].min %> of <%= @total_count %> projects
@@ -207,7 +195,29 @@
           <% end %>
         </div>
         
-        <div class="flex items-center space-x-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <%= form_with url: projects_path, method: :get, local: true, class: "flex flex-wrap items-center gap-2 max-w-full" do |sort_form| %>
+            <%= hidden_field_tag :q, @query %>
+            <%= hidden_field_tag :organism_id, @filters[:organism_id] %>
+            <%= hidden_field_tag :technology, @filters[:technology] %>
+            <%= hidden_field_tag :tissue, @filters[:tissue] %>
+            <%= hidden_field_tag :status_id, @filters[:status_id] %>
+            <%= hidden_field_tag :visibility, @filters[:visibility] %>
+            <label for="sort_toolbar" class="text-sm font-medium text-gray-700 whitespace-nowrap">Sort by</label>
+            <%= sort_form.select :sort,
+                options_for_select([
+                  ['Most Recent', 'created_at'],
+                  ['Name (A-Z)', 'name'],
+                  ['Most Views', 'views'],
+                  ['Last Updated', 'updated_at']
+                ], @filters[:sort]),
+                {},
+                {
+                  id: "sort_toolbar",
+                  class: "block w-full sm:w-56 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+                  onchange: "this.form.requestSubmit()"
+                } %>
+          <% end %>
           <!-- View Toggle Buttons -->
           <div class="flex items-center border border-gray-300 rounded-md overflow-hidden">
             <button type="button" 
@@ -229,8 +239,14 @@
               </svg>
             </button>
           </div>
-          
-          <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+          <button type="button"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600 hover:bg-red-700"
+                  data-project-selection-target="deleteButton"
+                  data-action="click->delete-projects#deleteSelected"
+                  disabled>
+            <i class="fas fa-trash-alt mr-2"></i>
+            <span data-project-selection-target="deleteButtonText">Delete selected</span>
+          </button>
         </div>
       </div>
 
@@ -348,7 +364,7 @@
       </div>
 
       <!-- List View -->
-      <div data-view-toggle-target="listView" class="" data-controller="project-selection delete-projects integrate-projects" data-delete-projects-url-value="<%= bulk_destroy_projects_path %>" data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
+      <div data-view-toggle-target="listView" class="">
         <!-- Action Bar -->
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-3">
@@ -371,18 +387,10 @@
                 <span data-project-selection-target="integrateButtonText">Integrate selected</span>
               </button>
             <% end %>
-            <button type="button"
-                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600 hover:bg-red-700"
-                    data-project-selection-target="deleteButton"
-                    data-action="click->delete-projects#deleteSelected"
-                    disabled>
-              <i class="fas fa-trash-alt mr-2"></i>
-              <span data-project-selection-target="deleteButtonText">Delete selected</span>
-            </button>
           </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>

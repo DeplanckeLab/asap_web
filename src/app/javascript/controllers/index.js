@@ -175,6 +175,10 @@ import CountdownController from "controllers/countdown_controller"
 application.register("countdown", CountdownController)
 console.log('Countdown controller registered')
 
+import SearchFormController from "controllers/search_form_controller"
+application.register("search-form", SearchFormController)
+console.log('Search form controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

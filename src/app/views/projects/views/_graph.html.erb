@@ -380,27 +380,31 @@
         }
       });
 
+      function normalizeStepKey(rawValue) {
+        if (rawValue == null) return '';
+        return String(rawValue)
+          .trim()
+          .toLowerCase()
+          .replace(/[_-]+/g, ' ')
+          .replace(/\s+/g, ' ');
+      }
+
       function applySelectedStepHighlight(stepId) {
         cy.nodes().removeClass('selected-step-node');
         if (!stepId) return;
         const normalizedSelectedStepId = String(stepId);
 
-        // Some logical steps (e.g. scaling) can exist with multiple internal step IDs.
-        // Resolve all step IDs that share the same step name in the current left menu.
+        // Highlight by logical step name so all internal step IDs for that step
+        // are selected together and unrelated runs are excluded.
         const stepItems = Array.from(document.querySelectorAll('[data-step-id][data-step-name]'));
         const selectedStepItem = stepItems.find((el) => String(el.getAttribute('data-step-id')) === normalizedSelectedStepId);
         const selectedStepName = selectedStepItem ? selectedStepItem.getAttribute('data-step-name') : null;
-        const relatedStepIds = new Set([normalizedSelectedStepId]);
-        if (selectedStepName) {
-          stepItems.forEach((el) => {
-            if (el.getAttribute('data-step-name') === selectedStepName) {
-              relatedStepIds.add(String(el.getAttribute('data-step-id')));
-            }
-          });
-        }
+        const normalizedSelectedStepName = normalizeStepKey(selectedStepName);
+        if (!normalizedSelectedStepName) return;
 
         cy.nodes().forEach(function(node) {
-          if (relatedStepIds.has(String(node.data('step_id')))) {
+          const nodeStepName = normalizeStepKey(node.data('step_name'));
+          if (nodeStepName === normalizedSelectedStepName) {
             node.addClass('selected-step-node');
           }
         });

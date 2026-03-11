@@ -7551,6 +7551,11 @@ class ProjectsController < ApplicationController
       end
 
       @project_type = @project.project_type
+      @non_published_runs_count = if @project.public? && @project.public_at.present?
+        @runs.count { |run| !@project.locked_from_publication?(run) }
+      else
+        0
+      end
       @klay_data = generate_klay_data
       @list_cards = generate_list_cards
       session[:activated_filter] ||= {}

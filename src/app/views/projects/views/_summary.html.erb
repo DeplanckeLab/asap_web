@@ -63,6 +63,14 @@
           <label class="block text-sm font-medium text-gray-500 mb-1">Project Key</label>
           <p class="text-gray-900"><span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"><%= @project.key %></span></p>
         </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Created at</label>
+          <p class="text-gray-900"><%= @project.created_at.strftime("%B %d, %Y") %></p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Updated at</label>
+          <p class="text-gray-900"><%= @project.updated_at.strftime("%B %d, %Y") %></p>
+        </div>
         <% if @project.public? %>
         <div>
           <label class="block text-sm font-medium text-gray-500 mb-1">Public ID</label>
@@ -71,8 +79,18 @@
         <% end %>
         <% if @project.public_at.present? %>
         <div>
-          <label class="block text-sm font-medium text-gray-500 mb-1">Published at</label>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Last publication date</label>
           <p class="text-gray-900"><%= @project.public_at.strftime("%B %d, %Y") %></p>
+        </div>
+        <% end %>
+        <% if @project.public? %>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-1">Non-published runs</label>
+          <% if @non_published_runs_count.positive? %>
+            <p class="text-gray-900">Yes (<%= @non_published_runs_count %>)</p>
+          <% else %>
+            <p class="text-gray-900">No (0)</p>
+          <% end %>
         </div>
         <% end %>
         <% if @project.user&.email.present? %>

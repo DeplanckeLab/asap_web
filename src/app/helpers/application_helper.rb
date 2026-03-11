@@ -162,7 +162,7 @@ module ApplicationHelper
         icon: "fas fa-network-wired"
       },
       {
-        label: "Ontology term types",
+        label: "Cell annotation schema",
         description: "Definitions and lineage rules used by ASAP",
         path: ontology_term_types_path,
         icon: "fas fa-diagram-project"

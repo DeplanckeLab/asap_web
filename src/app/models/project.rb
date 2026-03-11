@@ -145,10 +145,17 @@ class Project < ApplicationRecord
       end
     end
 
-    if filters[:public_only] == 'true'
-      search_definition[:query][:bool][:filter] << {
-        term: { public: true }
-      }
+    if filters[:current_user_id].present?
+      case filters[:visibility]
+      when 'public'
+        search_definition[:query][:bool][:filter] << {
+          term: { public: true }
+        }
+      when 'private'
+        search_definition[:query][:bool][:filter] << {
+          term: { public: false }
+        }
+      end
     end
 
     # Always filter out deleted projects

@@ -3,17 +3,19 @@
   <div class="mb-8 space-y-4">
     <div>
       <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
-        Ontology term types
+        Cell annotation schema in ASAP (for single-cell datasets)
       </h1>
       <!-- <p class="mt-2 text-gray-600 dark:text-gray-300">
         This directory mirrors the legacy ASAP configuration and lets administrators audit how ontology term types are grouped, ranked, and linked to cell ontologies.
       </p>-->
     </div>
-    <div>
-      <%= link_to "New ontology term type",
-                  new_ontology_term_type_path,
-                  class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 dark:bg-gray-100 dark:text-black dark:hover:bg-gray-200" %>
-    </div>
+    <% if admin? %>
+      <div>
+        <%= link_to "New annotation field",
+                    new_ontology_term_type_path,
+                    class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 dark:bg-gray-100 dark:text-black dark:hover:bg-gray-200" %>
+      </div>
+    <% end %>
   </div>
 
   <% if @ontology_term_types.empty? %>
@@ -22,15 +24,15 @@
     </div>
   <% else %>
     <div class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-      <div class="border-b border-gray-100 px-6 py-4 dark:border-gray-800">
+      <!--<div class="border-b border-gray-100 px-6 py-4 dark:border-gray-800">
         <p class="text-sm font-medium text-gray-500 dark:text-gray-400">
           <%= pluralize(@ontology_term_types.size, "configuration") %>
         </p>
-       <!-- <p class="text-sm text-gray-500 dark:text-gray-400">
+        <p class="text-sm text-gray-500 dark:text-gray-400">
           Ranks originate from the legacy pipeline and determine display priority in downstream tooling.
-        </p>-->
+        </p>
       </div>
-
+-->
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
           <thead>
@@ -42,7 +44,9 @@
               <th scope="col" class="px-6 py-3">Direct terms</th>
               <th scope="col" class="px-6 py-3">Free-text entries</th>-->
               <th scope="col" class="px-6 py-3 text-right">Rank</th>
-              <th scope="col" class="px-6 py-3 text-right">Actions</th>
+              <% if admin? %>
+                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+              <% end %>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white text-sm text-gray-900 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-100">
@@ -100,16 +104,18 @@
                 <td class="px-6 py-4 text-right font-semibold text-gray-900 dark:text-white">
                   <%= record.rank.presence || "—" %>
                 </td>
-                <td class="px-6 py-4 text-right text-sm">
-                  <%= link_to "Edit",
-                              edit_ontology_term_type_path(record),
-                              class: "text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200" %>
-                  <%= button_to "Delete",
-                                ontology_term_type_path(record),
-                                method: :delete,
-                                form: { data: { turbo_confirm: "Delete #{record.name}?" }, class: "inline" },
-                                class: "ml-3 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-transparent p-0" %>
-                </td>
+                <% if admin? %>
+                  <td class="px-6 py-4 text-right text-sm">
+                    <%= link_to "Edit",
+                                edit_ontology_term_type_path(record),
+                                class: "text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200" %>
+                    <%= button_to "Delete",
+                                  ontology_term_type_path(record),
+                                  method: :delete,
+                                  form: { data: { turbo_confirm: "Delete #{record.name}?" }, class: "inline" },
+                                  class: "ml-3 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-transparent p-0" %>
+                  </td>
+                <% end %>
               </tr>
             <% end %>
           </tbody>

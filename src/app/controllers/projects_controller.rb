@@ -24,12 +24,20 @@ class ProjectsController < ApplicationController
   # GET /projects or /projects.json
   def index
     @query = params[:q]
+    visibility = params[:visibility].presence || (
+      if params[:public_only].present?
+        params[:public_only] == 'true' ? 'public' : 'private'
+      else
+        'all'
+      end
+    )
+
     @filters = {
       organism_id: params[:organism_id],
       technology: params[:technology],
       tissue: params[:tissue],
       status_id: params[:status_id],
-      public_only: params[:public_only],
+      visibility: visibility,
       sort: params[:sort] || 'created_at',
       page: params[:page] || 1,
       # User permission context for filtering
@@ -9452,12 +9460,19 @@ class ProjectsController < ApplicationController
       
       # Only include runs that exist
       return data if @runs.blank?
+
+      # Exclude runs that belong to hidden steps from pipeline graph rendering.
+      visible_runs = @runs.reject do |run|
+        step = run.step || @h_steps[run.step_id]
+        step&.hidden?
+      end
+      return data if visible_runs.blank?
       
       # Group runs by step for better organization
-      runs_by_step = @runs.group_by(&:step_id)
+      runs_by_step = visible_runs.group_by(&:step_id)
       
       # Add nodes for each run
-      @runs.each do |run|
+      visible_runs.each do |run|
         step = run.step || @h_steps[run.step_id]
         
         # Create label: #run_number std_method_name (only show #run_number if multiple_runs == true)
@@ -9499,8 +9514,8 @@ class ProjectsController < ApplicationController
       end
       
       # Create a hash of run IDs for quick lookup
-      run_ids_set = @runs.map(&:id).to_set
-      runs_by_id = @runs.index_by(&:id)
+      run_ids_set = visible_runs.map(&:id).to_set
+      runs_by_id = visible_runs.index_by(&:id)
       normalize_step_name = lambda do |raw_name|
         raw_name.to_s.strip.downcase
       end
@@ -9531,7 +9546,7 @@ class ProjectsController < ApplicationController
       
       # Add edges based on run_parents_json (most reliable source)
       edges_added = false
-      @runs.each do |run|
+      visible_runs.each do |run|
         next if run.run_parents_json.blank?
         
         begin
@@ -9571,7 +9586,7 @@ class ProjectsController < ApplicationController
       
       # Fallback to pipeline_parent_run_ids if run_parents_json didn't provide edges
       if !edges_added
-        @runs.each do |run|
+        visible_runs.each do |run|
           next if run.pipeline_parent_run_ids.blank?
           
           parent_ids = run.pipeline_parent_run_ids.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
@@ -9660,7 +9675,7 @@ class ProjectsController < ApplicationController
       end
 
       edge_count = data.count { |item| item[:data] && item[:data][:source] && item[:data][:target] }
-      emit_graph_debug.call("[graph_debug][summary] project=#{@project.key} total_nodes=#{@runs.size} total_edges=#{edge_count}")
+      emit_graph_debug.call("[graph_debug][summary] project=#{@project.key} total_nodes=#{visible_runs.size} total_edges=#{edge_count}")
       
       data
     end

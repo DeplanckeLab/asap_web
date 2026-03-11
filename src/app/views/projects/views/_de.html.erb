@@ -247,7 +247,7 @@
     @h_de_filter['fdr_cutoff'] = params[:de_fdr] if params[:de_fdr].present?
     @h_de_filter['fc_cutoff'] = params[:de_fc] if params[:de_fc].present?
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-    user_id = current_user ? current_user.id : 1
+    user_id = de_filter_cache_key
     filter_stats_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
     @h_stats ||= {}
     if File.exist?(filter_stats_file)
@@ -262,9 +262,8 @@
 
   <% de_auto_filter = params[:de_fdr].present? || params[:de_fc].present? %>
   <div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);"
-       data-controller="de-filter"
-       data-de-filter-url-value="<%= filter_de_results_project_path(@project) %>"
-       data-de-filter-auto-filter-value="<%= de_auto_filter %>"
+       id="de-filter-root"
+       data-de-filter-url="<%= filter_de_results_project_path(@project, format: :json) %>"
   >
     <div class="sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
       <div class="border-b border-gray-200 px-6 py-4">
@@ -304,21 +303,31 @@
           <div class="flex items-center gap-3 flex-wrap">
             <label class="text-sm font-medium text-gray-700 cursor-help" title="False Discovery Rate - adjusted p-value controlling for multiple testing">FDR &lt;=</label>
             <input type="text" value="<%= @h_de_filter['fdr_cutoff'] %>"
-                   data-de-filter-target="fdrCutoff"
-                   data-action="keyup->de-filter#filterOnEnter"
+                   id="de-fdr-cutoff"
+                   oninput="scheduleDeFilterNow()"
+                   onblur="runDeFilterNow()"
+                   onchange="runDeFilterNow()"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();runDeFilterNow();}"
                    class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
             <label class="text-sm font-medium text-gray-700 ml-2 cursor-help" title="Fold Change - ratio of expression between compared groups">|FC| &gt;=</label>
             <input type="text" value="<%= @h_de_filter['fc_cutoff'] %>"
-                   data-de-filter-target="fcCutoff"
-                   data-action="keyup->de-filter#filterOnEnter"
+                   id="de-fc-cutoff"
+                   oninput="scheduleDeFilterNow()"
+                   onblur="runDeFilterNow()"
+                   onchange="runDeFilterNow()"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();runDeFilterNow();}"
                    class="form-input rounded border border-gray-300 bg-white text-sm w-24 px-2 py-1 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            <span id="de-filter-spinner"
+                  class="ml-2 hidden inline-flex items-center text-sm text-gray-600">
+              <i class="fas fa-spinner fa-spin mr-1"></i>Refreshing
+            </span>
           </div>
         </div>
       <% end %>
     </div>
     <div class="px-6 py-5 flex-1 overflow-y-auto">
       <% if has_de_runs %>
-        <div data-de-filter-target="resultsContainer">
+        <div id="de-results-container">
           <%= render partial: 'projects/views/de_results_table' %>
         </div>
       <% else %>
@@ -326,5 +335,86 @@
       <% end %>
     </div>
   </div>
+
+  <script>
+  var deFilterTimer = null;
+
+  function scheduleDeFilterNow() {
+    if (deFilterTimer) clearTimeout(deFilterTimer);
+    deFilterTimer = setTimeout(function() {
+      runDeFilterNow();
+    }, 350);
+  }
+
+  function runDeFilterNow() {
+    if (deFilterTimer) {
+      clearTimeout(deFilterTimer);
+      deFilterTimer = null;
+    }
+    var root = document.getElementById('de-filter-root');
+    if (!root) return;
+    var url = root.getAttribute('data-de-filter-url');
+    var container = document.getElementById('de-results-container');
+    var fdrInput = document.getElementById('de-fdr-cutoff');
+    var fcInput = document.getElementById('de-fc-cutoff');
+    var spinner = document.getElementById('de-filter-spinner');
+    if (!url || !container || !fdrInput || !fcInput) return;
+
+    var csrfToken = document.querySelector('meta[name="csrf-token"]');
+    var formData = new FormData();
+    formData.append('filter[fdr_cutoff]', fdrInput.value);
+    formData.append('filter[fc_cutoff]', fcInput.value);
+    if (spinner) spinner.classList.remove('hidden');
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken ? csrfToken.getAttribute('content') : ''
+      },
+      body: formData,
+      credentials: 'same-origin'
+    })
+    .then(function(response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    })
+    .then(function(payload) {
+      var stats = payload && payload.h_stats ? payload.h_stats : {};
+      Object.keys(stats).forEach(function(runId) {
+        var up = (stats[runId] && stats[runId].up != null) ? parseInt(stats[runId].up, 10) : 0;
+        var down = (stats[runId] && stats[runId].down != null) ? parseInt(stats[runId].down, 10) : 0;
+
+        var upBadge = document.getElementById('de-up-badge-' + runId);
+        if (upBadge) {
+          upBadge.textContent = up + ' genes';
+          upBadge.classList.remove('bg-green-100', 'text-green-800', 'hover:bg-green-200', 'bg-gray-100', 'text-gray-500');
+          if (up > 0) {
+            upBadge.classList.add('bg-green-100', 'text-green-800', 'hover:bg-green-200');
+          } else {
+            upBadge.classList.add('bg-gray-100', 'text-gray-500');
+          }
+        }
+
+        var downBadge = document.getElementById('de-down-badge-' + runId);
+        if (downBadge) {
+          downBadge.textContent = down + ' genes';
+          downBadge.classList.remove('bg-red-100', 'text-red-800', 'hover:bg-red-200', 'bg-gray-100', 'text-gray-500');
+          if (down > 0) {
+            downBadge.classList.add('bg-red-100', 'text-red-800', 'hover:bg-red-200');
+          } else {
+            downBadge.classList.add('bg-gray-100', 'text-gray-500');
+          }
+        }
+      });
+    })
+    .catch(function(error) {
+      console.error('[de-filter] request failed', error);
+    })
+    .finally(function() {
+      if (spinner) spinner.classList.add('hidden');
+    });
+  }
+  </script>
 
 <% end %>

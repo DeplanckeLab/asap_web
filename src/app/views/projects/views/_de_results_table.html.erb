@@ -20,7 +20,7 @@
         <% h_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {} %>
         <% up_count = (@h_stats && @h_stats[run_id]) ? @h_stats[run_id]['up'].to_i : -1 %>
         <% down_count = (@h_stats && @h_stats[run_id]) ? @h_stats[run_id]['down'].to_i : -1 %>
-        <tr class="hover:bg-gray-50">
+        <tr class="hover:bg-gray-50" data-de-run-id="<%= run.id %>">
           <td class="px-3 py-2 text-gray-900 font-semibold" data-sort-value="<%= run.num || run.id %>">#<%= run.num || run.id %></td>
           <td class="px-3 py-2 text-gray-900" data-sort-value="<%= method_label.downcase %>"><%= method_label %></td>
           <td class="px-3 py-2 text-gray-600 text-xs">
@@ -147,7 +147,8 @@
           </td>
           <td class="px-3 py-2" data-sort-value="<%= up_count %>">
             <% if up_count >= 0 %>
-              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= up_count > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
+              <span id="de-up-badge-<%= run.id %>"
+                    class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= up_count > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
                     onclick="loadFormInRightPanel('<%= get_de_gene_list_run_path(run) %>?type=up')">
                 <%= up_count %> genes
               </span>
@@ -155,7 +156,8 @@
           </td>
           <td class="px-3 py-2" data-sort-value="<%= down_count %>">
             <% if down_count >= 0 %>
-              <span class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= down_count > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
+              <span id="de-down-badge-<%= run.id %>"
+                    class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= down_count > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
                     onclick="loadFormInRightPanel('<%= get_de_gene_list_run_path(run) %>?type=down')">
                 <%= down_count %> genes
               </span>

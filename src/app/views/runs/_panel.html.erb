@@ -332,13 +332,7 @@
                                       <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project, plural:false) %> Metadata</h6>
                                       <div class="flex flex-wrap gap-1.5">
                                         <% col_attrs.each do |annot| %>
-                                          <% annot_name = annot.name || '' %>
-                                          <% display_name = annot_name.gsub(/^\/col_attrs\//, '') %>
-                                          <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
-                                            <span><%= display_name %></span>
-                                            <%= dimension_badge(1, :row, @project) %>
-                                            <%= dimension_badge(matrix_nber_cols, :col, @project) %>
-                                          <% end %>
+                                          <%= raw render_results_dataset_button(annot, 1, variant: :link_chip) %>
                                         <% end %>
                                       </div>
                                     </div>
@@ -348,13 +342,7 @@
                                       <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project, plural:false) %> Metadata</h6>
                                       <div class="flex flex-wrap gap-1.5">
                                         <% row_attrs.each do |annot| %>
-                                          <% annot_name = annot.name || '' %>
-                                          <% display_name = annot_name.gsub(/^\/row_attrs\//, '') %>
-                                          <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
-                                            <span><%= display_name %></span>
-                                            <%= dimension_badge(matrix_nber_rows, :row, @project) %>
-                                            <%= dimension_badge(1, :col, @project) %>
-                                          <% end %>
+                                          <%= raw render_results_dataset_button(annot, 2, variant: :link_chip) %>
                                         <% end %>
                                       </div>
                                     </div>
@@ -556,13 +544,7 @@
                           <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= col_label(@project) %> Metadata</h6>
                           <div class="flex flex-wrap gap-1.5">
                             <% col_attrs.each do |annot| %>
-                              <% annot_name = annot.name || '' %>
-                              <% display_name = annot_name.gsub(/^\/col_attrs\//, '') %>
-                              <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
-                                <span><%= display_name %></span>
-                                <%= dimension_badge(1, :row, @project) %>
-                                <%= dimension_badge(matrix_nber_cols, :col, @project) %>
-                              <% end %>
+                              <%= raw render_results_dataset_button(annot, 1, variant: :link_chip) %>
                             <% end %>
                           </div>
                         </div>
@@ -572,13 +554,7 @@
                           <h6 class="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2"><%= row_label(@project) %> Metadata</h6>
                           <div class="flex flex-wrap gap-1.5">
                             <% row_attrs.each do |annot| %>
-                              <% annot_name = annot.name || '' %>
-                              <% display_name = annot_name.gsub(/^\/row_attrs\//, '') %>
-                              <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
-                                <span><%= display_name %></span>
-                                <%= dimension_badge(matrix_nber_rows, :row, @project) %>
-                                <%= dimension_badge(1, :col, @project) %>
-                              </button>
+                              <%= raw render_results_dataset_button(annot, 2, variant: :link_chip) %>
                             <% end %>
                           </div>
                         </div>

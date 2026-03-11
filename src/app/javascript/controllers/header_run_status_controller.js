@@ -81,7 +81,7 @@ export default class extends Controller {
     }
 
     // Update run status counts from broadcast project_run_totals
-    // project_run_totals is { waiting: N, running: N, completed: N, failed: N }
+    // project_run_totals is { pending: N, running: N, success: N, failed: N }
     const totals = data.project_run_totals
     if (!totals) {
       console.log('[HeaderRunStatus] No project_run_totals in broadcast, syncing from server')

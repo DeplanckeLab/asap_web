@@ -61,7 +61,7 @@ export default class extends Controller {
   }
 
   filterOnEnter(event) {
-    if (event.keyCode === 13) this.filter()
+    if (event.key === 'Enter' || event.keyCode === 13) this.filter()
   }
 
   sort(event) {

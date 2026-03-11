@@ -92,7 +92,7 @@
   end
 
   h_ge_filtered_stats = {}
-  ge_stats_file = project_dir + 'tmp' + "#{current_user.id}_ge_filtered_stats.json"
+  ge_stats_file = project_dir + 'tmp' + "#{de_filter_cache_key}_ge_filtered_stats.json"
   if File.exist?(ge_stats_file)
     h_ge_filtered_stats = Basic.safe_parse_json(File.read(ge_stats_file), {})
   end
@@ -101,7 +101,20 @@
       ge_output_file = project_dir + 'ge' + ge_run_id.to_s + 'output.json'
       next unless File.exist?(ge_output_file)
       begin
-        ge_data = Basic.safe_parse_json(File.read(ge_output_file), {})
+        raw_output = File.binread(ge_output_file)
+        sanitized_output = raw_output.gsub("\\N", "\\\\N")
+        sanitized_output = sanitized_output.gsub(/\\(?!["\\\/bfnrtu])/) { '\\\\' }
+        ge_data = {}
+        begin
+          ge_data = JSON.parse(sanitized_output)
+        rescue JSON::ParserError, Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError
+          begin
+            utf8_output = sanitized_output.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+            ge_data = JSON.parse(utf8_output)
+          rescue JSON::ParserError, Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError
+            ge_data = {}
+          end
+        end
         headers = ge_data['headers'] || []
         fdr_idx = headers.index('fdr')
         next unless fdr_idx

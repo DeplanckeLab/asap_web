@@ -47,8 +47,9 @@
           
           # Only load actual runs for statuses that have runs (for dropdown lists)
           runs_by_status = {}
-          [:waiting, :running, :completed, :failed].each do |key|
-            status_id = { waiting: 1, running: 2, completed: 3, failed: 4 }[key]
+          h_status_ids = Status.where(name: %w[pending running success failed]).pluck(:name, :id).to_h.symbolize_keys
+          [:pending, :running, :success, :failed].each do |key|
+            status_id = h_status_ids[key]
             if run_counts[key] > 0
               runs_by_status[key] = @project.runs.includes(:step, :std_method).where(status_id: status_id, step_id: visible_step_ids).order(created_at: :desc)
             else
@@ -97,7 +98,7 @@
           end
           
           # Get status icons from database with header-specific inactive color
-          run_status_icons = [:waiting, :running, :completed, :failed].map do |key|
+          run_status_icons = [:pending, :running, :success, :failed].map do |key|
             config = status_icons_by_key[key].dup
             config[:inactive_color] = 'text-gray-500'
             config[:count] = run_counts[key]

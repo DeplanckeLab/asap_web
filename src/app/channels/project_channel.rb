@@ -44,14 +44,9 @@ class ProjectChannel < ApplicationCable::Channel
       parsing_step_id = parsing_step.id
       project_step = ProjectStep.find_by(project_id: project.id, step_id: parsing_step.id)
       if project_step
-        parsing_status = case project_step.status_id
-                         when 1 then 'waiting'
-                         when 2 then 'running'
-                         when 3 then 'complete'
-                         when 4 then 'failed'
-                         else 'complete'
-                         end
-        parsing_complete = (project_step.status_id == 3)
+        parsing_status = project_step.status&.name.to_s.downcase
+        parsing_status = 'success' unless %w[pending running success failed].include?(parsing_status)
+        parsing_complete = (parsing_status == 'success')
       end
     end
 
@@ -62,9 +57,9 @@ class ProjectChannel < ApplicationCable::Channel
       parsing_status: parsing_status,
       parsing_complete: parsing_complete,
       project_run_totals: {
-        waiting: run_totals[1],
+        pending: run_totals[1],
         running: run_totals[2],
-        completed: run_totals[3],
+        success: run_totals[3],
         failed: run_totals[4]
       },
       project_updated_at: project.updated_at&.to_f,

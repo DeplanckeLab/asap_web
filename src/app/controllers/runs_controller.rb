@@ -80,7 +80,7 @@ class RunsController < ApplicationController
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     list_filtered_rows = []
     if params[:from]== 'ge_form'
-      filename = @project_dir + "tmp" + "#{(current_user) ? current_user.id : 1}_#{@run.id}_filtered.json"
+      filename = @project_dir + "tmp" + "#{de_filter_cache_key}_#{@run.id}_filtered.json"
       tmp_h = Basic.safe_parse_json(File.read(filename), {})
       list_filtered_rows = tmp_h[params[:type]] if tmp_h[params[:type]]
     else
@@ -259,22 +259,11 @@ class RunsController < ApplicationController
         end
       end
       
-      # Build dataset results
-      dataset_results = []
-      h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
-      @h_annots_by_dim.each_key do |dim|
-        subtitle = h_dim[dim]
-        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
-        dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
-          @h_annots_by_dim[dim].map { |annot|
-            col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
-            row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
-            col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
-            row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
-            annot_path = Rails.application.routes.url_helpers.annot_path(annot)
-            "<a href='#{annot_path}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'>#{annot.name} <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_cols} #{col_name}</span> <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_rows} #{row_name}</span></a>"
-          }.join(" ") + "</p>"
-      end
+      dataset_results_html = helpers.render_results_dataset_sections(
+        @h_annots_by_dim,
+        variant: :link_chip,
+        pluralize_all: true
+      )
       
       # Add exec.out and exec.err files for admin
       exec_files_html = ""
@@ -317,7 +306,7 @@ class RunsController < ApplicationController
             else
               "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
             end
-          }.join(" ") : '') + dataset_results.join("<br/>\n")
+          }.join(" ") : '') + dataset_results_html
         }
       }
     end
@@ -622,6 +611,15 @@ class RunsController < ApplicationController
   end
 
   private
+    def de_filter_cache_key
+      return "u#{current_user.id}" if current_user
+
+      sandbox_key = session[:sandbox].to_s
+      return "g#{Zlib.crc32(sandbox_key).to_s(36)}" if sandbox_key.present?
+
+      'g0'
+    end
+
     # Use callbacks to share common setup or constraints between actions.
     def set_run
       @run = Run.find(params[:id])

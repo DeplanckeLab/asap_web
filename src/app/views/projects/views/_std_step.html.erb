@@ -64,7 +64,7 @@
                 </button>
               <% end %>
               <!-- DE Special Views -->
-              <% if analyzable?(@project) && @step.name == 'de' %>
+              <% if @step.name == 'de' %>
                 <button type="button"
                         class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'de_filter', format: :html) %>')"
@@ -76,6 +76,14 @@
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'markers', format: :html) %>')"
                         style="flex-shrink: 0;">
                   <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
+                </button>
+              <% end %>
+              <% if @step.name == 'ge' %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'ge_filter', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> GE table</span>
                 </button>
               <% end %>
               <!-- New Run Button -->
@@ -193,7 +201,7 @@
                 </button>
               <% end %>
               <!-- DE Special Views -->
-              <% if analyzable?(@project) && @step.name == 'de' %>
+              <% if @step.name == 'de' %>
                 <button type="button"
                         class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'de_filter', format: :html) %>')"
@@ -205,6 +213,14 @@
                         onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'markers', format: :html) %>')"
                         style="flex-shrink: 0;">
                   <i class="fas fa-crosshairs sm:mr-1"></i><span class="hidden sm:inline"> Markers</span>
+                </button>
+              <% end %>
+              <% if @step.name == 'ge' %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'ge_filter', format: :html) %>')"
+                        style="flex-shrink: 0;">
+                  <i class="fas fa-filter sm:mr-1"></i><span class="hidden sm:inline"> GE table</span>
                 </button>
               <% end %>
               <!-- New Run Button -->

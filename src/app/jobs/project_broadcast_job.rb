@@ -32,9 +32,9 @@ class ProjectBroadcastJob < ApplicationJob
       cell_count: project.cell_count,
       gene_count: project.gene_count,
       project_run_totals: {
-        waiting: run_totals[1],
+        pending: run_totals[1],
         running: run_totals[2],
-        completed: run_totals[3],
+        success: run_totals[3],
         failed: run_totals[4]
       }
     })

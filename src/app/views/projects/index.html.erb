@@ -503,7 +503,7 @@
                   <td class="px-6 py-4 whitespace-nowrap" onclick="window.location='<%= project_path(project) %>'">
                     <% run_counts = project_run_counts(project) %>
                     <div class="flex items-center gap-2">
-                      <% [:waiting, :running, :completed, :failed].each do |key| %>
+                      <% [:pending, :running, :success, :failed].each do |key| %>
                         <% 
                           config = status_icons_by_key[key]
                           count = run_counts[key]

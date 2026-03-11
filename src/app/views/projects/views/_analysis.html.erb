@@ -476,6 +476,8 @@
   function loadFormInRightPanel(formUrl) {
     formUrl = appendLoomContextToUrl(formUrl)
     const isGraphRequest = /\/graph(\?|$)/.test(formUrl)
+    window.__analysisRightPanelRequestSeq = (window.__analysisRightPanelRequestSeq || 0) + 1
+    const panelRequestSeq = window.__analysisRightPanelRequestSeq
     console.log('[loadFormInRightPanel] Loading form from:', formUrl, 'isGraphRequest=', isGraphRequest)
     
     // Find the step-selector controller and its content target
@@ -529,6 +531,10 @@
       return response.text()
     })
     .then(html => {
+      if (panelRequestSeq !== window.__analysisRightPanelRequestSeq) {
+        console.log('[loadFormInRightPanel] Ignoring stale response for:', formUrl)
+        return
+      }
       console.log('[loadFormInRightPanel] Form loaded, length:', html.length)
       
       // Create a temporary container to parse HTML
@@ -651,6 +657,8 @@
 
   function loadRunInRightPanel(runUrl, stepId) {
     setPipelineHeaderButtonMode('graph')
+    window.__analysisRightPanelRequestSeq = (window.__analysisRightPanelRequestSeq || 0) + 1
+    const panelRequestSeq = window.__analysisRightPanelRequestSeq
     console.log('[loadRunInRightPanel] Loading run from:', runUrl, 'stepId:', stepId)
     
     // Find the step-selector controller and its content target
@@ -721,6 +729,10 @@
       return response.text()
     })
     .then(html => {
+      if (panelRequestSeq !== window.__analysisRightPanelRequestSeq) {
+        console.log('[loadRunInRightPanel] Ignoring stale response for:', runUrl)
+        return
+      }
       console.log('[loadRunInRightPanel] Run loaded, length:', html.length)
       
       // Update content with run

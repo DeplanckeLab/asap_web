@@ -222,6 +222,14 @@ export default class extends Controller {
           console.log('[StepSelectorController] Loading step results for step_id:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
+          if (runIdFromUrl && typeof loadRunInRightPanel === 'function') {
+            controller.saveState(stepId, 'run', runIdFromUrl)
+            controller.refreshStepsPanel()
+            setTimeout(() => {
+              loadRunInRightPanel(`/runs/${runIdFromUrl}`, stepId)
+            }, 0)
+            return true
+          }
           const extraQuery = showFormFromUrl === '1' ? '&show_form=1' : ''
           controller.loadStepResults(stepId, stepElement, true, extraQuery)
           return true
@@ -454,15 +462,15 @@ export default class extends Controller {
       .then((counts) => {
         console.log('[StepSelectorController] reconcileCurrentStepOnConnect response:', counts)
         const running = parseInt(counts.running ?? 0, 10) || 0
-        const completed = parseInt(counts.completed ?? 0, 10) || 0
+        const success = parseInt(counts.success ?? 0, 10) || 0
         const failed = parseInt(counts.failed ?? 0, 10) || 0
-        const isTerminal = running === 0 && (completed > 0 || failed > 0)
+        const isTerminal = running === 0 && (success > 0 || failed > 0)
         if (!isTerminal) return
 
         console.log('[StepSelectorController] reconcileCurrentStepOnConnect forcing refresh for terminal parsing state', {
           currentStepId,
           running,
-          completed,
+          success,
           failed
         })
         this.loadStepResults(currentStepId, currentStepEl, false)
@@ -476,7 +484,7 @@ export default class extends Controller {
     if (!data) return false
 
     const parsingStatus = (data.parsing_status || '').toString().toLowerCase()
-    if (parsingStatus === 'complete' || parsingStatus === 'failed') {
+    if (parsingStatus === 'success' || parsingStatus === 'failed') {
       console.log('[StepSelectorController] Terminal by parsing_status:', parsingStatus)
       return true
     }
@@ -484,16 +492,16 @@ export default class extends Controller {
     const counts = data.h_nber_analyses
     if (!counts) return false
 
-    const waiting = parseInt(counts[1] ?? counts['1'] ?? 0, 10) || 0
+    const pending = parseInt(counts[1] ?? counts['1'] ?? 0, 10) || 0
     const running = parseInt(counts[2] ?? counts['2'] ?? 0, 10) || 0
-    const completed = parseInt(counts[3] ?? counts['3'] ?? 0, 10) || 0
+    const success = parseInt(counts[3] ?? counts['3'] ?? 0, 10) || 0
     const failed = parseInt(counts[4] ?? counts['4'] ?? 0, 10) || 0
 
-    const isTerminal = waiting === 0 && running === 0 && (completed > 0 || failed > 0)
+    const isTerminal = pending === 0 && running === 0 && (success > 0 || failed > 0)
     console.log('[StepSelectorController] Terminal by h_nber_analyses check:', {
-      waiting,
+      pending,
       running,
-      completed,
+      success,
       failed,
       isTerminal
     })
@@ -584,15 +592,15 @@ export default class extends Controller {
       // For the parsing step (identified by parsing_status in the broadcast data),
       // don't reload the content panel on every broadcast. The parsing view has no
       // run rows and would trigger an unnecessary full reload each time.
-      // The parsing_status check further below handles the complete/failed transitions.
-      if (data.parsing_status && data.parsing_status !== 'complete' && data.parsing_status !== 'failed') {
+      // The parsing_status check further below handles the success/failed transitions.
+      if (data.parsing_status && data.parsing_status !== 'success' && data.parsing_status !== 'failed') {
         // Keep in-progress parsing lightweight, but force a reload when the current
         // panel still shows a failed state so failed -> waiting/running is visible.
         const parsingStatusPanel = this.contentTarget.querySelector('[data-parsing-status-panel="true"]')
         const shownStatusId = parsingStatusPanel ? parseInt(parsingStatusPanel.dataset.currentStatusId || '', 10) : null
         const isShowingFailedPanel = shownStatusId === 4
 
-        if (isShowingFailedPanel && (data.parsing_status === 'waiting' || data.parsing_status === 'running')) {
+        if (isShowingFailedPanel && (data.parsing_status === 'pending' || data.parsing_status === 'running')) {
           console.log(`[StepSelectorController] Parsing recovered (${data.parsing_status}) from failed panel, reloading content`)
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
@@ -657,8 +665,8 @@ export default class extends Controller {
     if (data.parsing_status && this.currentStepId) {
       const currentStepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
       if (currentStepElement) {
-        // If parsing status changed to complete or failed, reload the current step
-        if (data.parsing_status === 'complete' || data.parsing_status === 'failed') {
+        // If parsing status changed to success or failed, reload the current step
+        if (data.parsing_status === 'success' || data.parsing_status === 'failed') {
           console.log(`[StepSelectorController] Parsing status changed to ${data.parsing_status}, reloading current step as fallback`)
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
@@ -680,7 +688,7 @@ export default class extends Controller {
       currentStepId: this.currentStepId
     })
     if (stepName !== 'parsing') return
-    if (status !== 'complete' && status !== 'failed') return
+    if (status !== 'success' && status !== 'failed') return
 
     const stepId = data.step_id ? parseInt(data.step_id, 10) : null
     if (!stepId) return
@@ -712,7 +720,7 @@ export default class extends Controller {
     const headerRoot = document.querySelector('[data-controller~="header-run-status"]')
     if (!headerRoot) return
 
-    const statusKeys = ['waiting', 'running', 'completed', 'failed']
+    const statusKeys = ['pending', 'running', 'success', 'failed']
     statusKeys.forEach((statusKey) => {
       const count = parseInt(totals[statusKey]) || 0
 
@@ -923,7 +931,8 @@ export default class extends Controller {
 
     // Get current status from the badge (if it exists) to detect changes
     const currentBadge = stepElement.querySelector('.inline-flex.items-center')
-    const currentStatus = currentBadge ? currentBadge.textContent.toLowerCase().trim() : null
+    const rawCurrentStatus = currentBadge ? currentBadge.textContent.toLowerCase().trim() : null
+    const currentStatus = this.normalizeStatusName(rawCurrentStatus)
     console.log('[StepSelectorController] Current badge status:', currentStatus)
 
     // Determine status from data
@@ -931,7 +940,7 @@ export default class extends Controller {
     
     // Check if this is the parsing step and we have parsing_status
     if (data.parsing_status && dataStepIdNum === stepIdNum) {
-      status = data.parsing_status
+      status = this.normalizeStatusName(data.parsing_status)
       console.log('[StepSelectorController] Using parsing_status:', status)
     } 
     // Check if we have run counts for this step
@@ -949,9 +958,9 @@ export default class extends Controller {
       } else if (hasFailed) {
         status = 'failed'
       } else if (hasComplete) {
-        status = 'complete'
+        status = 'success'
       } else if (data.h_nber_analyses[1] > 0) {
-        status = 'waiting'
+        status = 'pending'
       }
     } else {
       console.log('[StepSelectorController] No matching status data found')
@@ -965,10 +974,10 @@ export default class extends Controller {
       return
     }
     
-    // Check if status changed to complete or failed, and if this is the currently displayed step
+    // Check if status changed to success or failed, and if this is the currently displayed step
     const statusChanged = currentStatus !== status
     const isCurrentStep = this.currentStepId && (this.currentStepId.toString() === stepId.toString())
-    const shouldReload = statusChanged && isCurrentStep && (status === 'complete' || status === 'failed' || status === 'running')
+    const shouldReload = statusChanged && isCurrentStep && (status === 'success' || status === 'failed' || status === 'running')
     
     console.log('[StepSelectorController] Status change check:')
     console.log('  - statusChanged:', statusChanged, `("${currentStatus}" -> "${status}")`)
@@ -983,7 +992,7 @@ export default class extends Controller {
     // Update the icon
     const iconElement = stepElement.querySelector('.flex-shrink-0 i')
     if (iconElement) {
-      const statusConfig = this.getStatusIconConfig(status === 'complete' ? 'completed' : status)
+      const statusConfig = this.getStatusIconConfig(status)
       if (statusConfig) {
         const spinClass = status === 'running' && statusConfig.icon_spin ? ' ' + statusConfig.icon_spin : ''
         iconElement.className = statusConfig.icon_base + spinClass + ' text-lg ' + statusConfig.active_color
@@ -1034,19 +1043,21 @@ export default class extends Controller {
   }
 
   getStatusColor(status) {
-    switch(status) {
-      case 'complete': return 'green'
-      case 'running': return 'blue'
-      case 'waiting': return 'yellow'
-      case 'failed': return 'red'
-      default: return 'gray'
-    }
+    const statusConfig = this.getStatusIconConfig(status)
+    return statusConfig?.color || 'gray'
   }
 
   humanizeStatus(status) {
-    // Convert status string to human-readable format (capitalize first letter)
     if (!status) return ''
+    const statusConfig = this.getStatusIconConfig(status)
+    if (statusConfig?.label) return statusConfig.label
     return status.charAt(0).toUpperCase() + status.slice(1)
+  }
+
+  normalizeStatusName(status) {
+    const normalized = (status || '').toString().toLowerCase().trim()
+    if (!normalized) return normalized
+    return normalized
   }
 
   selectFirstAvailableStep() {
@@ -1287,6 +1298,10 @@ export default class extends Controller {
     
     // Store controller reference and stepId to preserve in promise chain
     const controller = this
+    this._stepResultsRequestSeq = (this._stepResultsRequestSeq || 0) + 1
+    const requestSeq = this._stepResultsRequestSeq
+    window.__analysisRightPanelRequestSeq = (window.__analysisRightPanelRequestSeq || 0) + 1
+    const panelRequestSeq = window.__analysisRightPanelRequestSeq
     
     fetch(url, {
       method: 'GET',
@@ -1309,6 +1324,11 @@ export default class extends Controller {
       return response.text()
     })
     .then((html) => {
+      // Ignore stale responses from older requests to prevent UI flashing/reverts.
+      if (requestSeq !== controller._stepResultsRequestSeq || panelRequestSeq !== window.__analysisRightPanelRequestSeq) {
+        console.log('[StepSelectorController] Ignoring stale step results response for step:', stepId)
+        return
+      }
       console.log('[StepSelectorController] Response text received, length:', html ? html.length : 0)
       console.log('[StepSelectorController] ===== STEP RESULTS LOADED =====')
       console.log('[StepSelectorController] HTML length:', html.length)

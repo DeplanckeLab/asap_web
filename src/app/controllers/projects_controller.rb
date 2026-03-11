@@ -7,10 +7,11 @@ require 'set'
 
 class ProjectsController < ApplicationController
   include ComplianceHelpers
+  helper_method :de_filter_cache_key
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing filter_de_results filter_ge_results save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
@@ -255,29 +256,10 @@ class ProjectsController < ApplicationController
       # Set selected run ID from URL parameter (to auto-load a specific run)
       @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
       
-      # Determine if we should load the run panel
-      # If a step-specific partial exists (like _parsing.html.erb), we don't load the run panel
-      # because step_results will render the custom partial instead
-      # This matches the behavior of clicking on a step in the left panel
+      # Run panels are fetched client-side from /runs/:id?panel=1 to keep a single
+      # rendering path for right-panel run content.
       @load_run_panel = false
       @run_panel_html = nil
-      if @selected_run_id.present?
-        selected_run = Run.find_by(id: @selected_run_id)
-        selected_step = selected_run&.step
-        Rails.logger.info("[show] run_panel_logic: selected_run_id=#{@selected_run_id}, selected_run=#{selected_run&.id}, selected_step=#{selected_step&.name}")
-        if selected_run && selected_step
-          begin
-            @run_panel_html = render_run_panel_to_string(selected_run, selected_step)
-            @load_run_panel = true
-            Rails.logger.info("[show] run_panel rendered server-side, html_length=#{@run_panel_html&.length}")
-          rescue => e
-            Rails.logger.error("[show] Error rendering run panel: #{e.class} - #{e.message}")
-            Rails.logger.error(e.backtrace.first(10).join("\n"))
-            @load_run_panel = false
-            @run_panel_html = nil
-          end
-        end
-      end
 
       @load_sub_view = false
       @sub_view_html = nil
@@ -601,23 +583,17 @@ class ProjectsController < ApplicationController
     # Variables specific to summary view
     if @view_type == 'summary'
       # Get parsing status for display
-      @parsing_status = 'complete'
+      @parsing_status = 'success'
       @parsing_step = parsing_step_for_project(@project)
       if @parsing_step
         @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
         if @parsing_project_step
-          @parsing_status = case @parsing_project_step.status_id
-          when 1
-            'waiting'
-          when 2
-            'running'
-          when 3
-            'complete'
-          when 4
-            'failed'
-          else
-            'complete'
-          end
+          status_name = @parsing_project_step.status&.name.to_s.downcase
+          @parsing_status = if %w[pending running success failed].include?(status_name)
+                              status_name
+                            else
+                              'success'
+                            end
         end
       end
       
@@ -1856,16 +1832,26 @@ class ProjectsController < ApplicationController
     if params[:filter].present?
       new_fc = params[:filter][:fc_cutoff].to_f
       new_fdr = params[:filter][:fdr_cutoff].to_f
-      @project.update_attribute(:de_filter_json, { fc_cutoff: new_fc, fdr_cutoff: new_fdr }.to_json)
+      if editable?(@project)
+        @project.update_attribute(:de_filter_json, { fc_cutoff: new_fc, fdr_cutoff: new_fdr }.to_json)
+      end
       @h_de_filter = { 'fc_cutoff' => new_fc, 'fdr_cutoff' => new_fdr }
     end
+
+    Rails.logger.info(
+      "[filter_de_results] project_id=#{@project.id} user_id=#{current_user&.id || 'guest'} " \
+      "cache_key=#{de_filter_cache_key} runs=#{@runs.size} fdr=#{@h_de_filter['fdr_cutoff']} fc=#{@h_de_filter['fc_cutoff']}"
+    )
 
     @h_stats = run_de_filter(annots, @h_de_filter)
 
     @h_std_methods = {}
     StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
 
-    render partial: 'projects/views/de_results_table', layout: false
+    respond_to do |format|
+      format.html { render partial: 'projects/views/de_results_table', layout: false }
+      format.json { render json: { h_stats: @h_stats } }
+    end
   end
 
   # POST /projects/1/filter_ge_results
@@ -1873,16 +1859,28 @@ class ProjectsController < ApplicationController
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
 
     asap_docker_image = Basic.get_asap_docker(@project.version)
-    ge_step = Step.where(docker_image_id: asap_docker_image.id, name: 'ge').first
-    @step = ge_step
-    @runs = @project.runs.where(step_id: ge_step.id).includes(:annots).order(created_at: :desc)
+    ge_step_ids = Step.where(docker_image_id: asap_docker_image.id, name: 'ge').pluck(:id)
+    @step = Step.find_by(id: ge_step_ids.first)
+    @runs = if ge_step_ids.any?
+      @project.runs.where(step_id: ge_step_ids).includes(:annots).order(created_at: :desc)
+    else
+      @project.runs.joins(:step).where(steps: { name: 'ge' }).includes(:annots).order(created_at: :desc)
+    end
 
     @h_ge_filter = Basic.safe_parse_json(@project.ge_filter_json, { 'fdr_cutoff' => 0.05 })
+    requested_run_ids = []
 
     if params[:filter].present?
       new_fdr = params[:filter][:fdr_cutoff].to_f
-      @project.update_attribute(:ge_filter_json, { fdr_cutoff: new_fdr }.to_json)
+      if editable?(@project)
+        @project.update_attribute(:ge_filter_json, { fdr_cutoff: new_fdr }.to_json)
+      end
       @h_ge_filter = { 'fdr_cutoff' => new_fdr }
+      requested_run_ids = Array(params.dig(:filter, :run_ids)).map(&:to_i).select { |id| id > 0 }
+    end
+
+    if requested_run_ids.any?
+      @runs = @project.runs.where(id: requested_run_ids).includes(:annots).order(created_at: :desc)
     end
 
     fdr_cutoff = @h_ge_filter['fdr_cutoff'].to_f
@@ -1890,13 +1888,43 @@ class ProjectsController < ApplicationController
     completed_runs = @runs.select { |r| r.status_id == 3 }
     completed_runs.each do |run|
       output_file = @project_dir + 'ge' + run.id.to_s + 'output.json'
-      next unless File.exist?(output_file)
-      h_output = Basic.safe_parse_json(File.read(output_file), {})
+      unless File.exist?(output_file)
+        Rails.logger.warn("[filter_ge_results] missing_output_file run_id=#{run.id} path=#{output_file}")
+        next
+      end
+      raw_output = File.binread(output_file)
+      sanitized_output = raw_output.gsub("\\N", "\\\\N")
+      sanitized_output = sanitized_output.gsub(/\\(?!["\\\/bfnrtu])/) { '\\\\' }
+      sanitized_output = sanitized_output.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+      sanitized_output = sanitized_output.gsub(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/, '')
+      h_output = {}
+      begin
+        h_output = JSON.parse(sanitized_output, allow_nan: true)
+      rescue JSON::ParserError, Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e
+        Rails.logger.warn(
+          "[filter_ge_results] parse_failed run_id=#{run.id} path=#{output_file} " \
+          "size=#{raw_output.bytesize} error=#{e.class}: #{e.message}"
+        )
+        begin
+          # Fallback: replace explicit invalid escape sequence from some GE outputs.
+          fallback_output = sanitized_output.gsub("\\N", "\\\\N")
+          h_output = JSON.parse(fallback_output, allow_nan: true)
+        rescue JSON::ParserError, Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e2
+          Rails.logger.warn(
+            "[filter_ge_results] parse_failed_fallback run_id=#{run.id} path=#{output_file} " \
+            "error=#{e2.class}: #{e2.message}"
+          )
+          h_output = {}
+        end
+      end
       headers = h_output['headers'] || []
       h_fields = {}
       headers.each_index { |i| h_fields[headers[i]] = i }
       fdr_idx = h_fields['fdr']
-      next unless fdr_idx
+      unless fdr_idx
+        Rails.logger.warn("[filter_ge_results] missing_fdr_index run_id=#{run.id} headers_sample=#{headers.first(8).inspect}")
+        next
+      end
       up_count = 0
       down_count = 0
       (h_output['up'] || []).each { |e| up_count += 1 if e[fdr_idx].to_f <= fdr_cutoff }
@@ -1904,10 +1932,19 @@ class ProjectsController < ApplicationController
       @h_stats[run.id.to_s] = { 'up' => up_count, 'down' => down_count }
     end
 
+    Rails.logger.info(
+      "[filter_ge_results] project_id=#{@project.id} user_id=#{current_user&.id || 'guest'} " \
+      "fdr=#{fdr_cutoff} requested_run_ids=#{requested_run_ids.inspect} " \
+      "completed_runs=#{completed_runs.map(&:id).inspect} h_stats=#{@h_stats.inspect}"
+    )
+
     @h_std_methods = {}
     StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
 
-    render partial: 'projects/views/ge_results_table', layout: false
+    respond_to do |format|
+      format.html { render partial: 'projects/views/ge_results_table', layout: false }
+      format.json { render json: { h_stats: @h_stats } }
+    end
   end
 
   # GET /projects/1/search_gene
@@ -1973,7 +2010,7 @@ class ProjectsController < ApplicationController
           end
         end
 
-        filtered_filename = "#{ge_run.user_id}_#{input_de['run_id']}_#{h_ge_run_attrs['fc_cutoff']}_#{h_ge_run_attrs['fdr_cutoff']}_filtered_ids.json"
+        filtered_filename = "#{de_filter_cache_key}_#{input_de['run_id']}_#{h_ge_run_attrs['fc_cutoff']}_#{h_ge_run_attrs['fdr_cutoff']}_filtered_ids.json"
         filtered_file = project_dir + 'tmp' + filtered_filename
         if File.exist?(filtered_file)
           h_filtered = Basic.safe_parse_json(File.read(filtered_file), {})
@@ -4835,6 +4872,7 @@ class ProjectsController < ApplicationController
         if @parsing_run && (@parsing_run.status_id == 3 || @parsing_run.status_id == 4)
           project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
           step_dir = project_dir + 'parsing'
+          # Parsing output is stored at the parsing step root.
           output_json = step_dir + 'output.json'
           
           # Load output.json if it exists
@@ -5034,6 +5072,13 @@ class ProjectsController < ApplicationController
             return
           end
 
+          # GE has dedicated sub-views (ge_filter, dashboard) that must
+          # bypass generic std_step rendering flags.
+          if @step&.name == 'ge' && %w[ge_filter dashboard].include?(params[:view].to_s)
+            render partial: 'projects/views/ge', layout: false
+            return
+          end
+
           # If compare_clusters view is requested, return the comparison UI
           if params[:view] == 'compare_clusters'
             render partial: 'projects/views/cluster_comparison', layout: false
@@ -5213,11 +5258,11 @@ class ProjectsController < ApplicationController
       totals[status_key] = count.to_i if totals.key?(status_key)
     end
     
-    # Map to canonical keys
+    # Map to canonical keys used by header and step selectors.
     counts = {
-      waiting: totals[1],
+      pending: totals[1],
       running: totals[2],
-      completed: totals[3],
+      success: totals[3],
       failed: totals[4],
       cell_count: @project.cell_count,
       col_label: helpers.col_label(@project)
@@ -7087,19 +7132,6 @@ class ProjectsController < ApplicationController
 
       @load_run_panel = false
       @run_panel_html = nil
-      if @selected_run_id.present?
-        selected_run = Run.find_by(id: @selected_run_id)
-        selected_step = selected_run&.step
-        if selected_run && selected_step
-          begin
-            @run_panel_html = render_run_panel_to_string(selected_run, selected_step)
-            @load_run_panel = true
-          rescue => e
-            Rails.logger.error("[show] Error rendering run panel: #{e.class} - #{e.message}")
-            Rails.logger.error(e.backtrace.first(10).join("\n"))
-          end
-        end
-      end
 
       @load_sub_view = false
       @sub_view_html = nil
@@ -7415,17 +7447,16 @@ class ProjectsController < ApplicationController
     end
 
     def load_summary_context
-      @parsing_status = 'complete'
+      @parsing_status = 'success'
       @parsing_step = parsing_step_for_project(@project)
       if @parsing_step
         @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
         if @parsing_project_step
-          @parsing_status = case @parsing_project_step.status_id
-                            when 1 then 'waiting'
-                            when 2 then 'running'
-                            when 3 then 'complete'
-                            when 4 then 'failed'
-                            else 'complete'
+          status_name = @parsing_project_step.status&.name.to_s.downcase
+          @parsing_status = if %w[pending running success failed].include?(status_name)
+                              status_name
+                            else
+                              'success'
                             end
         end
       end
@@ -7948,6 +7979,15 @@ class ProjectsController < ApplicationController
     Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
   end
 
+  def de_filter_cache_key
+    return "u#{current_user.id}" if current_user
+
+    sandbox_key = session[:sandbox].to_s
+    return "g#{Zlib.crc32(sandbox_key).to_s(36)}" if sandbox_key.present?
+
+    'g0'
+  end
+
   def marker_compatible_metadata?(annot)
     return false unless annot
 
@@ -8057,7 +8097,7 @@ class ProjectsController < ApplicationController
       end
     end
 
-    user_id = current_user ? current_user.id : 1
+    user_id = de_filter_cache_key
     list_of_run_ids = annots.map(&:run_id)
 
     filtered_stats_txt_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.txt"
@@ -8067,21 +8107,52 @@ class ProjectsController < ApplicationController
     cmd = "echo '#{list_of_run_ids.join("\n")}' | xargs -P 24 -I '{}' lib/filter_de '#{project_dir}' #{h_de_filter['fdr_cutoff']} #{h_de_filter['fc_cutoff']} de_results #{user_id} '{}' > #{project_dir + 'toto.txt'}"
     script_file = project_dir + 'tmp' + "#{user_id}_de_script.sh"
     File.open(script_file, 'w') { |f| f.write(cmd) }
-    `sh #{script_file}`
-
-    if File.exist?(filtered_stats_txt_file)
-      File.open(filtered_stats_txt_file, 'r') do |f|
-        while (l = f.gets)
-          t = l.chomp.split("\t")
-          h_stats[t[0]] = { 'up' => t[1].to_i, 'down' => t[2].to_i }
-        end
-      end
-
-      filtered_stats_json = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
-      File.open(filtered_stats_json, 'w') { |f| f.write(h_stats.to_json) }
+    stdout, stderr, status = Open3.capture3('sh', script_file.to_s)
+    unless status.success?
+      Rails.logger.error(
+        "[run_de_filter] command_failed project_id=#{@project.id} cache_key=#{user_id} " \
+        "status=#{status.exitstatus} stdout=#{stdout.to_s.strip} stderr=#{stderr.to_s.strip}"
+      )
+      raise "DE filtering failed (status #{status.exitstatus})"
     end
 
+    unless File.exist?(filtered_stats_txt_file)
+      Rails.logger.error(
+        "[run_de_filter] missing_stats_file project_id=#{@project.id} cache_key=#{user_id} " \
+        "expected=#{filtered_stats_txt_file}"
+      )
+      raise 'DE filtering failed (stats file missing)'
+    end
+
+    File.open(filtered_stats_txt_file, 'r') do |f|
+      while (l = f.gets)
+        t = l.chomp.split("\t")
+        h_stats[t[0]] = { 'up' => t[1].to_i, 'down' => t[2].to_i }
+      end
+    end
+
+    filtered_stats_json = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
+    File.open(filtered_stats_json, 'w') { |f| f.write(h_stats.to_json) }
+
+    Rails.logger.info(
+      "[run_de_filter] success project_id=#{@project.id} cache_key=#{user_id} runs=#{list_of_run_ids.size} stats=#{h_stats.size}"
+    )
+
     h_stats
+  rescue => e
+    Rails.logger.error(
+      "[run_de_filter] error project_id=#{@project.id} cache_key=#{user_id} " \
+      "error=#{e.class}: #{e.message}"
+    )
+    raise
+  ensure
+    if script_file && File.exist?(script_file)
+      begin
+        File.delete(script_file)
+      rescue => e
+        Rails.logger.warn("[run_de_filter] script_cleanup_failed #{script_file}: #{e.message}")
+      end
+    end
   end
 
   # Get all run IDs in the pipeline that created a given run
@@ -10339,21 +10410,11 @@ class ProjectsController < ApplicationController
         end
       end
       
-      # Build dataset results
-      dataset_results = []
-      h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
-      @h_annots_by_dim.each_key do |dim|
-        subtitle = h_dim[dim]
-        subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1 && dim > 2
-        dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
-          @h_annots_by_dim[dim].map { |annot|
-            col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
-            row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
-            col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
-            row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
-            "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
-          }.join(" ") + "</p>"
-      end
+      dataset_results_html = helpers.render_results_dataset_sections(
+        @h_annots_by_dim,
+        variant: :legacy_button,
+        pluralize_all: false
+      )
       
       # Set standard card elements
       @h_el = {
@@ -10382,7 +10443,7 @@ class ProjectsController < ApplicationController
             else
               "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
             end
-          }.join(" ") : '') + dataset_results.join("<br/>\n")
+          }.join(" ") : '') + dataset_results_html
         }
       }
     end
@@ -10646,21 +10707,11 @@ class ProjectsController < ApplicationController
             end
           end
 
-          dataset_results = []
-          h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => "Other" }
-          @h_annots_by_dim.each_key do |dim|
-            subtitle = h_dim[dim]
-            subtitle = subtitle.pluralize if subtitle && @h_annots_by_dim[dim].size > 1
-            dataset_results.push "<h4>#{subtitle}</h4><p style='line-height:2.5em'>" +
-              @h_annots_by_dim[dim].map { |annot|
-                col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
-                row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
-                col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
-                row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
-                annot_link = Rails.application.routes.url_helpers.annot_path(annot)
-                "<a href='#{annot_link}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'>#{annot.name} <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_cols} #{col_name}</span> <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_rows} #{row_name}</span></a>"
-              }.join(" ") + "</p>"
-          end
+          dataset_results_html = helpers.render_results_dataset_sections(
+            @h_annots_by_dim,
+            variant: :link_chip,
+            pluralize_all: true
+          )
 
           exec_files_html = ""
           if admin?
@@ -10748,7 +10799,7 @@ class ProjectsController < ApplicationController
                 else
                   "<p class='text-warning text-truncate' title='#{e}'>#{e}</p>"
                 end
-              }.join(" ") : '') + dataset_results.join("<br/>\n")
+              }.join(" ") : '') + dataset_results_html
             }
           }
         else

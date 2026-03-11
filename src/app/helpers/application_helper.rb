@@ -444,6 +444,77 @@ module ApplicationHelper
     return '' if all_badges.empty?
     "<div class='flex flex-wrap gap-1.5 items-center'>" + all_badges.join("") + "</div>"
   end
+
+  def render_results_dataset_sections(h_annots_by_dim, variant: :legacy_button, pluralize_all: false)
+    return '' unless h_annots_by_dim.present?
+
+    h_dim = { 1 => 'Cell metadata', 2 => 'Gene metadata', 3 => 'Expression matrix', 4 => 'Other' }
+
+    h_annots_by_dim.keys.sort.map do |dim|
+      annots = h_annots_by_dim[dim]
+      next if annots.blank?
+
+      subtitle = h_dim[dim] || 'Other'
+      if subtitle && annots.size > 1 && (pluralize_all || dim > 2)
+        subtitle = subtitle.pluralize
+      end
+
+      buttons_html = annots.map { |annot| render_results_dataset_button(annot, dim, variant: variant) }.join(' ')
+      "<h4>#{subtitle}</h4><p style='line-height:2.5em'>#{buttons_html}</p>"
+    end.compact.join("<br/>\n")
+  end
+
+  def render_results_dataset_button(annot, dim, variant: :legacy_button)
+    col_name = ([1, 3].include?(dim)) ? 'cell' : 'column'
+    row_name = ([2, 3].include?(dim)) ? 'gene' : 'row'
+    col_name = col_name.pluralize if annot.nber_cols && annot.nber_cols > 1
+    row_name = row_name.pluralize if annot.nber_rows && annot.nber_rows > 1
+    categories_count = annot.nber_cats.to_i
+    if categories_count <= 0 && annot.categories_json.present?
+      parsed_categories = Basic.safe_parse_json(annot.categories_json, nil)
+      categories_count =
+        if parsed_categories.is_a?(Hash)
+          parsed_categories.keys.size
+        elsif parsed_categories.is_a?(Array)
+          parsed_categories.size
+        else
+          0
+        end
+    end
+    is_categorical = categories_count > 0 || annot.name.to_s.include?('_clust_')
+    categories_badge_html = ''
+    if is_categorical
+      categories_label = categories_count == 1 ? 'category' : 'categories'
+      categories_badge_html = " <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{categories_count} #{categories_label}</span>"
+    end
+    if is_categorical
+      obs_count = if dim.to_i == 1 && annot.nber_rows.present? && annot.nber_rows.to_i > 0
+                    annot.nber_rows.to_i
+                  elsif annot.nber_cols.present? && annot.nber_cols.to_i > 0 && annot.nber_rows.present? && annot.nber_rows.to_i > 0
+                    [annot.nber_cols.to_i, annot.nber_rows.to_i].max
+                  elsif annot.nber_cols.present? && annot.nber_cols.to_i > 0
+                    annot.nber_cols.to_i
+                  else
+                    annot.nber_rows.to_i
+                  end
+      base_col_label = @project&.project_type&.col_label.presence || 'cells'
+      obs_label = obs_count == 1 ? base_col_label.to_s.singularize : base_col_label.to_s.pluralize
+      primary_badge_html = "<span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{obs_count} #{obs_label}</span>"
+    else
+      primary_badge_html = "<span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_cols} #{col_name}</span> <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{annot.nber_rows} #{row_name}</span>"
+    end
+
+    if variant.to_sym == :link_chip
+      annot_path = Rails.application.routes.url_helpers.annot_path(annot)
+      "<a href='#{annot_path}' class='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors'>#{annot.name} #{primary_badge_html}#{categories_badge_html}</a>"
+    else
+      if is_categorical
+        "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} #{primary_badge_html}#{categories_badge_html}</button>"
+      else
+        "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
+      end
+    end
+  end
   
   def display_download_btn(run, h_file)
     return "" unless h_file && h_file[:h_output]
@@ -508,18 +579,9 @@ module ApplicationHelper
   # Each status includes: key, icon_base, icon_spin, active_color, inactive_color, label
   def status_icons_config
     @status_icons_config ||= begin
-      # Map status IDs to canonical keys used in views
-      # Views use status_id 1,2,3,4 and reference them as waiting/running/completed/failed
-      id_to_key = {
-        1 => :waiting,   # DB name: pending
-        2 => :running,   # DB name: running
-        3 => :completed, # DB name: success
-        4 => :failed     # DB name: failed
-      }
-      
       # Build configuration from database statuses (all styling now comes from DB)
       Status.order(:rank, :id).map do |status|
-        key = id_to_key[status.id] || status.name.downcase.to_sym
+        key = status.name.to_s.downcase.to_sym
         
         # Use the database status name for display labels
         display_label = status.name.humanize
@@ -527,6 +589,8 @@ module ApplicationHelper
         {
           id: status.id,
           key: key,
+          db_name: key,
+          color: status.color.presence || 'gray',
           icon_base: status.icon_class.presence || 'fas fa-circle',
           icon_spin: status.icon_spin.presence || '',
           active_color: status.active_color.presence || 'text-gray-500',
@@ -539,14 +603,13 @@ module ApplicationHelper
   end
 
   # Returns a hash of status icons keyed by canonical key (symbol)
-  # This allows views to use :waiting, :running, :completed, :failed regardless of database names
-  # Also includes DB name aliases (:pending, :success) for compatibility
+  # Prefer DB status keys (:pending, :running, :success, :failed).
+  # Keep legacy aliases for compatibility with older views.
   def status_icons_by_key
     @status_icons_by_key ||= begin
       config = status_icons_config.index_by { |s| s[:key] }
-      # Add DB name aliases for views that use database status names
-      config[:pending] = config[:waiting] if config[:waiting]
-      config[:success] = config[:completed] if config[:completed]
+      config[:waiting] = config[:pending] if config[:pending]
+      config[:completed] = config[:success] if config[:success]
       config
     end
   end
@@ -580,7 +643,7 @@ module ApplicationHelper
 
   # Returns run counts by status from project_steps' nber_runs_json
   # More efficient than counting runs directly
-  # Returns { waiting: N, running: N, completed: N, failed: N }
+  # Returns { pending: N, running: N, success: N, failed: N }
   def project_run_counts(project)
     totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
     json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
@@ -591,9 +654,9 @@ module ApplicationHelper
     end
     
     {
-      waiting: totals[1],
+      pending: totals[1],
       running: totals[2],
-      completed: totals[3],
+      success: totals[3],
       failed: totals[4]
     }
   end

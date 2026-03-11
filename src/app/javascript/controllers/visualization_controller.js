@@ -13783,14 +13783,12 @@ export default class extends Controller {
         .map((item) => `${item.metadataId}:${item.createdAt || ''}`)
         .sort()
         .join('|')
-      if (completionSignature) {
-        if (this.lastSelectionCompletionSignature === null) {
-          // First polling pass establishes baseline only; avoid immediate left-panel replacement.
-          this.lastSelectionCompletionSignature = completionSignature
-        } else if (completionSignature !== this.lastSelectionCompletionSignature) {
-          this.lastSelectionCompletionSignature = completionSignature
-          this.refreshPageCategoricalMetadata()
-        }
+      if (this.lastSelectionCompletionSignature === null) {
+        // First polling pass establishes baseline only; avoid immediate left-panel replacement.
+        this.lastSelectionCompletionSignature = completionSignature
+      } else if (completionSignature !== this.lastSelectionCompletionSignature) {
+        this.lastSelectionCompletionSignature = completionSignature
+        this.refreshPageCategoricalMetadata()
       }
     } catch (_error) {
       // Ignore transient refresh errors.
@@ -13956,6 +13954,7 @@ export default class extends Controller {
     if (this.metadataRefreshInProgress) return
     this.metadataRefreshInProgress = true
     try {
+      const statusSnapshot = this.captureMetadataStatusIconSnapshot()
       const url = new URL(window.location.href)
       const response = await fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       if (!response.ok) return
@@ -13966,12 +13965,46 @@ export default class extends Controller {
       const currentLeftPanel = document.getElementById('left-panel')
       if (nextLeftPanel && currentLeftPanel) {
         currentLeftPanel.replaceWith(nextLeftPanel)
+        this.applyMetadataStatusIconSnapshot(statusSnapshot)
       }
     } catch (_error) {
       // Keep interaction uninterrupted if metadata panel refresh fails.
     } finally {
       this.metadataRefreshInProgress = false
     }
+  }
+
+  captureMetadataStatusIconSnapshot() {
+    const snapshot = new Map()
+    const icons = document.querySelectorAll('.metadata-status-icon[data-metadata-id]')
+    icons.forEach((statusIcon) => {
+      const metadataId = String(statusIcon.dataset.metadataId || '').trim()
+      if (!metadataId) return
+      const icon = statusIcon.querySelector('i')
+      snapshot.set(metadataId, {
+        backgroundColor: statusIcon.style.backgroundColor || '',
+        title: statusIcon.title || '',
+        iconClassName: icon ? icon.className : '',
+        iconColor: icon ? (icon.style.color || '') : ''
+      })
+    })
+    return snapshot
+  }
+
+  applyMetadataStatusIconSnapshot(snapshot) {
+    if (!(snapshot instanceof Map) || snapshot.size === 0) return
+    snapshot.forEach((state, metadataId) => {
+      const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
+      if (!statusIcon) return
+      const icon = statusIcon.querySelector('i')
+      statusIcon.style.display = 'flex'
+      if (state.backgroundColor) statusIcon.style.backgroundColor = state.backgroundColor
+      if (state.title) statusIcon.title = state.title
+      if (icon) {
+        if (state.iconClassName) icon.className = state.iconClassName
+        if (state.iconColor) icon.style.color = state.iconColor
+      }
+    })
   }
 
   async openSavedSelection(event) {

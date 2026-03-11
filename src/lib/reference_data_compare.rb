@@ -4,7 +4,7 @@ require "json"
 require "optparse"
 require "time"
 
-class CompareReferenceData
+class ReferenceDataCompare
   DEFAULT_MODELS = %w[
     DockerImage
     Version
@@ -295,13 +295,40 @@ class CompareReferenceData
       next unless changed_count.positive?
 
       payload[:changed].keys.sort.each do |id|
-        fields = payload[:changed][id].keys.sort
+        field_diffs = payload[:changed][id]
+        fields = field_diffs.keys.sort
         puts "    id=#{id} changed fields: #{fields.join(', ')}"
+        fields.each do |field|
+          diff = field_diffs[field]
+          puts "      - #{field}:"
+          puts "          left : #{format_value(diff[:left])}"
+          puts "          right: #{format_value(diff[:right])}"
+        end
       end
     end
+  end
+
+  def format_value(value)
+    str =
+      case value
+      when String
+        value
+      when NilClass
+        "null"
+      else
+        JSON.generate(value)
+      end
+
+    one_line = str.gsub(/\s+/, " ").strip
+    return one_line if one_line.length <= 220
+
+    "#{one_line[0, 220]}... (truncated)"
   end
 
   def blank?(value)
     value.nil? || value.to_s.strip.empty?
   end
 end
+
+# Backward compatibility for existing script/task references.
+CompareReferenceData = ReferenceDataCompare

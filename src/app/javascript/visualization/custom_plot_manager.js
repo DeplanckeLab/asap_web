@@ -24,6 +24,7 @@ export class CustomPlotManager {
     this.lastPlotExportData = null
     this.is2DPlotMinimized = false
     this.previous2DPlotWindowState = null
+    this.hasInitialized2DPlotWindowSize = false
   }
 
   resolveGeneMetadataIdentifiers(buttonInfo) {
@@ -1437,6 +1438,7 @@ export class CustomPlotManager {
     
     // Show modal and loading indicator
     modal.style.display = 'flex'
+    this.ensureInitial2DPlotModalWindowSize(modal)
     this.update2DPlotWindowControls()
     const loadingDiv = document.getElementById('2d-plot-loading')
     const canvas = document.getElementById('2d-plot-canvas')
@@ -1870,6 +1872,33 @@ export class CustomPlotManager {
       if (loadingDiv) loadingDiv.style.display = 'none'
       alert('Error loading 2D plot: ' + error.message)
     }
+  }
+
+  ensureInitial2DPlotModalWindowSize(modal) {
+    if (!modal || this.hasInitialized2DPlotWindowSize) return
+
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const margin = 32
+
+    const minWidth = 400
+    const minHeight = 300
+    const maxWidth = Math.max(minWidth, viewportWidth - (margin * 2))
+    const maxHeight = Math.max(minHeight, viewportHeight - (margin * 2))
+
+    const targetWidth = Math.min(maxWidth, Math.max(minWidth, Math.round(viewportWidth * 0.72)))
+    const targetHeight = Math.min(maxHeight, Math.max(minHeight, Math.round(viewportHeight * 0.72)))
+
+    const targetLeft = Math.max(margin, Math.round((viewportWidth - targetWidth) / 2))
+    const targetTop = Math.max(margin, Math.round((viewportHeight - targetHeight) / 2))
+
+    modal.style.transform = 'none'
+    modal.style.left = `${targetLeft}px`
+    modal.style.top = `${targetTop}px`
+    modal.style.width = `${targetWidth}px`
+    modal.style.height = `${targetHeight}px`
+
+    this.hasInitialized2DPlotWindowSize = true
   }
   
   // Helper to get decompressed values from a vector

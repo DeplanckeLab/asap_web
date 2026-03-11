@@ -563,6 +563,7 @@ export default class extends Controller {
     this.lassoGraphics = null
     this.lassoPoints = []
     this.isDrawingLasso = false
+    this.lassoClearTimeout = null
     this.lastMouseMoveTime = 0
     this.mouseMoveCount = 0
     this.minLassoPointDistance = 0 // Accept ALL events (remote desktop sends very few)
@@ -8912,6 +8913,11 @@ export default class extends Controller {
   }
   // Lasso mode handlers
   onLassoMouseDown(event) {
+    if (this.lassoClearTimeout) {
+      clearTimeout(this.lassoClearTimeout)
+      this.lassoClearTimeout = null
+    }
+
     const lassoStartTime = performance.now()
     const lassoId = `lasso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     this.currentLassoId = lassoId
@@ -9125,8 +9131,9 @@ export default class extends Controller {
     }
     
     // Clear lasso after a short delay
-    setTimeout(() => {
+    this.lassoClearTimeout = setTimeout(() => {
       this.clearLasso()
+      this.lassoClearTimeout = null
     }, 1000)
   }
 
@@ -9334,6 +9341,11 @@ export default class extends Controller {
 
   onLassoDoubleClick(event) {
     //console.log('Lasso mode double-click: Canceling current selection')
+    if (event && event.cancelable) {
+      event.preventDefault()
+    }
+    event?.stopPropagation?.()
+    this.clearLasso()
     this.cancelSelection()
   }
 
@@ -10690,6 +10702,11 @@ export default class extends Controller {
     if (this.firefoxMouseHandler) {
       document.removeEventListener('pointermove', this.firefoxMouseHandler, { capture: true })
       this.firefoxMouseHandler = null
+    }
+
+    if (this.lassoClearTimeout) {
+      clearTimeout(this.lassoClearTimeout)
+      this.lassoClearTimeout = null
     }
     
     const clearTime = performance.now() - clearStart

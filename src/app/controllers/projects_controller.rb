@@ -213,14 +213,8 @@ class ProjectsController < ApplicationController
     end
     build_best_cla_category_map(categorical_metadata)
     
-    # Check if we have visualization data (embeddings or categorical/numerical cell metadata)
+    # Check if we have embeddings for visualization
     has_visualization_embeddings = @all_embeddings_by_loom.any? { |_filepath, embeddings| embeddings.present? }
-    has_categorical_metadata = categorical_metadata.present?
-    has_numerical_cell_metadata = @h_metadata.any? do |_filepath, dimension_hash|
-      dimension_hash&.dig('cell', 'NUMERIC')&.present?
-    end
-    
-    has_visualization_data = has_visualization_embeddings || has_categorical_metadata || has_numerical_cell_metadata
 
     @initial_selection_items = []
     if @default_loom_file.present?
@@ -230,8 +224,9 @@ class ProjectsController < ApplicationController
       @initial_selection_items.reverse!
     end
     
-    # Set default view type: use visualization if we have visualization data, otherwise use summary
-    default_view = has_visualization_data ? 'visualization' : 'summary'
+    # Default to visualization only when embeddings exist.
+    # Projects without embeddings should open in analysis.
+    default_view = has_visualization_embeddings ? 'visualization' : 'analysis'
     @view_type = resolve_project_view_type(params[:view].presence || default_view)
     return unless authorize_requested_view_access!(@view_type)
     
@@ -2504,6 +2499,11 @@ class ProjectsController < ApplicationController
         return
       end
 
+      if immutable_since_publication?(run)
+        render json: { status: 'error', message: 'This selection was created before publication and cannot be deleted.' }, status: :forbidden
+        return
+      end
+
       RunsController.destroy_run_call(@project, run)
       cleanup_selection_cache_for_run_id(run_id)
       run_attrs = Basic.safe_parse_json(run.attrs_json, {})
@@ -2556,6 +2556,11 @@ class ProjectsController < ApplicationController
         return
       end
 
+      if immutable_since_publication?(annot)
+        render json: { status: 'error', message: 'This selection was created before publication and cannot be edited.' }, status: :forbidden
+        return
+      end
+
       aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
       aliases['names'] ||= {}
       aliases['names']['1'] = new_name
@@ -2591,6 +2596,11 @@ class ProjectsController < ApplicationController
         return
       end
 
+      if immutable_since_publication?(annot)
+        render json: { status: 'error', message: 'This selection was created before publication and cannot be edited.' }, status: :forbidden
+        return
+      end
+
       aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
       aliases['names'] ||= {}
       aliases['names']['1'] = new_name
@@ -2618,6 +2628,10 @@ class ProjectsController < ApplicationController
     if run_id > 0
       run = @project.runs.find_by(id: run_id)
       if run
+        if immutable_since_publication?(run)
+          render json: { status: 'error', message: 'This selection was created before publication and cannot be edited.' }, status: :forbidden
+          return
+        end
         run_attrs = Basic.safe_parse_json(run.attrs_json, {})
         run_attrs['selected_name'] = new_name
         run.update!(attrs_json: run_attrs.to_json)
@@ -2670,6 +2684,10 @@ class ProjectsController < ApplicationController
       render json: { status: 'error', message: 'Target manual gene set collection not found' }, status: :unprocessable_entity
       return
     end
+    if immutable_since_publication?(manual_collection)
+      render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be edited.' }, status: :forbidden
+      return
+    end
 
     payload = load_local_gene_set_collection_payload(manual_collection.file_key, manual_collection.name)
     items = Array(payload['items'])
@@ -2697,7 +2715,8 @@ class ProjectsController < ApplicationController
         id: local_gene_set_collection_id(manual_collection),
         label: manual_collection.name.to_s,
         nb_items: items.length,
-        custom: true
+        custom: true,
+        locked: immutable_since_publication?(manual_collection)
       },
       item: {
         id: item_id,
@@ -2771,6 +2790,7 @@ class ProjectsController < ApplicationController
         label: collection_record.name.to_s,
         nb_items: 0,
         custom: true,
+        locked: immutable_since_publication?(collection_record),
         import_pending: true
       }
     }.deep_merge(collection_type_presentation_for_collection(collection_record))
@@ -2804,8 +2824,17 @@ class ProjectsController < ApplicationController
         render json: { status: 'error', message: 'Manual gene set collection not found' }, status: :not_found
         return
       end
+      if immutable_since_publication?(local_collection)
+        render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be edited.' }, status: :forbidden
+        return
+      end
       payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
     elsif collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      manual_collection = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find { |collection| gene_set_collection_manual?(collection) }
+      if manual_collection && immutable_since_publication?(manual_collection)
+        render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be edited.' }, status: :forbidden
+        return
+      end
       payload = load_manual_gene_set_collection_payload
     else
       render json: { status: 'error', message: 'Invalid manual gene set identifier' }, status: :unprocessable_entity
@@ -2839,7 +2868,8 @@ class ProjectsController < ApplicationController
         id: local_collection_id ? local_gene_set_collection_id(local_collection) : MANUAL_GENE_SET_COLLECTION_ID,
         label: local_collection_id ? local_collection.name.to_s : MANUAL_GENE_SET_COLLECTION_LABEL,
         nb_items: items.length,
-        custom: true
+        custom: true,
+        locked: local_collection ? immutable_since_publication?(local_collection) : false
       }
     }.deep_merge(collection_type_presentation_for_collection(local_collection))
   rescue StandardError => e
@@ -2871,6 +2901,10 @@ class ProjectsController < ApplicationController
       render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
       return
     end
+    if immutable_since_publication?(local_collection)
+      render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be edited.' }, status: :forbidden
+      return
+    end
 
     local_collection.update!(name: new_name)
     local_payload = load_local_gene_set_collection_payload(local_collection.file_key, new_name)
@@ -2885,6 +2919,7 @@ class ProjectsController < ApplicationController
         label: local_collection.name.to_s,
         nb_items: Array(local_payload['items']).length,
         custom: true,
+        locked: immutable_since_publication?(local_collection),
         import_pending: false
       }
     }.deep_merge(collection_type_presentation_for_collection(local_collection))
@@ -2902,6 +2937,11 @@ class ProjectsController < ApplicationController
     end
 
     if collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      manual_collection = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find { |collection| gene_set_collection_manual?(collection) }
+      if manual_collection && immutable_since_publication?(manual_collection)
+        render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be deleted.' }, status: :forbidden
+        return
+      end
       payload = load_manual_gene_set_collection_payload
       items = Array(payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
       deleted_runs_count = items.sum { |item| delete_related_manual_module_score_runs(item) }
@@ -2910,7 +2950,6 @@ class ProjectsController < ApplicationController
       payload['updated_at'] = Time.now.utc.iso8601
       write_manual_gene_set_collection_payload(payload)
 
-      manual_collection = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find { |collection| gene_set_collection_manual?(collection) }
       manual_collection&.destroy
 
       render json: { status: 'ok', collection_id: collection_id_raw, deleted_runs_count: deleted_runs_count }
@@ -2922,6 +2961,10 @@ class ProjectsController < ApplicationController
       local_collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
       unless local_collection
         render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
+        return
+      end
+      if immutable_since_publication?(local_collection)
+        render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be deleted.' }, status: :forbidden
         return
       end
 
@@ -3042,6 +3085,7 @@ class ProjectsController < ApplicationController
       end
 
       local_payload = load_local_gene_set_collection_payload(local_collection.file_key, local_collection.name)
+      collection_locked = immutable_since_publication?(local_collection)
       local_items = Array(local_payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
       filtered_items = if query.present?
         query_downcase = query.downcase
@@ -3086,7 +3130,8 @@ class ProjectsController < ApplicationController
         status: 'ok',
         collection: {
           id: local_gene_set_collection_id(local_collection),
-          label: local_collection.name.to_s
+          label: local_collection.name.to_s,
+          locked: collection_locked
         },
         items: items_payload,
         total_count: total_count,
@@ -3096,6 +3141,8 @@ class ProjectsController < ApplicationController
     end
 
     if collection_id_raw == MANUAL_GENE_SET_COLLECTION_ID
+      manual_collection = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).find { |collection| gene_set_collection_manual?(collection) }
+      collection_locked = manual_collection ? immutable_since_publication?(manual_collection) : false
       manual_payload = load_manual_gene_set_collection_payload
       manual_items = Array(manual_payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
 
@@ -3132,7 +3179,7 @@ class ProjectsController < ApplicationController
           in_dataset_count: in_dataset_count,
           supports_module_score: false,
           created_at: item[:created_at],
-          deletable: true
+          deletable: !collection_locked
         }
       end
 
@@ -3140,7 +3187,8 @@ class ProjectsController < ApplicationController
         status: 'ok',
         collection: {
           id: MANUAL_GENE_SET_COLLECTION_ID,
-          label: MANUAL_GENE_SET_COLLECTION_LABEL
+          label: MANUAL_GENE_SET_COLLECTION_LABEL,
+          locked: collection_locked
         },
         items: items_payload,
         total_count: total_count,
@@ -5482,9 +5530,13 @@ class ProjectsController < ApplicationController
         # Delete all runs for this step
         runs = @project.runs.where(step_id: step_id).all
       end
+
+      immutable_runs = runs.select { |run| immutable_since_publication?(run) }
+      runs = runs.reject { |run| immutable_since_publication?(run) }
       
       if runs.empty?
-        redirect_to step_results_project_path(@project, step_id: step_id), notice: 'No runs to delete.'
+        message = immutable_runs.any? ? 'Selected runs were created before publication and cannot be deleted.' : 'No runs to delete.'
+        redirect_to step_results_project_path(@project, step_id: step_id), notice: message
         return
       end
       
@@ -5567,10 +5619,14 @@ class ProjectsController < ApplicationController
       
       # Determine success message
       deleted_count = runs.count
+      locked_count = immutable_runs.count
       if params[:run_ids].present? && params[:run_ids].is_a?(Array)
         success_message = "#{deleted_count} run(s) deleted successfully."
       else
         success_message = "All runs deleted successfully."
+      end
+      if locked_count > 0
+        success_message += " #{locked_count} run(s) were kept because they were created before publication."
       end
       
       respond_to do |format|
@@ -6025,13 +6081,13 @@ class ProjectsController < ApplicationController
       allowed_views = %w[summary visualization analysis data settings compliance]
       return view if allowed_views.include?(view)
 
-      project_has_visualization_data? ? 'visualization' : 'summary'
+      project_has_embeddings? ? 'visualization' : 'analysis'
     end
 
-    def project_has_visualization_data?
+    def project_has_embeddings?
       Annot.where(project_id: @project.id)
            .where.not(filepath: nil)
-           .where("name LIKE '/col_attrs/%' OR (dim = 1 AND nber_rows IN (2, 3))")
+           .where(dim: 1, nber_rows: [2, 3])
            .exists?
     end
 
@@ -6248,7 +6304,8 @@ class ProjectsController < ApplicationController
             label: row['label'].to_s,
             database_name: row['database_name'].to_s,
             nb_items: row['item_count'].to_i,
-            custom: is_custom
+            custom: is_custom,
+            locked: false
           }.merge(project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation)
         end
       end
@@ -6266,7 +6323,8 @@ class ProjectsController < ApplicationController
           label: collection.name.to_s,
           database_name: '',
           nb_items: Array(payload['items']).length,
-          custom: true
+          custom: true,
+          locked: immutable_since_publication?(collection)
         }.merge(gene_set_collection_type_presentation(gene_set_collection_type_key(collection)))
         if gene_set_collection_manual?(collection)
           manual_local_payloads << collection_payload
@@ -6286,7 +6344,8 @@ class ProjectsController < ApplicationController
           label: MANUAL_GENE_SET_COLLECTION_LABEL,
           database_name: '',
           nb_items: legacy_manual_payload_items.length,
-          custom: true
+          custom: true,
+          locked: false
         }.merge(gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_MANUAL)))
       end
 
@@ -7601,7 +7660,8 @@ class ProjectsController < ApplicationController
             else
               selection_number_from_metadata_name(run_attrs['selection_metadata_name'] || run_attrs[:selection_metadata_name])
             end
-          end
+          end,
+          locked: immutable_since_publication?(run)
         }
       end
 
@@ -7665,9 +7725,15 @@ class ProjectsController < ApplicationController
             from_annot = sanitize_filter_components(Basic.safe_parse_json(annot.attrs_json, {})['filter_components'])
             from_annot.presence || sanitize_filter_components(run_attrs_by_run_id.dig(annot.run_id, 'filter_components'))
           end,
-          selection_number: selection_number_from_metadata_name(annot.name)
+          selection_number: selection_number_from_metadata_name(annot.name),
+          locked: immutable_since_publication?(annot)
         }
       end
+    end
+
+    def immutable_since_publication?(record)
+      return false unless @project
+      @project.locked_from_publication?(record)
     end
 
     def selection_number_from_metadata_name(metadata_name)

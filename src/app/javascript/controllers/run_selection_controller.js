@@ -16,6 +16,7 @@ export default class extends Controller {
     console.log('[RunSelectionController] toggleAll called, checked:', event.target.checked)
     const checked = event.target.checked
     this.checkboxTargets.forEach(checkbox => {
+      if (checkbox.disabled) return
       checkbox.checked = checked
     })
     this.updateSelectAllState()
@@ -31,9 +32,10 @@ export default class extends Controller {
   }
 
   updateSelectAllState() {
-    const allChecked = this.checkboxTargets.length > 0 && 
-                       this.checkboxTargets.every(checkbox => checkbox.checked)
-    const someChecked = this.checkboxTargets.some(checkbox => checkbox.checked)
+    const selectableCheckboxes = this.checkboxTargets.filter((checkbox) => !checkbox.disabled)
+    const allChecked = selectableCheckboxes.length > 0 &&
+                       selectableCheckboxes.every((checkbox) => checkbox.checked)
+    const someChecked = selectableCheckboxes.some((checkbox) => checkbox.checked)
     
     if (this.hasSelectAllTarget) {
       this.selectAllTarget.checked = allChecked
@@ -73,7 +75,7 @@ export default class extends Controller {
 
   getSelectedRunIds() {
     return this.checkboxTargets
-      .filter(checkbox => checkbox.checked)
+      .filter((checkbox) => checkbox.checked && !checkbox.disabled)
       .map(checkbox => checkbox.value)
   }
 }

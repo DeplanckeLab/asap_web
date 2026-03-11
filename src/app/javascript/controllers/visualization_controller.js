@@ -11429,7 +11429,8 @@ export default class extends Controller {
       selectionNumber: selectionNumber,
       selectionSource: item.selection_source ? String(item.selection_source) : 'lasso',
       composeSteps: composeSteps,
-      filterComponents: filterComponents
+      filterComponents: filterComponents,
+      locked: item.locked === true
     }
   }
 
@@ -11717,9 +11718,11 @@ export default class extends Controller {
     const renameCancelBtn = node.querySelector('[data-role="saved-selection-rename-cancel"]')
     const detailsBtn = node.querySelector('[data-role="saved-selection-details"]')
     const warningBadge = node.querySelector('[data-role="saved-selection-warning"]')
+    const lockBadge = node.querySelector('[data-role="saved-selection-lock"]')
     const countLabel = node.querySelector('[data-role="saved-selection-count"]')
     const statusSlot = node.querySelector('[data-role="saved-selection-status"]')
     const deleteBtn = node.querySelector('[data-role="saved-selection-delete"]')
+    const isLocked = item.locked === true
 
     if (checkbox) {
       checkbox.dataset.selectionId = String(item.id)
@@ -11740,7 +11743,7 @@ export default class extends Controller {
     }
     if (renameBtn) {
       renameBtn.dataset.selectionId = String(item.id)
-      renameBtn.style.display = isEditingName ? 'none' : 'inline-flex'
+      renameBtn.style.display = (!isLocked && !isEditingName) ? 'inline-flex' : 'none'
     }
     if (renameSaveBtn) {
       renameSaveBtn.dataset.selectionId = String(item.id)
@@ -11756,6 +11759,9 @@ export default class extends Controller {
     if (warningBadge) {
       warningBadge.style.display = hasDeletedSelectionReference ? 'inline-flex' : 'none'
     }
+    if (lockBadge) {
+      lockBadge.style.display = isLocked ? 'inline-flex' : 'none'
+    }
     if (countLabel) {
       countLabel.textContent = `${item.selectedCount} cells${createdAt ? ` - ${createdAt}` : ''}`
     }
@@ -11764,6 +11770,7 @@ export default class extends Controller {
     }
     if (deleteBtn) {
       deleteBtn.dataset.selectionId = String(item.id)
+      deleteBtn.style.display = isLocked ? 'none' : 'inline-flex'
     }
 
     return node

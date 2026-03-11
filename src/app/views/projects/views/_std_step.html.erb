@@ -105,7 +105,8 @@
                 <% end %>
               <% end %>
               <!-- Delete All / Delete Selected Button -->
-              <% if editable?(@project) && @runs && @runs.any? %>
+              <% deletable_runs_present = @runs&.any? { |existing_run| !@project.locked_from_publication?(existing_run) } %>
+              <% if editable?(@project) && @runs && @runs.any? && deletable_runs_present %>
                 <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
                     method: :post,
                     form: {
@@ -242,7 +243,8 @@
                 <% end %>
               <% end %>
               <!-- Delete All / Delete Selected Button -->
-              <% if editable?(@project) && @runs && @runs.any? %>
+              <% deletable_runs_present = @runs&.any? { |existing_run| !@project.locked_from_publication?(existing_run) } %>
+              <% if editable?(@project) && @runs && @runs.any? && deletable_runs_present %>
                 <%= button_to delete_all_runs_from_step_project_path(@project, step_id: @step.id), 
                     method: :post,
                     form: {
@@ -371,6 +373,7 @@
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <% @runs.each do |run| %>
+                  <% run_locked = @project.locked_from_publication?(run) %>
                   <% run_status = case run.status_id
                                   when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
                                   when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
@@ -393,6 +396,8 @@
                       <input type="checkbox" 
                              class="rounded border-gray-300 text-red-600 focus:ring-red-500 run-checkbox" 
                              value="<%= run.id %>"
+                             <%= 'disabled' if run_locked %>
+                             title="<%= run_locked ? 'Created before publication; cannot be deleted' : '' %>"
                              data-action="change->run-selection#updateSelection"
                              data-run-selection-target="checkbox">
                     </td>
@@ -492,6 +497,12 @@
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div class="flex items-center justify-end gap-1.5" onclick="event.stopPropagation();">
+                        <% if run_locked %>
+                          <span class="inline-flex items-center justify-center px-2 py-2 border border-gray-300 rounded text-gray-500 bg-gray-50"
+                                title="Created before publication; cannot be modified">
+                            <i class="fas fa-lock text-xs"></i>
+                          </span>
+                        <% end %>
                         <% if @step && @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) %>
                           <%# Find 2D embedding annotation for this run %>
                           <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: run.id, nber_rows: 2).order(:name).first %>
@@ -503,7 +514,7 @@
                             <% end %>
                           <% end %>
                         <% end %>
-                        <% if editable?(@project) %>
+                        <% if editable?(@project) && !run_locked %>
                           <%= button_to run_path(run, format: :json), 
                               method: :delete,
                               remote: true,

@@ -55,6 +55,7 @@ has_visualization_data = @default_loom_file.present? && (
   embedding_groups.any? { |_path, embeddings| embeddings.present? } ||
   @h_metadata.any? { |_path, dims| dims&.dig('cell', 'DISCRETE').present? || dims&.dig('cell', 'NUMERIC').present? }
 )
+has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present? }
 
 unarchive_state = @project_unarchive_state.to_s
 show_unarchive_message = @project_archive_transitioning || (@project_files_missing && ['queued', 'in_progress', 'archived_missing', 'queue_failed'].include?(unarchive_state))
@@ -109,6 +110,14 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
           View Summary
         </a>
       </div>
+    </div>
+  </div>
+  <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
+  <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
+<% elsif !has_embeddings %>
+  <div style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
+    <div style="text-align: center;">
+      <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin: 0;">No embedding to be visualized</h2>
     </div>
   </div>
   <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
@@ -1820,6 +1829,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                            data-collection-name="<%= collection[:label].to_s.downcase %>"
                            data-collection-count="<%= collection[:nb_items] %>"
                            data-collection-custom="<%= collection[:custom] ? 'true' : 'false' %>"
+                           data-collection-locked="<%= collection[:locked] ? 'true' : 'false' %>"
                            data-collection-import-pending="<%= collection[:import_pending] ? 'true' : 'false' %>"
                            data-collection-type-key="<%= collection[:type_key].to_s %>"
                            data-collection-type-label="<%= collection[:type_label].to_s %>"
@@ -1828,7 +1838,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                            style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
                         <div style="flex:1;min-width:0;">
                           <% collection_id = collection[:id].to_s %>
-                          <% renameable_collection = collection[:custom] && collection_id.start_with?('local_collection:') %>
+                          <% renameable_collection = collection[:custom] && !collection[:locked] && collection_id.start_with?('local_collection:') %>
                           <% icon_class = collection[:type_icon].to_s %>
                           <% icon_color = collection[:type_icon_color].to_s.presence || '#6b7280' %>
                           <% type_label = collection[:type_label].to_s.presence || 'Collection type' %>
@@ -1876,7 +1886,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           </div>
                         </div>
                         <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
-                          <% if can_edit_project && collection[:custom] %>
+                          <% if collection[:locked] %>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;background:none;border:none;padding:0;"
+                                  title="Created before publication; cannot be modified"
+                                  aria-label="Created before publication; cannot be modified">
+                              <i class="fas fa-lock" style="font-size:12px;"></i>
+                            </span>
+                          <% end %>
+                          <% if can_edit_project && collection[:custom] && !collection[:locked] %>
                             <button type="button"
                                     data-gene-set-delete-btn="true"
                                     data-collection-id="<%= collection[:id] %>"

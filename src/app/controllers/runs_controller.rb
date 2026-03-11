@@ -392,6 +392,14 @@ class RunsController < ApplicationController
   # PATCH/PUT /runs/1
   # PATCH/PUT /runs/1.json
   def update
+    if @project.locked_from_publication?(@run)
+      respond_to do |format|
+        format.html { redirect_to project_path(@project), alert: 'This run was created before publication and cannot be edited.' }
+        format.json { render json: { status: 'error', message: 'This run was created before publication and cannot be edited.' }, status: :forbidden }
+      end
+      return
+    end
+
     respond_to do |format|
       if admin? and  @run.update(run_params)
         format.html { redirect_to @run, notice: 'Run was successfully updated.' }
@@ -597,6 +605,13 @@ class RunsController < ApplicationController
     start_time = Time.now
     @log += (Time.now - start_time).to_s + " start</br>"
     if editable?(@project)
+      if @project.locked_from_publication?(@run)
+        respond_to do |format|
+          format.html { redirect_to project_path(@project), alert: 'This run was created before publication and cannot be deleted.' }
+          format.json { render json: { status: 'error', message: 'This run was created before publication and cannot be deleted.' }, status: :forbidden }
+        end
+        return
+      end
 
       @log += RunsController.destroy_run_call(@project, @run)
       

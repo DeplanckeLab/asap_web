@@ -440,6 +440,23 @@ class Project < ApplicationRecord
   def is_public?
     public?
   end
+
+  def publication_lock_active?
+    public? && public_at.present?
+  end
+
+  def locked_from_publication?(record_or_time)
+    return false unless publication_lock_active?
+
+    created_at_value = if record_or_time.respond_to?(:created_at)
+      record_or_time.created_at
+    else
+      record_or_time
+    end
+    return false if created_at_value.blank?
+
+    created_at_value < public_at
+  end
   
   def cell_count
     respond_to?(:nber_cols) ? (nber_cols || 0) : 0

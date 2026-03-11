@@ -58,8 +58,8 @@ export class GeneSetCollectionsController {
       .replace(/'/g, '&#39;')
   }
 
-  isRenameableCollection(collectionId, isCustom) {
-    return isCustom === true && String(collectionId || '').startsWith('local_collection:')
+  isRenameableCollection(collectionId, isCustom, isLocked = false) {
+    return isCustom === true && isLocked !== true && String(collectionId || '').startsWith('local_collection:')
   }
 
   renderCollectionLabelHtml(collectionId, label, { isRenameable = false, isEditingName = false, typeLabel = '', typeIcon = '', typeIconColor = '' } = {}) {
@@ -114,7 +114,7 @@ export class GeneSetCollectionsController {
     `
   }
 
-  renderCollectionActionsHtml(collectionId, label, { isCustom = false, isImportPending = false } = {}) {
+  renderCollectionActionsHtml(collectionId, label, { isCustom = false, isImportPending = false, isLocked = false } = {}) {
     if (isImportPending) {
       return `
         <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
@@ -124,7 +124,14 @@ export class GeneSetCollectionsController {
     }
 
     return `
-      ${isCustom ? `
+      ${isLocked ? `
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;background:none;border:none;padding:0;"
+            title="Created before publication; cannot be modified"
+            aria-label="Created before publication; cannot be modified">
+        <i class="fas fa-lock" style="font-size:12px;"></i>
+      </span>
+      ` : ''}
+      ${isCustom && !isLocked ? `
       <button type="button"
               data-gene-set-delete-btn="true"
               data-collection-id="${collectionId}"
@@ -903,12 +910,13 @@ export class GeneSetCollectionsController {
     const itemCount = Number(collection.nb_items || collection.item_count || 0)
     const itemLabel = itemCount === 1 ? 'gene set' : 'gene sets'
     const isCustom = collection.custom === true
+    const isLocked = collection.locked === true
     const isImportPending = collection.import_pending === true
     const typeKey = String(collection.type_key || '').trim()
     const typeLabel = String(collection.type_label || '').trim()
     const typeIcon = String(collection.type_icon || '').trim()
     const typeIconColor = String(collection.type_icon_color || '').trim()
-    const isRenameable = this.isRenameableCollection(collectionId, isCustom)
+    const isRenameable = this.isRenameableCollection(collectionId, isCustom, isLocked)
     const isEditingName = isRenameable && String(this.editingCollectionId || '') === collectionId
     const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
     if (row) {
@@ -917,6 +925,7 @@ export class GeneSetCollectionsController {
       row.dataset.collectionName = label.toLowerCase()
       row.dataset.collectionCount = String(itemCount)
       row.dataset.collectionCustom = isCustom ? 'true' : 'false'
+      row.dataset.collectionLocked = isLocked ? 'true' : 'false'
       row.dataset.collectionImportPending = isImportPending ? 'true' : 'false'
       row.dataset.collectionTypeKey = typeKey
       row.dataset.collectionTypeLabel = typeLabel
@@ -928,7 +937,7 @@ export class GeneSetCollectionsController {
           <div data-role="collection-count" style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${itemCount} ${itemLabel}</div>
         </div>
         <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
-          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending })}
+          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending, isLocked })}
         </div>
       `
     } else {
@@ -939,6 +948,7 @@ export class GeneSetCollectionsController {
       newRow.setAttribute('data-collection-name', label.toLowerCase())
       newRow.setAttribute('data-collection-count', String(itemCount))
       newRow.setAttribute('data-collection-custom', isCustom ? 'true' : 'false')
+      newRow.setAttribute('data-collection-locked', isLocked ? 'true' : 'false')
       newRow.setAttribute('data-collection-import-pending', isImportPending ? 'true' : 'false')
       newRow.setAttribute('data-collection-type-key', typeKey)
       newRow.setAttribute('data-collection-type-label', typeLabel)
@@ -951,7 +961,7 @@ export class GeneSetCollectionsController {
           <div data-role="collection-count" style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${itemCount} ${itemLabel}</div>
         </div>
         <div data-role="collection-actions" style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
-          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending })}
+          ${this.renderCollectionActionsHtml(collectionId, label, { isCustom, isImportPending, isLocked })}
         </div>
       `
       this.listBody.prepend(newRow)
@@ -1021,7 +1031,8 @@ export class GeneSetCollectionsController {
     if (!row) return
     const currentLabel = String(row.dataset.collectionLabel || '').trim()
     const isCustom = row.dataset.collectionCustom === 'true'
-    if (!this.isRenameableCollection(collectionId, isCustom)) return
+    const isLocked = row.dataset.collectionLocked === 'true'
+    if (!this.isRenameableCollection(collectionId, isCustom, isLocked)) return
 
     this.editingCollectionId = collectionId
     this.pendingCollectionName = currentLabel
@@ -1031,6 +1042,7 @@ export class GeneSetCollectionsController {
       label: currentLabel,
       nb_items: Number(row.dataset.collectionCount || 0),
       custom: isCustom,
+      locked: isLocked,
       import_pending: row.dataset.collectionImportPending === 'true',
       type_key: row.dataset.collectionTypeKey || '',
       type_label: row.dataset.collectionTypeLabel || '',
@@ -1084,6 +1096,7 @@ export class GeneSetCollectionsController {
       label: String(row.dataset.collectionLabel || ''),
       nb_items: Number(row.dataset.collectionCount || 0),
       custom: row.dataset.collectionCustom === 'true',
+      locked: row.dataset.collectionLocked === 'true',
       import_pending: row.dataset.collectionImportPending === 'true',
       type_key: row.dataset.collectionTypeKey || '',
       type_label: row.dataset.collectionTypeLabel || '',
@@ -1115,6 +1128,7 @@ export class GeneSetCollectionsController {
 
     const itemCount = Number(row.dataset.collectionCount || 0)
     const isCustom = row.dataset.collectionCustom === 'true'
+    const isLocked = row.dataset.collectionLocked === 'true'
     const isImportPending = row.dataset.collectionImportPending === 'true'
     const typeKey = row.dataset.collectionTypeKey || ''
     const typeLabel = row.dataset.collectionTypeLabel || ''
@@ -1130,6 +1144,7 @@ export class GeneSetCollectionsController {
         label: nextName,
         nb_items: itemCount,
         custom: isCustom,
+        locked: isLocked,
         import_pending: isImportPending,
         type_key: typeKey,
         type_label: typeLabel,
@@ -1146,6 +1161,7 @@ export class GeneSetCollectionsController {
         label: previousLabel,
         nb_items: itemCount,
         custom: isCustom,
+        locked: isLocked,
         import_pending: isImportPending,
         type_key: typeKey,
         type_label: typeLabel,

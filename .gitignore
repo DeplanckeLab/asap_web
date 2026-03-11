@@ -26,6 +26,7 @@ src/solr
 src/solr*
 src/nohup.out
 src/app/javascript/controllers/visualization/README.md
+src/app/assets/builds
 nohup.out
 
 public/assets

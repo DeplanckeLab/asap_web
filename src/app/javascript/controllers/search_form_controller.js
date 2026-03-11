@@ -22,7 +22,7 @@ export default class extends Controller {
 
   submitNow() {
     this.clearSubmitTimer()
-    this.element.requestSubmit()
+    this.element.submit()
   }
 
   clearSubmitTimer() {

@@ -45,6 +45,7 @@ class Project < ApplicationRecord
       indexes :key, type: 'text', analyzer: 'english'
       indexes :description, type: 'text', analyzer: 'english'
       indexes :technology, type: 'keyword', normalizer: 'lowercase_normalizer'
+      indexes :project_type_name, type: 'keyword'
       indexes :tissue, type: 'keyword', normalizer: 'lowercase_normalizer'
       indexes :organism_name, type: 'keyword'
       indexes :status_name, type: 'keyword'
@@ -84,7 +85,7 @@ class Project < ApplicationRecord
       sort: [],
       aggs: {
         organisms: { terms: { field: 'organism_name', size: 500 } },
-        technologies: { terms: { field: 'technology', size: 500 } },
+        project_types: { terms: { field: 'project_type_name', size: 100 } },
         tissues: { terms: { field: 'tissue', size: 2000 } },
         statuses: { terms: { field: 'status_name', size: 50 } }
       },
@@ -122,10 +123,15 @@ class Project < ApplicationRecord
       end
     end
 
-    if filters[:technology].present?
-      search_definition[:query][:bool][:filter] << {
-        term: { technology: filters[:technology] }
-      }
+    if filters[:project_type_id].present?
+      begin
+        project_type = ProjectType.find(filters[:project_type_id])
+        search_definition[:query][:bool][:filter] << {
+          term: { project_type_name: project_type.name }
+        }
+      rescue ActiveRecord::RecordNotFound
+        Rails.logger.warn "Project type with ID #{filters[:project_type_id]} not found"
+      end
     end
 
     if filters[:tissue].present?
@@ -226,6 +232,7 @@ class Project < ApplicationRecord
       key: respond_to?(:key) ? (key || '') : '',
       description: respond_to?(:description) ? (description || '') : '',
       technology: compliance_term_names_for('technology'),
+      project_type_name: project_type&.name || '',
       tissue: compliance_term_names_for('tissue'),
       organism_name: organism&.name || '',
       status_name: status&.name || '',

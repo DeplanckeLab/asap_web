@@ -34,7 +34,7 @@ class ProjectsController < ApplicationController
 
     @filters = {
       organism_id: params[:organism_id],
-      technology: params[:technology],
+      project_type_id: params[:project_type_id],
       tissue: params[:tissue],
       status_id: params[:status_id],
       visibility: visibility,
@@ -57,9 +57,8 @@ class ProjectsController < ApplicationController
     # For filter dropdowns (fallback to database if no aggregations)
     @organisms = Organism.order(:name)
     @grouped_organisms = group_organisms(@organisms)
+    @project_types = ProjectType.order(:name)
     @statuses = Status.order(:name)
-    raw_technologies = @aggregations&.dig('technologies', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:technology).compact
-    @technologies = raw_technologies.map { |v| [v.sub(/\A./) { |c| c.upcase }, v] }.sort_by { |label, _| label.downcase }
 
     raw_tissues = @aggregations&.dig('tissues', 'buckets')&.map { |b| b['key'] } || Project.distinct.pluck(:tissue).compact
     @tissues = raw_tissues.map { |v| [v.sub(/\A./) { |c| c.upcase }, v] }.sort_by { |label, _| label.downcase }

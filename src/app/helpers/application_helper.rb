@@ -162,8 +162,8 @@ module ApplicationHelper
         icon: "fas fa-network-wired"
       },
       {
-        label: "Cell annotation schema",
-        description: "Definitions and lineage rules used by ASAP",
+        label: "Cell metadata schema",
+        description: "Cell metadata used by ASAP to annotate single-cell datasets",
         path: ontology_term_types_path,
         icon: "fas fa-diagram-project"
       },

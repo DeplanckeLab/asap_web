@@ -3,15 +3,16 @@
   <div class="mb-8 space-y-4">
     <div>
       <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
-        Cell annotation schema in ASAP (for single-cell datasets)
+        Cell metadata schema in ASAP (for single-cell datasets)
       </h1>
-      <!-- <p class="mt-2 text-gray-600 dark:text-gray-300">
-        This directory mirrors the legacy ASAP configuration and lets administrators audit how ontology term types are grouped, ranked, and linked to cell ontologies.
-      </p>-->
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Cell metadata used by ASAP to annotate single-cell datasets. This schema is mirroring the <a href="https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/README.md" target="_blank">scFAIR metadata schema</a> 
+        which is largely inspired from the <a href="https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/README.md" target="_blank">CELLxGENE metadata schema</a>.
+      </p>
     </div>
     <% if admin? %>
       <div>
-        <%= link_to "New annotation field",
+        <%= link_to "New metadata field",
                     new_ontology_term_type_path,
                     class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 dark:bg-gray-100 dark:text-black dark:hover:bg-gray-200" %>
       </div>

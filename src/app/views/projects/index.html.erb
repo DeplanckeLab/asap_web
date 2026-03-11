@@ -287,12 +287,14 @@
             <div class="p-6">
               <div class="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span class="text-gray-500">Cells:</span>
-                  <span class="font-medium text-gray-900"><%= number_with_delimiter(project.cell_count) %></span>
+                  <span class="text-gray-500">Columns:</span>
+                  <span class="font-medium text-gray-900 block"><%= number_with_delimiter(project.cell_count) %></span>
+                  <span class="text-xs text-gray-500 block"><%= col_label(project) %></span>
                 </div>
                 <div>
-                  <span class="text-gray-500">Genes:</span>
-                  <span class="font-medium text-gray-900"><%= number_with_delimiter(project.gene_count) %></span>
+                  <span class="text-gray-500">Rows:</span>
+                  <span class="font-medium text-gray-900 block"><%= number_with_delimiter(project.gene_count) %></span>
+                  <span class="text-xs text-gray-500 block"><%= row_label(project) %></span>
                 </div>
                 <div>
                   <span class="text-gray-500">Technology:</span>
@@ -397,8 +399,8 @@
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Organism</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technology</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cells</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Genes</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Columns</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rows</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -481,10 +483,12 @@
                     <%= project.technology_display %>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'">
-                    <%= number_with_delimiter(project.cell_count) %>
+                    <span class="block font-medium text-gray-900"><%= number_with_delimiter(project.cell_count) %></span>
+                    <span class="block text-xs text-gray-500"><%= col_label(project) %></span>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'">
-                    <%= number_with_delimiter(project.gene_count) %>
+                    <span class="block font-medium text-gray-900"><%= number_with_delimiter(project.gene_count) %></span>
+                    <span class="block text-xs text-gray-500"><%= row_label(project) %></span>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap" onclick="window.location='<%= project_path(project) %>'">
                     <% run_counts = project_run_counts(project) %>

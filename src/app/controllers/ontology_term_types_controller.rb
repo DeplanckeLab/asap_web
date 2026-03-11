@@ -4,7 +4,7 @@ class OntologyTermTypesController < ApplicationController
   before_action :set_ontology_term_type, only: [:edit, :update, :destroy]
 
   def index
-    @ontology_term_types = OntologyTermType.order(Arel.sql("COALESCE(rank, 999999), LOWER(name)"))
+    @ontology_term_types = OntologyTermType.order(Arel.sql("COALESCE(display_order, 999999), LOWER(name), id"))
     @cell_ontologies = cell_ontologies_for(@ontology_term_types)
     @terms_by_id = terms_for(@ontology_term_types)
   end

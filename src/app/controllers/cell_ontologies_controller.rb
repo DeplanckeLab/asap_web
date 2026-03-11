@@ -1,13 +1,23 @@
 class CellOntologiesController < ApplicationController
   before_action :authenticate_user!
-  skip_before_action :authenticate_user!, only: :index, raise: false
-  before_action :authorize_admin, except: :index
-  before_action :set_cell_ontology, only: [:edit, :update, :destroy]
+  skip_before_action :authenticate_user!, only: [:index, :show], raise: false
+  before_action :authorize_admin, except: [:index, :show]
+  before_action :set_cell_ontology, only: [:show, :edit, :update, :destroy]
 
   def index
     @cell_ontologies = CellOntology.order(Arel.sql("LOWER(name) ASC"))
     @organisms_by_tax_id = fetch_organisms_by_tax_id(@cell_ontologies)
     @term_counts = term_counts_for(@cell_ontologies)
+  end
+
+  def show
+    @total_terms = @cell_ontology.cell_ontology_terms.count
+    @original_terms = @cell_ontology.cell_ontology_terms.original.count
+    @sample_terms = @cell_ontology.cell_ontology_terms
+                                 .original
+                                 .order(Arel.sql("LOWER(name) ASC"))
+                                 .limit(100)
+    @organism_names = organism_names_for(@cell_ontology)
   end
 
   def new
@@ -66,6 +76,17 @@ class CellOntologiesController < ApplicationController
     originals = CellOntologyTerm.where(cell_ontology_id: ids, original: true).group(:cell_ontology_id).count
 
     { total: totals, original: originals }
+  end
+
+  def organism_names_for(cell_ontology)
+    return ["All organisms"] if cell_ontology.applies_to_all_organisms?
+
+    tax_ids = cell_ontology.tax_id_list
+    return ["No match"] if tax_ids.empty?
+
+    names_by_tax_id = Organism.where(tax_id: tax_ids).index_by(&:tax_id)
+    names = tax_ids.map { |tax_id| names_by_tax_id[tax_id]&.name || "Tax ID #{tax_id}" }
+    names.presence || ["No match"]
   end
 end
 

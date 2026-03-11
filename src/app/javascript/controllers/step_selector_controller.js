@@ -110,6 +110,11 @@ export default class extends Controller {
     this.statusUpdateDebounceMs = 350
     this.statusUpdateTimer = null
     this.pendingStatusUpdate = null
+    this._initialPanelRevealDone = false
+    this._pendingLoadStepId = null
+    this._isBootstrapping = true
+    this._hasLoadedInitialStep = false
+    this._realtimeReloadCooldownUntil = Date.now() + 4000
     
     // Remove any blue background from server-rendered steps (all should be white)
     // This ensures consistency with the new design
@@ -169,10 +174,10 @@ export default class extends Controller {
       this.currentStepId = subViewStepId.toString()
       this.element.setAttribute('data-current-step-id', subViewStepId.toString())
       this.saveState(subViewStepId, 'step', null)
-      this.refreshStepsPanel()
       this._executeInlineScripts()
       this.subscribeToProject()
       this._cleanUrlParams()
+      this._initialPanelRevealDone = true
       return
     }
 
@@ -182,13 +187,13 @@ export default class extends Controller {
       this.currentStepId = stepIdFromUrl.toString()
       this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
       this.saveState(stepIdFromUrl, 'run', runIdFromUrl)
-      this.refreshStepsPanel()
       this._executeInlineScripts()
       this.subscribeToProject()
       this._cleanUrlParams()
+      this._initialPanelRevealDone = true
       return
     }
-    
+
     // Normal flow: load step results
     // If panel_mode=graph is requested, do not auto-load a step here.
     // The analysis view script will load the graph into the right panel.
@@ -224,14 +229,13 @@ export default class extends Controller {
           controller.element.setAttribute('data-current-step-id', stepId.toString())
           if (runIdFromUrl && typeof loadRunInRightPanel === 'function') {
             controller.saveState(stepId, 'run', runIdFromUrl)
-            controller.refreshStepsPanel()
             setTimeout(() => {
               loadRunInRightPanel(`/runs/${runIdFromUrl}`, stepId)
             }, 0)
             return true
           }
           const extraQuery = showFormFromUrl === '1' ? '&show_form=1' : ''
-          controller.loadStepResults(stepId, stepElement, true, extraQuery)
+          controller.loadStepResults(stepId, stepElement, true, extraQuery, 'connect:url_step')
           return true
         } else {
           console.warn('[StepSelectorController] Step element not found for step_id:', stepIdFromUrl)
@@ -261,23 +265,20 @@ export default class extends Controller {
               controller.loadingStateTarget.style.display = 'block'
             }
             
-            // Refresh steps panel to show the border
-            controller.refreshStepsPanel()
-            
             // Load run panel - use global function from _analysis.html.erb
             setTimeout(() => {
               if (typeof loadRunInRightPanel === 'function') {
                 loadRunInRightPanel(`/runs/${savedState.runId}`, stepId)
               } else {
                 // Fallback to loading step results
-                controller.loadStepResults(stepId, stepElement, true)
+                controller.loadStepResults(stepId, stepElement, true, '', 'connect:restore_state_run_fallback')
               }
             }, 100)
             return true
           }
           
           // Regular step load
-          controller.loadStepResults(stepId, stepElement, true)
+          controller.loadStepResults(stepId, stepElement, true, '', 'connect:restore_state_step')
           return true
         } else {
           console.warn('[StepSelectorController] Saved step element not found for step_id:', savedState.stepId)
@@ -294,7 +295,7 @@ export default class extends Controller {
     // Try immediately, then retry after a short delay if steps panel isn't ready
     if (!trySelectStep()) {
       console.log('[StepSelectorController] Steps panel not ready, retrying after refresh...')
-      this.refreshStepsPanel()
+      this.refreshStepsPanel('connect:retry_steps_panel')
       setTimeout(function() {
         if (!trySelectStep()) {
           console.warn('[StepSelectorController] Still couldn\'t find step, falling back to first available')
@@ -346,7 +347,11 @@ export default class extends Controller {
         connected: () => {
           console.log(`[StepSelectorController] ===== WEBSOCKET CONNECTED =====`)
           console.log(`[StepSelectorController] Connected to ProjectChannel for project ${this.projectIdValue}`)
-          this.reconcileCurrentStepOnConnect()
+          if (this._hasLoadedInitialStep && !this._isBootstrapping) {
+            this.reconcileCurrentStepOnConnect()
+          } else {
+            console.log('[StepSelectorController] Skip reconcile on initial websocket connect during bootstrap')
+          }
         },
         disconnected: () => {
           console.warn(`[StepSelectorController] ===== WEBSOCKET DISCONNECTED =====`)
@@ -467,6 +472,32 @@ export default class extends Controller {
         const isTerminal = running === 0 && (success > 0 || failed > 0)
         if (!isTerminal) return
 
+        const sameStepLoadInFlight =
+          this._pendingLoadStepId &&
+          this._pendingLoadStepId.toString() === currentStepId.toString()
+
+        if (sameStepLoadInFlight) {
+          console.log('[StepSelectorController] reconcileCurrentStepOnConnect skip: same step load in flight', {
+            currentStepId,
+            pendingLoadStepId: this._pendingLoadStepId
+          })
+          return
+        }
+
+        const sameStepJustLoaded =
+          this._lastLoadedStepId &&
+          this._lastLoadedStepId.toString() === currentStepId.toString() &&
+          this._lastStepResultsLoadedAt &&
+          (Date.now() - this._lastStepResultsLoadedAt) < 3000
+
+        if (sameStepJustLoaded) {
+          console.log('[StepSelectorController] reconcileCurrentStepOnConnect skip: same step loaded recently', {
+            currentStepId,
+            msSinceLastLoad: Date.now() - this._lastStepResultsLoadedAt
+          })
+          return
+        }
+
         console.log('[StepSelectorController] reconcileCurrentStepOnConnect forcing refresh for terminal parsing state', {
           currentStepId,
           running,
@@ -509,6 +540,11 @@ export default class extends Controller {
   }
 
   handleStatusUpdate(data) {
+    if (this._isBootstrapping) {
+      console.log('[StepSelectorController] Ignoring websocket status update during bootstrap')
+      return
+    }
+
     console.log('[StepSelectorController] ===== HANDLE STATUS UPDATE =====')
     console.log('[StepSelectorController] handleStatusUpdate called with data:', data)
     console.log('[StepSelectorController] data.step_id:', data.step_id)
@@ -633,6 +669,10 @@ export default class extends Controller {
         console.warn(`[StepSelectorController] No content target available`)
       }
     } else if (updateStepId && !currentStepIdNum) {
+      if (Date.now() < this._realtimeReloadCooldownUntil) {
+        console.log('[StepSelectorController] Skipping websocket-driven step load during startup cooldown')
+        return
+      }
       // No step is currently selected, but we got an update for a step - select and load it
       console.log(`[StepSelectorController] No step selected, but got update for step ${updateStepId}, selecting it...`)
       const stepElement = this.element.querySelector(`[data-step-id="${updateStepId}"]`)
@@ -660,21 +700,7 @@ export default class extends Controller {
       console.log(`[StepSelectorController] Not reloading step results - updateStepId (${updateStepId}) !== currentStepIdNum (${currentStepIdNum})`)
     }
     
-    // Also reload if parsing_status changed and we're viewing the parsing step
-    // This handles the case where parsing_status is sent but step_id might not match exactly
-    if (data.parsing_status && this.currentStepId) {
-      const currentStepElement = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
-      if (currentStepElement) {
-        // If parsing status changed to success or failed, reload the current step
-        if (data.parsing_status === 'success' || data.parsing_status === 'failed') {
-          console.log(`[StepSelectorController] Parsing status changed to ${data.parsing_status}, reloading current step as fallback`)
-          clearTimeout(this.reloadTimeout)
-          this.reloadTimeout = setTimeout(() => {
-            this.loadStepResults(this.currentStepId, currentStepElement, false)
-          }, 500)
-        }
-      }
-    }
+    // Parsing terminal refresh is handled by forceRefreshParsingPanelOnTerminalStatus.
   }
 
   forceRefreshParsingPanelOnTerminalStatus(data) {
@@ -689,6 +715,10 @@ export default class extends Controller {
     })
     if (stepName !== 'parsing') return
     if (status !== 'success' && status !== 'failed') return
+    if (Date.now() < this._realtimeReloadCooldownUntil) {
+      console.log('[StepSelectorController] Skipping parsing terminal reload during startup cooldown')
+      return
+    }
 
     const stepId = data.step_id ? parseInt(data.step_id, 10) : null
     if (!stepId) return
@@ -777,18 +807,29 @@ export default class extends Controller {
     if (!this.hasContentTarget) return
     const scripts = this.contentTarget.querySelectorAll('script')
     scripts.forEach(original => {
-      const replacement = document.createElement('script')
-      if (original.src) {
-        replacement.src = original.src
-      } else {
-        replacement.textContent = original.textContent
+      try {
+        const replacement = document.createElement('script')
+        if (original.src) {
+          replacement.src = original.src
+        } else {
+          replacement.textContent = original.textContent
+        }
+        original.parentNode.replaceChild(replacement, original)
+      } catch (error) {
+        console.warn('[StepSelectorController] Inline script execution failed:', error)
       }
-      original.parentNode.replaceChild(replacement, original)
     })
   }
 
-  refreshStepsPanel() {
+  refreshStepsPanel(source = 'unknown') {
     console.log('[StepSelectorController] ===== REFRESHING STEPS PANEL FROM SERVER =====')
+    console.log('[StepSelectorController][trace] refreshStepsPanel called:', {
+      source,
+      currentStepId: this.currentStepId,
+      dataCurrentStepId: this.element.getAttribute('data-current-step-id'),
+      inFlight: this._refreshingStepsPanel,
+      origin: this.debugCallOrigin()
+    })
     if (this._refreshingStepsPanel) {
       return this._refreshingStepsPanelPromise || Promise.resolve()
     }
@@ -977,7 +1018,17 @@ export default class extends Controller {
     // Check if status changed to success or failed, and if this is the currently displayed step
     const statusChanged = currentStatus !== status
     const isCurrentStep = this.currentStepId && (this.currentStepId.toString() === stepId.toString())
-    const shouldReload = statusChanged && isCurrentStep && (status === 'success' || status === 'failed' || status === 'running')
+    const sameStepLoadInFlight =
+      this._pendingLoadStepId &&
+      this._pendingLoadStepId.toString() === stepId.toString()
+    const isParsingStatusPayload = !!data.parsing_status
+    const shouldReload =
+      statusChanged &&
+      isCurrentStep &&
+      !this._isBootstrapping &&
+      !sameStepLoadInFlight &&
+      !isParsingStatusPayload &&
+      (status === 'success' || status === 'failed')
     
     console.log('[StepSelectorController] Status change check:')
     console.log('  - statusChanged:', statusChanged, `("${currentStatus}" -> "${status}")`)
@@ -1057,7 +1108,25 @@ export default class extends Controller {
   normalizeStatusName(status) {
     const normalized = (status || '').toString().toLowerCase().trim()
     if (!normalized) return normalized
+
+    // Canonicalize status names so equivalent labels do not trigger fake transitions.
+    if (normalized === 'complete' || normalized === 'completed') return 'success'
+    if (normalized === 'waiting' || normalized === 'queued' || normalized === 'queue') return 'pending'
+    if (normalized === 'error') return 'failed'
+
     return normalized
+  }
+
+  debugCallOrigin() {
+    try {
+      return (new Error().stack || '')
+        .split('\n')
+        .slice(2, 6)
+        .map((line) => line.trim())
+        .join(' | ')
+    } catch (_e) {
+      return 'stack_unavailable'
+    }
   }
 
   selectFirstAvailableStep() {
@@ -1070,10 +1139,8 @@ export default class extends Controller {
       this.element.setAttribute('data-current-step-id', stepId.toString())
       // Save state to localStorage for when user returns from visualization view
       this.saveState(stepId, 'step', null)
-      // Refresh steps panel to show the border (server will render it)
-      this.refreshStepsPanel()
       // Load step results
-      this.loadStepResults(stepId, firstStep, true)
+      this.loadStepResults(stepId, firstStep, true, '', 'selectFirstAvailableStep')
       return true
     }
     return false
@@ -1103,9 +1170,6 @@ export default class extends Controller {
       dropdownElement.setAttribute('data-selected-step-id', stepId.toString())
     }
     
-    // Refresh steps panel to show the border (server will render it)
-    this.refreshStepsPanel()
-    
     // Update dropdown button if it exists
     this.updateDropdownButton(stepElement)
     
@@ -1114,6 +1178,7 @@ export default class extends Controller {
 
     // If graph mode is active, keep graph view and only update node highlighting
     if (this.isGraphModeActive()) {
+      this.refreshStepsPanel('selectStep:graph_mode')
       if (typeof window.updatePipelineGraphStepHighlight === 'function') {
         window.updatePipelineGraphStepHighlight(stepId)
       }
@@ -1123,7 +1188,7 @@ export default class extends Controller {
       return
     }
 
-    this.loadStepResults(stepId, stepElement)
+    this.loadStepResults(stepId, stepElement, true, '', 'selectStep')
   }
 
   selectStepFromDropdown(event) {
@@ -1147,9 +1212,6 @@ export default class extends Controller {
       dropdownElement.setAttribute('data-selected-step-id', stepId.toString())
     }
     
-    // Refresh steps panel to show the border (server will render it)
-    this.refreshStepsPanel()
-    
     // Find or create a step element for compatibility with loadStepResults
     let stepElement = document.querySelector(`[data-step-id="${stepId}"]`)
     if (!stepElement) {
@@ -1164,6 +1226,7 @@ export default class extends Controller {
 
     // If graph mode is active, keep graph view and only update node highlighting
     if (this.isGraphModeActive()) {
+      this.refreshStepsPanel('selectStepFromDropdown:graph_mode')
       if (typeof window.updatePipelineGraphStepHighlight === 'function') {
         window.updatePipelineGraphStepHighlight(stepId)
       }
@@ -1173,7 +1236,7 @@ export default class extends Controller {
       return
     }
 
-    this.loadStepResults(stepId, stepElement)
+    this.loadStepResults(stepId, stepElement, true, '', 'selectStepFromDropdown')
   }
 
   isGraphModeActive() {
@@ -1240,8 +1303,19 @@ export default class extends Controller {
     }
   }
 
-  loadStepResults(stepId, stepElement, showLoading = true, extraQuery = '') {
+  loadStepResults(stepId, stepElement, showLoading = true, extraQuery = '', source = 'unknown') {
     console.log('[StepSelectorController] ===== LOADING STEP RESULTS =====')
+    const callId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    console.log('[StepSelectorController][trace] loadStepResults called:', {
+      callId,
+      source,
+      stepId,
+      showLoading,
+      extraQuery,
+      currentStepIdBefore: this.currentStepId,
+      dataCurrentStepIdBefore: this.element.getAttribute('data-current-step-id'),
+      origin: this.debugCallOrigin()
+    })
     console.log('[StepSelectorController] Step ID:', stepId, 'type:', typeof stepId)
     console.log('[StepSelectorController] Step Element:', stepElement)
     console.log('[StepSelectorController] Show Loading:', showLoading)
@@ -1253,17 +1327,15 @@ export default class extends Controller {
     const stepIdString = stepId ? stepId.toString() : null
     this.currentStepId = stepIdString
     this.element.setAttribute('data-current-step-id', stepIdString)
+    this._pendingLoadStepId = stepIdString
     console.log('[StepSelectorController] New currentStepId:', this.currentStepId, 'type:', typeof this.currentStepId)
     console.log('[StepSelectorController] Stored stepIdString:', stepIdString)
     
     // Save state to localStorage for when user returns from visualization view
     this.saveState(stepId, 'step', null)
     
-    // Refresh steps panel to show the border (server will render it)
-    // Only refresh if we're not already in the middle of a refresh (to avoid infinite loops)
-    if (!this._refreshingStepsPanel) {
-      this.refreshStepsPanel()
-    }
+    // Avoid forcing a steps-panel refresh here: it causes a second visible redraw.
+    // Steps panel refresh is triggered by explicit flows (selection/graph/websocket sync).
     
     // Update UI states
     if (this.hasEmptyStateTarget) {
@@ -1329,10 +1401,17 @@ export default class extends Controller {
         console.log('[StepSelectorController] Ignoring stale step results response for step:', stepId)
         return
       }
-      console.log('[StepSelectorController] Response text received, length:', html ? html.length : 0)
-      console.log('[StepSelectorController] ===== STEP RESULTS LOADED =====')
+      console.log('[StepSelectorController] Response text received, length:', html ? html.length : 0, 'callId:', callId)
+      console.log('[StepSelectorController] ===== STEP RESULTS LOADED =====', 'callId:', callId)
       console.log('[StepSelectorController] HTML length:', html.length)
       console.log('[StepSelectorController] HTML preview (first 500 chars):', html.substring(0, 500))
+      controller._lastLoadedStepId = stepIdString
+      controller._lastStepResultsLoadedAt = Date.now()
+      controller._hasLoadedInitialStep = true
+      controller._isBootstrapping = false
+      if (controller._pendingLoadStepId && controller._pendingLoadStepId.toString() === stepIdString.toString()) {
+        controller._pendingLoadStepId = null
+      }
       
       // Check if queue-position controller is in the HTML
       if (html.includes('queue-position')) {
@@ -1434,7 +1513,6 @@ export default class extends Controller {
       
       // UI updates
       console.log('[StepSelectorController] Applying UI updates (showing content, hiding loading/empty states)')
-      
       if (controller.hasLoadingStateTarget) {
         controller.loadingStateTarget.style.display = 'none'
       }
@@ -1554,6 +1632,11 @@ export default class extends Controller {
       console.error('[StepSelectorController] Error stack:', error.stack)
       if (controller.hasLoadingStateTarget) {
         controller.loadingStateTarget.style.display = 'none'
+      }
+      controller._hasLoadedInitialStep = true
+      controller._isBootstrapping = false
+      if (controller._pendingLoadStepId && stepIdString && controller._pendingLoadStepId.toString() === stepIdString.toString()) {
+        controller._pendingLoadStepId = null
       }
       if (controller.hasContentTarget) {
         controller.contentTarget.innerHTML = `

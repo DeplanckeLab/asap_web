@@ -469,21 +469,22 @@
     <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
     <% loom_file = project_dir + 'parsing' + 'output.loom' %>
     <% if File.exist?(loom_file) && exportable?(@project) %>
-      $(".link_to_loom_tuto").click(function(e){
-        var url = '<%= tutorial_home_index_path(t: 'loom') rescue '#' %>'
-        var win = window.open(url, '_blank');
-        if (win) win.focus();
-        e.stopPropagation();
-        e.preventDefault();
-        return false;
+      document.querySelectorAll('.link_to_loom_tuto').forEach(function(el) {
+        el.addEventListener('click', function(e) {
+          var url = '<%= tutorial_home_index_path(t: 'loom') rescue '#' %>'
+          var win = window.open(url, '_blank')
+          if (win) win.focus()
+          e.stopPropagation()
+          e.preventDefault()
+        })
       })
     <% end %>
     
     <% if @project.parsing_attrs_json %>
       <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
       <% if h_attrs['integrate_batch_paths'] %>
-        if (typeof $.fn.DataTable !== 'undefined') {
-          $("#integration_projects").DataTable()
+        if (typeof DataTable !== 'undefined') {
+          new DataTable('#integration_projects')
         }
       <% end %>
     <% end %>

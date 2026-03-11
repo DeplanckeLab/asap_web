@@ -488,7 +488,8 @@
               <%= button_to clone_project_path(@project), 
                   method: :post,
                   class: "flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100",
-                  form: { data: { turbo_confirm: "Clone this project?", controller: "clone-overlay", action: "turbo:submit-start->clone-overlay#showOverlay" } } do %>
+                  data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_skip_confirm: "true" },
+                  form: { data: { skip_visualization_leave_guard: "true" } } do %>
                 <i class="fas fa-clone text-lg mr-3"></i>
                 Clone
               <% end %>
@@ -576,7 +577,8 @@
             method: :post,
             class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",
             title: "Clone Project",
-            form: { data: { turbo_confirm: "Clone this project?", controller: "clone-overlay", action: "turbo:submit-start->clone-overlay#showOverlay" } } do %><i class="fas fa-clone text-lg"></i><% end %><% end %>
+            data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_skip_confirm: "true" },
+            form: { data: { skip_visualization_leave_guard: "true" } } do %><i class="fas fa-clone text-lg"></i><% end %><% end %>
         
         <%= header_separator %>
         

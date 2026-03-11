@@ -724,6 +724,11 @@ export default class extends Controller {
 
       const form = event.target instanceof HTMLFormElement ? event.target : null
       if (!form) return
+      if (form.dataset?.skipVisualizationLeaveGuard === 'true') {
+        this.allowNextInAppNavigation = true
+        this.skipBeforeUnloadForConfirmedNavigation = true
+        return
+      }
       if (form.closest('#visualization-leave-guard-overlay')) return
       const formTarget = (form.getAttribute('target') || '').toLowerCase()
       if (formTarget && formTarget !== '_self') return

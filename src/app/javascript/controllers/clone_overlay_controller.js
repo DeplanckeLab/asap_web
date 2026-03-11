@@ -1,6 +1,52 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
+  connect() {
+    this.submitting = false
+  }
+
+  handleClick(event) {
+    event.preventDefault()
+
+    if (this.submitting) {
+      return
+    }
+
+    const form = this.element.closest("form")
+    if (!form) {
+      return
+    }
+
+    const skipConfirm = this.element.dataset.cloneOverlaySkipConfirm === "true"
+    if (!skipConfirm) {
+      const message = this.element.dataset.cloneOverlayConfirmValue || "Clone this project?"
+      if (!window.confirm(message)) {
+        return
+      }
+    }
+
+    this.submitting = true
+    this.showOverlay()
+    form.requestSubmit()
+  }
+
+  handleSubmit(event) {
+    if (this.submitting) {
+      this.showOverlay()
+      return
+    }
+
+    event.preventDefault()
+    const message = this.element.dataset.cloneOverlayConfirmValue || "Clone this project?"
+    if (!window.confirm(message)) {
+      return
+    }
+
+    this.submitting = true
+    this.showOverlay()
+    this.element.requestSubmit()
+  }
+
   showOverlay() {
     const existing = document.getElementById('clone-loading-overlay')
     if (existing) existing.remove()

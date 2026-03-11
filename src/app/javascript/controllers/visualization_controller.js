@@ -6707,6 +6707,7 @@ export default class extends Controller {
       } else {
         // console.log('Step 5: Adding category colors for discrete metadata...')
         this.addCategoryColors(metadataContainer, normalizedMetadataId)
+        this.expandCategoricalMetadataPanel(normalizedMetadataId)
       }
     } else {
       console.warn('🎨 WARNING: Could not find metadata container, but continuing with metadata loading...')
@@ -17825,6 +17826,28 @@ export default class extends Controller {
     
     // Initialize the range slider data (just for histogram, no coloring)
     this.toggleInlineRangeSlider(metadataId, metadataName)
+  }
+
+  async expandCategoricalMetadataPanel(metadataId) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return
+
+    const header = document.querySelector(
+      `[data-action*="toggleMetadata"][data-metadata-id="${normalizedMetadataId}"]`
+    )
+    if (!header) return
+
+    const chevron = header.querySelector('.fa-chevron-right')
+    const categoriesDiv = header.nextElementSibling
+    const isCollapsed = !!(
+      categoriesDiv && (
+        categoriesDiv.style.display === 'none' ||
+        (chevron && (chevron.style.transform === '' || chevron.style.transform === 'rotate(0deg)'))
+      )
+    )
+    if (!isCollapsed) return
+
+    await this.toggleMetadata({ currentTarget: header, timeStamp: performance.now() })
   }
 
   toggleInlineRangeSlider(metadataId, metadataName) {

@@ -2715,13 +2715,35 @@ export class CustomPlotManager {
     // Get coloring metadata vector for point colors
     const coloringVector = this.controller.colorManager?.getColoringMetadataVector()
 
-    // Build category outline colors with per-category overrides when applicable
+    // Build category outline colors using the X-axis metadata category mapping.
     const categoryColors = window.CATEGORY_COLORS || []
     const categoryColorMap = {}
+    const xMetadataId = xVector?.id || this.controller?.selectedXButton?.metadataId
+    const canResolveStableCategoryIndex = typeof this.controller.getStableSortedCategories === 'function'
+    const canResolveCategoryColor = typeof this.controller.getCategoryColor === 'function' && !!xMetadataId
+    let categoryToStableIndex = null
+
+    if (canResolveStableCategoryIndex) {
+      let allCategories
+      if (xVector?.compression_info?.categories && Array.isArray(xVector.compression_info.categories)) {
+        allCategories = [...xVector.compression_info.categories]
+      } else {
+        allCategories = [...new Set(xValues)]
+      }
+
+      const stableSortedCategories = this.controller.getStableSortedCategories(xValues, allCategories)
+      categoryToStableIndex = new Map()
+      stableSortedCategories.forEach((cat, idx) => {
+        categoryToStableIndex.set(cat, idx)
+      })
+    }
+
     categories.forEach((cat, idx) => {
-      const fallbackColor = categoryColors[idx % categoryColors.length]
-      if (coloringVector && String(coloringVector.id) === String(this.controller.currentMetadataId) && typeof this.controller.getCategoryColor === 'function') {
-        categoryColorMap[cat] = this.controller.getCategoryColor(cat, idx, this.controller.currentMetadataId)
+      const categoryIndex = categoryToStableIndex?.has(cat) ? categoryToStableIndex.get(cat) : idx
+      const fallbackColor = categoryColors[categoryIndex % categoryColors.length] || '#3b82f6'
+
+      if (canResolveCategoryColor) {
+        categoryColorMap[cat] = this.controller.getCategoryColor(cat, categoryIndex, xMetadataId)
       } else {
         categoryColorMap[cat] = fallbackColor
       }

@@ -11387,10 +11387,16 @@ export default class extends Controller {
 
   clearCurrentSelectionAfterSave() {
     this.selectedCells.clear()
+    // Invalidate color/order caches so repaint rebuilds a clean draw order.
+    this.lastColorUpdateHash = null
+    if (this.colorUpdateCache) this.colorUpdateCache.clear()
+    this._lastCategoryOrderApplied = null
+    this._lastNumericOrderApplied = null
+    this._lastNumericMetadataId = null
 
     const wasRestored = this.restoreMetadataStateAfterSelection()
     if (!wasRestored) {
-      this.updateSelectedPointColors()
+      this.renderPointsWithCurrentColoring()
     }
 
     this.uiManager.updateSelectedCellsCount()
@@ -14626,6 +14632,12 @@ export default class extends Controller {
     
     // Clear the selected cells
     this.selectedCells.clear()
+    // Invalidate color/order caches so repaint rebuilds a clean draw order.
+    this.lastColorUpdateHash = null
+    if (this.colorUpdateCache) this.colorUpdateCache.clear()
+    this._lastCategoryOrderApplied = null
+    this._lastNumericOrderApplied = null
+    this._lastNumericMetadataId = null
     
     // Restore the metadata state from before the selection
     const wasRestored = this.restoreMetadataStateAfterSelection()
@@ -14633,7 +14645,7 @@ export default class extends Controller {
     // If no metadata was restored, just update colors to remove selection highlighting
     if (!wasRestored) {
       // console.log('No metadata to restore, updating colors to default')
-      this.updateSelectedPointColors()
+      this.renderPointsWithCurrentColoring()
     }
     
     // Update the cell count display
@@ -14645,6 +14657,9 @@ export default class extends Controller {
         this.customPlotManager.refresh2DPlotIfOpen()
       }
     }
+
+    // Clear currently drawn lasso path.
+    this.clearLasso()
     
     // Clear any lasso graphics
     if (this.lassoGraphics) {

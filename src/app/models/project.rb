@@ -1,6 +1,7 @@
 class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
+  before_save :sanitize_non_raw_text_parsing_attrs!
 
   # Associations
   belongs_to :user, optional: true
@@ -646,5 +647,32 @@ class Project < ApplicationRecord
         )
       end
     end
+  end
+
+  private
+
+  def sanitize_non_raw_text_parsing_attrs!
+    return if parsing_attrs_json.blank?
+
+    attrs =
+      begin
+        parsed = JSON.parse(parsing_attrs_json)
+        parsed.is_a?(Hash) ? parsed : {}
+      rescue JSON::ParserError
+        {}
+      end
+    return if attrs.empty?
+
+    file_type = attrs['file_type'].to_s
+    return if file_type.blank?
+
+    format = FileFormat.find_by(name: file_type) || FileFormat.find_by(name: file_type.upcase)
+    is_raw_text = (file_type == 'RAW_TEXT') || (format && format.child_format == 'RAW_TEXT')
+    return if is_raw_text
+
+    attrs.delete('delimiter')
+    attrs.delete('gene_name_col')
+    attrs.delete('has_header')
+    self.parsing_attrs_json = attrs.to_json
   end
 end

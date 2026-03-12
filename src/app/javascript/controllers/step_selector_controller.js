@@ -514,8 +514,8 @@ export default class extends Controller {
   isTerminalStepUpdate(data) {
     if (!data) return false
 
-    const parsingStatus = (data.parsing_status || '').toString().toLowerCase()
-    if (parsingStatus === 'success' || parsingStatus === 'failed') {
+    const parsingStatus = this.normalizeStatusName(data.parsing_status)
+    if (this.isTerminalParsingStatus(parsingStatus)) {
       console.log('[StepSelectorController] Terminal by parsing_status:', parsingStatus)
       return true
     }
@@ -629,21 +629,22 @@ export default class extends Controller {
       // don't reload the content panel on every broadcast. The parsing view has no
       // run rows and would trigger an unnecessary full reload each time.
       // The parsing_status check further below handles the success/failed transitions.
-      if (data.parsing_status && data.parsing_status !== 'success' && data.parsing_status !== 'failed') {
+      const parsingStatus = this.normalizeStatusName(data.parsing_status)
+      if (parsingStatus && !this.isTerminalParsingStatus(parsingStatus)) {
         // Keep in-progress parsing lightweight, but force a reload when the current
         // panel still shows a failed state so failed -> waiting/running is visible.
         const parsingStatusPanel = this.contentTarget.querySelector('[data-parsing-status-panel="true"]')
         const shownStatusId = parsingStatusPanel ? parseInt(parsingStatusPanel.dataset.currentStatusId || '', 10) : null
         const isShowingFailedPanel = shownStatusId === 4
 
-        if (isShowingFailedPanel && (data.parsing_status === 'pending' || data.parsing_status === 'running')) {
-          console.log(`[StepSelectorController] Parsing recovered (${data.parsing_status}) from failed panel, reloading content`)
+        if (isShowingFailedPanel && this.isParsingInProgressStatus(parsingStatus)) {
+          console.log(`[StepSelectorController] Parsing recovered (${parsingStatus}) from failed panel, reloading content`)
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
             this.loadStepResults(this.currentStepId, currentStepElement, false)
           }, 300)
         } else {
-          console.log(`[StepSelectorController] Parsing step in progress (${data.parsing_status}), skipping content reload`)
+          console.log(`[StepSelectorController] Parsing step in progress (${parsingStatus}), skipping content reload`)
         }
       } else if (this.hasContentTarget) {
         // Search for run rows - they might be in a table or nested in the content
@@ -706,15 +707,17 @@ export default class extends Controller {
   forceRefreshParsingPanelOnTerminalStatus(data) {
     if (!data) return
     const status = data.parsing_status
+    const normalizedStatus = this.normalizeStatusName(status)
     const stepName = (data.step_name || '').toString().toLowerCase()
     console.log('[StepSelectorController] forceRefreshParsingPanelOnTerminalStatus input:', {
       step_id: data.step_id,
       step_name: stepName,
       parsing_status: status,
+      normalized_parsing_status: normalizedStatus,
       currentStepId: this.currentStepId
     })
     if (stepName !== 'parsing') return
-    if (status !== 'success' && status !== 'failed') return
+    if (!this.isTerminalParsingStatus(normalizedStatus)) return
     if (Date.now() < this._realtimeReloadCooldownUntil) {
       console.log('[StepSelectorController] Skipping parsing terminal reload during startup cooldown')
       return
@@ -1115,6 +1118,14 @@ export default class extends Controller {
     if (normalized === 'error') return 'failed'
 
     return normalized
+  }
+
+  isTerminalParsingStatus(status) {
+    return status === 'success' || status === 'failed'
+  }
+
+  isParsingInProgressStatus(status) {
+    return status === 'pending' || status === 'running'
   }
 
   debugCallOrigin() {

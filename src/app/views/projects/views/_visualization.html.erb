@@ -102,14 +102,6 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
       <p data-unarchive-status-target="errorText"
          style="display: none; font-size: 13px; color: #b45309; margin-bottom: 16px; line-height: 1.6;"></p>
 
-      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 6px;">
-        <a href="<%= project_path(@project, view: 'summary') %>"
-           style="display: inline-flex; align-items: center; padding: 12px 24px; background-color: #3b82f6; color: white; border-radius: 8px; text-decoration: none; font-weight: 500; transition: background-color 0.2s;"
-           onmouseover="this.style.backgroundColor='#2563eb'"
-           onmouseout="this.style.backgroundColor='#3b82f6'">
-          View Summary
-        </a>
-      </div>
     </div>
   </div>
   <%= render partial: 'projects/views/save_manual_gene_set_modal' %>

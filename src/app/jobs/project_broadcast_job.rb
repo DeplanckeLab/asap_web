@@ -130,7 +130,7 @@ class ProjectBroadcastJob < ApplicationJob
 
   def get_parsing_status(project, current_step_id = nil)
     status_info = {
-      parsing_status: 'complete',
+      parsing_status: 'success',
       parsing_complete: true
     }
     
@@ -157,11 +157,11 @@ class ProjectBroadcastJob < ApplicationJob
         when 2
           'running'
         when 3
-          'complete'
+          'success'
         when 4
           'failed'
         else
-          'complete'
+          'success'
         end
         status_info[:parsing_complete] = (project_step.status_id == 3)
       end

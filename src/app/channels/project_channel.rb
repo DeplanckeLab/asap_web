@@ -29,7 +29,7 @@ class ProjectChannel < ApplicationCable::Channel
       run_totals[key] = count.to_i if run_totals.key?(key)
     end
 
-    parsing_status = 'complete'
+    parsing_status = 'success'
     parsing_complete = true
     parsing_step_id = nil
 

@@ -279,13 +279,14 @@
                 Dataset: <%= selected_dataset %>
               </span>
             <% end %>
-            <% if h_attrs['delimiter'] && h_attrs['delimiter'] != '' %>
+            <% show_raw_text_options = (@results && @results["detected_format"] == 'RAW_TEXT') || (h_attrs['file_type'] == 'RAW_TEXT') %>
+            <% if show_raw_text_options && h_attrs['delimiter'] && h_attrs['delimiter'] != '' %>
               <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                 Delimiter: <%= h_delimiter[h_attrs['delimiter']] || h_attrs['delimiter'] %>
               </span>
             <% end %>
             <% h_gene_name_col = {"0" => "First", "first" => "First", "-1" => "Last", "last" => "Last", "NA" => "None", 'none' => "None"} %>
-            <% if h_attrs['gene_name_col'] %>
+            <% if show_raw_text_options && h_attrs['gene_name_col'] %>
               <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                 Gene name column: <%= h_gene_name_col[h_attrs['gene_name_col']] || h_attrs['gene_name_col'] %>
               </span>
@@ -295,7 +296,7 @@
                 Skip lines: <%= h_attrs['skip_line'] %>
               </span>
             <% end %>
-            <% if h_attrs['has_header'] %>
+            <% if show_raw_text_options && h_attrs['has_header'] %>
               <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                 Has header: <%= (h_attrs['has_header'] == "1" || h_attrs['has_header'] == true) ? 'Yes' : 'No' %>
               </span>

@@ -781,7 +781,13 @@ class ProjectsController < ApplicationController
     end
     
     # Handle parsing attributes from params
-    tmp_attrs = params[:attrs] || {}
+    raw_attrs = params[:attrs].presence
+    tmp_attrs = if raw_attrs
+                  source_attrs = raw_attrs.respond_to?(:to_unsafe_h) ? raw_attrs.to_unsafe_h : raw_attrs.to_h
+                  source_attrs.deep_symbolize_keys
+                else
+                  {}
+                end
     tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
     
     # Collect parsing attributes from params
@@ -805,10 +811,15 @@ class ProjectsController < ApplicationController
       tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
     end
     
-    # Remove RAW_TEXT parsing options for non-text formats
-    if tmp_attrs[:file_type] && @h_formats[tmp_attrs[:file_type]] && @h_formats[tmp_attrs[:file_type]].child_format != 'RAW_TEXT'
-      [:delimiter, :gene_name_col, :has_header].each do |k|
-        tmp_attrs.delete(k)
+    # Remove RAW_TEXT-only parsing options for any non-RAW_TEXT format.
+    if tmp_attrs[:file_type].present?
+      format_name = tmp_attrs[:file_type].to_s
+      format_obj = @h_formats[format_name] || @h_formats[format_name.upcase]
+      is_raw_text = (format_name == 'RAW_TEXT') || (format_obj && format_obj.child_format == 'RAW_TEXT')
+      unless is_raw_text
+        [:delimiter, :gene_name_col, :has_header].each do |k|
+          tmp_attrs.delete(k)
+        end
       end
     end
     
@@ -1085,8 +1096,15 @@ class ProjectsController < ApplicationController
               h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
               detected_format = h_preparsing['detected_format']
               if detected_format.present?
-                h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {})
-                h_parsing_attrs['file_type'] = detected_format
+                h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}).deep_symbolize_keys
+                h_parsing_attrs[:file_type] = detected_format
+                format_obj = @h_formats[detected_format] || @h_formats[detected_format.to_s.upcase]
+                is_raw_text = (detected_format.to_s == 'RAW_TEXT') || (format_obj && format_obj.child_format == 'RAW_TEXT')
+                unless is_raw_text
+                  [:delimiter, :gene_name_col, :has_header].each do |k|
+                    h_parsing_attrs.delete(k)
+                  end
+                end
                 @project.parsing_attrs_json = h_parsing_attrs.to_json
                 Rails.logger.info("[ProjectsController#create] Stored detected file_type '#{detected_format}' in parsing_attrs_json")
               end
@@ -1213,7 +1231,13 @@ class ProjectsController < ApplicationController
       FileFormat.all.map { |f| @h_formats[f.name] = f }
       
       # Handle parsing attributes from params
-      tmp_attrs = params[:attrs] || {}
+      raw_attrs = params[:attrs].presence
+      tmp_attrs = if raw_attrs
+                    source_attrs = raw_attrs.respond_to?(:to_unsafe_h) ? raw_attrs.to_unsafe_h : raw_attrs.to_h
+                    source_attrs.deep_symbolize_keys
+                  else
+                    {}
+                  end
       tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
       
       # Collect parsing attributes from params
@@ -1222,6 +1246,9 @@ class ProjectsController < ApplicationController
           tmp_attrs[k] = params[k]
         end
       end
+      # Keep previously detected file type when reset form does not submit one.
+      existing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}).deep_symbolize_keys
+      tmp_attrs[:file_type] ||= existing_attrs[:file_type]
       # The UI submits dataset selection as `sel`; persist canonical key `sel_name` for parse task.
       if tmp_attrs[:sel].present?
         tmp_attrs[:sel_name] = tmp_attrs[:sel]
@@ -1236,10 +1263,15 @@ class ProjectsController < ApplicationController
         tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
       end
       
-      # Remove RAW_TEXT parsing options for non-text formats
-      if tmp_attrs[:file_type] && @h_formats[tmp_attrs[:file_type]] && @h_formats[tmp_attrs[:file_type]].child_format != 'RAW_TEXT'
-        [:delimiter, :gene_name_col, :has_header].each do |k|
-          tmp_attrs.delete(k)
+      # Remove RAW_TEXT-only parsing options for any non-RAW_TEXT format.
+      if tmp_attrs[:file_type].present?
+        format_name = tmp_attrs[:file_type].to_s
+        format_obj = @h_formats[format_name] || @h_formats[format_name.upcase]
+        is_raw_text = (format_name == 'RAW_TEXT') || (format_obj && format_obj.child_format == 'RAW_TEXT')
+        unless is_raw_text
+          [:delimiter, :gene_name_col, :has_header].each do |k|
+            tmp_attrs.delete(k)
+          end
         end
       end
       
@@ -6006,6 +6038,7 @@ class ProjectsController < ApplicationController
 
     def queue_unarchive_if_project_files_missing
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      project_archive_file = Pathname.new("#{project_dir}.tgz")
       @project_files_missing = !File.exist?(project_dir)
       @project_archive_transitioning = [2, 4].include?(@project.archive_status_id)
       @project_unarchive_state = nil
@@ -6015,7 +6048,11 @@ class ProjectsController < ApplicationController
         @project_unarchive_state = 'queued'
         flash.now[:notice] = "Project files are archived. Unarchive has been queued and data will appear once extraction is complete."
       elsif @project.being_unarchived?
-        @project_unarchive_state = 'in_progress'
+        @project_unarchive_state = if File.exist?(project_archive_file) && File.size(project_archive_file).to_i.positive?
+          'unpacking'
+        else
+          'in_progress'
+        end
         flash.now[:notice] = "Project files are currently being unarchived. If this state is stale, it will be re-queued automatically."
       elsif @project.archived_on_s3?
         @project_unarchive_state = 'queue_failed'
@@ -6030,7 +6067,10 @@ class ProjectsController < ApplicationController
       flash.now[:alert] = "Project files are archived and unarchive queueing failed."
     ensure
       if @project_archive_transitioning && @project_unarchive_state.blank?
-        if @project.archive_status_id == 4 && !@project_files_missing
+        if @project.archive_status_id == 4 && (
+          !@project_files_missing ||
+          (File.exist?(project_archive_file) && File.size(project_archive_file).to_i.positive?)
+        )
           @project_unarchive_state = 'unpacking'
         else
           @project_unarchive_state = 'in_progress'

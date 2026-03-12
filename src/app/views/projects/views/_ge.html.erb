@@ -198,6 +198,7 @@
         });
         if (upBadge) {
           upBadge.textContent = up + ' gene sets';
+          if (upBadge.parentElement) upBadge.parentElement.setAttribute('data-sort-value', String(up));
           upBadge.classList.remove('bg-green-100', 'text-green-800', 'hover:bg-green-200', 'bg-gray-100', 'text-gray-500');
           if (up > 0) {
             upBadge.classList.add('bg-green-100', 'text-green-800', 'hover:bg-green-200');
@@ -215,6 +216,7 @@
         });
         if (downBadge) {
           downBadge.textContent = down + ' gene sets';
+          if (downBadge.parentElement) downBadge.parentElement.setAttribute('data-sort-value', String(down));
           downBadge.classList.remove('bg-red-100', 'text-red-800', 'hover:bg-red-200', 'bg-gray-100', 'text-gray-500');
           if (down > 0) {
             downBadge.classList.add('bg-red-100', 'text-red-800', 'hover:bg-red-200');
@@ -230,6 +232,16 @@
     .finally(function() {
       if (spinner) spinner.classList.add('hidden');
     });
+  }
+
+  function shouldRefreshGeStatsOnLoad() {
+    return document.querySelectorAll('tr[data-ge-run-id]').length > 0;
+  }
+
+  if (shouldRefreshGeStatsOnLoad()) {
+    setTimeout(function() {
+      runGeFilterNow();
+    }, 0);
   }
   </script>
 

@@ -263,6 +263,15 @@
   }
 
   function buildAnalysisDirectLink() {
+    const contentContainer = document.querySelector('[data-step-selector-target="content"]')
+    if (contentContainer) {
+      const explicitDirectLinkElement = contentContainer.querySelector('[data-analysis-direct-link-path]')
+      const explicitDirectLinkPath = explicitDirectLinkElement && explicitDirectLinkElement.getAttribute('data-analysis-direct-link-path')
+      if (explicitDirectLinkPath) {
+        return new URL(explicitDirectLinkPath, window.location.origin).toString()
+      }
+    }
+
     const url = new URL(window.location.href)
     url.searchParams.set('view', 'analysis')
 

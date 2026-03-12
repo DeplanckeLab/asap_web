@@ -1,20 +1,15 @@
 <% if @step && @run %>
 <% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'] %>
 
-<div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px);">
+<div class="bg-white rounded-lg shadow-sm flex flex-col"
+     style="max-height: calc(100vh - 200px);"
+     data-analysis-direct-link-path="<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter', gene_list_run_id: @run.id, gene_list_type: params[:type]) %>">
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
     <div class="flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-900">
         #<%= @run.num || @run.id %> - <%= @nber_genes %> <%= params[:type] %>-regulated genes
       </h3>
       <div class="flex items-center gap-2">
-        <button type="button"
-                class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
-                title="Copy direct link to clipboard"
-                style="flex-shrink: 0;"
-                onclick="(function(btn) { var url = window.location.origin + '<%= project_path(@project, view: 'analysis', step_id: @step.id, sub_view: 'de_filter', gene_list_run_id: @run.id, gene_list_type: params[:type]) %>'; navigator.clipboard.writeText(url).then(function() { btn.title = 'Copied!'; setTimeout(function() { btn.title = 'Copy direct link to clipboard'; }, 2000); }).catch(function() { prompt('Copy this URL:', url); }); })(this);">
-          <i class="fas fa-link sm:mr-1"></i><span class="hidden sm:inline"> Direct link</span>
-        </button>
         <% if exportable?(@project) %>
           <button type="button"
                   class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"

@@ -388,6 +388,7 @@
         var upBadge = document.getElementById('de-up-badge-' + runId);
         if (upBadge) {
           upBadge.textContent = up + ' genes';
+          if (upBadge.parentElement) upBadge.parentElement.setAttribute('data-sort-value', String(up));
           upBadge.classList.remove('bg-green-100', 'text-green-800', 'hover:bg-green-200', 'bg-gray-100', 'text-gray-500');
           if (up > 0) {
             upBadge.classList.add('bg-green-100', 'text-green-800', 'hover:bg-green-200');
@@ -399,6 +400,7 @@
         var downBadge = document.getElementById('de-down-badge-' + runId);
         if (downBadge) {
           downBadge.textContent = down + ' genes';
+          if (downBadge.parentElement) downBadge.parentElement.setAttribute('data-sort-value', String(down));
           downBadge.classList.remove('bg-red-100', 'text-red-800', 'hover:bg-red-200', 'bg-gray-100', 'text-gray-500');
           if (down > 0) {
             downBadge.classList.add('bg-red-100', 'text-red-800', 'hover:bg-red-200');
@@ -414,6 +416,23 @@
     .finally(function() {
       if (spinner) spinner.classList.add('hidden');
     });
+  }
+
+  function shouldRefreshDeStatsOnLoad() {
+    if (document.querySelector('td[data-sort-value="-1"]')) return true;
+    var badges = document.querySelectorAll('[id^="de-up-badge-"], [id^="de-down-badge-"]');
+    if (!badges.length) return false;
+    for (var i = 0; i < badges.length; i++) {
+      var text = (badges[i].textContent || '').trim();
+      if (!text) return true;
+    }
+    return false;
+  }
+
+  if (shouldRefreshDeStatsOnLoad()) {
+    setTimeout(function() {
+      runDeFilterNow();
+    }, 0);
   }
   </script>
 

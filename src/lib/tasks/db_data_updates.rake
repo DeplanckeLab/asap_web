@@ -724,4 +724,94 @@ namespace :projects do
     puts "  Errors:  #{errors}"
     puts "  Total:   #{broken.size}"
   end
+
+  desc "Fix symlinks that still point to old fus path"
+  task fix_fus_symlinks: :environment do
+    require 'find'
+    require 'pathname'
+
+    old_prefix = ENV.fetch('OLD_PREFIX', '/data/asap2/fus')
+    new_prefix = ENV.fetch('NEW_PREFIX', '/data/asap/fus')
+    search_root = ENV.fetch('SEARCH_ROOT', ENV.fetch('USER_DATA_DIR', '/data/asap2/projects'))
+    link_name = ENV.fetch('LINK_NAME', 'input.loom')
+    dry_run = ENV['DRY_RUN'].to_s == '1'
+
+    unless Dir.exist?(search_root)
+      puts "SEARCH_ROOT does not exist: #{search_root}"
+      exit 1
+    end
+
+    normalized_old_prefix = old_prefix.sub(%r{/+\z}, '')
+    normalized_new_prefix = new_prefix.sub(%r{/+\z}, '')
+    old_prefix_with_sep = "#{normalized_old_prefix}/"
+
+    puts "Search root: #{search_root}"
+    puts "Mode: #{dry_run ? 'DRY RUN' : 'APPLY'}"
+    puts "Match prefix: #{normalized_old_prefix}"
+    puts "Replace with: #{normalized_new_prefix}"
+    puts "Link name filter: #{link_name}"
+    puts ""
+
+    scanned_symlinks = 0
+    matched_symlinks = 0
+    updated_symlinks = 0
+    skipped_missing_new_target = 0
+    errors = 0
+
+    Find.find(search_root) do |path|
+      next unless File.symlink?(path)
+      next unless File.basename(path) == link_name
+
+      scanned_symlinks += 1
+      link_target = File.readlink(path)
+
+      absolute_target = if Pathname.new(link_target).absolute?
+        link_target
+      else
+        File.expand_path(link_target, File.dirname(path))
+      end
+
+      next unless absolute_target == normalized_old_prefix || absolute_target.start_with?(old_prefix_with_sep)
+
+      matched_symlinks += 1
+      new_absolute_target = absolute_target.sub(normalized_old_prefix, normalized_new_prefix)
+
+      unless File.exist?(new_absolute_target)
+        skipped_missing_new_target += 1
+        puts "[SKIP] #{path} -> #{new_absolute_target} (new target does not exist)"
+        next
+      end
+
+      new_link_target = if Pathname.new(link_target).absolute?
+        new_absolute_target
+      else
+        Pathname.new(new_absolute_target).relative_path_from(Pathname.new(File.dirname(path))).to_s
+      end
+
+      if dry_run
+        puts "[DRY RUN] #{path}: #{link_target} -> #{new_link_target}"
+        next
+      end
+
+      begin
+        File.delete(path)
+        File.symlink(new_link_target, path)
+        updated_symlinks += 1
+        puts "[UPDATED] #{path}: #{link_target} -> #{new_link_target}"
+      rescue StandardError => e
+        errors += 1
+        puts "[ERROR] #{path}: #{e.class} - #{e.message}"
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Symlinks scanned:           #{scanned_symlinks}"
+    puts "  Symlinks matched old path:  #{matched_symlinks}"
+    puts "  Updated:                    #{updated_symlinks}"
+    puts "  Skipped missing new target: #{skipped_missing_new_target}"
+    puts "  Errors:                     #{errors}"
+
+    exit 1 if errors.positive?
+  end
 end

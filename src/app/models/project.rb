@@ -19,13 +19,14 @@ class Project < ApplicationRecord
   has_many :reqs, dependent: :destroy
   has_many :runs, dependent: :destroy
   has_many :project_steps, dependent: :destroy
+  has_many :project_view_logs, dependent: :delete_all
   has_many :shares, dependent: :destroy
   has_many :checkpoints, dependent: :destroy
-  has_many :projects_provider_projects, dependent: :destroy
+  has_many :projects_provider_projects, dependent: :delete_all
   has_many :provider_projects, through: :projects_provider_projects
-  has_many :articles_projects, dependent: :destroy
+  has_many :articles_projects, dependent: :delete_all
   has_many :articles, through: :articles_projects
-  has_many :exp_entries_projects, dependent: :destroy
+  has_many :exp_entries_projects, dependent: :delete_all
   has_many :exp_entries, through: :exp_entries_projects
   
   # Elasticsearch settings
@@ -59,6 +60,9 @@ class Project < ApplicationRecord
       indexes :nber_cloned, type: 'integer'
       indexes :disk_size, type: 'long'
       indexes :user_id, type: 'integer'
+      indexes :owner_email, type: 'text' do
+        indexes :raw, type: 'keyword', normalizer: 'lowercase_normalizer'
+      end
       indexes :shared_user_ids, type: 'integer'
     end
   end
@@ -101,14 +105,21 @@ class Project < ApplicationRecord
 
     # Text search
     if query.present?
-      search_definition[:query][:bool][:must] << {
-        multi_match: {
-          query: query,
-          fields: ['name^3', 'key^2', 'description', 'technology'],
-          type: 'best_fields',
-          fuzziness: 'AUTO'
+      normalized_query = query.to_s.strip
+      if normalized_query.include?('@')
+        search_definition[:query][:bool][:must] << {
+          term: { 'owner_email.raw' => normalized_query.downcase }
         }
-      }
+      else
+        search_definition[:query][:bool][:must] << {
+          multi_match: {
+            query: normalized_query,
+            fields: ['name^3', 'key^2', 'description', 'technology', 'owner_email^2'],
+            type: 'best_fields',
+            fuzziness: 'AUTO'
+          }
+        }
+      end
     end
 
     # Filters
@@ -246,6 +257,7 @@ class Project < ApplicationRecord
       nber_cloned: respond_to?(:nber_cloned) ? (nber_cloned || 0) : 0,
       disk_size: respond_to?(:disk_size) ? (disk_size || 0) : 0,
       user_id: user_id,
+      owner_email: user&.email || '',
       shared_user_ids: shares.pluck(:user_id).compact
     }
   end

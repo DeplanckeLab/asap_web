@@ -1,142 +1,164 @@
-desc 'Compute parent_term_ids, lineage, and children_term_ids for all CellOntologyTerms'
+desc '####################### extract ids from ontologies'
 task extract_ids_from_ontologies: :environment do
   puts 'Executing...'
 
   now = Time.now
 
-  def add_lineage(tmp, cur_id, h_parents)
-    if tmp && cur_id && h_parents && h_parents[cur_id] && h_parents[cur_id].size > 0
+  data_dir = Pathname.new(APP_CONFIG[:data_dir])
+  ontology_dir = data_dir + 'ontologies'
+  latest_asap_data_version = 5
+
+  def add_lineage tmp, cur_id, h_parents
+    if tmp and cur_id and h_parents and h_parents[cur_id] and h_parents[cur_id].size > 0
       h_parents[cur_id].each do |k|
-        if !tmp.include?(k)
-          tmp.push(k)
+  #    puts "add #{k} -> #{tmp.to_json}..."
+        if !tmp.include? k
+          tmp.push k 
           tmp = add_lineage(tmp, k, h_parents)
         end
       end
     end
-    tmp
+    return tmp
   end
 
-  # Normalize identifier references from content_json is_a / part_of values.
-  # EFO OBO files store references as "efo:EFO_0030003" while the DB stores
-  # them as "EFO:0030003". This method converts such references.
-  def normalize_identifier(raw_id)
-    # Handle efo:EFO_XXXX -> EFO:XXXX
-    if m = raw_id.match(/^efo:EFO_(.+)/)
-      return "EFO:#{m[1]}"
-    end
-    raw_id
-  end
-
-  # Build a lookup hash of all terms by identifier (only original terms, i.e.
-  # those whose identifier starts with the ontology tag).
+  ## get all terms by id
   h_co = {}
-  CellOntology.all.each { |co| h_co[co.id] = co }
-
+  CellOntology.all.map{|co| h_co[co.id] = co}
   h_terms = {}
   h_terms2 = {}
-  CellOntologyTerm.find_each do |cot|
-    co = h_co[cot.cell_ontology_id]
-    next unless co && cot.identifier
-    next unless cot.identifier.start_with?("#{co.tag}:")
+  h_parents_by_id = {}
+  CellOntologyTerm.all.to_a.select{|cot| co = h_co[cot.cell_ontology_id]; cot.identifier and cot.identifier.match(/^#{co.tag}/)}.each do |cot|
     h_terms[cot.identifier] = cot
     h_terms2[cot.id] = cot
   end
 
-  puts "Loaded #{h_terms.size} original terms across all ontologies."
-
-  h_parents_by_id = {}
+#puts h_terms['CL:0002238'].to_json
+#exit
   h_children = {}
-
-  # Optionally limit to specific ontology tags via environment variable:
-  #   rake extract_ids_from_ontologies ONTOLOGIES=EFO,PATO,MONDO
-  filter_tags = ENV['ONTOLOGIES']&.split(',')&.map(&:strip)
-
+  
   CellOntology.all.each do |co|
-    next if filter_tags && !filter_tags.include?(co.tag)
-
-    puts "=> Treating #{co.name} (#{co.tag}, id=#{co.id})"
-
+    
+    puts "=> Treating #{co.name}"
+      
+    ## get genes
+    puts " - get genes..."
+    h_genes = {}
+    organism_ids =  co.organisms.map{|o| o.id}
+    ConnectionSwitch.with_db(:data_with_version, latest_asap_data_version) do
+      Gene.where(:organism_id => organism_ids).all.each do |g|
+        h_genes[g.ensembl_id] = g
+      end
+    end
+    
     cots = co.cell_ontology_terms
-    next unless cots
+ #   h_parents= {}
 
-    puts " - update parents and related term ids..."
+    if cots
+      puts " - update parents and related gene and term ids..."
 
-    cots.find_each do |cot|
-      h_cot = begin
-        JSON.parse(cot.content_json)
-      rescue StandardError
-        {}
-      end
+      ## get all terms     
+    #  h_terms = {}
+    #  h_terms2 = {}
+    #  h_parents_by_id = {}
+    #  co.cell_ontology_terms.select{|cot| cot.identifier.match(/^#{co.tag}/) }.each do |cot|
+    #    h_terms[cot.identifier] = cot
+    #	h_terms2[cot.id] = cot
+    #  end
+      ## number of terms 
+    #  puts "Number of terms: " + h_terms.keys.size
 
-      # Collect all referenced identifiers from content_json
-      tmp_list = []
-      h_cot.each_key do |k|
-        if h_cot[k].is_a?(Array)
-          tmp_list += h_cot[k]
-        elsif h_cot[k].is_a?(Hash)
-          h_cot[k].each_value do |v|
-            tmp_list += v if v.is_a?(Array)
+      ## extraction
+      co.cell_ontology_terms.each do |cot|
+        
+        h_related = {:genes => [], :terms => []}
+        
+        h_cot = Basic.safe_parse_json(cot.content_json, {})
+     #    h_parents_by_id[cot.id] = h_cot
+        tmp_list = []				
+#        tmp_parents = []
+        h_cot.each_key do |k|
+#          tmp_list = []
+          if h_cot[k].is_a? Array
+            tmp_list += h_cot[k]
+         #   tmp_parents.push 
+          elsif h_cot[k].is_a? Hash
+            h_cot[k].each_key do |k2|
+              if h_cot[k][k2]
+                tmp_list += h_cot[k][k2]
+              end
+            end
           end
         end
+        tmp_list.uniq!
+	h_parents_by_id[cot.id] =(h_cot["is_a"]) ? h_cot["is_a"].map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact : []
+        h_parents_by_id[cot.id] |=(h_cot["relationship"] and  h_cot["relationship"]["part_of"]) ? h_cot["relationship"]["part_of"].map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact : []
+
+        if h_cot["is_a"]
+          h_cot["is_a"].select{|e| h_terms[e] and h_terms[cot.identifier]}.map{|e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id}
+        end
+        if h_cot["relationship"] and  h_cot["relationship"]["part_of"]
+          h_cot["relationship"]["part_of"].select{|e| h_terms[e] and h_terms[cot.identifier]}.map{|e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id}
+        end
+#        h_parents_by_id[cot.id].map{|e| h_children}
+        h_upd = {
+          :node_gene_ids => tmp_list.map{|e| (h_genes[e]) ? h_genes[e].id : nil}.compact.join(","),          
+          :node_term_ids => tmp_list.map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact.join(","),
+          :parent_term_ids => h_parents_by_id[cot.id].join(",") #(h_cot["is_a"]) ? h_cot["is_a"].map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact.join(",") : ''
+        }
+        #        h_parents_by_id[cot.id] = h_upd[:parent_term_ids]
+        #        h_parents[cot.id] = h_upd[:parent_term_ids]
+        puts h_upd.to_json	
+        cot.update_attributes(h_upd)
+        
       end
-      tmp_list.uniq!
-      tmp_list.map! { |e| normalize_identifier(e) }
-
-      # Compute parent_term_ids from is_a and relationship.part_of
-      is_a_ids = (h_cot['is_a'] || []).map { |e| normalize_identifier(e) }
-      part_of_ids = (h_cot.dig('relationship', 'part_of') || []).map { |e| normalize_identifier(e) }
-
-      parent_ids = is_a_ids.filter_map { |e| h_terms[e]&.id }
-      parent_ids |= part_of_ids.filter_map { |e| h_terms[e]&.id }
-
-      h_parents_by_id[cot.id] = parent_ids
-
-      # Build children lookup (inverse of parents)
-      if h_terms[cot.identifier]
-        is_a_ids.each do |e|
-          parent_cot = h_terms[e]
-          if parent_cot
-            h_children[parent_cot.id] ||= []
-            h_children[parent_cot.id].push(h_terms[cot.identifier].id)
+      
+      #add lineages
+      puts " - compute lineages..."
+      related_gene_ids = {}
+      h_parents_by_id.each_key do |k|
+        lineage = add_lineage([], k, h_parents_by_id)
+        lineage.each do |e|
+       #   h_children[e] ||= []
+       #   h_children[e].push k if !h_children[e].include? k
+          related_gene_ids[e]||=[]
+	  if h_terms2[e]
+            #	   h_terms2[e].node_gene_ids.split(',').map{|e2| e2.to_i}.each do |gene_id|
+            if h_terms2[e].node_gene_ids
+              related_gene_ids[e] += h_terms2[e].node_gene_ids.split(',').map{|e2| e2.to_i} 
+            end
           end
         end
-        part_of_ids.each do |e|
-          parent_cot = h_terms[e]
-          if parent_cot
-            h_children[parent_cot.id] ||= []
-            h_children[parent_cot.id].push(h_terms[cot.identifier].id)
-          end
-        end
+
+        h_upd = {
+          :lineage => lineage.join(",")
+        }
+
+        h_terms2[k].update_attributes(h_upd) if h_terms2[k]
+      
       end
 
-      h_upd = {
-        node_term_ids: tmp_list.filter_map { |e| h_terms[e]&.id }.join(','),
-        parent_term_ids: parent_ids.join(',')
-      }
+      #compute related gene ids
+      
+       related_gene_ids.each_key do |k|
 
-      cot.update_columns(h_upd)
+        h_upd = {
+          :related_gene_ids => related_gene_ids[k].uniq.join(",")
+        }
+
+	puts "-#{k}-"
+        h_terms2[k].update_attributes(h_upd)
+
+      end
+
+
     end
 
-    # Compute lineages
-    puts " - compute lineages..."
 
-    h_parents_by_id.each_key do |k|
-      next unless h_terms2[k]
-      co_for_term = h_co[h_terms2[k].cell_ontology_id]
-      next unless co_for_term && co_for_term.id == co.id
-
-      lineage = add_lineage([], k, h_parents_by_id)
-      h_terms2[k].update_columns(lineage: lineage.join(','))
-    end
   end
-
-  # Update children_term_ids
-  puts " - update children_term_ids..."
+  
   h_children.each_key do |e|
-    next unless h_terms2[e]
-    h_terms2[e].update_columns(children_term_ids: h_children[e].uniq.join(','))
+    h_terms2[e].update_attributes(:children_term_ids =>  (h_children[e]) ? h_children[e].join(",") : '')
   end
 
-  elapsed = Time.now - now
-  puts "Done in #{elapsed.round(1)}s."
+  
 end

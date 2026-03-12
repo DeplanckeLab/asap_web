@@ -335,14 +335,31 @@ module Basic
     
     def write_file_on_s3 s3b, filepath, metadata
       h_s3_settings = get_s3_settings()
-      bucket = connect_resource_s3(s3b, h_s3_settings).bucket(s3b[:key])
-      obj = bucket.object(metadata[:key])
-      metadata.delete(:key)
+      client = connect_s3(s3b, h_s3_settings)
+      key = metadata.delete(:key)
+      upload_thread_count = ENV.fetch('S3_UPLOAD_THREADS', '16').to_i
+      upload_thread_count = 1 if upload_thread_count < 1
+      upload_thread_count = 64 if upload_thread_count > 64
+      upload_multipart_threshold_mb = ENV.fetch('S3_UPLOAD_MULTIPART_THRESHOLD_MB', '16').to_i
+      upload_multipart_threshold_mb = 5 if upload_multipart_threshold_mb < 5
+      upload_multipart_threshold_bytes = upload_multipart_threshold_mb * 1024 * 1024
       puts "Writing on S3"
       begin
-        obj.upload_file(filepath, :metadata => metadata)     
-        return obj
-      rescue Exception => e
+        transfer_manager = Aws::S3::TransferManager.new(client: client)
+        upload_ok = transfer_manager.upload_file(
+          filepath.to_s,
+          bucket: s3b[:key],
+          key: key,
+          thread_count: upload_thread_count,
+          multipart_threshold: upload_multipart_threshold_bytes,
+          metadata: metadata
+        )
+        raise "S3 TransferManager upload returned false for key=#{key}" unless upload_ok
+
+        bucket = connect_resource_s3(s3b, h_s3_settings).bucket(s3b[:key])
+        return bucket.object(key)
+      rescue StandardError => e
+        Rails.logger.error("[Basic.write_file_on_s3] key=#{key} error=#{e.class} #{e.message}")
         return nil
       end
       

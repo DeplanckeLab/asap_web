@@ -561,7 +561,7 @@ export class UIManager {
   }
 
   // Update metadata status icon based on loading state
-  // States: 'not-loaded', 'downloading', 'in-db', 'in-memory'
+  // States: 'not-loaded', 'downloading', 'in-db', 'in-memory', 'error'
   updateMetadataStatusIcon(metadataId, state) {
     const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
     if (!statusIcon) return
@@ -603,6 +603,14 @@ export class UIManager {
         icon.className = 'fas fa-check'
         icon.style.color = 'white'
         statusIcon.title = 'Metadata in memory (fast access)'
+        break
+
+      case 'error':
+        // Red circle with exclamation
+        statusIcon.style.backgroundColor = '#dc2626'
+        icon.className = 'fas fa-exclamation'
+        icon.style.color = 'white'
+        statusIcon.title = 'Error loading metadata'
         break
         
       default:

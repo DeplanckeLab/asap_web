@@ -418,8 +418,8 @@ export class DataManager {
       }
     } catch (error) {
       console.error(`Failed to load metadata vector ${metadataId}:`, error)
-      // Update status icon to show error (gray with question mark)
-      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'not-loaded')
+      // Update status icon to show load failure.
+      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'error')
       throw error
     } finally {
       // Always clean up loading state

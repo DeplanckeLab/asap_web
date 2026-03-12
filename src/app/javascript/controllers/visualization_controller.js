@@ -2871,6 +2871,7 @@ export default class extends Controller {
       
     } catch (error) {
       console.error(`Error loading metadata vector ${metadataId} silently:`, error)
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'error')
       return null
     } finally {
       // Remove from loading set (no spinner to hide)
@@ -3151,6 +3152,7 @@ export default class extends Controller {
       
     } catch (error) {
       console.error(`💾 [DISK] Error preloading metadata ${metadataId} to disk:`, error)
+      this.uiManager.updateMetadataStatusIcon(metadataId, 'error')
       return { success: false, error: error.message }
     } finally {
       // Remove from loading set

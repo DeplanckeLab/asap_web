@@ -384,7 +384,7 @@ class ProjectCloneService
 
   def update_source_clone_count
     current_count = source_project.nber_cloned || 0
-    source_project.update_column(:nber_cloned, current_count + 1)
+    source_project.update_column(:nber_cloned, current_count + 1) if !admin?
   end
 
   def cleanup_failed_clone

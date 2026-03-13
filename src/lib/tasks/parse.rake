@@ -3,7 +3,8 @@ require 'zlib'
 desc 'Parse project data (executed by SLURM)'
 task :parse, [:project_key] => [:environment] do |t, args|
   puts 'Executing parse...'
-  
+
+  puts ENV["RAILS_ENV"]
   now = Time.now
   logger = Rails.logger
   profile_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -23,13 +24,14 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
   project_key = args[:project_key]
   project = Project.where(:key => project_key).first
-  
+  puts project.to_json
   unless project
     logger.error("[ParseRake] Project with key #{project_key} not found")
     exit 1
   end
-  
+ 
   version = project.version
+  puts version.id
   unless version
     logger.error("[ParseRake] Project #{project_key} has no version")
     exit 1
@@ -37,7 +39,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
   
   h_env = Basic.safe_parse_json(version.env_json, {})
   asap_docker_image = Basic.get_asap_docker(version)
-  
+  puts asap_docker_image.id
   unless asap_docker_image
     logger.error("[ParseRake] Could not find ASAP docker image for version #{version.id}")
     exit 1
@@ -48,6 +50,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
                       else
                         h_env['asap_data_db_name'].to_s
                       end
+  puts asap_data_db_name.to_s
+  
   if asap_data_db_name.blank?
     logger.error("[ParseRake] Missing asap_data_db_name in version env_json for version #{version.id}")
     exit 1
@@ -216,7 +220,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
   h_data_classes = {}
   DataClass.all.map{|dt| h_data_classes[dt.name] = dt; h_data_classes[dt.id] = dt}
 
+  puts "test"
+  
   if project
+    puts "project.key:" + project.key
     begin
       puts "parse"
   
@@ -456,7 +463,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
       
       # -type is mandatory according to Java command, so always include it
       opts.push({'opt' => "-type", 'value' => file_type_value})
-
+      puts "toto"
+      
       if version.id >= 8
 
 

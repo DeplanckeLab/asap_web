@@ -18,7 +18,7 @@ class ProjectViewTracker
     )
 
     if result.rows.any?
-      Project.where(id: project.id).update_all(["viewed_at = ?, nber_views = COALESCE(nber_views, 0) + 1", viewed_at])
+      Project.where(id: project.id).update_all(["viewed_at = ?, nber_views = COALESCE(nber_views, 0) + 1", viewed_at]) 
     else
       Project.where(id: project.id).update_all(viewed_at: viewed_at)
     end

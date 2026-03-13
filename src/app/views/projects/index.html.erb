@@ -452,19 +452,6 @@
                             v<%= project.version_id %>
                           </span>
                         <% end %>
-                        <% if project.sandbox? %>
-                          <% sandbox_last_seen_at = project.viewed_at || project.updated_at || project.created_at || Time.current %>
-                          <% sandbox_destroy_at = sandbox_last_seen_at + sandbox_idle_days.days %>
-                          <% countdown = sandbox_self_destruct_countdown(sandbox_destroy_at) %>
-                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200"
-                                data-controller="countdown"
-                                data-countdown-end-ms-value="<%= (sandbox_destroy_at.to_f * 1000).to_i %>"
-                                data-countdown-idle-days-value="<%= sandbox_idle_days %>"
-                                title="Sandbox project auto-delete countdown">
-                            <i class="fas fa-bomb text-[11px]"></i>
-                            <span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
-                          </span>
-                        <% end %>
                       </div>
                     </div>
                   </td>
@@ -523,18 +510,36 @@
                     <%= project.updated_at&.strftime("%b %d, %Y") %>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="event.stopPropagation()">
-                    <div class="flex items-center gap-2">
-                      <%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
-                      <% if clonable?(project) %>
-                        <%= button_to raw('<i class="fas fa-clone mr-1"></i><span>Clone</span>'),
-                            clone_project_path(project),
-                            method: :post,
-                            class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 border-0 cursor-pointer",
-                            data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_confirm_value: "Clone this project?" },
-                            form: { class: "inline-block" } %>
-                      <% end %>
-                    </div>
-                  </td>
+      		    <div class="flex flex-col items-start gap-2">
+		      <div class="flex items-center gap-2">
+			<%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
+			
+			<% if clonable?(project) %>
+			<%= button_to raw('<i class="fas fa-clone mr-1"></i><span>Clone</span>'),
+			    clone_project_path(project),
+			    method: :post,
+			    class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 border-0 cursor-pointer",
+			    data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_confirm_value: "Clone this project?" },
+			    form: { class: "inline-block" } %>
+			<% end %>
+		      </div>
+		      
+		      <% if project.sandbox? %>
+		      <% sandbox_last_seen_at = project.viewed_at || project.updated_at || project.created_at || Time.current %>
+		      <% sandbox_destroy_at = sandbox_last_seen_at + sandbox_idle_days.days %>
+		      <% countdown = sandbox_self_destruct_countdown(sandbox_destroy_at) %>
+		      
+		      <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200"
+			    data-controller="countdown"
+			    data-countdown-end-ms-value="<%= (sandbox_destroy_at.to_f * 1000).to_i %>"
+			    data-countdown-idle-days-value="<%= sandbox_idle_days %>"
+			    title="Sandbox project auto-delete countdown">
+			<i class="fas fa-bomb text-[11px]"></i>
+			<span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
+		      </span>
+		      <% end %>
+		    </div>
+		  </td>
                 </tr>
               <% end %>
             </tbody>

@@ -954,7 +954,11 @@ module Basic
           logger.debug("TRY RDS CONVERSION")
           loom_file_path = base_dir + 'input.loom'
 #          cmd = "#{ENV.fetch('DOCKER_CALL')} \"Rscript -e \\\"rmarkdown::render('convert_seurat.Rmd', params = list(input=\'#{file_path.to_s}\', output=\'#{loom_file_path}\'))\\\"\""
-          docker_call_v7 = "docker run --network=asap2_asap_network -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2  -v /srv/asap_run/srv:/srv fabdavid/asap_run:v7 -c"
+          run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
+          if run_network.blank?
+            raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
+          end
+          docker_call_v7 = "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2  -v /srv/asap_run/srv:/srv fabdavid/asap_run:v7 -c"
           cmd = "#{docker_call_v7} 'Rscript --vanilla /srv/convert_seurat.R #{file_path.to_s} #{loom_file_path}'"
           logger.debug("CMD RDS: #{cmd}")
           `#{cmd}`
@@ -2379,18 +2383,21 @@ module Basic
         env_file_path = '/data/asap2_test/.env_asap_run'
         h_cmd['docker_call'].gsub!(/--env-file\s+\.env_asap_run/, "--env-file #{env_file_path}")
         
-        # Add /data/asap2_test volume mount if USER_DATA_DIR points to it and it's not already mounted
-        # This is needed for parsing jobs that write to /data/asap2_test/users/...
-        user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/users')
         # Keep docker network configurable from env to avoid hardcoded stack names.
         # This must point to the same compose network as the website/postgres services.
-        if user_data_dir.include?('asap2_test')
-          run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
-          if run_network.blank?
-            raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
-          end
-          h_cmd['docker_call'].gsub!(/--network=\S+/, "--network=#{run_network}")
+        # Always replace legacy network names; they are deployment-specific and brittle.
+        run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
+        has_network_flag = h_cmd['docker_call'].match?(/--network(?:=|\s+)\S+/)
+        uses_legacy_network = h_cmd['docker_call'].match?(/--network(?:=|\s+)asap2_asap_network(?:\s|$)/)
+        if run_network.present? && has_network_flag
+          h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "--network=#{run_network}")
+        elsif uses_legacy_network
+          raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
         end
+        
+        # Add /data/asap2_test volume mount if USER_DATA_DIR points to it and it's not already mounted.
+        # This is needed for parsing jobs that write to /data/asap2_test/users/...
+        user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/users')
         if user_data_dir.include?('asap2_test') && !h_cmd['docker_call'].include?('-v /data/asap2_test:/data/asap2_test')
           # Insert the volume mount after the existing /data/asap2 mount
           # Match the pattern more flexibly to handle different spacing

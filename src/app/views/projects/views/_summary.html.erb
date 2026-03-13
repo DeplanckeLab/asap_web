@@ -110,9 +110,9 @@
   </div>
 
   <div class="space-y-4">
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+    <div class="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-5 gap-3">
       <div
-        class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer"
+        class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer md:col-span-3 xl:col-span-1"
         data-summary-visualization-card-link
         data-url="<%= project_path(@project, view: 'visualization') %>"
         role="link"
@@ -136,7 +136,7 @@
         <% end %>
       </div>
 
-      <%= link_to project_path(@project, view: 'analysis'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors" do %>
+      <%= link_to project_path(@project, view: 'analysis'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors md:col-span-3 xl:col-span-1" do %>
         <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
           <i class="fas fa-sitemap text-sm text-gray-500"></i>
           <span>Analysis</span>
@@ -148,7 +148,7 @@
         </div>
       <% end %>
 
-      <%= link_to project_path(@project, view: 'data'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors" do %>
+      <%= link_to project_path(@project, view: 'data'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors md:col-span-2 xl:col-span-1" do %>
         <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
           <i class="fas fa-database text-sm text-gray-500"></i>
           <span>Data</span>
@@ -160,7 +160,7 @@
       <% end %>
 
       <% if editable?(@project) %>
-        <%= link_to project_path(@project, view: 'settings'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors" do %>
+        <%= link_to project_path(@project, view: 'settings'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors md:col-span-2 xl:col-span-1" do %>
           <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <i class="fas fa-cog text-sm text-gray-500"></i>
             <span>Settings</span>
@@ -175,7 +175,7 @@
           </div>
         <% end %>
       <% else %>
-        <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+        <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 md:col-span-2 xl:col-span-1">
           <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <i class="fas fa-cog text-sm text-gray-500"></i>
             <span>Settings</span>
@@ -192,7 +192,7 @@
       <% end %>
 
       <% if @project.compliance_schemas.any? %>
-        <%= link_to project_path(@project, view: 'compliance'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors" do %>
+        <%= link_to project_path(@project, view: 'compliance'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors md:col-span-2 xl:col-span-1" do %>
           <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <i class="fas fa-check-circle text-sm text-gray-500"></i>
             <span>Compliance</span>
@@ -232,7 +232,7 @@
           <% end %>
         <% end %>
       <% else %>
-        <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+        <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 md:col-span-2 xl:col-span-1">
           <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <i class="fas fa-check-circle text-sm text-gray-500"></i>
             <span>Compliance</span>

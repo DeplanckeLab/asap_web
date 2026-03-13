@@ -8907,6 +8907,7 @@ export default class extends Controller {
           } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
             this.renderContinuousColorLegend()
           }
+          this.updateSelectionCount()
         })
       }, 100) // Update UI elements after zoom stabilizes
     
@@ -9326,6 +9327,7 @@ export default class extends Controller {
     if (this.currentCoordinates && this.scatterContainer && this.currentBounds) {
       this.updatePointPositions()
     }
+    this.updateSelectionCount()
     
     // Reset cursor
     const stopCanvas = this.canvas
@@ -9393,6 +9395,7 @@ export default class extends Controller {
         if (categoriesCheckbox && categoriesCheckbox.checked && this.currentMetadataVector?.data_type === 'DISCRETE') {
           this.rendererManager.renderCategoryLabels()
         }
+        this.updateSelectionCount()
         
         // console.log('🔄 [ReGL] View reset complete')
       }
@@ -10108,16 +10111,16 @@ export default class extends Controller {
     let instructions = ''
     switch (this.interactionMode) {
       case 'pick':
-        instructions = 'Click to pick a cell, click and drag to move a label, scroll to zoom'
+        instructions = 'Click to pick a cell • Click and drag to move a label • Scroll to zoom • Dbl click to reset zoom/pan'
         break
       case 'pan':
-        instructions = 'Drag to pan • Scroll to zoom (mouse-centered)'
+        instructions = 'Drag to pan • Scroll to zoom • Dbl click to reset Zoom/Pan'
         break
       case 'lasso':
-        instructions = 'Click and drag to select cells, double click to cancel lasso selection, scroll to zoom'
+        instructions = 'Click and drag to select cells • Dbl click to cancel lasso selection • Scroll to zoom'
         break
       default:
-        instructions = 'Click to pick a cell, click and drag to move a label, scroll to zoom'
+        instructions = 'Click to pick a cell • Click and drag to move a label • Scroll to zoom • Dbl click to reset zoom/pan'
     }
     
     controlElement.textContent = instructions
@@ -10728,6 +10731,7 @@ export default class extends Controller {
   updateSelectionCount() {
     const countElement = document.getElementById('selected-cells-count')
     const labelElement = document.getElementById('selected-cells-label')
+    const viewWarningElement = document.getElementById('selected-cells-view-warning')
     const selectionDisplay = this.getSelectionCountDisplayData()
     if (countElement) {
       countElement.textContent = selectionDisplay.count.toLocaleString()
@@ -10737,6 +10741,11 @@ export default class extends Controller {
     }
     if (labelElement) {
       labelElement.textContent = selectionDisplay.label
+      labelElement.title = selectionDisplay.definitionTitle
+    }
+    if (viewWarningElement) {
+      const showWarning = selectionDisplay.label === 'visible cells' && selectionDisplay.showViewWarning
+      viewWarningElement.style.display = showWarning ? 'inline' : 'none'
     }
   }
 
@@ -10744,22 +10753,57 @@ export default class extends Controller {
     const lassoCount = this.selectedCells ? this.selectedCells.size : 0
     const totalCount = this.currentCoordinates ? this.currentCoordinates.length : 0
     const visibleCount = Array.isArray(this.currentVisibleCells) ? this.currentVisibleCells.length : totalCount
+    const visibleCellsDefinition = 'Visible cells are defined by the applied filters. Zoom/pan does not change this count, so the current view can show only a subset.'
+    const isViewRestricted = this.isCurrentPlotViewRestricted()
 
     if (lassoCount > 0) {
       const percentage = totalCount > 0 ? ((lassoCount / totalCount) * 100).toFixed(1) : '0.0'
       return {
         count: lassoCount,
-        label: 'lassoed cells selected',
-        title: `${lassoCount.toLocaleString()} lassoed cells selected (${percentage}% of ${totalCount.toLocaleString()} total)`
+        label: 'lassoed cells',
+        title: `${lassoCount.toLocaleString()} lassoed cells (${percentage}% of ${totalCount.toLocaleString()} total)`,
+        definitionTitle: visibleCellsDefinition,
+        showViewWarning: isViewRestricted
       }
     }
 
     const visiblePercentage = totalCount > 0 ? ((visibleCount / totalCount) * 100).toFixed(1) : '0.0'
     return {
       count: visibleCount,
-      label: 'visible cells selected',
-      title: `${visibleCount.toLocaleString()} visible cells selected (${visiblePercentage}% of ${totalCount.toLocaleString()} total)`
+      label: 'visible cells',
+      title: `${visibleCount.toLocaleString()} visible cells (${visiblePercentage}% of ${totalCount.toLocaleString()} total)`,
+      definitionTitle: visibleCellsDefinition,
+      showViewWarning: isViewRestricted
     }
+  }
+
+  isCurrentPlotViewRestricted() {
+    if (!this.currentCoordinates || !this.currentBounds) {
+      return false
+    }
+
+    const hasSameCoordinatesRef = this._viewWarningFullBoundsCoordsRef === this.currentCoordinates
+    const hasSameCoordinatesLength = this._viewWarningFullBoundsCoordsLength === this.currentCoordinates.length
+    if (!hasSameCoordinatesRef || !hasSameCoordinatesLength) {
+      this._viewWarningFullBoundsCache = this.dataManager.calculateBounds(this.currentCoordinates)
+      this._viewWarningFullBoundsCoordsRef = this.currentCoordinates
+      this._viewWarningFullBoundsCoordsLength = this.currentCoordinates.length
+    }
+
+    const fullBounds = this._viewWarningFullBoundsCache
+    if (!fullBounds) {
+      return false
+    }
+
+    const epsilon = 1e-9
+    // Restricted means the current view clips the full dataset bounds.
+    // If the view is larger than full bounds (zoomed out), all cells are visible.
+    return (
+      this.currentBounds.minX > fullBounds.minX + epsilon ||
+      this.currentBounds.maxX < fullBounds.maxX - epsilon ||
+      this.currentBounds.minY > fullBounds.minY + epsilon ||
+      this.currentBounds.maxY < fullBounds.maxY - epsilon
+    )
   }
 
   getEffectiveSelectionIndices() {

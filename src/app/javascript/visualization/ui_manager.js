@@ -812,21 +812,32 @@ export class UIManager {
     if (!pointCountElement) return
 
     const totalPoints = this.controller.currentCoordinates?.length || 0
+    const totalPointsText = totalPoints.toLocaleString()
+    const setPointCountMarkup = (visibleCount, currentColor = '', currentWeight = '') => {
+      const visiblePointsText = visibleCount.toLocaleString()
+      pointCountElement.innerHTML = `<span class="point-count-current">${visiblePointsText}</span><span class="point-count-total" style="color: #6b7280;"> / ${totalPointsText}</span>`
+
+      const currentCountElement = pointCountElement.querySelector('.point-count-current')
+      if (currentCountElement) {
+        currentCountElement.style.color = currentColor
+        currentCountElement.style.fontWeight = currentWeight
+      }
+    }
     
     // Handle undefined or null filteredIndices
     if (!filteredIndices || filteredIndices === undefined) {
-      // No filtering applied - show total points
-      pointCountElement.textContent = `${totalPoints.toLocaleString()}`
+      // No filtering applied - show total as visible
+      setPointCountMarkup(totalPoints)
       pointCountElement.title = 'All points visible (no filtering applied)'
-      pointCountElement.style.color = '' // Reset to default
-      pointCountElement.style.fontWeight = ''
     } else {
       // Filtering applied - show filtered count and percentage
       const filteredCount = filteredIndices.length || 0
       const percentage = totalPoints > 0 ? ((filteredCount / totalPoints) * 100).toFixed(1) : 0
       const filteringSummary = this.controller.dataManager.getFilteringSummary()
       
-      pointCountElement.textContent = `${filteredCount.toLocaleString()}`
+      const currentCountColor = filteredCount < totalPoints ? '#f59e0b' : ''
+      const currentCountWeight = filteredCount < totalPoints ? '600' : ''
+      setPointCountMarkup(filteredCount, currentCountColor, currentCountWeight)
       
       // Create detailed tooltip
       let tooltip = `${filteredCount.toLocaleString()} of ${totalPoints.toLocaleString()} points visible (${percentage}%)`
@@ -834,15 +845,6 @@ export class UIManager {
         tooltip += `\n\nActive filters: ${filteringSummary}`
       }
       pointCountElement.title = tooltip
-      
-      // Add visual indicator if filtering is applied
-      if (filteredCount < totalPoints) {
-        pointCountElement.style.color = '#f59e0b' // Orange to indicate filtering
-        pointCountElement.style.fontWeight = '600'
-      } else {
-        pointCountElement.style.color = '' // Reset to default
-        pointCountElement.style.fontWeight = ''
-      }
     }
 
     // Ensure the plot info panel is visible

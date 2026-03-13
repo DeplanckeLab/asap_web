@@ -447,7 +447,7 @@ class SlurmService
       # Command needs Rails - execute in website container
       # Escape single quotes for use in bash -c '...'
       escaped_command = options[:command].gsub("'", "'\"'\"'")
-      "docker exec asap2_test-website-1 bash -c '#{escaped_command}'"
+      "docker exec #{ENV["COMPOSE_PROJECT_NAME"]}-website-1 bash -c '#{escaped_command}'"
     end
     
     <<~SCRIPT

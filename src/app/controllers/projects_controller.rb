@@ -39,7 +39,7 @@ class ProjectsController < ApplicationController
       tissue: params[:tissue],
       status_id: params[:status_id],
       visibility: visibility,
-      sort: params[:sort] || 'created_at',
+      sort: params[:sort] || 'updated_at',
       page: params[:page] || 1,
       # User permission context for filtering
       current_user_id: current_user&.id,

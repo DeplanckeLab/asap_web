@@ -1,0 +1,60 @@
+<% content_for :title, "Ratings - ASAP" %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Ratings</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Review user feedback submitted through the rating form.
+    </p>
+  </div>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Date</th>
+          <th scope="col" class="px-3 py-2 text-left">User</th>
+          <th scope="col" class="px-3 py-2 text-left">Stars</th>
+          <th scope="col" class="px-3 py-2 text-left">Display publicly</th>
+          <th scope="col" class="px-3 py-2 text-left">Use for funding</th>
+          <th scope="col" class="px-3 py-2 text-left">Review</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+        <% @ratings.each do |rating| %>
+          <tr>
+            <td class="whitespace-nowrap px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              <%= display_timestamp(rating, :created_at) %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <%= rating.user&.email.presence || "Unknown user" %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                <%= rating.stars %> / 5
+              </span>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <span class="<%= rating.display_publicly ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400' %>">
+                <%= rating.display_publicly ? "Yes" : "No" %>
+              </span>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <span class="<%= rating.use_for_funding ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400' %>">
+                <%= rating.use_for_funding ? "Yes" : "No" %>
+              </span>
+            </td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-200">
+              <%= rating.review.presence || "No review provided" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @ratings.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No ratings found.
+    </div>
+  <% end %>
+</div>

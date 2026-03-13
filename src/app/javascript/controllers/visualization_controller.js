@@ -1199,7 +1199,7 @@ export default class extends Controller {
       return null
     }
 
-    const candidates = [embedding.display_name, embedding.label, embedding.name]
+    const candidates = [embedding.name, embedding.label, embedding.display_name]
     for (const candidate of candidates) {
       const sanitized = this.sanitizeEmbeddingName(candidate)
       if (sanitized) {
@@ -13383,7 +13383,7 @@ export default class extends Controller {
 
   composeSelectionEmbeddingLabel(embedding) {
     if (!embedding) return 'Embedding'
-    const name = String(embedding.display_name || embedding.label || embedding.name || `Embedding ${embedding.id}`)
+    const name = String(embedding.name || embedding.label || embedding.display_name || `Embedding ${embedding.id}`)
     const dims = embedding.nber_cols ? `${Number(embedding.nber_cols).toLocaleString()} cells` : null
     return dims ? `${name} - ${dims}` : name
   }

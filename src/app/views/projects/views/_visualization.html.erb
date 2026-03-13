@@ -158,13 +158,13 @@ can_edit_project = editable?(@project)
 can_analyze_project = analyzable?(@project)
 
 possible_names = []
-possible_names << default_embedding_record.display_name if default_embedding_record&.display_name.present?
-possible_names << default_embedding_record.label if default_embedding_record&.label.present?
 if default_embedding_record&.name.present?
   name_candidate = default_embedding_record.name
   name_candidate = name_candidate.split('/').last if name_candidate.include?('/')
   possible_names << name_candidate
 end
+possible_names << default_embedding_record.label if default_embedding_record&.label.present?
+possible_names << default_embedding_record.display_name if default_embedding_record&.display_name.present?
 default_embedding_name_text = possible_names.find(&:present?) || 'Select embedding...'
 
 default_cells = default_embedding_record&.nber_cols.presence || @project&.cell_count
@@ -819,9 +819,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                     <% if embeddings.present? %>
                       <% embeddings.each do |embedding| %>
                         <% label_parts = [
-                             embedding.display_name.presence,
+                             embedding.name.presence,
                              embedding.label.presence,
-                             embedding.name.presence
+                             embedding.display_name.presence
                            ].compact %>
                         <% base_label_raw = label_parts.first || "Embedding #{embedding.id}" %>
                         <% base_label = base_label_raw.include?('/') ? base_label_raw.split('/').last : base_label_raw %>
@@ -869,13 +869,13 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <option value="">Select embedding...</option>
             <% default_embeddings.each do |embedding| %>
               <% option_name_candidate = nil %>
-              <% if embedding.display_name.present? %>
-                <% option_name_candidate = embedding.display_name %>
-              <% elsif embedding.label.present? %>
-                <% option_name_candidate = embedding.label %>
-              <% elsif embedding.name.present? %>
+              <% if embedding.name.present? %>
                 <% raw_name = embedding.name %>
                 <% option_name_candidate = raw_name.include?('/') ? raw_name.split('/').last : raw_name %>
+              <% elsif embedding.label.present? %>
+                <% option_name_candidate = embedding.label %>
+              <% elsif embedding.display_name.present? %>
+                <% option_name_candidate = embedding.display_name %>
               <% end %>
               <% option_label = option_name_candidate.presence || "Embedding #{embedding.id}" %>
               <option value="<%= embedding.id %>" <%= (default_embedding_id.present? && embedding.id == default_embedding_id) ? 'selected' : '' %>>

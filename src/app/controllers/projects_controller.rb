@@ -9,8 +9,8 @@ class ProjectsController < ApplicationController
   include ComplianceHelpers
   helper_method :de_filter_cache_key
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
@@ -152,12 +152,12 @@ class ProjectsController < ApplicationController
     
     @h_metadata = organize_metadata(existing_metadata)
 
-    # Filter loom files to only include those with 2D/3D visualizations (UMAP/tSNE with 2 or 3 rows)
+    # Filter loom files to only include those with 2D visualizations (2 rows)
     @available_loom_files = existing_loom_files.select do |filepath|
       @h_metadata[filepath] && 
       @h_metadata[filepath]['cell'] && 
       @h_metadata[filepath]['cell']['NUMERIC'] &&
-      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) } # limit to 2D for now
+      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
     end
     
     # Get default loom file - use the first loom file with visualizations (only from existing files)
@@ -166,19 +166,19 @@ class ProjectsController < ApplicationController
     @default_loom_file = @available_loom_files.first || existing_loom_files.first
     Rails.logger.debug "[show] Default loom file set to: #{@default_loom_file.inspect}"
 
-    # Build embedding metadata (2D/3D coordinate sets) grouped by loom file
+    # Build embedding metadata (2-row coordinate sets) grouped by loom file
     @all_embeddings_by_loom = {}
     @available_loom_files.each do |filepath|
       numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
       @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
-        metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+        metadata.nber_rows.present? && metadata.nber_rows == 2
       end
     end
     
     # Check if a specific embedding_id was requested
     if params[:embedding_id].present?
       requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-      if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
+      if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows == 2
         @default_embedding = requested_embedding
         @default_embedding_loom_file = requested_embedding.filepath
         @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
@@ -649,6 +649,8 @@ class ProjectsController < ApplicationController
       
       # Get project type
       @project_type = @project.project_type
+
+      compute_summary_loom_overview
       
       # Generate klay data for pipeline visualization
       @klay_data = generate_klay_data
@@ -4030,6 +4032,82 @@ class ProjectsController < ApplicationController
     }
   end
 
+  # GET /projects/1/get_cell_set_annotations?cell_set_key=<md5>
+  def get_cell_set_annotations
+    cell_set_key = params[:cell_set_key].to_s.strip
+    if cell_set_key.blank?
+      return render json: { error: 'Cell set key is required' }, status: :unprocessable_entity
+    end
+
+    clas = Cla.active.joins(:cell_set)
+             .where(cell_sets: { key: cell_set_key })
+             .includes(:project, :annot, :cell_set, :user)
+             .order(created_at: :desc)
+             .to_a
+
+    readable_clas = clas.select { |cla| cla.project && readable?(cla.project) }
+
+    symbol_map_by_project_id = {}
+    readable_clas.group_by(&:project_id).each do |project_id, project_clas|
+      project = project_clas.first&.project
+      next unless project&.version
+
+      h_env = Basic.safe_parse_json(project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: "cell_set_annotations_symbols")
+      next if db_version.blank?
+
+      gene_ids = project_clas.flat_map do |cla|
+        [
+          cla.sorted_up_gene_ids.presence || cla.up_gene_ids,
+          cla.sorted_down_gene_ids.presence || cla.down_gene_ids
+        ].flat_map { |raw| parse_cla_field(raw) }
+      end
+      gene_ids = gene_ids.map { |value| value.to_i }.select { |id| id.positive? }.uniq
+      next if gene_ids.empty?
+
+      project_map = {}
+      RemoteGene.with_remote(db_version) do
+        RemoteGene.where(id: gene_ids).pluck(:id, :name).each do |gene_id, gene_name|
+          project_map[gene_id.to_s] = gene_name.to_s.presence || gene_id.to_s
+        end
+      end
+      symbol_map_by_project_id[project_id] = project_map
+    end
+
+    rows = readable_clas.map do |cla|
+      up_gene_ids = parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids)
+      down_gene_ids = parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+      symbol_map = symbol_map_by_project_id[cla.project_id] || {}
+
+      creator_label = if cla.user && current_user && cla.user.id == current_user.id
+                        'me'
+                      elsif cla.user&.email.present?
+                        cla.user.email.to_s.split('@').first
+                      else
+                        '-'
+                      end
+
+      {
+        project_key: cla.project&.key.to_s,
+        metadata_name: (cla.annot&.display_name.presence || cla.annot&.name.to_s),
+        cluster_category: cla.cat.presence || cla.name.presence || '-',
+        label: cla.name.presence || cla.cat.presence || '-',
+        cell_set_key: cla.cell_set&.key.to_s,
+        up_genes: up_gene_ids.map { |gene_id| symbol_map[gene_id.to_s].presence || gene_id },
+        down_genes: down_gene_ids.map { |gene_id| symbol_map[gene_id.to_s].presence || gene_id },
+        nber_agree: cla.nber_agree || 0,
+        nber_disagree: cla.nber_disagree || 0,
+        created_by: creator_label,
+        created_at: cla.created_at&.strftime('%b %d, %Y')
+      }
+    end
+
+    render json: { cell_set_key: cell_set_key, annotations: rows }
+  rescue StandardError => e
+    Rails.logger.error("[get_cell_set_annotations] #{e.class}: #{e.message}")
+    render json: { error: 'Unable to load cell set annotations' }, status: :internal_server_error
+  end
+
   # GET /projects/1/get_annot_evidences?annot_id=123&cat_idx=0
   def get_annot_evidences
     annot_id = params[:annot_id].to_i
@@ -6127,7 +6205,7 @@ class ProjectsController < ApplicationController
     def project_has_embeddings?
       Annot.where(project_id: @project.id)
            .where.not(filepath: nil)
-           .where(dim: 1, nber_rows: [2, 3])
+           .where(dim: 1, nber_rows: 2)
            .exists?
     end
 
@@ -6211,7 +6289,7 @@ class ProjectsController < ApplicationController
         @available_loom_files.each do |filepath|
           numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
           h_res[filepath] = numeric_metadata.select do |metadata|
-            metadata.nber_rows.present? && (metadata.nber_rows == 2 || metadata.nber_rows == 3)
+            metadata.nber_rows.present? && metadata.nber_rows == 2
           end
         end
         h_res
@@ -6220,7 +6298,7 @@ class ProjectsController < ApplicationController
       timed_step.call('resolve_default_embedding') do
         if params[:embedding_id].present?
           requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-          if requested_embedding && requested_embedding.nber_rows.present? && (requested_embedding.nber_rows == 2 || requested_embedding.nber_rows == 3)
+          if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows == 2
             @default_embedding = requested_embedding
             @default_embedding_loom_file = requested_embedding.filepath
             @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
@@ -7591,6 +7669,8 @@ class ProjectsController < ApplicationController
       end
 
       @project_type = @project.project_type
+      compute_summary_loom_overview
+      @summary_gene_symbol_by_id = build_summary_gene_symbol_map
       @non_published_runs_count = if @project.public? && @project.public_at.present?
         @runs.count { |run| !@project.locked_from_publication?(run) }
       else
@@ -7603,6 +7683,41 @@ class ProjectsController < ApplicationController
       session[:clust_comparison] ||= {}
       session[:clust_comparison][@project.id] ||= {}
       session[:clust_comparison][@project.id][:op] ||= "1"
+    end
+
+    def compute_summary_loom_overview
+      @summary_loom_file_count = 0
+      @summary_loom_content_counts = { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
+      @summary_shared_users_count = @project.shares.count
+      @summary_embedding_count = Annot.where(project_id: @project.id, nber_rows: 2).count
+      @summary_run_user_count = if defined?(@runs) && @runs.present?
+        @runs.map(&:user_id).compact.uniq.size
+      else
+        @project.runs.where.not(user_id: nil).distinct.count(:user_id)
+      end
+      @summary_visual_annotation_count = Cla.active.where(project_id: @project.id).count
+      @summary_visual_vote_count = Cla.where(project_id: @project.id).sum(Arel.sql('COALESCE(nber_agree, 0) + COALESCE(nber_disagree, 0)'))
+      @summary_checkpoint_count = @project.checkpoints.count
+      @summary_checkpoint_comment_count = @project.checkpoints.to_a.sum { |checkpoint| checkpoint.comments.size }
+
+      summary_annots = Annot.where(project_id: @project.id)
+                           .where.not(filepath: [nil, ''])
+                           .pluck(:filepath, :name, :dim)
+      return if summary_annots.empty?
+
+      @summary_loom_file_count = summary_annots.map(&:first).uniq.size
+      summary_annots.each do |_filepath, name, dim|
+        annot_name = name.to_s
+        if annot_name == '/matrix' || (dim == 3 && annot_name.start_with?('/layers/'))
+          @summary_loom_content_counts[:matrices] += 1
+        elsif annot_name.start_with?('/col_attrs/')
+          @summary_loom_content_counts[:col_attrs] += 1
+        elsif annot_name.start_with?('/row_attrs/')
+          @summary_loom_content_counts[:row_attrs] += 1
+        else
+          @summary_loom_content_counts[:global] += 1
+        end
+      end
     end
 
     def parsing_step_for_project(project)
@@ -9344,6 +9459,34 @@ class ProjectsController < ApplicationController
       end
 
       candidates.map { |item| item.to_s.strip }.reject(&:blank?)
+    end
+
+    def build_summary_gene_symbol_map
+      return {} unless @project&.version
+
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: "summary_gene_symbols")
+      return {} if db_version.blank?
+
+      raw_gene_fields = Cla.active.where(project_id: @project.id)
+                           .pluck(:sorted_up_gene_ids, :up_gene_ids, :sorted_down_gene_ids, :down_gene_ids)
+
+      gene_ids = raw_gene_fields.flat_map do |sorted_up_ids, up_ids, sorted_down_ids, down_ids|
+        [sorted_up_ids, up_ids, sorted_down_ids, down_ids].flat_map { |raw| parse_cla_field(raw) }
+      end
+      gene_ids = gene_ids.map { |value| value.to_i }.select { |id| id.positive? }.uniq
+      return {} if gene_ids.empty?
+
+      gene_symbol_by_id = {}
+      RemoteGene.with_remote(db_version) do
+        RemoteGene.where(id: gene_ids).pluck(:id, :name).each do |gene_id, gene_name|
+          gene_symbol_by_id[gene_id.to_s] = gene_name.to_s.presence || gene_id.to_s
+        end
+      end
+      gene_symbol_by_id
+    rescue StandardError => e
+      Rails.logger.warn("[summary_gene_symbols] Unable to resolve gene symbols for project #{@project&.id}: #{e.class} - #{e.message}")
+      {}
     end
 
     # Use callbacks to share common setup or constraints between actions.

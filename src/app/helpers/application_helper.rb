@@ -7,6 +7,16 @@ module ApplicationHelper
     return "Unknown Run" unless run
     "#{run.step&.label || 'Step'} ##{run.num}"
   end
+
+  def user_display_name(user, current_user: nil)
+    return '-' unless user
+    return 'me' if current_user && user.id == current_user.id
+
+    email_prefix = user.email.to_s.split('@').first
+    return email_prefix if email_prefix.present?
+
+    user.displayed_name.to_s.presence || '-'
+  end
   
   def duration2(duration)
     return "0 seconds" if duration.nil? || duration <= 0
@@ -125,6 +135,12 @@ module ApplicationHelper
         description: "Manage identifier types & external links",
         path: cross_references_admin_home_index_path,
         icon: "fas fa-link"
+      },
+      {
+        label: "Ratings",
+        description: "Review user ratings and feedback",
+        path: ratings_path,
+        icon: "fas fa-star"
       },
       { label: "Tools", path: tools_path, icon: "fas fa-wrench" },
       { label: "Tool Types", path: tool_types_path, icon: "fas fa-tags" },

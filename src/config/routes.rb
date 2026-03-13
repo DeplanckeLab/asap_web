@@ -51,6 +51,7 @@ Rails.application.routes.draw do
       post :filter_ge_results
       get :get_annot_info
       get :get_annot_evidences
+      get :get_cell_set_annotations
       post :clone
       post :toggle_public
       post :prepare_metadata
@@ -104,6 +105,7 @@ Rails.application.routes.draw do
   resources :reqs
   resources :docker_images
   resources :tools
+  resources :ratings, only: [:index]
   resources :data_classes
   resources :tool_types
   resources :project_types

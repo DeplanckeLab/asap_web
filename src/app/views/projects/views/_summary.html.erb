@@ -1,5 +1,5 @@
 <%
-  can_edit_project_title = current_user.present? && (@project.user_id == current_user.id || admin?)
+  can_edit_project_title = editable?(@project) && !@project.public?
 %>
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
   <div class="mb-6">
@@ -28,7 +28,7 @@
                 type="button"
                 title="Edit project title"
                 aria-label="Edit project title"
-                class="inline-flex items-center px-2 py-1 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+                class="inline-flex items-center text-gray-500 hover:text-gray-700 focus:outline-hidden focus:text-gray-700 transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 3.487a2.1 2.1 0 113 2.97L8.4 17.92l-4.2 1.2 1.2-4.2L16.862 3.487z" />

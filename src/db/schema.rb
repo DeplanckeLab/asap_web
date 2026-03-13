@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_10_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_13_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -715,6 +715,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_140000) do
     t.index ["project_id", "source_kind"], name: "index_gene_set_collections_on_project_id_and_source_kind"
     t.index ["project_id"], name: "index_gene_set_collections_on_project_id"
     t.index ["user_id"], name: "index_gene_set_collections_on_user_id"
+  end
+
+  create_table "guided_tour_steps", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "focus_element", null: false
+    t.bigint "guided_tour_id", null: false
+    t.string "page_url", null: false
+    t.integer "rank", null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.index ["guided_tour_id", "rank"], name: "index_guided_tour_steps_on_guided_tour_id_and_rank", unique: true
+    t.index ["guided_tour_id"], name: "index_guided_tour_steps_on_guided_tour_id"
+  end
+
+  create_table "guided_tours", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "duration_time"
+    t.string "name", null: false
+    t.integer "rank", null: false
+    t.datetime "updated_at", null: false
+    t.index ["rank"], name: "index_guided_tours_on_rank"
   end
 
   create_table "heatmaps", id: :serial, force: :cascade do |t|
@@ -1505,6 +1527,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_140000) do
   add_foreign_key "gene_filterings", "statuses", name: "filterings_status_id_fkey"
   add_foreign_key "gene_filterings", "users", name: "filterings_user_id_fkey"
   add_foreign_key "gene_set_collections", "gene_set_collection_types"
+  add_foreign_key "guided_tour_steps", "guided_tours"
   add_foreign_key "heatmaps", "jobs", name: "heatmaps_job_id_fkey"
   add_foreign_key "heatmaps", "projects", name: "heatmaps_project_id_fkey"
   add_foreign_key "heatmaps", "statuses", name: "heatmaps_status_id_fkey"

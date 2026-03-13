@@ -1,0 +1,70 @@
+<% content_for :title, "Guided Tours - ASAP" %>
+
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900">Guided Tours</h1>
+      <p class="mt-2 text-gray-600">
+        Define the chapters and step-by-step pages of your guided tours.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <% if @guided_tours.any? %>
+        <%= link_to "Start All Chapters", guided_tour_path(@guided_tours.first), class: "inline-flex items-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50" %>
+      <% else %>
+        <button type="button" disabled class="inline-flex items-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-400 cursor-not-allowed">
+          Start All Chapters
+        </button>
+      <% end %>
+      <%= link_to "New Guided Tour", new_guided_tour_path, class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+    </div>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+  <% end %>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Rank</th>
+          <th scope="col" class="px-3 py-2 text-left">Name</th>
+          <th scope="col" class="px-3 py-2 text-left">Duration</th>
+          <th scope="col" class="px-3 py-2 text-left">Steps</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody
+        class="divide-y divide-gray-100 text-sm text-gray-700"
+        data-controller="sortable-list"
+        data-sortable-list-url-value="<%= reorder_guided_tours_path %>"
+        data-sortable-list-item-selector-value="tr[data-id]">
+        <% @guided_tours.each do |guided_tour| %>
+          <tr
+            data-id="<%= guided_tour.id %>"
+            draggable="true"
+            data-action="dragstart->sortable-list#dragstart dragover->sortable-list#dragover drop->sortable-list#drop dragend->sortable-list#dragend">
+            <td class="px-3 py-2 font-medium" data-rank-label><%= guided_tour.rank %></td>
+            <td class="px-3 py-2"><%= guided_tour.name %></td>
+            <td class="px-3 py-2"><%= guided_tour.duration_time.present? ? "#{guided_tour.duration_time}s" : "—" %></td>
+            <td class="px-3 py-2"><%= guided_tour.guided_tour_steps.count %></td>
+            <td class="px-3 py-2 text-right">
+              <%= link_to "Open", guided_tour_path(guided_tour), class: "text-gray-600 hover:text-gray-800" %>
+              <span class="mx-2 text-gray-300">|</span>
+              <%= link_to "Edit", edit_guided_tour_path(guided_tour), class: "text-gray-600 hover:text-gray-800" %>
+              <span class="mx-2 text-gray-300">|</span>
+              <%= link_to "Delete", guided_tour_path(guided_tour), method: :delete, data: { confirm: "Delete this guided tour and all its steps?" }, class: "text-red-600 hover:text-red-700" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @guided_tours.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500">
+      No guided tours have been created yet.
+    </div>
+  <% end %>
+</div>

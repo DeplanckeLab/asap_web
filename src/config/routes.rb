@@ -112,6 +112,11 @@ Rails.application.routes.draw do
   resources :steps
   resources :std_methods
   resources :statuses
+  resources :guided_tours do
+    patch :reorder, on: :collection
+    patch :reorder_steps, on: :member, to: 'guided_tour_steps#reorder'
+    resources :guided_tour_steps, path: :steps, only: [:create, :update, :destroy]
+  end
   
   resources :shares, only: [:create, :update, :destroy] do
     collection do

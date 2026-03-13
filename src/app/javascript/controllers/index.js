@@ -179,6 +179,10 @@ import SearchFormController from "controllers/search_form_controller"
 application.register("search-form", SearchFormController)
 console.log('Search form controller registered')
 
+import SortableListController from "controllers/sortable_list_controller"
+application.register("sortable-list", SortableListController)
+console.log('Sortable list controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

@@ -800,7 +800,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           data-action="click->visualization#toggleEmbeddingGroup"
                           data-loom-file="<%= filepath %>"
                           data-open="<%= is_default_group ? 'true' : 'false' %>">
-                    <span class="embedding-menu-toggle"><%= is_default_group ? '[-]' : '[+]' %></span>
+                    <span class="embedding-menu-toggle">
+                      <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out; transform: <%= is_default_group ? 'rotate(90deg)' : 'rotate(0deg)' %>;"></i>
+                    </span>
                     <div class="embedding-menu-header-text">
                       <div class="embedding-menu-row">
                         <span class="embedding-menu-title"><%= display_label %></span>
@@ -911,7 +913,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             background-color: #f9fafb;
           }
           .embedding-selection-menu .embedding-menu-toggle {
-            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             color: #6b7280;
             width: 24px;
           }

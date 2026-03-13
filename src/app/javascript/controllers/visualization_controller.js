@@ -960,6 +960,8 @@ export default class extends Controller {
     }
     this._embeddingSelectionInitialized = true
 
+    this.reorderEmbeddingGroupsForDisplay()
+
     if (this.currentLoomFile) {
       this.populateMetadataSelectForLoom(this.currentLoomFile)
     }
@@ -970,49 +972,160 @@ export default class extends Controller {
       return
     }
 
+    const initialSelectedEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
+    if (initialSelectedEmbeddingId.length > 0) {
+      const currentLoom = this.getCurrentLoomFile() || this.currentLoomFile || this.defaultLoomFileValue || ''
+      this.highlightSelectedEmbedding(initialSelectedEmbeddingId, currentLoom)
+      this.setOnlyEmbeddingGroupOpen(currentLoom)
+    }
+
     setTimeout(() => {
+      const params = new URLSearchParams(window.location.search)
+      const checkpointIdFromUrl = String(params.get('checkpoint_id') || '').trim()
       const selectedEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
       if (selectedEmbeddingId.length > 0) {
+        const selectedIsServerDefault = (
+          this.hasDefaultEmbeddingIdValue &&
+          String(this.defaultEmbeddingIdValue || '').trim().length > 0 &&
+          selectedEmbeddingId === String(this.defaultEmbeddingIdValue || '').trim()
+        )
+
+        // Keep URL checkpoint restore untouched, but do not let server-side fallback
+        // preselection block ranked default embedding selection.
+        if (checkpointIdFromUrl.length === 0 && selectedIsServerDefault) {
+          this.checkpointDebug('initializeEmbeddingSelectionUI:replace-server-default-with-ranked-default', {
+            selectedEmbeddingId,
+            serverDefaultEmbeddingId: String(this.defaultEmbeddingIdValue || ''),
+            rankedEmbeddingId: String(defaultInfo.embedding?.id || ''),
+            rankedEmbeddingName: this.getEmbeddingName(defaultInfo.embedding),
+            rankedLoomFile: defaultInfo.loomFile
+          })
+          this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
+          this.setOnlyEmbeddingGroupOpen(defaultInfo.loomFile)
+          return
+        }
+
         this.checkpointDebug('initializeEmbeddingSelectionUI:skip-default-apply', {
           selectedEmbeddingId,
-          currentLoomFile: this.getCurrentLoomFile()
+          currentLoomFile: this.getCurrentLoomFile(),
+          checkpointIdFromUrl: checkpointIdFromUrl || null
         })
+        this.setOnlyEmbeddingGroupOpen(this.getCurrentLoomFile())
         return
       }
 
       this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
+      this.setOnlyEmbeddingGroupOpen(defaultInfo.loomFile)
     }, 100)
   }
 
   determineDefaultEmbedding() {
     if (!this.embeddingsByLoomValue || Object.keys(this.embeddingsByLoomValue).length === 0) {
+      this.checkpointDebug('determineDefaultEmbedding:no-embeddings')
       return null
     }
 
-    if (this.hasDefaultEmbeddingIdValue && this.defaultEmbeddingIdValue) {
-      const info = this.findEmbeddingById(this.defaultEmbeddingIdValue)
+    const params = new URLSearchParams(window.location.search)
+    const embeddingIdFromUrl = String(params.get('embedding_id') || '').trim()
+    if (embeddingIdFromUrl.length > 0) {
+      const info = this.findEmbeddingById(embeddingIdFromUrl)
       if (info) {
+        this.checkpointDebug('determineDefaultEmbedding:resolved-from-url-embedding-id', {
+          embeddingIdFromUrl,
+          resolvedEmbeddingId: String(info.embedding?.id || ''),
+          resolvedEmbeddingName: this.getEmbeddingName(info.embedding),
+          resolvedLoomFile: info.loomFile
+        })
         return info
       }
+      this.checkpointDebug('determineDefaultEmbedding:url-embedding-id-not-found', { embeddingIdFromUrl })
     }
 
     const preferredLoom = this.currentLoomFile || this.defaultLoomFileValue
-    if (preferredLoom && Array.isArray(this.embeddingsByLoomValue[preferredLoom]) && this.embeddingsByLoomValue[preferredLoom].length > 0) {
-      return {
-        embedding: this.embeddingsByLoomValue[preferredLoom][0],
-        loomFile: preferredLoom
+    const candidates = []
+    Object.entries(this.embeddingsByLoomValue).forEach(([loomFile, embeddings]) => {
+      if (!Array.isArray(embeddings) || embeddings.length === 0) {
+        return
       }
+
+      embeddings.forEach((embedding) => {
+        candidates.push({
+          embedding,
+          loomFile,
+          methodRank: this.getEmbeddingMethodPriority(embedding),
+          parsingRank: this.isParsingEmbeddingSource(embedding, loomFile) ? 0 : 1,
+          cellCount: this.getEmbeddingCellCount(embedding),
+          loomRank: preferredLoom && loomFile === preferredLoom ? 0 : 1,
+          embeddingId: Number(embedding?.id) || Number.MAX_SAFE_INTEGER
+        })
+      })
+    })
+
+    if (candidates.length === 0) {
+      this.checkpointDebug('determineDefaultEmbedding:no-candidates-after-scan')
+      return null
     }
 
-    const firstEntry = Object.entries(this.embeddingsByLoomValue).find(([, embeddings]) => Array.isArray(embeddings) && embeddings.length > 0)
-    if (firstEntry) {
-      return {
-        embedding: firstEntry[1][0],
-        loomFile: firstEntry[0]
-      }
-    }
+    candidates.sort((a, b) => {
+      if (a.methodRank !== b.methodRank) return a.methodRank - b.methodRank
+      if (a.parsingRank !== b.parsingRank) return a.parsingRank - b.parsingRank
+      if (a.cellCount !== b.cellCount) return b.cellCount - a.cellCount
+      if (a.loomRank !== b.loomRank) return a.loomRank - b.loomRank
+      return a.embeddingId - b.embeddingId
+    })
 
-    return null
+    const topCandidates = candidates.slice(0, 5).map((candidate, index) => ({
+      rank: index + 1,
+      embeddingId: String(candidate.embedding?.id || ''),
+      embeddingName: this.getEmbeddingName(candidate.embedding),
+      loomFile: candidate.loomFile,
+      methodRank: candidate.methodRank,
+      parsingRank: candidate.parsingRank,
+      cellCount: candidate.cellCount,
+      loomRank: candidate.loomRank
+    }))
+    this.checkpointDebug('determineDefaultEmbedding:ranked-candidates-top5', {
+      preferredLoom,
+      totalCandidates: candidates.length,
+      topCandidates
+    })
+    this.checkpointDebug('determineDefaultEmbedding:chosen', {
+      chosenEmbeddingId: String(candidates[0].embedding?.id || ''),
+      chosenEmbeddingName: this.getEmbeddingName(candidates[0].embedding),
+      chosenLoomFile: candidates[0].loomFile
+    })
+
+    return {
+      embedding: candidates[0].embedding,
+      loomFile: candidates[0].loomFile
+    }
+  }
+
+  getEmbeddingMethodPriority(embedding) {
+    const name = String(this.getEmbeddingName(embedding) || '').toLowerCase()
+    if (name.includes('umap')) {
+      return 0
+    }
+    if (name.includes('tsne') || /t[\s_-]*sne/i.test(name)) {
+      return 1
+    }
+    if (name.includes('pca')) {
+      return 2
+    }
+    return 3
+  }
+
+  isParsingEmbeddingSource(embedding, loomFile) {
+    const source = String(embedding?.filepath || loomFile || '').toLowerCase()
+    return /(^|\/)parsing(\/|$)/i.test(source)
+  }
+
+  getEmbeddingCellCount(embedding) {
+    const count = Number(embedding?.nber_cols)
+    if (Number.isNaN(count) || !Number.isFinite(count)) {
+      return 0
+    }
+    return count
   }
 
   populateMetadataSelectForLoom(loomFile) {
@@ -1485,6 +1598,10 @@ export default class extends Controller {
       item.classList.toggle('selected', isMatch)
       item.dataset.selected = isMatch ? 'true' : 'false'
     })
+
+    if (loomFile) {
+      this.setEmbeddingGroupOpenState(loomFile, true)
+    }
   }
 
   toggleEmbeddingMenu(event) {
@@ -1525,9 +1642,136 @@ export default class extends Controller {
     const isOpen = header.dataset.open === 'true'
     const shouldOpen = !isOpen
 
-    header.dataset.open = shouldOpen ? 'true' : 'false'
-    body.style.display = shouldOpen ? 'block' : 'none'
-    toggle.textContent = shouldOpen ? '[-]' : '[+]'
+    this.setEmbeddingGroupDomState(header, body, toggle, shouldOpen)
+  }
+
+  setEmbeddingGroupOpenState(loomFile, shouldOpen) {
+    const targetLoomFile = String(loomFile || '').trim()
+    if (!targetLoomFile) {
+      return
+    }
+
+    const card = document.querySelector(`.embedding-menu-card[data-loom-file="${CSS.escape(targetLoomFile)}"]`)
+    if (!card) {
+      return
+    }
+
+    const header = card.querySelector('.embedding-menu-header')
+    const body = card.querySelector('.embedding-menu-body')
+    const toggle = card.querySelector('.embedding-menu-toggle')
+    if (!header || !body || !toggle) {
+      return
+    }
+
+    this.setEmbeddingGroupDomState(header, body, toggle, !!shouldOpen)
+  }
+
+  setOnlyEmbeddingGroupOpen(loomFile) {
+    const targetLoomFile = String(loomFile || '').trim()
+    const cards = Array.from(document.querySelectorAll('.embedding-menu-card[data-loom-file]'))
+    if (cards.length === 0) {
+      return
+    }
+
+    cards.forEach((card) => {
+      const header = card.querySelector('.embedding-menu-header')
+      const body = card.querySelector('.embedding-menu-body')
+      const toggle = card.querySelector('.embedding-menu-toggle')
+      if (!header || !body || !toggle) {
+        return
+      }
+
+      const cardLoomFile = String(card.dataset.loomFile || '').trim()
+      const shouldOpen = targetLoomFile.length > 0 && cardLoomFile === targetLoomFile
+      this.setEmbeddingGroupDomState(header, body, toggle, shouldOpen)
+    })
+  }
+
+  setEmbeddingGroupDomState(header, body, toggle, isOpen) {
+    header.dataset.open = isOpen ? 'true' : 'false'
+    body.style.display = isOpen ? 'block' : 'none'
+    const chevron = toggle.querySelector('.fa-chevron-right')
+    if (chevron) {
+      chevron.style.transform = isOpen ? 'rotate(90deg)' : 'rotate(0deg)'
+    }
+  }
+
+  reorderEmbeddingGroupsForDisplay() {
+    const menu = document.getElementById('embedding-selection-menu')
+    if (!menu) {
+      return
+    }
+
+    const cards = Array.from(menu.querySelectorAll('.embedding-menu-card[data-loom-file]'))
+    if (cards.length <= 1) {
+      return
+    }
+
+    const sortedLoomFiles = this.getSortedLoomFilesForDisplay()
+    if (sortedLoomFiles.length === 0) {
+      return
+    }
+
+    const rankByLoom = new Map(sortedLoomFiles.map((loomFile, index) => [loomFile, index]))
+    cards
+      .sort((a, b) => {
+        const loomA = String(a.dataset.loomFile || '')
+        const loomB = String(b.dataset.loomFile || '')
+        const rankA = rankByLoom.has(loomA) ? rankByLoom.get(loomA) : Number.MAX_SAFE_INTEGER
+        const rankB = rankByLoom.has(loomB) ? rankByLoom.get(loomB) : Number.MAX_SAFE_INTEGER
+        if (rankA !== rankB) {
+          return rankA - rankB
+        }
+        return loomA.localeCompare(loomB)
+      })
+      .forEach((card) => menu.appendChild(card))
+
+    if (this.loomFileSelectTarget) {
+      const options = Array.from(this.loomFileSelectTarget.options || [])
+      const optionByValue = new Map(options.map((option) => [String(option.value || ''), option]))
+      sortedLoomFiles.forEach((loomFile) => {
+        const option = optionByValue.get(loomFile)
+        if (option) {
+          this.loomFileSelectTarget.appendChild(option)
+        }
+      })
+    }
+  }
+
+  getSortedLoomFilesForDisplay() {
+    if (!this.embeddingsByLoomValue || typeof this.embeddingsByLoomValue !== 'object') {
+      return []
+    }
+
+    const loomEntries = Object.entries(this.embeddingsByLoomValue)
+      .filter(([, embeddings]) => Array.isArray(embeddings) && embeddings.length > 0)
+      .map(([loomFile, embeddings]) => ({
+        loomFile,
+        creationRank: this.getLoomCreationRank(embeddings)
+      }))
+
+    loomEntries.sort((a, b) => {
+      if (a.creationRank !== b.creationRank) return a.creationRank - b.creationRank
+      return a.loomFile.localeCompare(b.loomFile)
+    })
+
+    return loomEntries.map((entry) => entry.loomFile)
+  }
+
+  getLoomCreationRank(embeddings) {
+    const ranks = (embeddings || []).map((embedding) => this.getEmbeddingCreationRank(embedding))
+    if (ranks.length === 0) {
+      return Number.MAX_SAFE_INTEGER
+    }
+    return Math.min(...ranks)
+  }
+
+  getEmbeddingCreationRank(embedding) {
+    const id = Number(embedding?.id)
+    if (Number.isFinite(id) && id > 0) {
+      return id
+    }
+    return Number.MAX_SAFE_INTEGER
   }
 
   selectEmbedding(event) {

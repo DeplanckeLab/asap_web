@@ -1,3 +1,4 @@
+# coding: utf-8
 require 'open3'
 require 'zlib'
 require 'base64'
@@ -121,7 +122,7 @@ class ProjectsController < ApplicationController
         load_view_context_for(@view_type)
         respond_to do |format|
           format.html
-          format.json { render json: @project }
+          format.json { render json: Basic.generate_project_json(@project) }
         end
       end
       return
@@ -674,10 +675,12 @@ class ProjectsController < ApplicationController
     #    @available_metadata = Annot.available_metadata(test_project.id)
     #  end
     #end
-    
+
     respond_to do |format|
       format.html # Use application layout
-      format.json { render json: @project }
+      format.json {
+        render json: Basic.generate_project_json(@project)
+      }
     end
   end
 

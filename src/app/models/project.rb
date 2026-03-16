@@ -234,7 +234,7 @@ class Project < ApplicationRecord
       )
     end
   end
-
+  
   # Index data for Elasticsearch.
   # Technology and tissue are pulled from ComplianceMapping / ComplianceTermReplacement
   # records (the actively maintained resolved terms) rather than the legacy Project columns.
@@ -313,6 +313,11 @@ class Project < ApplicationRecord
   end
 
   # Instance methods
+  
+  def public_key
+    return (self.public == true) ? ("ASAP" + self.public_id.to_s) : nil
+  end
+
   def display_name
     name.presence || key.presence || "Project #{id}"
   end

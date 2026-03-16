@@ -76,7 +76,18 @@ class ProjectsController < ApplicationController
     
     respond_to do |format|
       format.html
-      format.json { render json: @projects }
+      format.json {
+
+        file_path = Pathname.new(ENV.fetch("ASAP_PREDICTION_DATA_ROOT")) + 'projects.json'
+        headers['Content-Type'] = 'application/json'
+        headers['Cache-Control'] = 'no-cache'
+        headers['Content-Disposition'] = "inline; filename=#{File.basename(file_path)}"
+
+        # Use send_file to stream the content directly to the client                                                                                                                                                       
+        send_file(file_path, type: 'application/json', disposition: 'inline', stream: true)
+
+
+      }
     end
   end
 

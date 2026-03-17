@@ -376,11 +376,19 @@ task :parse, [:project_key] => [:environment] do |t, args|
           raise
         end
       end
+
+       h_types = {
+        'MEX' => "H5_10x",
+        'RDS' => "LOOM",
+        'H5_10X' => 'H5_10x'
+      }
       
       # Ensure H5AD selection is always explicit for Java parsing.
       # Java H5AD parser crashes with a NullPointerException if selection is missing.
-      if version.id < 8 && file_type == 'H5AD' && p['sel_name'].blank?
-        begin
+       group_names = []
+       file_type = (h_types[file_type]) ? h_types[file_type] : file_type
+       if version.id < 8 && ['H5AD', 'H5_10x'].include?(file_type) && p['sel_name'].blank?
+         begin
           upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
                               ENV["UPLOAD_DATA_DIR"]
                             elsif ENV["DATA_DIR"]
@@ -399,7 +407,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
           elsif group_names.size == 1
             p['sel_name'] = group_names.first
           else
-            raise "Missing H5AD matrix selection: please select a matrix group before parsing."
+            raise "Missing H5AD matrix selection: please select a matrix group before parsing #{h_preparsing.to_json}."
           end
         rescue => e
           logger.error("[ParseRake] Could not determine H5AD selection for project #{project.key}: #{e.class} - #{e.message}")
@@ -437,12 +445,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
       opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata']
       opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata']
 
-      h_types = {
-        'MEX' => "H5_10x",
-        'RDS' => "LOOM",
-        'H5_10X' => 'H5_10x'
-      }
-      
       opts += [
                {'opt' => "-ncells", 'value' => p["nber_cols"]},
                {'opt' => "-ngenes", 'value' => p["nber_rows"]},

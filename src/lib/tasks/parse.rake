@@ -438,7 +438,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
       h_types = {
         'MEX' => "H5_10x",
-        'RDS' => "LOOM"
+        'RDS' => "LOOM",
+        'H5_10X' => 'H5_10x'
       }
       
       opts += [

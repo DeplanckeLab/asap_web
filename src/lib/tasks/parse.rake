@@ -407,8 +407,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
       p['sel_name'] = 'mtx' if version.id < 8 && file_type == 'MEX' && p['sel_name'].blank?
-      opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name']
-
+      tmp_sel_name = group_names.first if group_names.size == 1
+      opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name'] or tmp_sel_name
+      
       # Only add -col and -header for RAW_TEXT file type
       if file_type == 'RAW_TEXT'
         # -col parameter: gene name column (default: "first" if not specified)

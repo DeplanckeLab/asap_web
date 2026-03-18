@@ -1771,7 +1771,8 @@ this.currentMatches = allMatches.filter(item => {
       return null
     }
 
-    const searchTerm = query.trim().toLowerCase()
+    const searchTerm = query.trim()
+    const searchLower = searchTerm.toLowerCase()
     
     // Try to find exact or partial match
     for (const entry of this.autocompleteData) {
@@ -1781,12 +1782,10 @@ this.currentMatches = allMatches.filter(item => {
       const { symbol: geneSymbol, ensemblId, stableId } = parsed
       
       // Match by gene symbol or Ensembl ID (exact/prefix/substring)
-      if (geneSymbol.toLowerCase() === searchTerm ||
-          ensemblId.toLowerCase() === searchTerm ||
-          geneSymbol.toLowerCase().startsWith(searchTerm) ||
-          ensemblId.toLowerCase().startsWith(searchTerm) ||
-          geneSymbol.toLowerCase().includes(searchTerm) ||
-          ensemblId.toLowerCase().includes(searchTerm)) {
+      if (geneSymbol === searchTerm ||
+          ensemblId.toLowerCase() === searchLower //||
+         // geneSymbol.toLowerCase() === searchLower
+          ) {
         return {
           symbol: geneSymbol,
           ensemblId: ensemblId,

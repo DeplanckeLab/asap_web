@@ -125,7 +125,7 @@ class ProjectsController < ApplicationController
     track_project_view!
     set_sandbox_self_destruct_at!
 
-    if @project.version_id <= 4
+    if @project.version_id < 4
        redirect_to "https://asap-old.epfl.ch/projects/#{@project.key}", allow_other_host: true
        return
     end

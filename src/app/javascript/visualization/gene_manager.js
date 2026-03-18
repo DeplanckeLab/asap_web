@@ -984,7 +984,7 @@ const parsedData = this.autocompleteData
   );
 
   let currentMatches2 = parsedData.filter(p => 
-    p.symbol == searchLower
+    p.symbol.toLowerCase() == searchLower
   );
 
 
@@ -1005,9 +1005,14 @@ const parsedData = this.autocompleteData
 // 3. Combine and slice
 let allMatches = [...currentMatches1, ...currentMatches2, ...currentMatches3, ...currentMatches4].slice(0, 25);
 
-this.currentMatches = Array.from(
-  new Map(allMatches.map(item => [item.ensemblId, item])).values()
-).slice(0, 25);
+const seen = new Set();
+this.currentMatches = allMatches.filter(item => {
+  if (seen.has(item.ensemblId)) {
+    return false;
+  }
+  seen.add(item.ensemblId);
+  return true;
+}).slice(0, 25);
 
     // console.log('GeneManager: Found', this.currentMatches.length, 'matches for query:', searchTerm)
     if (this.currentMatches.length > 0) {

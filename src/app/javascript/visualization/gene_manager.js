@@ -962,17 +962,52 @@ export class GeneManager {
     }
 
     // console.log('GeneManager: Searching in', this.autocompleteData.length, 'entries')
-    const searchTerm = query.toLowerCase().trim()
-    this.currentMatches = this.autocompleteData
+    const searchTerm = query.trim()
+    const searchLower = searchTerm.toLowerCase()
+    /*this.currentMatches = this.autocompleteData
       .map(entry => this.parseAutocompleteEntry(entry))
       .filter(parsed => {
         if (!parsed) return false
-        const { symbol: geneSymbol, ensemblId } = parsed
-        const searchLower = searchTerm.toLowerCase()
-        return geneSymbol.toLowerCase().includes(searchLower) ||
+        const { symbol: geneSymbol, ensemblId } = parsed        
+        return geneSymbol.includes(searchTerm) || geneSymbol.toLowerCase().includes(searchLower) ||
           ensemblId.toLowerCase().includes(searchLower)
       })
-      .slice(0, 10) // Limit to 10 results
+      .slice(0, 25) // Limit to 10 results
+*/
+console.log("bla")
+const parsedData = this.autocompleteData
+  .map(entry => this.parseAutocompleteEntry(entry))
+  .filter(p => !!p);
+
+  let currentMatches1 = parsedData.filter(p => 
+    p.symbol == searchTerm
+  );
+
+  let currentMatches2 = parsedData.filter(p => 
+    p.symbol == searchLower
+  );
+
+
+// 1. Get the priority matches (Exact case)
+
+  let currentMatches3 = parsedData.filter(p => 
+  p.symbol.toLowerCase().includes(searchTerm)
+);
+
+
+// 2. Get secondary matches (Case-insensitive or ID) 
+// but exclude ones already in primaryMatches
+
+  let currentMatches4 = parsedData.filter(p => 
+  (p.symbol.toLowerCase().includes(searchLower) || p.ensemblId.toLowerCase().includes(searchLower))
+);
+
+// 3. Combine and slice
+let allMatches = [...currentMatches1, ...currentMatches2, ...currentMatches3, ...currentMatches4].slice(0, 25);
+
+this.currentMatches = Array.from(
+  new Map(allMatches.map(item => [item.ensemblId, item])).values()
+).slice(0, 25);
 
     // console.log('GeneManager: Found', this.currentMatches.length, 'matches for query:', searchTerm)
     if (this.currentMatches.length > 0) {

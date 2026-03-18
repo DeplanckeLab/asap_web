@@ -38,22 +38,36 @@ font-size: inherit;
 </style>
 
 <%
-can_edit_project_title = editable?(@project) && !@project.public?
-summary_run_counts = project_run_counts(@project)
-summary_total_runs = summary_run_counts.values.sum
-summary_loom_file_count = @summary_loom_file_count || 0
-summary_shared_users_count = @summary_shared_users_count || 0
-summary_embedding_count = @summary_embedding_count || 0
-summary_visual_annotation_count = @summary_visual_annotation_count || 0
-summary_run_user_count = @summary_run_user_count || 0
-summary_checkpoint_count = @summary_checkpoint_count || 0
-summary_checkpoint_comment_count = @summary_checkpoint_comment_count || 0
-summary_compliance_schema_count = @project.compliance_schemas.size
-summary_owner_display = if current_user&.email.present? && @project.user&.email.present? && current_user.email.casecmp(@project.user.email).zero?
-'me'
-else
-@project.user&.email.to_s.split('@').first
-end
+  can_edit_project_title = editable?(@project) && !@project.public?
+  summary_run_counts = project_run_counts(@project)
+  summary_total_runs = summary_run_counts.values.sum
+  summary_loom_file_count = @summary_loom_file_count || 0
+  summary_loom_content_counts = @summary_loom_content_counts || { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
+  summary_shared_users_count = @summary_shared_users_count || 0
+  summary_embedding_count = @summary_embedding_count || 0
+  summary_visual_annotation_count = @summary_visual_annotation_count || 0
+  summary_visual_vote_count = @summary_visual_vote_count || 0
+  summary_run_user_count = @summary_run_user_count || 0
+  summary_checkpoint_count = @summary_checkpoint_count || 0
+  summary_checkpoint_comment_count = @summary_checkpoint_comment_count || 0
+  summary_compliance_schema_count = @project.compliance_schemas.size
+  summary_compliance_result = @project.cxg_validation_result
+  summary_compliance_valid = summary_compliance_result.present? ? summary_compliance_result['valid'] : nil
+  summary_compliance_schema_config = @project.compliance_schemas.first&.to_config_hash
+  summary_compliance_schema_name = summary_compliance_schema_config&.dig('name') || @project.compliance_schemas.first&.name || 'Schema'
+  summary_compliance_schema_version = summary_compliance_result&.dig('schema_version') || summary_compliance_schema_config&.dig('version')
+  summary_compliant_icon = summary_compliance_result&.dig('compliant_icon') || summary_compliance_schema_config&.dig('compliant_icon')
+  summary_not_compliant_icon = summary_compliance_result&.dig('not_compliant_icon') || summary_compliance_schema_config&.dig('not_compliant_icon')
+  summary_compliance_logo_icon = summary_compliant_icon || summary_not_compliant_icon
+  summary_publication_count = @project.doi.to_s.split(/\s*,\s*/).reject(&:blank?).size
+  summary_external_identifier_count = @h_exp_entries.present? ? @h_exp_entries.values.flatten.size : 0
+  summary_provider_source_count = @project.provider_projects.size
+  summary_owner_email_part = @project.user&.email.to_s.split('@').first
+  summary_owner_display = if current_user&.email.present? && @project.user&.email.present? && current_user.email.casecmp(@project.user.email).zero?
+    'me'
+  else
+    summary_owner_email_part
+  end
 downloaded_from_sources = @project.provider_projects.filter_map do |pp|
 provider = pp.provider
 next unless provider
@@ -67,6 +81,7 @@ summary_parsing_attrs = begin JSON.parse(@project.parsing_attrs_json.to_s); resc
 summary_integration_source_keys = summary_parsing_attrs['integrate_batch_paths'].is_a?(Hash) ? summary_parsing_attrs['integrate_batch_paths'].keys.reject(&:blank?) : []
 summary_integration_projects_by_key = summary_integration_source_keys.any? ? Project.where(key: summary_integration_source_keys).index_by(&:key) : {}
 summary_clone_lineage_projects = []
+summary_clone_lineage_deleted_parent_id = nil
 if @project.cloned_project_id.present?
 summary_lineage_current = @project
 summary_lineage_visited_ids = [@project.id]
@@ -79,9 +94,13 @@ if summary_lineage_parent
 summary_clone_lineage_projects << summary_lineage_parent
 summary_lineage_visited_ids << summary_lineage_parent.id
 summary_lineage_current = summary_lineage_parent
-else break; end
+else 
+ summary_clone_lineage_deleted_parent_id = summary_parent_id
+ break
+ end
 end
 end
+
 summary_embedding_records = Annot.where(project_id: @project.id, nber_rows: 2).includes(:user, run: [:user, :step]).order(:filepath, :name).to_a
 summary_checkpoint_records = @project.checkpoints.includes(:user).order(created_at: :desc).to_a
 summary_checkpoint_comments = []
@@ -95,6 +114,7 @@ summary_annotation_options = summary_cla_records.group_by(&:annot_id).map do |ai
 annot = clas.first&.annot; next unless annot; { id: aid, label: (annot.display_name.presence || annot.name.to_s), count: clas.length }
 end.compact.sort_by { |e| e[:label].to_s.downcase }
 summary_default_annotation_id = summary_annotation_options.first&.dig(:id)
+summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 %>
 <div class="adaptive-dashboard">
 <div class="mb-4">
@@ -272,13 +292,327 @@ summary_default_annotation_id = summary_annotation_options.first&.dig(:id)
 </div>
 
 <%# Draggable Details Popover %>
-<div id="summary-visual-details-popover" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border shadow-2xl flex flex-col overflow-hidden">
+<!--<div id="summary-visual-details-popover" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border shadow-2xl flex flex-col overflow-hidden">
 <div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b bg-gray-50 cursor-move"><h3 id="summary-visual-details-title" class="font-bold text-gray-900">Details</h3><button id="summary-visual-details-close-button" type="button" class="text-gray-400 hover:text-red-500"><i class="fas fa-times"></i></button></div>
 <div class="p-4 flex-1 overflow-auto">
 <div data-summary-detail-section="embeddings" class="hidden"><table class="min-w-full"><thead class="bg-gray-50"><tr><th class="px-2 py-2 text-left">File</th><th class="px-2 py-2 text-left">Name</th></tr></thead><tbody><% summary_embedding_records.each do |e| %><tr class="border-b"><td class="px-2 py-2 text-gray-500"><%= e.filepath.split('/').last %></td><td class="px-2 py-2 font-bold"><%= e.name %></td></tr><% end %></tbody></table></div>
 <div data-summary-detail-section="annotations" class="hidden"><div id="summary-annotations-main-view"><select id="summary-annotations-metadata-select" class="w-full max-w-md p-2 border rounded mb-4"><% summary_annotation_options.each do |o| %><option value="<%= o[:id] %>"><%= o[:label] %> (<%= o[:count] %>)</option><% end %></select><table class="min-w-full"><thead><tr class="bg-gray-50 text-gray-500 font-bold"><th class="px-2 py-2 text-left">Label</th><th class="px-2 py-2 text-left">Votes</th></tr></thead><tbody><% summary_cla_records.each do |cla| %><tr data-summary-annotation-row data-annot-id="<%= cla.annot_id %>" class="border-b"><td class="px-2 py-2 font-bold"><%= cla.name || cla.cat %></td><td class="px-2 py-2 font-bold text-gray-500">+<%= cla.nber_agree %> / -<%= cla.nber_disagree %></td></tr><% end %></tbody></table></div></div>
 <div data-summary-detail-section="checkpoints" class="hidden"><% summary_checkpoint_records.each do |cp| %><div class="border-b py-3"><p class="font-bold"><%= cp.title %></p></div><% end %></div>
 <div data-summary-detail-section="comments" class="hidden"><% summary_checkpoint_comments.each do |com| %><div class="border-b py-3"><p class="font-medium">"<%= com[:body] %>"</p></div><% end %></div>
+-->
+ <% if summary_clone_lineage_projects.any? %>
+      <div id="summary-lineage-popover" class="hidden fixed z-50 w-[min(56rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
+        <div id="summary-lineage-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
+          <div class="flex items-center gap-2 min-w-0">
+            <span id="summary-lineage-drag-handle" class="inline-flex items-center text-gray-400 cursor-move select-none" title="Drag">
+              <i class="fas fa-grip-vertical" style="font-size: 14px;"></i>
+            </span>
+            <h3 class="text-sm font-semibold text-gray-900">Full lineage</h3>
+          </div>
+          <button id="summary-lineage-close-button" type="button" class="inline-flex items-center justify-center p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700" title="Close" aria-label="Close">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="p-4 flex-1 overflow-y-auto overflow-x-auto min-h-0">
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Project</th>
+                  <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                  <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Runs</th>
+                  <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Views</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                <% summary_clone_lineage_projects.each_with_index do |lineage_project, lineage_index| %>
+                  <% lineage_run_counts = project_run_counts(lineage_project) %>
+                  <% lineage_total_runs = lineage_run_counts.values.sum %>
+                  <tr>
+                    <td class="px-2 py-1.5">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <%= link_to lineage_project.display_name, project_path(lineage_project), class: "text-xs font-medium text-blue-700 hover:text-blue-900 hover:underline truncate" %>
+                        <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-blue-100 text-blue-800 whitespace-nowrap"><%= lineage_project.key %></span>
+                        <% if lineage_project.public? %>
+                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">ASAP<%= lineage_project.public_id %></span>
+                        <% end %>
+                        <% if lineage_index == 0 %>
+                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-gray-100 text-gray-700 whitespace-nowrap">Current</span>
+                        <% elsif lineage_index == summary_clone_lineage_projects.length - 1 && summary_clone_lineage_deleted_parent_id.blank? %>
+                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-amber-100 text-amber-800 whitespace-nowrap">Original</span>
+                        <% end %>
+                      </div>
+                    </td>
+                    <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= lineage_project.created_at&.strftime("%b %d, %Y") %></td>
+                    <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= number_with_delimiter(lineage_total_runs) %></td>
+                    <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= number_with_delimiter(lineage_project.nber_views || 0) %></td>
+                  </tr>
+                <% end %>
+                <% if summary_clone_lineage_deleted_parent_id.present? %>
+                  <tr>
+                    <td class="px-2 py-1.5 text-xs text-gray-600 italic" colspan="4">
+                      Original ancestor was deleted (id: <%= summary_clone_lineage_deleted_parent_id %>)
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <div id="summary-visual-details-popover" data-project-key="<%= @project.key %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
+      <div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
+        <div class="flex items-center gap-2 min-w-0">
+          <span id="summary-visual-details-drag-handle" class="inline-flex items-center text-gray-400 cursor-move select-none" title="Drag">
+            <i class="fas fa-grip-vertical" style="font-size: 14px;"></i>
+          </span>
+          <h3 id="summary-visual-details-title" class="text-sm font-semibold text-gray-900">Details</h3>
+        </div>
+        <button id="summary-visual-details-close-button" type="button" class="inline-flex items-center justify-center p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700" title="Close" aria-label="Close">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="p-4 flex-1 overflow-y-auto overflow-x-auto min-h-0">
+        <div data-summary-detail-section="embeddings" class="hidden">
+          <% if summary_embedding_records.any? %>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">LOOM file</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Run</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Embedding</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                  <% summary_embedding_records.each do |embedding| %>
+                    <% embedding_creator = embedding.user || embedding.run&.user %>
+                    <tr>
+                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= loom_file_label(embedding.filepath.to_s) %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= embedding.run ? display_run(embedding.run) : '-' %></td>
+                      <% embedding_name = embedding.name.to_s %>
+                      <% embedding_name = embedding_name.split('/').last if embedding_name.include?('/') %>
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= embedding_name.presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= user_display_name(embedding_creator, current_user: current_user) %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= embedding.created_at&.strftime("%b %d, %Y") %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% else %>
+            <p class="text-xs text-gray-500 italic">No embeddings.</p>
+          <% end %>
+        </div>
+
+        <div data-summary-detail-section="checkpoints" class="hidden">
+          <% if summary_checkpoint_records.any? %>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Checkpoint</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Comments</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                  <% summary_checkpoint_records.each do |checkpoint| %>
+                    <tr>
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= checkpoint.title %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= checkpoint.user&.displayed_name.presence || checkpoint.user&.email.presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= checkpoint.created_at&.strftime("%b %d, %Y") %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= number_with_delimiter(checkpoint.comments.size) %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% else %>
+            <p class="text-xs text-gray-500 italic">No checkpoints.</p>
+          <% end %>
+        </div>
+
+        <div data-summary-detail-section="comments" class="hidden">
+          <% if summary_checkpoint_comments.any? %>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Checkpoint</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Comment</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">User</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                  <% summary_checkpoint_comments.each do |comment| %>
+                    <% comment_created_at = if comment[:created_at].present?
+                         begin
+                           Time.zone.parse(comment[:created_at]).strftime("%b %d, %Y")
+                         rescue StandardError
+                           comment[:created_at]
+                         end
+                       else
+                         '-'
+                       end %>
+                    <tr>
+                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= comment[:checkpoint_title] %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= comment[:body].presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= comment[:user_name].presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= comment_created_at %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% else %>
+            <p class="text-xs text-gray-500 italic">No comments.</p>
+          <% end %>
+        </div>
+
+        <div data-summary-detail-section="annotations" class="hidden">
+          <% if summary_annotation_options.any? %>
+            <% parse_summary_cla_field = lambda do |value|
+                 next [] if value.blank?
+                 text = value.to_s.strip
+                 next [] if text.blank?
+
+                 candidates = []
+                 begin
+                   parsed = JSON.parse(text)
+                   candidates = case parsed
+                                when Array
+                                  parsed
+                                when Hash
+                                  parsed.values
+                                else
+                                  [parsed]
+                                end
+                 rescue JSON::ParserError
+                   normalized = text.tr('[]{}', '')
+                   candidates = normalized.split(/[\s,;|]+/)
+                 end
+
+                 candidates.map { |item| item.to_s.strip }.reject(&:blank?)
+               end %>
+            <div id="summary-annotations-main-view">
+              <div class="mb-3">
+              <label for="summary-annotations-metadata-select" class="block text-xs font-medium text-gray-600 mb-1">Metadata</label>
+              <select id="summary-annotations-metadata-select" class="block w-full max-w-md px-2 py-1 text-xs border border-gray-300 rounded">
+                <% summary_annotation_options.each do |metadata_option| %>
+                  <option value="<%= metadata_option[:id] %>" <%= metadata_option[:id] == summary_default_annotation_id ? 'selected' : '' %>>
+                    <%= metadata_option[:label] %> (<%= number_with_delimiter(metadata_option[:count]) %>)
+                  </option>
+                <% end %>
+              </select>
+              </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Up-regulated genes</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Down-regulated genes</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Votes</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                  <% summary_cla_records.each do |cla| %>
+                    <% up_genes = parse_summary_cla_field.call(cla.sorted_up_gene_ids.presence || cla.up_gene_ids) %>
+                    <% down_genes = parse_summary_cla_field.call(cla.sorted_down_gene_ids.presence || cla.down_gene_ids) %>
+                    <% up_gene_symbols = up_genes.map { |gene_id| summary_gene_symbol_by_id[gene_id.to_s].presence || gene_id } %>
+                    <% down_gene_symbols = down_genes.map { |gene_id| summary_gene_symbol_by_id[gene_id.to_s].presence || gene_id } %>
+                    <% cluster_category_label = cla.cat.presence || cla.name.presence || '-' %>
+                    <tr data-summary-annotation-row data-annot-id="<%= cla.annot_id %>" class="<%= summary_default_annotation_id.present? && cla.annot_id != summary_default_annotation_id ? 'hidden' : '' %>">
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= cluster_category_label %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= cla.name.presence || cla.cat.presence || '-' %></td>
+                      <% cell_set_md5 = cla.cell_set&.key.to_s.presence %>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 font-mono whitespace-nowrap">
+                        <% if cell_set_md5 %>
+                          <button type="button" data-summary-cell-set-key="<%= cell_set_md5 %>" class="text-blue-700 hover:text-blue-900 hover:underline font-mono"><%= "#{cell_set_md5.first(10)}..." %></button>
+                        <% else %>
+                          <span><%= cla.cell_set_id || '-' %></span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600">
+                        <% if up_gene_symbols.any? %>
+                          <div class="flex flex-wrap gap-1">
+                            <% up_gene_symbols.each do |gene| %>
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800"><%= gene %></span>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600">
+                        <% if down_gene_symbols.any? %>
+                          <div class="flex flex-wrap gap-1">
+                            <% down_gene_symbols.each do |gene| %>
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800"><%= gene %></span>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">+<%= number_with_delimiter(cla.nber_agree || 0) %> / -<%= number_with_delimiter(cla.nber_disagree || 0) %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= user_display_name(cla.user, current_user: current_user) %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= cla.created_at&.strftime("%b %d, %Y") %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+              <p id="summary-annotations-empty" class="hidden text-xs text-gray-500 italic mt-2">No annotations for this metadata.</p>
+            </div>
+
+            <div id="summary-annotations-cell-set-view" class="hidden">
+              <div class="mb-3 flex items-center gap-2">
+                <button id="summary-annotations-cell-set-back" type="button" class="inline-flex items-center justify-center p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700" title="Go back" aria-label="Go back">
+                  <i class="fas fa-arrow-left"></i>
+                </button>
+                <span class="text-xs font-medium text-gray-700">Go back to project's annotations</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Project key</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Metadata name</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Up-regulated genes</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Down-regulated genes</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Votes</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="summary-annotations-cell-set-tbody" class="bg-white divide-y divide-gray-100"></tbody>
+                </table>
+              </div>
+              <p id="summary-annotations-cell-set-empty" class="hidden text-xs text-gray-500 italic mt-2">No annotations found for this cell set.</p>
+            </div>
+          <% else %>
+            <p class="text-xs text-gray-500 italic">No annotations.</p>
+          <% end %>
+        </div>
+      </div>
+    </div>
+
+
 </div>
 </div>
 </div>
@@ -324,4 +658,450 @@ lineageBtn?.addEventListener('click', (e) => { e.stopPropagation(); lineagePop?.
 const cardLink = document.querySelector('[data-summary-visualization-card-link]');
 cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url);
 })();
+</script>
+
+<% if can_edit_project_title %>
+  <script>
+    (function initializeProjectTitleEditor() {
+      const editor = document.getElementById('project-title-editor')
+      if (!editor || editor.dataset.initialized === 'true') return
+      editor.dataset.initialized = 'true'
+
+      const titleText = document.getElementById('project-title-text')
+      const editButton = document.getElementById('project-title-edit-button')
+      const editControls = document.getElementById('project-title-edit-controls')
+      const input = document.getElementById('project-title-input')
+      const saveButton = document.getElementById('project-title-save-button')
+      const cancelButton = document.getElementById('project-title-cancel-button')
+      if (!titleText || !editButton || !editControls || !input || !saveButton || !cancelButton) return
+
+      let currentTitle = editor.dataset.projectTitle || titleText.textContent.trim()
+      const updateUrl = editor.dataset.updateUrl
+
+      const showEditMode = () => {
+        titleText.classList.add('hidden')
+        editButton.classList.add('hidden')
+        editControls.classList.remove('hidden')
+        input.value = currentTitle
+        input.focus()
+        input.select()
+      }
+
+      const showReadMode = () => {
+        editControls.classList.add('hidden')
+        titleText.classList.remove('hidden')
+        editButton.classList.remove('hidden')
+      }
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+      const saveTitle = async () => {
+        const nextTitle = input.value.trim()
+        if (!nextTitle) {
+          alert('Project title cannot be empty.')
+          return
+        }
+        if (nextTitle === currentTitle) {
+          showReadMode()
+          return
+        }
+
+        saveButton.disabled = true
+        try {
+          const response = await fetch(updateUrl, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ project: { name: nextTitle } })
+          })
+
+          if (!response.ok) {
+            let message = 'Failed to update project title.'
+            try {
+              const payload = await response.json()
+              if (payload && payload.error) message = payload.error
+            } catch (_error) {}
+            throw new Error(message)
+          }
+
+          currentTitle = nextTitle
+          editor.dataset.projectTitle = nextTitle
+          titleText.textContent = nextTitle
+          document.title = `${nextTitle} - ASAP`
+          showReadMode()
+        } catch (error) {
+          alert(error.message || 'Failed to update project title.')
+        } finally {
+          saveButton.disabled = false
+        }
+      }
+
+      editButton.addEventListener('click', showEditMode)
+      cancelButton.addEventListener('click', showReadMode)
+      saveButton.addEventListener('click', saveTitle)
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          saveTitle()
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          showReadMode()
+        }
+      })
+    })()
+  </script>
+<% end %>
+
+<% if summary_clone_lineage_projects.any? %>
+  <script>
+    (function initializeSummaryLineagePanel() {
+      const toggleButton = document.getElementById('summary-lineage-toggle-button')
+      const lineagePopover = document.getElementById('summary-lineage-popover')
+      const closeButton = document.getElementById('summary-lineage-close-button')
+      const header = document.getElementById('summary-lineage-header')
+      if (!toggleButton || !lineagePopover || !closeButton || !header || toggleButton.dataset.initialized === 'true') return
+      toggleButton.dataset.initialized = 'true'
+      let wasDragged = false
+      let isDragging = false
+
+      const closePopover = () => {
+        lineagePopover.classList.add('hidden')
+        toggleButton.setAttribute('aria-expanded', 'false')
+      }
+
+      const positionPopover = () => {
+        const rect = toggleButton.getBoundingClientRect()
+        const popoverWidth = Math.min(window.innerWidth * 0.95, 896)
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverWidth - 8))
+        const top = rect.bottom + 8
+        lineagePopover.style.left = `${left}px`
+        lineagePopover.style.top = `${top}px`
+      }
+
+      const startDrag = (event) => {
+        if (event.button !== 0) return
+        if (closeButton.contains(event.target)) return
+        event.preventDefault()
+        event.stopPropagation()
+        const rect = lineagePopover.getBoundingClientRect()
+        const offsetX = event.clientX - rect.left
+        const offsetY = event.clientY - rect.top
+        isDragging = true
+
+        const onMove = (moveEvent) => {
+          if (!isDragging) return
+          wasDragged = true
+          const maxLeft = Math.max(8, window.innerWidth - rect.width - 8)
+          const maxTop = Math.max(8, window.innerHeight - rect.height - 8)
+          const left = Math.max(8, Math.min(moveEvent.clientX - offsetX, maxLeft))
+          const top = Math.max(8, Math.min(moveEvent.clientY - offsetY, maxTop))
+          lineagePopover.style.left = `${left}px`
+          lineagePopover.style.top = `${top}px`
+        }
+
+        const endDrag = () => {
+          isDragging = false
+          document.removeEventListener('mousemove', onMove)
+          document.removeEventListener('mouseup', endDrag)
+        }
+
+        document.addEventListener('mousemove', onMove)
+        document.addEventListener('mouseup', endDrag)
+      }
+
+      toggleButton.addEventListener('click', (event) => {
+        event.stopPropagation()
+        if (lineagePopover.classList.contains('hidden')) {
+          wasDragged = false
+          positionPopover()
+          lineagePopover.classList.remove('hidden')
+          toggleButton.setAttribute('aria-expanded', 'true')
+          return
+        }
+        closePopover()
+      })
+
+      closeButton.addEventListener('click', (event) => {
+        event.stopPropagation()
+        closePopover()
+      })
+
+      document.addEventListener('click', (event) => {
+        if (lineagePopover.classList.contains('hidden')) return
+        if (lineagePopover.contains(event.target) || toggleButton.contains(event.target)) return
+        closePopover()
+      })
+
+      header.addEventListener('mousedown', startDrag)
+
+      window.addEventListener('resize', () => {
+        if (lineagePopover.classList.contains('hidden') || wasDragged) return
+        positionPopover()
+      })
+
+      window.addEventListener('scroll', () => {
+        if (lineagePopover.classList.contains('hidden') || wasDragged) return
+        positionPopover()
+      }, { passive: true })
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !lineagePopover.classList.contains('hidden')) closePopover()
+      })
+
+      if (!lineagePopover.classList.contains('hidden')) {
+        positionPopover()
+        toggleButton.setAttribute('aria-expanded', 'true')
+      }
+    })()
+  </script>
+<% end %>
+
+<script>
+  (function initializeSummaryVisualDetailsPopover() {
+    const popover = document.getElementById('summary-visual-details-popover')
+    const closeButton = document.getElementById('summary-visual-details-close-button')
+    const header = document.getElementById('summary-visual-details-header')
+    const title = document.getElementById('summary-visual-details-title')
+    const triggers = Array.from(document.querySelectorAll('[data-summary-detail-trigger]'))
+    if (!popover || !closeButton || !header || !title || triggers.length === 0 || popover.dataset.initialized === 'true') return
+    popover.dataset.initialized = 'true'
+    let wasDragged = false
+    let isDragging = false
+
+    const sectionByType = {
+      embeddings: 'Embeddings',
+      annotations: 'Annotations',
+      checkpoints: 'Checkpoints',
+      comments: 'Comments'
+    }
+
+    const allSections = Array.from(popover.querySelectorAll('[data-summary-detail-section]'))
+    const annotationSelect = document.getElementById('summary-annotations-metadata-select')
+    const annotationRows = Array.from(popover.querySelectorAll('[data-summary-annotation-row]'))
+    const annotationEmpty = document.getElementById('summary-annotations-empty')
+    const annotationsMainView = document.getElementById('summary-annotations-main-view')
+    const annotationsCellSetView = document.getElementById('summary-annotations-cell-set-view')
+    const annotationsCellSetBackButton = document.getElementById('summary-annotations-cell-set-back')
+    const annotationsCellSetTbody = document.getElementById('summary-annotations-cell-set-tbody')
+    const annotationsCellSetEmpty = document.getElementById('summary-annotations-cell-set-empty')
+    const projectKey = popover.dataset.projectKey
+
+    const refreshAnnotationRows = () => {
+      if (!annotationSelect || annotationRows.length === 0) return
+      const selected = annotationSelect.value
+      let visibleCount = 0
+      annotationRows.forEach((row) => {
+        const isVisible = row.dataset.annotId === selected
+        row.classList.toggle('hidden', !isVisible)
+        if (isVisible) visibleCount += 1
+      })
+      if (annotationEmpty) annotationEmpty.classList.toggle('hidden', visibleCount > 0)
+    }
+
+    const escapeHtml = (value) => {
+      return String(value == null ? '' : value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;')
+    }
+
+    const renderGeneBadges = (genes, tone) => {
+      const list = Array.isArray(genes) ? genes : []
+      if (list.length === 0) return '<span class="text-gray-400">-</span>'
+      const badgeClass = tone === 'up'
+        ? 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800'
+        : 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800'
+      return `<div class="flex flex-wrap gap-1">${list.map((gene) => `<span class="${badgeClass}">${escapeHtml(gene)}</span>`).join('')}</div>`
+    }
+
+    const showProjectAnnotationsView = () => {
+      if (annotationsMainView) annotationsMainView.classList.remove('hidden')
+      if (annotationsCellSetView) annotationsCellSetView.classList.add('hidden')
+    }
+
+    const showCellSetAnnotationsView = () => {
+      if (annotationsMainView) annotationsMainView.classList.add('hidden')
+      if (annotationsCellSetView) annotationsCellSetView.classList.remove('hidden')
+    }
+
+    const loadCellSetAnnotations = async (cellSetKey) => {
+      if (!annotationsCellSetTbody || !projectKey || !cellSetKey) return
+      showCellSetAnnotationsView()
+      annotationsCellSetTbody.innerHTML = '<tr><td colspan="10" class="px-2 py-3 text-xs text-gray-500">Loading annotations...</td></tr>'
+      if (annotationsCellSetEmpty) annotationsCellSetEmpty.classList.add('hidden')
+
+      try {
+        const response = await fetch(`/projects/${encodeURIComponent(projectKey)}/get_cell_set_annotations?cell_set_key=${encodeURIComponent(cellSetKey)}`, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin'
+        })
+        if (!response.ok) throw new Error('Failed to load cell set annotations')
+        const payload = await response.json()
+        const rows = Array.isArray(payload.annotations) ? payload.annotations : []
+
+        if (rows.length === 0) {
+          annotationsCellSetTbody.innerHTML = ''
+          if (annotationsCellSetEmpty) annotationsCellSetEmpty.classList.remove('hidden')
+          return
+        }
+
+        annotationsCellSetTbody.innerHTML = rows.map((row) => {
+          const cellSetHash = String(row.cell_set_key || '')
+          const shortHash = cellSetHash ? `${cellSetHash.slice(0, 10)}...` : '-'
+          return `
+            <tr>
+              <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.project_key || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.metadata_name || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.cluster_category || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.label || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600 font-mono whitespace-nowrap">${escapeHtml(shortHash)}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600">${renderGeneBadges(row.up_genes, 'up')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600">${renderGeneBadges(row.down_genes, 'down')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">+${escapeHtml(row.nber_agree || 0)} / -${escapeHtml(row.nber_disagree || 0)}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">${escapeHtml(row.created_by || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">${escapeHtml(row.created_at || '-')}</td>
+            </tr>
+          `
+        }).join('')
+      } catch (_error) {
+        annotationsCellSetTbody.innerHTML = '<tr><td colspan="10" class="px-2 py-3 text-xs text-red-600">Unable to load annotations for this cell set.</td></tr>'
+      }
+    }
+
+    if (annotationSelect) {
+      annotationSelect.addEventListener('change', refreshAnnotationRows)
+      refreshAnnotationRows()
+    }
+
+    if (annotationsCellSetBackButton) {
+      annotationsCellSetBackButton.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        showProjectAnnotationsView()
+        refreshAnnotationRows()
+      })
+    }
+
+    popover.addEventListener('click', (event) => {
+      const trigger = event.target.closest('[data-summary-cell-set-key]')
+      if (!trigger) return
+      event.preventDefault()
+      event.stopPropagation()
+      loadCellSetAnnotations(trigger.dataset.summaryCellSetKey)
+    })
+
+    const closePopover = () => {
+      popover.classList.add('hidden')
+      triggers.forEach((trigger) => trigger.setAttribute('aria-expanded', 'false'))
+      showProjectAnnotationsView()
+    }
+
+    const positionPopover = (trigger) => {
+      const rect = trigger.getBoundingClientRect()
+      const popoverWidth = Math.min(window.innerWidth * 0.95, 1024)
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverWidth - 8))
+      const top = rect.bottom + 8
+      popover.style.left = `${left}px`
+      popover.style.top = `${top}px`
+    }
+
+    const startDrag = (event) => {
+      if (event.button !== 0) return
+      if (closeButton.contains(event.target)) return
+      event.preventDefault()
+      event.stopPropagation()
+      const rect = popover.getBoundingClientRect()
+      const offsetX = event.clientX - rect.left
+      const offsetY = event.clientY - rect.top
+      isDragging = true
+
+      const onMove = (moveEvent) => {
+        if (!isDragging) return
+        wasDragged = true
+        const maxLeft = Math.max(8, window.innerWidth - rect.width - 8)
+        const maxTop = Math.max(8, window.innerHeight - rect.height - 8)
+        const left = Math.max(8, Math.min(moveEvent.clientX - offsetX, maxLeft))
+        const top = Math.max(8, Math.min(moveEvent.clientY - offsetY, maxTop))
+        popover.style.left = `${left}px`
+        popover.style.top = `${top}px`
+      }
+
+      const endDrag = () => {
+        isDragging = false
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', endDrag)
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', endDrag)
+    }
+
+    const openPopover = (trigger, type) => {
+      allSections.forEach((section) => {
+        section.classList.toggle('hidden', section.dataset.summaryDetailSection !== type)
+      })
+      title.textContent = sectionByType[type] || 'Details'
+      wasDragged = false
+      positionPopover(trigger)
+      popover.classList.remove('hidden')
+      triggers.forEach((otherTrigger) => otherTrigger.setAttribute('aria-expanded', otherTrigger === trigger ? 'true' : 'false'))
+      if (type === 'annotations') {
+        showProjectAnnotationsView()
+        refreshAnnotationRows()
+      }
+    }
+
+    triggers.forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const type = trigger.dataset.summaryDetailType
+        if (!type) return
+        if (!popover.classList.contains('hidden') && trigger.getAttribute('aria-expanded') === 'true') {
+          closePopover()
+          return
+        }
+        openPopover(trigger, type)
+      })
+    })
+
+    closeButton.addEventListener('click', (event) => {
+      event.stopPropagation()
+      closePopover()
+    })
+
+    header.addEventListener('mousedown', startDrag)
+
+    document.addEventListener('click', (event) => {
+      if (popover.classList.contains('hidden')) return
+      if (popover.contains(event.target)) return
+      const clickedTrigger = triggers.some((trigger) => trigger.contains(event.target))
+      if (clickedTrigger) return
+      closePopover()
+    })
+
+    window.addEventListener('resize', () => {
+      if (popover.classList.contains('hidden')) return
+      if (wasDragged) return
+      const activeTrigger = triggers.find((trigger) => trigger.getAttribute('aria-expanded') === 'true')
+      if (activeTrigger) positionPopover(activeTrigger)
+    })
+
+    window.addEventListener('scroll', () => {
+      if (popover.classList.contains('hidden')) return
+      if (wasDragged) return
+      const activeTrigger = triggers.find((trigger) => trigger.getAttribute('aria-expanded') === 'true')
+      if (activeTrigger) positionPopover(activeTrigger)
+    }, { passive: true })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !popover.classList.contains('hidden')) closePopover()
+    })
+  })()
 </script>

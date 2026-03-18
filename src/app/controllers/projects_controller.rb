@@ -244,7 +244,7 @@ class ProjectsController < ApplicationController
     
     # Default to visualization only when embeddings exist.
     # Projects without embeddings should open in analysis.
-    default_view = has_visualization_embeddings ? 'visualization' : 'analysis'
+    default_view = "summary" #has_visualization_embeddings ? 'visualization' : 'summary'
     @view_type = resolve_project_view_type(params[:view].presence || default_view)
     return unless authorize_requested_view_access!(@view_type)
     
@@ -6219,7 +6219,8 @@ class ProjectsController < ApplicationController
       allowed_views = %w[summary visualization analysis data settings compliance]
       return view if allowed_views.include?(view)
 
-      project_has_embeddings? ? 'visualization' : 'analysis'
+      #project_has_embeddings? ? 'visualization' : 'summary'
+      "summary"
     end
 
     def project_has_embeddings?

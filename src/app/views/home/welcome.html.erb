@@ -1,33 +1,45 @@
-
 <!-- Hero -->
-<div class="max-w-[85rem] mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-  <!-- Grid -->
-  <div class="grid md:grid-cols-2 gap-4 md:gap-8 xl:gap-20 md:items-center">
-    <div>
+<div class="relative overflow-hidden">
+  <div class="max-w-[85rem] mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-20">
+    
+    <!-- Centered Content Wrapper -->
+    <div class="max-w-4xl mx-auto text-center">
+      
+      <!-- Logo Header (Kept your original H1 classes) -->
       <h1 class="block text-3xl font-bold text-gray-800 sm:text-4xl lg:text-6xl lg:leading-tight dark:text-white">
-        <%= image_tag "ASAP_avecTagline_Colors.svg", 
-        class: 'h-full w-full object-contain', 
-        style: '', 
-        alt: 'ASAP Logo' %> 
+        <div class="flex justify-center">
+          <%= image_tag "ASAP_avecTagline_Colors.svg", 
+              class: 'h-24 sm:h-32 md:h-40 w-auto object-contain', 
+              alt: 'ASAP Logo' %> 
+        </div>
       </h1>
-      <p class="mt-3 text-lg text-gray-800 dark:text-neutral-400">
-      A collaborative portal to analyze single-cell transcriptomics data.
+
+      <!-- Tagline (Kept your original P classes) -->
+      <p class="mt-3 text-lg text-gray-800 dark:text-neutral-400 max-w-2xl mx-auto">
+        A collaborative portal to analyze single-cell transcriptomics data.
       </p>
 
-      <!-- Buttons -->
-      <div class="mt-7 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-        <a class="<%= tw_btn(:primary) %> justify-center px-6 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" href="<%= new_project_path %>">
+      <!-- Buttons (Centered) -->
+      <div class="mt-8 flex flex-col sm:flex-row justify-center gap-3 w-full sm:w-auto">
+        <a class="<%= tw_btn(:primary) %> justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" href="<%= new_project_path %>">
           Try it now!
-          <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          <svg class="shrink-0 size-4 ml-2" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </a>
-        <a class="<%= tw_btn(:light) %> justify-center px-6 py-3 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" href="<%= projects_path %>">
+        <a class="<%= tw_btn(:light) %> justify-center px-8 py-3 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" href="<%= projects_path %>">
           Search projects
         </a>
       </div>
-      <!-- End Buttons -->
 
-      <!-- Feedback -->
-      <div class="mt-6 flex flex-wrap gap-4">
+      <!-- Tutorial Link (Replacement for the video) -->
+      <div class="mt-6">
+        <a class="inline-flex items-center gap-x-1.5 text-sm font-medium text-blue-600 decoration-2 hover:underline focus:outline-none focus:underline dark:text-blue-500" href="<%= tutorial_home_index_path %>">
+          Check the tutorials
+          <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </a>
+      </div>
+
+      <!-- Feedback (Centered) -->
+      <div class="mt-10 flex flex-wrap justify-center gap-6">
         <% feedback_menu_links.each do |link| %>
           <a href="<%= link[:path] %>"
              class="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
@@ -38,55 +50,33 @@
         <% end %>
       </div>
 
-      <!-- SIB -->
-      <div class="mt-8 flex items-center gap-4">
-        <a href="https://www.sib.swiss" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 w-28 flex justify-center">
-          <%= image_tag "sib_logo.svg", class: "h-20", alt: "SIB Swiss Institute of Bioinformatics" %>
-        </a>
-        <p class="text-sm text-gray-500">ASAP is proudly part of <a href="https://www.sib.swiss/sib-resources" target="_blank" rel="noopener noreferrer" class="text-gray-700 hover:underline font-medium">SIB resources</a><br><a href="https://www.sib.swiss/sib-resources" target="_blank" rel="noopener noreferrer" class="text-gray-700 hover:underline font-medium">Explore resources and their impact</a></p>
-      </div>
-
-      <!-- scFAIR -->
-      <div class="mt-4 flex items-center gap-4">
-        <a href="https://sc-fair.org" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 w-28 flex justify-center">
-          <%= image_tag "scfair.svg", class: "h-18", alt: "scFAIR" %>
-        </a>
-        <p class="text-sm text-gray-500">Partner resource in the <a href="https://sc-fair.org" target="_blank" rel="noopener noreferrer" class="text-gray-700 hover:underline font-medium">scFAIR</a> initiative</p>
-      </div>
-
-    </div>
-    <!-- End Col -->
-
-    <div class="relative ms-4">
-
-      <div class="relative flex flex-col w-full min-h-60 bg-[url('https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=560&q=80')] bg-center bg-cover rounded-xl">
-        <div class="flex-auto p-4 md:p-6">
-         <!-- <h3 class="text-xl text-white/90 group-hover:text-white">Video tutorial</h3> -->
-          <h3 class="text-xl text-white/90">Video tutorial</h3>
-          <div class="container text-center">
-	          <a href="https://www.youtube.com/watch?v=OjFamgLC_8M" target="_blank">
-              <img src="https://img.youtube.com/vi/OjFamgLC_8M/0.jpg" alt="YouTube Video Thumbnail" style="width:250px">
-	          </a>
-	        </div>
-        </div>
-        <div class="pt-0 p-4 md:p-6">
-          <div class="inline-flex items-center gap-2 text-sm font-medium text-white">
-            <a class='hover:shadow-lg focus:outline-hidden focus:shadow-lg transition' href="<%= tutorial_home_index_path %>">Also check the tutorials</a>
-           <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      <!-- Partners (Formatted as a clean footer-style row) -->
+      <div class="mt-16 pt-10 border-t border-gray-200 dark:border-neutral-800">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center max-w-3xl mx-auto">
+          
+          <!-- SIB -->
+          <div class="flex items-center gap-4 justify-center md:justify-start">
+            <a href="https://www.sib.swiss" target="_blank" rel="noopener noreferrer" class="shrink-0">
+              <%= image_tag "sib_logo.svg", class: "h-14", alt: "SIB Logo" %>
+            </a>
+            <p class="text-xs text-left text-gray-500 max-w-[200px]">
+              ASAP is part of <a href="https://www.sib.swiss/sib-resources" class="text-gray-700 font-medium hover:underline">SIB resources</a>
+            </p>
           </div>
+
+          <!-- scFAIR -->
+          <div class="flex items-center gap-4 justify-center md:justify-start">
+            <a href="https://sc-fair.org" target="_blank" rel="noopener noreferrer" class="shrink-0">
+              <%= image_tag "scfair.svg", class: "h-12", alt: "scFAIR" %>
+            </a>
+            <p class="text-xs text-left text-gray-500 max-w-[200px]">
+              Partner in the <a href="https://sc-fair.org" class="text-gray-700 font-medium hover:underline">scFAIR initiative</a>
+            </p>
+          </div>
+
         </div>
       </div>
+
     </div>
-
-    <!-- End Col -->
   </div>
-  <!-- End Grid -->
-</div>
-<!-- End Hero -->
-
-<div
-  data-controller="simple-test"
-  data-simple-test-channel-value="SolidCable::Channel" <%# Default Solid Cable channel %>
-  data-simple-test-stream-name-value="my_very_simple_test_stream" <%# Our hardcoded stream name %>
->
 </div>

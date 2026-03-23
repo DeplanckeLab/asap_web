@@ -5,9 +5,23 @@ namespace :runs do
 
     #get the runs that are in a running status
 
+    runs = Run.where(status_id: 2).where.not(slurm_job_id: nil)
     # for each of them check if there is a slurm job running
     # otherwise we check if the run finished (if output.json exists in the run's path, running Basic.finish_run should move the run to success or failed status) 
-   
+    runs.each do |run|
+      slurm_job_id = run.slurm_job_id
+      if slurm_job_id.nil?
+        puts "Run #{run.id} has no slurm job id"
+      else
+        slurm_service = SlurmService.new(logger: Rails.logger)
+        status = slurm_service.get_job_status(slurm_job_id, run)
+        if status.nil?
+          puts "Run #{run.id} has no slurm job id"
+        else
+          puts "Run #{run.id} has slurm job id #{slurm_job_id} and status #{status}"
+        end
+      end
+    end
     
   end
 end

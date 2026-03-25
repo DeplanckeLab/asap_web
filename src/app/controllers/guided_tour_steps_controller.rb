@@ -58,6 +58,6 @@ class GuidedTourStepsController < ApplicationController
   end
 
   def guided_tour_step_params
-    params.require(:guided_tour_step).permit(:rank, :page_url, :title, :focus_element, :description)
+    params.require(:guided_tour_step).permit(:rank, :page_url, :title, :focus_element, :description, :step_actions_json)
   end
 end

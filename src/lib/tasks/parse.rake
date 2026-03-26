@@ -147,6 +147,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
       Dir.children(project_dir).each do |entry|
         sub_path = project_dir + entry
         next unless File.directory?(sub_path)
+        # Keep FU storage during reset; parsing input symlink points there.
+        next if entry == 'fus'
         FileUtils.rm_rf(sub_path)
       end
     end
@@ -450,6 +452,33 @@ task :parse, [:project_key] => [:environment] do |t, args|
       
       if version.id >= 8
 
+        # For RAW_TEXT uploads packaged in archives (.tar.gz/.zip), preparsing can
+        # extract the real matrix file and expose it in output.json:file_path.
+        # Use that resolved path for v8 parser instead of the archive itself.
+        if file_type == 'RAW_TEXT' && fu
+          begin
+            preparsing_output_file = fu.upload_dir + "output.json"
+            if File.exist?(preparsing_output_file)
+              h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
+              preparsed_file_path = h_preparsing['file_path'].to_s
+              if preparsed_file_path.present?
+                legacy_prefix = "/data/asap2_test/fus/#{fu.id}/"
+                if preparsed_file_path.start_with?(legacy_prefix)
+                  preparsed_file_path = preparsed_file_path.sub(legacy_prefix, "#{fu.upload_dir}/")
+                end
+                if File.exist?(preparsed_file_path)
+                  filepath = Pathname.new(preparsed_file_path)
+                  logger.info("[ParseRake] Using preparsed RAW_TEXT file path #{filepath} instead of archive input")
+                else
+                  logger.warn("[ParseRake] Preparsing file_path not found on disk: #{preparsed_file_path}, keeping original input #{filepath}")
+                end
+              end
+            end
+          rescue => e
+            logger.warn("[ParseRake] Could not resolve preparsed RAW_TEXT file path: #{e.class} - #{e.message}")
+          end
+        end
+
 
 #      usage: parse.v8.py -f File to parse [-o Output folder] --filetype File type [--header [RAW_TEXT] Is there a header] [--col [RAW_TEXT] Which column contains row names]                 
 #                   [--sel In case of multiple matrices, which one to use] [--delim [RAW_TEXT] Delimiter to parse columns] --organism Organism --dburl Host URL for DB                        
@@ -488,13 +517,22 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
         h_env_docker_image = h_env['docker_images']['asap_run']
         image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+        docker_call = h_env_docker_image['call'].gsub(/\#image_name/, image_name)
+        user_data_mount = ENV.fetch('USER_DATA_DIR')
+        mount_arg = "-v #{user_data_mount}:#{user_data_mount}"
+        unless docker_call.include?(mount_arg)
+          docker_call = docker_call.sub('--rm', "--rm #{mount_arg}")
+        end
 
         asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
         h_cmd_parse = {
           'host_name' => "localhost",
-          'time_call' => h_env["time_call"].gsub(/\#output_dir/, tmp_dir.to_s),
+          # v8 parsing runs in a container context that does not always mount USER_DATA_DIR
+          # (for example /data/asap2_test), so legacy `time -o <output_dir>/exec_run_details.log`
+          # can fail before parser execution. Keep time_call empty for v8 and rely on parser output.
+          'time_call' => nil,
           'container_name' => asap_instance_name + "_" + run.id.to_s,
-          'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
+          'docker_call' => docker_call,
           'program' => "python3 parse.v8.py",
           'opts' => opts,
           'args' => []
@@ -869,9 +907,13 @@ task :parse, [:project_key] => [:environment] do |t, args|
       if fu
         begin
           upload_dir_to_cleanup = fu.upload_dir
-          if File.exist?(upload_dir_to_cleanup)
+          global_upload_root = Fu.global_upload_root.to_s
+          cleanup_allowed = upload_dir_to_cleanup.to_s.start_with?(global_upload_root + "/")
+          if cleanup_allowed && File.exist?(upload_dir_to_cleanup)
             FileUtils.rm_rf(upload_dir_to_cleanup)
             logger.info("[ParseRake] Cleaned upload directory #{upload_dir_to_cleanup} after parsing")
+          elsif !cleanup_allowed
+            logger.info("[ParseRake] Skipping cleanup for project-attached upload directory #{upload_dir_to_cleanup}")
           end
         rescue => e
           logger.error("[ParseRake] Failed to clean upload directory for Fu##{fu.id}: #{e.class} - #{e.message}")

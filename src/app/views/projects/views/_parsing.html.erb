@@ -123,8 +123,9 @@
           </p>
           <% if can_reset_parsing %>
             <% if editable?(@project) %>
-              <%= link_to reset_parsing_project_path(@project),
-                    class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block" do %>
+              <%= button_tag type: 'button',
+                    data: { reset_parsing_url: reset_parsing_project_path(@project) },
+                    class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0" do %>
                 <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
               <% end %>
             <% else %>
@@ -145,6 +146,7 @@
     </div>
   </div>
 <% end %>
+
 
 <%# Parsing Results Section %>
 <% if @step && @step.name == 'parsing' && @results && !@results['displayed_error'] && (@parsing_run.nil? || @parsing_run.status_id == 3) %>
@@ -201,8 +203,9 @@
           <!-- Reset Button -->
           <% if can_reset_parsing %>
             <% if editable?(@project) %>
-              <%= link_to reset_parsing_project_path(@project),
-                    class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
+              <%= button_tag type: 'button',
+                    data: { reset_parsing_url: reset_parsing_project_path(@project) },
+                    class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0",
                     style: "flex-shrink: 0;" do %>
                 <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
               <% end %>
@@ -258,13 +261,13 @@
       <!-- Parameters (for non-LOOM/H5_10x/MEX formats) -->
       <% if @results && !['LOOM', 'H5_10x', 'MEX'].include?(@results["detected_format"]) && @project.parsing_attrs_json %>
         <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-        <div class="pt-4 relative overflow-hidden">
+        <div class="pt-4 relative overflow-visible min-h-[4.5rem]">
           <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
             <i class="fas fa-cog text-gray-500"></i>
             Parameters
           </h4>
           <!-- File Format - Right Floating -->
-          <div class="absolute top-4 right-6 max-w-[calc(100%-3rem)] overflow-hidden">
+          <div class="absolute top-4 right-2 max-w-[calc(100%-0.5rem)] overflow-visible">
             <% if @h_formats && @results && @results["detected_format"] && @h_formats[@results["detected_format"]] %>
               <%= raw display_file_format(@h_formats[@results["detected_format"]]) %>
             <% elsif @results && @results["detected_format"] %>
@@ -504,8 +507,9 @@
         </h3>
         <% if can_reset_parsing %>
           <% if editable?(@project) %>
-            <%= link_to reset_parsing_project_path(@project),
-                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block",
+            <%= button_tag type: 'button',
+                  data: { reset_parsing_url: reset_parsing_project_path(@project) },
+                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0",
                   style: "flex-shrink: 0;" do %>
               <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
             <% end %>

@@ -5709,6 +5709,7 @@ class ProjectsController < ApplicationController
     if h_attrs['integrate_batch_paths'].present?
       source_keys = h_attrs['integrate_batch_paths'].keys
       session[:integrate_project_keys] = source_keys
+      Rails.logger.info("[reset_parsing] Integration project detected, redirecting to new project integrate form source_keys=#{source_keys.inspect}")
       # Pass source_keys in URL params so the new action does not depend solely
       # on the session cookie surviving the redirect (Turbo Drive + fetch can
       # occasionally lose the Set-Cookie from the intermediate 302 response).
@@ -5724,6 +5725,7 @@ class ProjectsController < ApplicationController
          end
     
     unless fu
+      Rails.logger.warn("[reset_parsing] Fu not found for project id=#{@original_project.id} key=#{@original_project.key}; redirecting back to analysis")
       redirect_to project_path(@original_project, view: 'analysis'), alert: 'File upload record not found. Cannot reset parsing.'
       return
     end
@@ -5734,19 +5736,54 @@ class ProjectsController < ApplicationController
 
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + @original_project.user_id.to_s + @original_project.key
-    canonical_project_input_filename = @original_project.input_filename.presence || fu.upload_file_name
-    canonical_project_input_file_path = project_dir + canonical_project_input_filename
+    input_filename_candidates = [
+      @original_project.input_filename,
+      fu.upload_file_name,
+      'input_file.tar.gz',
+      'input_file.tgz',
+      'input_file.zip',
+      'input_file'
+    ].compact.map(&:to_s).uniq
+    canonical_project_input_filename = input_filename_candidates.find do |candidate|
+      File.exist?(project_dir + candidate)
+    end
+    canonical_project_input_file_path = canonical_project_input_filename ? (project_dir + canonical_project_input_filename) : nil
+    Rails.logger.info("[reset_parsing] Using fu id=#{fu.id} upload_dir=#{upload_dir} upload_file_path=#{upload_file_path} input_filename_candidates=#{input_filename_candidates.inspect} selected_input_filename=#{canonical_project_input_filename.inspect} selected_input_file_path=#{canonical_project_input_file_path}")
 
-    unless File.exist?(canonical_project_input_file_path)
-      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project input file copy not found. Cannot reset parsing.'
+    unless canonical_project_input_file_path && File.exist?(canonical_project_input_file_path)
+      checked_paths = input_filename_candidates.map { |candidate| (project_dir + candidate).to_s }
+      fu_expected_path = upload_file_path.to_s
+      Rails.logger.warn("[reset_parsing] Could not resolve project input file. checked_paths=#{checked_paths.inspect} fu_expected_path=#{fu_expected_path} project_dir_exists=#{File.exist?(project_dir)} upload_dir_exists=#{File.exist?(upload_dir)}")
+      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project input file copy not found (expected archived upload is missing). Please re-upload the file before resetting parsing.'
       return
+    end
+
+    if @original_project.input_filename != canonical_project_input_filename
+      @original_project.update_column(:input_filename, canonical_project_input_filename)
+    end
+
+    source_path = canonical_project_input_file_path.to_s
+    source_realpath = begin
+      File.realpath(source_path)
+    rescue StandardError
+      source_path
+    end
+    upload_dir_realpath = File.expand_path(upload_dir.to_s)
+    source_inside_upload_dir = source_realpath == upload_dir_realpath || source_realpath.start_with?(upload_dir_realpath + "/")
+
+    staged_source_path = nil
+    if source_inside_upload_dir
+      staged_source_path = upload_dir.parent + ".reset_staging_#{fu.id}_#{SecureRandom.hex(6)}"
+      FileUtils.cp(source_path, staged_source_path.to_s)
+      source_path = staged_source_path.to_s
     end
 
     FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
     FileUtils.mkdir_p(upload_dir)
-    FileUtils.cp(canonical_project_input_file_path, upload_file_path)
+    FileUtils.cp(source_path, upload_file_path)
+    FileUtils.rm_f(staged_source_path.to_s) if staged_source_path
     restored_file_size = File.size(upload_file_path)
-    Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{canonical_project_input_file_path}")
+    Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{source_path}")
 
     preparsing_options = {
       organism_id: @original_project.organism_id,
@@ -5804,6 +5841,7 @@ class ProjectsController < ApplicationController
     @is_resetting_parsing = true
     
     # Render the new project form
+    Rails.logger.info("[reset_parsing] Rendering new project form for project id=#{@project.id} key=#{@project.key} existing_fu_id=#{@existing_fu_id.inspect}")
     render :new
   end
 
@@ -6029,19 +6067,22 @@ class ProjectsController < ApplicationController
     end
 
     def authorize_project_read_access
-      return if readable?(@project)
+      allowed = readable?(@project)
+      return if allowed
 
       handle_project_unauthorized_access
     end
 
     def authorize_project_edit_access
-      return if editable?(@project)
+      allowed = editable?(@project)
+      return if allowed
 
       handle_project_unauthorized_access
     end
 
     def authorize_project_analyze_access
-      return if analyzable?(@project)
+      allowed = analyzable?(@project)
+      return if allowed
 
       handle_project_unauthorized_access
     end

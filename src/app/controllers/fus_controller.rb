@@ -11,12 +11,9 @@ class FusController < ApplicationController
     # Clean filename
     filename.gsub!(/[()\[\]#?$]/, '')
     
-    # Extract file extension and create input filename
-    input_filename = nil
-    if filename.present?
-      file_ext = File.extname(filename)
-      input_filename = "input_file#{file_ext}"
-    end
+    # Extract file extension and create input filename.
+    # Preserve compound archive extensions like .tar.gz.
+    input_filename = build_input_filename(filename)
     
     # Find or create Fu record for tracking resumable upload
     # Project key will be set later when project is created
@@ -209,11 +206,7 @@ class FusController < ApplicationController
     
     # Find existing Fu record for this upload
     # If fu_id provided, use it; otherwise find most recent upload for this user/filename
-    input_filename = nil
-    if filename.present?
-      file_ext = File.extname(filename)
-      input_filename = "input_file#{file_ext}"
-    end
+    input_filename = build_input_filename(filename)
     
     fu = if fu_id.present?
            fu_scope_for_current_actor.find_by(id: fu_id)
@@ -281,9 +274,10 @@ class FusController < ApplicationController
       filename = uri_obj.path.split('/').last.presence || 'downloaded_file'
       filename.gsub!(/[()\[\]#?$]/, '') # Clean filename
       
-      # Extract file extension and create input filename
-      file_ext = File.extname(filename)
-      file_ext = '.txt' if file_ext.blank? # Default extension if none found
+      # Extract file extension and create input filename.
+      # Preserve compound archive extensions like .tar.gz.
+      file_ext = extract_upload_extension(filename)
+      file_ext = '.txt' if file_ext.blank?
       input_filename = "input_file#{file_ext}"
 
       # Temporary reuse optimization: if same URL was already downloaded by this user, reuse it.
@@ -522,7 +516,7 @@ class FusController < ApplicationController
         render json: { status: fu.status, error: "Failed to load preparsing results: #{e.message}" }, status: :internal_server_error
       end
     elsif fu.status == 'preparsing_failed'
-      render json: { status: 'preparsing_failed', error: 'Preparsing failed' }
+      render json: { status: 'preparsing_failed', error: preparsing_failure_message_for(fu) }
     else
       render json: { status: fu.status }
     end
@@ -598,5 +592,61 @@ class FusController < ApplicationController
     else
       Fu.where(user_id: nil, project_key: session[:sandbox])
     end
+  end
+
+  def build_input_filename(filename)
+    "input_file#{extract_upload_extension(filename)}"
+  end
+
+  def extract_upload_extension(filename)
+    normalized = filename.to_s.downcase
+    multi_part_extension = %w[
+      .tar.gz
+      .tar.bz2
+      .tar.xz
+      .tar.zst
+      .tgz
+      .tbz2
+      .txz
+    ].find { |ext| normalized.end_with?(ext) }
+
+    multi_part_extension || File.extname(filename.to_s)
+  end
+
+  def preparsing_failure_message_for(fu)
+    output_json_path = fu.upload_dir + 'output.json'
+    if output_json_path.exist?
+      begin
+        output = JSON.parse(output_json_path.read)
+        displayed_error = output['displayed_error']
+        if displayed_error.is_a?(Array)
+          first_error = displayed_error.find { |entry| entry.present? }
+          return normalize_preparsing_error_message(first_error.to_s) if first_error.present?
+        elsif displayed_error.present?
+          return normalize_preparsing_error_message(displayed_error.to_s)
+        end
+      rescue JSON::ParserError
+        # Fall through to other sources.
+      end
+    end
+
+    output_err_path = fu.upload_dir + 'output.err'
+    if output_err_path.exist?
+      err_text = output_err_path.read.to_s.strip
+      return normalize_preparsing_error_message(err_text) if err_text.present?
+    end
+
+    'Input file format is not recognized. Please upload a supported format.'
+  end
+
+  def normalize_preparsing_error_message(message)
+    text = message.to_s.strip
+    return text if text.blank?
+
+    if text.downcase.include?('file format not detected')
+      return 'Input file format is not recognized. Please upload a supported format.'
+    end
+
+    text
   end
 end

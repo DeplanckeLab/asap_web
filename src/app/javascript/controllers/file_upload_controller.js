@@ -1065,7 +1065,14 @@ export default class extends Controller {
       case 'failed':
         this.isPreparsingComplete = false
         this.hasMatrixData = false
-        this.setPreparsingStatus(`Preparsing failed${data.error ? `: ${data.error}` : ''}`, 'error')
+        const errorText = (data.error || '').toString().trim()
+        const normalizedError = errorText.toLowerCase()
+        const failureStatusMessage = !errorText
+          ? 'Preparsing failed.'
+          : (normalizedError.startsWith('preparsing failed')
+              ? errorText
+              : `Preparsing failed: ${errorText}`)
+        this.setPreparsingStatus(failureStatusMessage, 'error')
         // Store raw data even for failures
         this.rawPreparsingData = data
         this.renderPreparsingResult({}, [], data)
@@ -1788,11 +1795,13 @@ export default class extends Controller {
     const matrixType = dataset?.is_count_matrix ? 'Count matrix' : 'Expression matrix'
     // Format predicted RAM (value is in KB, convert to bytes using binary conversion 1024 to match system standard)
     const predictedRamValue = dataset?.predicted_ram
-    const predictedRam = predictedRamValue ? this.formatMemory(predictedRamValue * 1024) : 'n/a'
+    const hasPredictedRam = predictedRamValue !== null && predictedRamValue !== undefined && predictedRamValue !== ''
+    const predictedRam = hasPredictedRam ? this.formatMemory(predictedRamValue * 1024) : 'n/a'
     
     // Format predicted duration (value is in seconds)
     const predictedDurationValue = dataset?.predicted_duration
-    const predictedDuration = predictedDurationValue ? this.formatDuration(predictedDurationValue) : 'n/a'
+    const hasPredictedDuration = predictedDurationValue !== null && predictedDurationValue !== undefined && predictedDurationValue !== ''
+    const predictedDuration = hasPredictedDuration ? this.formatDuration(predictedDurationValue) : 'n/a'
     
     // Sample matrix data
     const sampleMatrix = Array.isArray(dataset?.sample_matrix) ? dataset.sample_matrix : []

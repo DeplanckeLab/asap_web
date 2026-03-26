@@ -87,21 +87,11 @@ class ProjectInputFinalizerService
   end
 
   def canonical_input_filename_for(input_filename)
-    # Canonical root naming keeps one predictable input path:
-    # - input_file.<accepted_ext> when extension is recognized
-    # - input_file otherwise
-    valid_extensions = FileFormat.all.flat_map do |ff|
-      if ff.ext.present?
-        ff.ext.split(",").map(&:strip).reject(&:blank?)
-      else
-        []
-      end
-    end.compact.uniq.map(&:downcase)
-
-    ext = File.extname(input_filename.to_s).delete_prefix(".").downcase
-    has_accepted_extension = ext.present? && valid_extensions.include?(ext)
-    canonical_name = has_accepted_extension ? "input_file.#{ext}" : "input_file"
-    [canonical_name, (has_accepted_extension ? ext : nil)]
+    # Keep original upload extension(s) to avoid name collisions with extracted
+    # directories (e.g. input_file.tar.gz vs extracted input_file/).
+    ext = extract_upload_extension(input_filename.to_s)
+    canonical_name = ext.present? ? "input_file#{ext}" : "input_file"
+    [canonical_name, ext.delete_prefix(".").presence]
   end
 
   def finalize_storage!(upload_dir:, input_filename:, canonical_project_input_filename:)
@@ -118,6 +108,9 @@ class ProjectInputFinalizerService
       src_in_fus = @input_file.upload_dir + input_filename
       dest_fus = @input_file.upload_dir + canonical_project_input_filename
       raise "Uploaded file not found after staging move" unless File.exist?(src_in_fus)
+      if File.directory?(dest_fus.to_s)
+        raise "Canonical input path conflicts with existing directory: #{dest_fus}"
+      end
 
       unless src_in_fus.to_s == dest_fus.to_s
         # Keep original uploaded name intact, and materialize canonical alias by copy.
@@ -154,5 +147,20 @@ class ProjectInputFinalizerService
     FileUtils.rm_rf(new_upload_dir) if File.exist?(new_upload_dir.to_s)
     FileUtils.mv(old_upload_dir.to_s, new_upload_dir.to_s)
     @logger.info("[ProjectsController#create] Moved upload directory from #{old_upload_dir} to #{new_upload_dir}")
+  end
+
+  def extract_upload_extension(filename)
+    normalized = filename.to_s.downcase
+    multi_part_extension = %w[
+      .tar.gz
+      .tar.bz2
+      .tar.xz
+      .tar.zst
+      .tgz
+      .tbz2
+      .txz
+    ].find { |ext| normalized.end_with?(ext) }
+
+    multi_part_extension || File.extname(filename.to_s)
   end
 end

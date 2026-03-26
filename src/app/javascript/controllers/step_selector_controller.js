@@ -311,6 +311,26 @@ export default class extends Controller {
       }, 300)
     }
     
+      // Handle reset-parsing buttons in the right panel at capture phase,
+      // so navigation is not swallowed by other click handlers.
+      this.boundResetParsingClick = (event) => {
+        const target = event.target instanceof Element ? event.target : null
+        if (!target) return
+        const button = target.closest('[data-reset-parsing-url]')
+        if (!button) return
+
+        const url = button.getAttribute('data-reset-parsing-url')
+        if (!url) return
+
+        event.preventDefault()
+        event.stopPropagation()
+        if (typeof event.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation()
+        }
+        window.location.assign(url)
+      }
+      document.addEventListener('click', this.boundResetParsingClick, true)
+
       // Subscribe to websocket updates for this project
       this.subscribeToProject()
       console.log('[StepSelectorController] Initial setup complete, currentStepId:', this.currentStepId)
@@ -324,6 +344,10 @@ export default class extends Controller {
     if (this.statusUpdateTimer) {
       clearTimeout(this.statusUpdateTimer)
       this.statusUpdateTimer = null
+    }
+    if (this.boundResetParsingClick) {
+      document.removeEventListener('click', this.boundResetParsingClick, true)
+      this.boundResetParsingClick = null
     }
     this.unsubscribeFromProject()
   }

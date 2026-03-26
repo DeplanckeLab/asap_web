@@ -19,15 +19,23 @@
     <div class="flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-900"><%= step_label %> failed</h3>
       <% if analyzable?(@project) && editable?(@project) %>
-        <button type="button"
-                class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                data-controller="restart-step"
-                data-restart-step-project-id-value="<%= @project.id %>"
-                data-restart-step-step-id-value="<%= @step.id %>"
-                data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
-                data-action="click->restart-step#restart">
-          <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
-        </button>
+        <% if @step&.name == 'parsing' %>
+          <button type="button"
+                  class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  data-reset-parsing-url="<%= reset_parsing_project_path(@project) %>">
+            <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+          </button>
+        <% else %>
+          <button type="button"
+                  class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                  data-controller="restart-step"
+                  data-restart-step-project-id-value="<%= @project.id %>"
+                  data-restart-step-step-id-value="<%= @step.id %>"
+                  data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
+                  data-action="click->restart-step#restart">
+            <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+          </button>
+        <% end %>
       <% elsif analyzable?(@project) %>
         <button type="button" disabled
                 class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
@@ -78,3 +86,4 @@
     </div>
   </div>
 </div>
+

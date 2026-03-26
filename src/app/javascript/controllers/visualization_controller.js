@@ -692,6 +692,7 @@ export default class extends Controller {
       const rawHref = (anchor.getAttribute('href') || '').trim()
       if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return
       if (anchor.hasAttribute('download')) return
+      if (anchor.dataset?.skipVisualizationLeaveGuard === 'true') return
       const anchorTarget = (anchor.getAttribute('target') || '').toLowerCase()
       if (anchorTarget && anchorTarget !== '_self') return
 

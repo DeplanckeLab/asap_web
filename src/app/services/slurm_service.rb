@@ -68,8 +68,11 @@ class SlurmService
     File.chmod(0755, script_file)
     
     @logger.info("[SlurmService] Submitting job for Run##{run_id}: #{job_name}")
-    @logger.debug("[SlurmService] Script: #{script_file}")
-    @logger.debug("[SlurmService] Command: #{command}")
+    @logger.info("[SlurmService] Script path for Run##{run_id}: #{script_file}")
+    @logger.info("[SlurmService] Output path for Run##{run_id}: #{output_file}")
+    @logger.info("[SlurmService] Error path for Run##{run_id}: #{error_file}")
+    @logger.info("[SlurmService] Command for Run##{run_id}: #{command}")
+    @logger.info("[SlurmService] Script content for Run##{run_id}:\n#{script_content}")
     
     # Run sbatch directly (SLURM client tools are installed in this container)
     # The script file path is accessible via shared volumes
@@ -78,10 +81,19 @@ class SlurmService
     account_name = user_id ? "user_#{user_id}" : nil
     account_flag = account_name ? "--account=#{account_name} " : ""
     result = `sbatch #{account_flag}--parsable #{script_file} 2>&1`
+    @logger.info("[SlurmService] sbatch exit_code=#{$?.exitstatus} output=#{result.to_s.strip.inspect} for Run##{run_id}")
     
     if $?.success?
       slurm_job_id = result.strip
       @logger.info("[SlurmService] Job submitted successfully: SLURM Job ID #{slurm_job_id} for Run##{run_id}")
+      begin
+        squeue_snapshot = `squeue -j #{slurm_job_id} -h -o "%i|%T|%R" 2>&1`
+        @logger.info("[SlurmService] post-submit squeue job=#{slurm_job_id} exit_code=#{$?.exitstatus} output=#{squeue_snapshot.to_s.strip.inspect}")
+        scontrol_snapshot = `scontrol show job #{slurm_job_id} 2>&1`
+        @logger.info("[SlurmService] post-submit scontrol job=#{slurm_job_id} exit_code=#{$?.exitstatus} output=#{scontrol_snapshot.to_s.strip.inspect}")
+      rescue => e
+        @logger.warn("[SlurmService] Could not capture post-submit SLURM snapshots for job #{slurm_job_id}: #{e.message}")
+      end
       return slurm_job_id
     else
       error_msg = "Failed to submit SLURM job: #{result}"
@@ -95,6 +107,7 @@ class SlurmService
     
     # Run squeue directly (SLURM client tools are installed in this container)
     result = `squeue -j #{slurm_job_id} -h -o "%T" 2>&1`
+    @logger.info("[SlurmService#get_job_status] squeue job=#{slurm_job_id} exit_code=#{$?.exitstatus} output=#{result.to_s.strip.inspect}")
     if result.match?(/Invalid job id specified/i)
       return :invalid_job
     end
@@ -105,6 +118,7 @@ class SlurmService
     else
       # Try sacct if squeue doesn't return results
       result = `sacct -j #{slurm_job_id} -n -o State --parsable2 --noheader 2>&1`
+      @logger.info("[SlurmService#get_job_status] sacct job=#{slurm_job_id} exit_code=#{$?.exitstatus} output=#{result.to_s.strip.inspect}")
       if result.match?(/Invalid job id specified/i)
         return :invalid_job
       end
@@ -112,8 +126,14 @@ class SlurmService
         status = result.strip.split.first
         return normalize_status(status)
       end
+
+      # Explicitly surface SLURM accounting outages. When a job disappears from
+      # squeue and sacct is unavailable, we cannot infer a reliable state.
+      if result.match?(/Unable to connect to database/i)
+        return :accounting_unavailable
+      end
       
-      # If sacct fails (e.g., munge auth issues), check output files as fallback
+      # If sacct fails, check output files as fallback before surfacing infra errors.
       if run
         project = run.project
         step = run.step
@@ -123,6 +143,7 @@ class SlurmService
         
         output_file = output_dir + "slurm.out"
         error_file = output_dir + "slurm.err"
+        @logger.info("[SlurmService#get_job_status] fallback run=#{run.id} output_dir=#{output_dir} slurm_out_exists=#{File.exist?(output_file)} slurm_err_exists=#{File.exist?(error_file)}")
         
         # If output files exist and are recent (modified within last hour), job likely completed
         if File.exist?(output_file) && File.mtime(output_file) > 1.hour.ago
@@ -156,6 +177,7 @@ class SlurmService
           end
         end
       end
+
     end
     
     nil

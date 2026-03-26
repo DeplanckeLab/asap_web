@@ -109,7 +109,9 @@ class RunExecutionJob < ApplicationJob
     
     Rails.logger.info("[RunExecutionJob] Run##{run.id} submitted to SLURM with job ID: #{slurm_job_id}")
     
-    SlurmJobMonitorJob.set(wait: 30.seconds).perform_later(run.id, slurm_job_id)
+    # Start monitoring immediately so failures are surfaced even if delayed
+    # in-process jobs are dropped during app restarts.
+    SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
   end
 
   def execute_directly(run, project, step, h_cmd)

@@ -33,6 +33,15 @@ class SlurmJobMonitorJob < ApplicationJob
       return
     end
 
+    # A run can be resubmitted while old monitor jobs are still queued.
+    # Always follow the current SLURM job id stored on the run to avoid
+    # polling a stale job id and leaving the run "running" indefinitely.
+    current_slurm_job_id = run.slurm_job_id.presence
+    if current_slurm_job_id && slurm_job_id.to_s != current_slurm_job_id.to_s
+      Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} monitor job id mismatch: queued=#{slurm_job_id} current=#{current_slurm_job_id}. Switching to current job id.")
+      slurm_job_id = current_slurm_job_id.to_s
+    end
+
     begin
       slurm_service = SlurmService.new(logger: Rails.logger)
       status = slurm_service.get_job_status(slurm_job_id, run)
@@ -241,6 +250,13 @@ class SlurmJobMonitorJob < ApplicationJob
         # Extract detailed error message from error file
         error_message = extract_error_message(run)
         finish_run_with_error(run, error_message || "SLURM job finished with status: #{status}")
+
+      when :accounting_unavailable
+        Rails.logger.error("[SlurmJobMonitorJob] Run##{run_id} cannot be monitored: SLURM accounting is unavailable")
+        finish_run_with_error(
+          run,
+          "SLURM accounting is unavailable (sacct database unreachable), so job status cannot be tracked. Please retry when SLURM accounting is healthy."
+        )
 
       when :invalid_job
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has invalid SLURM job id: #{slurm_job_id}")

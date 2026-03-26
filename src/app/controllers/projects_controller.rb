@@ -1114,6 +1114,8 @@ class ProjectsController < ApplicationController
     is_resetting_parsing = (session[:resetting_parsing] && session[:resetting_parsing_project_id] == @project.id) || reset_requested
     
     if is_resetting_parsing
+      previous_fu_id = @project.fu_id
+
       # Handle parsing reset similar to create action
       # Get file formats for parsing attributes handling
       @h_formats = {}
@@ -1174,7 +1176,8 @@ class ProjectsController < ApplicationController
       @project.nber_cols = params[:nber_cols] if params[:nber_cols]
       @project.nber_rows = params[:nber_rows] if params[:nber_rows]
       @project.step_id ||= 1
-      @project.status_id ||= 1
+      # Force project back to waiting during reset to avoid stale "success" UI state.
+      @project.status_id = 1
       @project.modified_at = Time.now
       
       # Get input file from session
@@ -1201,12 +1204,40 @@ class ProjectsController < ApplicationController
       
       # Update Fu record with project info (if it exists)
       if input_file.present?
+        old_upload_dir = input_file.global_upload_dir
         input_file.update!(
           project_id: @project.id,
           project_key: @project.key,
           status: 'completed'
         )
+        input_file.reload
+
+        new_upload_dir = input_file.upload_dir
+        if File.exist?(old_upload_dir.to_s) && old_upload_dir.to_s != new_upload_dir.to_s
+          FileUtils.mkdir_p(new_upload_dir.parent)
+          FileUtils.rm_rf(new_upload_dir) if File.exist?(new_upload_dir.to_s)
+          FileUtils.mv(old_upload_dir.to_s, new_upload_dir.to_s)
+          Rails.logger.info("[ProjectsController#update] Moved reset upload directory from #{old_upload_dir} to #{new_upload_dir}")
+        end
+
         @project.fu_id = input_file.id
+
+        # Keep the canonical project input file in sync with the selected FU.
+        # parse.rake reads project_dir/input_filename; if this copy is stale, the
+        # run can mix old matrix dimensions with new preparsing parameters.
+        user_data_root = Pathname.new(ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s)
+        project_dir = user_data_root + @project.user_id.to_s + @project.key
+        FileUtils.mkdir_p(project_dir.to_s) unless File.directory?(project_dir.to_s)
+
+        source_upload_file = input_file.upload_dir + input_file.upload_file_name
+        unless File.exist?(source_upload_file.to_s)
+          raise "Selected upload file is missing: #{source_upload_file}"
+        end
+
+        @project.input_filename = 'input_file'
+        canonical_project_input_file = project_dir + @project.input_filename
+        FileUtils.rm_f(canonical_project_input_file.to_s)
+        FileUtils.cp(source_upload_file.to_s, canonical_project_input_file.to_s)
       end
       
       # Reset parsing step status
@@ -1240,6 +1271,18 @@ class ProjectsController < ApplicationController
         @project.reload
         @project.broadcast(parsing_step.id) if @project.respond_to?(:broadcast)
       end
+
+      # Clear previous parsing artifacts immediately so reset does not display stale results
+      # while the new parsing run is being scheduled.
+      if @project.user_id.present? && @project.key.present?
+        user_data_root = Pathname.new(ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s)
+        parsing_dir = user_data_root + @project.user_id.to_s + @project.key + 'parsing'
+        if File.directory?(parsing_dir.to_s)
+          FileUtils.rm_rf(parsing_dir.to_s)
+        end
+        FileUtils.mkdir_p(parsing_dir.to_s, mode: 0777)
+        FileUtils.chmod(0777, parsing_dir.to_s) if File.directory?(parsing_dir.to_s)
+      end
       
       respond_to do |format|
         if @project.save
@@ -1247,6 +1290,37 @@ class ProjectsController < ApplicationController
           if @project.respond_to?(:parse_files)
             h_data = {}
             @project.parse_files(h_data)
+          end
+
+          # If a new upload replaced the previous project Fu, remove stale upload data.
+          if input_file.present? && previous_fu_id.present? && previous_fu_id != input_file.id
+            previous_fu = Fu.find_by(id: previous_fu_id)
+            if previous_fu
+              stale_paths = [previous_fu.upload_dir.to_s, previous_fu.global_upload_dir.to_s].uniq
+              stale_paths.each do |stale_path|
+                next unless File.exist?(stale_path)
+
+                FileUtils.rm_rf(stale_path)
+                Rails.logger.info("[ProjectsController#update] Removed stale reset upload directory #{stale_path} (previous_fu_id=#{previous_fu_id}, new_fu_id=#{input_file.id})")
+              end
+            end
+          end
+
+          # Keep only the latest upload directory for this project after reset upload succeeds.
+          if input_file.present? && @project.user_id.present? && @project.key.present?
+            project_fus_root = Pathname.new(ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s) + @project.user_id.to_s + @project.key + 'fus'
+            if File.directory?(project_fus_root.to_s)
+              Dir.children(project_fus_root.to_s).each do |entry|
+                next unless entry.match?(/\A\d+\z/)
+                next if entry.to_i == input_file.id
+
+                stale_project_fu_dir = project_fus_root + entry
+                next unless File.directory?(stale_project_fu_dir.to_s)
+
+                FileUtils.rm_rf(stale_project_fu_dir.to_s)
+                Rails.logger.info("[ProjectsController#update] Removed stale project fu directory #{stale_project_fu_dir} (kept_fu_id=#{input_file.id})")
+              end
+            end
           end
           
           # Clean up session flags

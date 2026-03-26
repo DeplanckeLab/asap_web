@@ -20,10 +20,16 @@ class FusController < ApplicationController
     fu = if fu_id.present?
            fu_scope_for_current_actor.find_by(id: fu_id)
          else
+           resetting_project = resetting_parsing_project_for_current_actor
            # Create new Fu record on first chunk
            Fu.new(
             user_id: current_user&.id,
-            project_key: current_user ? nil : session[:sandbox],
+            project_id: resetting_project&.id,
+            project_key: if current_user
+                           resetting_project&.key
+                         else
+                           session[:sandbox]
+                         end,
              upload_file_name: input_filename,
              upload_file_size: file_size,
              status: 'uploading',
@@ -38,12 +44,9 @@ class FusController < ApplicationController
     
     fu.save! if fu.new_record?
     
-    # Upload to global fus until a project exists.
-    upload_base_dir = Pathname.new(Fu.global_upload_root)
-    FileUtils.mkdir_p(upload_base_dir) unless upload_base_dir.exist?
-    
-    # Create upload directory using fu.id
-    upload_dir = upload_base_dir.join(fu.id.to_s)
+    # Upload directory is project-local when Fu is attached to a project
+    # (e.g. parsing reset flow), otherwise global fus staging.
+    upload_dir = fu.upload_dir
     FileUtils.mkdir_p(upload_dir)
     
     # Upload to: /data/asap2/fus/{fu.id}/{input_filename}
@@ -611,6 +614,22 @@ class FusController < ApplicationController
     ].find { |ext| normalized.end_with?(ext) }
 
     multi_part_extension || File.extname(filename.to_s)
+  end
+
+  def resetting_parsing_project_for_current_actor
+    project_id = session[:resetting_parsing_project_id]
+    return nil if project_id.blank?
+
+    project = Project.find_by(id: project_id)
+    return nil unless project
+
+    if user_signed_in?
+      return nil unless project.user_id == current_user&.id || admin?
+    else
+      return nil unless project.sandbox? && session[:sandbox].present? && project.key == session[:sandbox]
+    end
+
+    project
   end
 
   def preparsing_failure_message_for(fu)

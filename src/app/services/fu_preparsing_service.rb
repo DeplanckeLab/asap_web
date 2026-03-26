@@ -91,6 +91,11 @@ class FuPreparsingService
                   else
                     stderr_str.presence || stdout_str.presence || "Unknown error"
                   end
+      # Persist the best-available failure detail so UI/support can inspect it later,
+      # even when the script reports errors only on stdout and does not create output.json.
+      if !error_file.exist? || error_file.read.empty?
+        File.write(error_file, error_msg.to_s)
+      end
       raise "Preparsing command failed (exit #{status.exitstatus}): #{error_msg}"
     end
     

@@ -2397,14 +2397,13 @@ module Basic
 
          h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "")
         
-        # Add /data/asap2_test volume mount if USER_DATA_DIR points to it and it's not already mounted.
-        # This is needed for parsing jobs that write to /data/asap2_test/users/...
-     #   user_data_dir = ENV.fetch('USER_DATA_DIR', '/data/asap2/users')
-     #   if user_data_dir.include?('asap2_test') && !h_cmd['docker_call'].include?('-v /data/asap2_test:/data/asap2_test')
-     #     # Insert the volume mount after the existing /data/asap2 mount
-     #     # Match the pattern more flexibly to handle different spacing
-     #     h_cmd['docker_call'].gsub!(/(-v\s+\/data\/asap2:\/data\/asap2)/, "\\1 -v /data/asap2_test:/data/asap2_test")
-     #   end
+        # Ensure the host root that contains USER_DATA_DIR is mounted so parser
+        # containers can read/write project paths like /data/asap2_test/users/...
+        user_data_root = Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.to_s
+        required_mount = "-v #{user_data_root}:#{user_data_root}"
+        if !h_cmd['docker_call'].include?(required_mount)
+          h_cmd['docker_call'].sub!(/^docker run\s+/, "docker run #{required_mount} ")
+        end
 
         # On Linux Docker, host.docker.internal is not always available by default.
         # Add an explicit host-gateway mapping when commands target that hostname.

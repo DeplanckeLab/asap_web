@@ -47,5 +47,6 @@ class FuPreparsingJob < ApplicationJob
   rescue StandardError
     nil
   end
+
 end
 

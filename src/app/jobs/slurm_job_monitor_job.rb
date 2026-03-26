@@ -3,6 +3,7 @@ class SlurmJobMonitorJob < ApplicationJob
 
   MAX_MONITOR_ATTEMPTS = 480
   MONITOR_INTERVAL = 30.seconds
+  ACCOUNTING_UNAVAILABLE_GRACE_ATTEMPTS = 6
 
   def perform(run_id, slurm_job_id, attempt = 1)
     Rails.logger.debug("[SlurmJobMonitorJob] Checking Run##{run_id}, SLURM Job##{slurm_job_id}, attempt #{attempt}")
@@ -252,11 +253,16 @@ class SlurmJobMonitorJob < ApplicationJob
         finish_run_with_error(run, error_message || "SLURM job finished with status: #{status}")
 
       when :accounting_unavailable
-        Rails.logger.error("[SlurmJobMonitorJob] Run##{run_id} cannot be monitored: SLURM accounting is unavailable")
-        finish_run_with_error(
-          run,
-          "SLURM accounting is unavailable (sacct database unreachable), so job status cannot be tracked. Please retry when SLURM accounting is healthy."
-        )
+        if attempt < ACCOUNTING_UNAVAILABLE_GRACE_ATTEMPTS
+          Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} accounting temporarily unavailable (attempt #{attempt}/#{ACCOUNTING_UNAVAILABLE_GRACE_ATTEMPTS}), retrying")
+          SlurmJobMonitorJob.set(wait: MONITOR_INTERVAL).perform_later(run_id, slurm_job_id, attempt + 1)
+        else
+          Rails.logger.error("[SlurmJobMonitorJob] Run##{run_id} cannot be monitored: SLURM accounting still unavailable after #{attempt} attempts")
+          finish_run_with_error(
+            run,
+            "SLURM accounting is currently unavailable (sacct database unreachable), so job status cannot be tracked. Please retry when SLURM accounting is healthy."
+          )
+        end
 
       when :invalid_job
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} has invalid SLURM job id: #{slurm_job_id}")

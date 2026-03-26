@@ -127,11 +127,7 @@ class SlurmService
         return normalize_status(status)
       end
 
-      # Explicitly surface SLURM accounting outages. When a job disappears from
-      # squeue and sacct is unavailable, we cannot infer a reliable state.
-      if result.match?(/Unable to connect to database/i)
-        return :accounting_unavailable
-      end
+      sacct_accounting_unavailable = result.match?(/Unable to connect to database/i)
       
       # If sacct fails, check output files as fallback before surfacing infra errors.
       if run
@@ -176,6 +172,12 @@ class SlurmService
             end
           end
         end
+      end
+
+      # Explicitly surface SLURM accounting outages only after we fail to infer
+      # state from run artifacts.
+      if sacct_accounting_unavailable
+        return :accounting_unavailable
       end
 
     end

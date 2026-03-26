@@ -587,21 +587,18 @@ class Project < ApplicationRecord
       end
     end
     
-    # Fall back to upload directory
-    validation_path = File.join(
-      ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
-      id.to_s,
-      'cxg_validation_result.json'
-    )
-    
-    if File.exist?(validation_path)
+    # Fall back to fu upload directories (global staging or project/fus/<fu_id>)
+    Fu.where(project_id: id).find_each do |fu|
+      validation_path = File.join(fu.upload_dir.to_s, 'cxg_validation_result.json')
+      next unless File.exist?(validation_path)
+
       begin
         return JSON.parse(File.read(validation_path))
       rescue JSON::ParserError => e
         Rails.logger.warn("[Project] Could not parse validation result: #{e.message}")
       end
     end
-    
+
     nil
   end
 

@@ -51,7 +51,7 @@ class ResetParsingFlowTest < ActionDispatch::IntegrationTest
     FileUtils.mkdir_p(project_dir)
     File.write(canonical_project_copy, "abc\n")
 
-    upload_dir = Pathname.new(ENV["UPLOAD_DATA_DIR"]) + fu.id.to_s
+    upload_dir = fu.upload_dir
     FileUtils.mkdir_p(upload_dir)
     File.write(upload_dir + fu.upload_file_name, "stale\n")
     File.write(upload_dir + "output.json", "{\"old\":true}\n")

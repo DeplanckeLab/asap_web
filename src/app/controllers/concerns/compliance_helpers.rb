@@ -39,14 +39,10 @@ module ComplianceHelpers
       end
     end
 
-    # Fall back to upload directory
-    validation_path = File.join(
-      ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
-      project.id.to_s,
-      'cxg_validation_result.json'
-    )
+    Fu.where(project_id: project.id).find_each do |fu|
+      validation_path = File.join(fu.upload_dir.to_s, 'cxg_validation_result.json')
+      next unless File.exist?(validation_path)
 
-    if File.exist?(validation_path)
       begin
         return JSON.parse(File.read(validation_path), symbolize_names: true)
       rescue JSON::ParserError

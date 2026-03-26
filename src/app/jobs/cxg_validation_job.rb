@@ -128,12 +128,11 @@ class CxgValidationJob < ApplicationJob
       return path if path && File.exist?(path) && path.end_with?('.loom')
     end
 
-    # Check upload directory as last resort
-    upload_dir = ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus')
-    project_upload_dir = File.join(upload_dir, project.id.to_s)
-    
-    if File.directory?(project_upload_dir)
-      loom_files = Dir.glob(File.join(project_upload_dir, '**', '*.loom'))
+    Fu.where(project_id: project.id).find_each do |fu|
+      upload_dir = fu.upload_dir.to_s
+      next unless File.directory?(upload_dir)
+
+      loom_files = Dir.glob(File.join(upload_dir, '**', '*.loom'))
       return loom_files.first if loom_files.any?
     end
 
@@ -223,17 +222,19 @@ class CxgValidationJob < ApplicationJob
           'cxg_validation_result.json'
         )
       end
-      validation_path ||= File.join(
-        ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus'),
-        project.id.to_s,
-        'cxg_validation_result.json'
-      )
-      begin
-        FileUtils.mkdir_p(File.dirname(validation_path))
-        File.write(validation_path, json_content)
-        Rails.logger.info("[CxgValidationJob] Saved latest result to: #{validation_path}")
-      rescue StandardError => e
-        Rails.logger.error("[CxgValidationJob] Could not save validation result: #{e.message}")
+      unless validation_path
+        fu = project.fu_id.present? ? Fu.find_by(id: project.fu_id) : nil
+        fu ||= Fu.where(project_id: project.id).order(id: :desc).first
+        validation_path = File.join(fu.upload_dir.to_s, 'cxg_validation_result.json') if fu
+      end
+      if validation_path
+        begin
+          FileUtils.mkdir_p(File.dirname(validation_path))
+          File.write(validation_path, json_content)
+          Rails.logger.info("[CxgValidationJob] Saved latest result to: #{validation_path}")
+        rescue StandardError => e
+          Rails.logger.error("[CxgValidationJob] Could not save validation result: #{e.message}")
+        end
       end
     end
   end

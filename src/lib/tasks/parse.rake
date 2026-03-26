@@ -261,14 +261,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       else
         phase_start.call('load_preparsing_predictions')
         begin
-          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                              ENV["UPLOAD_DATA_DIR"]
-                            elsif ENV["DATA_DIR"]
-                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                            else
-                              '/data/asap2/fus'
-                            end
-          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          upload_dir = fu.upload_dir
           output_file = upload_dir + "output.json"
           
           if File.exist?(output_file)
@@ -308,14 +301,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       if file_type.blank?
         # Try to get detected_format from preparsing output
         begin
-          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                            ENV["UPLOAD_DATA_DIR"]
-                          elsif ENV["DATA_DIR"]
-                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                          else
-                            '/data/asap2/fus'
-                          end
-          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          upload_dir = fu.upload_dir
           output_file = upload_dir + "output.json"
           
           if File.exist?(output_file)
@@ -389,14 +375,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
        file_type = (h_types[file_type]) ? h_types[file_type] : file_type
        if version.id < 8 && ['H5AD', 'H5_10x'].include?(file_type) && p['sel_name'].blank?
          begin
-          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                              ENV["UPLOAD_DATA_DIR"]
-                            elsif ENV["DATA_DIR"]
-                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                            else
-                              '/data/asap2/fus'
-                            end
-          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          upload_dir = fu.upload_dir
           output_file = upload_dir + "output.json"
           h_preparsing = File.exist?(output_file) ? Basic.safe_parse_json(File.read(output_file), {}) : {}
           list_groups = Array(h_preparsing['list_groups'])
@@ -727,24 +706,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), cannot proceed with metadata copying")
       else
         phase_start.call('metadata_copying')
-        upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                            ENV["UPLOAD_DATA_DIR"]
-                          elsif ENV["DATA_DIR"]
-                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                          else
-                            '/data/asap2/fus'
-                          end
-        upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+        upload_dir = fu.upload_dir
         output_file = upload_dir + "output.json"
         output_path = project_dir + "parsing" + "output.loom"
-        upload_data_dir = if ENV["UPLOAD_DATA_DIR"]
-                            ENV["UPLOAD_DATA_DIR"]
-                          elsif ENV["DATA_DIR"]
-                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                          else
-                            '/data/asap2/fus'
-                          end
-        ori_fu_path = Pathname.new(upload_data_dir) + fu.id.to_s + fu.upload_file_name
+        ori_fu_path = fu.upload_dir + fu.upload_file_name
         puts ori_fu_path
         h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
         puts h_preparsing.to_json
@@ -903,14 +868,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
     ensure
       if fu
         begin
-          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                              ENV["UPLOAD_DATA_DIR"]
-                            elsif ENV["DATA_DIR"]
-                              Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                            else
-                              '/data/asap2/fus'
-                            end
-          upload_dir_to_cleanup = Pathname.new(upload_base_dir) + fu.id.to_s
+          upload_dir_to_cleanup = fu.upload_dir
           if File.exist?(upload_dir_to_cleanup)
             FileUtils.rm_rf(upload_dir_to_cleanup)
             logger.info("[ParseRake] Cleaned upload directory #{upload_dir_to_cleanup} after parsing")

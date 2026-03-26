@@ -106,14 +106,7 @@ class ProjectParsingJob < ApplicationJob
              end
         
         if fu
-          upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                            ENV["UPLOAD_DATA_DIR"]
-                          elsif ENV["DATA_DIR"]
-                            Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                          else
-                            '/data/asap2/fus'
-                          end
-          upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+          upload_dir = fu.upload_dir
           output_file = upload_dir + "output.json"
           
           if File.exist?(output_file)

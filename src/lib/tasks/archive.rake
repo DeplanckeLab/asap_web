@@ -5,7 +5,7 @@ require 'tempfile'
 require 'find'
 
 def include_project_fus_for_archive(project, project_dir)
-  upload_data_dir = Pathname.new(ENV.fetch('UPLOAD_DATA_DIR'))
+  upload_data_dir = Pathname.new(Fu.global_upload_root)
   project_fus_dir = project_dir + 'fus'
   FileUtils.mkdir_p(project_fus_dir) unless File.exist?(project_fus_dir)
 
@@ -13,28 +13,36 @@ def include_project_fus_for_archive(project, project_dir)
   destination_file = File.readlink(project_dir + input_file) if input_file
 
   Fu.where(project_id: project.id).order(id: :desc).each do |fu|
-    fu_dir = upload_data_dir + fu.id.to_s
-    next unless File.exist?(fu_dir)
+    fu_dir = fu.upload_dir
+    next unless File.exist?(fu_dir.to_s)
 
     target_fu_dir = project_fus_dir + fu.id.to_s
-    unless File.exist?(target_fu_dir)
-      FileUtils.cp_r(fu_dir, project_fus_dir)
-      Dir.glob(File.join(target_fu_dir, '**', '*')).each do |entry|
-        next unless File.exist?(entry) && File.symlink?(entry)
+    if fu_dir.to_s != target_fu_dir.to_s
+      unless File.exist?(target_fu_dir)
+        FileUtils.cp_r(fu_dir, project_fus_dir)
+        Dir.glob(File.join(target_fu_dir.to_s, '**', '*')).each do |entry|
+          next unless File.exist?(entry) && File.symlink?(entry)
 
-        symlink_target = File.realpath(entry)
-        FileUtils.rm(entry)
-        FileUtils.cp_r(symlink_target, entry)
+          symlink_target = File.realpath(entry)
+          FileUtils.rm(entry)
+          FileUtils.cp_r(symlink_target, entry)
+        end
       end
     end
 
-    FileUtils.rm_r(fu_dir) if File.exist?(target_fu_dir)
+    global_fu_dir = upload_data_dir + fu.id.to_s
+    if File.exist?(global_fu_dir.to_s) && File.exist?(target_fu_dir.to_s)
+      FileUtils.rm_r(global_fu_dir)
+    end
   end
 
   return unless destination_file.present? && input_file.present?
 
   Dir.chdir(project_dir) do
-    new_destination_file = destination_file.to_s.gsub(/^#{Regexp.escape(upload_data_dir.to_s)}/, './fus')
+    new_destination_file = destination_file.to_s
+    new_destination_file = new_destination_file.sub(/^#{Regexp.escape(upload_data_dir.to_s)}/, './fus')
+    project_fus_abs = (project_dir + 'fus').to_s
+    new_destination_file = new_destination_file.sub(/^#{Regexp.escape(project_fus_abs)}/, './fus')
     if File.exist?(new_destination_file)
       FileUtils.ln_sf(new_destination_file, project_dir + input_file)
     end
@@ -279,7 +287,7 @@ namespace :projects do
       scope = if project_key
                 Project.where(key: project_key).where(sandbox: false)
               else
-                Project.where(archive_status_id: 1).where(public_id: nil, sandbox: false)
+                Project.where(archive_status_id: 1).where(sandbox: false)
               end
       candidates = if project_key
                      scope

@@ -29,6 +29,7 @@ RUN apt-get update && \
     mailutils \
     netcat-openbsd \
     pigz \
+    rsync \
     sqlite3 \
     postgresql-client \
     libpq-dev \

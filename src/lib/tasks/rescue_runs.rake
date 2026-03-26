@@ -19,7 +19,17 @@ namespace :runs do
           puts "Run #{run.id} has no slurm job id"
         else
           puts "Run #{run.id} has slurm job id #{slurm_job_id} and status #{status}"
-        end
+          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + run.project.user_id.to_s + run.project.key
+          step_dir = project_dir + run.step.name
+          output_dir = (run.step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+          output_json_path = output_dir + 'output.json'
+          if File.exist?(output_json_path)
+            puts "Run #{run.id} has output.json"
+            Basic.finish_run(Rails.logger, run, {})
+          else
+            puts "Run #{run.id} has no output.json"
+          end
+        end  
       end
     end
     

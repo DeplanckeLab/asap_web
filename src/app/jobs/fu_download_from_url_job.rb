@@ -9,18 +9,7 @@ class FuDownloadFromUrlJob < ApplicationJob
     fu = Fu.find_by(id: fu_id)
     return unless fu
 
-    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                        ENV["UPLOAD_DATA_DIR"]
-                      elsif ENV["DATA_DIR"]
-                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                      else
-                        '/data/asap2/fus'
-                      end
-
-    upload_base_path = Pathname.new(upload_base_dir)
-    FileUtils.mkdir_p(upload_base_path) unless upload_base_path.exist?
-
-    upload_dir = upload_base_path.join(fu.id.to_s)
+    upload_dir = fu.upload_dir
     FileUtils.mkdir_p(upload_dir)
     upload_file_path = upload_dir.join(fu.upload_file_name)
 

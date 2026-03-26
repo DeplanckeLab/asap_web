@@ -1,4 +1,6 @@
+require 'fileutils'
 require 'find'
+require 'open3'
 require 'pathname'
 
 namespace :storage do
@@ -47,9 +49,120 @@ namespace :storage do
     []
   end
 
+  def assert_backup_dir_usable!(backup_root)
+    br = Pathname.new(backup_root)
+    raise "BACKUP_DIR must be absolute: #{br}" unless br.absolute?
+
+    if File.directory?(br.to_s)
+      raise "BACKUP_DIR is not writable: #{br}" unless File.writable?(br.to_s)
+
+      return
+    end
+
+    raise "BACKUP_DIR exists but is not a directory: #{br}" if File.exist?(br.to_s)
+
+    parent = br.parent
+    unless File.directory?(parent.to_s)
+      raise "BACKUP_DIR parent must exist (e.g. mount #{parent} on the host): #{parent}"
+    end
+    unless File.writable?(parent.to_s)
+      raise "BACKUP_DIR parent is not writable: #{parent}"
+    end
+
+    FileUtils.mkdir_p(br.to_s)
+    raise "BACKUP_DIR is not writable after create: #{br}" unless File.writable?(br.to_s)
+  end
+
+  def move_path_across_filesystems(src, dest)
+    dest_parent = File.dirname(dest)
+    if File.lstat(src).dev == File.stat(dest_parent).dev
+      FileUtils.mv(src, dest)
+      return
+    end
+
+    cross_device_copy_then_remove(src, dest)
+  end
+
+  # -L: follow symlinks on the source so the destination never needs to store symlinks (many backup
+  # filesystems return ENOTSUP for symlink(2), e.g. some NFS/CIFS exports).
+  # With -L, dangling symlinks cannot be copied; rsync exits 23. We treat that as success when every
+  # non-summary line is only "symlink has no referent" (nothing else failed).
+  def rsync_exit_23_only_broken_symlinks?(combined)
+    lines = combined.lines.map(&:strip).reject(&:empty?)
+    return false if lines.empty?
+
+    meaningful = lines.reject do |line|
+      line.match?(/rsync error:.*code 23/i) ||
+        line.match?(/some files\/attrs were not transferred/i)
+    end
+
+    return false if meaningful.empty?
+
+    meaningful.all? { |l| l.match?(/symlink has no referent:/i) }
+  end
+
+  def rsync_cross_device_copy(src, dest)
+    args = ['rsync', '-aH', '-L', '--checksum']
+    argv = if File.directory?(src)
+      args + ["#{src}/", "#{dest}/"]
+    else
+      args + [src, dest]
+    end
+
+    stdout, stderr, status = Open3.capture3(*argv)
+    combined = stdout + stderr
+    $stdout.print(stdout) unless stdout.empty?
+    $stderr.print(stderr) unless stderr.empty?
+
+    return true if status.success?
+
+    return false unless status.exitstatus == 23
+
+    unless rsync_exit_23_only_broken_symlinks?(combined)
+      return false
+    end
+
+    puts "[storage:audit_users_dir] NOTE: rsync exit 23 accepted (only broken symlinks under -L)"
+    true
+  end
+
+  def cross_device_copy_then_remove(src, dest)
+    FileUtils.rm_rf(dest) if File.exist?(dest)
+
+    unless rsync_cross_device_copy(src, dest)
+      raise "cross-device move failed (rsync -aHL --checksum): src=#{src} dest=#{dest}"
+    end
+
+    FileUtils.rm_rf(src)
+  end
+
+  def move_candidate_to_backup(src, users_root, backup_root)
+    src_pn = Pathname.new(src)
+    rel = src_pn.relative_path_from(users_root)
+    dest = backup_root + rel
+    raise "refusing to move: path is not under users_dir (#{users_root}): #{src}" if rel.to_s.start_with?('..')
+
+    if File.exist?(dest.to_s)
+      if File.exist?(src_pn.to_s)
+        puts "[storage:audit_users_dir] NOTE: destination exists; removing stale backup and redoing move: #{dest}"
+        FileUtils.rm_rf(dest.to_s)
+      else
+        puts "[storage:audit_users_dir] NOTE: skipping move (source already absent, backup present): #{dest}"
+        return dest.to_s
+      end
+    end
+
+    FileUtils.mkdir_p(dest.parent.to_s)
+    move_path_across_filesystems(src_pn.to_s, dest.to_s)
+    dest.to_s
+  end
+
   desc "Audit users storage tree for removable leftovers and estimate reclaimable bytes. " \
        "Scan root: USERS_DIR if set, else USER_DATA_DIR (same as project on-disk layout), else /data/asap/users. " \
-       "Usage: rake storage:audit_users_dir [USERS_DIR=...] [TOP=50] [LIMIT_USERS=] [LIMIT_PROJECTS=]"
+       "With MOVE=1, move each reported candidate under BACKUP_DIR (default /mnt/asap-backup/old_users_data; " \
+       "created if missing when the parent path exists and is writable), " \
+       "preserving the path relative to the users root. " \
+       "Usage: rake storage:audit_users_dir [USERS_DIR=...] [TOP=50] [LIMIT_USERS=] [LIMIT_PROJECTS=] [MOVE=1] [BACKUP_DIR=...]"
   task audit_users_dir: :environment do
     users_dir = ENV['USERS_DIR'].presence || ENV.fetch('USER_DATA_DIR', '/data/asap/users')
     top_n = ENV.fetch('TOP', '50').to_i
@@ -180,6 +293,25 @@ namespace :storage do
       .each do |c|
         puts "  #{c[:type]} #{c[:bytes]} #{bytes_to_human(c[:bytes])} #{c[:user_id]} #{c[:project_key]} #{c[:project_id] || '-'} #{c[:archive_status_id] || '-'} #{c[:path]}"
       end
+
+    if ENV['MOVE'] == '1'
+      backup_root = Pathname.new(ENV.fetch('BACKUP_DIR', '/mnt/asap-backup/old_users_data'))
+      assert_backup_dir_usable!(backup_root)
+
+      puts ""
+      puts "[storage:audit_users_dir] MOVE: #{candidates.size} path(s) -> #{backup_root}"
+
+      moved = 0
+      moved_bytes = 0
+      candidates.sort_by { |c| -c[:bytes].to_i }.each do |c|
+        dest = move_candidate_to_backup(c[:path], root, backup_root)
+        puts "  moved #{c[:type]} #{bytes_to_human(c[:bytes])} #{c[:path]} -> #{dest}"
+        moved += 1
+        moved_bytes += c[:bytes].to_i
+      end
+
+      puts "[storage:audit_users_dir] MOVE done: #{moved} path(s), #{moved_bytes} bytes (#{bytes_to_human(moved_bytes)})"
+    end
 
     puts ""
     puts "[storage:audit_users_dir] done"

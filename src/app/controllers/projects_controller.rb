@@ -974,29 +974,21 @@ class ProjectsController < ApplicationController
       # Check if this is an integration request (no file upload needed)
       is_integrate = params[:integrate_batch_paths].present?
       
-      # Require an input file for project creation (unless integrating)
-      # Check if we have either a Fu record OR a valid session path
-      # Rails sessions serialize hash keys as strings, so we need to use string keys
-      has_input_file = input_file.present? && input_file.upload_file_name.present?
-      file_upload_hash = session[:file_upload]
-      session_path_check = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
-      has_session_path = session_path_check && File.exist?(session_path_check)
-      
+      # Require a Fu-backed input file for project creation (unless integrating).
+      has_input_file = input_file.present? && input_file.id.present? && input_file.upload_file_name.present?
+
       Rails.logger.info("[ProjectsController#create] is_integrate: #{is_integrate}")
       Rails.logger.info("[ProjectsController#create] has_input_file: #{has_input_file}")
-      Rails.logger.info("[ProjectsController#create] session[:file_upload][:path]: #{session_path_check.inspect}")
-      Rails.logger.info("[ProjectsController#create] File.exist?(session_path): #{session_path_check && File.exist?(session_path_check)}")
-      Rails.logger.info("[ProjectsController#create] has_session_path: #{has_session_path}")
-      
-      unless is_integrate || has_input_file || has_session_path
+
+      unless is_integrate || has_input_file
         Rails.logger.warn("[ProjectsController#create] ===== VALIDATION FAILED =====")
-        Rails.logger.warn("[ProjectsController#create] Input file validation failed - input_file: #{input_file.inspect}, session_path exists: #{has_session_path}")
+        Rails.logger.warn("[ProjectsController#create] Input file validation failed - no valid Fu record")
         @organisms = Organism.order(:name)
         @project_types = ProjectType.order(:name)
         @versions = available_versions
         @file_formats = FileFormat.ordered
         @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
-        @project.errors.add(:base, "An input file is required to create a project. Please upload a file first.")
+        @project.errors.add(:base, "A valid uploaded file record is required to create a project. Please upload a file again.")
         format.html { 
           Rails.logger.info("[ProjectsController#create] Rendering :new template (HTML format)")
           render template: 'projects/new', status: :unprocessable_entity 
@@ -1052,20 +1044,9 @@ class ProjectsController < ApplicationController
         Rails.logger.info("[ProjectsController#create] input_file after save: #{input_file.inspect}")
         Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
         
-        # Check session path
-        # Rails sessions serialize hash keys as strings, so we need to use string keys
-        file_upload_hash = session[:file_upload]
-        session_path = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
-        session_path_exists = session_path && File.exist?(session_path)
-        Rails.logger.info("[ProjectsController#create] session[:file_upload][:path]: #{file_upload_hash && file_upload_hash[:path].inspect}")
-        Rails.logger.info("[ProjectsController#create] session[:file_upload]['path']: #{file_upload_hash && file_upload_hash['path'].inspect}")
-        Rails.logger.info("[ProjectsController#create] session_path (resolved): #{session_path.inspect}")
-        Rails.logger.info("[ProjectsController#create] Session path file exists: #{session_path_exists}")
-        
-        # Ensure we have either input_file or session path (validation already checked this)
-        unless input_file.present? || session_path_exists
-          Rails.logger.error("[ProjectsController#create] Neither input_file nor session path available after validation passed! This should not happen.")
-          @project.errors.add(:base, "Internal error: input file not found")
+        unless input_file.present? && input_file.id.present?
+          Rails.logger.error("[ProjectsController#create] Fu record missing after validation; aborting")
+          @project.errors.add(:base, "Internal error: uploaded file record not found")
           format.html { render template: 'projects/new', status: :unprocessable_entity }
           format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
           format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
@@ -1077,135 +1058,21 @@ class ProjectsController < ApplicationController
         project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
         FileUtils.mkdir_p(project_dir)
         
-        # Get preparsing data from output.json
-        upload_base_dir = ENV["UPLOAD_DATA_DIR"]
-        
-        # Use input_file.id if available, otherwise use session path
-        Rails.logger.info("[ProjectsController#create] ===== DETERMINING UPLOAD PATH =====")
-        Rails.logger.info("[ProjectsController#create] input_file: #{input_file.inspect}")
-        Rails.logger.info("[ProjectsController#create] input_file && input_file.id: #{input_file && input_file.id}")
-        
-        if input_file && input_file.id
-          upload_dir = Pathname.new(upload_base_dir) + input_file.id.to_s
-        input_filename = input_file.upload_file_name
-          Rails.logger.info("[ProjectsController#create] Using input_file path - upload_dir: #{upload_dir}, input_filename: #{input_filename}")
-        else
-          # Fallback: use session path directly if Fu record not found
-          # Rails sessions serialize hash keys as strings, so we need to use string keys
-          file_upload_hash = session[:file_upload]
-          session_path_str = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
-          if session_path_str
-            session_path = Pathname.new(session_path_str)
-            upload_dir = session_path.dirname
-            input_filename = session_path.basename.to_s
-            Rails.logger.warn("[ProjectsController#create] Using session path fallback: #{upload_dir}/#{input_filename}")
-          else
-            Rails.logger.error("[ProjectsController#create] Cannot determine upload directory - input_file: #{input_file.inspect}, session: #{session[:file_upload].inspect}")
-            @project.errors.add(:base, "Cannot locate uploaded file")
-            format.html { render template: 'projects/new', status: :unprocessable_entity }
-            format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
-            format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
-            return
-          end
-        end
-
-        # Persist detected file format from preparsing so parsing does not depend
-        # on the temporary fus directory after project creation.
-        if input_file && input_file.id
-          begin
-            preparsing_output_file = upload_dir + 'output.json'
-            if File.exist?(preparsing_output_file)
-              h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
-              detected_format = h_preparsing['detected_format']
-              if detected_format.present?
-                h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}).deep_symbolize_keys
-                h_parsing_attrs[:file_type] = detected_format
-                format_obj = @h_formats[detected_format] || @h_formats[detected_format.to_s.upcase]
-                is_raw_text = (detected_format.to_s == 'RAW_TEXT') || (format_obj && format_obj.child_format == 'RAW_TEXT')
-                unless is_raw_text
-                  [:delimiter, :gene_name_col, :has_header].each do |k|
-                    h_parsing_attrs.delete(k)
-                  end
-                end
-                @project.parsing_attrs_json = h_parsing_attrs.to_json
-                Rails.logger.info("[ProjectsController#create] Stored detected file_type '#{detected_format}' in parsing_attrs_json")
-              end
-            end
-          rescue => e
-            Rails.logger.warn("[ProjectsController#create] Could not persist preparsing detected_format: #{e.class} - #{e.message}")
-          end
-        end
-        
-        # Get all valid extensions from FileFormat model
-        valid_extensions = FileFormat.all.flat_map do |ff|
-          if ff.ext.present?
-            ff.ext.split(',').map(&:strip).reject(&:blank?)
-          else
-            []
-          end
-        end.compact.uniq.map(&:downcase)
-        
-        # Determine extension from the uploaded filename and persist the project copy
-        # with a fixed canonical name.
-        ext = File.extname(input_filename.to_s).delete_prefix('.').downcase
-        has_accepted_extension = ext.present? && valid_extensions.include?(ext)
-        canonical_project_input_filename = has_accepted_extension ? "input_file.#{ext}" : 'input_file'
-
-        @project.input_filename = canonical_project_input_filename
-        @project.fu_id = input_file&.id  # Use safe navigation operator
-        @project.extension = has_accepted_extension ? ext : nil
-        @project.save
-
-        # Resolve the uploaded source path.
-        upload_path = upload_dir + input_filename
-        project_input_backup_path = project_dir + canonical_project_input_filename
-        
-        # Check if there's an uncompressed version of the file (for compressed files like .bz2, .gz)
-        # Prefer uncompressed file if it exists, as Java parsing command may need it
-        uncompressed_path = nil
-        if input_filename.match(/\.(bz2|gz|zip)$/i)
-          base_name = input_filename.sub(/\.(bz2|gz|zip)$/i, '')
-          uncompressed_path = upload_dir + base_name
-          if File.exist?(uncompressed_path)
-            upload_path = uncompressed_path
-            Rails.logger.info "Found uncompressed file, using #{uncompressed_path} instead of #{upload_dir + input_filename}"
-          end
-        end
-        
-        # Persist a canonical copy in the project directory.
-        # This copy is used to restore fus/<fu_id>/input_file.<ext> during parsing reset.
-        canonical_upload_path = upload_dir + input_filename
-        unless File.exist?(canonical_upload_path)
-          Rails.logger.error("[ProjectsController#create] Canonical uploaded file not found at #{canonical_upload_path}")
-          @project.errors.add(:base, "Uploaded file not found")
+        begin
+          ProjectInputFinalizerService.call(
+            project: @project,
+            project_dir: project_dir,
+            input_file: input_file,
+            formats_by_name: @h_formats,
+            logger: Rails.logger
+          )
+        rescue => e
+          Rails.logger.error("[ProjectsController#create] Upload finalization failed: #{e.class} - #{e.message}")
+          @project.errors.add(:base, e.message)
           format.html { render template: 'projects/new', status: :unprocessable_entity }
           format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
           format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
           return
-        end
-        File.delete(project_input_backup_path) if File.exist?(project_input_backup_path) || File.symlink?(project_input_backup_path)
-        FileUtils.cp(canonical_upload_path, project_input_backup_path)
-        Rails.logger.info("[ProjectsController#create] Stored canonical upload copy at #{project_input_backup_path}")
-
-        # Keep backward compatibility for legacy paths that still expect input.<ext>.
-        if has_accepted_extension
-          symlink_path = project_dir + "input.#{ext}"
-          File.delete(symlink_path) if File.exist?(symlink_path) || File.symlink?(symlink_path)
-          File.symlink(project_input_backup_path, symlink_path)
-          Rails.logger.info "Created symlink from #{project_input_backup_path} to #{symlink_path}"
-        end
-        
-        # Update Fu record with project info (if it exists)
-        if input_file.present?
-        input_file.update!(
-          project_id: @project.id,
-          project_key: @project.key,
-          status: 'completed'
-        )
-        else
-          file_upload_hash = session[:file_upload]
-          session_path = file_upload_hash && (file_upload_hash[:path] || file_upload_hash['path'])
-          Rails.logger.warn("[ProjectsController#create] Fu record not found, skipping update. Project created with session path: #{session_path}")
         end
         
         # ProjectStep records are initialized lazily when needed for display
@@ -2193,14 +2060,6 @@ class ProjectsController < ApplicationController
   def prepare_metadata
     delimiters = ["\n", "\t", " ", ";", ","]
 
-    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                        ENV["UPLOAD_DATA_DIR"]
-                      elsif ENV["DATA_DIR"]
-                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                      else
-                        '/data/asap2/fus'
-                      end
-
     h_fu = {
       project_id: @project.id,
       project_key: @project.key,
@@ -2214,7 +2073,7 @@ class ProjectsController < ApplicationController
     fu = Fu.new(h_fu)
     fu.save!
 
-    fu_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+    fu_dir = fu.upload_dir
     FileUtils.mkdir_p(fu_dir)
     filepath = fu_dir + 'clipboard.txt'
 
@@ -5870,14 +5729,7 @@ class ProjectsController < ApplicationController
     end
     
     # Restore fus/<fu_id>/input_file.<ext> from the canonical project copy, then rerun preparsing.
-    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                        ENV["UPLOAD_DATA_DIR"]
-                      elsif ENV["DATA_DIR"]
-                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                      else
-                        '/data/asap2/fus'
-                      end
-    upload_dir = Pathname.new(upload_base_dir) + fu.id.to_s
+    upload_dir = fu.upload_dir
     upload_file_path = upload_dir + fu.upload_file_name
 
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s

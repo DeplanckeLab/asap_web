@@ -154,7 +154,7 @@ class FuPreparsingService
     script_args << '-o' << upload_dir_str
     script_cmd = Shellwords.join(script_args)
     
-    @logger.info("[FuPreparsingService] UPLOAD_DATA_DIR: #{ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus')}")
+    @logger.info("[FuPreparsingService] fu upload dir: #{@fu.upload_dir}")
     @logger.info("[FuPreparsingService] File path to pass to Python: #{file_path}")
     @logger.info("[FuPreparsingService] Python script: #{python_script_name}")
     
@@ -447,8 +447,7 @@ class FuPreparsingService
   end
 
   def upload_dir
-    upload_root = ENV.fetch('UPLOAD_DATA_DIR', '/data/asap2/fus')
-    @upload_dir ||= Pathname.new(upload_root) + @fu.id.to_s
+    @upload_dir ||= @fu.upload_dir
   end
 
   def ensure_directory_writable

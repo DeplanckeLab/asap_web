@@ -41,16 +41,8 @@ class FusController < ApplicationController
     
     fu.save! if fu.new_record?
     
-    # Upload to /data/asap2/fus/{fu.id}/{filename} (temporary location)
-    upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                        ENV["UPLOAD_DATA_DIR"]
-                      elsif ENV["DATA_DIR"]
-                        Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                      else
-                        '/data/asap2/fus'
-                      end
-    
-    upload_base_dir = Pathname.new(upload_base_dir)
+    # Upload to global fus until a project exists.
+    upload_base_dir = Pathname.new(Fu.global_upload_root)
     FileUtils.mkdir_p(upload_base_dir) unless upload_base_dir.exist?
     
     # Create upload directory using fu.id
@@ -351,14 +343,7 @@ class FusController < ApplicationController
       organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
       version_id = request_body['version_id'] || safe_integer_param(:version_id)
 
-      upload_base_dir = if ENV["UPLOAD_DATA_DIR"]
-                          ENV["UPLOAD_DATA_DIR"]
-                        elsif ENV["DATA_DIR"]
-                          Pathname.new(ENV["DATA_DIR"]).join('fus').to_s
-                        else
-                          '/data/asap2/fus'
-                        end
-      upload_dir = Pathname.new(upload_base_dir).join(fu.id.to_s)
+      upload_dir = Pathname.new(Fu.global_upload_root).join(fu.id.to_s)
       upload_file_path = upload_dir.join(input_filename)
 
       # Store upload info in session for project creation (completion checked through Fu status)

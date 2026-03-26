@@ -193,6 +193,7 @@ Rails.application.routes.draw do
   get '/unauthorized', to: 'home#unauthorized', as: :unauthorized
   get '/orcid_authentication', to: 'home#orcid_authentication', as: :orcid_authentication
   get '/associate_orcid', to: 'home#associate_orcid', as: :associate_orcid
+  get '/swagger', to: redirect('/swagger/index.html')
   root "home#welcome"
 
 end

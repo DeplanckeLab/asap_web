@@ -13,21 +13,21 @@ Moreover, here we show traditional pipeline steps, but you can also run the step
 
 <h4 class="sm" id="sm-0">Create Project</h4>
 <p>Once you registered, or after creating a sandbox project, you should see this page:</p>
-<%= image_tag 'tuto_2_001.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_001.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>Here you can choose to upload your own dataset or fetch a dataset from the HCA. If you do, you will end up with the following screen.</p>
-<%= image_tag 'tuto_2_002.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_002.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>Here you can select a project to download from the Human Cell Atlas server (here I selected the Pancreatic data). <br/>Then you can change the project Name, and the organism of interest (here Homo Sapiens). The database currently hosts ~500 species downloaded from Ensembl (see <a href="https://asap.epfl.ch/versions">versions</a> for more information).<br/>Finally, you can select the version of ASAP that you want to run the project on. By default the last stable version is selected, here I chose the beta version (v5).<br/>Then press the "Create Project" button.</p>
 
 <hr/>
 
 <h4 class="sm" id="sm-0">Step 1: Parsing</h4>
 <p>ASAP server is now contacting the HCA website to download the dataset. From this stage, you should be able to see the project in the home page of ASAP, in the "My projects" section.<br />Once the parsing step is finished, the main page of the project should look like that:</p>
-<%= image_tag 'tuto_2_003.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_003.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>Here you see in the left panel the list of steps/tools that can be run on the dataset. "Report" and "Metadata" sections are showing informations about the loom files and metadata generated, while the other sections are the modular pipeline that you can run.</p>
 <p>In the main panel, you have the "Reproducibility" section, that contains the initial .loom file after parsing and list of commands for reproducing the pipeline locally.<br/> The "Programmatic access" section allows other portals/tools to know the .loom files that are generated, for future exchange of data.<br/> The "Pipeline" section currently contains only the "Parsing" step that was ran, but will be populated by all the analysis that you will perform, as you advance in your pipeline. It shows a tree of the pipeline that you ran (using Cytoscape).<br/>On the right, you have external links that are populated automatically for HCA projects. In the "Experimental data" section you see the GEO/Array Express accession numbers of the raw data, and the publications that are linked to these datasets. They are generated automatically for HCA project, but if you create a project from your own files, you can later add accession numbers and publication informations from the "Settings" wheel icon next to the project name.</p>
 <p>Finally, in the "All runs" section, you see all the tools that were ran during this project, and their status (success, failed or running). Here we did not run anything yet, so only the Parsing step is shown as succeeded.</p>
 <p>Then you can click on the "Parsing" step to see the results of the parsing.</p>
-<%= image_tag 'tuto_2_004.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_004.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>In this page you can see a panel "Parsing results" showing the results of the parsing step. In particular you can see that the dataset contains 58347 genes and 2544 cells. 92.27% of the values were equal to zero. And all the genes were correctly mapped to the version of Ensembl that is installed on ASAP v5 (since I used v5 when I created the project). This means that some stats will be computed like "ratio of mitochondrial genes" or "ratio of protein coding genes", and that you will be able to perform the last step of the pipeline: "Functional Enrichment" into GO/KEGG and other gene sets/pathways without issue.</p>
 <p>Here you also see a warning message in red: "the data contains float". It means that some tools will not be available for this project (such as DESeq2 that uses raw counts modeling). Here it is just because this dataset contains estimated counts, so this is not a big issue, but as far as possible, it is always better to work with raw count data.</p>
 <p>Finally, in the bottom of the result tab, you can see the date when the job was run, how much time it took, and how much RAM it consumed. This can be useful for benchmarking certain methods. In developement, we are preparing an estimation of these value, prior to the run. So you can know if the method is scalable/applicable to your dataset.</p>
@@ -39,7 +39,7 @@ Moreover, here we show traditional pipeline steps, but you can also run the step
 <h4 class="sm" id="sm-0">Step 2: Cell filtering</h4>
 <p>In this step, we remove cells that are not passing standards QCs, such as number of UMIs, detected genes or too many mitochondrial reads.</p>
 <p>You can click on "New cell filtering" to generate a novel cell filtering job. It will open the following page:</p>
-<%= image_tag 'tuto_2_005.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_005.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>Here you can see some stats on your dataset. There are five panels, each showing a different statistics, where you can set specific thresholding for filtering out cells that would not pass the QC.</p>
 <p>In all panels, a point is a cell. </p>
 <p class='alert alert-info'>
@@ -66,7 +66,7 @@ You can also select a metadata from your .loom file for filtering cells. For exa
 <p>In this step, we remove genes that are too lowly expressed, or we focus on the most highly variable genes (HVG).</p>
 <p>You can press the "New gene filtering" button to create a novel gene filtering</p>
 <p>Info: We are currently considering separating the HVG step from the actual gene filtering step. This should be done in a future version of ASAP.</p>
-<%= image_tag 'tuto_2_006.png', {class:"tuto-image", style:'width:50%'} %>
+<%= image_tag 'tuto_2_006.png', {class:"tuto-image", style:'width:50%', alt: 'Full pipeline tutorial screenshot'} %>
 <p>Contrary to the previous steps, here you see that there is more than one method available for Gene Filtering. The most common methods for single-cell RNA-seq are the 3 last ones.</p>
 <ul>
 <li>HVG [scanpy] is a scalable method from the scanpy package, to compute highly variable genes.</li>
@@ -85,7 +85,7 @@ For each method you need to select the dataset you want to run the tool on. Here
 I will choose "Cell Filtering" for both, because I don't want to run HVG on cells that are of low quality<br/>
 </p>
 
-<%= image_tag 'tuto_2_007.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_007.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 Now, you can see that both methods were computed and produced different outputs.<br/>
 The HVG method from Seurat found 3317 genes that are highly variables, while the method from scanpy found 11710.<br/>
@@ -102,7 +102,7 @@ If you click on "Details" you can see some extra information about the run.<br/>
 In the case of Gene filtering, and especially in the HVG calculation, this can be interesting, so I will click on the "Highly Variable Gene" card to see these details.
 </p>
 
-<%= image_tag 'tuto_2_008.png', {class:"tuto-image",  style:'width:70%'} %>
+<%= image_tag 'tuto_2_008.png', {class:"tuto-image", style:'width:70%', alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 Here you can see the different outputs of the run: 1) metadata that were generated/added to the loom files, 2) interactive plots if they exists for this method, and 3) Docker execution standard output / error<br/>
 </p>
@@ -116,7 +116,7 @@ Now we will go to the next step: "Normalization".
 <h4 class="sm" id="sm-0">Step 4: Normalization</h4>
 <p>In this step, we normalize the cells/samples to remove effect of depth and other library biases.</p>
 <p>You can press the "New Normalization" button to create a novel gene filtering</p>
-<%= image_tag 'tuto_2_009.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_009.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 Again, you see that this step has multiple methods to run your dataset on.<br />
 DEseq2 is red because the dataset is not identified as a raw count matrix, so it cannot be used<br />
@@ -129,7 +129,7 @@ I keep the default scaling factor, but of course you can change this value if yo
 The normalization of Seurat was not scalable in our tests, and we could not run it effectively on datasets with millions of cells. So we rewrote it in Java for faster computation and for maximum scalability. That's why it is written "[ASAP impl.]"
 </p>
 
-<%= image_tag 'tuto_2_010.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_010.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 Again you can see the output of the pipeline.<br/>
 The resulting dataset is 3317 genes vs. 2379 cells which corresponds to the filterings I used in the previous steps.<br/>
@@ -148,12 +148,12 @@ So the goal will be to use the scaled dataset for these 2 steps, and use the nor
 <i class='fas fa-info-circle'></i> <b>Of note</b><br />
 For the moment, only one method is implemented (the basic scaling from Seurat). In the near future, we plan to add the possibility to regress out covariates (metadata) and to integrate several dataset (batch effect correction). It is not yet possible to do that.
 </p>
-<%= image_tag 'tuto_2_011.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_011.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 This step only takes the normalization output as input. And I keep the default parameters for running it.<br/>
 Then once again, you see the results of the run in a "Success" card.
 </p>
-<%= image_tag 'tuto_2_012.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_012.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 <p>
 The resulting dataset is still 3317 genes vs. 2379 cells which corresponds the same filtering than the normalization you used as input (normal, since scaling does not perform extra filtering).<br/>
 Now I'll move to the next step: "Dimension Reduction"
@@ -184,7 +184,7 @@ You can press the "New Dimension Reduction" button to create a novel PCA<br/>
 Here, the good practice asks us to first generate a PCA. We will use an iterative PCA which are much faster to compute, and here is also using the chunking system of the .loom file to perform out-of-RAM computations.<br />
 By default 50 Principle Components are computed.
 </p>
-<%= image_tag 'tuto_2_013.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_013.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Then, when the PCA is finished, we will run both t-SNE and UMAP on the resulting PCA.<br/>
@@ -196,7 +196,7 @@ t-SNE is a very popular tool for visualizing single-cell RNA-seq data, but suffe
 </ul>
 Therefore UMAP slowly becomes the method of choice for visualizing RNA-seq datasets.
 </p>
-<%= image_tag 'tuto_2_014.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_014.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Now, let's look a bit more into the available plotting/visualization options.<br/>
@@ -206,7 +206,7 @@ The plot is fully interactive, so you can zoom in, move, or hover on the cells t
 You can also click on the greyed icons on the top left to recenter the plot, or perform a rectangular/lasso selection.<br />
 If you perform a selection, you can name it, and add it in the .loom file as a novel metadata. It will be a [0,1] binary annotation of the cells (1 = selected), that can further be used for coloring, or in the differential expression step.
 </p>
-<%= image_tag 'tuto_2_015.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_015.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Finally, if you color the plots using a categorical metadata (such as a clustering result), you have the possibility to name the clusters according to some annotation you deem useful (such as cell type annotation).<br />
@@ -230,13 +230,13 @@ Indeed, after this step, the goal is to find all the marker genes of the found c
 Again, many methods are available for performing this step, but recent benchmarking have shown that graph-based clustering methods were more efficients (such as the one implemented in the Seurat package). So we recommend these methods.
 Here I will thus run Seurat method (which is also one of the fastest method to run.
 </p>
-<%= image_tag 'tuto_2_016.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_016.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 When the computation is over, you will see the result card and you can click on it to see the list of the clusters and the associated cells.<br/>
 You can also go back to the dimension reduction plot, and color it by the result of your clustering.
 </p>
-<%= image_tag 'tuto_2_017.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_017.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Now it's time to find marker genes for your clusters. For this, we will go to the Differential Expression step.
@@ -256,7 +256,7 @@ As you will see, many differential expression methods were implemented in R (Seu
 Recent benchmarking papers have shown that standard t-test/wilcoxon tests were performing as well (or better) than single-cell specific method, with the advantage of being fast to compute.<br/>
 Seurat recommends using the wilcoxon test, so this is the one we will use in this tutorial.
 </p>
-<%= image_tag 'tuto_2_018.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_018.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p class='alert alert-info'>
 <i class='fas fa-info-circle'></i> <b>Of note</b><br />
@@ -267,13 +267,13 @@ We realize that when the dataset has a lot of clusters, this view can be filled 
 When the DE is computed, you can switch view using the blue button on the top bar. From the "Dashboard" to the "DE table" view.<br/>
 The "DE table" view shows the number of up- and down-regulated genes for every cluster (the up-regulated genes being the main marker genes). You can click on the green/red numbers to see the list of DE genes for every run.<br />
 </p>
-<%= image_tag 'tuto_2_019.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_019.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Here you see the list of DE genes, filtered according to a default FDR5% threshold (that you can change in the DE table view). Then, after applying the FDR filtering, we sort the DE genes by decreasing abs(Fold Change) order. The top ones being the most interesting DE genes.<br/>
 In addition, we also implemented a "Markers" view that lists the top 10 up- down- regulated genes for every cluster. This helps to have a quick view of the most interesting marker for every cell cluster/cell type.<br/>
 </p>
-<%= image_tag 'tuto_2_020.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_020.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 But sometimes, it may be difficult to know the purpose/pathway of the marker genes.<br/>
@@ -300,7 +300,7 @@ Moreover, we specifically developed this method for .loom files, which makes it 
 <p>
 Now, I'll run a FET on the results from the Differential Expression step. In particular, there is one cluster with marker genes that I cannot interpret. So I'll run the enrichment on the marker genes of this cluster.<br />
 </p>
-<%= image_tag 'tuto_2_021.png', {class:"tuto-image"} %>
+<%= image_tag 'tuto_2_021.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
 Again, the results of the FET are listed in a "Dashboard" view, or in an "Enrichment table" view.<br/>

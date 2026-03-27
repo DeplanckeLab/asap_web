@@ -1,4 +1,10 @@
 <% content_for :title do %><%= @project.display_name %> - ASAP<% end %>
+<% meta_desc = if @project.description.present?
+  strip_tags(@project.description.to_s).squish.truncate(160)
+else
+  "Project #{@project.display_name} on ASAP, the Automated Single-cell Analysis Pipeline for single-cell transcriptomics."
+end %>
+<% content_for :meta_description, meta_desc %>
 
 <% content_for :head do %>
   <script src="https://cdn.tailwindcss.com"></script>

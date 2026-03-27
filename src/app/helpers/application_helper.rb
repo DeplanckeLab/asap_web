@@ -714,4 +714,38 @@ module ApplicationHelper
 
     project_path(project, view: 'analysis', step_id: step.id, run_id: run.id)
   end
+
+  DEFAULT_META_DESCRIPTION = 'A collaborative portal to analyze single-cell transcriptomics data.'.freeze
+
+  def default_meta_description
+    DEFAULT_META_DESCRIPTION
+  end
+
+  def seo_site_base_url
+    ENV.fetch('SERVER_URL').chomp('/')
+  end
+
+  def seo_page_title
+    if content_for?(:meta_title)
+      strip_tags(content_for(:meta_title))
+    elsif content_for?(:title)
+      strip_tags(content_for(:title))
+    else
+      'ASAP'
+    end
+  end
+
+  def seo_meta_description
+    content_for(:meta_description).presence || default_meta_description
+  end
+
+  def seo_canonical_url
+    "#{seo_site_base_url}#{request.fullpath}"
+  end
+
+  def seo_og_image_url
+    path = content_for(:og_image_path).presence || '/icon.png'
+    path = "/#{path.delete_prefix('/')}"
+    "#{seo_site_base_url}#{path}"
+  end
 end

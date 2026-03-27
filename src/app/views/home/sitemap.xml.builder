@@ -15,4 +15,14 @@ xml.urlset xmlns: 'http://www.sitemaps.org/schemas/sitemap/0.9' do
       xml.priority priority
     end
   end
+
+  # Public project show pages (same visibility as anonymous users: public, not deleted, not sandbox).
+  Project.where(public: true, being_deleted: false, sandbox: false).find_each do |project|
+    xml.url do
+      xml.loc "#{base}#{project_path(project)}"
+      xml.changefreq 'weekly'
+      xml.priority '0.5'
+      xml.lastmod project.updated_at.iso8601 if project.updated_at
+    end
+  end
 end

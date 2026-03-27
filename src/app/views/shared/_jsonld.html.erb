@@ -1,12 +1,12 @@
 <script type="application/ld+json">
 {
   "@context": "https://schema.org/",
-  "@id": "https://asap.epfl.ch/",
+  "@id": "<%= seo_site_base_url %>/",
   "@type": "DataCatalog",
   "name": "ASAP",
   "alternateName": "Automated Single-cell Analysis Pipeline",
   "description": "A collaborative portal to analyze single-cell transcriptomics data.",
-  "url": "https://asap.epfl.ch/",
+  "url": "<%= seo_site_base_url %>/",
   "isAccessibleForFree" : true,
   "license": {
     "@type": "CreativeWork",
@@ -35,7 +35,7 @@
           "@type": "Dataset",
           "name": "Fly Cell Atlas",
           "description": "Single-cell transcriptomes of the entire adult Drosophila.",
-          "url": "https://asap.epfl.ch/fca",
+          "url": "<%= seo_site_base_url %><%= atlas_projects_path(atlas: 'fca') %>",
           "isAccessibleForFree" : true,
           "license": {
             "@type": "CreativeWork",
@@ -52,7 +52,7 @@
           "@type": "Dataset",
           "name": "Human Cell Atlas",
           "description": "Mapping the human body at the cellular level.",
-          "url": "https://asap.epfl.ch/hca",
+          "url": "<%= seo_site_base_url %><%= atlas_projects_path(atlas: 'hca') %>",
           "isAccessibleForFree" : true
         }
       ]

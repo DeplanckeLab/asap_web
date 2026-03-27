@@ -3,7 +3,7 @@
       <table>
         <tbody>
           <tr><td width='170px'>
-              <%= link_to image_tag('epfl-logo.svg', :height => '35px' ), "http://epfl.ch", {:class => 'epfl-footer-logo-link'} %>
+              <%= link_to image_tag('epfl-logo.svg', height: '35px', alt: 'EPFL logo'), "http://epfl.ch", {:class => 'epfl-footer-logo-link'} %>
             </td><td class='footer-meta-text' style="text-align:center">
               &copy;2016-<%= Time.now.year %> EPFL, 1015 Lausanne<br>
               <%= link_to "Contact", contact_home_index_path %>
@@ -16,7 +16,7 @@
                  with the support of the Swiss State Secretariat for Education, Research and Innovation SERI.
               </span>
             </td><td class='pt-2 pb-2 pr-2' width='80px'>
-              <%=  link_to image_tag('sib_logo.svg', :height => '70px'), "https://sib.swiss" %>
+              <%= link_to image_tag('sib_logo.svg', height: '70px', alt: 'SIB Swiss Institute of Bioinformatics logo'), "https://sib.swiss" %>
             </td>
       </tr></tbody></table>
     </div>

@@ -19,7 +19,7 @@ Moreover, here we show traditional pipeline steps, but you can also run the step
 <p>In the top bar of ASAP, you can click on "Data > Fly Cell Atlas" to see a list of all available datasets, and some additional info (nb cells, nb genes, etc.)</p>
 
 <p>In our case, you can select Malpighian tubule (stringent), which will open the project in ASAP, and directly jump to the "Visualization" step where we plot the UMAP, colored by cell-type annotation. You should see this page:</p>
-<%= image_tag '_tutorial_fly_cell_atlas_1_001.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_001.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 
 <p class='alert alert-info'>
 <i class='fas fa-info-circle'></i> <b>Of note</b><br />
@@ -32,7 +32,7 @@ UMAP/t-SNE/Clustering were made using the <a href="https://github.com/vib-single
 <p>From this view, you can hover your mouse on the cells, and you will see more informations (cell name, if activated in the "General" tab), cluster or cell type (depending on the current coloring), etc. </p>
 
 <h5>Let's look at the top-left options:</h5>
-<%= image_tag '_tutorial_fly_cell_atlas_1_002.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_002.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <p>Here you can see multiple options controlling the plot you see:</p>
 <ul>
 <li><b>A.</b> Here is the list of visualization/dimension reductions available to plot in 2D/3D. In the Fly Cell Atlas datasets you will always see 5 of them.
@@ -56,13 +56,13 @@ For more information on the generation of these dimension reductions, please che
 </p>
 
 <h5>Let's look at the plot icons:</h5>
-<%= image_tag '_tutorial_fly_cell_atlas_1_003.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_003.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <p>These are the standard icons from plotly, maybe you saw them before. Here is what they do:</p>
 <ul>
 <li><b>A</b> This is the <b>Zoom</b> tool, you can select a portion of your plot and zoom in (mouse wheel is deactivated, and will not work for Zooming). Double-click on the plot to get back to the default zoom.</li>
 <li><b>B</b> This is the <b>Pan</b> tool, you can move the data around (by translation). Double-click on the plot to get back to the default view.</li>
 <li><b>C / D</b> These are the <b>Box<b> and <b>Lasso</b> selection tools, you can select cells using these tools directly on the plot. You can deactivate the selection by double clicking on the plot. Once cells are selected, your selection will appear in the "Inspector" tab on the right "Controls" panel.
-<%= image_tag '_tutorial_fly_cell_atlas_1_004.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_004.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 </li>
 <li><b>E / F</b> These are other <b>Zooming</b> tools. Contrary to the magnifier tool (<b>A</b>), you cannot control the region you zoom in/out.</li>
 <li><b>G / H</b> These tools have similar effects than the double click. They reset the view to default.</li>
@@ -71,9 +71,9 @@ For more information on the generation of these dimension reductions, please che
 
 <h5>Now, let's look at the Controls panel</h5>
 <p>If the "Controls" panel is not currently visible/open, you should see a "Controls" button on the bottom right:</p>
-<%= image_tag '_tutorial_fly_cell_atlas_1_005.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_005.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <p>Once clicked, the Controls panel opens, and you can see three main tabs (A, B and C):</p>
-<%= image_tag '_tutorial_fly_cell_atlas_1_006.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_006.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <ul>
 <li><b>A</b> This is the <b>General</b> tab, controlling the points/cells options. Here you can control the point opacity / size, and you can activate the "cell name" which will appear once you hover your mouse on a particular cell.</li>
 <li><b>B</b> This is the <b>Coloring</b> tab, it controls the coloring of the plot. We will explain this tab in more details in the next section.</li>
@@ -87,7 +87,7 @@ In general, the "Controls" tab is closed by default. Here it's opened on the Col
 </p>
 
 <h5>Now, let's look at the Coloring tab in the Controls panel</h5>
-<%= image_tag '_tutorial_fly_cell_atlas_1_007.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_007.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <p>First, you can see that there are 4 options to color your plot.</p>
 <ul>
 <li><b>A</b> This will remove all coloring of the points (all points become blue)</li>
@@ -95,7 +95,7 @@ In general, the "Controls" tab is closed by default. Here it's opened on the Col
 
 <ul>
 In the <b>B</b> "Continuous" tab, you have the possibility to color according to different data types:
-<%= image_tag '_tutorial_fly_cell_atlas_1_008.png', {class:"tuto-image"} %>
+<%= image_tag '_tutorial_fly_cell_atlas_1_008.png', {class:"tuto-image", alt: 'Fly Cell Atlas tutorial screenshot'} %>
 <li><b>Gene expression</b> You can color the cells according to certain gene expression. Just enter the name of the gene (symbol or Ensembl ID) in the corresponding text box (there is an autocomplete feature to help you)</li>
 <li><b>B</b> This is where you can color your points according to <b>continuous</b> features. Please note that depending on the nature of the metadata, you should select the "Continuous" or "Discrete" tab, accordingly.
 </ul>

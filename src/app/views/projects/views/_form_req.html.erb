@@ -127,7 +127,7 @@
         <div class="flex-shrink-0 w-24">
           <% if defined?(Speed) %>
             <% Speed.all.each do |s| %>
-              <%= image_tag 'speed_' + s.name + '.png', id: 'speed_' + s.id.to_s, class: 'speed_image hidden', width: '25px' %>
+              <%= image_tag 'speed_' + s.name + '.png', id: 'speed_' + s.id.to_s, class: 'speed_image hidden', width: '25px', alt: "Estimated run speed: #{s.name}" %>
             <% end %>
           <% end %>
         </div>

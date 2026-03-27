@@ -1,6 +1,7 @@
 require 'json'
 require 'net/http'
 require 'uri'
+require 'yaml'
 
 class HomeController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
@@ -13,7 +14,59 @@ class HomeController < ApplicationController
   def welcome
   end
 
+  def atlases
+  end
+
+  def atlas_projects
+    @atlas = params[:atlas].to_s.downcase
+    @atlas_title = atlas_title(@atlas)
+    return head :not_found if @atlas_title.blank?
+
+    @query = params[:q].to_s.strip
+    @atlas_terms = atlas_terms(@atlas)
+
+    base_scope = Project
+      .left_outer_joins(:shares)
+      .where(being_deleted: false)
+      .distinct
+
+    unless admin?
+      if current_user
+        base_scope = base_scope.where(
+          'projects.public = :public OR projects.user_id = :user_id OR shares.user_id = :user_id',
+          public: true,
+          user_id: current_user.id
+        )
+      else
+        base_scope = base_scope.where(public: true)
+      end
+    end
+
+    atlas_filter_sql = searchable_project_fields_sql
+    atlas_conditions = @atlas_terms.map { "#{atlas_filter_sql} LIKE ?" }.join(' OR ')
+    atlas_values = @atlas_terms.map { |term| "%#{ActiveRecord::Base.sanitize_sql_like(term.downcase)}%" }
+    base_scope = base_scope.where([atlas_conditions, *atlas_values])
+
+    if @query.present?
+      query_value = "%#{ActiveRecord::Base.sanitize_sql_like(@query.downcase)}%"
+      base_scope = base_scope.where("#{atlas_filter_sql} LIKE ?", query_value)
+    end
+
+    @projects = base_scope
+      .includes(:project_type, :organism, :archive_status, :user)
+      .order(updated_at: :desc)
+      .limit(200)
+  end
+
   def api_documentation
+  end
+
+  def openapi_spec
+    spec_path = Rails.root.join('public', 'swagger', 'openapi.yaml')
+    spec = YAML.safe_load_file(spec_path, aliases: true)
+    spec['servers'] = [{ 'url' => ENV.fetch('OPENAPI_SERVER_URL') }]
+
+    render plain: spec.to_yaml, content_type: 'application/yaml'
   end
 
   def contact
@@ -230,5 +283,29 @@ class HomeController < ApplicationController
     Rails.application.credentials.dig(:orcid, :redirect_uri).to_s.presence ||
       ENV['ORCID_REDIRECT_URI'].to_s.presence ||
       associate_orcid_url
+  end
+
+  def atlas_title(atlas_key)
+    case atlas_key
+    when 'fca'
+      'Fly Cell Atlas'
+    when 'hca'
+      'Human Cell Atlas'
+    end
+  end
+
+  def atlas_terms(atlas_key)
+    case atlas_key
+    when 'fca'
+      ['fca', 'fly cell atlas', 'flycellatlas']
+    when 'hca'
+      ['hca', 'human cell atlas', 'humancellatlas']
+    else
+      []
+    end
+  end
+
+  def searchable_project_fields_sql
+    "LOWER(COALESCE(projects.name, '') || ' ' || COALESCE(projects.key, '') || ' ' || COALESCE(projects.description, ''))"
   end
 end

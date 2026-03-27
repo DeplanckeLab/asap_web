@@ -190,6 +190,12 @@ module ApplicationHelper
         icon: "fas fa-link"
       },
       {
+        label: "Atlases",
+        description: "FCA and HCA reference pages and entry points",
+        path: atlases_path,
+        icon: "fas fa-atlas"
+      },
+      {
         label: "Tutorials",
         description: "Step-by-step guides for new users",
         path: tutorial_home_index_path,
@@ -204,7 +210,7 @@ module ApplicationHelper
       {
         label: "API documentation",
         description: "OpenAPI/Swagger reference for JSON endpoints",
-        path: "/swagger",
+        path: "/api-doc",
         icon: "fas fa-book-open"
       },
       {

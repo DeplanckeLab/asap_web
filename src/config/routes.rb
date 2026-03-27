@@ -193,8 +193,15 @@ Rails.application.routes.draw do
   get '/unauthorized', to: 'home#unauthorized', as: :unauthorized
   get '/orcid_authentication', to: 'home#orcid_authentication', as: :orcid_authentication
   get '/associate_orcid', to: 'home#associate_orcid', as: :associate_orcid
-  get '/swagger', to: 'home#api_documentation'
-  get '/swagger/index.html', to: redirect('/swagger', status: 302)
+  get '/atlases', to: 'home#atlases', as: :atlases
+  get '/atlases/:atlas', to: 'home#atlas_projects', as: :atlas_projects
+  namespace :api, defaults: { format: :json } do
+    get 'projects', to: '/projects#index'
+    get 'projects/:id', to: '/projects#show'
+    get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
+  end
+  get '/api-doc', to: 'home#api_documentation'
+  get '/api-doc/index.html', to: redirect('/api-doc', status: 302)
   root "home#welcome"
 
 end

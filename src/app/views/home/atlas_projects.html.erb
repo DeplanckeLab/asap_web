@@ -1,0 +1,85 @@
+<% content_for :title, "#{@atlas_title} projects" %>
+
+<div class="min-h-screen bg-gray-50">
+  <div class="w-full mx-auto px-3 sm:px-4 lg:px-6 py-8">
+    <div class="mb-6">
+      <%= link_to atlases_path, class: "inline-flex items-center text-sm text-blue-600 hover:text-blue-700" do %>
+        <span>Back to atlases</span>
+      <% end %>
+    </div>
+
+    <div class="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2"><%= @atlas_title %> projects</h1>
+        <p class="text-gray-600">Dedicated listing for projects tagged with <%= @atlas_title %> terms.</p>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+      <%= form_with url: atlas_projects_path(atlas: @atlas), method: :get, local: true, class: "space-y-4" do |form| %>
+        <div>
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-2">Filter results</label>
+          <div class="flex items-stretch">
+            <%= form.text_field :q,
+              value: @query,
+              placeholder: "Filter within #{@atlas_title} projects",
+              class: "block w-full h-10 px-3 border border-gray-300 rounded-l-md rounded-r-none leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500" %>
+            <%= form.submit "Apply",
+              class: "h-10 px-4 border border-l-0 border-gray-300 rounded-r-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 whitespace-nowrap" %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="mb-4 text-sm text-gray-600">
+      <% if @projects.any? %>
+        Showing <%= @projects.size %> matching projects
+      <% else %>
+        No matching projects
+      <% end %>
+    </div>
+
+    <% if @projects.any? %>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Organism</th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <% @projects.each do |project| %>
+              <tr class="hover:bg-gray-50 transition-colors">
+                <td class="px-6 py-4">
+                  <div class="text-sm font-medium text-gray-900"><%= project.display_name %></div>
+                  <div class="text-xs text-gray-500 mt-0.5"><%= project.key %></div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <%= project.project_type&.name.presence || '-' %>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <%= project.organism&.name.presence || '-' %>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <%= project.updated_at&.strftime("%b %d, %Y") %>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                  <%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% else %>
+      <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
+        <h3 class="text-sm font-medium text-gray-900">No projects found</h3>
+        <p class="mt-1 text-sm text-gray-500">Try a different filter term.</p>
+      </div>
+    <% end %>
+  </div>
+</div>

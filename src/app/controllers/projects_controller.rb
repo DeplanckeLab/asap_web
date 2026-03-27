@@ -9,6 +9,7 @@ require 'set'
 class ProjectsController < ApplicationController
   include ComplianceHelpers
   helper_method :de_filter_cache_key
+  rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations selection_states]
@@ -9512,6 +9513,14 @@ class ProjectsController < ApplicationController
       user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp('/')
       base_dir = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
       @project_dir = base_dir + @project.user_id.to_s + @project.key
+    end
+
+    def handle_project_not_found(exception)
+      if request.format.json? || request.path.start_with?('/api/')
+        render json: { error: 'Project not found', message: exception.message }, status: :not_found
+      else
+        raise exception
+      end
     end
 
     # Only allow a list of trusted parameters through.

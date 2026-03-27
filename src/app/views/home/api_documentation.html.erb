@@ -8,9 +8,16 @@
       display: none;
     }
 
-    /* Hide Try it out only for GET /projects.json */
-    #operations-Projects-listProjectsJson .try-out__btn,
-    #operations-Projects-listProjectsJson .execute-wrapper {
+    /* Match site typography for the main Swagger title */
+    #swagger-ui .info .title {
+      font-family: inherit;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    /* Hide Try it out only for GET /projects */
+    #operations-Projects-listProjectsApi .try-out__btn,
+    #operations-Projects-listProjectsApi .execute-wrapper {
       display: none !important;
     }
   </style>
@@ -25,7 +32,7 @@
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
   (function () {
-    const openApiUrl = "/swagger/openapi.yaml?v=" + Date.now();
+    const openApiUrl = "/api/openapi.yaml?v=" + Date.now();
     window.ui = SwaggerUIBundle({
       url: openApiUrl,
       dom_id: "#swagger-ui",

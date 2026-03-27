@@ -8,10 +8,9 @@ servers:
 paths:
   /projects.json:
     get:
-      summary: Download projects prediction JSON
+      summary: Download public projects in JSON
       description: |
-        Streams the `projects.json` file from the prediction data directory.
-        Returns a list of project export objects.
+        Returns a list of public project objects.
       operationId: listProjectsJson
       tags:
         - Projects
@@ -27,6 +26,7 @@ paths:
               examples:
                 projectList:
                   summary: Project list
+                  description: Truncated example for readability. Each project object includes many additional fields defined in `ProjectExport`.
                   value:
                     - public_key: "ASAP49"
                       key: "abc123"
@@ -447,7 +447,7 @@ components:
           description: Last update timestamp.
           example: "2026-03-26T17:30:00Z"
     CellOntologyTermRef:
-      title: Cell Ontology Term Reference
+      title: Cell Ontology Term
       type: object
       description: One cell ontology term linked to an annotation.
       properties:
@@ -563,40 +563,3 @@ components:
           type: string
           format: date-time
           description: Record update timestamp.
-    ProjectCatalogObject:
-      title: Projects Catalog (Object Form)
-      type: object
-      description: |
-        Common shape used by `/projects.json` when metadata and project entries are wrapped
-        in one object.
-      properties:
-        generated_at:
-          type: string
-          format: date-time
-          description: File generation timestamp when provided by producer.
-        projects:
-          type: array
-          description: List of project entries.
-          items:
-            $ref: '#/components/schemas/ProjectCatalogItem'
-      additionalProperties: true
-    ProjectCatalogArray:
-      title: Projects Catalog (Array Form)
-      type: array
-      description: Direct list of project entries returned by `/projects.json`.
-      items:
-        $ref: '#/components/schemas/ProjectCatalogItem'
-    ProjectCatalogItem:
-      title: Projects Catalog Item
-      type: object
-      description: One project entry in `projects.json` (fields may vary by producer).
-      properties:
-        key:
-          type: string
-          description: Project key.
-          example: abcd1234
-        label:
-          type: string
-          description: Human-readable project label.
-          example: Example project
-      additionalProperties: true

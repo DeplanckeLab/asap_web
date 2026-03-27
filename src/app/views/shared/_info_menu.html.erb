@@ -1,4 +1,4 @@
-<div class="<%= local_assigns[:wrapper_classes] || 'py-2 text-sm' %>"
+<div class="<%= [local_assigns[:wrapper_classes] || 'py-2 text-sm', 'max-h-[90vh] overflow-y-auto overscroll-contain'].join(' ') %>"
      <%= (local_assigns[:data_attributes] || {}).map { |key, value| %(data-#{key.to_s.tr('_', '-')}="#{value}") }.join(' ') %>>
   <% info_menu_links.each do |link| %>
     <%= link_to link[:path],

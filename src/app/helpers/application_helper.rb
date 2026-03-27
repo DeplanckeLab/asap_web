@@ -202,6 +202,12 @@ module ApplicationHelper
         icon: "fas fa-file-alt"
       },
       {
+        label: "API documentation",
+        description: "OpenAPI/Swagger reference for JSON endpoints",
+        path: "/swagger",
+        icon: "fas fa-book-open"
+      },
+      {
         label: "FAQ",
         description: "Frequently asked questions about ASAP",
         path: faq_home_index_path,

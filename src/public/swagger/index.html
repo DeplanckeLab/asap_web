@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ASAP Swagger Docs</title>
+    <title>ASAP API Docs</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
     <style>
       html, body {
@@ -11,14 +11,20 @@
         padding: 0;
         background: #ffffff;
       }
+      /* Hide Try it out only for GET /projects.json */
+      #operations-Projects-listProjectsJson .try-out__btn,
+      #operations-Projects-listProjectsJson .execute-wrapper {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
+      const openApiUrl = "/swagger/openapi.yaml?v=" + Date.now();
       window.ui = SwaggerUIBundle({
-        url: "/swagger/openapi.yaml",
+        url: openApiUrl,
         dom_id: "#swagger-ui",
         deepLinking: true,
         presets: [SwaggerUIBundle.presets.apis],

@@ -200,8 +200,10 @@ Rails.application.routes.draw do
     get 'projects/:id', to: '/projects#show'
     get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
   end
-  get '/api-doc', to: 'home#api_documentation'
+  get '/api-doc', to: 'home#api_documentation', as: :api_doc
   get '/api-doc/index.html', to: redirect('/api-doc', status: 302)
+  get '/sitemap.xml', to: 'home#sitemap', as: :sitemap
+  get '/robots.txt', to: 'home#robots', as: :robots
   root "home#welcome"
 
 end

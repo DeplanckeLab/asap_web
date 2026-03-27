@@ -61,6 +61,19 @@ class HomeController < ApplicationController
   def api_documentation
   end
 
+  def sitemap
+  end
+
+  def robots
+    base = ENV.fetch('SERVER_URL').chomp('/')
+    render plain: <<~ROBOTS, content_type: 'text/plain'
+      User-agent: *
+      Allow: /
+
+      Sitemap: #{base}/sitemap.xml
+    ROBOTS
+  end
+
   def openapi_spec
     spec_path = Rails.root.join('public', 'swagger', 'openapi.yaml')
     spec = YAML.safe_load_file(spec_path, aliases: true)

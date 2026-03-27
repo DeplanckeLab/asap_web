@@ -1,0 +1,41 @@
+<% content_for :title, "API Documentation" %>
+
+<% content_for :head do %>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    /* Keep docs readable within the existing site layout */
+    #swagger-ui .topbar {
+      display: none;
+    }
+
+    /* Hide Try it out only for GET /projects.json */
+    #operations-Projects-listProjectsJson .try-out__btn,
+    #operations-Projects-listProjectsJson .execute-wrapper {
+      display: none !important;
+    }
+  </style>
+<% end %>
+
+<div class="max-w-[85rem] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="rounded-xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+    <div id="swagger-ui"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  (function () {
+    const openApiUrl = "/swagger/openapi.yaml?v=" + Date.now();
+    window.ui = SwaggerUIBundle({
+      url: openApiUrl,
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis],
+      docExpansion: "full",
+      defaultModelsExpandDepth: 10,
+      defaultModelExpandDepth: 10,
+      displayRequestDuration: true,
+      layout: "BaseLayout"
+    });
+  })();
+</script>

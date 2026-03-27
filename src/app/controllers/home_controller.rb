@@ -13,6 +13,9 @@ class HomeController < ApplicationController
   def welcome
   end
 
+  def api_documentation
+  end
+
   def contact
   end
 

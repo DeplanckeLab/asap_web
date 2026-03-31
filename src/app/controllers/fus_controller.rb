@@ -18,7 +18,7 @@ class FusController < ApplicationController
     # Find or create Fu record for tracking resumable upload
     # Project key will be set later when project is created
     fu = if fu_id.present?
-           fu_scope_for_current_actor.find_by(id: fu_id)
+           find_fu_for_current_actor(fu_id)
          else
            resetting_project = resetting_parsing_project_for_current_actor
            # Create new Fu record on first chunk
@@ -212,7 +212,7 @@ class FusController < ApplicationController
     input_filename = build_input_filename(filename)
     
     fu = if fu_id.present?
-           fu_scope_for_current_actor.find_by(id: fu_id)
+           find_fu_for_current_actor(fu_id)
          else
            # Find most recent incomplete upload for this user and filename
            fu_scope_for_current_actor.where(
@@ -384,7 +384,7 @@ class FusController < ApplicationController
 
   # POST /fus/:id/rerun_preparsing
   def rerun_preparsing
-    fu = fu_scope_for_current_actor.find_by(id: params[:id])
+    fu = find_fu_for_current_actor(params[:id])
     unless fu
       render json: { error: 'Upload record not found' }, status: :not_found
       return
@@ -485,7 +485,7 @@ class FusController < ApplicationController
 
   # GET /fus/:id/preparsing_status
   def preparsing_status
-    fu = fu_scope_for_current_actor.find_by(id: params[:id])
+    fu = find_fu_for_current_actor(params[:id])
     unless fu
       render json: { error: 'Upload record not found' }, status: :not_found
       return
@@ -589,12 +589,39 @@ class FusController < ApplicationController
     nil
   end
 
+  # Project-local paths use Project#user_id (USER_DATA_DIR/<owner>/<key>/fus/<fu_id>/).
+  # fus.user_id is not always set, so signed-in scope also includes rows linked to projects
+  # owned by the current user.
   def fu_scope_for_current_actor
     if user_signed_in?
-      Fu.where(user_id: current_user.id)
+      uid = current_user.id
+      fu_t = Fu.arel_table
+      projects_t = Project.arel_table
+      Fu.left_joins(:project).where(
+        fu_t[:user_id].eq(uid).or(projects_t[:user_id].eq(uid))
+      )
     else
       Fu.where(user_id: nil, project_key: session[:sandbox])
     end
+  end
+
+  # Covers sandbox and admin cases not matched by fu_scope_for_current_actor alone.
+  # Never return a Fu loaded through fu_scope_for_current_actor when signed in: that scope
+  # uses left_joins(:project) and those rows are readonly, so update! would raise.
+  def find_fu_for_current_actor(fu_id)
+    return nil if fu_id.blank?
+
+    if fu_scope_for_current_actor.where(id: fu_id).exists?
+      return Fu.find_by(id: fu_id)
+    end
+
+    fu = Fu.find_by(id: fu_id)
+    return nil unless fu
+
+    project = fu.project
+    return fu if project.present? && editable?(project)
+
+    nil
   end
 
   def build_input_filename(filename)

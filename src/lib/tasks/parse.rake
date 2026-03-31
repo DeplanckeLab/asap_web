@@ -397,8 +397,45 @@ task :parse, [:project_key] => [:environment] do |t, args|
       end
       p['sel_name'] = 'mtx' if version.id < 8 && file_type == 'MEX' && p['sel_name'].blank?
       tmp_sel_name = group_names.first if group_names.size == 1
-      opts.push({'opt' => "-sel", 'value' => p['sel_name']}) if p['sel_name'] or tmp_sel_name
-      
+      sel_for_java = p['sel_name'].presence || tmp_sel_name
+      opts.push({'opt' => "-sel", 'value' => sel_for_java}) if sel_for_java.present?
+
+      # Java H5AD: -ngenes/-ncells must match the selected layer. parsing_attrs can still
+      # hold dimensions from preparsing preview of a different matrix.
+      if version.id < 8 && fu && ['H5AD', 'H5_10x'].include?(file_type)
+        begin
+          preparsing_output = fu.upload_dir + 'output.json'
+          if File.exist?(preparsing_output.to_s) && sel_for_java.present?
+            h_preparsing = Basic.safe_parse_json(File.read(preparsing_output), {})
+            list_groups = Array(h_preparsing['list_groups'])
+            if list_groups.any?
+              norm = ->(s) { s.to_s.strip.delete_prefix('/').delete_suffix('/').tr('\\', '/') }
+              sel_n = norm.call(sel_for_java)
+              candidates = [sel_n]
+              candidates << sel_n.sub(/\Alayers\//, '') if sel_n.start_with?('layers/')
+              candidates << "layers/#{sel_n}" unless sel_n.start_with?('layers/')
+              candidates.uniq!
+              matched = list_groups.find do |g|
+                g.is_a?(Hash) && g['group'].present? && candidates.include?(norm.call(g['group']))
+              end
+              if matched
+                nr = matched['nber_rows'] || matched['nb_genes']
+                nc = matched['nber_cols'] || matched['nb_cells']
+                if nr.present? && nc.present?
+                  p['nber_rows'] = nr.to_i
+                  p['nber_cols'] = nc.to_i
+                  logger.info("[ParseRake] Synced nber_rows/nber_cols from preparsing for sel=#{sel_for_java}: #{p['nber_rows']} x #{p['nber_cols']}")
+                end
+              else
+                logger.warn("[ParseRake] No preparsing list_groups row matched sel=#{sel_for_java.inspect}; Java will use parsing_attrs nber_rows=#{p['nber_rows']} nber_cols=#{p['nber_cols']}")
+              end
+            end
+          end
+        rescue => e
+          logger.warn("[ParseRake] Could not sync H5AD dimensions from preparsing: #{e.class} #{e.message}")
+        end
+      end
+
       # Only add -col and -header for RAW_TEXT file type
       if file_type == 'RAW_TEXT'
         # -col parameter: gene name column (default: "first" if not specified)

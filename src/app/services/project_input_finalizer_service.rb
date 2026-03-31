@@ -136,7 +136,9 @@ class ProjectInputFinalizerService
     # Capture old location before linking Fu to project because upload_dir resolution
     # changes once project_id/project_key are persisted on the Fu.
     old_upload_dir = @input_file.global_upload_dir
-    @input_file.update!(project_id: @project.id, project_key: @project.key, status: "completed")
+    attrs = { project_id: @project.id, project_key: @project.key, status: "completed" }
+    attrs[:user_id] = @project.user_id if @project.user_id.present?
+    @input_file.update!(attrs)
     @input_file.reload
 
     new_upload_dir = @input_file.upload_dir

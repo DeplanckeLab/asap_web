@@ -1096,12 +1096,13 @@ export default class extends Controller {
       }
       if (badgeContainer && status !== 'not_started') {
         // Create badge for all statuses except 'not_started' (including 'complete')
-        badgeContainer.innerHTML = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${this.getStatusColor(status)}-100 text-${this.getStatusColor(status)}-800">${this.humanizeStatus(status)}</span>`
+        const badgeClass = this.statusBadgeClassesForColor(this.getStatusColor(status))
+        badgeContainer.innerHTML = `<span class="${badgeClass}">${this.humanizeStatus(status)}</span>`
         console.log('[StepSelectorController] Created new badge for status:', status)
       }
     } else if (status !== 'not_started') {
       // Update existing badge
-      badgeElement.className = `inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${this.getStatusColor(status)}-100 text-${this.getStatusColor(status)}-800`
+      badgeElement.className = this.statusBadgeClassesForColor(this.getStatusColor(status))
       badgeElement.textContent = this.humanizeStatus(status)
       console.log('[StepSelectorController] Updated existing badge to status:', status)
     } else if (status === 'not_started' && badgeElement) {
@@ -1123,6 +1124,28 @@ export default class extends Controller {
   getStatusColor(status) {
     const statusConfig = this.getStatusIconConfig(status)
     return statusConfig?.color || 'gray'
+  }
+
+  // Full class strings (no template interpolation) so the Tailwind build includes these utilities.
+  statusBadgeClassesForColor(colorName) {
+    const raw = (colorName || 'gray').toString().toLowerCase()
+    const c = raw === 'grey' ? 'gray' : raw
+    const base = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium '
+    const byColor = {
+      gray: 'bg-gray-100 text-gray-800',
+      slate: 'bg-slate-100 text-slate-800',
+      yellow: 'bg-yellow-100 text-yellow-800',
+      amber: 'bg-amber-100 text-amber-800',
+      blue: 'bg-blue-100 text-blue-800',
+      indigo: 'bg-indigo-100 text-indigo-800',
+      green: 'bg-green-100 text-green-800',
+      emerald: 'bg-emerald-100 text-emerald-800',
+      red: 'bg-red-100 text-red-800',
+      rose: 'bg-rose-100 text-rose-800',
+      orange: 'bg-orange-100 text-orange-800',
+      purple: 'bg-purple-100 text-purple-800'
+    }
+    return base + (byColor[c] || byColor.gray)
   }
 
   humanizeStatus(status) {

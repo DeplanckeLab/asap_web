@@ -753,8 +753,23 @@ task :parse, [:project_key] => [:environment] do |t, args|
       annot_count = Annot.where(run_id: run.id).count
       logger.info("[ParseRake] finish_run completed for run #{run.id}, status_id=#{run.status_id}, annotations created: #{annot_count}")
       
-      # finish_run already called upd_project_step via upd_run, so only set project status here
-      project.update(status_id: 3)
+      # Visualization (embedding menu) shows cells x genes via project.gene_count / cell_count, which
+      # read projects.nber_rows / nber_cols. Those columns were only set from the create-project form;
+      # refresh them from the authoritative parsing output so they match the matrix annot.
+      project.reload
+      status_update = { status_id: 3 }
+      nr = h_parsing['nber_rows'] || h_parsing[:nber_rows]
+      nc = h_parsing['nber_cols'] || h_parsing[:nber_cols]
+      if nr.present? && nc.present?
+        status_update[:nber_rows] = nr.to_i
+        status_update[:nber_cols] = nc.to_i
+        pa = Basic.safe_parse_json(project.parsing_attrs_json, {})
+        pa['nber_rows'] = nr.to_i
+        pa['nber_cols'] = nc.to_i
+        status_update[:parsing_attrs_json] = pa.to_json
+        logger.info("[ParseRake] Updated project nber_rows/nber_cols from parsing output: #{nr.to_i} x #{nc.to_i}")
+      end
+      project.update(status_update)
       project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
       logger.info("[ParseRake] Parsing completed, broadcasting update")
 

@@ -385,15 +385,6 @@ export class DataManager {
       // Store the loaded metadata vector
       const vectorData = data.metadata_vectors[metadataId]
       if (vectorData) {
-        // Parse compression_info if it's a JSON string
-        if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
-          try {
-            vectorData.compression_info = JSON.parse(vectorData.compression_info)
-          } catch (e) {
-            console.error('Failed to parse compression_info:', e)
-          }
-        }
-        
         // FIRST: Store in memory cache immediately
         this.controller.loadedMetadataVectors[metadataId] = vectorData
         const enrichedData = this.ensureMetadataVectorValues(metadataId, vectorData)
@@ -570,6 +561,19 @@ export class DataManager {
     return numericValues
   }
 
+  normalizeMetadataCompressionInfo(raw) {
+    if (raw == null) return null
+    if (typeof raw === 'object' && !Array.isArray(raw)) return raw
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw)
+      } catch (e) {
+        return null
+      }
+    }
+    return null
+  }
+
   ensureMetadataVectorValues(metadataId, vectorData) {
     if (!vectorData) {
       return null
@@ -583,20 +587,46 @@ export class DataManager {
       }
     }
     
-    let compressionInfo = vectorData.compression_info
-    if (!compressionInfo) {
-      console.warn(`⚠️ [DataManager] Metadata ${metadataId} is missing compression_info - cannot ensure values are loaded`)
+    let compressionInfo = this.normalizeMetadataCompressionInfo(vectorData.compression_info)
+    if (compressionInfo && typeof vectorData.compression_info === 'string') {
+      vectorData.compression_info = compressionInfo
+    }
+
+    if (compressionInfo && compressionInfo.type === 'error') {
+      console.warn(
+        `[DataManager] Metadata ${metadataId} compression failed on server: ${compressionInfo.code || 'error'} ${compressionInfo.message || ''}`
+      )
+      vectorData.compression_info = compressionInfo
       return vectorData
     }
-    
-    if (typeof compressionInfo === 'string') {
-      try {
-        compressionInfo = JSON.parse(compressionInfo)
-        vectorData.compression_info = compressionInfo
-      } catch (error) {
-        console.error(`⚠️ [DataManager] Failed to parse compression_info for metadata ${metadataId}:`, error)
-        return vectorData
+
+    if (
+      vectorData.data_type === 'NUMERIC' &&
+      compressionInfo &&
+      compressionInfo.zero_range === true &&
+      Number.isFinite(compressionInfo.min_val) &&
+      typeof compressionInfo.cell_count === 'number' &&
+      compressionInfo.cell_count > 0
+    ) {
+      const fill = compressionInfo.min_val
+      const n = compressionInfo.cell_count
+      vectorData.values = new Array(n).fill(fill)
+      vectorData.compression_info = compressionInfo
+      if (this.controller.loadedMetadataVectors) {
+        this.controller.loadedMetadataVectors[metadataId] = vectorData
       }
+      return vectorData
+    }
+
+    if (!compressionInfo) {
+      if (typeof vectorData.compression_info === 'string' && vectorData.compression_info.length > 0) {
+        console.warn(
+          `[DataManager] Metadata ${metadataId} has non-JSON compression_info string; re-fetch may be needed after server update`
+        )
+      } else {
+        console.warn(`⚠️ [DataManager] Metadata ${metadataId} is missing compression_info - cannot ensure values are loaded`)
+      }
+      return vectorData
     }
     
     const hasCompressedPayload = !!vectorData.compressed_data || compressionInfo.single_category
@@ -676,14 +706,13 @@ export class DataManager {
      // valuesLength: vectorData.values?.length
      // }) */
     
-    // Validate the loaded data - handle both compressed and uncompressed data
-    // Parse compression_info if it's a JSON string
-    if (vectorData.compression_info && typeof vectorData.compression_info === 'string') {
-      try {
-        vectorData.compression_info = JSON.parse(vectorData.compression_info)
-      } catch (e) {
-        console.error('Failed to parse compression_info:', e)
-      }
+    // Normalize compression_info (object or JSON string). No bare English sentences from the server.
+    const parsedInfo = this.normalizeMetadataCompressionInfo(vectorData.compression_info)
+    if (parsedInfo) {
+      vectorData.compression_info = parsedInfo
+    }
+    if (vectorData.compression_info && vectorData.compression_info.type === 'error') {
+      return
     }
     
     // Check if compression_info is a valid object (not an error string)

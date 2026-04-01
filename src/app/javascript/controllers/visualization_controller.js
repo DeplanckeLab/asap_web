@@ -5116,33 +5116,137 @@ export default class extends Controller {
   }
 */
 
-  // Initialize inline range slider with metadata values
-  initializeInlineRangeSlider(metadataId, values) {
-    const isGene = metadataId && metadataId.startsWith('gene_')
-    const logPrefix = isGene ? '🧬 [SLIDER INIT]' : '🎚️ [SLIDER INIT]'
-    
-    // Check renderer state BEFORE initialization (for debugging)
-    if (isGene) {
-      // console.log(`${logPrefix} Renderer state BEFORE initializeInlineRangeSlider (gene):`, {
-        // hasReglRenderer: !!this.reglRenderer,
-        // rendererInstanceId: this.reglRenderer?.instanceId || 'none',
-        // numPoints: this.reglRenderer?.numPoints || 0,
-        // hasPositions: !!this.reglRenderer?.positions,
-        // positionsLength: this.reglRenderer?.positions?.length || 0,
-        // hasCurrentCoordinates: !!this.currentCoordinates,
-        // currentCoordinatesLength: this.currentCoordinates?.length || 0
-      // })
+  findRangeSliderElementByMetadataId(metadataId) {
+    const want = String(metadataId == null ? '' : metadataId).trim()
+    if (!want) return null
+    const nodes = document.querySelectorAll('[data-range-slider-metadata-id-value]')
+    for (let i = 0; i < nodes.length; i++) {
+      if (String(nodes[i].getAttribute('data-range-slider-metadata-id-value') || '').trim() === want) {
+        return nodes[i]
+      }
     }
-    
-    // console.log(`${logPrefix} Initializing inline range slider for metadata:`, metadataId)
-    
-    if (!values || !Array.isArray(values)) {
-      console.error(`❌ ${logPrefix} Invalid values provided to initializeInlineRangeSlider:`, values)
+    return null
+  }
+
+  findMetadataItemRowByMetadataId(metadataId) {
+    const want = String(metadataId == null ? '' : metadataId).trim()
+    if (!want) return null
+    const nodes = document.querySelectorAll('[data-metadata-item]')
+    for (let i = 0; i < nodes.length; i++) {
+      if (String(nodes[i].getAttribute('data-metadata-item') || '').trim() === want) {
+        return nodes[i]
+      }
+    }
+    return null
+  }
+
+  parseCompressionInfoObject(compressionInfo) {
+    if (compressionInfo == null) return null
+    if (typeof compressionInfo === 'string') {
+      try {
+        return JSON.parse(compressionInfo)
+      } catch (e) {
+        return null
+      }
+    }
+    if (typeof compressionInfo === 'object') return compressionInfo
+    return null
+  }
+
+  computeNumericDegenerateState(values, compressionInfo) {
+    const ci = this.parseCompressionInfoObject(compressionInfo)
+    if (ci && Number.isFinite(ci.min_val) && Number.isFinite(ci.max_val)) {
+      const ciSpread = Math.abs(ci.max_val - ci.min_val)
+      if (ciSpread === 0 || ciSpread < 1e-15) {
+        return { degenerate: true, minVal: ci.min_val, maxVal: ci.max_val }
+      }
+    }
+    if (!values || typeof values.length !== 'number' || values.length === 0) {
+      return { degenerate: false }
+    }
+    const minV = this.dataManager.safeMin(values)
+    const maxV = this.dataManager.safeMax(values)
+    if (!Number.isFinite(minV) || !Number.isFinite(maxV)) {
+      return { degenerate: false, minVal: minV, maxVal: maxV }
+    }
+    const spread = Math.abs(maxV - minV)
+    if (spread === 0) {
+      return { degenerate: true, minVal: minV, maxVal: maxV }
+    }
+    const scale = Math.max(Math.abs(minV), Math.abs(maxV), 1e-9)
+    const rel = spread / scale
+    if (rel < 1e-10) {
+      return { degenerate: true, minVal: minV, maxVal: maxV }
+    }
+    return { degenerate: false, minVal: minV, maxVal: maxV }
+  }
+
+  applyDegenerateNumericPlotControlsUi(metadataId, degenerate) {
+    const idStr = String(metadataId == null ? '' : metadataId).trim()
+    const isGene = idStr.startsWith('gene_')
+    const rangeSliderEl = this.findRangeSliderElementByMetadataId(idStr)
+    let row = null
+    if (isGene) {
+      row = rangeSliderEl && rangeSliderEl.closest('[data-gene-item]')
+    } else {
+      row = this.findMetadataItemRowByMetadataId(idStr)
+      if (!row && rangeSliderEl) {
+        row = rangeSliderEl.closest('[data-metadata-item]')
+      }
+    }
+    if (!row) return
+
+    const setFilterIconPlaceholder = (iconEl) => {
+      if (!iconEl) return
+      if (degenerate) {
+        iconEl.style.display = 'flex'
+        iconEl.style.visibility = 'hidden'
+        iconEl.style.pointerEvents = 'none'
+      } else {
+        iconEl.style.visibility = ''
+        iconEl.style.pointerEvents = ''
+        iconEl.style.display = 'flex'
+      }
+    }
+
+    if (isGene) {
+      const stableGeneId = idStr.replace(/^gene_/, '').split('_')[0]
+      row.querySelectorAll('.gene-filter-state-icon').forEach((icon) => {
+        if (String(icon.getAttribute('data-gene-id') || '').trim() !== stableGeneId) return
+        setFilterIconPlaceholder(icon)
+      })
       return
     }
-    
-    const minVal = this.dataManager.safeMin(values)
-    const maxVal = this.dataManager.safeMax(values)
+
+    row.querySelectorAll('.metadata-filter-state-icon').forEach((icon) => {
+      if (String(icon.getAttribute('data-metadata-id') || '').trim() !== idStr) return
+      setFilterIconPlaceholder(icon)
+    })
+  }
+
+  // Initialize inline range slider with metadata values
+  initializeInlineRangeSlider(metadataId, values, vectorData) {
+    metadataId = String(metadataId == null ? '' : metadataId).trim()
+    if (!metadataId) return
+    const isGene = metadataId.startsWith('gene_')
+    const logPrefix = isGene ? '[gene slider init]' : '[metadata slider init]'
+
+    if (!values || typeof values.length !== 'number' || values.length === 0) {
+      console.error(`${logPrefix} Invalid values provided to initializeInlineRangeSlider:`, values)
+      return
+    }
+
+    const valuesForStorage = ArrayBuffer.isView(values) ? Array.from(values) : values
+
+    const loadedVec = this.loadedMetadataVectors && this.loadedMetadataVectors[metadataId]
+    const compressionInfo =
+      (vectorData && vectorData.compression_info) ||
+      (loadedVec && loadedVec.compression_info)
+
+    const degenerateState = this.computeNumericDegenerateState(valuesForStorage, compressionInfo)
+    const minVal = degenerateState.minVal !== undefined ? degenerateState.minVal : this.dataManager.safeMin(valuesForStorage)
+    const maxVal = degenerateState.maxVal !== undefined ? degenerateState.maxVal : this.dataManager.safeMax(valuesForStorage)
+    const isDegenerateNumericRange = degenerateState.degenerate === true
     
     // console.log(`${logPrefix} Calculated min/max values:`, { minVal, maxVal, valuesLength: values.length })
     
@@ -5166,7 +5270,7 @@ export default class extends Controller {
       max: maxVal,
       currentMin: currentMin,
       currentMax: currentMax,
-      values: values
+      values: valuesForStorage
     }
     
     // console.log(`${logPrefix} Stored in inlineRangeSliderData:`, {
@@ -5179,6 +5283,57 @@ export default class extends Controller {
       // allKeys: Object.keys(this.inlineRangeSliderData)
     // })
     
+    const metadataItemRow = !isGene ? this.findMetadataItemRowByMetadataId(metadataId) : null
+    const rangeSliderElementEarly = this.findRangeSliderElementByMetadataId(metadataId)
+    const rangeSectionEarly =
+      (metadataItemRow && metadataItemRow.querySelector('.metadata-range-section')) ||
+      rangeSliderElementEarly?.closest('.metadata-range-section, .gene-range-section')
+
+    if (isDegenerateNumericRange) {
+      if (this.selectedRanges?.[metadataId]) {
+        delete this.selectedRanges[metadataId]
+      }
+      const valueText =
+        Number.isFinite(minVal) && Number.isInteger(minVal) ? String(minVal) : (Number.isFinite(minVal) ? minVal.toFixed(3) : '')
+      if (rangeSectionEarly) {
+        const notice = rangeSectionEarly.querySelector('.metadata-constant-range-notice')
+        const controls = rangeSectionEarly.querySelector('.metadata-range-slider-controls')
+        if (notice) {
+          const span = notice.querySelector('.metadata-constant-range-value')
+          if (span) span.textContent = valueText
+          notice.style.display = 'block'
+        }
+        if (controls) {
+          controls.style.display = 'none'
+        } else if (rangeSliderElementEarly) {
+          rangeSliderElementEarly.style.display = 'none'
+        }
+      } else if (rangeSliderElementEarly) {
+        rangeSliderElementEarly.style.display = 'none'
+      }
+      this.applyDegenerateNumericPlotControlsUi(metadataId, true)
+      if (this.uiManager) {
+        if (metadataId.startsWith('gene_')) {
+          const stableGeneId = metadataId.replace(/^gene_/, '').split('_')[0]
+          this.uiManager.updateGeneFilterSwitchVisibility(stableGeneId, metadataId)
+        } else {
+          this.uiManager.updateFilterSwitchVisibility(metadataId)
+        }
+      }
+      return
+    }
+
+    this.applyDegenerateNumericPlotControlsUi(metadataId, false)
+    if (rangeSectionEarly) {
+      const notice = rangeSectionEarly.querySelector('.metadata-constant-range-notice')
+      const controls = rangeSectionEarly.querySelector('.metadata-range-slider-controls')
+      if (notice) notice.style.display = 'none'
+      if (controls) controls.style.display = ''
+    }
+    if (rangeSliderElementEarly) {
+      rangeSliderElementEarly.style.display = ''
+    }
+    
     // Verify loadedMetadataVectors has this metadata (critical for filtering)
     if (isGene) {
       const hasInLoadedVectors = !!this.loadedMetadataVectors?.[metadataId]
@@ -5190,7 +5345,7 @@ export default class extends Controller {
     }
     
     // Find the range slider controller and update its values
-    const rangeSliderElement = document.querySelector(`[data-range-slider-metadata-id-value="${metadataId}"]`)
+    const rangeSliderElement = rangeSliderElementEarly || this.findRangeSliderElementByMetadataId(metadataId)
     // console.log(`${logPrefix} Looking for range slider element:`, rangeSliderElement)
     
     if (rangeSliderElement) {
@@ -18197,14 +18352,14 @@ export default class extends Controller {
   }
 
   toggleInlineRangeSlider(metadataId, metadataName) {
-    // console.log('🎚️ Initializing inline range slider for metadata:', metadataId, metadataName)
-    
+    const mid = String(metadataId == null ? '' : metadataId).trim()
+
     // Load and initialize the range slider data
       // console.log('🎚️ Loading metadata for inline range slider...')
-      this.dataManager.loadSingleMetadataVector(metadataId).then(vectorData => {
+      this.dataManager.loadSingleMetadataVector(mid).then(vectorData => {
         // console.log('🎚️ Metadata loaded for inline range slider:', vectorData)
         if (!vectorData) {
-          console.error('❌ No vector data loaded for inline range slider')
+          console.error('No vector data loaded for inline range slider')
           return
         }
         
@@ -18215,14 +18370,16 @@ export default class extends Controller {
         }
         
         if (!values) {
-          console.error('❌ No values available for inline range slider')
+          console.error('No values available for inline range slider', { metadataId: mid })
           return
         }
-        
-        // console.log('🎚️ Values loaded for inline range slider:', values.length, 'values')
+
+        if (ArrayBuffer.isView(values)) {
+          values = Array.from(values)
+        }
         
       // Initialize the inline range slider with the loaded values (just the histogram, no coloring)
-        this.initializeInlineRangeSlider(metadataId, values)
+        this.initializeInlineRangeSlider(mid, values, vectorData)
         
       // Check renderer state after initialization (for debugging - compare with gene initialization)
       // console.log('🎚️ [CONTINUOUS INIT] Checking renderer state after initialization...')
@@ -18241,7 +18398,7 @@ export default class extends Controller {
         
       // console.log('🎚️ Inline range slider fully initialized (histogram shown, no coloring applied)')
       }).catch(error => {
-        console.error('❌ Error loading metadata for inline range slider:', error)
+        console.error('Error loading metadata for inline range slider:', error)
       })
   }
 
@@ -18252,6 +18409,7 @@ export default class extends Controller {
     const sliderData = this.inlineRangeSliderData[metadataId]
     const { min, max, currentMin, currentMax } = sliderData
     const range = max - min
+    if (!Number.isFinite(range) || range === 0) return
     
     const minPercent = ((currentMin - min) / range) * 100
     const maxPercent = ((currentMax - min) / range) * 100

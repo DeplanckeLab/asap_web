@@ -9591,7 +9591,15 @@ class ProjectsController < ApplicationController
         compress_discrete_metadata_vector(raw_vector, metadata)
       else
         Rails.logger.warn "Unknown data type for compression: #{data_type}"
-        { data: nil, info: "Unknown data type: #{data_type}" }
+        {
+          data: nil,
+          info: {
+            type: 'error',
+            code: 'unknown_data_type',
+            message: "Unknown data type: #{data_type}",
+            data_type: data_type
+          }
+        }
       end
     end
     
@@ -9612,7 +9620,15 @@ class ProjectsController < ApplicationController
           end
         rescue JSON::ParserError => e
           Rails.logger.error "Failed to parse categories for #{metadata.display_name}: #{e.message}"
-          return { data: nil, info: "Failed to parse categories" }
+          return {
+            data: nil,
+            info: {
+              type: 'error',
+              code: 'failed_parse_categories',
+              message: 'Failed to parse categories',
+              cell_count: raw_vector.length
+            }
+          }
         end
       end
       
@@ -9627,7 +9643,15 @@ class ProjectsController < ApplicationController
       
       if categories.empty?
         Rails.logger.warn "No categories found for discrete metadata: #{metadata.display_name}"
-        return { data: nil, info: "No categories available" }
+        return {
+          data: nil,
+          info: {
+            type: 'error',
+            code: 'no_categories',
+            message: 'No categories available',
+            cell_count: raw_vector.length
+          }
+        }
       end
       
       # Create category to index mapping
@@ -9650,15 +9674,17 @@ class ProjectsController < ApplicationController
       # Handle edge case: only 1 category - no data needed, all cells are the same
       if num_categories <= 1
         Rails.logger.info "Only #{num_categories} unique category(ies) found - no data needed (all cells same category)"
-        return { 
-          data: nil, 
+        # Hash only (no .to_json): render json: embeds this as a JSON object; clients must not JSON.parse a bare string.
+        return {
+          data: nil,
           info: {
+            type: 'discrete',
             single_category: true,
             category_index: unique_indices.first || 0,
             length: indices.length,
             categories: categories,
             num_categories: num_categories
-          }.to_json
+          }
         }
       end
       
@@ -9738,7 +9764,19 @@ class ProjectsController < ApplicationController
       # Determine optimal precision and bit width
       if range <= 0
         Rails.logger.warn "Zero range for continuous metadata: #{metadata.display_name}"
-        return { data: nil, info: "Zero range - no variation in data" }
+        # Structured info so the client can JSON-parse and synthesize a constant vector (no binary payload).
+        return {
+          data: nil,
+          info: {
+            type: 'continuous',
+            zero_range: true,
+            min_val: min_val.to_f,
+            max_val: max_val.to_f,
+            cell_count: raw_vector.length,
+            bit_width: 16,
+            message: 'Zero range - no variation in data'
+          }
+        }
       end
       
       # Use 16-bit unsigned integers with normalization

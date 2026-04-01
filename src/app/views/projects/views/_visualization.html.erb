@@ -672,6 +672,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 </div>
                 <!-- Range Slider Section (initially hidden) -->
                 <div class="metadata-range-section" style="padding: 12px; border-top: 1px solid #f3f4f6; display: none; background-color: #fafafa;">
+                  <div class="metadata-constant-range-notice" style="display: none; font-size: 12px; color: #6b7280; margin-bottom: 8px;">
+                    All cells have the same value: <span class="metadata-constant-range-value"></span>
+                  </div>
+                  <div class="metadata-range-slider-controls">
                   <!-- Range Slider -->
                   <div data-controller="range-slider" 
                        data-range-slider-metadata-id-value="<%= metadata.id %>"
@@ -728,6 +732,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                       <canvas data-range-slider-target="canvas" class="density-plot-canvas" data-metadata-id="<%= metadata.id %>" 
                               style="width: 100%; height: 80px; border: 1px solid #e5e7eb; border-radius: 4px; background-color: white;"></canvas>
                     </div>
+                  </div>
                   </div>
                 </div>
               </div>

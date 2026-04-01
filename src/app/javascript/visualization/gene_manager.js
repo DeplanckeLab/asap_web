@@ -2038,6 +2038,10 @@ this.currentMatches = allMatches.filter(item => {
       <div class="gene-range-section" 
            data-gene-id="${gene.stableId}"
            style="padding: 12px; border-top: 1px solid #f3f4f6; display: none; background-color: #fafafa;">
+        <div class="metadata-constant-range-notice" style="display: none; font-size: 12px; color: #6b7280; margin-bottom: 8px;">
+          All cells have the same value: <span class="metadata-constant-range-value"></span>
+        </div>
+        <div class="metadata-range-slider-controls">
         <!-- Range Slider -->
         <div data-controller="range-slider" 
              data-range-slider-metadata-id-value="${layerMetadataId}"
@@ -2096,6 +2100,7 @@ this.currentMatches = allMatches.filter(item => {
                     style="width: 100%; height: 80px; border: 1px solid #e5e7eb; border-radius: 4px; background-color: white;"></canvas>
           </div>
         </div>
+        </div>
       </div>
       <!-- Loading indicator (shown while expression data loads) -->
       <div id="gene-expression-loading-${gene.stableId}" style="display: none; padding: 12px; color: #6b7280; font-size: 14px; text-align: center;">
@@ -2143,7 +2148,11 @@ this.currentMatches = allMatches.filter(item => {
     if (existingData && existingData.values && this.controller) {
       // Data already available, initialize slider data
       if (this.controller.initializeInlineRangeSlider) {
-        this.controller.initializeInlineRangeSlider(layerMetadataId, existingData.values)
+        this.controller.initializeInlineRangeSlider(
+          layerMetadataId,
+          existingData.values,
+          this.controller.loadedMetadataVectors?.[layerMetadataId]
+        )
       }
     }
   }
@@ -2285,7 +2294,11 @@ this.currentMatches = allMatches.filter(item => {
         
         // Initialize slider data immediately (needed for count updates)
         if (this.controller && this.controller.initializeInlineRangeSlider) {
-          this.controller.initializeInlineRangeSlider(geneMetadataId, expressionData.values)
+          this.controller.initializeInlineRangeSlider(
+            geneMetadataId,
+            expressionData.values,
+            this.controller.loadedMetadataVectors?.[geneMetadataId]
+          )
           if (baseMetadataId !== geneMetadataId && this.controller.inlineRangeSliderData) {
             this.controller.inlineRangeSliderData[baseMetadataId] = this.controller.inlineRangeSliderData[geneMetadataId]
           }
@@ -2413,7 +2426,11 @@ this.currentMatches = allMatches.filter(item => {
         
         // Initialize slider data immediately (needed for count updates)
         if (this.controller.initializeInlineRangeSlider) {
-          this.controller.initializeInlineRangeSlider(geneMetadataId, expressionValues)
+          this.controller.initializeInlineRangeSlider(
+            geneMetadataId,
+            expressionValues,
+            this.controller.loadedMetadataVectors?.[geneMetadataId]
+          )
           if (baseMetadataId !== geneMetadataId && this.controller.inlineRangeSliderData) {
             this.controller.inlineRangeSliderData[baseMetadataId] = this.controller.inlineRangeSliderData[geneMetadataId]
           }
@@ -2675,7 +2692,11 @@ this.currentMatches = allMatches.filter(item => {
     }
 
     if (typeof this.controller.initializeInlineRangeSlider === 'function') {
-      this.controller.initializeInlineRangeSlider(geneMetadataId, values)
+      this.controller.initializeInlineRangeSlider(
+        geneMetadataId,
+        values,
+        this.controller.loadedMetadataVectors?.[geneMetadataId]
+      )
       this.updateGeneSearchVisibility()
     } else {
       console.warn('[GENE INIT] initializeInlineRangeSlider is not available on the visualization controller')

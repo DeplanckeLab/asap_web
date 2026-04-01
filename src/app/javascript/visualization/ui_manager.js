@@ -411,16 +411,33 @@ export class UIManager {
       
       // Status icon updates should be handled by data loading logic, not UI display logic
       
-      // Show filter state icon
+      // Show filter state icon (hidden when all cells have the same value; no subrange to filter)
       const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${metadataId}"]`)
       if (filterStateIcon) {
-        filterStateIcon.style.display = 'flex'
-        // Initialize as white (no filter) - will be updated by range slider controller
-        filterStateIcon.style.backgroundColor = 'white'
-        filterStateIcon.style.borderColor = '#d1d5db'
-        const icon = filterStateIcon.querySelector('i')
-        if (icon) {
-          icon.style.color = '#9ca3af'
+        const valuesRaw = metadataVector?.values
+        const values =
+          valuesRaw && ArrayBuffer.isView(valuesRaw)
+            ? Array.from(valuesRaw)
+            : valuesRaw
+        const degenerateState = this.controller.computeNumericDegenerateState(
+          Array.isArray(values) ? values : [],
+          metadataVector?.compression_info
+        )
+        if (degenerateState.degenerate) {
+          filterStateIcon.style.display = 'flex'
+          filterStateIcon.style.visibility = 'hidden'
+          filterStateIcon.style.pointerEvents = 'none'
+        } else {
+          filterStateIcon.style.visibility = ''
+          filterStateIcon.style.pointerEvents = ''
+          filterStateIcon.style.display = 'flex'
+          // Initialize as white (no filter) - will be updated by range slider controller
+          filterStateIcon.style.backgroundColor = 'white'
+          filterStateIcon.style.borderColor = '#d1d5db'
+          const icon = filterStateIcon.querySelector('i')
+          if (icon) {
+            icon.style.color = '#9ca3af'
+          }
         }
       }
       

@@ -1679,7 +1679,6 @@ module Basic
         ori_annot = Annot.where(:project_id => project.id, :name => meta['name']).order("id asc").first
         ori_annot_by_name[ori_annot_key] = ori_annot
       end
-      type_txt = ''
       if ori_annot and annot != ori_annot ## second part of expression: in case of re-importing a metadata or creating again the same metadata, do not get the metadata attributes from the previous metadata version (it might be outdated, for example in the case of imported metadata => the type can me changed by the user)
         meta["type"] = (dt = ori_annot.data_type) ? dt.name : nil
         if ori_annot.data_class_ids and ori_annot.data_class_ids != ''
@@ -1689,28 +1688,30 @@ module Basic
           }.compact
         end
         meta["imported"] = ori_annot.imported
-        type_txt = (dt = ori_annot.data_type) ? "-type #{dt.name}" : ""
       end
-      type_txt = "-type #{h_data_types[meta['forced_type_id']].name}"  if meta['forced_type_id']
-      
+      if meta['forced_type_id'] && (fdt = h_data_types[meta['forced_type_id']])
+        meta['type'] = fdt.name
+      end
+
       loom_path = project_dir + relative_filepath
       if meta['data_class_names'] and meta['data_class_names'].include?("discrete_mdata")
         meta["type"]= 'DISCRETE'
       end
-      values_opt = (meta["type"] == 'DISCRETE') ? '' : '-no-values' 
-      ##cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar #{values_opt} -T ExtractMetadata -loom #{loom_path} #{type_txt} -meta \"#{meta['name']}\""
-      ##puts cmd
-      ##res_json =`#{cmd}`
-      #   puts res_json
-      ##meta_compl = Basic.safe_parse_json(res_json, {})
-      ##puts meta_compl
-      #        begin
-      #          meta_compl = JSON.parse(res_json)
-      #        rescue
-      #        end
+      if meta['forced_type_id']
+        type_for_extract = h_data_types[meta['forced_type_id']]&.name
+        no_values = meta['type'] != 'DISCRETE'
+        meta_compl = H5DataService.extract_metadata_compl(
+          loom_path.to_s,
+          meta['name'],
+          type_name: type_for_extract,
+          no_values: no_values
+        )
+        logger&.info("[Basic.load_annot] forced_type_id extract name=#{meta['name']} type=#{type_for_extract} keys=#{meta_compl.keys.inspect}")
+      else
+        meta_compl = {}
+      end
 
       ## complement for h5ad existing_metadata or if we want to change type (call from annot update)
-      meta_compl ||= {}
       ['type', 'on', 'nber_rows', 'nber_cols', 'dataset_size'].each do |k|
         meta[k] ||= meta_compl[k] 
       end

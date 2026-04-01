@@ -1485,6 +1485,14 @@ class ProjectsController < ApplicationController
       return
     end
 
+    if @project.version_id.to_i < 4
+      respond_to do |format|
+        format.html { redirect_to projects_path, alert: "Cloning is not available for projects on ASAP release before v4." }
+        format.json { render json: { error: "Cloning is not available for this project release" }, status: :unprocessable_entity }
+      end
+      return
+    end
+
     clone_service = ProjectCloneService.new(@project, user: current_user, session: session)
     new_project = clone_service.call
 

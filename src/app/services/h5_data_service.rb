@@ -13,6 +13,25 @@ class H5DataService
     Shellwords.join(cmd_array)
   end
 
+  # Full ExtractMetadata JSON (used when re-interpreting metadata type, e.g. annot update).
+  # type_name: NUMERIC, CATEGORICAL, STRING, etc. as accepted by ASAP.jar -type
+  def self.extract_metadata_compl(loom_path, meta_path, type_name:, no_values: true)
+    args = ['-T', 'ExtractMetadata', '-loom', loom_path]
+    args.push('-no-values') if no_values
+    args.push('-type', type_name.to_s) if type_name.present?
+    args.push('-meta', meta_path.to_s)
+    cmd = asap_command(*args)
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      Rails.logger.error("[H5DataService.extract_metadata_compl] failed: #{stderr}")
+      return {}
+    end
+    JSON.parse(stdout)
+  rescue JSON::ParserError => e
+    Rails.logger.error("[H5DataService.extract_metadata_compl] parse error: #{e.message}")
+    {}
+  end
+
   # 1. Gene expression data
   def self.get_gene_data(genes, h5_path)
     sanitized_genes = genes.map(&:to_s)

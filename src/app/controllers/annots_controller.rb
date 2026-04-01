@@ -1,7 +1,9 @@
 require 'open3'
 
 class AnnotsController < ApplicationController
-  before_action :set_annot, only: [:show, :download, :categories]
+  helper_method :metadata_type_editable?
+
+  before_action :set_annot, only: [:show, :download, :categories, :edit, :update]
 
   # GET /annots/:id
   def show
@@ -307,12 +309,94 @@ class AnnotsController < ApplicationController
     end
   end
 
+  def edit
+    @project = @annot.project
+    unless editable?(@project)
+      redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' and return
+    end
+    unless metadata_type_editable?(@annot)
+      redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
+    end
+    @data_type_options = DataType.order(:id).map { |dt| [dt.label.presence || dt.name, dt.id] }
+  end
+
+  def update
+    @project = @annot.project
+    unless editable?(@project)
+      redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' and return
+    end
+    unless metadata_type_editable?(@annot)
+      redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
+    end
+
+    permitted = annot_params
+    new_type_id = permitted[:data_type_id].presence&.to_i
+    unless new_type_id.positive? && DataType.exists?(id: new_type_id)
+      redirect_to edit_annot_path(@annot, annot_back_params), alert: 'Invalid data type.' and return
+    end
+
+    h_annot = {
+      data_type_id: new_type_id,
+      data_class_ids: (new_type_id != @annot.data_type_id ? '' : permitted[:data_class_ids].to_s)
+    }
+
+    h_data_types = {}
+    DataType.find_each { |dt| h_data_types[dt.name] = dt; h_data_types[dt.id] = dt }
+    h_data_classes = {}
+    DataClass.find_each { |dc| h_data_classes[dc.name] = dc; h_data_classes[dc.id] = dc }
+
+    ori_annot = Annot.where(project_id: @project.id, name: @annot.name).order(:id).first
+    unless ori_annot
+      redirect_to annot_path(@annot, annot_back_params), alert: 'Annotation not found.' and return
+    end
+
+    all_annots = Annot.where(project_id: @project.id, name: @annot.name).order(:id)
+    if all_annots.any? { |a| a.run_id.blank? }
+      redirect_to edit_annot_path(@annot, annot_back_params), alert: 'Cannot update: a related row is missing its run.' and return
+    end
+
+    ActiveRecord::Base.transaction do
+      ori_annot.update!(h_annot)
+      all_annots.each do |annot|
+        meta = {
+          'name' => annot.name,
+          'forced_type_id' => h_annot[:data_type_id]
+        }
+        Basic.load_annot(annot.run, meta, annot.filepath, h_data_types, h_data_classes, logger, {})
+      end
+    end
+
+    redirect_to annot_path(@annot, annot_back_params), notice: 'Data type was updated. Related annotations were refreshed.'
+  rescue StandardError => e
+    Rails.logger.error("[annots#update] #{e.class}: #{e.message}\n#{e.backtrace&.first(12)&.join("\n")}")
+    redirect_to edit_annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}"
+  end
+
   private
+
+  def annot_params
+    params.require(:annot).permit(:data_type_id, :data_class_ids)
+  end
+
+  def annot_back_params
+    { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact
+  end
+
+  def metadata_type_editable?(annot)
+    return false if annot.blank?
+    return false if annot.dim == 3
+    return false if annot.name == '/matrix'
+    return false if annot.filepath.blank?
+
+    user_data_dir = ENV.fetch('USER_DATA_DIR', Rails.root.join('storage', 'user_data').to_s)
+    loom = Pathname.new(user_data_dir) + annot.project.user_id.to_s + annot.project.key + annot.filepath
+    File.exist?(loom)
+  end
 
   def set_annot
     @annot = Annot.find(params[:id])
     unless readable?(@annot.project)
-      redirect_to unauthorized_path
+      redirect_to unauthorized_path and return
     end
   end
 

@@ -353,7 +353,7 @@
             <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
               <div class="flex space-x-2">
                 <%= link_to "View", project_path(project), class: "flex-1 text-center px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none" %>
-                <% if clonable?(project) %>
+                <% if clonable?(project) && project.version_id.to_i >= 4 %>
                   <%= button_to raw('<i class="fas fa-clone"></i><span>Clone</span>'),
                       clone_project_path(project),
                       method: :post,
@@ -515,7 +515,7 @@
 		      <div class="flex items-center gap-2">
 			<%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
 			
-			<% if clonable?(project) %>
+			<% if clonable?(project) && project.version_id.to_i >= 4 %>
 			<%= button_to raw('<i class="fas fa-clone mr-1"></i><span>Clone</span>'),
 			    clone_project_path(project),
 			    method: :post,

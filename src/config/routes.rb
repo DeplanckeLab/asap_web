@@ -91,7 +91,7 @@ Rails.application.routes.draw do
     end
   end
   
-  resources :annots, only: [:show] do
+  resources :annots, only: [:show, :edit, :update] do
     member do
       get :download
       get :categories

@@ -1,0 +1,41 @@
+<% content_for :title, "Change data type – #{@annot.label.presence || format_annot_name(@annot.name)}" %>
+
+<div class="fixed top-16 left-0 right-0 z-40 flex-shrink-0 bg-white shadow-sm border-b border-gray-200">
+  <div class="px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between py-4">
+      <h3 class="text-lg font-semibold text-gray-900">Change metadata data type</h3>
+      <%= link_to annot_path(@annot, annot_back_params), class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors' do %>
+        Back
+      <% end %>
+    </div>
+  </div>
+</div>
+
+<div class="flex-1 overflow-y-auto">
+  <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24 max-w-xl">
+    <% if flash[:alert].present? %>
+      <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><%= flash[:alert] %></div>
+    <% end %>
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+      <p class="text-sm text-gray-600">
+        Path: <span class="font-mono text-gray-900"><%= @annot.name %></span>
+        <% if @annot.filepath.present? %>
+          <br />
+          File: <span class="font-mono text-gray-900"><%= @annot.filepath %></span>
+        <% end %>
+      </p>
+
+      <%= form_with model: @annot, url: annot_path(@annot, annot_back_params), method: :patch, local: true, class: 'space-y-4' do |f| %>
+        <div>
+          <%= f.label :data_type_id, 'Data type', class: 'block text-sm font-medium text-gray-700 mb-1' %>
+          <%= f.select :data_type_id, options_for_select(@data_type_options, @annot.data_type_id), {}, class: 'block w-full rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500' %>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <%= f.submit 'Update', class: 'inline-flex justify-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 cursor-pointer border-0' %>
+          <%= link_to 'Cancel', annot_path(@annot, annot_back_params), class: 'inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50' %>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>

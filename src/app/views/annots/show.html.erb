@@ -84,6 +84,11 @@
               <% else %>
                 <span class="text-sm text-gray-500">N/A</span>
               <% end %>
+              <% if editable?(@project) && metadata_type_editable?(@annot) %>
+                <div class="mt-2">
+                  <%= link_to 'Change data type', edit_annot_path(@annot, { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact), class: 'text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline' %>
+                </div>
+              <% end %>
             </div>
           </div>
           <% if @annot.filepath.present? %>

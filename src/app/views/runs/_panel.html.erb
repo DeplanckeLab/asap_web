@@ -43,7 +43,7 @@
             <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to runs</span>
           </button>
         <% end %>
-        <% if @step && @step.name.in?(['dim_reduction', 'pca', 'tsne', 'umap']) %>
+        <% if @step&.embedding_step? %>
           <%= link_to project_path(@project, view: 'visualization'), 
               class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",
               title: "Visualization",

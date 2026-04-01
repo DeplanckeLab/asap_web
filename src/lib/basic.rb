@@ -373,6 +373,21 @@ module Basic
       return asap_docker_image
     end
 
+    # Mounted host:container at the same absolute path (typical Linux deploy).
+    def prediction_data_root_mount
+      ENV.fetch('ASAP_PREDICTION_DATA_ROOT')
+    end
+
+    # Directory containing version subfolders, passed to prediction.tool.2.R (first path argument).
+    def prediction_models_path_for_r
+      File.join(prediction_data_root_mount, 'pred_models')
+    end
+
+    def prediction_docker_volume_mount_arg
+      r = prediction_data_root_mount
+      "-v #{r}:#{r}"
+    end
+
     def get_asap_docker_for_markers project
       version = project.version
       asap_docker_image = get_asap_docker(version)
@@ -2067,15 +2082,18 @@ module Basic
           
           if h_p[:h_attrs][k.to_s]['valid_types'].flatten.include?('dataset')
             logger.debug("ATTR3:" + k)
-            list_datasets = []            
-            if h_p[:h_attrs][k.to_s]['req_data_structure'] == 'array' and !h_p[:h_attrs][k.to_s]['combinatorial_runs'] and p[k] and !p[k].empty?
-              ### cases where there are several items
-              logger.debug("ATTR4:" + p[k].to_json)
-              list_datasets = p[k]
-              #              h_var[k]=[]
+            list_datasets = []
+            if h_p[:h_attrs][k.to_s]['req_data_structure'] == 'array' and !h_p[:h_attrs][k.to_s]['combinatorial_runs']
+              # Optional multi-select (e.g. covariates): [] must stay [], not [[]]. Absent key / nil => no items.
+              list_datasets = if p[k].is_a?(Array)
+                p[k]
+              elsif p[k].nil?
+                []
+              else
+                logger.debug("ATTR4:" + p[k].to_json)
+                [p[k]]
+              end
             else
-             # logger.debug(h_p[:h_attrs][k.to_s]['req_data_structure'])
-             # logger.debug()
               list_datasets = [p[k]]
             end
             
@@ -2310,7 +2328,9 @@ module Basic
         asap_docker_image = get_asap_docker(version)
         asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
 #        cmd = "docker run --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2 -v /srv/asap_run/srv:/srv fabdavid/asap_run:v#{h_p[:project].version_id} -c 'Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
-        cmd = "docker run --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2 -v /srv/asap_run/srv:/srv #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
+        vol = Basic.prediction_docker_volume_mount_arg
+        models_base = Basic.prediction_models_path_for_r
+        cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} -v /srv/asap_run/srv:/srv #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
             logger.debug("PRED_CMD: #{cmd}")
         pred_results_json = `#{cmd}`.split("\n").first #.gsub(/^(\{.+?\})/, "\1")                                                                                                       
         h_pred_results = Basic.safe_parse_json(pred_results_json, {})

@@ -20,7 +20,7 @@ class Annot < ApplicationRecord
   # Get available embeddings for a project
   def self.available_embeddings(project_id)
     # Find runs that created embeddings
-    embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: ['dim_reduction', 'pca', 'tsne', 'umap'] })
+    embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: Step::EMBEDDING_STEP_NAMES })
     
     # Get annotations created by those runs
     where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id))
@@ -49,7 +49,7 @@ class Annot < ApplicationRecord
   # Get available embeddings for a specific loom file in a project
   def self.available_embeddings_for_loom(project_id, filepath)
     # Find runs that created embeddings
-    embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: ['dim_reduction', 'pca', 'tsne', 'umap'] })
+    embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: Step::EMBEDDING_STEP_NAMES })
     
     # Get annotations created by those runs for the specific loom file
     where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id), filepath: filepath)

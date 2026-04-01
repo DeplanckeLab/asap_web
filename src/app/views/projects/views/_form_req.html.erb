@@ -16,6 +16,7 @@
       'data-form-req-step-name-value' => @step.name,
       'data-form-req-action-button-label-value' => (@h_step_attrs['action_button_label'] || 'Submit'),
       'data-form-req-submit-url-value' => reqs_path,
+      'data-form-req-upd-pred-url-value' => upd_pred_project_path(@project),
       'data-form-req-step-results-url-value' => step_results_project_path(@project),
       'data-form-req-unavailable-methods-value' => @h_unavailable_methods.to_json,
       'data-form-req-methods-value' => h_methods.to_json
@@ -133,7 +134,8 @@
         </div>
         <div class="flex-1">
           <div id="method_desc" class="text-sm text-gray-700 mb-1" data-form-req-target="methodDesc"></div>
-          <div id="method_pred" class="text-xs text-gray-500" data-form-req-target="methodPred"></div>
+          <div id="method_pred" class="text-xs text-gray-500 mt-1" data-form-req-target="methodPred"></div>
+          <div class="hidden mt-2 text-sm text-amber-800 border border-amber-200 bg-amber-50 rounded-md px-3 py-2" data-form-req-target="predictionPrevent" role="alert"></div>
           <%= hidden_field_tag :pred_process_duration %>
           <%= hidden_field_tag :pred_max_ram %>
         </div>

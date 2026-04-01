@@ -137,7 +137,7 @@ class ReqsController < ApplicationController
       puts "Elapsed time 4:" + (Time.now-t).to_s
 
 
-      ### update params
+      ### update params (always set [1] for Basic.set_run h_p[:p], not only when group_pairs is set)
       list_of_runs.each_index do |run_i|
         run = list_of_runs[run_i]
         h_run_attrs = JSON.parse(run[0].attrs_json)
@@ -146,8 +146,8 @@ class ReqsController < ApplicationController
           h_run_attrs['group_comp'] = gp[1]
           h_run_attrs['group_pairs'] = nil
           list_of_runs[run_i][0].attrs_json = h_run_attrs.to_json
-          list_of_runs[run_i][1] = h_run_attrs
         end
+        list_of_runs[run_i][1] = h_run_attrs
       end
       puts "Elapsed time 5:" + (Time.now-t).to_s
 

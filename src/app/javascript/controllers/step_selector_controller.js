@@ -1754,11 +1754,10 @@ export default class extends Controller {
   updateRunStatusInDOM(runRow, data) {
     console.log(`[StepSelectorController] Updating DOM for run ${data.run_id} with status ${data.status_id}`)
     
-    // Find status cell - it's the 4th td in the row
-    const cells = runRow.querySelectorAll('td')
-    const statusCell = cells[3] // 0-indexed, so 3 is the 4th column
+    // Status column index varies (e.g. clustering adds a column before status); use a stable marker from the template.
+    const statusCell = runRow.querySelector('td[data-run-table-status-cell]')
     if (!statusCell) {
-      console.warn('[StepSelectorController] Status cell not found in run row')
+      console.warn('[StepSelectorController] Status cell not found in run row (missing data-run-table-status-cell)')
       return
     }
     

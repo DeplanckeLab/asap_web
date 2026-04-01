@@ -6,6 +6,7 @@ export default class extends Controller {
     "methodSelect",
     "methodDesc",
     "methodPred",
+    "predictionPrevent",
     "attrsContainer",
     "errorMessages"
   ]
@@ -17,12 +18,15 @@ export default class extends Controller {
     stepName: String,
     actionButtonLabel: String,
     submitUrl: String,
+    updPredUrl: String,
     stepResultsUrl: String,
     unavailableMethods: { type: Object, default: {} },
     methods: { type: Object, default: {} }
   }
 
   connect() {
+    this._predictionPreventSubmit = false
+    this._resourcePredictionTimer = null
     console.log("=== [FormReqController] CONNECTED ===")
     console.log("[FormReqController] Element:", this.element)
     console.log("[FormReqController] Step name:", this.stepNameValue)
@@ -66,6 +70,10 @@ export default class extends Controller {
   }
 
   disconnect() {
+    if (this._resourcePredictionTimer) {
+      clearTimeout(this._resourcePredictionTimer)
+      this._resourcePredictionTimer = null
+    }
     console.log("[FormReqController] Disconnected")
   }
 
@@ -166,6 +174,224 @@ export default class extends Controller {
     }
   }
 
+  getStdMethodId() {
+    if (this.hasMethodSelectTarget && this.methodSelectTarget.value) {
+      return this.methodSelectTarget.value
+    }
+    const hidden = this.element.querySelector('input[name="req[std_method_id]"], #req_std_method_id')
+    return hidden ? hidden.value : ''
+  }
+
+  collectAnnotIdsForPrediction() {
+    const ids = new Set()
+    if (!this.hasAttrsContainerTarget) {
+      return []
+    }
+    const hiddenFields = this.attrsContainerTarget.querySelectorAll('[data-input-data-selector-target="hiddenField"]')
+    hiddenFields.forEach((field) => {
+      const raw = (field.value || '').trim()
+      if (!raw) {
+        return
+      }
+      try {
+        const parsed = JSON.parse(raw)
+        const list = Array.isArray(parsed) ? parsed : [parsed]
+        list.forEach((item) => {
+          if (item && item.annot_id != null && item.annot_id !== '') {
+            ids.add(String(item.annot_id))
+          }
+        })
+      } catch (_e) {
+        // ignore invalid JSON
+      }
+    })
+    return Array.from(ids)
+  }
+
+  scheduleResourcePrediction() {
+    if (!this.hasMethodPredTarget) {
+      return
+    }
+    if (this._resourcePredictionTimer) {
+      clearTimeout(this._resourcePredictionTimer)
+    }
+    this._resourcePredictionTimer = setTimeout(() => {
+      this._resourcePredictionTimer = null
+      this.refreshResourcePrediction()
+    }, 400)
+  }
+
+  clearResourcePrediction() {
+    this._predictionPreventSubmit = false
+    if (this.hasMethodPredTarget) {
+      this.methodPredTarget.innerHTML = ''
+    }
+    if (this.hasPredictionPreventTarget) {
+      this.predictionPreventTarget.textContent = ''
+      this.predictionPreventTarget.classList.add('hidden')
+    }
+    const dur = document.getElementById('pred_process_duration')
+    const ram = document.getElementById('pred_max_ram')
+    if (dur) {
+      dur.value = ''
+    }
+    if (ram) {
+      ram.value = ''
+    }
+  }
+
+  escapeHtml(text) {
+    if (text == null) {
+      return ''
+    }
+    const div = document.createElement('div')
+    div.textContent = String(text)
+    return div.innerHTML
+  }
+
+  badgeClassForSeverity(severity) {
+    if (severity === 'danger') {
+      return 'bg-red-50 text-red-900 border-red-200'
+    }
+    if (severity === 'warning') {
+      return 'bg-amber-50 text-amber-900 border-amber-200'
+    }
+    return 'bg-gray-100 text-gray-800 border-gray-200'
+  }
+
+  applyResourcePredictionPayload(data) {
+    if (!this.hasMethodPredTarget) {
+      return
+    }
+
+    const dur = document.getElementById('pred_process_duration')
+    const ram = document.getElementById('pred_max_ram')
+    if (dur) {
+      dur.value = data.predicted_time != null ? String(data.predicted_time) : ''
+    }
+    if (ram) {
+      ram.value = data.predicted_ram != null ? String(data.predicted_ram) : ''
+    }
+
+    if (data.error) {
+      this.methodPredTarget.innerHTML = `<span class="text-red-600">${this.escapeHtml(data.error)}</span>`
+      this._predictionPreventSubmit = false
+      if (this.hasPredictionPreventTarget) {
+        this.predictionPreventTarget.classList.add('hidden')
+      }
+      this.validateForm()
+      return
+    }
+
+    const timeDisp = data.time_display || ''
+    const ramDisp = data.ram_display || ''
+    if (!timeDisp && !ramDisp) {
+      this.methodPredTarget.innerHTML = ''
+      this._predictionPreventSubmit = false
+      if (this.hasPredictionPreventTarget) {
+        this.predictionPreventTarget.classList.add('hidden')
+      }
+      this.validateForm()
+      return
+    }
+
+    const tCls = this.badgeClassForSeverity(data.time_severity || 'none')
+    const rCls = this.badgeClassForSeverity(data.ram_severity || 'none')
+    const tTitle = this.escapeHtml(data.time_title || '')
+    const rTitle = this.escapeHtml(data.ram_title || '')
+
+    const timeBadge = timeDisp
+      ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border mr-1 mb-1 ${tCls}" title="${tTitle}">Time: ${this.escapeHtml(timeDisp)}</span>`
+      : ''
+    const ramBadge = ramDisp
+      ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border mb-1 ${rCls}" title="${rTitle}">RAM: ${this.escapeHtml(ramDisp)}</span>`
+      : ''
+
+    this.methodPredTarget.innerHTML =
+      `<span class="font-medium text-gray-700">Resource prediction:</span> ${timeBadge}${ramBadge}`
+
+    this._predictionPreventSubmit = !!data.prevent_submit
+    if (this.hasPredictionPreventTarget) {
+      if (data.prevent_submit && Array.isArray(data.prevent_messages) && data.prevent_messages.length > 0) {
+        const lines = data.prevent_messages.map((m) => this.escapeHtml(m)).join('<br/>')
+        this.predictionPreventTarget.innerHTML =
+          `${lines}<br/><span class="font-semibold">Try a smaller input or a more scalable method.</span>`
+        this.predictionPreventTarget.classList.remove('hidden')
+      } else {
+        this.predictionPreventTarget.textContent = ''
+        this.predictionPreventTarget.classList.add('hidden')
+      }
+    }
+
+    this.validateForm()
+  }
+
+  refreshResourcePrediction() {
+    if (!this.hasMethodPredTarget) {
+      return
+    }
+
+    const methodId = this.getStdMethodId()
+    if (!methodId) {
+      this.clearResourcePrediction()
+      this.validateForm()
+      return
+    }
+
+    const annotIds = this.collectAnnotIdsForPrediction()
+    if (annotIds.length === 0) {
+      this.clearResourcePrediction()
+      this.validateForm()
+      return
+    }
+
+    const url =
+      this.updPredUrlValue && String(this.updPredUrlValue).length > 0
+        ? this.updPredUrlValue
+        : `/projects/${this.projectKeyValue}/upd_pred`
+
+    this.methodPredTarget.innerHTML =
+      '<span class="text-gray-500">Predicting required resources</span>'
+
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': token
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        annot_ids: annotIds.join(','),
+        std_method_id: methodId
+      })
+    })
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().then((text) => {
+            let msg = text || `HTTP ${response.status}`
+            try {
+              const body = JSON.parse(text)
+              if (body.error) {
+                msg = body.error
+              }
+            } catch (_e) {
+              // keep msg as text
+            }
+            throw new Error(msg)
+          })
+        }
+        return response.json()
+      })
+      .then((data) => this.applyResourcePredictionPayload(data))
+      .catch((err) => {
+        console.warn('[FormReqController] Resource prediction failed:', err)
+        this.applyResourcePredictionPayload({ error: err.message || 'Prediction failed' })
+      })
+  }
+
   loadAttributes(stdMethodId) {
     if (!this.hasAttrsContainerTarget || !this.projectKeyValue || !this.stepIdValue) {
       return
@@ -244,12 +470,14 @@ export default class extends Controller {
       // Listen for custom validation events from input-data-selector
       selector.addEventListener('validation-changed', () => {
         this.validateForm()
+        this.scheduleResourcePrediction()
       })
     })
     
     // Initial validation
     this.syncDeGroupVisibility()
     this.validateForm()
+    this.scheduleResourcePrediction()
   }
 
   syncDeGroupVisibility() {
@@ -299,15 +527,17 @@ export default class extends Controller {
     
     // If no attributes container, just check method selection
     if (!this.hasAttrsContainerTarget) {
-      this.submitButtonTarget.disabled = !isValid
-      if (isValid) {
+      const blockedByPrediction = this._predictionPreventSubmit === true
+      const submitEnabled = isValid && !blockedByPrediction
+      this.submitButtonTarget.disabled = !submitEnabled
+      if (submitEnabled) {
         this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
         this.submitButtonTarget.classList.add('cursor-pointer')
       } else {
         this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
         this.submitButtonTarget.classList.remove('cursor-pointer')
       }
-      return isValid
+      return isValid && !blockedByPrediction
     }
     
     // Get all attribute containers
@@ -411,11 +641,12 @@ export default class extends Controller {
       }
     })
     
-    // Update submit button state
-    this.submitButtonTarget.disabled = !isValid
-    
-    // Update button styling
-    if (isValid) {
+    // Update submit button state (resource prediction can block submit like legacy ASAP)
+    const blockedByPrediction = this._predictionPreventSubmit === true
+    const submitEnabled = isValid && !blockedByPrediction
+    this.submitButtonTarget.disabled = !submitEnabled
+
+    if (submitEnabled) {
       this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
       this.submitButtonTarget.classList.add('cursor-pointer')
     } else {
@@ -424,13 +655,13 @@ export default class extends Controller {
     }
     
     // Log validation result
-    if (!isValid) {
+    if (!isValid || blockedByPrediction) {
       console.log('[FormReqController] Validation failed:', errors)
     } else {
       console.log('[FormReqController] Form is valid')
     }
-    
-    return isValid
+
+    return isValid && !blockedByPrediction
   }
 
   submit(event) {

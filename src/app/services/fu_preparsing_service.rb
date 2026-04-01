@@ -551,18 +551,19 @@ class FuPreparsingService
       docker_image = "fabdavid/asap_run:#{docker_image_tag}"
       
       # Build the R script command inside the container
-      r_script_cmd = "Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
+      models_base = Basic.prediction_models_path_for_r
+      r_script_cmd = "Rscript prediction.tool.2.R predict #{models_base}/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
       @logger.info("[FuPreparsingService] R script command: #{r_script_cmd}")
       
-      prediction_host_root = prediction_models_host_root
-      @logger.info("[FuPreparsingService] Prediction host root: #{prediction_host_root}")
+      prediction_mount_root = Basic.prediction_data_root_mount
+      @logger.info("[FuPreparsingService] Prediction volume mount root: #{prediction_mount_root}")
 
       # Build Docker command
       docker_cmd = [
         'docker', 'run',
         '--entrypoint', '/bin/sh',
         '--rm',
-        '-v', "#{prediction_host_root}:/data/asap2",
+        '-v', "#{prediction_mount_root}:#{prediction_mount_root}",
         '-v', '/srv/asap_run/srv:/srv',
         docker_image,
         '-c', r_script_cmd
@@ -643,17 +644,18 @@ class FuPreparsingService
       end
       
       # Build R script command with actual values if we have them
+      models_base = Basic.prediction_models_path_for_r
       if version_id && std_method_id
-        r_script_cmd = "Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
+        r_script_cmd = "Rscript prediction.tool.2.R predict #{models_base}/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
       elsif version_id
-        r_script_cmd = "Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{version_id} <std_method_id> #{nber_rows} #{nber_cols}"
+        r_script_cmd = "Rscript prediction.tool.2.R predict #{models_base}/#{version_id} <std_method_id> #{nber_rows} #{nber_cols}"
       else
-        r_script_cmd = "Rscript prediction.tool.2.R predict /data/asap2/pred_models/<version_id> <std_method_id> #{nber_rows} #{nber_cols}"
+        r_script_cmd = "Rscript prediction.tool.2.R predict #{models_base}/<version_id> <std_method_id> #{nber_rows} #{nber_cols}"
       end
       
       # Build docker command preview if we can
       begin
-        prediction_host_root = prediction_models_host_root
+        prediction_mount_root = Basic.prediction_data_root_mount
         if version_id
           docker_image_tag = if asap_docker_image
                                asap_docker_image.tag || "v#{version_id}"
@@ -666,7 +668,7 @@ class FuPreparsingService
             'docker', 'run',
             '--entrypoint', '/bin/sh',
             '--rm',
-            '-v', "#{prediction_host_root}:/data/asap2",
+            '-v', "#{prediction_mount_root}:#{prediction_mount_root}",
             '-v', '/srv/asap_run/srv:/srv',
             docker_image,
             '-c', r_script_cmd
@@ -700,8 +702,5 @@ class FuPreparsingService
     end
   end
 
-  def prediction_models_host_root
-    ENV.fetch('ASAP_PREDICTION_DATA_ROOT')
-  end
 end
 

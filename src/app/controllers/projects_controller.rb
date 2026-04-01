@@ -11,8 +11,8 @@ class ProjectsController < ApplicationController
   helper_method :de_filter_cache_key
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
@@ -6085,7 +6085,260 @@ class ProjectsController < ApplicationController
     render plain: "<div class='p-4 text-center text-red-600'>Error loading attributes: #{e.message}</div>", status: :internal_server_error
   end
 
+  # POST /projects/:id/upd_pred
+  # Predicts RAM and duration from the largest selected input dataset (same idea as legacy ASAP).
+  def upd_pred
+    annot_ids = params[:annot_ids].to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i).uniq
+    std_method = StdMethod.find_by(id: params[:std_method_id])
+
+    h_vals = {
+      '0' => '0s',
+      'NA' => '?'
+    }
+    h_title = {
+      'NA' => 'Not enough benchmarked data yet to make this prediction.'
+    }
+
+    empty_payload = {
+      predicted_time: nil,
+      predicted_ram: nil,
+      time_display: '',
+      ram_display: '',
+      time_severity: 'none',
+      ram_severity: 'none',
+      prevent_submit: false,
+      prevent_messages: []
+    }
+
+    unless std_method && annot_ids.any?
+      render json: empty_payload
+      return
+    end
+
+    annots = Annot.where(id: annot_ids).to_a
+    unless annots.size == annot_ids.size
+      render json: empty_payload.merge(error: 'Some annotations were not found.')
+      return
+    end
+
+    biggest_annot = annots.max_by { |a| a.nber_cols.to_i * a.nber_rows.to_i }
+    unless biggest_annot
+      render json: empty_payload
+      return
+    end
+
+    rows = biggest_annot.nber_rows.to_i
+    cols = biggest_annot.nber_cols.to_i
+    if rows <= 0 || cols <= 0
+      render json: empty_payload.merge(
+        error: 'Selected input has invalid dimensions for prediction.',
+        time_title: 'Rows/columns must be positive.',
+        ram_title: 'Rows/columns must be positive.'
+      )
+      return
+    end
+
+    version = @project.version
+    asap_docker_image = Basic.get_asap_docker(version)
+    unless asap_docker_image
+      render json: empty_payload.merge(error: 'Docker image for this version is not configured.')
+      return
+    end
+
+    asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
+    vol = Basic.prediction_docker_volume_mount_arg
+    models_base = Basic.prediction_models_path_for_r
+    cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} -v /srv/asap_run/srv:/srv #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{@project.version_id} #{std_method.id} #{rows} #{cols} 2>&1'"
+
+    pred_text, process_status = Open3.capture2e(cmd)
+    Rails.logger.info("[upd_pred] prediction exit=#{process_status&.exitstatus} bytes=#{pred_text.to_s.bytesize} cmd=#{cmd}")
+
+    h_results = parse_prediction_script_output(pred_text)
+    unless h_results.is_a?(Hash)
+      snippet = pred_text.to_s.gsub(/\s+/, ' ').strip[0, 500]
+      Rails.logger.warn("[upd_pred] No prediction JSON in output snippet=#{snippet.inspect}")
+      render json: empty_payload.merge(
+        prediction_parse_failed: true,
+        error: 'Could not read prediction output from the server.',
+        time_display: '',
+        ram_display: '',
+        time_title: 'The prediction script did not return JSON. Check Docker and ASAP_PREDICTION_DATA_ROOT (pred_models under that root).',
+        ram_title: ''
+      )
+      return
+    end
+
+    if h_results['displayed_error'].present?
+      msg = h_results['displayed_error'].to_s
+      Rails.logger.warn("[upd_pred] prediction.tool.2.R displayed_error=#{msg}")
+      render json: empty_payload.merge(
+        error: msg,
+        prediction_script_error: true,
+        time_display: '',
+        ram_display: ''
+      )
+      return
+    end
+
+    raw_time = h_results.fetch('predicted_time', :missing)
+    raw_ram = h_results.fetch('predicted_ram', :missing)
+
+    time_na = prediction_r_reports_na?(raw_time)
+    ram_na = prediction_r_reports_na?(raw_ram)
+
+    time_sec = prediction_seconds(raw_time)
+    ram_kb = prediction_ram_kb(raw_ram)
+
+    pred_time_raw =
+      if raw_time == :missing
+        ''
+      elsif time_na
+        'NA'
+      elsif time_sec.nil?
+        raw_time.to_s.strip
+      else
+        time_sec.to_s
+      end
+
+    time_display =
+      if raw_time == :missing
+        ''
+      elsif time_na
+        h_vals['NA']
+      elsif time_sec.nil?
+        h_vals[pred_time_raw] || helpers.duration(pred_time_raw.to_i)
+      elsif time_sec <= 0
+        '0s'
+      else
+        helpers.duration(time_sec)
+      end
+
+    ram_display =
+      if raw_ram == :missing
+        ''
+      elsif ram_na
+        h_vals['NA']
+      elsif ram_kb.nil?
+        h_vals['NA']
+      elsif ram_kb <= 0
+        '0 B'
+      else
+        helpers.display_mem(ram_kb * 1024)
+      end
+
+    time_severity = 'none'
+    if time_sec.is_a?(Integer) && time_sec.positive?
+      if time_sec > 48 * 3600
+        time_severity = 'danger'
+      elsif time_sec > 24 * 3600
+        time_severity = 'warning'
+      end
+    end
+
+    ram_severity = 'none'
+    if ram_kb.is_a?(Integer) && ram_kb.positive?
+      if ram_kb > 100_000_000
+        ram_severity = 'danger'
+      elsif ram_kb > 50_000_000
+        ram_severity = 'warning'
+      end
+    end
+
+    prevent_messages = []
+    if ram_kb.is_a?(Integer) && ram_kb > 100_000_000
+      prevent_messages << 'Predicted RAM exceeds 100Gb for the biggest input dataset selected.'
+    end
+    if time_sec.is_a?(Integer) && time_sec > 48 * 3600
+      prevent_messages << 'Predicted execution time exceeds 2 days for the biggest input dataset selected.'
+    end
+
+    na_title = h_title['NA'].to_s
+    missing_title = 'This field was not present in the prediction script output.'
+
+    render json: {
+      predicted_time: time_na ? nil : (time_sec.is_a?(Integer) ? time_sec.to_s : nil),
+      predicted_ram: ram_na ? nil : ram_kb,
+      time_display: time_display,
+      ram_display: ram_display,
+      time_severity: time_severity,
+      ram_severity: ram_severity,
+      time_title: time_na ? na_title : (raw_time == :missing ? missing_title : ''),
+      ram_title: ram_na ? na_title : (raw_ram == :missing ? missing_title : ''),
+      prevent_submit: prevent_messages.any?,
+      prevent_messages: prevent_messages
+    }
+  rescue StandardError => e
+    Rails.logger.error("[upd_pred] #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
+    render json: { error: e.message }, status: :internal_server_error
+  end
+
   private
+    # Lines from prediction.tool.2.R may be prefixed by Docker/R noise; JSON may use floats.
+    def parse_prediction_script_output(text)
+      text.to_s.each_line do |line|
+        line = line.strip
+        next if line.empty?
+
+        h = Basic.safe_parse_json(line, nil)
+        if h.is_a?(Hash) && prediction_script_json_hash?(h)
+          return h
+        end
+
+        i = line.index('{')
+        next unless i
+
+        h = Basic.safe_parse_json(line[i..], nil)
+        if h.is_a?(Hash) && prediction_script_json_hash?(h)
+          return h
+        end
+      end
+      nil
+    end
+
+    def prediction_script_json_hash?(h)
+      h.key?('predicted_ram') || h.key?('predicted_time') || h.key?('displayed_error')
+    end
+
+    # True when R/JSON explicitly reports NA (including JSON null), not when the key was absent (:missing).
+    def prediction_r_reports_na?(val)
+      return false if val == :missing
+
+      return true if val.nil?
+
+      s = val.is_a?(String) ? val.strip : val.to_s.strip
+      return true if s.empty?
+
+      up = s.upcase
+      return true if up == 'NA' || up == 'NAN' || up == 'NULL'
+
+      false
+    end
+
+    def prediction_seconds(val)
+      return nil if val == :missing
+      return nil if prediction_r_reports_na?(val)
+
+      return val.to_f.round if val.is_a?(Numeric)
+
+      s = val.to_s.strip
+      return nil unless s.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/)
+
+      s.to_f.round
+    end
+
+    def prediction_ram_kb(val)
+      return nil if val == :missing
+      return nil if prediction_r_reports_na?(val)
+
+      return val.to_f.to_i if val.is_a?(Numeric)
+
+      s = val.to_s.strip
+      return nil unless s.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/)
+
+      s.to_f.to_i
+    end
+
     def set_sandbox_self_destruct_at!
       @sandbox_self_destruct_at = nil
       return unless @project.sandbox? && !current_user

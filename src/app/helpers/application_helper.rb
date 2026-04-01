@@ -403,6 +403,18 @@ module ApplicationHelper
       return badges.join('')
     end
 
+    if key.to_s == 'covariates' && value.is_a?(Array) && value.empty?
+      palette = param_badge_palette(key)
+      key_txt = ERB::Util.html_escape(key.to_s)
+      tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
+      return (
+        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-help' title='#{tooltip_txt}'>" \
+          "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
+          "<span class='#{palette[:value]} italic'>none</span>" \
+          "</span>"
+      ).html_safe
+    end
+
     value_str = if value.is_a?(Array) || value.is_a?(Hash)
                   value.to_json
                 else

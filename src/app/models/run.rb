@@ -11,11 +11,11 @@ class Run < ApplicationRecord
   has_many :fos, dependent: :destroy
   has_one :active_run, dependent: :destroy
 
-  scope :dimension_reduction, -> { joins(:step).where(steps: { name: %w[dim_reduction pca tsne umap] }) }
+  scope :dimension_reduction, -> { joins(:step).where(steps: { name: Step::EMBEDDING_STEP_NAMES }) }
   scope :clustering, -> { joins(:step).where(steps: { name: 'clustering' }) }
 
   def embedding_run?
-    step&.name&.in?(%w[dim_reduction pca tsne umap])
+    step&.embedding_step?
   end
 
   def clustering_run?

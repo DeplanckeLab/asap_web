@@ -27,6 +27,7 @@ Rails.application.routes.draw do
       get :refresh_steps_panel
       get :queue_position
       get :get_attributes
+      post :upd_pred
       get :data_content
       post :restart_step
       post :stop_parsing

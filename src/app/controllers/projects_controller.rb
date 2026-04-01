@@ -1601,36 +1601,43 @@ class ProjectsController < ApplicationController
       project_dir = base_dir + @project.user_id.to_s + @project.key
       run_id = (params[:run_id]) ? params[:run_id] : nil #((params[:filename] and m = params[:filename].match(/^(\d+)\.\w{1,3}/)) ? m[1].to_i : nil)                                                                                               
       step_name = params[:step]
+      run = nil
+      h_file_by_id = {}
       if run_id
-        run =  Run.where(:id => run_id).first
-        h_outputs = Basic.safe_parse_json(run.output_json, {})
-        h_file_by_id = {}
-        h_outputs.each_key do |k|
-          h_outputs[k].each_key do |k2|
-            t = k2.split(":")
-            relative_path = t[0]
-            full_path = project_dir + relative_path
-            h_file_by_id[h_outputs[k][k2]['onum']]={:filename => h_outputs[k][k2]['filename'], :filepath => full_path}
+        run = Run.where(:id => run_id).first
+        if run
+          h_outputs = Basic.safe_parse_json(run.output_json, {})
+          h_outputs.each_key do |k|
+            h_outputs[k].each_key do |k2|
+              t = k2.split(":")
+              relative_path = t[0]
+              full_path = project_dir + relative_path
+              h_file_by_id[h_outputs[k][k2]['onum']] = { :filename => h_outputs[k][k2]['filename'], :filepath => full_path }
+            end
           end
+          step_name = run.step&.name
         end
-        step_name = (step = run.step) ? step.name : nil
       end
   
       filepath = nil
       filename = nil
       if params[:onum]
-        filename = h_file_by_id[params[:onum].to_i][:filename]
-        filepath = h_file_by_id[params[:onum].to_i][:filepath]
+        entry = h_file_by_id[params[:onum].to_i]
+        if entry
+          filename = entry[:filename]
+          filepath = entry[:filepath]
+        end
       elsif params[:filename]
         filename = params[:filename]
         # Use @project.key instead of params[:key] since we already have the project loaded
-        # File structure: USER_DATA_DIR/users/user_id/project_key/step/filename
+        # File layout matches RunExecutionJob: step/run_id/filename only when step.multiple_runs;
+        # otherwise step/filename (e.g. parsing/output.loom).
         # Check if "users" is already in USER_DATA_DIR to avoid double "users"
         user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp('/')
         base_dir = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
         tmp_dir = base_dir + @project.user_id.to_s + @project.key
         tmp_dir += step_name if step_name
-        tmp_dir += params[:run_id].to_s if params[:run_id]
+        tmp_dir += params[:run_id].to_s if params[:run_id].present? && run&.step&.multiple_runs
         filepath = tmp_dir + filename
         Rails.logger.info "get_file: Constructed filepath for filename param: #{filepath}"
       end

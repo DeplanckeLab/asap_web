@@ -13,27 +13,47 @@ class FuDownloadFromUrlJob < ApplicationJob
     FileUtils.mkdir_p(upload_dir)
     upload_file_path = upload_dir.join(fu.upload_file_name)
 
-    remote_total_size = fetch_remote_size(url)
-    fu.update_column(:upload_file_size, remote_total_size) if remote_total_size.to_i > 0
+    copied_internally = false
+    begin
+      result = LocalAsapGetFileCopyService.copy_if_get_file_url!(
+        fu: fu,
+        url: url,
+        dest_path: upload_file_path
+      )
+      copied_internally = (result == :copied)
+    rescue StandardError => e
+      if self.class.local_get_file_url?(url)
+        Rails.logger.error("[FuDownloadFromUrlJob] Local get_file copy failed for Fu##{fu_id}: #{e.class} - #{e.message}")
+        fu&.update(status: 'download_failed')
+        broadcast(fu.id, status: 'failed', error: e.message) if fu
+        return
+      end
+      raise e
+    end
 
-    # Stream download with curl so bytes are flushed progressively to disk.
-    curl_cmd = [
-      'curl',
-      '-L',
-      '--fail',
-      '--connect-timeout', '30',
-      '--retry', '2',
-      '--retry-delay', '2',
-      '--output', upload_file_path.to_s,
-      url.to_s
-    ]
+    unless copied_internally
+      remote_total_size = fetch_remote_size(url)
+      fu.update_column(:upload_file_size, remote_total_size) if remote_total_size.to_i > 0
 
-    combined_output = +''
-    Open3.popen2e(*curl_cmd) do |stdin, stdout_and_stderr, wait_thr|
-      stdin.close
-      combined_output = stdout_and_stderr.read.to_s
-      exit_status = wait_thr.value.exitstatus
-      raise "curl download failed (exit #{exit_status}): #{combined_output}" unless exit_status == 0
+      # Stream download with curl so bytes are flushed progressively to disk.
+      curl_cmd = [
+        'curl',
+        '-L',
+        '--fail',
+        '--connect-timeout', '30',
+        '--retry', '2',
+        '--retry-delay', '2',
+        '--output', upload_file_path.to_s,
+        url.to_s
+      ]
+
+      combined_output = +''
+      Open3.popen2e(*curl_cmd) do |stdin, stdout_and_stderr, wait_thr|
+        stdin.close
+        combined_output = stdout_and_stderr.read.to_s
+        exit_status = wait_thr.value.exitstatus
+        raise "curl download failed (exit #{exit_status}): #{combined_output}" unless exit_status == 0
+      end
     end
 
     downloaded_size = File.size(upload_file_path)
@@ -68,6 +88,13 @@ class FuDownloadFromUrlJob < ApplicationJob
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
     fu&.update(status: 'preparsing_failed')
     broadcast(fu.id, status: 'failed', error: e.message) if fu
+  end
+
+  def self.local_get_file_url?(url)
+    u = URI.parse(url.to_s)
+    u.path.to_s.match?(LocalAsapGetFileCopyService::GET_FILE_PATH_RE)
+  rescue URI::InvalidURIError
+    false
   end
 
   private

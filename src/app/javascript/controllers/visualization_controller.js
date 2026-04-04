@@ -219,7 +219,6 @@ export default class extends Controller {
     if (this.reglRenderer === undefined) {
     this.reglRenderer = null // Will hold ReGL renderer instance
     }
-    this.pixiApp = null // Not used, kept for compatibility
     
     // Initialize canvas and renderer (only if renderer doesn't already have state)
     // This check is now in connect() above, but we still need to call it if renderer doesn't exist or has no state
@@ -479,10 +478,14 @@ export default class extends Controller {
     // Ensure CLA columns reflect current panel width
     this.updateMetadataClaColumns()
     
-    // Initialize draggable dividers
-    setTimeout(() => {
-      this.initializeDraggableDivider() // Metadata divider
-      this.initializeRightPanelDivider() // Gene Expression / Selections divider
+    // Initialize draggable dividers after layout (cleared on disconnect if user navigates away)
+    this.dividerInitTimeoutId = window.setTimeout(() => {
+      this.dividerInitTimeoutId = null
+      if (!this.element || !this.element.isConnected) {
+        return
+      }
+      this.initializeDraggableDivider()
+      this.initializeRightPanelDivider()
       this.updateMetadataClaColumns()
     }, 500)
     
@@ -762,6 +765,11 @@ export default class extends Controller {
   }
 
   disconnect() {
+    if (this.dividerInitTimeoutId != null) {
+      window.clearTimeout(this.dividerInitTimeoutId)
+      this.dividerInitTimeoutId = null
+    }
+
     // Remove click outside listener when controller disconnects
     if (this.boundCloseDropdowns) {
       document.removeEventListener('click', this.boundCloseDropdowns)
@@ -867,12 +875,6 @@ export default class extends Controller {
     
     // Remove interaction event listeners
     this.removeInteractionEventListeners()
-    
-    // Clean up any existing PIXI app
-    if (this.pixiApp) {
-      this.pixiApp.destroy(true)
-      this.pixiApp = null
-    }
   }
 
   shouldWarnBeforeLeavingVisualization() {
@@ -2861,7 +2863,7 @@ export default class extends Controller {
     this.reglRenderer.render()
     // console.log('🔍 DEBUG: First frame rendered')
     
-    // Render grid and axes using PixiJS overlay
+    // Render grid and axes on the Canvas 2D overlay
     this.rendererManager.renderGrid()
     this.rendererManager.renderAxes()
     this.rendererManager.renderCategoryLabels() // ✅ Category labels work in ReGL mode!
@@ -4300,7 +4302,7 @@ export default class extends Controller {
 
   // Update visualization with metadata vector coloring
   updateVisualizationWithMetadataVector() {
-    // Check for renderer availability (either ReGL or PixiJS)
+    // Check for renderer availability (ReGL)
     const hasRenderer = !!this.reglRenderer
     
     if (!this.currentMetadataVector || !hasRenderer) {
@@ -4732,43 +4734,6 @@ export default class extends Controller {
     
     // Refresh fixed tooltip if one is displayed
     this.refreshFixedTooltipIfNeeded()
-  }
-
-
-  // Color points for continuous metadata
-  colorPointsContinuous(values, compressionInfo) {
-    // /*console.log('Coloring points for continuous metadata:', {
-      // range: `${compressionInfo.min_val} to ${compressionInfo.max_val}`,
-      // actualRange: `${this.dataManager.safeMin(values).toFixed(3)} to ${this.dataManager.safeMax(values).toFixed(3)}`
-    // })*/
-    
-    const minVal = compressionInfo.min_val
-    const maxVal = compressionInfo.max_val
-    const range = maxVal - minVal
-    
-    // Create single graphics object for all points
-    const graphics = new this.PIXI.Graphics()
-    
-    // Render points with color based on value
-    this.currentCoordinates.forEach((coord, index) => {
-      const value = values[index]
-      const normalizedValue = (value - minVal) / range
-      
-      // Convert to color (blue to red gradient)
-      const color = this.valueToColor(normalizedValue)
-      
-      const screenX = this.interactionHandler.normalizeX(coord[0], this.currentBounds)
-      const screenY = this.interactionHandler.normalizeY(coord[1], this.currentBounds)
-      
-      graphics.beginFill(color)
-      graphics.drawCircle(screenX, screenY, this.currentPointSize)
-      graphics.endFill()
-    })
-    
-    this.scatterContainer.addChild(graphics)
-    
-    // Update point count display
-    this.uiManager.updatePointCountDisplay(null)
   }
 
   // Create color map for discrete categories
@@ -5448,8 +5413,7 @@ export default class extends Controller {
     // console.log('🎨 [CLEAR COLORING] Checking prerequisites:', {
       // rendererType: this.rendererType,
       // reglRenderer: !!this.reglRenderer,
-      // pixiRendererId: this.reglRenderer?.instanceId || 'none',
-      // pixiApp: !!this.pixiApp,
+      // reglRendererId: this.reglRenderer?.instanceId || 'none',
       // scatterContainer: !!this.scatterContainer,
       // currentCoordinates: !!this.currentCoordinates,
       // currentCoordinatesLength: this.currentCoordinates?.length || 0,
@@ -5458,7 +5422,7 @@ export default class extends Controller {
       // currentMetadataId: this.currentMetadataId || 'none'
     // })
     
-    // Check for renderer availability (either ReGL or PixiJS)
+    // Check for renderer availability (ReGL)
     const hasRenderer = !!this.reglRenderer
     
     if (!hasRenderer || !this.currentCoordinates || !this.currentBounds) {
@@ -6720,21 +6684,19 @@ export default class extends Controller {
 
   // Initialize draggable divider (moved from inline JS)
   initializeDraggableDivider() {
-    const divider = document.getElementById('metadata-divider')
-    if (!divider) {
-      console.error('Divider element not found')
+    if (!this.element?.isConnected) {
       return
     }
-    
-    // Find panels by looking for elements with specific styles
+    const divider = this.element.querySelector('#metadata-divider')
+    if (!divider) {
+      return
+    }
+
     const discretePanel = divider.previousElementSibling
     const continuousPanel = divider.nextElementSibling
     const container = discretePanel?.parentElement
-    
-    //console.log('Elements found:', { divider, discretePanel, continuousPanel, container })
-    
+
     if (!discretePanel || !continuousPanel || !container) {
-      console.error('Required elements for draggable divider not found', { discretePanel, continuousPanel, container })
       return
     }
     
@@ -6802,23 +6764,19 @@ export default class extends Controller {
 
   // Initialize draggable divider for right panel (Gene Expression / Selections)
   initializeRightPanelDivider() {
-    const divider = document.getElementById('right-panel-divider')
-    if (!divider) {
-      console.error('Right panel divider element not found')
+    if (!this.element?.isConnected) {
       return
     }
-    
-    // Find panels
-    const geneExpressionPanel = document.getElementById('gene-expression-panel')
-    const selectionsPanel = document.getElementById('selections-panel')
-    const container = divider.parentElement // right-panel
-    
+    const divider = this.element.querySelector('#right-panel-divider')
+    if (!divider) {
+      return
+    }
+
+    const geneExpressionPanel = this.element.querySelector('#gene-expression-panel')
+    const selectionsPanel = this.element.querySelector('#selections-panel')
+    const container = divider.parentElement
+
     if (!geneExpressionPanel || !selectionsPanel || !container) {
-      console.error('Required elements for right panel divider not found', { 
-        geneExpressionPanel: !!geneExpressionPanel, 
-        selectionsPanel: !!selectionsPanel, 
-        container: !!container 
-      })
       return
     }
     
@@ -8975,7 +8933,7 @@ export default class extends Controller {
     this.boundWheel = this.onInteractionWheel.bind(this)
     this.boundDoubleClick = this.onInteractionDoubleClick.bind(this)
     
-    // WORKAROUND: Attach to document with capture to intercept before PIXI gets them!
+    // WORKAROUND: Attach to document with capture to intercept before other handlers
     // console.log('Adding event listeners to canvas AND document:', canvas)
     // console.log('Canvas element:', canvas.tagName, canvas.width, canvas.height)
     
@@ -9274,7 +9232,7 @@ export default class extends Controller {
     this.currentBounds = newBounds
     
     // Use shape-based zooming for smooth performance with large datasets
-    // Only use for PixiJS mode with very large visible point counts
+    // Only use for very large visible point counts (legacy path)
     const boundsArea = (newBounds.maxX - newBounds.minX) * (newBounds.maxY - newBounds.minY)
     const totalArea = (this.currentBounds.maxX - this.currentBounds.minX) * (this.currentBounds.maxY - this.currentBounds.minY)
     const estimatedVisiblePoints = Math.floor((boundsArea / totalArea) * this.currentCoordinates.length)
@@ -10438,7 +10396,7 @@ export default class extends Controller {
       this.renderContinuousColorLegend()
       
       // Recolor all scatter plot points based on the new gradient
-      // renderPointsWithCurrentColoring() handles both ReGL and PixiJS renderers internally
+      // renderPointsWithCurrentColoring() updates the ReGL renderer internally
       // console.log('🎨 Recoloring scatter plot points (renderer type:', this.rendererType, ')')
       this.renderPointsWithCurrentColoring()
       
@@ -10524,15 +10482,6 @@ export default class extends Controller {
     }
     
     controlElement.textContent = instructions
-  }
-
-
-  // Convert hex color to PIXI color number
-  convertHexToPixiColor(hexColor) {
-    if (!hexColor) return 0xcccccc // Default grey if no color
-    // Remove # if present and convert to number
-    const hex = hexColor.replace('#', '')
-    return parseInt(hex, 16)
   }
 
   updateLassoGraphics() {
@@ -10899,7 +10848,7 @@ export default class extends Controller {
 
   // Update colors of selected points without re-rendering (preserves pan/zoom state)
   updateSelectedPointColors() {
-    const numPoints = this.rendererType === 'regl' ? this.numPoints : (this.pointSprites?.length || 0)
+    const numPoints = this.numPoints
     // console.log(`⏱️ [PERF] updateSelectedPointColors - ${this.selectedCells.size} selected out of ${numPoints} total`)
     
     // Get current filter state
@@ -10913,165 +10862,78 @@ export default class extends Controller {
     
     const updateStart = performance.now()
     
-    // ReGL PATH: Update color buffer
-    if (this.rendererType === 'regl') {
-      if (!this.reglRenderer || !this.numPoints) {
-        // console.log('⚠️ No ReGL renderer or points available for color update')
-        return
-      }
-      
-      const hasSelections = this.selectedCells.size > 0
-      if (!this.cachedColorsByCellIndex) {
-        this.cachedColorsByCellIndex = new Map()
-      }
-      
-      // Reorder displayOrder to put selected cells on top
-      if (hasSelections && this.displayOrder && this.currentCoordinates) {
-        this.reorderDisplayOrderForSelectedCells()
-      }
-      
-      const colorMap = new Map()
-      
-      if (hasSelections) {
-        // console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
-        // Set selected cells to red, unselected to faded original color
-        // Use displayOrder to correctly map draw positions to cell indices
-        // IMPORTANT: Respect current filter - hide filtered-out cells
-        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
-          const cellIndex = this.displayOrder[drawPos]
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
-          
-          if (!isVisible) {
-            // Hide filtered-out points
-            colorMap.set(drawPos, 0x00000000)
-            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
-            continue
-          }
-          
-          if (this.selectedCells.has(cellIndex)) {
-            colorMap.set(drawPos, 0xff0000) // Red
-            this.cachedColorsByCellIndex.set(cellIndex, 0xff0000)
-          } else {
-            // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
-            const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
-            colorMap.set(drawPos, originalColor)
-            this.cachedColorsByCellIndex.set(cellIndex, originalColor)
-          }
+    if (!this.reglRenderer || !this.numPoints) {
+      // console.log('⚠️ No ReGL renderer or points available for color update')
+      return
+    }
+    
+    const hasSelections = this.selectedCells.size > 0
+    if (!this.cachedColorsByCellIndex) {
+      this.cachedColorsByCellIndex = new Map()
+    }
+    
+    // Reorder displayOrder to put selected cells on top
+    if (hasSelections && this.displayOrder && this.currentCoordinates) {
+      this.reorderDisplayOrderForSelectedCells()
+    }
+    
+    const colorMap = new Map()
+    
+    if (hasSelections) {
+      // console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
+      // Set selected cells to red, unselected to faded original color
+      // Use displayOrder to correctly map draw positions to cell indices
+      // IMPORTANT: Respect current filter - hide filtered-out cells
+      for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+        const cellIndex = this.displayOrder[drawPos]
+        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        
+        if (!isVisible) {
+          // Hide filtered-out points
+          colorMap.set(drawPos, 0x00000000)
+          this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
+          continue
         }
-      } else {
-        // console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
-        // Restore original colors
-        // Use displayOrder to correctly map draw positions to cell indices
-        // IMPORTANT: Respect current filter - hide filtered-out cells
-        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
-          const cellIndex = this.displayOrder[drawPos]
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
-          
-          if (!isVisible) {
-            // Hide filtered-out points
-            colorMap.set(drawPos, 0x00000000)
-            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
-            continue
-          }
-          
+        
+        if (this.selectedCells.has(cellIndex)) {
+          colorMap.set(drawPos, 0xff0000) // Red
+          this.cachedColorsByCellIndex.set(cellIndex, 0xff0000)
+        } else {
+          // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
           const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
           colorMap.set(drawPos, originalColor)
           this.cachedColorsByCellIndex.set(cellIndex, originalColor)
         }
       }
-      
-      this.reglRenderer.updateColors(colorMap)
-      this.reglRenderer.render()
-      
-      this.previouslySelectedCells = new Set(this.selectedCells)
-      this.colorUpdateCache.set('lastColorMap', colorMap)
-      const updateTime = performance.now() - updateStart
-      // console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
-      return
-    }
-    
-    // PixiJS PATH (original)
-    /*if (!this.pointSprites || this.pointSprites.length === 0) {
-      // console.log('⚠️ No sprites available for color update')
-      return
-    }*/
-    
-    const hasSelections = this.selectedCells.size > 0
-    const wasEmpty = !this.previouslySelectedCells || this.previouslySelectedCells.size === 0
-    const isFirstSelection = wasEmpty && hasSelections
-    
-    // console.log(`⏱️ [PERF] isFirstSelection=${isFirstSelection}, hasSelections=${hasSelections}`)
-    
-    if (isFirstSelection) {
-      // First selection: need to update ALL sprites (fade unselected + highlight selected)
-      // console.log(`⏱️ [PERF] First selection - updating all ${this.pointSprites.length} sprites`)
-      const allUpdateStart = performance.now()
-      
-      if (!this.cachedColorsByCellIndex) {
-        this.cachedColorsByCellIndex = new Map()
-      }
-
-      for (let i = 0; i < this.pointSprites.length; i++) {
-        const sprite = this.pointSprites[i]
-        if (!sprite || sprite.destroyed) continue
-        
-        if (this.selectedCells.has(i)) {
-          sprite.tint = 0xff0000
-          sprite.alpha = 1.0
-          this.cachedColorsByCellIndex.set(i, 0xff0000)
-        } else {
-          sprite.alpha = 0.3 // Fade unselected (keep existing color)
-          const originalColor = this.originalPointColors.get(i) || sprite.tint || 0x3b82f6
-          this.cachedColorsByCellIndex.set(i, originalColor)
-        }
-      }
-      
-      const allUpdateTime = performance.now() - allUpdateStart
-      // console.log(`  Updated all sprites in ${allUpdateTime.toFixed(2)}ms (${Math.round(this.pointSprites.length / allUpdateTime * 1000).toLocaleString()} sprites/sec)`)
-    } else if (hasSelections) {
-      // Adding to existing selection: only update newly selected cells
-      // console.log(`⏱️ [PERF] Incremental selection - updating only ${this.selectedCells.size} selected cells`)
-      const incrementalStart = performance.now()
-      
-      for (const cellId of this.selectedCells) {
-        const sprite = this.pointSprites[cellId]
-        if (sprite && !sprite.destroyed) {
-          sprite.tint = 0xff0000
-          sprite.alpha = 1.0
-          if (this.cachedColorsByCellIndex) {
-            this.cachedColorsByCellIndex.set(cellId, 0xff0000)
-          }
-        }
-      }
-      
-      const incrementalTime = performance.now() - incrementalStart
-      // console.log(`  Updated ${this.selectedCells.size} sprites in ${incrementalTime.toFixed(2)}ms`)
     } else {
-      // Clearing selection: restore all to normal
-      // console.log(`⏱️ [PERF] Clearing selection - restoring all sprites`)
-      const clearStart = performance.now()
-      
-      for (let i = 0; i < this.pointSprites.length; i++) {
-        const sprite = this.pointSprites[i]
-        if (!sprite || sprite.destroyed) continue
+      // console.log(`⚡ [ReGL] Restoring original colors for all ${this.numPoints} cells`)
+      // Restore original colors
+      // Use displayOrder to correctly map draw positions to cell indices
+      // IMPORTANT: Respect current filter - hide filtered-out cells
+      for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+        const cellIndex = this.displayOrder[drawPos]
+        const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
-        const originalColor = this.originalPointColors.get(i) || 0x3b82f6
-        sprite.tint = originalColor
-        sprite.alpha = 1.0
-        if (this.cachedColorsByCellIndex) {
-          this.cachedColorsByCellIndex.set(i, originalColor)
+        if (!isVisible) {
+          // Hide filtered-out points
+          colorMap.set(drawPos, 0x00000000)
+          this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
+          continue
         }
+        
+        const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        colorMap.set(drawPos, originalColor)
+        this.cachedColorsByCellIndex.set(cellIndex, originalColor)
       }
-      
-      const clearTime = performance.now() - clearStart
-      // console.log(`  Restored all sprites in ${clearTime.toFixed(2)}ms`)
     }
     
-    // Store current selection for next comparison
-    this.previouslySelectedCells = new Set(this.selectedCells)
+    this.reglRenderer.updateColors(colorMap)
+    this.reglRenderer.render()
     
+    this.previouslySelectedCells = new Set(this.selectedCells)
+    this.colorUpdateCache.set('lastColorMap', colorMap)
     const updateTime = performance.now() - updateStart
-    // console.log(`⏱️ [PERF] Color update completed in ${updateTime.toFixed(2)}ms`)
+    // console.log(`⚡ [ReGL] Color update completed in ${updateTime.toFixed(2)}ms`)
   }
 
   isPointInPolygon(x, y, polygon) {
@@ -11390,8 +11252,11 @@ export default class extends Controller {
     this.gradientManager.closeGradientEditorModal()
   }
 
-  // Open memory diagnostic window
+  // Open memory diagnostic window (admins only; button is not rendered for others)
   async openMemoryDiagnostic() {
+    if (this.element.dataset.isAdmin !== "true") {
+      return
+    }
     await this.performanceManager.openMemoryDiagnostic()
   }
 
@@ -14729,13 +14594,7 @@ export default class extends Controller {
   // Generate SVG content from the current plot
   generateSVGFromPlot() {
     // console.log('💾 Generating SVG from plot...')
-    
-    // Dispatch to appropriate implementation
-    if (this.rendererType === 'regl') {
-      return this.generateSVGFromPlotReGL()
-    } else {
-      return this.generateSVGFromPlotPixi()
-    }
+    return this.generateSVGFromPlotReGL()
   }
   
   // ReGL version of SVG generation
@@ -15128,9 +14987,6 @@ export default class extends Controller {
 
   // Tooltip methods
   showTooltip(cellId, point) {
-    // This method is kept for compatibility with PixiJS mode
-    // For RegL mode, we use showSimpleTooltip instead
-    
     // Get cell information
     const cellName = cellId.toString() // Generate cell name from ID
     
@@ -15235,54 +15091,42 @@ export default class extends Controller {
     this.tooltip.style.visibility = 'visible'
     this.tooltip.style.opacity = '1'
     
-    // For RegL mode, use proper positioning instead of fixed debug position
-    if (this.rendererType === 'regl') {
-      // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
-      
-      // Use the calculated position for RegL
-      this.tooltip.style.left = `${tooltipLeft}px`
-      this.tooltip.style.top = `${tooltipTop}px`
-      
-      // Different styling for fixed vs dynamic tooltips
-      if (this.isTooltipFixed) {
-        // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
-        this.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
-        this.tooltip.style.border = '2px solid #00ff00'
-        this.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
-      } else {
-        // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
-        this.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
-        this.tooltip.style.border = '1px solid #ccc'
-        this.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
-      }
-      
-      this.tooltip.style.width = 'auto'
-      this.tooltip.style.height = 'auto'
-      
-      // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
-        // left: this.tooltip.style.left,
-        // top: this.tooltip.style.top,
-        // display: this.tooltip.style.display,
-        // backgroundColor: this.tooltip.style.backgroundColor
-      // })
-      
-      // TEMPORARY: Force tooltip to a visible position for debugging
-      this.tooltip.style.left = '100px'
-      this.tooltip.style.top = '100px'
-      this.tooltip.style.backgroundColor = 'red'
-      this.tooltip.style.border = '3px solid yellow'
-      this.tooltip.style.width = '300px'
-      this.tooltip.style.height = '100px'
-      // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+    // Use proper positioning instead of fixed debug position (ReGL)
+    // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+    
+    this.tooltip.style.left = `${tooltipLeft}px`
+    this.tooltip.style.top = `${tooltipTop}px`
+    
+    if (this.isTooltipFixed) {
+      // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+      this.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
+      this.tooltip.style.border = '2px solid #00ff00'
+      this.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
     } else {
-      // Keep debug positioning for PixiJS mode
-      this.tooltip.style.left = '50px'
-      this.tooltip.style.top = '50px'
-      this.tooltip.style.backgroundColor = 'red'
-      this.tooltip.style.border = '3px solid yellow'
-      this.tooltip.style.width = '300px'
-      this.tooltip.style.height = '100px'
+      // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+      this.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
+      this.tooltip.style.border = '1px solid #ccc'
+      this.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
     }
+    
+    this.tooltip.style.width = 'auto'
+    this.tooltip.style.height = 'auto'
+    
+    // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+      // left: this.tooltip.style.left,
+      // top: this.tooltip.style.top,
+      // display: this.tooltip.style.display,
+      // backgroundColor: this.tooltip.style.backgroundColor
+    // })
+    
+    // TEMPORARY: Force tooltip to a visible position for debugging
+    this.tooltip.style.left = '100px'
+    this.tooltip.style.top = '100px'
+    this.tooltip.style.backgroundColor = 'red'
+    this.tooltip.style.border = '3px solid yellow'
+    this.tooltip.style.width = '300px'
+    this.tooltip.style.height = '100px'
+    // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
     
     // Tooltip positioned
   }
@@ -17400,68 +17244,7 @@ export default class extends Controller {
       // hasScatterContainer: !!this.scatterContainer,
       // scatterContainerChildren: this.scatterContainer?.children?.length
     // })
-    
-    // ReGL path: update point visibility by modifying alpha channel
-    if (this.rendererType === 'regl') {
-      // console.log('🎨 [VISIBILITY] Using ReGL path')
-      return this.updatePointVisibilityReGL(filteredIndices)
-    }
-    
-    // PixiJS path
-    if (!this.scatterContainer || !this.scatterContainer.children) {
-      // console.log('🎨 [VISIBILITY] No scatter container or children - cannot update visibility')
-      return
-    }
-    
-    // console.log('🎨 [VISIBILITY] Using PixiJS path')
-
-    const startTime = performance.now()
-    let visibleCount = 0
-    let hiddenCount = 0
-
-    // Convert filteredIndices to Set for O(1) lookup if it exists
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
-
-    let pointCount = 0
-    
-    // Helper function to update points in a container
-    const updatePointsInContainer = (container, containerName) => {
-      container.children.forEach((point) => {
-        if (point.isPoint) {
-          pointCount++
-          // Use the cellId property instead of array index
-          const shouldBeVisible = !filteredSet || filteredSet.has(point.cellId)
-          
-          if (shouldBeVisible) {
-            point.visible = true
-            point.alpha = point.originalAlpha || 1.0 // Restore original alpha
-            visibleCount++
-          } else {
-            point.visible = false
-            hiddenCount++
-          }
-        }
-      })
-    }
-    
-    // Update points in scatterContainer (direct children)
-    updatePointsInContainer(this.scatterContainer, 'Direct')
-    
-    // Also check for points in animatedContainer if it exists
-    if (this.animatedContainer && this.animatedContainer.children.length > 0) {
-      updatePointsInContainer(this.animatedContainer, 'Animated')
-    }
-    
-    // Check for nested containers (our standard structure)
-    this.scatterContainer.children.forEach((child) => {
-      if (child.children && child.children.length > 1000 && !child.isPoint) {
-        // This is likely our main points container, update its children
-        updatePointsInContainer(child, 'Nested')
-      }
-    })
-
-    const endTime = performance.now()
-    //console.log(`Visibility update: ${visibleCount} visible, ${hiddenCount} hidden (${pointCount} total points)`)
+    return this.updatePointVisibilityReGL(filteredIndices)
   }
   // Update point visibility in ReGL mode by hiding filtered-out points
   // OPTIMIZED: Uses cached colors and only recalculates when coloring metadata changes

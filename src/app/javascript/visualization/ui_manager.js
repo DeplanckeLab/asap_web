@@ -1897,9 +1897,6 @@ export class UIManager {
 
   // Tooltip methods
   showTooltip(cellId, point) {
-    // This method is kept for compatibility with PixiJS mode
-    // For RegL mode, we use showSimpleTooltip instead
-    
     // Get cell information
     const cellName = `Cell ${cellId + 1}` // Generate cell name from ID
     
@@ -2004,54 +2001,40 @@ export class UIManager {
     this.controller.tooltip.style.visibility = 'visible'
     this.controller.tooltip.style.opacity = '1'
     
-    // For RegL mode, use proper positioning instead of fixed debug position
-    if (this.controller.rendererType === 'regl') {
-      // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
-      
-      // Use the calculated position for RegL
-      this.controller.tooltip.style.left = `${tooltipLeft}px`
-      this.controller.tooltip.style.top = `${tooltipTop}px`
-      
-      // Different styling for fixed vs dynamic tooltips
-      if (this.controller.isTooltipFixed) {
-        // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
-        this.controller.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
-        this.controller.tooltip.style.border = '2px solid #00ff00'
-        this.controller.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
-      } else {
-        // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
-        this.controller.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
-        this.controller.tooltip.style.border = '1px solid #ccc'
-        this.controller.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
-      }
-      
-      this.controller.tooltip.style.width = 'auto'
-      this.controller.tooltip.style.height = 'auto'
-      
-      // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
-        // left: this.controller.tooltip.style.left,
-        // top: this.controller.tooltip.style.top,
-        // display: this.controller.tooltip.style.display,
-        // backgroundColor: this.controller.tooltip.style.backgroundColor
-      // })
-      
-      // TEMPORARY: Force tooltip to a visible position for debugging
-      this.controller.tooltip.style.left = '100px'
-      this.controller.tooltip.style.top = '100px'
-      this.controller.tooltip.style.backgroundColor = 'red'
-      this.controller.tooltip.style.border = '3px solid yellow'
-      this.controller.tooltip.style.width = '300px'
-      this.controller.tooltip.style.height = '100px'
-      // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
+    // console.log('🎯 [Tooltip] Applying RegL positioning and styling')
+    this.controller.tooltip.style.left = `${tooltipLeft}px`
+    this.controller.tooltip.style.top = `${tooltipTop}px`
+    
+    if (this.controller.isTooltipFixed) {
+      // console.log('🎯 [Tooltip] Applying fixed tooltip styling (green)')
+      this.controller.tooltip.style.backgroundColor = 'rgba(0, 100, 0, 0.9)' // Green for fixed
+      this.controller.tooltip.style.border = '2px solid #00ff00'
+      this.controller.tooltip.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)'
     } else {
-      // Keep debug positioning for PixiJS mode
-      this.controller.tooltip.style.left = '50px'
-      this.controller.tooltip.style.top = '50px'
-      this.controller.tooltip.style.backgroundColor = 'red'
-      this.controller.tooltip.style.border = '3px solid yellow'
-      this.controller.tooltip.style.width = '300px'
-      this.controller.tooltip.style.height = '100px'
+      // console.log('🎯 [Tooltip] Applying dynamic tooltip styling (black)')
+      this.controller.tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)' // Black for dynamic
+      this.controller.tooltip.style.border = '1px solid #ccc'
+      this.controller.tooltip.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3)'
     }
+    
+    this.controller.tooltip.style.width = 'auto'
+    this.controller.tooltip.style.height = 'auto'
+    
+    // console.log('🎯 [Tooltip] Final RegL tooltip position:', {
+      // left: this.controller.tooltip.style.left,
+      // top: this.controller.tooltip.style.top,
+      // display: this.controller.tooltip.style.display,
+      // backgroundColor: this.controller.tooltip.style.backgroundColor
+    // })
+    
+    // TEMPORARY: Force tooltip to a visible position for debugging
+    this.controller.tooltip.style.left = '100px'
+    this.controller.tooltip.style.top = '100px'
+    this.controller.tooltip.style.backgroundColor = 'red'
+    this.controller.tooltip.style.border = '3px solid yellow'
+    this.controller.tooltip.style.width = '300px'
+    this.controller.tooltip.style.height = '100px'
+    // console.log('🎯 [Tooltip] FORCED tooltip to visible position for debugging')
     
     // Tooltip positioned
   }
@@ -2074,10 +2057,6 @@ export class UIManager {
       // ReGL mode: redraw overlay (renderGrid clears and redraws everything)
       // console.log(`🔄 [ReGL] Toggling axes: ${checkbox.checked}`)
       this.controller.rendererManager.renderGrid()
-    } else if (this.controller.axesContainer) {
-      // PixiJS mode: axes are in a PixiJS container
-      this.controller.axesContainer.visible = checkbox.checked
-      this.controller.rendererManager.renderAxes()
     }
   }
 
@@ -2091,10 +2070,6 @@ export class UIManager {
     if (this.controller.rendererType === 'regl') {
       // ReGL mode: grid is drawn on Canvas2D overlay
       // console.log(`🔄 [ReGL] Toggling grid: ${checkbox.checked}`)
-      this.controller.rendererManager.renderGrid()
-    } else if (this.controller.gridContainer) {
-      // PixiJS mode: grid is in a PixiJS container
-      this.controller.gridContainer.visible = checkbox.checked
       this.controller.rendererManager.renderGrid()
     }
   }
@@ -2126,20 +2101,6 @@ export class UIManager {
         this.controller.rendererManager.renderAxes()
         this.controller.rendererManager.renderCategoryLabels()
       }
-    } else if (this.controller.categoryLabelsContainer) {
-      // PixiJS mode: Labels are in a PixiJS container
-      this.controller.categoryLabelsContainer.visible = checkbox.checked
-      // console.log(`🏷️ Category labels container visible: ${this.controller.categoryLabelsContainer.visible}`)
-      
-      // If turning on, make sure labels are rendered
-      if (checkbox.checked) {
-        // console.log('🏷️ Re-rendering category labels...')
-        this.controller.rendererManager.renderCategoryLabels()
-      } else {
-        // console.log('🏷️ Hiding category labels')
-      }
-    } else {
-      // console.log('🏷️ No categoryLabelsContainer available')
     }
     
     // Find the categories container in the right panel
@@ -2189,18 +2150,10 @@ export class UIManager {
       
       // IMPORTANT: Don't recreate color map - keep existing color assignments!
       // The color map should remain stable regardless of sort order
-      // We only need to update the z-order (PixiJS) or buffer order (ReGL)
-      
+      // Reorder points in buffer for painter's algorithm (ReGL)
       if (this.controller.rendererType === 'regl') {
-        // ReGL: Reorder points in buffer for painter's algorithm
         // This function will also redraw the overlay (grid, axes, labels)
         this.controller.reorderPointsForCategoryDisplay()
-      } else {
-        // PixiJS: Update sprite z-index
-        this.controller.renderPointsWithCurrentColoring()
-      
-        // Re-render category labels
-        this.controller.rendererManager.renderCategoryLabels()
       }
       
       // console.log('📊 [CATEGORY ORDER] Complete!')

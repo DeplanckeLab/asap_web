@@ -199,6 +199,7 @@ Rails.application.routes.draw do
   namespace :api, defaults: { format: :json } do
     get 'projects', to: '/projects#index'
     get 'projects/:id', to: '/projects#show'
+    resources :guided_tours, only: %i[index show]
     get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
   end
   get '/api-doc', to: 'home#api_documentation', as: :api_doc

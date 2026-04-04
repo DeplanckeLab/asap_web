@@ -180,7 +180,7 @@ export class ReglRenderer {
   
   /**
    * Fast update of positions using buffer.subdata()
-   * This is the key performance advantage of ReGL over PixiJS sprites
+   * This is the key performance advantage of ReGL over many sprite-based renderers
    */
   updatePositions(coordinates) {
     const startTime = performance.now()

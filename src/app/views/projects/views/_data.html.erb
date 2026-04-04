@@ -1,4 +1,4 @@
-<div class="flex flex-col h-full" data-controller="data-view" data-data-view-project-id-value="<%= @project.key %>">
+<div class="flex flex-col h-full" data-guided-tour="project-data-main" data-controller="data-view" data-data-view-project-id-value="<%= @project.key %>">
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
     <h2 class="text-2xl font-bold text-gray-900">Data summary</h2>
@@ -57,7 +57,7 @@
   <!-- Two Column Layout: Loom Files Panel (Left) and Data Content (Right) -->
   <div class="flex flex-row gap-4 flex-1 min-h-0">
     <!-- Left Panel: Loom Files Navigation (Hidden on narrow screens) -->
-    <div class="hidden lg:flex w-64 flex-shrink-0 flex flex-col min-h-0">
+    <div class="hidden lg:flex w-64 flex-shrink-0 flex flex-col min-h-0" data-guided-tour="data-loom-files-panel">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
         <div class="flex flex-col h-full">
           <div class="bg-gray-600 text-white px-4 py-3 border-b-2 border-gray-700 flex-shrink-0">

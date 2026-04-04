@@ -2,11 +2,15 @@ class GuidedTourStep < ApplicationRecord
   # Declarative actions run by the tour player. Each entry: { "action" => "...", ... }.
   # scroll_to: { "action" => "scroll_to", "selector" => "#id" }
   # click: { "action" => "click", "selector" => "#id" }
+  # visit: { "action" => "visit", "path" => "/projects/1?view=visualization", "skip_if_selector" => "..." }
   # wait_for_selector: { "action" => "wait_for_selector", "selector" => "#id", "timeout_ms" => 5000 }
+  # fill: { "action" => "fill", "selector" => "#id", "value" => "text", "skip_if_selector" => "..." }
   ACTION_REQUIRED_KEYS = {
     'scroll_to' => ['selector'],
     'click' => ['selector'],
-    'wait_for_selector' => ['selector']
+    'visit' => ['path'],
+    'wait_for_selector' => ['selector'],
+    'fill' => ['selector']
   }.freeze
 
   belongs_to :guided_tour, inverse_of: :guided_tour_steps

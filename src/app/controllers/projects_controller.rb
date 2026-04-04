@@ -9762,9 +9762,9 @@ class ProjectsController < ApplicationController
       
       # Try to find by public_id if still not found
       if @project.nil?
-        # public_id might be numeric or in format like "ASAP49"
+        # public_id might be numeric or in format like "ASAP48"
         if identifier.match?(/^ASAP\d+$/i)
-          # Extract numeric part from "ASAP49" format
+          # Extract numeric part from "ASAP48" format
           numeric_part = identifier.match(/\d+$/).to_s.to_i
           @project = Project.find_by(public_id: numeric_part)
         else

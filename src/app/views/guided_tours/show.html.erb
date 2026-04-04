@@ -51,117 +51,108 @@
         <% end %>
       </div>
 
-      <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
-        <div class="flex items-center justify-between">
+      <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="text-xl font-semibold text-gray-900">Steps</h2>
-            <p class="text-sm text-gray-600">Drag rows to reorder. Edit each step inline.</p>
+            <p class="text-sm text-gray-600">Drag rows to reorder. Use Add step or Edit to change a step.</p>
           </div>
+          <button type="button"
+                  class="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50"
+                  onclick="document.getElementById('add-step-modal').showModal()">
+            Add step
+          </button>
         </div>
 
-        <div class="rounded-lg border border-gray-200 p-4">
-          <h3 class="text-sm font-semibold text-gray-900 mb-3">Add Step</h3>
-          <%= form_with model: [@guided_tour, @new_guided_tour_step], class: "space-y-4" do |form| %>
-            <% if @new_guided_tour_step.errors.any? %>
-              <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                <ul class="list-disc space-y-1 pl-5">
-                  <% @new_guided_tour_step.errors.full_messages.each do |message| %>
-                    <li><%= message %></li>
-                  <% end %>
-                </ul>
-              </div>
-            <% end %>
-
-            <div class="grid gap-4 md:grid-cols-3">
-              <div>
-                <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
-                <%= form.text_field :title, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "Chapter title" %>
-              </div>
-              <div>
-                <%= form.label :page_url, class: "block text-sm font-medium text-gray-700" %>
-                <%= form.text_field :page_url, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "/projects/123?view=analysis" %>
-              </div>
-              <div>
-                <%= form.label :focus_element, class: "block text-sm font-medium text-gray-700" %>
-                <%= form.text_field :focus_element, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "#analysis-panel" %>
-              </div>
+        <dialog id="add-step-modal" class="guided-tour-admin-dialog" <%= @new_guided_tour_step.errors.any? ? 'open' : '' %>>
+          <div class="guided-tour-admin-dialog-inner">
+            <div class="guided-tour-admin-dialog-header">
+              <h3 class="text-lg font-semibold text-gray-900">New step</h3>
+              <button type="button" class="guided-tour-admin-dialog-close" onclick="document.getElementById('add-step-modal').close()" aria-label="Close">Close</button>
             </div>
-
-            <div>
-              <%= form.label :description, class: "block text-sm font-medium text-gray-700 mb-1" %>
-              <% description_input_id = "new_step_description_input" %>
-              <%= form.hidden_field :description, id: description_input_id %>
-              <trix-editor input="<%= description_input_id %>" class="trix-content"></trix-editor>
-            </div>
-
-            <div>
-              <%= form.label :step_actions_json, "Step actions (JSON array)", class: "block text-sm font-medium text-gray-700 mb-1" %>
-              <%= form.text_area :step_actions_json, rows: 6, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: '[\n  { "action": "wait_for_selector", "selector": "#panel" },\n  { "action": "scroll_to", "selector": "#panel" }\n]' %>
-              <p class="mt-1 text-xs text-gray-500">Declarative steps: scroll_to, click, wait_for_selector (each object needs action and required fields).</p>
-            </div>
-
-            <div>
-              <%= form.submit "Create Step", class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800" %>
-            </div>
-          <% end %>
-        </div>
-
-        <div
-          class="space-y-4"
-          data-controller="sortable-list"
-          data-sortable-list-url-value="<%= reorder_steps_guided_tour_path(@guided_tour) %>"
-          data-sortable-list-item-selector-value="div[data-id]">
-          <% @guided_tour_steps.each do |step| %>
-            <div
-              data-id="<%= step.id %>"
-              draggable="true"
-              data-action="dragstart->sortable-list#dragstart dragover->sortable-list#dragover drop->sortable-list#drop dragend->sortable-list#dragend"
-              class="rounded-lg border border-gray-200 p-4">
-              <div class="mb-3 flex items-center justify-between">
-                <div class="text-sm font-semibold text-gray-900" data-rank-label>Step #<%= step.rank %></div>
-              </div>
-
-              <%= form_with model: [@guided_tour, step], class: "space-y-4" do |form| %>
-                <div class="grid gap-4 md:grid-cols-3">
-                  <div>
-                    <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
-                    <%= form.text_field :title, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900" %>
+            <div class="guided-tour-admin-dialog-body">
+              <%= form_with model: [@guided_tour, @new_guided_tour_step], class: "space-y-4" do |form| %>
+                <% if @new_guided_tour_step.errors.any? %>
+                  <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    <ul class="list-disc space-y-1 pl-5">
+                      <% @new_guided_tour_step.errors.full_messages.each do |message| %>
+                        <li><%= message %></li>
+                      <% end %>
+                    </ul>
                   </div>
-                  <div>
-                    <%= form.label :page_url, class: "block text-sm font-medium text-gray-700" %>
-                    <%= form.text_field :page_url, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900" %>
-                  </div>
-                  <div>
-                    <%= form.label :focus_element, class: "block text-sm font-medium text-gray-700" %>
-                    <%= form.text_field :focus_element, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900" %>
-                  </div>
-                </div>
-
-                <div>
-                  <%= form.label :description, class: "block text-sm font-medium text-gray-700 mb-1" %>
-                  <% description_input_id = "guided_tour_step_#{step.id}_description_input" %>
-                  <%= form.hidden_field :description, id: description_input_id %>
-                  <trix-editor input="<%= description_input_id %>" class="trix-content"></trix-editor>
-                </div>
-
-                <div>
-                  <%= form.label :step_actions_json, "Step actions (JSON array)", class: "block text-sm font-medium text-gray-700 mb-1" %>
-                  <%= form.text_area :step_actions_json, rows: 6, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900" %>
-                  <p class="mt-1 text-xs text-gray-500">Declarative steps: scroll_to, click, wait_for_selector.</p>
-                </div>
-
-                <div class="flex items-center gap-3">
-                  <%= form.submit "Save Step", class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800" %>
-                  <%= link_to "Delete Step", guided_tour_guided_tour_step_path(@guided_tour, step), method: :delete, data: { confirm: "Delete this step?" }, class: "text-sm text-red-600 hover:text-red-700" %>
+                <% end %>
+                <%= render "step_form_fields", form: form, description_input_id: "new_step_description_modal_input" %>
+                <div class="flex flex-wrap items-center gap-3 pt-2">
+                  <%= form.submit "Create step", class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800" %>
+                  <button type="button" class="text-sm text-gray-600 hover:text-gray-900" onclick="document.getElementById('add-step-modal').close()">Cancel</button>
                 </div>
               <% end %>
             </div>
-          <% end %>
-        </div>
+          </div>
+        </dialog>
 
-        <% if @guided_tour_steps.empty? %>
+        <% if @guided_tour_steps.any? %>
+          <div
+            class="space-y-2"
+            data-controller="sortable-list"
+            data-sortable-list-url-value="<%= reorder_steps_guided_tour_path(@guided_tour) %>"
+            data-sortable-list-item-selector-value="div[data-id]">
+            <% @guided_tour_steps.each do |step| %>
+              <% edit_open = @guided_tour_step&.id == step.id && @guided_tour_step.errors.any? %>
+              <div
+                data-id="<%= step.id %>"
+                draggable="true"
+                data-action="dragstart->sortable-list#dragstart dragover->sortable-list#dragover drop->sortable-list#drop dragend->sortable-list#dragend"
+                class="guided-tour-step-sortable">
+                <div class="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5 hover:border-gray-300">
+                  <span class="shrink-0 cursor-grab select-none text-xs font-medium uppercase tracking-wide text-gray-400" title="Drag to reorder">Drag</span>
+                  <span class="shrink-0 inline-flex min-w-[2.5rem] items-center justify-center rounded bg-white px-2 py-0.5 text-xs font-semibold text-gray-700 ring-1 ring-gray-200" data-rank-label><%= step.rank %></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate text-sm font-medium text-gray-900"><%= step.title.presence || "(no title)" %></div>
+                    <div class="truncate font-mono text-xs text-gray-500"><%= step.page_url %></div>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-2">
+                    <button type="button"
+                            class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                            onclick="document.getElementById('edit-step-modal-<%= step.id %>').showModal()">
+                      Edit
+                    </button>
+                    <%= link_to "Delete", guided_tour_guided_tour_step_path(@guided_tour, step), method: :delete, data: { confirm: "Delete this step?" }, class: "text-sm text-red-600 hover:text-red-700" %>
+                  </div>
+                </div>
+
+              <dialog id="edit-step-modal-<%= step.id %>" class="guided-tour-admin-dialog" <%= edit_open ? 'open' : '' %>>
+                <div class="guided-tour-admin-dialog-inner">
+                  <div class="guided-tour-admin-dialog-header">
+                    <h3 class="text-lg font-semibold text-gray-900">Edit step</h3>
+                    <button type="button" class="guided-tour-admin-dialog-close" onclick="document.getElementById('edit-step-modal-<%= step.id %>').close()" aria-label="Close">Close</button>
+                  </div>
+                  <div class="guided-tour-admin-dialog-body">
+                    <%= form_with model: [@guided_tour, step], class: "space-y-4" do |form| %>
+                      <% if edit_open %>
+                        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                          <ul class="list-disc space-y-1 pl-5">
+                            <% @guided_tour_step.errors.full_messages.each do |message| %>
+                              <li><%= message %></li>
+                            <% end %>
+                          </ul>
+                        </div>
+                      <% end %>
+                      <%= render "step_form_fields", form: form, description_input_id: "guided_tour_step_#{step.id}_description_input" %>
+                      <div class="flex flex-wrap items-center gap-3 pt-2">
+                        <%= form.submit "Save step", class: "inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800" %>
+                        <button type="button" class="text-sm text-gray-600 hover:text-gray-900" onclick="document.getElementById('edit-step-modal-<%= step.id %>').close()">Cancel</button>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+              </dialog>
+              </div>
+            <% end %>
+          </div>
+        <% else %>
           <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center text-gray-500">
-            No steps yet for this guided tour.
+            No steps yet. Click Add step to create one.
           </div>
         <% end %>
       </div>

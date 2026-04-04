@@ -48,21 +48,24 @@
             <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                href="<%= projects_path %>"
                data-controller="nav-item"
-               data-action="click->nav-item#navigate">
+               data-action="click->nav-item#navigate"
+               data-guided-tour="welcome-search-projects-nav">
               <i class="fas fa-search w-4 text-center"></i>
               Search projects
             </a>
             
-            <!-- Tutorials -->
-            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-               href="<%= tutorial_home_index_path %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              <i class="fas fa-graduation-cap w-4 text-center"></i>
-              Tutorials
-            </a>
-            
-            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+            <% if guided_tours_for_menu.any? %>
+              <div class="px-4 py-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Guided tours</p>
+                <% guided_tours_for_menu.each do |tour| %>
+                  <%= link_to tour.name,
+                              guided_tour_start_url(tour.id),
+                              class: "flex items-center gap-2 px-0 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg",
+                              data: { controller: "nav-item", action: "click->nav-item#navigate" } %>
+                <% end %>
+              </div>
+              <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+            <% end %>
             
             <!-- Info Section -->
             <div class="px-4 py-2">
@@ -132,6 +135,8 @@
         <div class="hidden md:inline-block md:me-2">
           <div class="w-px h-4 bg-gray-300 dark:bg-neutral-700"></div>
         </div>
+
+        <%= render "shared/guided_tour_nav_dropdown" %>
 
         <!-- Info Dropdown -->
         <div class="relative inline-block text-left"
@@ -236,18 +241,27 @@
               <a class="<%= tw_menu_item %>" 
                  href="<%= projects_path %>"
                  data-controller="nav-item"              
-                 data-action="click->nav-item#navigate">
+                 data-action="click->nav-item#navigate"
+                 data-guided-tour="welcome-search-projects-nav">
                 <i class="fas fa-search me-1.5"></i>
                 Search projects
               </a>
 
-              <a class="<%= tw_menu_item %>" 
-                 href="<%= tutorial_home_index_path %>"
-                 data-controller="nav-item"              
-                 data-action="click->nav-item#navigate">
-                <i class="fas fa-graduation-cap me-1.5"></i>
-                Tutorials
-              </a>
+              <% if guided_tours_for_menu.any? %>
+                <div class="md:hidden mt-2 w-full rounded-lg border border-white/10 p-2 text-white/80">
+                  <p class="px-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    Guided tours
+                  </p>
+                  <div class="mt-1 flex flex-col">
+                    <% guided_tours_for_menu.each do |tour| %>
+                      <%= link_to tour.name,
+                                  guided_tour_start_url(tour.id),
+                                  class: "#{tw_menu_item}",
+                                  data: { controller: "nav-item", action: "click->nav-item#navigate" } %>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
 
               <div class="md:hidden mt-2 w-full rounded-lg border border-white/10 p-2 text-white/80">
                 <p class="px-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">

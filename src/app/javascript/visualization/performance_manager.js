@@ -75,7 +75,6 @@ export class PerformanceManager {
     // Check renderer state
     // console.log(`🔍 Renderer type:`, this.controller.rendererType)
     // console.log(`🔍 ReGL renderer:`, !!this.controller.reglRenderer)
-    // console.log(`🔍 PIXI app:`, !!this.controller.pixiApp)
     
     // Check canvas state
     const canvas = document.querySelector('canvas')

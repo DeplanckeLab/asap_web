@@ -383,7 +383,7 @@ export class ColorManager {
       const storedColor = localStorage.getItem(storageKey)
       
       if (storedColor) {
-        // Convert hex string to number for PIXI.js
+        // Convert hex string to packed RGB number
         colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
       } else {
         // Use default color

@@ -132,6 +132,17 @@ export default class extends Controller {
     }
   }
 
+  syncSelectionFromHiddenInput() {
+    if (!this.hasHiddenInputTarget) {
+      return
+    }
+    const id = String(this.hiddenInputTarget.value || "").trim()
+    if (!id) {
+      return
+    }
+    this.trySelectOrganismById(id)
+  }
+
   selectOrganism(event) {
     event.stopPropagation()
     const clickedOption = event.currentTarget
@@ -276,19 +287,30 @@ export default class extends Controller {
       .then(data => {
         console.log('[OrganismSelector] Received organisms data:', data)
         this.updateOrganismDropdown(data.organisms)
-        
-        // Try to reapply the previously selected organism if it exists in the new list
-        if (previouslySelectedOrganismId) {
-          const organismExists = this.trySelectOrganismById(previouslySelectedOrganismId)
-          if (organismExists) {
-            console.log('[OrganismSelector] Successfully reapplied previously selected organism:', previouslySelectedOrganismId)
+
+        // Prefer the hidden field as it is *after* the dropdown rebuild: the user or guided
+        // tour may have set organism_id while this request was in flight (version change runs
+        // this fetch asynchronously). Using only the value captured at fetch start clears that.
+        const idsToTry = []
+        if (this.hasHiddenInputTarget) {
+          const cur = String(this.hiddenInputTarget.value || "").trim()
+          if (cur) idsToTry.push(cur)
+        }
+        const startId =
+          previouslySelectedOrganismId != null ? String(previouslySelectedOrganismId).trim() : ""
+        if (startId && !idsToTry.includes(startId)) {
+          idsToTry.push(startId)
+        }
+
+        for (const id of idsToTry) {
+          if (this.trySelectOrganismById(id)) {
+            console.log('[OrganismSelector] Matched organism after reload:', id)
             return
-          } else {
-            console.log('[OrganismSelector] Previously selected organism not found in new list, resetting selection')
           }
         }
-        
-        // Reset selection if organism wasn't found or wasn't previously selected
+
+        console.log('[OrganismSelector] No matching organism in new list, resetting selection')
+
         if (this.hasHiddenInputTarget) {
           this.hiddenInputTarget.value = ''
         }

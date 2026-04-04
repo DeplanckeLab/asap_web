@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_24_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -720,6 +720,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_24_120000) do
   create_table "guided_tour_steps", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "description"
+    t.boolean "exclude_from_page_replay", default: false, null: false
     t.string "focus_element", null: false
     t.bigint "guided_tour_id", null: false
     t.string "page_url", null: false

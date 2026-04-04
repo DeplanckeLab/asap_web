@@ -26,7 +26,7 @@ export class InteractionHandler {
       // console.log('Interaction mode buttons not found')
     }
     
-    // Set up canvas event listeners when PIXI app becomes available
+    // Set up canvas event listeners when the plot canvas is ready
     this.setupCanvasListeners()
   }
 
@@ -54,7 +54,7 @@ export class InteractionHandler {
       }
     }
     
-    // Add our new interaction event listeners (works for both ReGL and PixiJS)
+    // Add interaction event listeners (ReGL plot canvas)
     this.controller.addInteractionEventListeners()
   }
 

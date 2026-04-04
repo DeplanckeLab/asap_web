@@ -116,20 +116,20 @@ end.compact.sort_by { |e| e[:label].to_s.downcase }
 summary_default_annotation_id = summary_annotation_options.first&.dig(:id)
 summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 %>
-<div class="adaptive-dashboard">
+<div class="adaptive-dashboard" data-guided-tour="project-summary-dashboard">
 <div class="mb-4">
 <h2 class="font-bold text-gray-900 mb-2" style="font-size: clamp(1.5rem, 3.5vw, 2.75rem);">Summary</h2>
 </div>
 <div class="space-y-4">
 <%# Row 1: Metrics %>
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-<%= (admin?) ? 3 : 2 %> xl:grid-cols-<%= (admin?) ? 5 : 4 %> gap-3">
-<div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer sm:col-span-2 lg:col-span-1" data-summary-visualization-card-link data-url="<%= project_path(@project, view: 'visualization') %>" role="link" tabindex="0">
+<div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer sm:col-span-2 lg:col-span-1" data-guided-tour="summary-visualization-shortcut" data-summary-visualization-card-link data-url="<%= project_path(@project, view: 'visualization') %>" role="link" tabindex="0">
 <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-chart-line text-gray-500"></i><span>Visualization</span></p>
 <div class="grid grid-cols-2 gap-2 mt-2">
 <button type="button" data-summary-detail-trigger data-summary-detail-type="embeddings" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_embedding_count.to_i.positive? ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_embedding_count) %></span> embeddings</button>
-<button type="button" data-summary-detail-trigger data-summary-detail-type="annotations" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_visual_annotation_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_visual_annotation_count) %></span> annotations</button>
-<button type="button" data-summary-detail-trigger data-summary-detail-type="checkpoints" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_checkpoint_count.to_i.positive? ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_checkpoint_count) %></span> checkpoints</button>
-<button type="button" data-summary-detail-trigger data-summary-detail-type="comments" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_checkpoint_comment_count.to_i.positive? ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_checkpoint_comment_count) %></span> comments</button>
+<button type="button" data-summary-detail-trigger data-summary-detail-type="annotations" data-guided-tour="summary-annotations-trigger" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_visual_annotation_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_visual_annotation_count) %></span> annotations</button>
+<button type="button" data-summary-detail-trigger data-summary-detail-type="checkpoints" data-guided-tour="summary-checkpoints-trigger" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_checkpoint_count.to_i.positive? ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_checkpoint_count) %></span> checkpoints</button>
+<button type="button" data-summary-detail-trigger data-summary-detail-type="comments" data-guided-tour="summary-comments-trigger" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_checkpoint_comment_count.to_i.positive? ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_checkpoint_comment_count) %></span> comments</button>
 </div>
 </div>
 
@@ -148,7 +148,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
     <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-cog text-gray-500"></i><span>Settings</span></p>
     <div class="flex flex-col gap-2 mt-2">
       <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= @project.public? ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800' %>"><%= @project.public? ? 'Public project' : 'Private project' %></span>
-      <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_shared_users_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600' %>">Shared with <span class="font-semibold mx-1"><%= number_with_delimiter(summary_shared_users_count) %></span> users</span>
+      <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_shared_users_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600' %>" data-guided-tour="summary-sharing-badge">Shared with <span class="font-semibold mx-1"><%= number_with_delimiter(summary_shared_users_count) %></span> users</span>
     </div>
   </div>
 <% if admin?%>
@@ -165,7 +165,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 
 <%# Row 2: Info Boxes %>
 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3">
-    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-6">
+    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-6" data-guided-tour="summary-identity-panel">
       <div class="flex items-center justify-between mb-2"><p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-fingerprint text-gray-500"></i><span>Identity</span></p><div class="flex items-center gap-1.5"><span class="badge-text px-2 py-0.5 rounded font-medium bg-blue-100 text-blue-800"><%= @project.key %></span></div></div>
       <div class="space-y-2.5">
         <div class="flex items-center gap-4 min-h-[1.5em]"><span class="w-24 shrink-0 text-gray-500">Project Name</span>
@@ -183,7 +183,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     </div>
 
-    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-3">
+    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-3" data-guided-tour="summary-activity-panel">
       <p class="dashboard-card-title text-gray-900 flex items-center gap-2 mb-2"><i class="fas fa-history text-gray-500"></i><span>Activity</span></p>
       <div class="space-y-2.5">
         <div class="flex justify-between items-center min-h-[1.5em]"><span class="text-gray-500">Created</span><span class="text-gray-900 font-medium"><%= @project.created_at.strftime("%b %d, %Y") %></span></div>
@@ -192,7 +192,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     </div>
 
-    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-3">
+    <div class="bg-white rounded-lg border border-gray-200 p-3 xl:col-span-3" data-guided-tour="summary-reproducibility-panel">
       <p class="dashboard-card-title text-gray-900 flex items-center gap-2 mb-2"><i class="fas fa-file-alt text-gray-500"></i><span>Reproducibility</span></p>
       <div class="flex flex-col gap-2">
         <%= link_to "Instructions", instructions_project_path(@project.key), class: "badge-text px-2 py-1 rounded bg-blue-100 text-blue-800 font-medium text-center hover:bg-blue-200" %>
@@ -362,7 +362,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     <% end %>
 
-    <div id="summary-visual-details-popover" data-project-key="<%= @project.key %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
+    <div id="summary-visual-details-popover" data-guided-tour="summary-collab-popover" data-project-key="<%= @project.key %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
       <div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
         <div class="flex items-center gap-2 min-w-0">
           <span id="summary-visual-details-drag-handle" class="inline-flex items-center text-gray-400 cursor-move select-none" title="Drag">
@@ -409,7 +409,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
           <% end %>
         </div>
 
-        <div data-summary-detail-section="checkpoints" class="hidden">
+        <div data-summary-detail-section="checkpoints" data-guided-tour="summary-collab-checkpoints-section" class="hidden">
           <% if summary_checkpoint_records.any? %>
             <div class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200">
@@ -438,7 +438,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
           <% end %>
         </div>
 
-        <div data-summary-detail-section="comments" class="hidden">
+        <div data-summary-detail-section="comments" data-guided-tour="summary-collab-comments-section" class="hidden">
           <% if summary_checkpoint_comments.any? %>
             <div class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200">

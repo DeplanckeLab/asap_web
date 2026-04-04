@@ -551,7 +551,7 @@ export default class extends Controller {
       }
     }
     
-    // Add our new interaction event listeners (works for both ReGL and PixiJS)
+    // Add interaction event listeners (ReGL plot canvas)
     this.addInteractionEventListeners()
   }
 

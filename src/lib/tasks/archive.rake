@@ -4,6 +4,10 @@ require 'digest'
 require 'tempfile'
 require 'find'
 
+# Guided tour demo project (ASAP48) and matching disk keys: never archive to S3.
+GUIDED_TOUR_ARCHIVE_EXEMPT_PROJECT_KEYS = %w[ASAP48].freeze
+GUIDED_TOUR_ARCHIVE_EXEMPT_PUBLIC_IDS = [48].freeze
+
 def include_project_fus_for_archive(project, project_dir)
   upload_data_dir = Pathname.new(Fu.global_upload_root)
   project_fus_dir = project_dir + 'fus'
@@ -136,6 +140,13 @@ rescue StandardError
 end
 
 def archive_project_to_s3!(project, s3b:, dry_run: false)
+  exempt_by_key = GUIDED_TOUR_ARCHIVE_EXEMPT_PROJECT_KEYS.include?(project.key.to_s)
+  exempt_by_public = project.public? && GUIDED_TOUR_ARCHIVE_EXEMPT_PUBLIC_IDS.include?(project.public_id)
+  if exempt_by_key || exempt_by_public
+    Rails.logger.info("[archive] skip guided-tour exempt project key=#{project.key} public_id=#{project.public_id.inspect}")
+    return :exempt
+  end
+
   base_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s
   project_dir = base_dir + project.key
   return :missing_local_dir unless File.directory?(project_dir)
@@ -301,7 +312,7 @@ namespace :projects do
         counts[result] += 1
       end
 
-      puts "[archive_inactive] done archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]}"
+      puts "[archive_inactive] done archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]} exempt=#{counts[:exempt]}"
       f.flock(File::LOCK_UN)
     end
   end
@@ -503,6 +514,6 @@ namespace :projects do
       end
     end
 
-    puts "[rescue_archive_states] done manual_review_newer_smaller=#{counts[:manual_review_newer_smaller]} marked_archived_s3_only=#{counts[:marked_archived_s3_only]} marked_unarchived_local_only=#{counts[:marked_unarchived_local_only]} replaced_with_s3=#{counts[:replaced_with_s3]} kept_local=#{counts[:kept_local]} missing_both=#{counts[:missing_both]} status_reset=#{counts[:status_reset]} rearchive_archived=#{counts[:rearchive_archived]} rearchive_failed=#{counts[:rearchive_failed]} rearchive_missing_local_dir=#{counts[:rearchive_missing_local_dir]} rearchive_empty_local_dir=#{counts[:rearchive_empty_local_dir]} rearchive_dry_run=#{counts[:rearchive_dry_run]} rearchive_not_due=#{counts[:rearchive_not_due]} rearchive_skipped=#{counts[:rearchive_skipped]} failed=#{counts[:failed]}"
+    puts "[rescue_archive_states] done manual_review_newer_smaller=#{counts[:manual_review_newer_smaller]} marked_archived_s3_only=#{counts[:marked_archived_s3_only]} marked_unarchived_local_only=#{counts[:marked_unarchived_local_only]} replaced_with_s3=#{counts[:replaced_with_s3]} kept_local=#{counts[:kept_local]} missing_both=#{counts[:missing_both]} status_reset=#{counts[:status_reset]} rearchive_archived=#{counts[:rearchive_archived]} rearchive_exempt=#{counts[:rearchive_exempt]} rearchive_failed=#{counts[:rearchive_failed]} rearchive_missing_local_dir=#{counts[:rearchive_missing_local_dir]} rearchive_empty_local_dir=#{counts[:rearchive_empty_local_dir]} rearchive_dry_run=#{counts[:rearchive_dry_run]} rearchive_not_due=#{counts[:rearchive_not_due]} rearchive_skipped=#{counts[:rearchive_skipped]} failed=#{counts[:failed]}"
   end
 end

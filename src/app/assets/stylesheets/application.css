@@ -75,3 +75,396 @@
     color: #374151 !important;
   }
 }
+
+.info-menu-guided-tours-disclosure summary {
+  list-style: none;
+}
+
+.info-menu-guided-tours-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.info-menu-guided-tours-chevron {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  margin-top: -0.15rem;
+  opacity: 0.65;
+}
+
+.info-menu-guided-tours-disclosure[open] .info-menu-guided-tours-chevron {
+  transform: rotate(45deg);
+  margin-top: 0.1rem;
+}
+
+/* Tour chrome (panel, overlay root, try bar) sits above page UI including header dropdowns
+   (nav/project use up to z-[10000]). Highlighted page nodes use a low z-index so they do not
+   stack above the fixed header; only the popup is lifted. */
+.guided-tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10090;
+  pointer-events: none;
+}
+
+.guided-tour-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+  pointer-events: none;
+}
+
+.guided-tour-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 10100;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(70vh, 480px);
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 16px 20px 16px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+
+.guided-tour-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -16px -20px 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #334155;
+  border-radius: 12px 12px 0 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.guided-tour-panel-header:active {
+  cursor: grabbing;
+}
+
+.guided-tour-panel-drag-handle {
+  flex-shrink: 0;
+  color: #64748b;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+.guided-tour-panel-title-in-header {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+
+.guided-tour-picker {
+  max-height: none;
+}
+
+.guided-tour-picker-list {
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+}
+
+.guided-tour-picker-list li {
+  margin-bottom: 8px;
+}
+
+.guided-tour-picker-list button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.guided-tour-picker-list button:hover {
+  background: #334155;
+}
+
+.guided-tour-panel-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.guided-tour-panel-title:not(.guided-tour-panel-title-in-header) {
+  margin: 0 0 8px;
+}
+
+.guided-tour-panel-body {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  color: #cbd5e1;
+}
+
+.guided-tour-panel-body a {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+.guided-tour-panel-body a:hover {
+  color: #7dd3fc;
+}
+
+.guided-tour-panel-body strong {
+  color: #f8fafc;
+}
+
+.guided-tour-panel-body .trix-content {
+  max-height: 40vh;
+  overflow: auto;
+  color: #cbd5e1;
+}
+
+.guided-tour-panel-warn {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #fbbf24;
+}
+
+.guided-tour-panel-meta {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.guided-tour-complete-title {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 1.15rem;
+}
+
+.guided-tour-panel-meta-complete {
+  font-weight: 600;
+  color: #34d399;
+}
+
+.guided-tour-panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.guided-tour-panel-countdown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 2.5rem;
+}
+
+.guided-tour-countdown-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.guided-tour-countdown-ring-wrap {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.guided-tour-countdown-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.guided-tour-countdown-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #38bdf8;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.guided-tour-countdown-track {
+  fill: none;
+  stroke: rgba(56, 189, 248, 0.22);
+  stroke-width: 3;
+}
+
+.guided-tour-countdown-bar {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s linear;
+}
+
+.guided-tour-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.guided-tour-btn {
+  padding: 8px 14px;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.guided-tour-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.guided-tour-btn-primary {
+  background: #38bdf8;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.guided-tour-btn-primary:hover:not(:disabled) {
+  background: #7dd3fc;
+}
+
+.guided-tour-btn-secondary {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.guided-tour-btn-secondary:hover:not(:disabled) {
+  background: #334155;
+}
+
+.guided-tour-target {
+  position: relative;
+  z-index: 40;
+  outline: 3px solid #2563eb;
+  outline-offset: 4px;
+}
+
+.guided-tour-try-bar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10100;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.guided-tour-try-bar-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.guided-tour-try-bar-btn-primary {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.guided-tour-try-bar-btn-primary:hover {
+  background: #7dd3fc;
+}
+
+.guided-tour-try-bar-btn-secondary {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.guided-tour-try-bar-btn-secondary:hover {
+  background: #334155;
+}
+
+.guided-tour-admin-dialog {
+  width: min(42rem, calc(100vw - 2rem));
+  max-width: 100%;
+  max-height: min(90vh, 900px);
+  margin: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0.75rem;
+  background: transparent;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+}
+
+.guided-tour-admin-dialog::backdrop {
+  background: rgba(17, 24, 39, 0.5);
+}
+
+.guided-tour-admin-dialog-inner {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 900px);
+  background: #fff;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.guided-tour-admin-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.guided-tour-admin-dialog-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.guided-tour-admin-dialog-close {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  color: #4b5563;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.guided-tour-admin-dialog-close:hover {
+  color: #111827;
+  background: #f3f4f6;
+}

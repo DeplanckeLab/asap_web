@@ -76,7 +76,54 @@ class Project < ApplicationRecord
   scope :by_tissue, ->(tissue) { where("tissue ILIKE ?", "%#{tissue}%") if tissue.present? }
   scope :by_status, ->(status_id) { where(status_id: status_id) if status_id.present? }
   scope :not_deleted, -> { where(being_deleted: false) }
-  
+
+  # Picks the project used by the "Getting started" guided tour and browse-page demo row highlight.
+  # Priority: GUIDED_TOUR_DEMO_PROJECT_ID, GUIDED_TOUR_DEMO_PROJECT_KEY, public ASAP48 when present,
+  # known FCA/haltère keys, any public project whose key or name suggests FCA + haltère,
+  # first public with a 2D embedding annot, then first public / any project (same as legacy seeds).
+  def self.guided_tour_demo_project
+    id_s = ENV["GUIDED_TOUR_DEMO_PROJECT_ID"].to_s.strip
+    if id_s.match?(/\A\d+\z/) && id_s.to_i.positive?
+      found = find_by(id: id_s.to_i)
+      return found if found
+    end
+
+    key_s = ENV["GUIDED_TOUR_DEMO_PROJECT_KEY"].to_s.strip
+    if key_s.present?
+      found = find_by(key: key_s)
+      return found if found
+    end
+
+    asap48 = public_projects.find_by(public_id: 48)
+    return asap48 if asap48
+
+    %w[fca_haltere FCA_haltere fca-haltere FCA-haltere].each do |k|
+      p = public_projects.find_by(key: k)
+      return p if p
+    end
+
+    fca_haltere_scope = public_projects.where(
+      <<~SQL.squish,
+        (projects.key ILIKE :haltere_ascii OR projects.name ILIKE :haltere_ascii
+         OR projects.key ILIKE :haltere_utf8 OR projects.name ILIKE :haltere_utf8)
+        AND (projects.key ILIKE :fca OR projects.name ILIKE :fca)
+      SQL
+      haltere_ascii: "%haltere%",
+      haltere_utf8: "%haltère%",
+      fca: "%fca%"
+    )
+    hit = fca_haltere_scope.order(:id).first
+    return hit if hit
+
+    embedded = public_projects
+      .where(id: Annot.where(nber_rows: 2).select(:project_id))
+      .order(:id)
+      .first
+    return embedded if embedded
+
+    public_projects.order(:id).first || order(:id).first
+  end
+
   # Elasticsearch search functionality
   def self.search(query, filters = {})
     # Build the search query

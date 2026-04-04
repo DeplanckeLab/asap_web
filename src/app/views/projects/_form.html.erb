@@ -17,7 +17,7 @@
     </div>
   <% end %>
 
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-controller="file-upload organism-selector" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>" data-file-upload-row-label-value="<%= row_label(project) %>" data-file-upload-col-label-value="<%= col_label(project) %>"<% if defined?(@existing_fu_id) && @existing_fu_id %> data-file-upload-existing-fu-id-value="<%= @existing_fu_id %>" data-file-upload-existing-filename-value="<%= @existing_filename %>"<% end %>>
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6" data-guided-tour="project-new-form" data-controller="file-upload organism-selector" data-file-upload-is-admin-value="<%= admin? ? 'true' : 'false' %>" data-file-upload-row-label-value="<%= row_label(project) %>" data-file-upload-col-label-value="<%= col_label(project) %>"<% if defined?(@existing_fu_id) && @existing_fu_id %> data-file-upload-existing-fu-id-value="<%= @existing_fu_id %>" data-file-upload-existing-filename-value="<%= @existing_filename %>"<% end %>>
     <script type="application/json" data-file-upload-target="fileFormatsData">
       <%= raw(file_formats_for_js.to_json) %>
     </script>
@@ -29,12 +29,12 @@
       }.to_json) %>
     </script>
     <!-- Project Information Section -->
-    <div class="mb-8">
+    <div class="mb-8" data-guided-tour="project-new-project-info">
       <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Project Information</h2>
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Project Name -->
-        <div class="md:col-span-2">
+        <div class="md:col-span-2" data-guided-tour="project-new-field-name">
           <%= form.label :name, "Project Name", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <%= form.text_field :name, 
                 class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white #{'border-red-500' if project.errors[:name].any?}", 
@@ -48,6 +48,7 @@
           <% end %>
         </div>
 
+        <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6" data-guided-tour="project-new-type-and-release">
         <!-- Project Type -->
         <div>
           <%= form.label :project_type_id, "Project Type", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
@@ -74,9 +75,10 @@
                 { prompt: "Select ASAP release" },
                 { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton change->organism-selector#reloadOrganisms" } } %>
         </div>
+        </div>
 
         <!-- Organism -->
-        <div class="md:col-span-2">
+        <div class="md:col-span-2" data-guided-tour="project-new-field-organism">
           <%= form.label :organism_id, "Organism", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="relative" data-test="organism-selector-container">
             <% 
@@ -84,7 +86,7 @@
               effective_organism_id = (project.new_record? && project.organism_id == 1 && !@integrate_mode) ? nil : project.organism_id
               show_short_name = project.version_id.to_i < 8
             %>
-            <%= form.hidden_field :organism_id, value: effective_organism_id || "", data: { organism_selector_target: "hiddenInput", action: "change->file-upload#checkSubmitButton" } %>
+            <%= form.hidden_field :organism_id, value: effective_organism_id || "", data: { organism_selector_target: "hiddenInput", action: "change->file-upload#checkSubmitButton change->organism-selector#syncSelectionFromHiddenInput" } %>
             
             <!-- Dropdown button -->
             <button type="button"
@@ -189,7 +191,7 @@
       <%= hidden_field_tag 'integrate', '1' %>
     <% else %>
     <!-- File Upload Section -->
-    <div class="mb-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+    <div class="mb-8 pt-6 border-t border-gray-200 dark:border-gray-700" data-guided-tour="project-new-upload-intro">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Upload Data File</h2>
         <button 
@@ -207,7 +209,7 @@
       </p>
       
       <!-- File Upload Container -->
-      <div id="file-upload-container" data-file-upload-target="fileUploadContainer" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+      <div id="file-upload-container" data-guided-tour="project-new-file-upload-local" data-file-upload-target="fileUploadContainer" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
         <div data-file-upload-target="dropzone" class="space-y-4">
           <div id="upload-icon" class="mx-auto text-gray-400">
             <svg class="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
@@ -227,7 +229,7 @@
           </div>
         </div>
 
-        <div data-file-upload-target="downloadForm" class="mt-6 text-center">
+        <div data-file-upload-target="downloadForm" data-guided-tour="project-new-file-url" class="mt-6 text-center">
           <div class="text-sm uppercase tracking-wide text-gray-400 dark:text-gray-500">or</div>
           <div class="mt-3 flex flex-col sm:flex-row gap-3 justify-center">
             <input
@@ -271,7 +273,7 @@
       <%= hidden_field_tag 'nber_cols', 0 %>
       <%= hidden_field_tag 'nber_rows', 0 %>
 
-      <div id="preparsing-panel" data-file-upload-target="preparsingPanel" class="mt-6 hidden">
+      <div id="preparsing-panel" data-guided-tour="project-new-preparsing-panel" data-file-upload-target="preparsingPanel" class="mt-6 hidden">
         <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
           <div class="flex flex-wrap items-center gap-2 text-sm">
             <span class="font-medium text-gray-900 dark:text-white">Preparsing status:</span>
@@ -285,7 +287,7 @@
               <span data-file-upload-target="preparsingStatus" class="text-gray-700 dark:text-gray-300">Waiting for upload</span>
             </span>
           </div>
-          <div data-file-upload-target="preparsingResult" class="mt-4 space-y-4"></div>
+          <div data-file-upload-target="preparsingResult" data-guided-tour="project-new-preparsing-results" class="mt-4 space-y-4"></div>
         </div>
       </div>
     </div>
@@ -300,7 +302,7 @@
     <% end %>
 
     <!-- Actions -->
-    <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+    <div class="flex items-center justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700" data-guided-tour="project-new-form-actions">
       <% if @is_resetting_parsing && @original_project %>
         <% parsing_step = Step.find_by(name: 'parsing') %>
         <% cancel_path = parsing_step ? project_path(@original_project, view: 'analysis', step_id: parsing_step.id) : project_path(@original_project, view: 'analysis') %>
@@ -310,7 +312,7 @@
       <% end %>
       <% submit_label = @is_resetting_parsing ? "Recreate project" : (@integrate_mode ? "Create integrated project" : "Create project") %>
       <% submit_disabled = @integrate_mode ? false : true %>
-      <%= form.submit submit_label, id: "submit-button", data: { file_upload_target: 'submitButton' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: submit_disabled %>
+      <%= form.submit submit_label, id: "submit-button", data: { file_upload_target: 'submitButton', guided_tour: 'project-new-submit' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: submit_disabled %>
     </div>
   </div>
 <% end %>

@@ -26,6 +26,7 @@
 <% end %>
 
 <div class="max-w-6xl mx-auto"
+     data-guided-tour="project-compliance-view"
      data-controller="metadata-validation"
      data-metadata-validation-project-id-value="<%= @project.id %>"
      data-metadata-validation-status-url-value="<%= compliance_project_status_path(@project) %>"
@@ -79,6 +80,7 @@
         <button type="button"
                 data-action="click->metadata-validation#runValidation"
                 data-metadata-validation-target="validateButton"
+                data-guided-tour="compliance-validate-button"
                 class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Re-run Validation</button>
         <% if !@project.is_public? || admin? %>
           <% if @validation_result && @validation_result[:valid] %>
@@ -98,7 +100,7 @@
 
   <% if @validation_result %>
     <!-- Summary Card -->
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6" data-guided-tour="compliance-validation-summary">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-gray-900">Validation Summary</h2>
         <% if @validation_result[:valid] %>

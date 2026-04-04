@@ -183,6 +183,10 @@ import SortableListController from "controllers/sortable_list_controller"
 application.register("sortable-list", SortableListController)
 console.log('Sortable list controller registered')
 
+import GuidedTourPlayerController from "controllers/guided_tour_player_controller"
+application.register("guided-tour-player", GuidedTourPlayerController)
+console.log('Guided tour player controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

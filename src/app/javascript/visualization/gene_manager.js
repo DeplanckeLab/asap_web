@@ -359,7 +359,7 @@ export class GeneManager {
     const projectIdValue = visualizationElement?.dataset?.projectId
     this.projectChannelId = projectIdValue ? String(projectIdValue).trim() : null
 
-    // Extract project identifier from URL (could be ID, key, or public_id like ASAP49)
+    // Extract project identifier from URL (could be ID, key, or public_id like ASAP48)
     const pathMatch = window.location.pathname.match(/\/projects\/([^\/]+)/)
     if (pathMatch) {
       this.projectIdentifier = pathMatch[1] // Use identifier instead of just ID

@@ -1,42 +1,3 @@
-<!-- Load PIXI.js globally -->
-<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
-
-<!-- Prevent page scrolling for full-screen visualization -->
-<style>
-  html, body {
-    overflow: hidden !important;
-    height: 100%;
-    width: 100%;
-    margin: 0;
-    padding: 0;
-  }
-</style>
-
-<!-- Global color palette for visualization -->
-<script>
-  console.log('🎨 Visualization view script executing...');
-  try {
-    console.log('🎨 Attempting to load colors from server...');
-    var colors = <%= raw category_colors.to_json %>;
-    console.log('🎨 Raw colors from server:', colors);
-    console.log('🎨 Colors type:', typeof colors);
-    console.log('🎨 Colors length:', colors ? colors.length : 'null/undefined');
-    
-    window.CATEGORY_COLORS = colors;
-    console.log('🎨 window.CATEGORY_COLORS set to:', window.CATEGORY_COLORS);
-    
-    if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
-      console.error('No colors loaded from server configuration!');
-    } else {
-      console.log('Colors loaded successfully in visualization view!');
-    }
-  } catch (error) {
-    console.error('Error loading colors from server:', error);
-    console.error('Error stack:', error.stack);
-    window.CATEGORY_COLORS = null;
-  }
-</script>
-
 <%
 embedding_groups = @all_embeddings_by_loom || {}
 default_group_key = @default_embedding_loom_file || @default_loom_file
@@ -62,7 +23,7 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
 %>
 
 <% if show_unarchive_message %>
-  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
+  <div data-guided-tour="project-visualization-view" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="max-width: 640px; width: 100%; text-align: center;"
          data-controller="unarchive-status"
          data-unarchive-status-project-id-value="<%= @project.id %>"
@@ -107,7 +68,7 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
   <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
   <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
 <% elsif !has_embeddings %>
-  <div style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
+  <div data-guided-tour="project-visualization-view" style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="text-align: center;">
       <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin: 0;">No embedding to be visualized</h2>
     </div>
@@ -115,7 +76,7 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
   <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
   <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
 <% elsif !has_visualization_data %>
-  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
+  <div data-guided-tour="project-visualization-view" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="max-width: 600px; text-align: center;">
       <div style="font-size: 64px; color: #d1d5db; margin-bottom: 24px;">
         <i class="fas fa-chart-scatter"></i>
@@ -152,6 +113,30 @@ show_unarchive_message = @project_archive_transitioning || (@project_files_missi
   <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
 <% else %>
 
+<%# Interactive visualization: full-page layout lock and CATEGORY_COLORS.
+    Kept out of empty-state branches so layout does not block other views. %>
+<style>
+  html, body {
+    overflow: hidden !important;
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+</style>
+<script>
+  try {
+    var colors = <%= raw category_colors.to_json %>;
+    window.CATEGORY_COLORS = colors;
+    if (!window.CATEGORY_COLORS || window.CATEGORY_COLORS.length === 0) {
+      console.error("Visualization: no CATEGORY_COLORS from server configuration");
+    }
+  } catch (error) {
+    console.error("Visualization: failed to set CATEGORY_COLORS", error);
+    window.CATEGORY_COLORS = null;
+  }
+</script>
+
 <%
 default_embedding_id = default_embedding_record&.id
 can_edit_project = editable?(@project)
@@ -180,7 +165,8 @@ end
 default_origin_label = default_group_key.present? ? (default_group_key.split('/').first || default_group_key).to_s.capitalize : ''
 %>
 
-<div data-controller="visualization" 
+<div data-controller="visualization"
+     data-guided-tour="project-visualization-view"
      data-visualization-embeddings-by-loom-value="<%= embedding_groups.to_json %>"
      data-visualization-default-loom-file-value="<%= (default_group_key.presence || @default_loom_file || 'parsing/output.loom') %>"
      data-visualization-default-embedding-id-value="<%= default_embedding_id&.to_s %>"
@@ -195,10 +181,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   
   <!-- Left Panel: Metadata -->
-  <div id="left-panel" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
+  <% loom_meta_for_tour = @h_metadata[@default_loom_file] %>
+  <% viz_tour_sample_on_categorical = loom_meta_for_tour.present? && (loom_meta_for_tour.dig('cell', 'DISCRETE') || []).any? %>
+  <div id="left-panel" data-guided-tour="visualization-metadata-panel" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
-      <div style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
+      <div data-guided-tour="visualization-categorical-metadata" style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
@@ -222,7 +210,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []) %>
             <% categorical_metadata_items.each_with_index do |metadata, idx| %>
               <% is_last_categorical_item = (idx == categorical_metadata_items.length - 1) %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>">
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if viz_tour_sample_on_categorical && idx == 0 %>>
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
@@ -541,7 +529,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       </div>
 
       <!-- Continuous Metadata Section -->
-      <div style="height: 50%; display: flex; flex-direction: column;">
+      <div data-guided-tour="visualization-continuous-metadata" style="height: 50%; display: flex; flex-direction: column;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
@@ -564,7 +552,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <% continuous_metadata_items = @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 } %>
             <% continuous_metadata_items.each_with_index do |metadata, idx| %>
               <% is_last_continuous_item = (idx == continuous_metadata_items.length - 1) %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_continuous_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>">
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_continuous_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if !viz_tour_sample_on_categorical && idx == 0 %>>
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
@@ -751,7 +739,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
        onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
 
   <!-- Main Content: UMAP Plot -->
-  <div id="main-panel" style="flex: 1; height: 100%; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+  <div id="main-panel" data-guided-tour="visualization-plot-area" style="flex: 1; height: 100%; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
     <!-- Menu Bar -->
     <div style="display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
@@ -759,6 +747,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <div style="display: flex; align-items: center; gap: 6px; position: relative;">
           <a href="#"
              id="embedding-selection-link"
+             data-guided-tour="visualization-embedding-picker"
              data-action="click->visualization#toggleEmbeddingMenu"
              data-current-loom-file="<%= default_group_key %>"
              data-selected-embedding-id="<%= default_embedding_id&.to_s %>"
@@ -1205,6 +1194,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <div style="display: flex; align-items: flex-start; gap: 8px; ml-1; flex-wrap: wrap; justify-content: flex-end;">
         <!-- Global Filter Summary -->
         <div id="global-filter-summary"
+             data-guided-tour="visualization-global-filter-bar"
              data-action="click->visualization#toggleGlobalFilterPanel"
              style="position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; height: 35px; background-color: #f3f4f6; cursor: pointer; transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; box-shadow: none;">
           <i class="fas fa-filter" style="font-size: 14px; color: #6b7280; transition: color 0.2s;"></i>
@@ -1222,7 +1212,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
 
         <!-- Interaction Mode Buttons -->
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div data-guided-tour="visualization-mode-buttons" style="display: flex; align-items: center; gap: 8px;">
                     <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
             <!-- Pan/Zoom Button -->
             <button id="pan-mode-btn"
@@ -1262,7 +1252,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
         
         <!-- Checkpoint Action Group -->
-        <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 4px; overflow: visible;">
+        <div data-guided-tour="visualization-save-toolbar" style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 4px; overflow: visible;">
           <!-- Save Dropdown -->
           <div id="save-dropdown-container"
                style="position: relative; display: inline-block;">
@@ -1361,17 +1351,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           </button>
         </div>
         
-        <!-- Memory Diagnostic Button -->
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button type="button" 
-                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
-                  data-action="click->visualization#openMemoryDiagnostic"
-                  title="Memory & Database Diagnostic"
-                  onmouseover="this.style.backgroundColor='#e5e7eb'" 
-                  onmouseout="this.style.backgroundColor='#f3f4f6'">
-            <i class="fas fa-brain" style="font-size: 14px;"></i>
-          </button>
-          
+        <div data-guided-tour="visualization-utility-toolbar" style="display: flex; justify-content: flex-end; gap: 8px;">
+          <% if admin? %>
+            <!-- Memory Diagnostic Button (admins only) -->
+            <button type="button"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
+                    data-action="click->visualization#openMemoryDiagnostic"
+                    title="Memory & Database Diagnostic"
+                    onmouseover="this.style.backgroundColor='#e5e7eb'"
+                    onmouseout="this.style.backgroundColor='#f3f4f6'">
+              <i class="fas fa-brain" style="font-size: 14px;"></i>
+            </button>
+          <% end %>
+
           <!-- Settings Button (Icon Only) -->
           <button id="settings-btn"
                   style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
@@ -1432,10 +1424,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
        onmouseout="this.style.backgroundColor='#e5e7eb'"></div>
 
   <!-- Right Panel: Split into Gene Expression and Selections -->
-  <div id="right-panel" style="width: 320px; height: 100%; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+  <div id="right-panel" data-guided-tour="visualization-right-panel" style="width: 320px; height: 100%; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
     
     <!-- Top Section: Gene Expression Panel -->
-    <div id="gene-expression-panel" style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+    <div id="gene-expression-panel" data-guided-tour="visualization-gene-expression-panel" style="flex: 1; background-color: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 10px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -1445,7 +1437,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         </div>
         <!-- Gene Tags Container with Input -->
         <div style="position: relative;">
-          <div id="gene-tags-container" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;min-height:34px;border:1px solid #d1d5db;border-radius:6px;background-color:#fff;align-items:center;transition:border-color 0.2s;cursor:text;"
+          <div id="gene-tags-container" data-guided-tour="visualization-gene-search" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;min-height:34px;border:1px solid #d1d5db;border-radius:6px;background-color:#fff;align-items:center;transition:border-color 0.2s;cursor:text;"
                onclick="document.getElementById('gene-autocomplete-input').focus()">
             <input 
               type="text" 
@@ -1476,6 +1468,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span>Values from</span>
             <a href="#"
              id="matrix-selection-link"
+             data-guided-tour="visualization-matrix-layer-picker"
              data-layer="<%= default_layer %>"
              data-annot-id="<%= default_annot_id %>"
              data-run-id="<%= default_run_id %>"
@@ -1642,13 +1635,15 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <!-- Selection Tabs -->
       <div style="border-bottom: 1px solid #e5e7eb;">
         <nav style="display: flex; align-items: center; gap: 8px; padding: 0 16px;">
-          <button id="cells-tab" 
+          <button id="cells-tab"
+                  data-guided-tour="visualization-cell-sets-tab"
                   style="padding: 8px 16px; border-bottom: 2px solid #3b82f6; font-weight: 500; font-size: 14px; color: #3b82f6; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer;"
                   data-action="click->visualization#switchSelectionTab"
                   data-tab="cells">
             Cell Sets
           </button>
-          <button id="gene-sets-tab" 
+          <button id="gene-sets-tab"
+                  data-guided-tour="visualization-gene-sets-tab"
                   style="padding: 8px 16px; border-bottom: 2px solid transparent; font-weight: 500; font-size: 14px; color: #6b7280; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;"
                   data-action="click->visualization#switchSelectionTab"
                   data-tab="gene-sets">
@@ -1660,7 +1655,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <!-- Tab Content -->
       <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
         <!-- Cells Tab Content -->
-        <div id="cells-tab-content" style="flex: 1; padding: 16px; overflow: hidden; min-height: 0; display: flex; flex-direction: column;">
+        <div id="cells-tab-content" data-guided-tour="visualization-cell-sets-content" style="flex: 1; padding: 16px; overflow: hidden; min-height: 0; display: flex; flex-direction: column;">
           <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0;">
             <!-- Cell count with action buttons -->
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
@@ -1800,7 +1795,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
         <!-- Gene Sets Tab Content -->
         <div id="gene-sets-tab-content" style="flex: 1; padding: 16px 0; min-height: 0; display: none; overflow: hidden;">
           <div style="display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; width: 100%;">
-            <div id="gene-set-collections-list-view" style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
+            <div id="gene-set-collections-list-view" data-guided-tour="visualization-gene-set-collections-list" style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 0; width: 100%; padding: 0 16px; box-sizing: border-box;">
                 <input id="gene-set-collections-name-filter-input"
                        type="text"

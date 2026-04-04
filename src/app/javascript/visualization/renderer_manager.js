@@ -856,10 +856,6 @@ export class RendererManager {
     return this.controller.generateSVGFromPlotReGL()
   }
 
-  generateSVGFromPlotPixi() {
-    return this.controller.generateSVGFromPlotPixi()
-  }
-
   // Point counting
   countVisiblePoints(bounds) {
     return this.controller.countVisiblePoints(bounds)
@@ -1048,7 +1044,6 @@ export class RendererManager {
         this.controller.interactionHandler.setupInteractionSystem()
         
         // Create HTML Canvas 2D overlay for axes/grid/labels
-        // (Simple and efficient - no need for PixiJS!)
         const overlayCanvas = document.createElement('canvas')
         overlayCanvas.width = plotContainer.clientWidth
         overlayCanvas.height = plotContainer.clientHeight
@@ -1064,10 +1059,6 @@ export class RendererManager {
         this.controller.overlayCanvas = overlayCanvas
         this.controller.overlayCtx = overlayCanvas.getContext('2d')
         
-        // Store PIXI reference for compatibility (but don't create app)
-        this.controller.PIXI = PIXI
-        this.controller.pixiApp = null // No PixiJS app in ReGL mode
-        
         // console.log('✅ Canvas 2D overlay created for UI elements (axes/grid/labels)')
         // console.log('📊 Canvas 2D overlay details:', {
           // width: overlayCanvas.width,
@@ -1077,12 +1068,11 @@ export class RendererManager {
         // })
         
     
-        // ReGL mode: No PixiJS containers needed, using Canvas 2D overlay
-        this.controller.scatterContainer = { children: [] } // Dummy for compatibility
+        // ReGL mode: Canvas 2D overlay for axes/grid/labels; dummy scatter container for legacy checks
+        this.controller.scatterContainer = { children: [] }
         this.controller.gridContainer = null
         this.controller.categoryLabelsContainer = null
         this.controller.axesContainer = null
-        // console.log(`✅ ReGL mode - using Canvas 2D overlay (no PixiJS containers)`)
       
 
       // Store current loom file safely (loom selector can be absent in some layouts)

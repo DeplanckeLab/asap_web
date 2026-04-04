@@ -3,6 +3,7 @@
 <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i %>
 
 <div class="min-h-screen bg-gray-50">
+  <% gt_demo = guided_tour_demo_project_for_highlight %>
   <div class="w-full mx-auto px-3 sm:px-4 lg:px-6 py-8">
     <% if notice.present? %>
       <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -11,17 +12,17 @@
     <% end %>
 
     <!-- Header -->
-    <div class="mb-8 flex items-start justify-between gap-4">
+    <div class="mb-8 flex items-start justify-between gap-4" data-guided-tour="projects-browse-header">
       <div>
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
         <p class="text-gray-600">Search and explore ASAP projects</p>
       </div>
-      <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap" %>
+      <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap", data: { guided_tour: "projects-new-project-link" } %>
     </div>
 
     <!-- Search Form -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8 relative">
-      <%= form_with url: projects_path, method: :get, local: true, class: "space-y-6", data: { controller: "search-form" } do |form| %>
+      <%= form_with url: projects_path, method: :get, local: true, class: "space-y-6", data: { controller: "search-form", guided_tour: "projects-search-form-section" } do |form| %>
         <div class="absolute top-6 right-6">
           <%= link_to "Clear form", projects_path, class: "text-xs text-gray-500 hover:text-gray-700 underline" %>
         </div>
@@ -39,7 +40,7 @@
                 <%= form.text_field :q, value: @query, placeholder: "Search by name, description, technology...",
                     class: "block w-full h-10 pl-10 pr-3 border border-gray-300 rounded-l-md rounded-r-none leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500" %>
               </div>
-              <%= form.submit "Search", class: "h-10 px-4 border border-l-0 border-gray-300 rounded-r-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 whitespace-nowrap" %>
+              <%= form.submit "Search", class: "h-10 px-4 border border-l-0 border-gray-300 rounded-r-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 whitespace-nowrap", data: { guided_tour: "projects-search-submit" } %>
             </div>
           </div>
           <% if current_user.present? %>
@@ -65,7 +66,7 @@
         </div>
 
         <!-- Filters Row -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" data-guided-tour="projects-filter-row">
           <!-- Organism Filter -->
           <div data-controller="organism-selector">
             <label class="block text-sm font-medium text-gray-700 mb-2">Organism</label>
@@ -186,7 +187,8 @@
     </div>
 
     <!-- Results Header and Projects Container -->
-    <div data-controller="view-toggle project-selection delete-projects integrate-projects"
+    <h2 class="text-xl font-semibold text-gray-900 mb-4" data-guided-tour="projects-results-section">Search results</h2>
+    <div data-controller="project-selection delete-projects integrate-projects"
          data-delete-projects-url-value="<%= bulk_destroy_projects_path %>"
          data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
       <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center mb-6">
@@ -198,7 +200,7 @@
           <% end %>
         </div>
         
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3" data-guided-tour="projects-results-toolbar">
           <%= form_with url: projects_path, method: :get, local: true, class: "flex flex-wrap items-center gap-2 max-w-full" do |sort_form| %>
             <%= hidden_field_tag :q, @query %>
             <%= hidden_field_tag :organism_id, @filters[:organism_id] %>
@@ -221,27 +223,6 @@
                   onchange: "this.form.requestSubmit()"
                 } %>
           <% end %>
-          <!-- View Toggle Buttons -->
-          <div class="flex items-center border border-gray-300 rounded-md overflow-hidden">
-            <button type="button" 
-                    data-view-toggle-target="cardBtn" 
-                    data-action="click->view-toggle#showCards"
-                    class="px-3 py-1.5 text-sm font-medium bg-white text-gray-600 hover:bg-gray-50 focus:outline-none" 
-                    title="Card View">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-              </svg>
-            </button>
-            <button type="button" 
-                    data-view-toggle-target="listBtn" 
-                    data-action="click->view-toggle#showList"
-                    class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white focus:outline-none" 
-                    title="List View">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-              </svg>
-            </button>
-          </div>
           <button type="button"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600 hover:bg-red-700"
                   data-project-selection-target="deleteButton"
@@ -255,120 +236,7 @@
 
       <!-- Projects Container -->
     <% if @projects.any? %>
-      <!-- Cards View -->
-      <div data-view-toggle-target="cardView" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <% @projects.each do |project| %>
-          <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
-            <!-- Project Header -->
-            <div class="p-6 border-b border-gray-100">
-              <div class="flex items-start justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                  <%= link_to project.display_name, project_path(project), class: "hover:text-blue-600" %>
-                </h3>
-                <div class="flex items-center gap-1.5 shrink-0">
-                  <% if project.version_id.present? %>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
-                          title="ASAP release">
-                      v<%= project.version_id %>
-                    </span>
-                  <% end %>
-                  <% if project.archive_status.present? && project.archive_status.icon_class.present? %>
-                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-700"
-                          title="Archive status: <%= project.archive_status.display_name %>">
-                      <i class="<%= project.archive_status.icon_class %>"></i>
-                    </span>
-                  <% end %>
-                  <% if project.project_type.present? && project.project_type.tag.present? %>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
-                          title="<%= project.project_type.name %>">
-                      <%= project.project_type.tag %>
-                    </span>
-                  <% else %>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800"
-                          title="Project type not set">
-                      ?
-                    </span>
-                  <% end %>
-                  <% if project.is_public? %>
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      Public
-                    </span>
-                  <% end %>
-                </div>
-              </div>
-              
-              <% if project.description.present? %>
-                <p class="text-sm text-gray-600 line-clamp-2"><%= truncate(project.description, length: 120) %></p>
-              <% end %>
-            </div>
-
-            <!-- Project Stats -->
-            <div class="p-6">
-              <div class="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span class="text-gray-500">Columns:</span>
-                  <span class="font-medium text-gray-900 block"><%= number_with_delimiter(project.cell_count) %></span>
-                  <span class="text-xs text-gray-500 block"><%= col_label(project) %></span>
-                </div>
-                <div>
-                  <span class="text-gray-500">Rows:</span>
-                  <span class="font-medium text-gray-900 block"><%= number_with_delimiter(project.gene_count) %></span>
-                  <span class="text-xs text-gray-500 block"><%= row_label(project) %></span>
-                </div>
-                <div>
-                  <span class="text-gray-500">Technology:</span>
-                  <span class="font-medium text-gray-900"><%= project.technology_display %></span>
-                </div>
-                <div>
-                  <span class="text-gray-500">Tissue:</span>
-                  <span class="font-medium text-gray-900"><%= project.tissue_display %></span>
-                </div>
-              </div>
-
-              <!-- Project Meta -->
-              <div class="mt-4 pt-4 border-t border-gray-100">
-                <div class="flex items-center justify-between text-xs text-gray-500">
-                  <span>Updated <%= time_ago_in_words(project.updated_at) %> ago</span>
-                  <span><%= pluralize(project.view_count, 'view') %></span>
-                </div>
-                <% if project.sandbox? %>
-                  <% sandbox_last_seen_at = project.viewed_at || project.updated_at || project.created_at || Time.current %>
-                  <% sandbox_destroy_at = sandbox_last_seen_at + sandbox_idle_days.days %>
-                  <% countdown = sandbox_self_destruct_countdown(sandbox_destroy_at) %>
-                  <div class="mt-2">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-xs"
-                          data-controller="countdown"
-                          data-countdown-end-ms-value="<%= (sandbox_destroy_at.to_f * 1000).to_i %>"
-                          data-countdown-idle-days-value="<%= sandbox_idle_days %>"
-                          title="Sandbox project auto-delete countdown">
-                      <i class="fas fa-bomb text-[11px]"></i>
-                      <span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
-                    </span>
-                  </div>
-                <% end %>
-              </div>
-            </div>
-
-            <!-- Project Actions -->
-            <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
-              <div class="flex space-x-2">
-                <%= link_to "View", project_path(project), class: "flex-1 text-center px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none" %>
-                <% if clonable?(project) && project.version_id.to_i >= 4 %>
-                  <%= button_to raw('<i class="fas fa-clone"></i><span>Clone</span>'),
-                      clone_project_path(project),
-                      method: :post,
-                      class: "flex-1 text-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-700 focus:outline-none bg-transparent border-0 cursor-pointer inline-flex items-center justify-center gap-1.5",
-                      data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_confirm_value: "Clone this project?" },
-                      form: { class: "flex-1" } %>
-                <% end %>
-              </div>
-            </div>
-          </div>
-        <% end %>
-      </div>
-
-      <!-- List View -->
-      <div data-view-toggle-target="listView" class="">
+      <div>
         <!-- Action Bar -->
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-3">
@@ -513,7 +381,7 @@
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="event.stopPropagation()">
       		    <div class="flex flex-col items-start gap-2">
 		      <div class="flex items-center gap-2">
-			<%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
+			<%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100", data: (gt_demo && project.id == gt_demo.id ? { guided_tour: "demo-project-view-list" } : {}) %>
 			
 			<% if clonable?(project) && project.version_id.to_i >= 4 %>
 			<%= button_to raw('<i class="fas fa-clone mr-1"></i><span>Clone</span>'),
@@ -576,7 +444,6 @@
           </nav>
         </div>
       <% end %>
-    </div>
     <% else %>
       <!-- Empty State -->
       <div class="text-center py-12">

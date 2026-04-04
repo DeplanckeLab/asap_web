@@ -1075,7 +1075,7 @@ export class DataManager {
                                      hasMetadataData ||
                                      hasRendererPositions
       
-      const reglReady = this.controller.rendererType === 'regl' && 
+      let reglReady = this.controller.rendererType === 'regl' && 
                        this.controller.reglRenderer && 
                        hasCanvas &&
                        ((this.controller.currentCoordinates && 
@@ -1084,9 +1084,7 @@ export class DataManager {
                         hasRendererState ||
                         hasCoordinatesAvailable)  // If we have coordinates available, we can restore/initialize
       
-      const pixiReady = this.controller.rendererType === 'pixi' && this.controller.scatterContainer
-      
-      const isRendererReady = reglReady || pixiReady
+      let isRendererReady = reglReady
       
       // CRITICAL: If renderer has state but currentCoordinates/displayOrder are missing,
       // create displayOrder from renderer state BEFORE checking isRendererReady
@@ -1109,7 +1107,7 @@ export class DataManager {
                      this.controller.displayOrder.length > 0) || 
                     hasRendererState ||
                     hasCoordinatesAvailable)
-        isRendererReady = reglReady || pixiReady
+        isRendererReady = reglReady
       }
       
       // console.log('🎨 [FILTER] About to update visualization:', {
@@ -2190,9 +2188,7 @@ export class DataManager {
 
   // Extract current screen positions (coordinate extraction)
   extractCurrentScreenPositions(currentBounds, coordinateCount) {
-    // Since we can't easily extract positions from individual PIXI Graphics objects,
-    // we'll recreate the positions using the current bounds and coordinates
-    // This is a limitation of PIXI Graphics - we need to store positions differently
+    // Recreate positions from bounds and coordinates (no retained per-point draw objects)
     // console.log('Extracting current screen positions (recreating from bounds)')
     return currentBounds
   }
@@ -2342,13 +2338,6 @@ export class DataManager {
   clearMetadataData() {
     this.controller.metadataData = null
     // console.log('Cleared metadata data')
-    
-    // Clear PIXI.js visualization
-    if (this.controller.pixiApp) {
-      this.controller.pixiApp.destroy(true)
-      this.controller.pixiApp = null
-      this.controller.scatterContainer = null
-    }
     
     // Show placeholder and hide plot info
     const placeholder = document.getElementById('plot-placeholder')

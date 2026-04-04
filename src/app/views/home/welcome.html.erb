@@ -24,11 +24,15 @@
 
       <!-- Buttons (Centered) -->
       <div class="mt-8 flex flex-col sm:flex-row justify-center gap-3 w-full sm:w-auto">
-        <a class="<%= tw_btn(:primary) %> justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" href="<%= new_project_path %>">
+        <a class="<%= tw_btn(:primary) %> justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+           href="<%= new_project_path %>"
+           data-guided-tour="welcome-create-project-cta">
           Try it now!
           <svg class="shrink-0 size-4 ml-2" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </a>
-        <a class="<%= tw_btn(:light) %> justify-center px-8 py-3 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" href="<%= projects_path %>">
+        <a class="<%= tw_btn(:light) %> justify-center px-8 py-3 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-gray-400"
+           href="<%= projects_path %>"
+           data-guided-tour="welcome-search-projects-body">
           Search projects
         </a>
       </div>

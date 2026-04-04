@@ -157,6 +157,24 @@ module ApplicationHelper
     colors[step_id % colors.length]
   end
 
+  def guided_tours_for_menu
+    return [] unless GuidedTour.exists?
+
+    GuidedTour.ordered.select(:id, :name)
+  end
+
+  def guided_tour_start_url(tour_id)
+    q = request.query_parameters.merge("guided_tour" => tour_id.to_s)
+    "#{request.path}?#{q.to_query}"
+  end
+
+  # Same resolution as db/seeds Getting started tour (for highlighting the demo row on /projects).
+  def guided_tour_demo_project_for_highlight
+    return @guided_tour_demo_project_for_highlight if instance_variable_defined?(:@guided_tour_demo_project_for_highlight)
+
+    @guided_tour_demo_project_for_highlight = Project.guided_tour_demo_project
+  end
+
   def info_menu_links
     [
       {
@@ -194,12 +212,6 @@ module ApplicationHelper
         description: "FCA and HCA reference pages and entry points",
         path: atlases_path,
         icon: "fas fa-atlas"
-      },
-      {
-        label: "Tutorials",
-        description: "Step-by-step guides for new users",
-        path: tutorial_home_index_path,
-        icon: "fas fa-chalkboard-teacher"
       },
       {
         label: "File formats",

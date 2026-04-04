@@ -3,7 +3,7 @@
   <% loom_data = @annots_by_loom_and_type[@selected_loom_file] %>
   
   <!-- Sticky Top Menu: Data Type Tabs -->
-  <div class="sticky top-0 z-10 bg-white border-b border-gray-200 flex-shrink-0">
+  <div class="sticky top-0 z-10 bg-white border-b border-gray-200 flex-shrink-0" data-guided-tour="data-type-tabs">
     <div class="flex items-center gap-1 px-4 py-2">
       <button type="button"
               class="px-4 py-2 text-sm font-medium rounded-md transition-colors <%= @selected_data_type == 'matrices' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' %>"

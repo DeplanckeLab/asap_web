@@ -1,0 +1,34 @@
+<div class="grid gap-4 md:grid-cols-3">
+  <div>
+    <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :title, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "Chapter title" %>
+  </div>
+  <div>
+    <%= form.label :page_url, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :page_url, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "/projects/123?view=analysis" %>
+  </div>
+  <div>
+    <%= form.label :focus_element, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :focus_element, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: "#analysis-panel" %>
+  </div>
+</div>
+
+<div>
+  <%= form.label :description, class: "block text-sm font-medium text-gray-700 mb-1" %>
+  <%= form.hidden_field :description, id: description_input_id %>
+  <trix-editor input="<%= description_input_id %>" class="trix-content"></trix-editor>
+</div>
+
+<div>
+  <%= form.label :step_actions_json, "Step actions (JSON array)", class: "block text-sm font-medium text-gray-700 mb-1" %>
+  <%= form.text_area :step_actions_json, rows: 6, class: "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs text-gray-900 shadow-sm focus:border-gray-900 focus:ring-gray-900", placeholder: '[\n  { "action": "wait_for_selector", "selector": "#panel" },\n  { "action": "scroll_to", "selector": "#panel" }\n]' %>
+  <p class="mt-1 text-xs text-gray-500">Declarative steps: wait_for_selector, scroll_to, click (optional skip_if_selector), fill (selector and value). On resume or after navigation, prior steps on the same page replay unless excluded below.</p>
+</div>
+
+<div class="flex items-start gap-2">
+  <%= form.check_box :exclude_from_page_replay, class: "mt-1 rounded border-gray-300" %>
+  <div>
+    <%= form.label :exclude_from_page_replay, "Exclude from page replay", class: "block text-sm font-medium text-gray-700" %>
+    <p class="text-xs text-gray-500">When resuming the tour, skip replaying this step's actions (use for optional UI toggles such as opening a filter dropdown).</p>
+  </div>
+</div>

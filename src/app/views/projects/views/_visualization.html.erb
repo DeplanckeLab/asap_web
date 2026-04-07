@@ -2721,6 +2721,76 @@ function setupModalFormListeners() {
 }
 document.addEventListener('DOMContentLoaded', setupModalFormListeners)
 
+document.addEventListener('change', function(e) {
+  if (!e.target.matches || !e.target.matches('input.import-collision-radio')) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal || !modal.contains(e.target)) return
+  if (e.target.closest('[data-controller="data-view"]')) return
+  var sel = modal.querySelector('input.import-collision-radio:checked')
+  window._importCollisionResolution = sel ? sel.value : ''
+  updateVizImportSubmitEnabled(modal)
+})
+
+function escapeHtmlForImportMeta(s) {
+  var d = document.createElement('div')
+  d.textContent = s == null ? '' : String(s)
+  return d.innerHTML
+}
+
+function buildImportValidationHtmlViz(iv) {
+  if (!iv || iv.skip_name_checks) return ''
+  if (iv.error) {
+    return '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">' + escapeHtmlForImportMeta(iv.error) + '</div>'
+  }
+  var checks = Array.isArray(iv.checks) ? iv.checks : []
+  var badAuth = checks.filter(function(c) { return !c.authorized })
+  if (badAuth.length) {
+    var msgs = badAuth.map(function(c) { return c.auth_message || 'Name not allowed' }).join(' ')
+    return '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">' + escapeHtmlForImportMeta(msgs) + '</div>'
+  }
+  var collisions = checks.filter(function(c) { return c.collision })
+  if (!collisions.length) return ''
+  var h = '<div class="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900 mt-2">'
+  h += '<p class="font-semibold mb-2">Existing metadata uses the same column path:</p><ul class="list-disc pl-5 mb-3">'
+  collisions.forEach(function(c) {
+    h += '<li><code class="text-xs">' + escapeHtmlForImportMeta(c.path || '') + '</code>'
+    if ((c.dependent_run_count || 0) > 0) {
+      h += ' <span class="text-amber-800">(' + c.dependent_run_count + ' pipeline runs reference it)</span>'
+    }
+    h += '</li>'
+  })
+  h += '</ul><p class="mb-2">Choose how to proceed:</p>'
+  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (add version suffix .vN)</label>'
+  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite (only when no runs reference the column)</label>'
+  h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="skip" class="import-collision-radio"> Cancel import</label></div>'
+  return h
+}
+
+function updateVizImportSubmitEnabled(modal) {
+  var submitBtn = modal.querySelector('#import-submit-btn')
+  if (!submitBtn) return
+  var iv = window._vizLastImportValidation
+  if (!iv || iv.skip_name_checks) {
+    submitBtn.disabled = false
+    return
+  }
+  if (iv.error) {
+    submitBtn.disabled = true
+    return
+  }
+  var checks = Array.isArray(iv.checks) ? iv.checks : []
+  if (checks.some(function(c) { return !c.authorized })) {
+    submitBtn.disabled = true
+    return
+  }
+  var collisions = checks.filter(function(c) { return c.collision })
+  if (collisions.length) {
+    submitBtn.disabled = !window._importCollisionResolution
+    return
+  }
+  submitBtn.disabled = false
+}
+
 function handlePreviewMetadata(btn) {
   if (btn.closest('[data-controller="data-view"]')) return
   btn.disabled = true
@@ -2759,11 +2829,15 @@ function handlePreviewMetadata(btn) {
   .then(function(data) {
     btn.textContent = 'Preview'
     window._importFuId = data.fu_id
+    window._importCollisionResolution = ''
+    window._vizLastImportValidation = data.import_validation || null
     var warnings = modal.querySelector('#import-warnings')
+    var dupBlock = ''
     if (data.duplicates && data.duplicates.length > 0) {
-      warnings.innerHTML = '<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">' + data.duplicates.length + ' duplicate(s) found (' + data.duplicates.join(', ') + '). Only first occurrence is kept.</div>'
-      warnings.classList.remove('hidden')
-    } else { warnings.classList.add('hidden') }
+      dupBlock = '<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">' + data.duplicates.length + ' duplicate(s) found (' + data.duplicates.map(function(x) { return escapeHtmlForImportMeta(x) }).join(', ') + '). Only first occurrence is kept.</div>'
+    }
+    warnings.innerHTML = dupBlock + buildImportValidationHtmlViz(data.import_validation)
+    warnings.classList.remove('hidden')
     var preview = modal.querySelector('#import-preview')
     var previewContent = modal.querySelector('#import-preview-content')
     if (data.preview_lines && data.preview_lines.length > 0) {
@@ -2775,7 +2849,8 @@ function handlePreviewMetadata(btn) {
       if (nameInput && !nameInput.value.trim()) nameInput.value = data.header_name
     }
     var submitBtn = modal.querySelector('#import-submit-btn')
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('hidden') }
+    if (submitBtn) { submitBtn.classList.remove('hidden') }
+    updateVizImportSubmitEnabled(modal)
     btn.classList.add('hidden')
   })
   .catch(function(err) {
@@ -2795,16 +2870,45 @@ function handleSubmitMetadata(btn) {
   var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
   var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
   var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
+  var inputTypeId = modal.querySelector('#import-input-type-id')?.value || '1'
+  var name = modal.querySelector('#import-metadata-name')?.value || ''
+  var hasHeader = modal.querySelector('#import-has-header')?.checked ? '1' : '0'
   var loomFile = '<%= @default_loom_file %>'
 
   fetch('/projects/' + projectId + '/do_import_metadata', {
     method: 'POST',
     headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ fu_id: window._importFuId, metadata_type_id: metadataTypeId, loom_file: loomFile })
+    body: JSON.stringify({
+      fu_id: window._importFuId,
+      metadata_type_id: metadataTypeId,
+      loom_file: loomFile,
+      input_type_id: inputTypeId,
+      name: name,
+      header_name: '',
+      has_header: hasHeader,
+      collision_resolution: window._importCollisionResolution || ''
+    })
   })
-  .then(function(r) { if (!r.ok) throw new Error('HTTP error ' + r.status); return r.json() })
+  .then(function(r) {
+    return r.json().then(function(data) {
+      if (!r.ok) {
+        var msg = data.message || data.error || ('HTTP error ' + r.status)
+        throw new Error(msg)
+      }
+      return data
+    })
+  })
   .then(function(data) {
+    if (data.status !== 'ok') {
+      var msg = data.message || data.error || 'Import failed'
+      var warnings = modal.querySelector('#import-warnings')
+      warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">' + escapeHtmlForImportMeta(msg) + '</div>'
+      warnings.classList.remove('hidden')
+      btn.textContent = 'Import'
+      btn.disabled = false
+      return
+    }
     modal.classList.add('hidden')
     if (data.status === 'ok') {
       window.location.reload()
@@ -2813,7 +2917,7 @@ function handleSubmitMetadata(btn) {
   .catch(function(err) {
     btn.textContent = 'Import'; btn.disabled = false
     var warnings = modal.querySelector('#import-warnings')
-    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ' + err.message + '</div>'
+    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ' + escapeHtmlForImportMeta(err.message) + '</div>'
     warnings.classList.remove('hidden')
   })
 }

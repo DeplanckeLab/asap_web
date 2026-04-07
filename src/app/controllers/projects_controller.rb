@@ -2452,6 +2452,17 @@ class ProjectsController < ApplicationController
     }
     response[:header_name] = header_name if header_name.present?
 
+    validation = MetadataFileImportValidation.analyze(
+      project: @project,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id,
+      name: name,
+      header_name: header_name,
+      has_header: has_header,
+      raw_content: raw_content
+    )
+    response[:import_validation] = import_validation_json(validation)
+
     render json: response
   end
 
@@ -2460,6 +2471,11 @@ class ProjectsController < ApplicationController
     fu_id = params[:fu_id]
     metadata_type_id = params[:metadata_type_id].to_s
     loom_file = params[:loom_file]
+    input_type_id = params[:input_type_id].to_s
+    name = params[:name].to_s
+    header_name = params[:header_name].to_s
+    has_header = params[:has_header]
+    collision_resolution = params[:collision_resolution].to_s
 
     unless fu_id
       render json: { status: 'error', message: 'No file upload ID provided' }, status: :unprocessable_entity
@@ -2469,6 +2485,28 @@ class ProjectsController < ApplicationController
     fu = Fu.find_by(id: fu_id)
     unless fu
       render json: { status: 'error', message: 'File upload not found' }, status: :not_found
+      return
+    end
+
+    unless fu.project_id == @project.id
+      render json: { status: 'error', message: 'Upload does not belong to this project' }, status: :forbidden
+      return
+    end
+
+    submission = MetadataFileImportSubmission.prepare_staged_file!(
+      project: @project,
+      fu: fu,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id.presence || "1",
+      name: name,
+      header_name: header_name,
+      has_header: has_header,
+      collision_resolution: collision_resolution
+    )
+    unless submission[:ok]
+      payload = { status: 'error', message: submission[:error] }
+      payload[:dependent_run_ids] = submission[:dependent_run_ids] if submission[:dependent_run_ids].present?
+      render json: payload, status: submission[:status] || :unprocessable_entity
       return
     end
 
@@ -6592,6 +6630,26 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def import_validation_json(validation)
+      if validation[:skip_name_checks]
+        return { skip_name_checks: true }
+      end
+
+      {
+        skip_name_checks: false,
+        error: validation[:error],
+        checks: validation[:checks].map do |c|
+          {
+            path: c.path,
+            authorized: c.authorized,
+            auth_message: c.auth_message,
+            collision: c.collision,
+            dependent_run_count: c.dependent_run_ids.size
+          }
+        end
+      }
+    end
+
     def apply_publication_snapshot_to_runs(relation)
       return relation unless @project && publication_snapshot_reader?(@project)
 

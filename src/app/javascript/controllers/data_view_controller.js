@@ -55,6 +55,14 @@ export default class extends Controller {
     if (fileInput) {
       fileInput.addEventListener('change', (e) => this.handleFileSelect(e))
     }
+
+    this.element.addEventListener('change', (e) => {
+      if (!e.target.matches || !e.target.matches('input.import-collision-radio')) return
+      const warnings = this.element.querySelector('#import-warnings')
+      const sel = warnings && warnings.querySelector('input.import-collision-radio:checked')
+      window._importCollisionResolution = sel ? sel.value : ''
+      this.updateImportSubmitEnabled()
+    })
   }
 
   getProjectIdentifier() {
@@ -145,6 +153,8 @@ export default class extends Controller {
     if (preview) preview.classList.add('hidden')
 
     this.fuId = null
+    this.lastImportValidation = null
+    window._importCollisionResolution = ''
     this.updatePlaceholder()
   }
 
@@ -375,14 +385,16 @@ export default class extends Controller {
       .then(data => {
         btn.textContent = 'Preview'
         this.fuId = data.fu_id
+        this.lastImportValidation = data.import_validation || null
+        window._importCollisionResolution = ''
 
         const warnings = this.element.querySelector('#import-warnings')
-        if (data.duplicates && data.duplicates.length > 0) {
-          warnings.innerHTML = `<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">${data.duplicates.length} duplicate(s) found (${data.duplicates.join(', ')}). Only first occurrence is kept.</div>`
-          warnings.classList.remove('hidden')
-        } else {
-          warnings.classList.add('hidden')
-        }
+        const dupBlock = (data.duplicates && data.duplicates.length > 0)
+          ? `<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">${data.duplicates.length} duplicate(s) found (${data.duplicates.map((d) => this.escapeHtml(d)).join(', ')}). Only first occurrence is kept.</div>`
+          : ''
+        warnings.innerHTML = dupBlock + this.buildImportValidationHtml(data.import_validation)
+        warnings.classList.remove('hidden')
+        this.updateImportSubmitEnabled()
 
         const preview = this.element.querySelector('#import-preview')
         const previewContent = this.element.querySelector('#import-preview-content')
@@ -401,7 +413,8 @@ export default class extends Controller {
         }
 
         const submitBtn = this.element.querySelector('#import-submit-btn')
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('hidden') }
+        if (submitBtn) { submitBtn.classList.remove('hidden') }
+        this.updateImportSubmitEnabled()
         btn.classList.add('hidden')
       })
       .catch(error => {
@@ -424,6 +437,11 @@ export default class extends Controller {
     const metadataTypeId = this.element.querySelector('#import-metadata-type-id')?.value
     const loomFile = new URLSearchParams(window.location.search).get('loom_file') || ''
 
+    const inputTypeId = this.element.querySelector('#import-input-type-id')?.value || '1'
+    const name = this.element.querySelector('#import-metadata-name')?.value || ''
+    const hasHeader = this.element.querySelector('#import-has-header')?.checked ? '1' : '0'
+    const headerName = ''
+
     fetch(`/projects/${projectId}/do_import_metadata`, {
       method: 'POST',
       headers: {
@@ -435,15 +453,33 @@ export default class extends Controller {
       body: JSON.stringify({
         fu_id: this.fuId,
         metadata_type_id: metadataTypeId,
-        loom_file: loomFile
+        loom_file: loomFile,
+        input_type_id: inputTypeId,
+        name: name,
+        header_name: headerName,
+        has_header: hasHeader,
+        collision_resolution: window._importCollisionResolution || ''
       })
     })
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`)
-        return response.json()
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const msg = data.message || data.error || `HTTP error ${response.status}`
+          throw new Error(msg)
+        }
+        return data
       })
       .then(data => {
         const modal = this.element.querySelector('#add-metadata-modal')
+        if (data.status !== 'ok') {
+          const msg = data.message || data.error || 'Import failed'
+          const warnings = this.element.querySelector('#import-warnings')
+          warnings.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">${this.escapeHtml(msg)}</div>`
+          warnings.classList.remove('hidden')
+          btn.textContent = 'Import'
+          btn.disabled = false
+          return
+        }
         if (modal) modal.classList.add('hidden')
 
         if (data.status === 'ok') {
@@ -456,9 +492,63 @@ export default class extends Controller {
         btn.textContent = 'Import'
         btn.disabled = false
         const warnings = this.element.querySelector('#import-warnings')
-        warnings.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ${error.message}</div>`
+        warnings.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ${this.escapeHtml(error.message)}</div>`
         warnings.classList.remove('hidden')
       })
+  }
+
+  buildImportValidationHtml(iv) {
+    if (!iv || iv.skip_name_checks) return ''
+    if (iv.error) {
+      return `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">${this.escapeHtml(iv.error)}</div>`
+    }
+    const checks = Array.isArray(iv.checks) ? iv.checks : []
+    const badAuth = checks.filter((c) => !c.authorized)
+    if (badAuth.length) {
+      const msgs = badAuth.map((c) => c.auth_message || 'Name not allowed').join(' ')
+      return `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">${this.escapeHtml(msgs)}</div>`
+    }
+    const collisions = checks.filter((c) => c.collision)
+    if (!collisions.length) return ''
+    let h = '<div class="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900 mt-2">'
+    h += '<p class="font-semibold mb-2">Existing metadata uses the same column path:</p><ul class="list-disc pl-5 mb-3">'
+    collisions.forEach((c) => {
+      h += '<li><code class="text-xs">' + this.escapeHtml(c.path || '') + '</code>'
+      if ((c.dependent_run_count || 0) > 0) {
+        h += ` <span class="text-amber-800">(${c.dependent_run_count} pipeline runs reference it)</span>`
+      }
+      h += '</li>'
+    })
+    h += '</ul><p class="mb-2">Choose how to proceed:</p>'
+    h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (add version suffix .vN)</label>'
+    h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite (only when no runs reference the column)</label>'
+    h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="skip" class="import-collision-radio"> Cancel import</label></div>'
+    return h
+  }
+
+  updateImportSubmitEnabled() {
+    const submitBtn = this.element.querySelector('#import-submit-btn')
+    if (!submitBtn) return
+    const iv = this.lastImportValidation
+    if (!iv || iv.skip_name_checks) {
+      submitBtn.disabled = false
+      return
+    }
+    if (iv.error) {
+      submitBtn.disabled = true
+      return
+    }
+    const checks = Array.isArray(iv.checks) ? iv.checks : []
+    if (checks.some((c) => !c.authorized)) {
+      submitBtn.disabled = true
+      return
+    }
+    const collisions = checks.filter((c) => c.collision)
+    if (collisions.length) {
+      submitBtn.disabled = !window._importCollisionResolution
+      return
+    }
+    submitBtn.disabled = false
   }
 
   escapeHtml(text) {

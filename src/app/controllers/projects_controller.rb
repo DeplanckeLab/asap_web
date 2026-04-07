@@ -8707,6 +8707,9 @@ class ProjectsController < ApplicationController
     if marker_run.nil? || marker_run.status_id.to_i == 4
       user_id = current_user&.id || @project.user_id
       res = Basic.find_markers(Rails.logger, @project, annot, user_id)
+      if res[:error].present?
+        return { run: nil, started: false, submitted: false, resubmitted: false, error: res[:error].to_s }
+      end
       marker_run = res[:run]
       started = marker_run.present?
     end
@@ -8725,6 +8728,9 @@ class ProjectsController < ApplicationController
       marker_run.reload
       if Basic.safe_parse_json(marker_run.command_json, {}).empty?
         res = Basic.find_markers(Rails.logger, @project, annot, current_user&.id || @project.user_id)
+        if res[:error].present?
+          return { run: nil, started: started, submitted: false, resubmitted: false, error: res[:error].to_s }
+        end
         marker_run = res[:run]
         marker_run&.reload
         if marker_run && Basic.safe_parse_json(marker_run.command_json, {}).empty?

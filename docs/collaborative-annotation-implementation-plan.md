@@ -11,7 +11,7 @@ This file tracks the **phased implementation roadmap** for collaborative annotat
 1. **Align `get_annot_info`** with **R-V1**: filter `Cla` by **`readable?(cla.project)`**; include **project provenance** in JSON for each row (**R-F2**).
 2. **Audit** summaries, visualization overlays, and exports that list `Cla` so federated rows do not leak projects the user cannot read.
 3. **Document** for support: clone **does not copy `Cla` rows**; federation **aggregates by `cell_set_id`** without duplicating rows. **Done:** [support-clones-and-community-annotations.md](./support-clones-and-community-annotations.md).
-4. **List** call sites like **`marker_groups_annot_id`** that assume source `Annot` still exists; add **user-visible** errors (**R-N1**).
+4. **List** call sites like **`marker_groups_annot_id`** that assume source `Annot` still exists; add **user-visible** errors (**R-N1**). **Done:** `Basic::SourceAnnotResolutionError`, clearer copy in **`Basic.marker_groups_annot_id`**, structured **`{ error: }`** from **`Basic.find_markers`**, handled in **`find_or_start_marker_run_for_annot`** (surfaced by **`get_annot_evidences`** as **`state: error`** + **`message`**). Inventory: [support-clones-and-community-annotations.md](./support-clones-and-community-annotations.md) (FindMarkers / clone source metadata).
 
 ---
 

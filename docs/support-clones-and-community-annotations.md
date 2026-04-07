@@ -31,7 +31,20 @@ Users who **cannot** read the owning project must **not** see that project’s *
 - **“I need annotations copied into my clone as new rows.”**  
   That is **not** what clone does today. Product direction is federation and provenance, not silent duplication of **`Cla`** rows (see spec **R-F1** / section 6.4).
 
+## FindMarkers on a clone: `marker_groups_annot_id` (source `Annot` must exist)
+
+For a project with **`cloned_project_id`** set, **FindMarkers** resolves the **groups** column id on the **immediate parent project** (same metadata **name**, **`latest_version: true`**). Implementation: **`Basic.marker_groups_annot_id`** in **`lib/basic.rb`**.
+
+**Call sites**
+
+- **`Basic.find_markers`** — builds the markers run; uses **`marker_groups_annot_id`** when matrix and metadata are present.
+- **`ProjectsController#marker_run_for_annot`** — looks up an existing markers run with matching **`attrs_json`**; calls **`marker_groups_annot_id`**.
+- Both paths are reached from **`find_or_start_marker_run_for_annot`**, used by **`get_annot_evidences`** (annotation popup, Identify markers tab).
+
+If the source project no longer has a matching latest-version column (removed, renamed, version churn), the user gets an explicit **`Basic::SourceAnnotResolutionError`** message (no silent fallback). **`get_annot_evidences`** returns JSON **`state: 'error'`** and **`message`** with that text so the UI can show it (**R-N1**).
+
 ## Code pointers
 
 - **`app/services/project_clone_service.rb`** — clone steps; no **`Cla`** copy step.
 - **`app/controllers/projects_controller.rb`** — **`get_annot_info`**, **`get_cell_set_annotations`**, and visualization **`build_best_cla_category_map`** apply **`readable?(cla.project)`** where rows from multiple projects can appear.
+- **`lib/basic.rb`** — **`marker_groups_annot_id`**, **`find_markers`**, **`Basic::SourceAnnotResolutionError`**.

@@ -1,5 +1,9 @@
 module Basic
 
+  # Raised when a cloned project needs the same metadata column on the immediate parent project
+  # (see marker_groups_annot_id) and that source Annot row cannot be found.
+  SourceAnnotResolutionError = Class.new(StandardError)
+
   #class Basic
 
   class << self
@@ -412,7 +416,12 @@ module Basic
       ).order(version_nber: :desc, id: :desc).first
 
       if source_meta.nil?
-        raise "Unable to resolve source metadata for cloned project #{project.key} and annot #{meta.name}"
+        source_key = Project.find_by(id: cloned_project_id)&.key || "id #{cloned_project_id}"
+        column = meta.name.to_s.presence || "this metadata column"
+        raise SourceAnnotResolutionError, "FindMarkers needs the same metadata column on the project this copy was cloned from (#{source_key}). " \
+                                            "There is no current latest-version column matching #{column.inspect} there anymore " \
+                                            "(it may have been removed, renamed, or version-replaced). " \
+                                            "Open the clone source project or use a metadata column that still exists on both projects."
       end
 
       source_meta.id
@@ -573,6 +582,7 @@ module Basic
 
     def find_markers logger, project, meta, user_id
 
+      run = nil
       t = Time.now
       project_dir =  Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       version = project.version
@@ -613,7 +623,13 @@ module Basic
       DataClass.all.map{|dc| h_data_classes[dc.id] = dc}
       
       if matrix and meta #and last_run
-        marker_groups_id = marker_groups_annot_id(project, meta)
+        begin
+          marker_groups_id = marker_groups_annot_id(project, meta)
+        rescue SourceAnnotResolutionError => e
+          logger.error("[find_markers] #{e.class}: #{e.message}")
+          return { run: nil, error: e.message }
+        end
+
         ensure_markers_original_gene_attr(logger, project_dir + meta.filepath)
         h_attrs = {
   #        #        {"input_de":{"annot_id":168794,"run_id":32390},"fdr_cutoff":"0.05","fc_cutoff":"2","gene_set_id":"672","adj_method":"fdr","min":"15","max":"500"}

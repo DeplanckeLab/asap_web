@@ -5,7 +5,7 @@
 This document defines rules and a roadmap for:
 
 1. Making **cell-level annotation** (community labels, ontology links, marker lists, votes) work well in a **collaborative** setting.
-2. **Reusing** metadata across **clones** and **accessible projects**: **metadata import** (current scope) only concerns LOOM paths **`/col_attrs/...`** and **`/row_attrs/...`**. It supports (a) discovery by shared **`cell_set_id`** and (b) **explicit source project** with multi-select, **collision policies** (overwrite / cancel / versioned **`.vN`** keep-both), and **reserved patterns** under those prefixes for the target **version**.
+2. **Reusing** metadata across **clones** and **accessible projects**: **metadata import** (current scope) only concerns LOOM paths **`/col_attrs/...`** and **`/row_attrs/...`**. The product already supports **import from an uploaded file** (current **import metadata** flow). Planned cross-project flows add (a) discovery by shared **`cell_set_id`** and (b) **explicit source project** with multi-select; all paths should align on **collision policies** (overwrite / cancel / versioned **`.vN`** keep-both) and **reserved patterns** under those prefixes for the target **version** where applicable.
 3. **Federated visibility** of **`Cla`** rows: show annotations from **all public/private projects the user can read** that share the same cell set, **without importing** duplicate `Cla` rows; **always show source project**.
 4. **Same cluster or selection across clones vs. data that belongs to one project:** The **cell set** (which group of cells) can stay **the same** after a clone, so we can relate labels to that group across projects. **Metadata, runs, and files** are **separate for each project** — new rows, new paths — so we match by **cell set**, not by reusing the same metadata id or file path from another project.
 
@@ -123,14 +123,17 @@ Until then, matching by **`name` + `cloned_project_id`** remains a **best-effort
 - **R-V1 (adopted direction):** For a given **`cell_set_id`**, show **`Cla.active`** from **every** project where the current user is **`readable?(cla.project)`**. **Do not** create duplicate `Cla` rows in the viewer’s project; **merge for display** and attach **source project** metadata (key, display name) to each row. Align **`get_annot_info`** with this filter so security matches **`get_cell_set_annotations`**.
 - **R-V2:** **Forks:** Clones share **`cell_set_id`** when `project_cell_set_id` is unchanged; federated CLA lists naturally include rows whose **`project_id`** is the canonical public project, a clone, or any other readable project in the lineage.
 
-### 6.3 Import metadata from other projects (two discovery modes)
+### 6.3 Import metadata (uploaded file and cross-project discovery)
 
-These flows are **new import modes**, separate from clone copy and separate from **CLA federation**. They only materialize **`Annot` / loom metadata** on the **target** project for paths under **`/col_attrs/`** and **`/row_attrs/`** (**Rule M2**).
+**Metadata import** can bring **`Annot` / loom metadata** onto the **target** project for paths under **`/col_attrs/`** and **`/row_attrs/`** (**Rule M2**) in more than one way:
 
-**Common preconditions**
+- **Uploaded file (existing):** User supplies a file through the current **import metadata** UI; the app runs the same **`prepare_metadata` / `do_import_metadata`** (and related) pipeline as today. No cross-project **discovery** step; compatibility and authorization follow the **existing** upload path.
+- **Modes A and B (planned):** Cross-project **discovery** from other projects the user can read — separate from clone copy and separate from **CLA federation**.
+
+**Common preconditions** (where they apply)
 
 - **R-MS (eligible metadata):** Only **`Annot`** candidates whose names match **`/col_attrs/...`** or **`/row_attrs/...`** participate in discovery, compatibility checks, and import. Other paths are excluded from the UI lists and rejected by **`MetadataNameAuthorizationService`** for this feature.
-- **R-M2:** User must be **`readable?`** on every **source** project used; user must be **`analyzable?`** (or owner) on the **target** project. Validate **row counts / matrix compatibility** before write (same rules as existing metadata import; **R-N1** applies).
+- **R-M2 (cross-project modes A and B):** User must be **`readable?`** on every **source** project used; user must be **`analyzable?`** (or owner) on the **target** project. Validate **row counts / matrix compatibility** before write (same rules as existing metadata import; **R-N1** applies). **Uploaded-file import** does not use **R-M2** as stated here; it uses the **existing** target-project and file checks for that flow.
 - **R-M3 (not CLA):** These paths **do not copy** `Cla` records. After import, **federated CLA UI** (section 6.4) still shows other projects’ `Cla` rows for the same **`cell_set_id`** when readable.
 
 #### 6.3.1 Mode A — discovery by shared `cell_set_id`
@@ -142,7 +145,11 @@ These flows are **new import modes**, separate from clone copy and separate from
 - **R-M1b (scope):** User chooses a **specific** source **project** (by key, search, or recent list), subject to **`readable?`**. The system lists **compatible** metadata (`Annot` rows / columns) from **that project only**; user selects **one or several** to import.
 - **R-M1c (compatibility):** “Compatible” means the same constraints as Mode A (e.g. matching **`project_cell_set_id`** / cell alignment, dimensions, loom scope). Incompatible rows are **not** offered or are shown disabled with **explicit** reason (**R-N1**).
 
-#### 6.3.3 Name collision on the target project
+#### 6.3.3 Uploaded file (current import metadata)
+
+- **R-M0 (existing):** Users can already import metadata by **uploading a file** in the project’s **import metadata** flow. That path is **not** a third “discovery mode” from another ASAP project; it is the **current** mechanism for bringing column/row attributes from an external file into the target project, subject to the same **version** and validation stack as **`prepare_metadata` / `do_import_metadata`**. **Collision handling**, **reserved names** (**R-NM1–R-NM4**), and **overwrite safety** (**R-M5**) should stay **consistent** with this flow when extending the UI so users are not surprised when switching between **upload** and **cross-project** import.
+
+#### 6.3.4 Name collision on the target project
 
 When the **logical metadata name** (typically `Annot#name` / loom column basename) **already exists** on the **target** project for an import candidate, the UI must **not** proceed silently. For **each** colliding item, offer:
 
@@ -156,7 +163,7 @@ When the **logical metadata name** (typically `Annot#name` / loom column basenam
 
 **R-M5 (overwrite safety):** Overwrite is allowed only after **enumerating dependent runs** (pipeline steps whose `attrs_json` / `output_json` / lineage reference that metadata). If enumeration fails, **block** overwrite and show **R-N1**-style messaging.
 
-#### 6.3.4 Reserved and ASAP-like metadata names (imports and user-chosen names)
+#### 6.3.5 Reserved and ASAP-like metadata names (imports and user-chosen names)
 
 **Scope:** Applies to **import metadata** names that already satisfy **R-MS** (only **`/col_attrs/...`** and **`/row_attrs/...`**). Reserved rules are evaluated on the **full path string** (e.g. `/col_attrs/foo.sel_123`).
 
@@ -220,14 +227,15 @@ Distinguish:
 3. **Document** for support: clone **does not copy `Cla` rows**; federation **aggregates by `cell_set_id`** without duplicating rows.
 4. **List** call sites like **`marker_groups_annot_id`** that assume source `Annot` still exists; add **user-visible** errors (**R-N1**).
 
-### Phase 1 — Metadata import (Modes A and B) (medium)
+### Phase 1 — Metadata import (upload + Modes A and B) (medium)
 
-1. **Discovery service (Mode A):** Given **`project_id`** + **`cell_set_id`** (or key), list **other projects** with the same **`project_cell_set_id`** / cell-set identity where the user is **`readable?`**, and list **compatible** `Annot` candidates.
-2. **Explicit project picker (Mode B):** Given **`readable?`** source **`project_id`**, list **compatible** metadata for multi-select import (**R-M1b–R-M1c**).
-3. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable.
-4. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**.
-5. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**.
-6. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
+1. **Uploaded file (already shipped):** Keep **import metadata** by file as the baseline; extend or align **collision**, **reserved patterns**, and **overwrite** behavior (**R-M4**, **R-M5**, **R-NM1–R-NM4**) with new cross-project UI per **R-M0**.
+2. **Discovery service (Mode A):** Given **`project_id`** + **`cell_set_id`** (or key), list **other projects** with the same **`project_cell_set_id`** / cell-set identity where the user is **`readable?`**, and list **compatible** `Annot` candidates.
+3. **Explicit project picker (Mode B):** Given **`readable?`** source **`project_id`**, list **compatible** metadata for multi-select import (**R-M1b–R-M1c**).
+4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable.
+5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**.
+6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**.
+7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
 
 ### Phase 2 — Federated CLA UI and vote policy (medium–long)
 

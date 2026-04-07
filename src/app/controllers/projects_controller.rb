@@ -4258,11 +4258,14 @@ class ProjectsController < ApplicationController
     clas_list = []
     if annot_cell_set&.cell_set_id
       clas_list = Cla.active.where(cell_set_id: annot_cell_set.cell_set_id)
+                     .includes(:project)
                      .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
                      .to_a
+      clas_list = clas_list.select { |cla| cla.project && readable?(cla.project) }
     end
 
     cla_data = clas_list.map do |cla|
+      proj = cla.project
       {
         id: cla.id,
         num: cla.num,
@@ -4278,7 +4281,13 @@ class ProjectsController < ApplicationController
         nber_disagree: cla.nber_disagree || 0,
         score: cla.score,
         created_at: cla.created_at&.strftime("%Y-%m-%d %H:%M"),
-        obsolete: cla.obsolete
+        obsolete: cla.obsolete,
+        project_id: cla.project_id,
+        project: {
+          key: proj&.key.to_s,
+          name: proj&.name.to_s,
+          public_id: proj&.public_id
+        }
       }
     end
 

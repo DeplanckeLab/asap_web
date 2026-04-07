@@ -3332,33 +3332,49 @@ function renderExistingAnnotationsTab(clas) {
       content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">'
 
       content += '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">'
-      content += '<div style="font-weight: 600; font-size: 13px; color: #374151;">#' + (cla.num || cla.id) + '</div>'
+      content += '<div style="font-weight: 600; font-size: 13px; color: #374151;">#' + escapeHtml(String(cla.num || cla.id)) + '</div>'
       content += '<div style="display: flex; align-items: center; gap: 8px;">'
       content += '<span style="font-size: 11px; color: #9ca3af;">' + (cla.created_at || '') + '</span>'
       content += '<span style="font-weight: 600; font-size: 14px; color: ' + scoreColor + ';">' + score + '</span>'
       content += '</div></div>'
 
+      if (cla.project) {
+        var p = cla.project
+        var projBits = []
+        if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
+          projBits.push('ASAP' + escapeHtml(String(p.public_id)))
+        }
+        if (p.key) projBits.push(escapeHtml(String(p.key)))
+        if (p.name) {
+          var nameEsc = escapeHtml(String(p.name))
+          if (projBits.indexOf(nameEsc) === -1) projBits.push(nameEsc)
+        }
+        if (projBits.length > 0) {
+          content += '<div style="margin-bottom: 8px; font-size: 11px; color: #6b7280;"><span style="font-weight: 600; color: #4b5563;">Source project: </span>' + projBits.join(' - ') + '</div>'
+        }
+      }
+
       if (cla.name) {
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Name: </span><span style="font-size: 12px; color: #374151;">' + cla.name + '</span></div>'
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Name: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cla.name)) + '</span></div>'
       }
 
       if (cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids) {
         var cotIds = cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span><span style="font-size: 12px; color: #374151;">' + cotIds + '</span></div>'
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cotIds)) + '</span></div>'
       }
 
       if (cla.sorted_up_gene_ids || cla.up_gene_ids) {
         var upGenes = cla.sorted_up_gene_ids || cla.up_gene_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Up genes: </span><span style="font-size: 12px; color: #374151;">' + upGenes + '</span></div>'
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Up genes: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(upGenes)) + '</span></div>'
       }
 
       if (cla.sorted_down_gene_ids || cla.down_gene_ids) {
         var downGenes = cla.sorted_down_gene_ids || cla.down_gene_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Down genes: </span><span style="font-size: 12px; color: #374151;">' + downGenes + '</span></div>'
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Down genes: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(downGenes)) + '</span></div>'
       }
 
       if (cla.comment) {
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Comment: </span><span style="font-size: 12px; color: #374151;">' + cla.comment + '</span></div>'
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Comment: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cla.comment)) + '</span></div>'
       }
 
       content += '<div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">'

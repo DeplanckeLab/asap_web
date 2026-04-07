@@ -61,7 +61,7 @@
 
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1.5">Input method</label>
-          <div class="flex rounded-md overflow-hidden border border-gray-300">
+          <div class="flex flex-wrap rounded-md overflow-hidden border border-gray-300">
             <button type="button" data-input-method="1"
                     class="input-method-btn px-4 py-1.5 text-sm font-medium bg-blue-600 text-white cursor-pointer">
               Copy-paste
@@ -69,6 +69,10 @@
             <button type="button" data-input-method="2"
                     class="input-method-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
               Upload file
+            </button>
+            <button type="button" data-input-method="3" id="import-input-method-from-project-btn"
+                    class="input-method-btn px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer border-l border-gray-300">
+              From project
             </button>
           </div>
           <input type="hidden" id="import-input-method-id" value="1">
@@ -112,6 +116,46 @@
           </label>
           <div id="import-file-info" class="hidden mt-3 text-sm text-gray-700"></div>
         </div>
+      </div>
+
+      <div id="import-from-project-section" class="hidden space-y-3 border border-gray-200 rounded-md p-3 bg-gray-50">
+        <p class="text-sm text-gray-600">
+          Copy one metadata column from another project you can read, with the same cell-set identity as this project (Modes A and B discovery).
+        </p>
+        <div class="flex flex-wrap gap-4 text-sm">
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="import-cross-mode" value="a" checked class="import-cross-mode-radio">
+            <span>By cell set</span>
+          </label>
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="import-cross-mode" value="b" class="import-cross-mode-radio">
+            <span>By source project key</span>
+          </label>
+        </div>
+        <div id="import-cross-mode-a" class="space-y-2">
+          <label for="import-cross-cell-set-id" class="block text-sm font-medium text-gray-700">Cell set</label>
+          <select id="import-cross-cell-set-id" class="block w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+            <option value="">Loading...</option>
+          </select>
+          <button type="button" id="import-cross-discover-a-btn"
+                  class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 cursor-pointer">
+            Find other projects
+          </button>
+          <div id="import-cross-sources" class="text-sm max-h-48 overflow-y-auto space-y-2"></div>
+        </div>
+        <div id="import-cross-mode-b" class="hidden space-y-2">
+          <label for="import-cross-source-project-key" class="block text-sm font-medium text-gray-700">Source project key</label>
+          <input type="text" id="import-cross-source-project-key"
+                 class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="Project key">
+          <button type="button" id="import-cross-discover-b-btn"
+                  class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 cursor-pointer">
+            List columns
+          </button>
+          <div id="import-cross-annots-flat" class="text-sm max-h-48 overflow-y-auto space-y-1"></div>
+        </div>
+        <div id="import-cross-status" class="text-sm text-gray-600 hidden"></div>
+        <div id="import-cross-selection" class="hidden text-sm text-gray-800 font-medium"></div>
       </div>
 
       <div id="import-warnings" class="hidden">

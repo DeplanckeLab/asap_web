@@ -2540,6 +2540,20 @@ function openAddMetadataModal() {
   var inputMethodInput = modal.querySelector('#import-input-method-id')
   if (inputMethodInput) inputMethodInput.value = '1'
 
+  modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+  modal.querySelector('#import-cross-status')?.classList.add('hidden')
+  if (modal.querySelector('#import-cross-status')) modal.querySelector('#import-cross-status').textContent = ''
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  if (modal.querySelector('#import-cross-selection')) modal.querySelector('#import-cross-selection').textContent = ''
+  if (modal.querySelector('#import-cross-sources')) modal.querySelector('#import-cross-sources').innerHTML = ''
+  if (modal.querySelector('#import-cross-annots-flat')) modal.querySelector('#import-cross-annots-flat').innerHTML = ''
+  if (modal.querySelector('#import-cross-source-project-key')) modal.querySelector('#import-cross-source-project-key').value = ''
+  modal.querySelector('#import-cross-mode-a')?.classList.remove('hidden')
+  modal.querySelector('#import-cross-mode-b')?.classList.add('hidden')
+  modal.querySelectorAll('.import-cross-mode-radio').forEach(function(r) { r.checked = r.value === 'a' })
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+
   var delimiter = modal.querySelector('#import-delimiter')
   if (delimiter) { delimiter.value = '0'; delimiter.disabled = true }
 
@@ -2621,6 +2635,11 @@ function checkModalForm() {
   var inputMethod = modal.querySelector('#import-input-method-id')?.value
   var previewBtn = modal.querySelector('#import-preview-btn')
   if (!previewBtn) return
+  if (inputMethod === '3') {
+    var sel = window._crossProjectSelection
+    previewBtn.disabled = !(sel && sel.sourceProjectId && sel.sourceAnnotId)
+    return
+  }
   if (inputMethod === '2') {
     var fileInput = modal.querySelector('#import-metadata-file')
     previewBtn.disabled = !(fileInput && fileInput.files && fileInput.files.length > 0)
@@ -2664,10 +2683,23 @@ function setupModalFormListeners() {
   modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var type = btn.getAttribute('data-metadata-type')
+      if (type === '4' && modal.querySelector('#import-input-method-id')?.value === '3') {
+        var im1 = modal.querySelector('.input-method-btn[data-input-method="1"]')
+        if (im1) im1.click()
+      }
       modal.querySelector('#import-metadata-type-id').value = type
       modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
         if (b.getAttribute('data-metadata-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
         else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      modal.querySelectorAll('.input-method-btn[data-input-method="3"]').forEach(function(b) {
+        if (type === '4') {
+          b.classList.add('opacity-50', 'cursor-not-allowed')
+          b.setAttribute('disabled', 'disabled')
+        } else {
+          b.classList.remove('opacity-50', 'cursor-not-allowed')
+          b.removeAttribute('disabled')
+        }
       })
       updateModalPlaceholder()
       checkModalForm()
@@ -2713,13 +2745,192 @@ function setupModalFormListeners() {
         if (b.getAttribute('data-input-method') === method) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
         else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
       })
-      if (method === '1') { modal.querySelector('#import-copypaste-section')?.classList.remove('hidden'); modal.querySelector('#import-upload-section')?.classList.add('hidden') }
-      else { modal.querySelector('#import-copypaste-section')?.classList.add('hidden'); modal.querySelector('#import-upload-section')?.classList.remove('hidden') }
+      if (method === '1') {
+        modal.querySelector('#import-copypaste-section')?.classList.remove('hidden')
+        modal.querySelector('#import-upload-section')?.classList.add('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+      } else if (method === '2') {
+        modal.querySelector('#import-copypaste-section')?.classList.add('hidden')
+        modal.querySelector('#import-upload-section')?.classList.remove('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+      } else if (method === '3') {
+        modal.querySelector('#import-copypaste-section')?.classList.add('hidden')
+        modal.querySelector('#import-upload-section')?.classList.add('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.remove('hidden')
+        vizLoadImportCellSets(modal)
+        vizApplyMatrixModeForCrossProject(modal)
+      }
       checkModalForm()
     })
   })
+
+  modal.querySelectorAll('.import-cross-mode-radio').forEach(function(r) {
+    r.addEventListener('change', function() { vizToggleImportCrossMode(modal) })
+  })
+  modal.querySelector('#import-cross-discover-a-btn')?.addEventListener('click', function() { vizDiscoverMetadataImportModeA(modal) })
+  modal.querySelector('#import-cross-discover-b-btn')?.addEventListener('click', function() { vizDiscoverMetadataImportModeB(modal) })
+  modal.querySelector('#import-from-project-section')?.addEventListener('click', function(e) {
+    var btn = e.target.closest('button.import-cross-annot-btn')
+    if (!btn || btn.disabled) return
+    var sp = parseInt(btn.getAttribute('data-source-project-id'), 10)
+    var aid = parseInt(btn.getAttribute('data-source-annot-id'), 10)
+    var aname = btn.dataset.annotName || ''
+    if (sp > 0 && aid > 0) vizPickCrossProjectAnnot(modal, sp, aid, aname)
+  })
 }
 document.addEventListener('DOMContentLoaded', setupModalFormListeners)
+
+function vizEscAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+
+function vizLoadImportCellSets(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var sel = modal.querySelector('#import-cross-cell-set-id')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !sel) return
+  fetch('/projects/' + projectId + '/metadata_import_cell_sets', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json() })
+    .then(function(data) {
+      if (status) {
+        status.classList.toggle('hidden', !data.error)
+        status.textContent = data.error || ''
+      }
+      var rows = data.cell_sets || []
+      if (!rows.length) { sel.innerHTML = '<option value="">No cell sets</option>'; return }
+      sel.innerHTML = rows.map(function(cs) { return '<option value="' + cs.id + '">' + vizEscAttr(cs.key) + '</option>' }).join('')
+    })
+    .catch(function() { sel.innerHTML = '<option value="">Failed to load</option>' })
+}
+
+function vizToggleImportCrossMode(modal) {
+  var v = modal.querySelector('input.import-cross-mode-radio:checked')?.value || 'a'
+  modal.querySelector('#import-cross-mode-a')?.classList.toggle('hidden', v !== 'a')
+  modal.querySelector('#import-cross-mode-b')?.classList.toggle('hidden', v !== 'b')
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  if (modal.querySelector('#import-cross-sources')) modal.querySelector('#import-cross-sources').innerHTML = ''
+  if (modal.querySelector('#import-cross-annots-flat')) modal.querySelector('#import-cross-annots-flat').innerHTML = ''
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  checkModalForm()
+}
+
+function vizApplyMatrixModeForCrossProject(modal) {
+  modal.querySelector('#import-input-type-id').value = '2'
+  modal.querySelectorAll('.input-type-btn').forEach(function(b) {
+    var t = b.getAttribute('data-input-type')
+    if (t === '2') { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+    else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+  })
+  var delim = modal.querySelector('#import-delimiter')
+  var name = modal.querySelector('#import-metadata-name')
+  var hh = modal.querySelector('#import-has-header')
+  if (delim) { delim.value = '0'; delim.disabled = true }
+  if (name) { name.disabled = true; name.placeholder = 'Set by column choice' }
+  if (hh) { hh.checked = true; hh.disabled = true }
+}
+
+function vizRenderCrossAnnotRow(a, sourceProjectId) {
+  var ok = a.compatible && a.import_name_allowed_on_target
+  var label = (a.display_name || a.name || '').toString()
+  var why = (!ok && (a.incompatibility_reason || a.import_name_block_reason)) ? (a.incompatibility_reason || a.import_name_block_reason).toString() : ''
+  var reason = why ? ' title="' + vizEscAttr(why) + '"' : ''
+  var disabled = ok ? '' : 'disabled'
+  return '<div><button type="button" class="import-cross-annot-btn text-left w-full px-2 py-1 rounded border border-gray-100 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" data-source-project-id="' + sourceProjectId + '" data-source-annot-id="' + a.id + '" data-annot-name="' + vizEscAttr(a.name || '') + '" ' + disabled + reason + '>' + escapeHtmlForImportMeta(label) + '</button></div>'
+}
+
+function vizDiscoverMetadataImportModeA(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csId = modal.querySelector('#import-cross-cell-set-id')?.value
+  var box = modal.querySelector('#import-cross-sources')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !csId) {
+    if (status) { status.textContent = 'Choose a cell set first.'; status.classList.remove('hidden') }
+    return
+  }
+  if (status) status.classList.add('hidden')
+  if (box) box.innerHTML = 'Loading...'
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  fetch('/projects/' + projectId + '/discover_metadata_import_sources?cell_set_id=' + encodeURIComponent(csId), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j } }) })
+    .then(function(res) {
+      if (!res.ok) {
+        if (box) box.innerHTML = ''
+        if (status) { status.textContent = res.j.error || 'Discovery failed'; status.classList.remove('hidden') }
+        return
+      }
+      var sources = res.j.sources || []
+      if (!sources.length) { if (box) box.innerHTML = '<p class="text-gray-600">No other readable projects with metadata on this cell set.</p>'; return }
+      if (box) {
+        box.innerHTML = sources.map(function(src) {
+          var proj = src.project || {}
+          var pid = proj.id
+          var rows = (src.annots || []).map(function(a) { return vizRenderCrossAnnotRow(a, pid) }).join('')
+          return '<div class="border border-gray-200 rounded p-2 bg-white"><div class="font-medium text-gray-800">' + escapeHtmlForImportMeta(proj.name || '') + ' <span class="text-gray-500 font-mono text-xs">' + escapeHtmlForImportMeta(proj.key || '') + '</span></div><div class="mt-1 space-y-1">' + rows + '</div></div>'
+        }).join('')
+      }
+    })
+    .catch(function(err) {
+      if (box) box.innerHTML = ''
+      if (status) { status.textContent = err.message || 'Request failed'; status.classList.remove('hidden') }
+    })
+}
+
+function vizDiscoverMetadataImportModeB(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var key = (modal.querySelector('#import-cross-source-project-key')?.value || '').trim()
+  var box = modal.querySelector('#import-cross-annots-flat')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !key) {
+    if (status) { status.textContent = 'Enter a source project key.'; status.classList.remove('hidden') }
+    return
+  }
+  if (status) status.classList.add('hidden')
+  if (box) box.innerHTML = 'Loading...'
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  fetch('/projects/' + projectId + '/discover_metadata_import_from_project?source_project_key=' + encodeURIComponent(key), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j } }) })
+    .then(function(res) {
+      if (!res.ok) {
+        if (box) box.innerHTML = ''
+        if (status) { status.textContent = res.j.error || 'Discovery failed'; status.classList.remove('hidden') }
+        return
+      }
+      var annots = res.j.annots || []
+      var spid = res.j.source_project && res.j.source_project.id
+      if (!annots.length) { if (box) box.innerHTML = '<p class="text-gray-600">No compatible columns found.</p>'; return }
+      if (box) box.innerHTML = annots.map(function(a) { return vizRenderCrossAnnotRow(a, spid) }).join('')
+    })
+    .catch(function(err) {
+      if (box) box.innerHTML = ''
+      if (status) { status.textContent = err.message || 'Request failed'; status.classList.remove('hidden') }
+    })
+}
+
+function vizPickCrossProjectAnnot(modal, sourceProjectId, sourceAnnotId, annotName) {
+  var metaType = annotName.indexOf('/row_attrs/') === 0 ? '2' : '1'
+  modal.querySelector('#import-metadata-type-id').value = metaType
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
+    var t = b.getAttribute('data-metadata-type')
+    if (t === metaType) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+    else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+  })
+  window._crossProjectSelection = { sourceProjectId: sourceProjectId, sourceAnnotId: sourceAnnotId }
+  window._crossProjectPrepareMeta = null
+  var selEl = modal.querySelector('#import-cross-selection')
+  if (selEl) { selEl.textContent = 'Selected column: ' + annotName + ' (source project ' + sourceProjectId + ')'; selEl.classList.remove('hidden') }
+  window._importFuId = null
+  window._vizLastImportValidation = null
+  modal.querySelector('#import-warnings')?.classList.add('hidden')
+  if (modal.querySelector('#import-warnings')) modal.querySelector('#import-warnings').innerHTML = ''
+  modal.querySelector('#import-preview')?.classList.add('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.add('hidden')
+  checkModalForm()
+}
 
 document.addEventListener('change', function(e) {
   if (!e.target.matches || !e.target.matches('input.import-collision-radio')) return
@@ -2808,7 +3019,20 @@ function handlePreviewMetadata(btn) {
   var loomFile = '<%= @default_loom_file %>'
 
   var fetchPromise
-  if (inputMethod === '2') {
+  if (inputMethod === '3') {
+    var sel = window._crossProjectSelection
+    if (!sel || !sel.sourceProjectId || !sel.sourceAnnotId) {
+      btn.textContent = 'Preview'
+      btn.disabled = false
+      return
+    }
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata_from_project_annot', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ source_project_id: sel.sourceProjectId, source_annot_id: sel.sourceAnnotId })
+    })
+  } else if (inputMethod === '2') {
     var fileInput = modal.querySelector('#import-metadata-file')
     if (!fileInput?.files?.[0]) return
     var formData = new FormData()
@@ -2825,12 +3049,25 @@ function handlePreviewMetadata(btn) {
     fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ metadata_type_id: metadataTypeId, input_type_id: inputTypeId, delimiter: delimiter, name: name, has_header: hasHeader, content: content, loom_file: loomFile }) })
   }
 
-  fetchPromise.then(function(r) { if (!r.ok) throw new Error('HTTP error ' + r.status); return r.json() })
+  fetchPromise.then(function(r) {
+    return r.json().catch(function() { return {} }).then(function(data) {
+      if (!r.ok) {
+        var msg = data.error || data.message || ('HTTP error ' + r.status)
+        throw new Error(msg)
+      }
+      return data
+    })
+  })
   .then(function(data) {
     btn.textContent = 'Preview'
     window._importFuId = data.fu_id
     window._importCollisionResolution = ''
     window._vizLastImportValidation = data.import_validation || null
+    if (inputMethod === '3' && data.metadata_type_id) {
+      window._crossProjectPrepareMeta = { metadataTypeId: String(data.metadata_type_id), inputTypeId: String(data.input_type_id || '2') }
+    } else {
+      window._crossProjectPrepareMeta = null
+    }
     var warnings = modal.querySelector('#import-warnings')
     var dupBlock = ''
     if (data.duplicates && data.duplicates.length > 0) {
@@ -2844,7 +3081,7 @@ function handlePreviewMetadata(btn) {
       previewContent.innerHTML = data.preview_lines.map(function(l) { var d = document.createElement('div'); d.textContent = l; return '<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">' + d.innerHTML + '</div>' }).join('')
       preview.classList.remove('hidden')
     }
-    if (data.header_name) {
+    if (data.header_name && inputMethod !== '3') {
       var nameInput = modal.querySelector('#import-metadata-name')
       if (nameInput && !nameInput.value.trim()) nameInput.value = data.header_name
     }
@@ -2869,8 +3106,13 @@ function handleSubmitMetadata(btn) {
   var modal = document.getElementById('add-metadata-modal')
   var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
   var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
   var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
   var inputTypeId = modal.querySelector('#import-input-type-id')?.value || '1'
+  if (inputMethod === '3' && window._crossProjectPrepareMeta) {
+    metadataTypeId = window._crossProjectPrepareMeta.metadataTypeId
+    inputTypeId = window._crossProjectPrepareMeta.inputTypeId
+  }
   var name = modal.querySelector('#import-metadata-name')?.value || ''
   var hasHeader = modal.querySelector('#import-has-header')?.checked ? '1' : '0'
   var loomFile = '<%= @default_loom_file %>'

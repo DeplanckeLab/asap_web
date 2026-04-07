@@ -232,7 +232,7 @@ Distinguish:
 1. **Uploaded file (already shipped):** Keep **import metadata** by file as the baseline; extend or align **collision**, **reserved patterns**, and **overwrite** behavior (**R-M4**, **R-M5**, **R-NM1–R-NM4**) with new cross-project UI per **R-M0**.
 2. **Discovery service (Mode A):** Given **`project_id`** + **`cell_set_id`** (or key), list **other projects** with the same **`project_cell_set_id`** / cell-set identity where the user is **`readable?`**, and list **compatible** `Annot` candidates.
 3. **Explicit project picker (Mode B):** Given **`readable?`** source **`project_id`**, list **compatible** metadata for multi-select import (**R-M1b–R-M1c**). **API done:** `GET /projects/:id/discover_metadata_import_from_project` with `source_project_id` or `source_project_key`; see **section 9** and [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 3. **UI:** Phase 1 item 4.
-4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable.
+4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable. **Done (API + UI):** see [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 4.
 5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**.
 6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**.
 7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
@@ -271,7 +271,9 @@ Distinguish:
 
 - `app/controllers/concerns/project_authorization.rb` — `readable?`, `analyzable?`, `annotable?`, `cla_votable?`, `exportable?`
 - `app/services/project_clone_service.rb` — clone steps, `annot_cell_sets`, `cloned_project_id`
-- `app/controllers/projects_controller.rb` — `get_annot_info`, `get_cell_set_annotations`, `discover_metadata_import_sources` (Mode A), `discover_metadata_import_from_project` (Mode B)
+- `app/controllers/projects_controller.rb` — `get_annot_info`, `get_cell_set_annotations`, `discover_metadata_import_sources` (Mode A), `discover_metadata_import_from_project` (Mode B), `metadata_import_cell_sets`, `prepare_metadata_from_project_annot` (wizard prepare)
+- `app/services/metadata_import_prepare_staging.rb` — shared clipboard staging for `prepare_metadata` and cross-project prepare
+- `app/services/metadata_import_matrix_from_annot_builder.rb` — build matrix TSV from source `Annot` / loom
 - `app/services/metadata_import_discovery_helpers.rb` — shared discovery payloads (R-M1c)
 - `app/services/metadata_import_mode_a_discovery_service.rb` — Mode A (R-M1a)
 - `app/services/metadata_import_mode_b_discovery_service.rb` — Mode B (R-M1b)

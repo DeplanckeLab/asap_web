@@ -63,6 +63,28 @@ export default class extends Controller {
       window._importCollisionResolution = sel ? sel.value : ''
       this.updateImportSubmitEnabled()
     })
+
+    this.element.querySelectorAll('.import-cross-mode-radio').forEach((r) => {
+      r.addEventListener('change', () => this.toggleImportCrossMode())
+    })
+
+    const discoverA = this.element.querySelector('#import-cross-discover-a-btn')
+    if (discoverA) discoverA.addEventListener('click', () => this.discoverMetadataImportModeA())
+
+    const discoverB = this.element.querySelector('#import-cross-discover-b-btn')
+    if (discoverB) discoverB.addEventListener('click', () => this.discoverMetadataImportModeB())
+
+    const fromProjectSection = this.element.querySelector('#import-from-project-section')
+    if (fromProjectSection) {
+      fromProjectSection.addEventListener('click', (e) => {
+        const btn = e.target.closest('button.import-cross-annot-btn')
+        if (!btn || btn.disabled) return
+        const sp = parseInt(btn.getAttribute('data-source-project-id'), 10)
+        const aid = parseInt(btn.getAttribute('data-source-annot-id'), 10)
+        const aname = btn.dataset.annotName || ''
+        if (sp > 0 && aid > 0) this.pickCrossProjectAnnot(sp, aid, aname)
+      })
+    }
   }
 
   getProjectIdentifier() {
@@ -152,6 +174,25 @@ export default class extends Controller {
     const preview = this.element.querySelector('#import-preview')
     if (preview) preview.classList.add('hidden')
 
+    this.element.querySelector('#import-from-project-section')?.classList.add('hidden')
+    const crossStatus = this.element.querySelector('#import-cross-status')
+    if (crossStatus) { crossStatus.classList.add('hidden'); crossStatus.textContent = '' }
+    const crossSel = this.element.querySelector('#import-cross-selection')
+    if (crossSel) { crossSel.classList.add('hidden'); crossSel.textContent = '' }
+    this.element.querySelector('#import-cross-sources')?.replaceChildren()
+    this.element.querySelector('#import-cross-annots-flat')?.replaceChildren()
+    const crossKey = this.element.querySelector('#import-cross-source-project-key')
+    if (crossKey) crossKey.value = ''
+    const modeA = this.element.querySelector('#import-cross-mode-a')
+    const modeB = this.element.querySelector('#import-cross-mode-b')
+    if (modeA) modeA.classList.remove('hidden')
+    if (modeB) modeB.classList.add('hidden')
+    this.element.querySelectorAll('.import-cross-mode-radio').forEach((r) => {
+      r.checked = r.value === 'a'
+    })
+
+    this.crossProjectSelection = null
+    this.crossProjectPrepareMeta = null
     this.fuId = null
     this.lastImportValidation = null
     window._importCollisionResolution = ''
@@ -185,6 +226,11 @@ export default class extends Controller {
     const formatGroup = this.element.querySelector('#import-format-group')
 
     if (type === '4') {
+      const methodNow = this.element.querySelector('#import-input-method-id')?.value
+      if (methodNow === '3') {
+        const b = this.element.querySelector('.input-method-btn[data-input-method="1"]')
+        if (b) b.click()
+      }
       if (delimiterGroup) delimiterGroup.classList.add('hidden')
       if (hasHeaderGroup) hasHeaderGroup.classList.add('hidden')
       if (formatGroup) formatGroup.classList.add('hidden')
@@ -200,6 +246,16 @@ export default class extends Controller {
       if (descGlobal) descGlobal.classList.add('hidden')
       this.updateFormatDescription()
     }
+
+    this.element.querySelectorAll('.input-method-btn[data-input-method="3"]').forEach((b) => {
+      if (type === '4') {
+        b.classList.add('opacity-50', 'cursor-not-allowed')
+        b.setAttribute('disabled', 'disabled')
+      } else {
+        b.classList.remove('opacity-50', 'cursor-not-allowed')
+        b.removeAttribute('disabled')
+      }
+    })
 
     this.updatePlaceholder()
     this.checkForm()
@@ -247,13 +303,223 @@ export default class extends Controller {
 
     const copypaste = this.element.querySelector('#import-copypaste-section')
     const upload = this.element.querySelector('#import-upload-section')
+    const fromProject = this.element.querySelector('#import-from-project-section')
     if (method === '1') {
       copypaste?.classList.remove('hidden')
       upload?.classList.add('hidden')
-    } else {
+      fromProject?.classList.add('hidden')
+    } else if (method === '2') {
       copypaste?.classList.add('hidden')
       upload?.classList.remove('hidden')
+      fromProject?.classList.add('hidden')
+    } else if (method === '3') {
+      copypaste?.classList.add('hidden')
+      upload?.classList.add('hidden')
+      fromProject?.classList.remove('hidden')
+      this.loadImportCellSets()
+      this.applyMatrixModeForCrossProject()
     }
+    this.checkForm()
+  }
+
+  toggleImportCrossMode() {
+    const modal = this.element.querySelector('#add-metadata-modal')
+    if (!modal) return
+    const v = modal.querySelector('input.import-cross-mode-radio:checked')?.value || 'a'
+    modal.querySelector('#import-cross-mode-a')?.classList.toggle('hidden', v !== 'a')
+    modal.querySelector('#import-cross-mode-b')?.classList.toggle('hidden', v !== 'b')
+    this.crossProjectSelection = null
+    this.crossProjectPrepareMeta = null
+    modal.querySelector('#import-cross-sources')?.replaceChildren()
+    modal.querySelector('#import-cross-annots-flat')?.replaceChildren()
+    modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+    this.checkForm()
+  }
+
+  applyMatrixModeForCrossProject() {
+    this.element.querySelector('#import-input-type-id').value = '2'
+    this.activateButton('.input-type-btn', '2', 'data-input-type')
+    const delimiter = this.element.querySelector('#import-delimiter')
+    const name = this.element.querySelector('#import-metadata-name')
+    const hasHeader = this.element.querySelector('#import-has-header')
+    if (delimiter) { delimiter.value = '0'; delimiter.disabled = true }
+    if (name) { name.disabled = true; name.placeholder = 'Set by column choice' }
+    if (hasHeader) { hasHeader.checked = true; hasHeader.disabled = true }
+    this.updateFormatDescription()
+  }
+
+  loadImportCellSets() {
+    const projectId = this.getProjectIdentifier()
+    const sel = this.element.querySelector('#import-cross-cell-set-id')
+    const status = this.element.querySelector('#import-cross-status')
+    if (!projectId || !sel) return
+
+    fetch(`/projects/${projectId}/metadata_import_cell_sets`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin'
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (status) {
+          status.classList.toggle('hidden', !data.error)
+          status.textContent = data.error || ''
+        }
+        const rows = data.cell_sets || []
+        if (!rows.length) {
+          sel.innerHTML = '<option value="">No cell sets</option>'
+          return
+        }
+        sel.innerHTML = rows.map((cs) =>
+          `<option value="${cs.id}">${this.escapeHtml(cs.key)}</option>`
+        ).join('')
+      })
+      .catch(() => {
+        sel.innerHTML = '<option value="">Failed to load</option>'
+      })
+  }
+
+  discoverMetadataImportModeA() {
+    const projectId = this.getProjectIdentifier()
+    const csId = this.element.querySelector('#import-cross-cell-set-id')?.value
+    const box = this.element.querySelector('#import-cross-sources')
+    const status = this.element.querySelector('#import-cross-status')
+    if (!projectId || !csId) {
+      if (status) {
+        status.textContent = 'Choose a cell set first.'
+        status.classList.remove('hidden')
+      }
+      return
+    }
+    if (status) status.classList.add('hidden')
+    if (box) box.innerHTML = 'Loading...'
+    this.crossProjectSelection = null
+    this.crossProjectPrepareMeta = null
+    this.element.querySelector('#import-cross-selection')?.classList.add('hidden')
+
+    fetch(`/projects/${projectId}/discover_metadata_import_sources?cell_set_id=${encodeURIComponent(csId)}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin'
+    })
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!ok) {
+          if (box) box.innerHTML = ''
+          if (status) {
+            status.textContent = j.error || 'Discovery failed'
+            status.classList.remove('hidden')
+          }
+          return
+        }
+        const sources = j.sources || []
+        if (!sources.length) {
+          if (box) box.innerHTML = '<p class="text-gray-600">No other readable projects with metadata on this cell set.</p>'
+          return
+        }
+        if (box) {
+          box.innerHTML = sources.map((src) => this.renderCrossProjectSourceBlock(src)).join('')
+        }
+      })
+      .catch((err) => {
+        if (box) box.innerHTML = ''
+        if (status) {
+          status.textContent = err.message || 'Request failed'
+          status.classList.remove('hidden')
+        }
+      })
+  }
+
+  discoverMetadataImportModeB() {
+    const projectId = this.getProjectIdentifier()
+    const key = this.element.querySelector('#import-cross-source-project-key')?.value?.trim()
+    const box = this.element.querySelector('#import-cross-annots-flat')
+    const status = this.element.querySelector('#import-cross-status')
+    if (!projectId || !key) {
+      if (status) {
+        status.textContent = 'Enter a source project key.'
+        status.classList.remove('hidden')
+      }
+      return
+    }
+    if (status) status.classList.add('hidden')
+    if (box) box.innerHTML = 'Loading...'
+    this.crossProjectSelection = null
+    this.crossProjectPrepareMeta = null
+    this.element.querySelector('#import-cross-selection')?.classList.add('hidden')
+
+    fetch(`/projects/${projectId}/discover_metadata_import_from_project?source_project_key=${encodeURIComponent(key)}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin'
+    })
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!ok) {
+          if (box) box.innerHTML = ''
+          if (status) {
+            status.textContent = j.error || 'Discovery failed'
+            status.classList.remove('hidden')
+          }
+          return
+        }
+        const annots = j.annots || []
+        if (!annots.length) {
+          if (box) box.innerHTML = '<p class="text-gray-600">No compatible columns found.</p>'
+          return
+        }
+        if (box) {
+          box.innerHTML = annots.map((a) => this.renderCrossProjectAnnotRow(a, j.source_project?.id)).join('')
+        }
+      })
+      .catch((err) => {
+        if (box) box.innerHTML = ''
+        if (status) {
+          status.textContent = err.message || 'Request failed'
+          status.classList.remove('hidden')
+        }
+      })
+  }
+
+  renderCrossProjectSourceBlock(src) {
+    const proj = src.project || {}
+    const pid = proj.id
+    const annots = src.annots || []
+    const rows = annots.map((a) => this.renderCrossProjectAnnotRow(a, pid)).join('')
+    return `<div class="border border-gray-200 rounded p-2 bg-white">
+      <div class="font-medium text-gray-800">${this.escapeHtml(proj.name || '')} <span class="text-gray-500 font-mono text-xs">${this.escapeHtml(proj.key || '')}</span></div>
+      <div class="mt-1 space-y-1">${rows}</div>
+    </div>`
+  }
+
+  renderCrossProjectAnnotRow(a, sourceProjectId) {
+    const ok = a.compatible && a.import_name_allowed_on_target
+    const label = (a.display_name || a.name || '').toString()
+    const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+    const why = (!ok && (a.incompatibility_reason || a.import_name_block_reason))
+      ? (a.incompatibility_reason || a.import_name_block_reason).toString()
+      : ''
+    const reason = why ? ` title="${escAttr(why)}"` : ''
+    const disabled = ok ? '' : 'disabled'
+    return `<div><button type="button" class="import-cross-annot-btn text-left w-full px-2 py-1 rounded border border-gray-100 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" data-source-project-id="${sourceProjectId}" data-source-annot-id="${a.id}" data-annot-name="${escAttr(a.name || '')}" ${disabled}${reason}>${this.escapeHtml(label)}</button></div>`
+  }
+
+  pickCrossProjectAnnot(sourceProjectId, sourceAnnotId, annotName) {
+    const metaType = annotName.startsWith('/row_attrs/') ? '2' : '1'
+    this.element.querySelector('#import-metadata-type-id').value = metaType
+    this.activateButton('.metadata-type-btn', metaType, 'data-metadata-type')
+    this.crossProjectSelection = { sourceProjectId, sourceAnnotId }
+    this.crossProjectPrepareMeta = null
+    const selEl = this.element.querySelector('#import-cross-selection')
+    if (selEl) {
+      selEl.textContent = `Selected column: ${annotName} (source project ${sourceProjectId})`
+      selEl.classList.remove('hidden')
+    }
+    this.fuId = null
+    this.lastImportValidation = null
+    const warnings = this.element.querySelector('#import-warnings')
+    if (warnings) { warnings.classList.add('hidden'); warnings.innerHTML = '' }
+    const preview = this.element.querySelector('#import-preview')
+    if (preview) preview.classList.add('hidden')
+    const submitBtn = this.element.querySelector('#import-submit-btn')
+    if (submitBtn) submitBtn.classList.add('hidden')
     this.checkForm()
   }
 
@@ -288,6 +554,12 @@ export default class extends Controller {
     const inputMethod = this.element.querySelector('#import-input-method-id')?.value
     const previewBtn = this.element.querySelector('#import-preview-btn')
     if (!previewBtn) return
+
+    if (inputMethod === '3') {
+      const sel = this.crossProjectSelection
+      previewBtn.disabled = !(sel && sel.sourceProjectId && sel.sourceAnnotId)
+      return
+    }
 
     if (inputMethod === '2') {
       const fileInput = this.element.querySelector('#import-metadata-file')
@@ -336,7 +608,27 @@ export default class extends Controller {
 
     let fetchPromise
 
-    if (inputMethod === '2') {
+    if (inputMethod === '3') {
+      const sel = this.crossProjectSelection
+      if (!sel || !sel.sourceProjectId || !sel.sourceAnnotId) {
+        btn.textContent = 'Preview'
+        btn.disabled = false
+        return
+      }
+      fetchPromise = fetch(`/projects/${projectId}/prepare_metadata_from_project_annot`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          source_project_id: sel.sourceProjectId,
+          source_annot_id: sel.sourceAnnotId
+        })
+      })
+    } else if (inputMethod === '2') {
       const fileInput = this.element.querySelector('#import-metadata-file')
       if (!fileInput?.files?.[0]) return
 
@@ -378,15 +670,27 @@ export default class extends Controller {
     }
 
     fetchPromise
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`)
-        return response.json()
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const msg = data.error || data.message || `HTTP error ${response.status}`
+          throw new Error(msg)
+        }
+        return data
       })
       .then(data => {
         btn.textContent = 'Preview'
         this.fuId = data.fu_id
         this.lastImportValidation = data.import_validation || null
         window._importCollisionResolution = ''
+        if (inputMethod === '3' && data.metadata_type_id) {
+          this.crossProjectPrepareMeta = {
+            metadataTypeId: String(data.metadata_type_id),
+            inputTypeId: String(data.input_type_id || '2')
+          }
+        } else {
+          this.crossProjectPrepareMeta = null
+        }
 
         const warnings = this.element.querySelector('#import-warnings')
         const dupBlock = (data.duplicates && data.duplicates.length > 0)
@@ -405,7 +709,7 @@ export default class extends Controller {
           preview.classList.remove('hidden')
         }
 
-        if (data.header_name) {
+        if (data.header_name && inputMethod !== '3') {
           const nameInput = this.element.querySelector('#import-metadata-name')
           if (nameInput && !nameInput.value.trim()) {
             nameInput.value = data.header_name
@@ -434,10 +738,15 @@ export default class extends Controller {
 
     const projectId = this.getProjectIdentifier()
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-    const metadataTypeId = this.element.querySelector('#import-metadata-type-id')?.value
+    const inputMethod = this.element.querySelector('#import-input-method-id')?.value
+    let metadataTypeId = this.element.querySelector('#import-metadata-type-id')?.value
     const loomFile = new URLSearchParams(window.location.search).get('loom_file') || ''
 
-    const inputTypeId = this.element.querySelector('#import-input-type-id')?.value || '1'
+    let inputTypeId = this.element.querySelector('#import-input-type-id')?.value || '1'
+    if (inputMethod === '3' && this.crossProjectPrepareMeta) {
+      metadataTypeId = this.crossProjectPrepareMeta.metadataTypeId
+      inputTypeId = this.crossProjectPrepareMeta.inputTypeId
+    }
     const name = this.element.querySelector('#import-metadata-name')?.value || ''
     const hasHeader = this.element.querySelector('#import-has-header')?.checked ? '1' : '0'
     const headerName = ''

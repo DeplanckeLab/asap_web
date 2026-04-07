@@ -11,9 +11,9 @@ class ProjectsController < ApplicationController
   helper_method :de_filter_cache_key
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project selection_states]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
@@ -2353,101 +2353,37 @@ class ProjectsController < ApplicationController
 
   # POST /projects/1/prepare_metadata
   def prepare_metadata
-    delimiters = ["\n", "\t", " ", ";", ","]
-
-    h_fu = {
-      project_id: @project.id,
-      project_key: @project.key,
-      status: 'new',
-      upload_type: 2,
-      upload_file_name: 'clipboard.txt',
-      upload_content_type: 'text/plain',
-      user_id: current_user&.id || 1
-    }
-
-    fu = Fu.new(h_fu)
-    fu.save!
-
-    fu_dir = fu.upload_dir
-    FileUtils.mkdir_p(fu_dir)
-    filepath = fu_dir + 'clipboard.txt'
-
-    duplicates = []
-    h_identifiers = {}
-    final_content = []
-
-    if params[:file].present?
-      raw_content = params[:file].read
-    else
-      raw_content = params[:content] || ''
-    end
+    raw_content =
+      if params[:file].present?
+        params[:file].read
+      else
+        params[:content] || ""
+      end
 
     input_type_id = params[:input_type_id].to_s
     metadata_type_id = params[:metadata_type_id].to_s
-    delimiter_idx = (params[:delimiter] || '0').to_i
-    name = params[:name] || ''
-    has_header = params[:has_header].to_s != '0'
+    delimiter_idx = (params[:delimiter] || "0").to_i
+    name = params[:name] || ""
+    has_header = params[:has_header].to_s != "0"
 
-    header_name = nil
+    staged = MetadataImportPrepareStaging.call(
+      project: @project,
+      user_id: current_user&.id || 1,
+      raw_content: raw_content,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id,
+      delimiter_idx: delimiter_idx,
+      name: name,
+      has_header: has_header
+    )
 
-    if metadata_type_id == '4'
-      raw_content.split(/\n/).each do |line|
-        line = line.strip
-        next if line.empty?
-        final_content.push(line)
-      end
-    elsif input_type_id == '2'
-      lines = raw_content.split(/\n/)
-      lines.each_with_index do |line, idx|
-        if idx == 0 && has_header
-          final_content.push(line)
-          next
-        end
-        parts = line.split(/\t/)
-        identifier = parts[0]
-        if identifier && !h_identifiers[identifier]
-          h_identifiers[identifier] = 1
-          final_content.push(line)
-        elsif identifier
-          duplicates.push(identifier)
-        end
-      end
-    elsif input_type_id == '1'
-      delimiter = delimiters[delimiter_idx] || "\n"
-      entries = raw_content.split(/#{Regexp.escape(delimiter)}+/).map(&:strip).reject(&:empty?)
-
-      if has_header && entries.any?
-        header_name = entries.shift
-        header_prefix = metadata_type_id == '2' ? 'genes' : 'cells'
-        final_content.push("#{header_prefix}\t#{header_name}")
-      end
-
-      entries.each do |e|
-        if !h_identifiers[e]
-          h_identifiers[e] = 1
-          final_content.push("#{e}\t1")
-        else
-          duplicates.push(e)
-        end
-      end
-    end
-
-    File.open(filepath, 'w') { |f| f.write(final_content.join("\n")) }
-
-    if File.exist?(filepath) && File.size(filepath) > 0
-      fu.update(
-        status: 'written',
-        upload_file_size: File.size(filepath),
-        upload_updated_at: Time.now
-      )
-    end
-
-    preview_lines = final_content.first(20)
+    final_content = staged[:final_content]
+    header_name = staged[:header_name]
 
     response = {
-      fu_id: fu.id,
-      duplicates: duplicates,
-      preview_lines: preview_lines,
+      fu_id: staged[:fu].id,
+      duplicates: staged[:duplicates],
+      preview_lines: final_content.first(20),
       total_lines: final_content.size
     }
     response[:header_name] = header_name if header_name.present?
@@ -2462,6 +2398,94 @@ class ProjectsController < ApplicationController
       raw_content: raw_content
     )
     response[:import_validation] = import_validation_json(validation)
+
+    render json: response
+  end
+
+  # POST /projects/:id/prepare_metadata_from_project_annot
+  # Stages matrix import content from a readable source project's {Annot}; reuses collision / reserved checks.
+  def prepare_metadata_from_project_annot
+    source_project_id = params[:source_project_id].to_i
+    source_annot_id = params[:source_annot_id].to_i
+
+    unless source_project_id.positive? && source_annot_id.positive?
+      return render json: { error: "source_project_id and source_annot_id are required" }, status: :unprocessable_entity
+    end
+
+    source_project = Project.find_by(id: source_project_id)
+    unless source_project
+      return render json: { error: "Source project not found" }, status: :not_found
+    end
+
+    unless readable?(source_project)
+      return render json: { error: "You do not have access to the source project" }, status: :forbidden
+    end
+
+    annot = Annot.find_by(id: source_annot_id, project_id: source_project.id)
+    unless annot
+      return render json: { error: "Metadata column not found on the source project" }, status: :not_found
+    end
+
+    unless annot.latest_version
+      return render json: { error: "Only the latest version of a metadata column can be imported this way." }, status: :unprocessable_entity
+    end
+
+    t_pcs = @project.project_cell_set_id
+    s_pcs = source_project.project_cell_set_id
+    unless t_pcs.present? && s_pcs.present? && t_pcs == s_pcs
+      return render json: { error: "Source project does not share the same cell-set identity as this project." }, status: :unprocessable_entity
+    end
+
+    h = MetadataImportDiscoveryHelpers
+    dim = h.dimension_alignment(@project, source_project)
+    auth = MetadataNameAuthorizationService.call(project: @project, name: annot.name)
+    ok_compat, reason = h.compatibility_for_annot(@project, annot, dim, auth)
+    unless ok_compat
+      return render json: { error: reason.presence || "This metadata cannot be imported from the source project." }, status: :unprocessable_entity
+    end
+
+    built = MetadataImportMatrixFromAnnotBuilder.call(annot: annot)
+    unless built[:ok]
+      return render json: { error: built[:error] }, status: built[:status] || :unprocessable_entity
+    end
+
+    raw_content = built[:raw_content]
+    metadata_type_id = built[:metadata_type_id]
+    input_type_id = "2"
+    has_header = true
+
+    staged = MetadataImportPrepareStaging.call(
+      project: @project,
+      user_id: current_user&.id || 1,
+      raw_content: raw_content,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id,
+      delimiter_idx: 0,
+      name: "",
+      has_header: has_header
+    )
+
+    final_content = staged[:final_content]
+
+    validation = MetadataFileImportValidation.analyze(
+      project: @project,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id,
+      name: "",
+      header_name: nil,
+      has_header: has_header,
+      raw_content: raw_content
+    )
+
+    response = {
+      fu_id: staged[:fu].id,
+      duplicates: staged[:duplicates],
+      preview_lines: final_content.first(20),
+      total_lines: final_content.size,
+      metadata_type_id: metadata_type_id,
+      input_type_id: input_type_id,
+      import_validation: import_validation_json(validation)
+    }
 
     render json: response
   end
@@ -4459,6 +4483,20 @@ class ProjectsController < ApplicationController
     end
 
     render json: result[:payload]
+  end
+
+  # GET /projects/:id/metadata_import_cell_sets
+  # Cell sets sharing {project_cell_set_id} with this project (for Mode A picker in import wizard).
+  def metadata_import_cell_sets
+    pcs_id = @project.project_cell_set_id
+    unless pcs_id
+      return render json: { cell_sets: [], error: "This project has no cell-set identity (project_cell_set_id)." }
+    end
+
+    rows = CellSet.where(project_cell_set_id: pcs_id).order(:id).pluck(:id, :key)
+    render json: {
+      cell_sets: rows.map { |id, key| { id: id, key: key.to_s } }
+    }
   end
 
   # GET /projects/1/get_annot_evidences?annot_id=123&cat_idx=0

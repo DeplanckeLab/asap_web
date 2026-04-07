@@ -11,8 +11,8 @@ class ProjectsController < ApplicationController
   helper_method :de_filter_cache_key
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
@@ -4427,6 +4427,30 @@ class ProjectsController < ApplicationController
       target_project: @project,
       cell_set_id: (cell_set_id if cell_set_id&.positive?),
       cell_set_key: cell_set_key,
+      readable_if: ->(p) { readable?(p) }
+    )
+
+    unless result[:ok]
+      return render json: { error: result[:error] }, status: result[:status] || :unprocessable_entity
+    end
+
+    render json: result[:payload]
+  end
+
+  # GET /projects/:id/discover_metadata_import_from_project?source_project_id=... OR ?source_project_key=...
+  # Mode B (R-M1b): readable source project + compatible Annot list for multi-select import planning.
+  def discover_metadata_import_from_project
+    source_project_id = params[:source_project_id].presence&.to_i
+    source_project_key = params[:source_project_key].to_s.strip.presence
+
+    unless source_project_id&.positive? || source_project_key.present?
+      return render json: { error: "source_project_id or source_project_key is required" }, status: :unprocessable_entity
+    end
+
+    result = MetadataImportModeBDiscoveryService.call(
+      target_project: @project,
+      source_project_id: (source_project_id if source_project_id&.positive?),
+      source_project_key: source_project_key,
       readable_if: ->(p) { readable?(p) }
     )
 

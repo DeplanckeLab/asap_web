@@ -54,6 +54,7 @@ Rails.application.routes.draw do
       get :get_annot_evidences
       get :get_cell_set_annotations
       get :discover_metadata_import_sources
+      get :discover_metadata_import_from_project
       post :clone
       post :toggle_public
       post :prepare_metadata

@@ -25,6 +25,13 @@ class MetadataNameAuthorizationService
     /\.sel_\d+\z/
   ].freeze
 
+  # Common ASAP embedding / reduction output columns (run id suffix); finite families (R-NM1).
+  PIPELINE_OUTPUT_FAMILY_REGEXPS = [
+    %r{\A/col_attrs/_umap_\d+\z},
+    %r{\A/col_attrs/_tsne_\d+\z},
+    %r{\A/col_attrs/_pca_\d+\z}
+  ].freeze
+
   class << self
     def call(project:, name:)
       new(project: project, name: name).call
@@ -55,7 +62,7 @@ class MetadataNameAuthorizationService
       if (re = matching_reserved_regexp(candidate))
         return failure(
           :reserved_asap_pattern,
-          "Name matches a reserved ASAP pattern (#{re.inspect})"
+          "Name matches a reserved pattern for this ASAP version or compliance metadata (#{re.inspect}). Use another name or keep both with a different base."
         )
       end
     end
@@ -74,14 +81,22 @@ class MetadataNameAuthorizationService
   end
 
   def reserved_regexps_for_project
-    @reserved_regexps_for_project ||= (MINIMAL_RESERVED_REGEXPS + reserved_regexps_from_project_version(@project))
+    @reserved_regexps_for_project ||= dedupe_regexps(
+      MINIMAL_RESERVED_REGEXPS + PIPELINE_OUTPUT_FAMILY_REGEXPS + reserved_regexps_from_project_version(@project)
+    )
   end
 
-  # R-NM1 / R-NM3: Regexp objects for auto-generated /col_attrs/ and /row_attrs/ families for this
-  # project +version+ (not per-run literal names).
+  # R-NM1 / R-NM3: Regexp objects derived from the project {Version}, ASAP {DockerImage} {Step}/{StdMethod}
+  # JSON, optional {Version#env_json} +metadata_import_reserved+, ontology/compliance paths, and {OutputAttr}.
   def reserved_regexps_from_project_version(project)
-    return [] unless project
+    return [] unless project&.version
 
-    []
+    MetadataImportReservedPatternCatalog.regexps_for_project(project)
+  end
+
+  def dedupe_regexps(list)
+    seen = {}
+    list.each { |re| seen["#{re.source}\0#{re.options}"] = re }
+    seen.values
   end
 end

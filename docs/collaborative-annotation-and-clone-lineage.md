@@ -175,6 +175,7 @@ When the **logical metadata name** (typically `Annot#name` / loom column basenam
   - **Regexp (or equivalent) rules** that match **families** of auto-generated **col_attr / row_attr** paths (e.g. segments that embed **run ids**, standard **output_attr** shapes, selection suffixes **`.sel_<n>`** on an embedding column, etc.).
   - Optional **additional exact strings** only where a pattern would be too broad.
   - **Out of scope for this subsection:** roots such as **`/matrix`** or **`/attrs/...`** — not part of **metadata import** until **Rule M2** is extended.
+  - **Implementation:** **`MetadataImportReservedPatternCatalog`** plus **`MetadataNameAuthorizationService`** (see **section 9**).
 - **R-NM2 (validation):** Before finalizing an import (or a rename within the same path scope), reject names that match any **reserved pattern** for that version. Message should say **why** (reserved for automatic ASAP outputs). Reference: **`MetadataNameAuthorizationService`** (central policy).
 - **R-NM3 (maintenance):** When a new **Version** is released, refresh the **regexp set** (and any fixed strings) from **machine-readable** step/output definitions for **col_attrs / row_attrs** for that version.
 - **R-NM4:** Versioned suffixes **`base.vN`** used for “keep both” (**R-M4**) should **not** bypass **R-NM1**: apply the same patterns to **both** the full string and the **base** after stripping **`\.v\d+\z`**. If either matches, require a **user-visible** rename or a different base name.
@@ -234,7 +235,7 @@ Distinguish:
 3. **Explicit project picker (Mode B):** Given **`readable?`** source **`project_id`**, list **compatible** metadata for multi-select import (**R-M1b–R-M1c**). **API done:** `GET /projects/:id/discover_metadata_import_from_project` with `source_project_id` or `source_project_key`; see **section 9** and [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 3. **UI:** Phase 1 item 4.
 4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable. **Done (API + UI):** see [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 4.
 5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**. **Done:** see **`RunAnnotReferenceScanner`** and Phase 1 item **5** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
-6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**.
+6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**. **Done:** see Phase 1 item **6** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
 7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
 
 ### Phase 2 — Federated CLA UI and vote policy (medium–long)
@@ -278,6 +279,7 @@ Distinguish:
 - `app/services/metadata_import_mode_a_discovery_service.rb` — Mode A (R-M1a)
 - `app/services/metadata_import_mode_b_discovery_service.rb` — Mode B (R-M1b)
 - `app/services/metadata_name_authorization_service.rb` — reserved **regexp** policy for metadata names (R-NM0–R-NM4)
+- `app/services/metadata_import_reserved_pattern_catalog.rb` — version / step / std_method / env / ontology-derived reserved paths (R-NM1, R-NM3)
 - `app/services/run_annot_reference_scanner.rb` — dependent runs before metadata **overwrite** (R-M5); used by **`MetadataFileImportValidation`**
 - `app/models/cla_vote.rb` — `ClaVote` model
 - `lib/basic.rb` — `add_clas`, `marker_groups_annot_id`

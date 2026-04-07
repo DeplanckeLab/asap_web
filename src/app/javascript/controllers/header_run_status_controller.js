@@ -3,7 +3,7 @@ import consumer from "channels/consumer"
 
 export default class extends Controller {
   static targets = ["statusCount", "statusIcon", "statusButton", "cellCount"]
-  static values = { projectId: Number }
+  static values = { projectId: Number, publicationSnapshot: Boolean }
 
   connect() {
     console.log('[HeaderRunStatus] Connected, project ID:', this.projectIdValue)
@@ -85,6 +85,12 @@ export default class extends Controller {
     const totals = data.project_run_totals
     if (!totals) {
       console.log('[HeaderRunStatus] No project_run_totals in broadcast, syncing from server')
+      this.syncCountsFromServer()
+      return
+    }
+    // Broadcast aggregates are full totals; publication snapshot readers only see runs before public_at.
+    if (this.publicationSnapshotValue) {
+      console.log('[HeaderRunStatus] Publication snapshot reader: refreshing counts from server instead of broadcast totals')
       this.syncCountsFromServer()
       return
     }

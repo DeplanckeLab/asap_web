@@ -187,6 +187,9 @@ class ReqsController < ApplicationController
         end
 
         existing_step_runs = Run.where(project_id: @project.id, step_id: @step.id).order(created_at: :desc).to_a
+        if existing_step_runs.any? { |r| @project.locked_from_publication?(r) }
+          raise PublicationLockedDeletionError, 'Cannot replace step runs while a run created before publication still exists.'
+        end
         existing_step_runs.each do |existing_run|
           begin
             RunsController.destroy_run_call(@project, existing_run)
@@ -459,7 +462,12 @@ class ReqsController < ApplicationController
   def destroy
     @project = @req.project
     if owner_or_admin_obj? @req, @project #or (current_user.id and @req.user_id == current_user.id) or (@project.sandbox == true and @project.key == session[:project_key])
-      @req.runs.map{|r| RunsController.destroy_run_call @req.project, r}
+      @req.runs.each do |r|
+        next if @project.locked_from_publication?(r)
+
+        RunsController.destroy_run_call(@req.project, r)
+      end
+      Run.where(req_id: @req.id).update_all(req_id: nil)
       @req.destroy
       respond_to do |format|
         format.html { redirect_to reqs_url, notice: 'Req was successfully destroyed.' }

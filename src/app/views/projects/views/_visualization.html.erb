@@ -17,57 +17,10 @@ has_visualization_data = @default_loom_file.present? && (
   @h_metadata.any? { |_path, dims| dims&.dig('cell', 'DISCRETE').present? || dims&.dig('cell', 'NUMERIC').present? }
 )
 has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present? }
-
-unarchive_state = @project_unarchive_state.to_s
-show_unarchive_message = @project_archive_transitioning || (@project_files_missing && ['queued', 'in_progress', 'archived_missing', 'queue_failed'].include?(unarchive_state))
 %>
 
-<% if show_unarchive_message %>
-  <div data-guided-tour="project-visualization-view" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
-    <div style="max-width: 640px; width: 100%; text-align: center;"
-         data-controller="unarchive-status"
-         data-unarchive-status-project-id-value="<%= @project.id %>"
-         data-unarchive-status-initial-state-value="<%= unarchive_state %>">
-      <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin-bottom: 16px;">Project Is Being Unarchived</h2>
-      <p style="font-size: 16px; color: #6b7280; margin-bottom: 24px; line-height: 1.6;">
-        This project is archived on storage and its files are not yet available locally.
-      </p>
-
-      <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 14px;">
-        <div style="width: 22px; height: 22px; border: 3px solid #d1d5db; border-top-color: #3b82f6; border-radius: 50%; animation: unarchive-spin 1s linear infinite;"></div>
-      </div>
-
-      <style>
-        @keyframes unarchive-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      </style>
-
-      <p data-unarchive-status-target="statusText"
-         style="font-size: 14px; color: #4b5563; margin-bottom: 12px; line-height: 1.6;">
-        Retrieving archive from S3 storage...
-      </p>
-
-      <div style="width: 100%; height: 10px; background-color: #e5e7eb; border-radius: 9999px; overflow: hidden; margin-bottom: 16px;">
-        <div data-unarchive-status-target="progressBar"
-             style="height: 100%; width: 20%; background-color: #3b82f6; transition: width 0.5s ease;"></div>
-      </div>
-
-      <div style="text-align: left; font-size: 13px; color: #6b7280; line-height: 1.7; margin-bottom: 14px;">
-        <div data-unarchive-status-target="retrievingStep">1. Retrieving archive from S3</div>
-        <div data-unarchive-status-target="unpackingStep">2. Unpacking archive on server</div>
-        <div data-unarchive-status-target="completedStep">3. Loading project view</div>
-      </div>
-
-      <p data-unarchive-status-target="errorText"
-         style="display: none; font-size: 13px; color: #b45309; margin-bottom: 16px; line-height: 1.6;"></p>
-
-    </div>
-  </div>
-  <%= render partial: 'projects/views/save_manual_gene_set_modal' %>
-  <%= render partial: 'projects/views/add_gene_set_collection_modal' %>
-<% elsif !has_embeddings %>
+<%# Unarchive full-page state is rendered from show.html.erb for all project tabs. %>
+<% if !has_embeddings %>
   <div data-guided-tour="project-visualization-view" style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="text-align: center;">
       <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin: 0;">No embedding to be visualized</h2>

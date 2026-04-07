@@ -259,7 +259,7 @@ class ProjectsController < ApplicationController
       @project_type = @project.project_type
       
       # Get runs for the project
-      @runs = @project.runs.includes(:annots)
+      @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       
       # Build steps with status using shared method
       prepare_steps_with_status
@@ -290,7 +290,9 @@ class ProjectsController < ApplicationController
             saved_view_param = params[:view]
 
             @step = sub_view_step
-            @runs = @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            @runs = apply_publication_snapshot_to_runs(
+              @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            )
             @project_step = ProjectStep.find_or_create_by(project_id: @project.id, step_id: @selected_step_id)
             @show_form = false
             @show_custom_form = false
@@ -425,10 +427,12 @@ class ProjectsController < ApplicationController
       @project_type = @project.project_type
       
       # Get all annotations with step and run information for ordering
-      all_annots = Annot.where(project_id: @project.id)
-                        .where.not(filepath: nil)
-                        .includes(:step, run: [:std_method])
-                        .order(:name)
+      all_annots = apply_publication_snapshot_to_annots(
+        Annot.where(project_id: @project.id)
+             .where.not(filepath: nil)
+             .includes(:step, run: [:std_method])
+             .order(:name)
+      )
       
       # Get unique filepaths with their minimum step rank and run id for ordering
       # We use the minimum to get the earliest step/run that created each file
@@ -621,7 +625,7 @@ class ProjectsController < ApplicationController
       @cloned_project = @project.cloned_project if @project.cloned_project_id
       
       # Get runs for the project (needed for filter_runs partial)
-      @runs = @project.runs.includes(:annots) unless @runs
+      @runs ||= apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       
       # Get steps hash (needed for filter_runs partial)
       unless @h_steps
@@ -683,6 +687,8 @@ class ProjectsController < ApplicationController
       session[:clust_comparison] ||= {}
       session[:clust_comparison][@project.id] ||= {}
       session[:clust_comparison][@project.id][:op] ||= "1"
+
+      assign_summary_submitted_file_link!
     end
     
     # For testing, if no embeddings found, use a project that has them
@@ -1578,14 +1584,198 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/instructions
   def instructions
-    # Placeholder for instructions action
-    render plain: "Instructions for project #{@project.key}"
+    @reproduction_server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
+    text = render_to_string(template: 'projects/reproduction_instructions', formats: [:text], layout: false)
+    send_data text,
+              filename: "instructions_to_reproduce_#{@project.key}.txt",
+              type: 'text/plain; charset=utf-8',
+              disposition: 'inline'
   end
 
   # GET /projects/1/get_commands
   def get_commands
-    # Placeholder for get_commands action
-    render plain: "Commands for project #{@project.key}"
+    version = @project.version
+    unless version
+      return render plain: 'Project has no version; cannot build reproduction script.', status: :unprocessable_entity
+    end
+
+    asap_docker_image = Basic.get_asap_docker(version)
+    unless asap_docker_image
+      return render plain: 'No ASAP docker image for this project version; cannot build reproduction script.', status: :unprocessable_entity
+    end
+
+    h_env = Basic.safe_parse_json(version.env_json, {})
+    unless h_env['docker_images'].is_a?(Hash) && h_env['docker_images']['asap_run']
+      return render plain: 'Version env_json is missing docker_images.asap_run; cannot build reproduction script.', status: :unprocessable_entity
+    end
+
+    begin
+      asap_data_db = Basic.asap_data_db_name_from_env!(h_env)
+    rescue ArgumentError => e
+      return render plain: e.message.to_s, status: :unprocessable_entity
+    end
+
+    docker_name = "#{h_env['docker_images']['asap_run']['name']}:#{h_env['docker_images']['asap_run']['tag']}"
+    server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
+    project_dir = @project_dir
+
+    @h_steps = {}
+    Step.where(docker_image_id: asap_docker_image.id).find_each { |s| @h_steps[s.id] = s }
+    @h_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id).index_by(&:id)
+    @h_dashboard_card = {}
+    Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+      @h_dashboard_card[step.id] = Basic.safe_parse_json(step.dashboard_card_json, {})
+    end
+
+    list_cmds = []
+    list_cmds.push("## This script contains all commands executed in the PROJECT #{@project.key} and can be run again using the ASAP_run docker (https://hub.docker.com/layers/fabdavid/asap_run)")
+    list_cmds.push("echo '*******************Reproducing analysis of PROJECT #{@project.key}#{@project.public? ? " / ASAP#{@project.public_id}" : ''}**********************'")
+    list_cmds.push("echo '***************************************************************************************'")
+    list_cmds.push('')
+
+    list_cmds.push("## CONFIGURATION (edit below to match your machine; lines until the separator)")
+    list_cmds.push("export ASAP_PROJECTS_DIR=/asap_projects ## change this to write analysis results there (there will be subdirectory for each project key).")
+    list_cmds.push("export LOOM_DIR=$ASAP_PROJECTS_DIR/loom_files")
+    list_cmds.push("export ASAP_DATA_DB_HOST=localhost; export ASAP_DATA_DB_PORT=5432")
+    list_cmds.push("export PSQL_DIR=/usr/pgsql-10/bin")
+    list_cmds.push('')
+    list_cmds.push("## =========================================================")
+    list_cmds.push('')
+    list_cmds.push("export PROJECT_DIR=$ASAP_PROJECTS_DIR/#{@project.key}")
+
+    list_cmds.push("## Pull Docker images (must run before any docker run in this script)")
+    list_cmds.push('')
+    h_env['docker_images'].each_key do |img_key|
+      tmp = "#{h_env['docker_images'][img_key]['name']}:#{h_env['docker_images'][img_key]['tag']}"
+      list_cmds.push("docker pull #{tmp}")
+    end
+    list_cmds.push('')
+
+    list_cmds.push("## Host LOOM staging directory (inside Docker volume)")
+    list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"mkdir -p $LOOM_DIR; chmod 777 $LOOM_DIR\"")
+    list_cmds.push('')
+    if @project.public?
+      list_cmds.push("echo 'This project is PUBLIC => Nothing to do'")
+    else
+      list_cmds.push("echo 'This project is PRIVATE => Please download the Inital Loom file from the Report section of the project (Loom file generated after the parsing step) and save it in LOOM_DIR'")
+      list_cmds.push("read -p 'When ready press any key to continue... ' -n1 -s")
+    end
+    list_cmds.push('')
+
+    asap_data_db_url = "#{server_url}/dumps/#{asap_data_db}.sql.gz"
+    list_cmds.push("## Local PostgreSQL: create ASAP data database and load dump if missing")
+    list_cmds.push("if ! psql -lqt | cut -d \\| -f 1 | grep -qw #{asap_data_db}; then echo 'Create database #{asap_data_db}'; echo '$PSQL_DIR/createdb -p $ASAP_DATA_DB_PORT #{asap_data_db}'; $PSQL_DIR/createdb -p $ASAP_DATA_DB_PORT #{asap_data_db}; echo 'wget -qO - #{asap_data_db_url} | gunzip | grep -v \\'AS integer\\' | $PSQL_DIR/psql -p $ASAP_DATA_DB_PORT #{asap_data_db}'; wget -qO - #{asap_data_db_url} | gunzip | grep -v 'AS integer' | $PSQL_DIR/psql -p $ASAP_DATA_DB_PORT #{asap_data_db}; fi")
+    list_cmds.push('')
+
+    list_cmds.push("## Project directory on the shared volume")
+    list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"mkdir -p $PROJECT_DIR\"")
+    list_cmds.push('')
+
+    run_step_ids = @project.runs.distinct.pluck(:step_id).compact
+    mk_steps = Step.where(id: run_step_ids, docker_image_id: asap_docker_image.id).to_a
+    list_dirs = mk_steps.map { |step| "$PROJECT_DIR/#{step.name}/" }
+    if list_dirs.any?
+      list_cmds.push("## Step output directories (one folder per pipeline step that has runs)")
+      mkdir_cmd = list_dirs.map { |d| "mkdir -p #{d}" }.join(' && ')
+      list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"#{mkdir_cmd}\"")
+      list_cmds.push('')
+    end
+
+    list_cmds.push("## Parsed LOOM file (public: wget; private: place file then symlink as below)")
+    list_cmds.push("echo 'Loading parsed Loom file...'")
+    if @project.public_id.present?
+      list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"wget -qO $PROJECT_DIR/parsing/output.loom '#{server_url}/projects/#{@project.key}/get_file?filename=parsing/output.loom'\"")
+    else
+      list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"ln -s #{@project.key}_parsing_output.loom parsing/output.loom\"")
+    end
+    list_cmds.push('')
+
+    parsing_step_id = Step.find_by(docker_image_id: asap_docker_image.id, name: 'parsing')&.id
+
+    list_cmds.push("## Re-execute each recorded run (parsing step is skipped; LOOM is already in place)")
+    list_cmds.push('')
+
+    @project.runs.includes(:std_method, :step).order(:id).each do |run|
+      next if parsing_step_id && run.step_id == parsing_step_id
+
+      step = run.step
+      next unless step
+
+      step_dir = project_dir + step.name
+      local_step_dir = "$PROJECT_DIR/#{step.name}/"
+      std_method = run.std_method
+      next unless std_method
+
+      list_cmds.push('')
+      list_cmds.push("## ----------------------------------------------------------------")
+      list_cmds.push("## Run #{run.id}  #{@h_steps[run.step_id]&.label}  (#{reproduction_run_short_txt(run)})")
+      list_cmds.push("## ----------------------------------------------------------------")
+      list_cmds.push('')
+
+      h_res = Basic.get_std_method_attrs(std_method, step)
+      h_method_attr_defs = h_res[:h_attrs] || {}
+
+      output_dir = step.multiple_runs? ? (step_dir + run.id.to_s) : step_dir
+      local_output_dir = (step.multiple_runs? ? "#{local_step_dir}#{run.id}/" : local_step_dir).to_s
+      list_cmds.push("## Ensure output directory exists")
+      list_cmds.push("docker run --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"mkdir -p #{local_output_dir}\"")
+      list_cmds.push('')
+
+      h_method_attr_defs.each_key do |ak|
+        filename = h_method_attr_defs[ak].is_a?(Hash) ? h_method_attr_defs[ak]['write_in_file'] : nil
+        next if filename.blank?
+
+        filepath = output_dir + filename
+        local_filepath = "#{local_output_dir}#{filename}"
+        operation = "writing file #{local_filepath}"
+        list_cmds.push("## #{operation}")
+        list_cmds.push("echo '-> #{operation}'")
+        next unless File.exist?(filepath)
+
+        file_body = File.read(filepath)
+        safe_body = file_body.gsub("'", "'\\''")
+        list_cmds.push("docker run --network=asap2_asap_network --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"echo '#{safe_body}' > #{local_filepath}\"")
+        list_cmds.push('')
+      end
+
+      h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+      h_std_method_attrs = { run.std_method_id => h_method_attr_defs }
+      attrs_txt = helpers.display_run_attrs_txt(run, h_run_attrs, h_std_method_attrs)
+      operation = "Running #{@h_steps[run.step_id]&.label} [#{run.id}] [#{reproduction_run_short_txt(run)}] (#{attrs_txt})"
+      list_cmds.push("## #{operation}")
+      list_cmds.push("echo '-> #{operation}'")
+      list_cmds.push('')
+
+      h_cmd = Basic.safe_parse_json(run.command_json, {})
+      if h_cmd['docker_call']
+        h_cmd['docker_call'] = h_cmd['docker_call'].gsub('-v /srv/asap_run/srv:/srv', '')
+        h_cmd['docker_call'] = h_cmd['docker_call'].gsub('/data/asap2:/data/asap2', '$ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR')
+        h_cmd['docker_call'] = h_cmd['docker_call'].gsub('--network=asap2_asap_network', '--net=host')
+      end
+      h_cmd['time_call'] = nil
+      %w[opts args].each do |ek|
+        next unless h_cmd[ek]
+
+        h_cmd[ek].each_index do |i|
+          next unless h_cmd[ek][i] && h_cmd[ek][i]['value']
+
+          h_cmd[ek][i]['value'] = h_cmd[ek][i]['value'].to_s.gsub(project_dir.to_s, '$PROJECT_DIR')
+        end
+      end
+
+      cmd_line = Basic.build_cmd(h_cmd)
+      cmd_line = cmd_line.gsub(project_dir.to_s, '$PROJECT_DIR')
+      cmd_line = cmd_line.gsub(/postgres:\d+\/asap_data_v\d+/, "$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/#{asap_data_db}")
+      cmd_line = cmd_line.gsub(/postgres:\d+\/asap2_data_v\d+/, "$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/#{asap_data_db}")
+      list_cmds.push("## Command")
+      list_cmds.push(cmd_line)
+      list_cmds.push('')
+    end
+
+    send_data list_cmds.join("\n"),
+              filename: "ASAP_analysis_#{@project.key}.sh",
+              type: 'text/plain; charset=utf-8',
+              disposition: 'inline'
   end
 
   # GET /projects/1/get_file
@@ -1612,7 +1802,7 @@ class ProjectsController < ApplicationController
       run = nil
       h_file_by_id = {}
       if run_id
-        run = Run.where(:id => run_id).first
+        run = Run.find_by(id: run_id, project_id: @project.id)
         if run
           h_outputs = Basic.safe_parse_json(run.output_json, {})
           h_outputs.each_key do |k|
@@ -1625,6 +1815,11 @@ class ProjectsController < ApplicationController
           end
           step_name = run.step&.name
         end
+      end
+
+      if run && publication_snapshot_reader?(@project) && !@project.locked_from_publication?(run)
+        render plain: 'Not authorized to access this file.', status: 403
+        return
       end
   
       filepath = nil
@@ -1648,6 +1843,13 @@ class ProjectsController < ApplicationController
         tmp_dir += params[:run_id].to_s if params[:run_id].present? && run&.step&.multiple_runs
         filepath = tmp_dir + filename
         Rails.logger.info "get_file: Constructed filepath for filename param: #{filepath}"
+      end
+
+      project_root = base_dir + @project.user_id.to_s + @project.key
+      unless filepath.nil? || get_file_path_within_project_root?(project_root, filepath)
+        Rails.logger.warn "get_file: Rejected path outside project directory (project #{@project.id}): #{filepath}"
+        render plain: "Invalid file path", status: 400
+        return
       end
 
       if filename.nil?
@@ -1694,7 +1896,7 @@ class ProjectsController < ApplicationController
             content = File.read(filepath)
             content.gsub!(project_dir.to_s, "$PROJECT_DIR")
             send_data content, type: params[:content_type] || 'text', # type: 'application/octet-stream'                                                                                                                                           
-            x_sendfile: true, buffer_size: 512, disposition: (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name,  run_id, filename].compact.join("_")) : ''
+            x_sendfile: true, buffer_size: 512, disposition: (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name,  run_id, File.basename(filename)].compact.join("_")) : ''
           elsif ext == 'json' || filename.match(/\.json$/)
             # For JSON files, read and return content directly (needed for autocomplete_genes.json)
             Rails.logger.info "get_file: Reading JSON file from path: #{filepath}"
@@ -1724,7 +1926,7 @@ class ProjectsController < ApplicationController
             file_size = File.size(filepath)
             Rails.logger.info "get_file: Serving file #{filename}, size: #{file_size} bytes (#{(file_size / 1024.0 / 1024.0).round(2)} MB)"
             
-            disposition = (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name, run_id, filename].compact.join("_")) : 'inline'
+            disposition = (!params[:display]) ? ("attachment; filename=" + [@project.key, step_name, run_id, File.basename(filename)].compact.join("_")) : 'inline'
             send_file filepath,
               type: 'application/octet-stream',
               disposition: disposition,
@@ -1830,7 +2032,7 @@ class ProjectsController < ApplicationController
     asap_docker_image = Basic.get_asap_docker(@project.version)
     de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
     @step = de_step
-    @runs = @project.runs.where(step_id: de_step.id).includes(:annots).order(created_at: :desc)
+    @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: de_step.id)).includes(:annots).order(created_at: :desc)
     annots = Annot.where(run_id: @runs.map(&:id)).to_a
 
     @h_de_filter = Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
@@ -1867,11 +2069,12 @@ class ProjectsController < ApplicationController
     asap_docker_image = Basic.get_asap_docker(@project.version)
     ge_step_ids = Step.where(docker_image_id: asap_docker_image.id, name: 'ge').pluck(:id)
     @step = Step.find_by(id: ge_step_ids.first)
-    @runs = if ge_step_ids.any?
-      @project.runs.where(step_id: ge_step_ids).includes(:annots).order(created_at: :desc)
-    else
-      @project.runs.joins(:step).where(steps: { name: 'ge' }).includes(:annots).order(created_at: :desc)
-    end
+    ge_runs_scope = if ge_step_ids.any?
+                      @project.runs.where(step_id: ge_step_ids)
+                    else
+                      @project.runs.joins(:step).where(steps: { name: 'ge' })
+                    end
+    @runs = apply_publication_snapshot_to_runs(ge_runs_scope).includes(:annots).order(created_at: :desc)
 
     @h_ge_filter = Basic.safe_parse_json(@project.ge_filter_json, { 'fdr_cutoff' => 0.05 })
     requested_run_ids = []
@@ -1886,7 +2089,7 @@ class ProjectsController < ApplicationController
     end
 
     if requested_run_ids.any?
-      @runs = @project.runs.where(id: requested_run_ids).includes(:annots).order(created_at: :desc)
+      @runs = apply_publication_snapshot_to_runs(@project.runs.where(id: requested_run_ids)).includes(:annots).order(created_at: :desc)
     end
 
     fdr_cutoff = @h_ge_filter['fdr_cutoff'].to_f
@@ -2042,10 +2245,12 @@ class ProjectsController < ApplicationController
     @project_type = @project.project_type
     
     # Get all annotations with step and run information for ordering
-    all_annots = Annot.where(project_id: @project.id)
-                      .where.not(filepath: nil)
-                      .includes(:step, run: [:std_method])
-                      .order(:name)
+    all_annots = apply_publication_snapshot_to_annots(
+      Annot.where(project_id: @project.id)
+           .where.not(filepath: nil)
+           .includes(:step, run: [:std_method])
+           .order(:name)
+    ).to_a
     
     # Get unique filepaths with their minimum step rank and run id for ordering
     filepath_info = {}
@@ -3873,9 +4078,92 @@ class ProjectsController < ApplicationController
   end
 
   # GET /projects/1/get_loom_files_json
+  # Lists LOOM matrices (dim 3) with download URLs and optional H5AD sibling paths, matching legacy ASAP summary behavior.
   def get_loom_files_json
-    # Placeholder for get_loom_files_json action
-    render json: []
+    unless ENV['USER_DATA_DIR'].present?
+      Rails.logger.error 'get_loom_files_json: USER_DATA_DIR environment variable is not set'
+      return render json: { error: 'Server configuration error' }, status: :internal_server_error
+    end
+
+    unless @project.user_id
+      Rails.logger.error "get_loom_files_json: Project #{@project.id} has no user_id"
+      return render json: { error: 'Project has no associated user' }, status: :internal_server_error
+    end
+
+    user_data_dir = ENV['USER_DATA_DIR'].to_s.chomp('/')
+    base_dir = if user_data_dir.end_with?('/users') || user_data_dir.end_with?('users')
+                 Pathname.new(user_data_dir)
+               else
+                 Pathname.new(user_data_dir) + 'users'
+               end
+    project_dir = base_dir + @project.user_id.to_s + @project.key
+    server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
+
+    h_data_types = DataType.pluck(:id, :name).to_h
+    annots = Annot.where(project_id: @project.id).includes(:data_type, run: :std_method).to_a
+    h_annots_by_path = Hash.new { |h, k| h[k] = [] }
+    h_file_details = {}
+
+    annots.each do |a|
+      next if a.filepath.blank?
+
+      run = a.run
+      next unless run
+
+      h_annots_by_path[a.filepath].push(
+        name: a.name,
+        nber_cols: a.nber_cols,
+        nber_rows: a.nber_rows,
+        data_type: (a.data_type_id && h_data_types[a.data_type_id]) ? h_data_types[a.data_type_id] : 'NA',
+        imported: a.imported
+      )
+
+      next unless a.dim == 3
+      next if h_file_details[a.filepath]
+
+      full_path = project_dir + a.filepath
+      file_size = File.exist?(full_path) ? File.size(full_path) : 0
+      h_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      h_std_method_attrs = {}
+      if run.std_method_id.present? && run.std_method&.attrs_json.present?
+        h_std_method_attrs = Basic.safe_parse_json(run.std_method.attrs_json, {})
+      end
+
+      h_file_details[a.filepath] = {
+        file_size: file_size,
+        run_name: helpers.display_run(run),
+        run_attrs: helpers.display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
+        nber_cols: a.nber_cols,
+        nber_rows: a.nber_rows
+      }
+    end
+
+    list_files = []
+    h_annots_by_path.each_key do |rel_path|
+      details = h_file_details[rel_path]
+      next unless details
+
+      h5ad_path = rel_path.sub(/loom\z/, 'h5ad')
+      list_files.push(
+        name: rel_path,
+        file_size: helpers.display_mem(details[:file_size]),
+        run_name: details[:run_name],
+        run_attrs: details[:run_attrs],
+        nber_cols: details[:nber_cols],
+        nber_rows: details[:nber_rows],
+        url: "#{server_url}#{get_file_project_path(@project.key, filename: rel_path)}",
+        url_h5ad: "#{server_url}#{get_file_project_path(@project.key, filename: h5ad_path)}",
+        content: h_annots_by_path[rel_path]
+      )
+    end
+
+    list_files.sort_by! { |e| e[:name].to_s }
+
+    if params[:download].present?
+      send_data list_files.to_json, filename: "loom_files_#{@project.key}.json", type: 'application/json'
+    else
+      render json: list_files
+    end
   end
 
   # GET /projects/1/get_step
@@ -3933,6 +4221,7 @@ class ProjectsController < ApplicationController
       Rails.logger.error("[graph] Error applying loom file context: #{e.class} - #{e.message}")
     end
 
+    runs_scope = apply_publication_snapshot_to_runs(runs_scope)
     @runs = runs_scope.order(:step_id, :num, :id)
     
     # Get steps hash
@@ -4250,7 +4539,7 @@ class ProjectsController < ApplicationController
     end
     
     # Prepare data for the partial (similar to std_step)
-    @runs = runs
+    @runs = runs.select { |r| run_visible_under_publication_rules?(@project, r) }
     
     # Identify the immediate parent run (the one that created the annotation)
     @immediate_parent_run_id = ori_run_id
@@ -4336,7 +4625,7 @@ class ProjectsController < ApplicationController
     @cloned_project = @project.cloned_project if @project.cloned_project_id
     
     # Get runs for the project (needed for filter_runs partial)
-    @runs = @project.runs.includes(:annots)
+    @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
     
     # Get steps hash (needed for filter_runs partial)
     @h_steps = {}
@@ -4394,7 +4683,9 @@ class ProjectsController < ApplicationController
     session[:clust_comparison] ||= {}
     session[:clust_comparison][@project.id] ||= {}
     session[:clust_comparison][@project.id][:op] ||= "1"
-    
+
+    assign_summary_submitted_file_link!
+
     render 'summary_test'
   end
 
@@ -4923,6 +5214,7 @@ class ProjectsController < ApplicationController
         loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
         runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
       end
+      runs_scope = apply_publication_snapshot_to_runs(runs_scope)
       @runs = runs_scope.includes(:annots).order(created_at: :desc)
       Rails.logger.info("[step_results][debug] step_id=#{step_id} step_name=#{@step&.name} selected_loom_file=#{@selected_loom_file.inspect} show_form_param=#{params[:show_form].inspect} prefer_runs_list_param=#{params[:prefer_runs_list].inspect} runs_count=#{@runs.size} run_ids=#{@runs.map(&:id).join(',')}")
       @missing_single_run_in_loom_context =
@@ -4936,7 +5228,7 @@ class ProjectsController < ApplicationController
       # Keep the most recent run and remove older duplicates.
       if @step && !@step.multiple_runs && @runs.size > 1
         runs_to_keep = @runs.first
-        runs_to_delete = @runs.drop(1)
+        runs_to_delete = @runs.drop(1).reject { |r| @project.locked_from_publication?(r) }
         Rails.logger.warn("[step_results] Found #{runs_to_delete.size} extra run(s) for single-run step #{@step.name} in project #{@project.id}; deleting older runs and keeping run #{runs_to_keep.id}")
         runs_to_delete.each do |run|
           begin
@@ -4946,7 +5238,7 @@ class ProjectsController < ApplicationController
             raise
           end
         end
-        @runs = @project.runs.where(step_id: step_id).includes(:annots).order(created_at: :desc)
+        @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: step_id)).includes(:annots).order(created_at: :desc)
       end
       
       # Get project step status (ensure it exists)
@@ -5317,7 +5609,7 @@ class ProjectsController < ApplicationController
     @project.ensure_project_steps
     
     # Get runs for the project
-    @runs = @project.runs.includes(:annots) unless @runs
+    @runs ||= apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
     
     # Build steps with status using shared method
     prepare_steps_with_status
@@ -5376,15 +5668,31 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Read pre-aggregated counts from project.nber_runs_json.
-    totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
-    json_data = @project.nber_runs_json.is_a?(String) ? JSON.parse(@project.nber_runs_json) : @project.nber_runs_json
-    json_data ||= {}
-    json_data.each do |status_id, count|
-      status_key = status_id.to_i
-      totals[status_key] = count.to_i if totals.key?(status_key)
-    end
-    
+    visible_step_ids = Step.where.not(hidden: true).pluck(:id)
+    totals =
+      if @project.publication_lock_active? && publication_snapshot_reader?(@project)
+        tallies = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+        @project.runs
+                .where(step_id: visible_step_ids)
+                .where('runs.created_at < ?', @project.public_at)
+                .group(:status_id)
+                .count
+                .each do |status_id, n|
+          k = status_id.to_i
+          tallies[k] = n if tallies.key?(k)
+        end
+        tallies
+      else
+        out = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+        json_data = @project.nber_runs_json.is_a?(String) ? JSON.parse(@project.nber_runs_json) : @project.nber_runs_json
+        json_data ||= {}
+        json_data.each do |status_id, count|
+          status_key = status_id.to_i
+          out[status_key] = count.to_i if out.key?(status_key)
+        end
+        out
+      end
+
     # Map to canonical keys used by header and step selectors.
     counts = {
       pending: totals[1],
@@ -5441,6 +5749,11 @@ class ProjectsController < ApplicationController
           # Delete all runs for this step (not just waiting/running)
           runs = @project.runs.where(step_id: step.id).all
           runs.each do |run|
+            if @project.locked_from_publication?(run)
+              Rails.logger.info("[restart_step] Skipping run #{run.id} (created before publication)")
+              next
+            end
+
             # Cancel SLURM job if it exists and is running/waiting
             if run.slurm_job_id.present?
               begin
@@ -5469,15 +5782,9 @@ class ProjectsController < ApplicationController
             rescue => e
               Rails.logger.error("Error destroying run #{run.id}: #{e.message}")
               Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
-              # Clear variables even on error
               RunsController.instance_variable_set(:@log, nil)
               RunsController.instance_variable_set(:@h_step_ids, nil)
-              # Fallback: just delete the run if destroy_run_call fails
-              begin
-                run.destroy
-              rescue => e2
-                Rails.logger.error("Error in fallback run destroy: #{e2.message}")
-              end
+              raise
             end
           end
           
@@ -5649,15 +5956,9 @@ class ProjectsController < ApplicationController
         rescue => e
           Rails.logger.error("Error destroying run #{run.id}: #{e.message}")
           Rails.logger.error("Error backtrace: #{e.backtrace.first(5).join("\n")}")
-          # Clear variables even on error
           RunsController.instance_variable_set(:@log, nil)
           RunsController.instance_variable_set(:@h_step_ids, nil)
-          # Fallback: just delete the run if destroy_run_call fails
-          begin
-            run.destroy
-          rescue => e2
-            Rails.logger.error("Error in fallback run destroy: #{e2.message}")
-          end
+          raise
         end
       end
       
@@ -6282,6 +6583,18 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def apply_publication_snapshot_to_runs(relation)
+      return relation unless @project && publication_snapshot_reader?(@project)
+
+      relation.where("#{Run.table_name}.created_at < ?", @project.public_at)
+    end
+
+    def apply_publication_snapshot_to_annots(relation)
+      return relation unless @project && publication_snapshot_reader?(@project)
+
+      relation.where("#{Annot.table_name}.created_at < ?", @project.public_at)
+    end
+
     # Lines from prediction.tool.2.R may be prefixed by Docker/R noise; JSON may use floats.
     def parse_prediction_script_output(text)
       text.to_s.each_line do |line|
@@ -6368,9 +6681,13 @@ class ProjectsController < ApplicationController
     end
 
     def queue_unarchive_if_project_files_missing
+      if @project.reconcile_archive_status_with_filesystem!
+        @project.reload
+      end
+
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
       project_archive_file = Pathname.new("#{project_dir}.tgz")
-      @project_files_missing = !File.exist?(project_dir)
+      @project_files_missing = @project.filesystem_project_data_missing?
       @project_archive_transitioning = [2, 4].include?(@project.archive_status_id)
       @project_unarchive_state = nil
       return unless @project_files_missing
@@ -7426,7 +7743,17 @@ class ProjectsController < ApplicationController
       end
 
       return 0 if candidate_run_ids.empty?
-      Run.where(id: candidate_run_ids).delete_all
+
+      deletable_ids = []
+      Run.where(id: candidate_run_ids).find_each do |run|
+        next if @project.locked_from_publication?(run)
+
+        deletable_ids << run.id
+      end
+      return 0 if deletable_ids.empty?
+
+      Run.where(id: deletable_ids).delete_all
+      deletable_ids.size
     end
 
     def prepare_visualization_de_modal_context
@@ -7559,7 +7886,7 @@ class ProjectsController < ApplicationController
         end
       end
 
-      @runs = @project.runs.includes(:annots)
+      @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       prepare_steps_with_status
       @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
       @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
@@ -7582,7 +7909,9 @@ class ProjectsController < ApplicationController
             saved_view_param = params[:view]
 
             @step = sub_view_step
-            @runs = @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            @runs = apply_publication_snapshot_to_runs(
+              @project.runs.where(step_id: @selected_step_id).includes(:annots).order(created_at: :desc)
+            )
             @project_step = ProjectStep.find_or_create_by(project_id: @project.id, step_id: @selected_step_id)
             @show_form = false
             @show_custom_form = false
@@ -7898,7 +8227,7 @@ class ProjectsController < ApplicationController
       @time_to_destroy = nil
       @time_to_destroy = @project.updated_at + 2.days if @project.sandbox? && !current_user
       @cloned_project = @project.cloned_project if @project.cloned_project_id
-      @runs = @project.runs.includes(:annots) unless @runs
+      @runs ||= apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       @h_steps ||= @all_project_steps.index_by(&:id)
 
       @h_all_runs = {}
@@ -7940,26 +8269,81 @@ class ProjectsController < ApplicationController
       session[:clust_comparison] ||= {}
       session[:clust_comparison][@project.id] ||= {}
       session[:clust_comparison][@project.id][:op] ||= "1"
+
+      assign_summary_submitted_file_link!
+    end
+
+    def summary_project_data_root(project)
+      return unless project&.user_id.present?
+
+      user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp("/")
+      return if user_data_dir.blank?
+
+      base = user_data_dir.end_with?("/users") || user_data_dir.end_with?("users") ? Pathname.new(user_data_dir) : Pathname.new(user_data_dir) + "users"
+      base + project.user_id.to_s + project.key
+    end
+
+    def assign_summary_submitted_file_link!
+      @summary_show_submitted_file_link = false
+      @summary_input_file_get_file_query_param = nil
+      return unless exportable?(@project) && @project.fu_id.present?
+
+      fu = Fu.find_by(id: @project.fu_id)
+      return unless fu
+
+      project_dir = summary_project_data_root(@project)
+      return unless project_dir && Dir.exist?(project_dir.to_s)
+
+      fus_dir = project_dir + "fus" + fu.id.to_s
+      return unless Dir.exist?(fus_dir.to_s)
+
+      expected, = ProjectInputFinalizerService.canonical_input_filename_parts(fu.upload_file_name)
+      expected_path = fus_dir + expected
+      basename =
+        if File.file?(expected_path.to_s) || File.symlink?(expected_path.to_s)
+          expected
+        else
+          candidates = Dir.children(fus_dir.to_s).select do |name|
+            next false if name.include?("/") || name.start_with?(".")
+            p = fus_dir + name
+            next false unless File.file?(p.to_s) || File.symlink?(p.to_s)
+            name == "input_file" || (name.start_with?("input_file.") && name.length > "input_file.".length)
+          end
+          candidates.max_by { |n| [n.length, n] }
+        end
+      return if basename.blank?
+
+      @summary_input_file_get_file_query_param = "fus/#{fu.id}/#{basename}"
+      @summary_show_submitted_file_link = true
+    end
+
+    def get_file_path_within_project_root?(project_root, filepath)
+      root = Pathname.new(project_root.to_s).expand_path
+      fp = Pathname.new(filepath.to_s).expand_path
+      root_s = root.to_s
+      fp_s = fp.to_s
+      fp_s.start_with?(root_s + File::SEPARATOR) || fp_s == root_s
     end
 
     def compute_summary_loom_overview
       @summary_loom_file_count = 0
       @summary_loom_content_counts = { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
       @summary_shared_users_count = @project.shares.count
-      @summary_embedding_count = Annot.where(project_id: @project.id, nber_rows: 2).count
+      embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id, nber_rows: 2))
+      @summary_embedding_count = embedding_scope.count
       @summary_run_user_count = if defined?(@runs) && @runs.present?
         @runs.map(&:user_id).compact.uniq.size
       else
-        @project.runs.where.not(user_id: nil).distinct.count(:user_id)
+        apply_publication_snapshot_to_runs(@project.runs).where.not(user_id: nil).distinct.count(:user_id)
       end
       @summary_visual_annotation_count = Cla.active.where(project_id: @project.id).count
       @summary_visual_vote_count = Cla.where(project_id: @project.id).sum(Arel.sql('COALESCE(nber_agree, 0) + COALESCE(nber_disagree, 0)'))
       @summary_checkpoint_count = @project.checkpoints.count
       @summary_checkpoint_comment_count = @project.checkpoints.to_a.sum { |checkpoint| checkpoint.comments.size }
 
-      summary_annots = Annot.where(project_id: @project.id)
-                           .where.not(filepath: [nil, ''])
-                           .pluck(:filepath, :name, :dim)
+      summary_annots = apply_publication_snapshot_to_annots(
+        Annot.where(project_id: @project.id).where.not(filepath: [nil, ''])
+      ).pluck(:filepath, :name, :dim)
       return if summary_annots.empty?
 
       @summary_loom_file_count = summary_annots.map(&:first).uniq.size
@@ -9746,7 +10130,20 @@ class ProjectsController < ApplicationController
       {}
     end
 
-    # Use callbacks to share common setup or constraints between actions.
+    def reproduction_run_short_txt(run)
+      return 'NA' unless run && @h_steps && @h_steps[run.step_id]
+
+      step = @h_steps[run.step_id]
+      std_method = run.std_method_id ? @h_std_methods[run.std_method_id] : nil
+      std_method_name = std_method&.name
+      parts = step.label.to_s.dup
+      parts += " ##{run.num}" if step.multiple_runs?
+      if std_method_name.present? && std_method_name.downcase != step.label.to_s.downcase
+        parts += " #{std_method_name}"
+      end
+      parts
+    end
+
     def set_project
       identifier = params.expect(:id)
       
@@ -10669,7 +11066,9 @@ class ProjectsController < ApplicationController
         else
           [@step.id]
         end
-      total_runs_count = @project.runs.where(step_id: total_run_step_ids).count
+      total_runs_count = apply_publication_snapshot_to_runs(
+        @project.runs.where(step_id: total_run_step_ids)
+      ).count
       
       Rails.logger.info("[prepare_std_step_data] Step: #{@step.name}, multiple_runs: #{@step.multiple_runs}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, runs_count: #{runs_count}")
       

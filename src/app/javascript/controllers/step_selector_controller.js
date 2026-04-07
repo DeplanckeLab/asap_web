@@ -771,11 +771,18 @@ export default class extends Controller {
   }
 
   updateHeaderStatusSummary(data) {
-    const totals = data && data.project_run_totals
-    if (!totals) return
-
     const headerRoot = document.querySelector('[data-controller~="header-run-status"]')
     if (!headerRoot) return
+
+    // project_run_totals in ActionCable payloads are full aggregates. Publication snapshot readers
+    // (guests / non-owners on published projects) must use filtered counts from GET /run_counts;
+    // applying broadcast totals here would flip the header between correct snapshot counts and full totals.
+    if (headerRoot.getAttribute('data-header-run-status-publication-snapshot-value') === 'true') {
+      return
+    }
+
+    const totals = data && data.project_run_totals
+    if (!totals) return
 
     const statusKeys = ['pending', 'running', 'success', 'failed']
     statusKeys.forEach((statusKey) => {

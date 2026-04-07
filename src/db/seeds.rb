@@ -185,7 +185,7 @@ else
 
   seed_guided_tour!(
     "Get project summary",
-    duration_time: 200,
+    duration_time: 660,
     steps: [
       {
         page_url: base,
@@ -202,7 +202,7 @@ else
         page_url: base,
         title: "Summary dashboard",
         focus_element: '[data-guided-tour="project-summary-dashboard"]',
-        description: "<p>The summary dashboard shows embeddings, annotations, checkpoints, and quick links to Analysis and Data. Cards are clickable shortcuts into each area.</p>",
+        description: "<p>The <strong>Summary</strong> page is a dashboard of cards. This tour walks them in reading order: top row left to right, then the next rows, then source links and publications.</p>",
         exclude_from_page_replay: true,
         step_actions: [
           { "action" => "wait_for_selector", "selector" => '[data-guided-tour="project-summary-dashboard"]', "timeout_ms" => 15000 }
@@ -210,9 +210,109 @@ else
       },
       {
         page_url: base,
-        title: "Identity and key",
+        title: "Visualization card",
+        focus_element: '[data-guided-tour="summary-visualization-shortcut"]',
+        description: "<p>First card: <strong>Visualization</strong>. The whole card opens the interactive plot when embeddings exist. The four counters below summarize collaboration around that view.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-visualization-shortcut"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Embeddings count",
+        focus_element: '[data-guided-tour="summary-embeddings-trigger"]',
+        description: "<p>This number is how many <strong>2D embeddings</strong> (coordinate sets) exist for the project. Click to open a list of LOOM file, run, and embedding name.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-embeddings-trigger"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Annotations count",
+        focus_element: '[data-guided-tour="summary-annotations-trigger"]',
+        description: "<p>Cell-level <strong>annotations</strong> with votes across the project. Click for a breakdown by metadata and label (see also the collaborative annotation tour).</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-annotations-trigger"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Checkpoints count",
+        focus_element: '[data-guided-tour="summary-checkpoints-trigger"]',
+        description: "<p>Saved <strong>checkpoints</strong> capture named views of the visualization. The count is how many checkpoints exist; click to inspect titles and authors.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-checkpoints-trigger"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Comments count",
+        focus_element: '[data-guided-tour="summary-comments-trigger"]',
+        description: "<p><strong>Comments</strong> attached to checkpoints. The number is total comments; click to read them in context of each checkpoint.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-comments-trigger"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Analysis card",
+        focus_element: '[data-guided-tour="summary-analysis-card"]',
+        description: "<p>Next card: <strong>Analysis</strong>. Opens the pipeline of runs and methods. The large number is the <strong>total run count</strong> (all statuses) across steps and methods.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-analysis-card"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Data card",
+        focus_element: '[data-guided-tour="summary-data-card"]',
+        description: "<p><strong>Data</strong> lists LOOM and related files. The large number counts <strong>LOOM files</strong> on the project; open the card to browse matrices, attributes, and downloads.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-data-card"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Settings card",
+        focus_element: '[data-guided-tour="summary-settings-card"]',
+        description: "<p><strong>Settings</strong> summarizes visibility at a glance: whether the project is public or private and how many users it is shared with.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-settings-card"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Public or private",
+        focus_element: '[data-guided-tour="summary-settings-visibility-badge"]',
+        description: "<p><strong>Public</strong> projects appear in browse and search; <strong>private</strong> ones are limited to owners and invited users.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-settings-visibility-badge"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Shared users",
+        focus_element: '[data-guided-tour="summary-sharing-badge"]',
+        description: "<p>How many distinct users have an explicit <strong>share</strong> on this project (not counting public visibility).</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-sharing-badge"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Identity card",
         focus_element: '[data-guided-tour="summary-identity-panel"]',
-        description: "<p>The <strong>Identity</strong> panel shows the project name, type, public or private status, and the stable <strong>project key</strong> others can use to find or cite this project.</p>",
+        description: "<p>Second row, left: <strong>Identity</strong>. Stable identifiers and provenance: key, display name, project type, and whether the project was cloned.</p>",
         exclude_from_page_replay: true,
         step_actions: [
           { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-identity-panel"]', "timeout_ms" => 12000 }
@@ -220,42 +320,142 @@ else
       },
       {
         page_url: base,
-        title: "Collaboration on the summary cards",
-        focus_element: '[data-guided-tour="summary-annotations-trigger"]',
-        description: "<p>Badges on the Visualization card summarize collaborative work: open <strong>annotations</strong>, <strong>checkpoints</strong>, or <strong>comments</strong> from here for full detail (covered in the collaborative annotation tour).</p>",
+        title: "Project key",
+        focus_element: '[data-guided-tour="summary-identity-key"]',
+        description: "<p>The internal <strong>key</strong> never changes; APIs and file paths use it. It is not the same as the public ASAP id shown elsewhere.</p>",
         exclude_from_page_replay: true,
         step_actions: [
-          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-annotations-trigger"]', "timeout_ms" => 10000 }
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-identity-key"]', "timeout_ms" => 12000 }
         ]
       },
       {
         page_url: base,
-        title: "Shortcut to visualization",
-        focus_element: '[data-guided-tour="summary-visualization-shortcut"]',
-        description: "<p>Click the Visualization card to jump straight to embeddings and the interactive plot when coordinate data is available.</p>",
+        title: "Project name",
+        focus_element: '[data-guided-tour="summary-identity-name-row"]',
+        description: "<p>The <strong>display name</strong> shown in headers and lists. Owners can rename it when the project is not public.</p>",
         exclude_from_page_replay: true,
         step_actions: [
-          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-visualization-shortcut"]', "timeout_ms" => 10000 }
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-identity-name-row"]', "timeout_ms" => 12000 }
         ]
       },
       {
         page_url: base,
-        title: "Activity",
+        title: "Project type",
+        focus_element: '[data-guided-tour="summary-identity-type-row"]',
+        description: "<p><strong>Type</strong> (for example single-cell vs bulk) drives labels and which parts of the pipeline apply.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-identity-type-row"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Origin",
+        focus_element: '[data-guided-tour="summary-identity-origin-row"]',
+        description: "<p><strong>Origin</strong> states if the project was created from scratch or <strong>cloned</strong> from another; you can open full lineage when applicable.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-identity-origin-row"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Activity card",
         focus_element: '[data-guided-tour="summary-activity-panel"]',
-        description: "<p>The <strong>Activity</strong> panel lists recent runs and updates so you can see how the project has evolved.</p>",
+        description: "<p>Middle card: <strong>Activity</strong> dates and traffic for the project as a whole.</p>",
         exclude_from_page_replay: true,
         step_actions: [
-          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-activity-panel"]', "timeout_ms" => 10000 }
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-activity-panel"]', "timeout_ms" => 12000 }
         ]
       },
       {
         page_url: base,
-        title: "Reproducibility",
-        focus_element: '[data-guided-tour="summary-reproducibility-panel"]',
-        description: "<p>The <strong>Reproducibility</strong> panel links to methods, software versions, and related documentation when they are recorded for the project.</p>",
+        title: "Created date",
+        focus_element: '[data-guided-tour="summary-activity-created"]',
+        description: "<p>When the project record was <strong>created</strong> in ASAP.</p>",
         exclude_from_page_replay: true,
         step_actions: [
-          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-reproducibility-panel"]', "timeout_ms" => 10000 }
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-activity-created"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Last updated",
+        focus_element: '[data-guided-tour="summary-activity-updated"]',
+        description: "<p>Last time project metadata or related records were <strong>updated</strong> (not each individual run).</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-activity-updated"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "View count",
+        focus_element: '[data-guided-tour="summary-activity-views"]',
+        description: "<p>Cumulative <strong>views</strong> of the project (summary and other views) as recorded by the platform.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-activity-views"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Reproducibility card",
+        focus_element: '[data-guided-tour="summary-reproducibility-panel"]',
+        description: "<p>Right card: <strong>Reproducibility</strong> links for rerunning or auditing the project outside the browser.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-reproducibility-panel"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Instructions link",
+        focus_element: '[data-guided-tour="summary-repro-instructions-link"]',
+        description: "<p>Human-readable <strong>instructions</strong> to reproduce analyses with the recorded software and data layout.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-repro-instructions-link"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Commands link",
+        focus_element: '[data-guided-tour="summary-repro-commands-link"]',
+        description: "<p>Exported <strong>commands</strong> (shell or similar) matching how runs were executed.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-repro-commands-link"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Loom list (JSON)",
+        focus_element: '[data-guided-tour="summary-repro-loom-json-link"]',
+        description: "<p>Machine-readable <strong>list of LOOM paths</strong> for scripting and external tools.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-repro-loom-json-link"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Source repository links",
+        focus_element: '[data-guided-tour="summary-repository-panel"]',
+        description: "<p>Bottom section: external <strong>repository and accession</strong> metadata (GEO, ArrayExpress, etc.) when curators attached them.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-repository-panel"]', "timeout_ms" => 12000 }
+        ]
+      },
+      {
+        page_url: base,
+        title: "Publications",
+        focus_element: '[data-guided-tour="summary-publications-panel"]',
+        description: "<p><strong>Publications</strong> linked by DOI, with resolved titles when metadata is available.</p>",
+        exclude_from_page_replay: true,
+        step_actions: [
+          { "action" => "wait_for_selector", "selector" => '[data-guided-tour="summary-publications-panel"]', "timeout_ms" => 12000 }
         ]
       }
     ]

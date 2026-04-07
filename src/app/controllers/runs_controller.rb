@@ -1,5 +1,6 @@
 class RunsController < ApplicationController
   before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy]
+  before_action :authorize_publication_snapshot_run_access, only: [:get_de_gene_list, :get_ge_geneset_list, :show]
   before_action :get_base_data, only: [:get_de_gene_list, :get_ge_geneset_list]
   include ApplicationHelper
   
@@ -412,6 +413,9 @@ class RunsController < ApplicationController
   end
 
   def self.destroy_run project, step, run
+    if project.locked_from_publication?(run)
+      raise PublicationLockedDeletionError, 'This run was created before publication and cannot be deleted.'
+    end
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
     step_dir = project_dir + step.name
@@ -556,6 +560,10 @@ class RunsController < ApplicationController
   end
   
   def self.destroy_run_call project, run
+    if project.locked_from_publication?(run)
+      raise PublicationLockedDeletionError, 'This run was created before publication and cannot be deleted.'
+    end
+
     start_time = Time.now
     @log = ""
     log = ''
@@ -626,6 +634,21 @@ class RunsController < ApplicationController
   end
 
   private
+
+    def authorize_publication_snapshot_run_access
+      return unless @run && @project
+
+      unless readable?(@project)
+        head :forbidden
+        return
+      end
+
+      return unless publication_snapshot_reader?(@project)
+      return if @project.locked_from_publication?(@run)
+
+      head :forbidden
+    end
+
     def de_filter_cache_key
       return "u#{current_user.id}" if current_user
 

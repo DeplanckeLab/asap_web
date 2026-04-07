@@ -485,13 +485,8 @@
                       </div>
                     </td>
                     <td class="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div class="flex items-center justify-end gap-1.5" onclick="event.stopPropagation();">
-                        <% if run_locked %>
-                          <span class="inline-flex items-center justify-center px-2 py-2 border border-gray-300 rounded text-gray-500 bg-gray-50"
-                                title="Created before publication; cannot be modified">
-                            <i class="fas fa-lock text-xs"></i>
-                          </span>
-                        <% end %>
+                      <div class="flex items-center justify-end gap-1.5 flex-wrap" onclick="event.stopPropagation();">
+                        <%= publication_visibility_badge(@project, run, full_read_access: !publication_snapshot_reader?(@project)) %>
                         <% if @step&.embedding_step? %>
                           <%# Find 2D embedding annotation for this run %>
                           <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: run.id, nber_rows: 2).order(:name).first %>

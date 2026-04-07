@@ -69,8 +69,9 @@
             <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 hover:border-blue-300 transition-colors">
               <div class="flex items-start justify-between gap-3">
                 <%= link_to annot_path(annot, from: 'data'), class: 'flex-1 min-w-0 cursor-pointer' do %>
-                  <h4 class="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                  <h4 class="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2 flex-wrap">
                     <%= format_annot_name(annot.name) %>
+                    <%= publication_visibility_badge(@project, annot, full_read_access: !publication_snapshot_reader?(@project)) %>
                     <i class="fas fa-chevron-right text-xs text-gray-400"></i>
                   </h4>
                   <div class="flex flex-wrap gap-2 items-center">

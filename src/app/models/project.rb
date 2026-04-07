@@ -1,3 +1,5 @@
+require "shellwords"
+
 class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
@@ -377,6 +379,21 @@ class Project < ApplicationRecord
     Pathname.new(ENV.fetch('USER_DATA_DIR')) + user_id.to_s + key
   end
 
+  # Matches the idea in Basic.unarchive: directory must exist and have more than ~10KB of content.
+  # An empty or placeholder directory is treated as missing so we still queue unarchive from S3.
+  def filesystem_project_data_present?
+    dir = storage_dir
+    return false unless File.directory?(dir)
+
+    du_line = `du -sk #{Shellwords.escape(dir.to_s)} 2>/dev/null`.strip
+    kb = du_line.split(/\s+/, 2).first.to_i
+    kb > 10
+  end
+
+  def filesystem_project_data_missing?
+    !filesystem_project_data_present?
+  end
+
   def archived_on_s3?
     archive_status_id == 3
   end
@@ -385,10 +402,62 @@ class Project < ApplicationRecord
     archive_status_id == 4
   end
 
+  # UI: +archive_status_id+ is what jobs and Basic.unarchive use. Rows in +archive_statuses+ can have
+  # mismatched +name+ / +icon_class+ after imports or legacy data; do not trust them for tooltips/icons.
+  ARCHIVE_STATE_DISPLAY = {
+    1 => { label: 'Unarchived', icon: 'fas fa-folder-open' },
+    2 => { label: 'Archiving', icon: 'fas fa-spinner fa-spin' },
+    3 => { label: 'Archived', icon: 'fas fa-archive' },
+    4 => { label: 'Unarchiving', icon: 'fas fa-spinner fa-spin' }
+  }.freeze
+
+  def archive_status_label_for_display
+    ARCHIVE_STATE_DISPLAY.dig(archive_status_id, :label) || archive_status&.display_name.presence || 'Unknown'
+  end
+
+  def archive_status_icon_class_for_display
+    if ARCHIVE_STATE_DISPLAY.key?(archive_status_id)
+      ARCHIVE_STATE_DISPLAY[archive_status_id][:icon]
+    else
+      archive_status&.icon_class
+    end
+  end
+
+  # When DB state does not match the local USER_DATA_DIR tree (e.g. DB from production but files from dev,
+  # or the opposite), align archive_status with whether the project directory exists.
+  # Does not run when archive_status_id is 2 (being archived) or 4 (being unarchived); those are handled
+  # by archive/unarchive jobs and projects:rescue_archive_states.
+  def reconcile_archive_status_with_filesystem!
+    with_lock do
+      reload
+      return false if [2, 4].include?(archive_status_id)
+
+      data_present = filesystem_project_data_present?
+      effective_unarchived = archive_status_id.nil? || archive_status_id == 1
+
+      if data_present && archived_on_s3?
+        Rails.logger.info(
+          "[Project#reconcile_archive_status_with_filesystem!] Project #{id} (#{key}): folder present but status was archived; setting unarchived"
+        )
+        update!(archive_status_id: 1, disk_size_archived: nil)
+        true
+      elsif !data_present && effective_unarchived
+        Rails.logger.info(
+          "[Project#reconcile_archive_status_with_filesystem!] Project #{id} (#{key}): project data missing or empty but status was unarchived; setting archived"
+        )
+        update!(archive_status_id: 3)
+        true
+      else
+        false
+      end
+    end
+  end
+
   def queue_unarchive_if_needed!
     with_lock do
       reload
-      if archive_status_id == 1 && disk_size_archived.present? && !File.exist?(storage_dir)
+      effective_unarchived = archive_status_id.nil? || archive_status_id == 1
+      if effective_unarchived && disk_size_archived.present? && filesystem_project_data_missing?
         update!(archive_status_id: 3)
       end
 

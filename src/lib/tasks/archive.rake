@@ -157,6 +157,11 @@ def archive_project_to_s3!(project, s3b:, dry_run: false)
     return :dry_run
   end
 
+  if Rails.env.development?
+    Rails.logger.info("[archive] development: skip S3 upload and local archive for project=#{project.id} key=#{project.key}")
+    return :development_skipped
+  end
+
   archive_file = Pathname.new("#{project_dir}.tgz")
   File.delete(archive_file) if File.exist?(archive_file)
 
@@ -312,7 +317,7 @@ namespace :projects do
         counts[result] += 1
       end
 
-      puts "[archive_inactive] done archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]} exempt=#{counts[:exempt]}"
+      puts "[archive_inactive] done archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]} exempt=#{counts[:exempt]} development_skipped=#{counts[:development_skipped]}"
       f.flock(File::LOCK_UN)
     end
   end
@@ -378,7 +383,23 @@ namespace :projects do
     scope = scope.where("updated_at < ?", Time.current - stale_hours.hours) if stale_hours.positive?
 
     puts "[rescue_archive_states] start dry_run=#{dry_run} rearchive=#{rearchive} rearchive_idle_days=#{rearchive_idle_days} stale_hours=#{stale_hours} project_key=#{project_key || 'all'}"
-    puts "[rescue_archive_states] candidates=#{scope.count}"
+    candidates_count = scope.count
+    puts "[rescue_archive_states] candidates=#{candidates_count}"
+
+    if project_key.present? && candidates_count.zero?
+      p = Project.find_by(key: project_key)
+      if p.nil?
+        puts "[rescue_archive_states] diagnostic: no Project row with key=#{project_key}"
+      else
+        puts "[rescue_archive_states] diagnostic: project id=#{p.id} key=#{p.key} archive_status_id=#{p.archive_status_id} updated_at=#{p.updated_at&.utc&.iso8601}"
+        unless [2, 4].include?(p.archive_status_id)
+          puts "[rescue_archive_states] diagnostic: not in scope because archive_status_id is not 2 or 4 (only those states are rescued)"
+        end
+        if stale_hours.positive? && p.updated_at.present? && p.updated_at >= Time.current - stale_hours.hours
+          puts "[rescue_archive_states] diagnostic: not in scope because STALE_HOURS=#{stale_hours} excludes rows with updated_at within the last #{stale_hours} hours"
+        end
+      end
+    end
 
     counts = Hash.new(0)
 
@@ -386,7 +407,9 @@ namespace :projects do
       begin
         user_dir = user_data_dir + project.user_id.to_s
         local_dir = user_dir + project.key
-        local_exists = File.exist?(local_dir)
+        # Match Project#filesystem_project_data_present?: a real project tree is a directory. File.exist?
+        # would be true for a stray file at this path, which is not a project directory.
+        local_exists = File.directory?(local_dir)
         local_mtime = directory_latest_mtime(local_dir)
         local_size_bytes = directory_size_bytes(local_dir)
         last_seen_at = project.viewed_at || project.updated_at || project.created_at
@@ -423,15 +446,22 @@ namespace :projects do
             puts "[rescue_archive_states][WARNING] review manually before any repair/archive decision"
             puts "[rescue_archive_states][WARNING] ----------------------------------------------------------------"
             counts[:manual_review_newer_smaller] += 1
+            puts "[rescue_archive_states] SKIPPED key=#{project.key}: manual_review_newer_smaller (archive_status_id=#{project.archive_status_id} left unchanged)"
             FileUtils.rm_r(tmp_dir) if File.exist?(tmp_dir)
             next
           end
         end
 
+        # Same notion of "present" as Project#filesystem_project_data_present? (dir with more than ~10KB).
+        # A tiny or empty directory must not use :local_only_mark_unarchived or the next HTTP request will
+        # reconcile to archived and queue_unarchive_if_needed! will set 4 again.
+        filesystem_data_present = project.filesystem_project_data_present?
         decision = if !local_exists && s3_exists
                      :s3_only_mark_archived
-                   elsif local_exists && !s3_exists
+                   elsif local_exists && !s3_exists && filesystem_data_present
                      :local_only_mark_unarchived
+                   elsif local_exists && !s3_exists && !filesystem_data_present
+                     :missing_both
                    elsif local_exists && s3_exists && s3_mtime && local_mtime && s3_mtime > local_mtime
                      :replace_with_s3
                    elsif local_exists
@@ -440,10 +470,27 @@ namespace :projects do
                      :missing_both
                    end
 
-        puts "[rescue_archive_states] project=#{project.id} key=#{project.key} status=#{project.archive_status_id} local_exists=#{local_exists} local_mtime=#{local_mtime&.utc&.iso8601} local_size_bytes=#{local_size_bytes} s3_exists=#{s3_exists} s3_mtime=#{s3_mtime&.utc&.iso8601} s3_size_bytes=#{s3_size_bytes} decision=#{decision}"
+        puts "[rescue_archive_states] project=#{project.id} key=#{project.key} status=#{project.archive_status_id} local_exists=#{local_exists} filesystem_data_present=#{filesystem_data_present} local_mtime=#{local_mtime&.utc&.iso8601} local_size_bytes=#{local_size_bytes} s3_exists=#{s3_exists} s3_mtime=#{s3_mtime&.utc&.iso8601} s3_size_bytes=#{s3_size_bytes} decision=#{decision}"
 
         if decision == :missing_both
           counts[:missing_both] += 1
+          missing_detail = if local_exists
+                               'local project dir exists but has no usable project data (same rule as Project#filesystem_project_data_present?); S3 snapshot missing or could not be restored'
+                             else
+                               'no local project dir under USER_DATA_DIR and S3 snapshot missing or could not be restored (see Basic.write_file_from_s3 / retrieve_project_snapshot_from_s3)'
+                             end
+          puts "[rescue_archive_states] missing_both key=#{project.key}: #{missing_detail}"
+          if project.archive_status_id == 4
+            if dry_run
+              puts "[rescue_archive_states][dry-run] would set archive_status_id=3 for key=#{project.key} to clear stuck being-unarchived (missing both)"
+            else
+              project.update!(archive_status_id: 3)
+              puts "[rescue_archive_states] set archive_status_id=3 for key=#{project.key} (was 4, missing both) so unarchive can be retried after S3/path is fixed"
+            end
+            counts[:missing_both_reset_from_unarchiving] += 1
+          else
+            puts "[rescue_archive_states] status unchanged for key=#{project.key} (missing_both, archive_status_id=#{project.archive_status_id})"
+          end
           FileUtils.rm_r(tmp_dir) if File.exist?(tmp_dir)
           next
         end
@@ -510,10 +557,13 @@ namespace :projects do
         FileUtils.rm_r(tmp_dir) if File.exist?(tmp_dir)
       rescue StandardError => e
         counts[:failed] += 1
-        Rails.logger.error("[rescue_archive_states] project=#{project.id} key=#{project.key} error=#{e.class} #{e.message}")
+        msg = "[rescue_archive_states] FAILED project=#{project.id} key=#{project.key} error=#{e.class} #{e.message}"
+        Rails.logger.error(msg)
+        puts msg
+        puts e.backtrace&.first&.to_s
       end
     end
 
-    puts "[rescue_archive_states] done manual_review_newer_smaller=#{counts[:manual_review_newer_smaller]} marked_archived_s3_only=#{counts[:marked_archived_s3_only]} marked_unarchived_local_only=#{counts[:marked_unarchived_local_only]} replaced_with_s3=#{counts[:replaced_with_s3]} kept_local=#{counts[:kept_local]} missing_both=#{counts[:missing_both]} status_reset=#{counts[:status_reset]} rearchive_archived=#{counts[:rearchive_archived]} rearchive_exempt=#{counts[:rearchive_exempt]} rearchive_failed=#{counts[:rearchive_failed]} rearchive_missing_local_dir=#{counts[:rearchive_missing_local_dir]} rearchive_empty_local_dir=#{counts[:rearchive_empty_local_dir]} rearchive_dry_run=#{counts[:rearchive_dry_run]} rearchive_not_due=#{counts[:rearchive_not_due]} rearchive_skipped=#{counts[:rearchive_skipped]} failed=#{counts[:failed]}"
+    puts "[rescue_archive_states] done manual_review_newer_smaller=#{counts[:manual_review_newer_smaller]} marked_archived_s3_only=#{counts[:marked_archived_s3_only]} marked_unarchived_local_only=#{counts[:marked_unarchived_local_only]} replaced_with_s3=#{counts[:replaced_with_s3]} kept_local=#{counts[:kept_local]} missing_both=#{counts[:missing_both]} missing_both_reset_from_unarchiving=#{counts[:missing_both_reset_from_unarchiving]} status_reset=#{counts[:status_reset]} rearchive_archived=#{counts[:rearchive_archived]} rearchive_exempt=#{counts[:rearchive_exempt]} rearchive_failed=#{counts[:rearchive_failed]} rearchive_missing_local_dir=#{counts[:rearchive_missing_local_dir]} rearchive_empty_local_dir=#{counts[:rearchive_empty_local_dir]} rearchive_dry_run=#{counts[:rearchive_dry_run]} rearchive_not_due=#{counts[:rearchive_not_due]} rearchive_skipped=#{counts[:rearchive_skipped]} failed=#{counts[:failed]}"
   end
 end

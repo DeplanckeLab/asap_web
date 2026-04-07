@@ -303,10 +303,11 @@
                         <%= project.display_name %>
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
-                        <% if project.archive_status.present? && project.archive_status.icon_class.present? %>
+                        <% archive_icon = project.archive_status_icon_class_for_display %>
+                        <% if archive_icon.present? %>
                           <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-700"
-                                title="Archive status: <%= project.archive_status.display_name %>">
-                            <i class="<%= project.archive_status.icon_class %> text-xs"></i>
+                                title="Archive status: <%= project.archive_status_label_for_display %>">
+                            <i class="<%= archive_icon %> text-xs"></i>
                           </span>
                         <% end %>
                         <% if project.key.present? %>

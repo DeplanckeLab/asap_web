@@ -1,4 +1,6 @@
 class Run < ApplicationRecord
+  before_destroy :prevent_deletion_if_locked_from_publication
+
   belongs_to :project
   belongs_to :step
   belongs_to :status, optional: true
@@ -21,4 +23,13 @@ class Run < ApplicationRecord
   def clustering_run?
     step&.name == 'clustering'
   end
+
+  private
+
+    def prevent_deletion_if_locked_from_publication
+      return unless project&.locked_from_publication?(self)
+
+      errors.add(:base, 'This run was created before publication and cannot be deleted.')
+      throw(:abort)
+    end
 end

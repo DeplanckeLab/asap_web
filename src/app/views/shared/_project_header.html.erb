@@ -57,7 +57,9 @@
           [:pending, :running, :success, :failed].each do |key|
             status_id = h_status_ids[key]
             if run_counts[key] > 0
-              runs_by_status[key] = @project.runs.includes(:step, :std_method).where(status_id: status_id, step_id: visible_step_ids).order(created_at: :desc)
+              scope = @project.runs.includes(:step, :std_method).where(status_id: status_id, step_id: visible_step_ids)
+              scope = scope.where('runs.created_at < ?', @project.public_at) if publication_snapshot_reader?(@project)
+              runs_by_status[key] = scope.order(created_at: :desc)
             else
               runs_by_status[key] = []
             end
@@ -113,7 +115,8 @@
         %>
         <div class="flex items-stretch space-x-4 min-w-0"
              data-controller="header-run-status"
-             data-header-run-status-project-id-value="<%= @project.id %>">
+             data-header-run-status-project-id-value="<%= @project.id %>"
+             data-header-run-status-publication-snapshot-value="<%= publication_snapshot_reader?(@project) %>">
             <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2 min-w-0">
               <span class="block truncate max-w-[10rem] sm:max-w-[14rem] md:max-w-xs lg:max-w-sm xl:max-w-md" title="<%= @project.display_name %>"><%= @project.display_name %></span>

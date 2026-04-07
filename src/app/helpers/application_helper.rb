@@ -1,4 +1,27 @@
 module ApplicationHelper
+  # Badges for published public projects (public_at set):
+  # - Green closed lock: in the public snapshot (created before public_at); visible to anyone who can read the project in snapshot mode.
+  # - Grey open lock: after public_at; only listed for users with full read access (owner/admin). Snapshot-only readers and guests must not see these rows (controller filters enforce that).
+  def publication_visibility_badge(project, record, full_read_access:)
+    return ''.html_safe unless project&.publication_lock_active? && record
+
+    if project.locked_from_publication?(record)
+      content_tag(:span,
+                  class: 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 border border-green-200 ml-1',
+                  title: 'Included in public snapshot') do
+        content_tag(:i, '', class: 'fas fa-lock')
+      end
+    elsif full_read_access
+      content_tag(:span,
+                  class: 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300 ml-1',
+                  title: 'Not in public snapshot; visible only with full read access to this project') do
+        content_tag(:i, '', class: 'fas fa-lock-open')
+      end
+    else
+      ''.html_safe
+    end
+  end
+
   def clean_metadata_path(name)
     name.to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/row_attrs/}, '').sub(%r{^/}, '')
   end
@@ -497,6 +520,44 @@ module ApplicationHelper
     "<div class='flex flex-wrap gap-1.5 items-center'>" + all_badges.join("") + "</div>"
   end
 
+  # Plain-text run parameters for reproduction shell scripts (legacy ASAP get_commands).
+  def display_run_attrs_txt(run, h_attrs, h_std_method_attrs)
+    return '' unless run && h_attrs.is_a?(Hash)
+
+    reject_attrs = if @h_dashboard_card && @h_dashboard_card[run.step_id]
+                     @h_dashboard_card[run.step_id]['reject_attrs'] || []
+                   else
+                     []
+                   end
+
+    list = []
+    h_attrs.keys.reject { |attr| reject_attrs.include?(attr) }.each do |attr|
+      v = h_attrs[attr]
+      txt = ''
+      list_datasets = []
+      if v.is_a?(Hash) && v['run_id']
+        list_datasets.push(v)
+      elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
+        list_datasets = v
+      else
+        std_method_attr = (h_std_method_attrs && run.std_method_id) ? h_std_method_attrs[run.std_method_id]&.[](attr) : nil
+        txt = std_method_attr ? "#{attr}:#{v}" : ''
+      end
+      list_datasets.each_index do |_dataset_i|
+        v_ds = list_datasets[_dataset_i]
+        tmp_run = v_ds && v_ds['run_id'] ? Run.find_by(id: v_ds['run_id']) : nil
+        tmp_step = tmp_run ? @h_steps[tmp_run.step_id] : nil
+        txt = if tmp_run && tmp_step
+                "#{attr}:#{tmp_step.name}" + (tmp_step.multiple_runs? ? " ##{tmp_run.num}" : '')
+              else
+                "#{attr}:NA"
+              end
+      end
+      list.push(txt)
+    end
+    list.reject(&:blank?).join(' ')
+  end
+
   def render_results_dataset_sections(h_annots_by_dim, variant: :legacy_button, pluralize_all: false)
     return '' unless h_annots_by_dim.present?
 
@@ -696,21 +757,44 @@ module ApplicationHelper
   # Returns run counts by status from project_steps' nber_runs_json
   # More efficient than counting runs directly
   # Returns { pending: N, running: N, success: N, failed: N }
+  #
+  # For published public projects (public_at set), guests and other snapshot readers must only
+  # see runs in the public snapshot (same rule as run_visible_under_publication_rules? / green lock).
   def project_run_counts(project)
-    totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
-    json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
-    json_data ||= {}
-    json_data.each do |status_id, count|
-      status_key = status_id.to_i
-      totals[status_key] = count.to_i if totals.key?(status_key)
+    visible_ids = visible_step_ids_for_run_counts
+    if project.publication_lock_active? && publication_snapshot_reader?(project)
+      tallies = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+      project.runs
+             .where(step_id: visible_ids)
+             .where('runs.created_at < ?', project.public_at)
+             .group(:status_id)
+             .count
+             .each do |status_id, n|
+        k = status_id.to_i
+        tallies[k] = n if tallies.key?(k)
+      end
+      {
+        pending: tallies[1],
+        running: tallies[2],
+        success: tallies[3],
+        failed: tallies[4]
+      }
+    else
+      totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+      json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
+      json_data ||= {}
+      json_data.each do |status_id, count|
+        status_key = status_id.to_i
+        totals[status_key] = count.to_i if totals.key?(status_key)
+      end
+
+      {
+        pending: totals[1],
+        running: totals[2],
+        success: totals[3],
+        failed: totals[4]
+      }
     end
-    
-    {
-      pending: totals[1],
-      running: totals[2],
-      success: totals[3],
-      failed: totals[4]
-    }
   end
 
   def visible_step_ids_for_run_counts

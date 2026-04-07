@@ -1,4 +1,26 @@
 class ProjectInputFinalizerService
+  # Shared with summary / get_file links: canonical basename under fus/<fu_id>/.
+  def self.extract_upload_extension(filename)
+    normalized = filename.to_s.downcase
+    multi_part_extension = %w[
+      .tar.gz
+      .tar.bz2
+      .tar.xz
+      .tar.zst
+      .tgz
+      .tbz2
+      .txz
+    ].find { |ext| normalized.end_with?(ext) }
+
+    multi_part_extension || File.extname(filename.to_s)
+  end
+
+  def self.canonical_input_filename_parts(upload_file_name)
+    ext = extract_upload_extension(upload_file_name.to_s)
+    canonical_name = ext.present? ? "input_file#{ext}" : "input_file"
+    [canonical_name, ext.delete_prefix(".").presence]
+  end
+
   # Finalizes uploaded input storage when a project is created:
   # - resolve source from Fu staging
   # - persist detected format in parsing attrs
@@ -28,7 +50,7 @@ class ProjectInputFinalizerService
     # 2) Persist detected format early so parsing does not depend on transient files.
     persist_detected_format_from_preparsing(upload_dir)
     # 3) Normalize root filename (input_file.<ext>) and project extension metadata.
-    canonical_project_input_filename, ext = canonical_input_filename_for(input_filename)
+    canonical_project_input_filename, ext = self.class.canonical_input_filename_parts(input_filename)
 
     @project.input_filename = canonical_project_input_filename
     @project.fu_id = @input_file&.id
@@ -86,14 +108,6 @@ class ProjectInputFinalizerService
     @logger.warn("[ProjectsController#create] Could not persist preparsing detected_format: #{e.class} - #{e.message}")
   end
 
-  def canonical_input_filename_for(input_filename)
-    # Keep original upload extension(s) to avoid name collisions with extracted
-    # directories (e.g. input_file.tar.gz vs extracted input_file/).
-    ext = extract_upload_extension(input_filename.to_s)
-    canonical_name = ext.present? ? "input_file#{ext}" : "input_file"
-    [canonical_name, ext.delete_prefix(".").presence]
-  end
-
   def finalize_storage!(upload_dir:, input_filename:, canonical_project_input_filename:)
     canonical_upload_path = upload_dir + input_filename
     # Source file must exist in staging before we mutate Fu linkage or move dirs.
@@ -149,20 +163,5 @@ class ProjectInputFinalizerService
     FileUtils.rm_rf(new_upload_dir) if File.exist?(new_upload_dir.to_s)
     FileUtils.mv(old_upload_dir.to_s, new_upload_dir.to_s)
     @logger.info("[ProjectsController#create] Moved upload directory from #{old_upload_dir} to #{new_upload_dir}")
-  end
-
-  def extract_upload_extension(filename)
-    normalized = filename.to_s.downcase
-    multi_part_extension = %w[
-      .tar.gz
-      .tar.bz2
-      .tar.xz
-      .tar.zst
-      .tgz
-      .tbz2
-      .txz
-    ].find { |ext| normalized.end_with?(ext) }
-
-    multi_part_extension || File.extname(filename.to_s)
   end
 end

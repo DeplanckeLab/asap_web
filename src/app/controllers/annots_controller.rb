@@ -398,6 +398,9 @@ class AnnotsController < ApplicationController
     unless readable?(@annot.project)
       redirect_to unauthorized_path and return
     end
+    unless annot_visible_under_publication_rules?(@annot.project, @annot)
+      redirect_to unauthorized_path and return
+    end
   end
 
   # Compute bins for histogram

@@ -1,4 +1,6 @@
 class Annot < ApplicationRecord
+  before_destroy :prevent_deletion_if_locked_from_publication
+
   belongs_to :project
   belongs_to :step, optional: true
   belongs_to :run, optional: true
@@ -137,6 +139,13 @@ class Annot < ApplicationRecord
   end
 
   private
+
+  def prevent_deletion_if_locked_from_publication
+    return unless project&.locked_from_publication?(self)
+
+    errors.add(:base, 'This metadata was created before publication and cannot be deleted.')
+    throw(:abort)
+  end
 
   def reindex_project
     project&.__elasticsearch__&.index_document

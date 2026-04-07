@@ -189,6 +189,31 @@ module ProjectAuthorization
     admin? || owner?(project)
   end
 
+  # Public projects with public_at: only owners/admins see runs/annots created after publication.
+  # Anonymous and other readers see the "snapshot" (records with created_at < public_at).
+  def publication_snapshot_reader?(project)
+    return false unless project&.publication_lock_active?
+
+    return false if admin?
+    return false if owner_or_admin?(project)
+
+    true
+  end
+
+  def annot_visible_under_publication_rules?(project, annot)
+    return true unless project&.publication_lock_active?
+    return true if admin? || owner_or_admin?(project)
+
+    project.locked_from_publication?(annot)
+  end
+
+  def run_visible_under_publication_rules?(project, run)
+    return true unless project&.publication_lock_active?
+    return true if admin? || owner_or_admin?(project)
+
+    project.locked_from_publication?(run)
+  end
+
   # Check if project is read-only for current user
   def read_only?(project)
     return true unless project

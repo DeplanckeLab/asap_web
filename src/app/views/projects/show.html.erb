@@ -6,7 +6,14 @@ else
 end %>
 <% content_for :meta_description, meta_desc %>
 
-<!-- Content Area -->
+<!-- Content Area: unarchive-in-progress applies to every tab (same condition as visualization used to use alone) -->
+<% unarchive_state = @project_unarchive_state.to_s %>
+<% show_unarchive_pending = @project_archive_transitioning || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state)) %>
+<% if show_unarchive_pending %>
+  <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+    <%= render 'projects/views/unarchive_pending_overlay' %>
+  </div>
+<% else %>
 <% case @view_type %>
 <% when 'summary' %>
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -36,4 +43,5 @@ end %>
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/summary' %>
   </div>
+<% end %>
 <% end %>

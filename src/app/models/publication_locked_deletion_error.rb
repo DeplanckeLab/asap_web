@@ -1,0 +1,1 @@
+class PublicationLockedDeletionError < StandardError; end

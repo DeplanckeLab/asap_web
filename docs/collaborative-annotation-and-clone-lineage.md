@@ -271,7 +271,8 @@ Distinguish:
 
 - `app/controllers/concerns/project_authorization.rb` — `readable?`, `analyzable?`, `annotable?`, `cla_votable?`, `exportable?`
 - `app/services/project_clone_service.rb` — clone steps, `annot_cell_sets`, `cloned_project_id`
-- `app/controllers/projects_controller.rb` — `get_annot_info`, `get_cell_set_annotations`
+- `app/controllers/projects_controller.rb` — `get_annot_info`, `get_cell_set_annotations`, `discover_metadata_import_sources` (Mode A)
+- `app/services/metadata_import_mode_a_discovery_service.rb` — Mode A discovery (R-M1a)
 - `app/services/metadata_name_authorization_service.rb` — reserved **regexp** policy for metadata names (R-NM0–R-NM4)
 - `app/models/cla_vote.rb` — `ClaVote` model
 - `lib/basic.rb` — `add_clas`, `marker_groups_annot_id`

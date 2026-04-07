@@ -161,7 +161,7 @@ When the **logical metadata name** (typically `Annot#name` / loom column basenam
 
 **R-M4 (versioned name, “keep both”):** Follow the same **suffix convention** already used around compliance workflows: names ending with **`.vN`** where **N** is a positive integer (see **`lib/tasks/compliance_audit.rake`** for patterns such as `%.v%` and stripping **`\.v\d+\z`** to obtain the base name). On “keep both”, assign the **next free N** for that **base name** in the **target** project so **`base.v{N}`** does not collide with any existing `Annot.name`. Increment **`version_nber`** / **`latest_version`** flags consistently with how the application already represents successive metadata versions (align with compliance and `Annot` versioning rules).
 
-**R-M5 (overwrite safety):** Overwrite is allowed only after **enumerating dependent runs** (pipeline steps whose `attrs_json` / `output_json` / lineage reference that metadata). If enumeration fails, **block** overwrite and show **R-N1**-style messaging.
+**R-M5 (overwrite safety):** Overwrite is allowed only after **enumerating dependent runs** (pipeline steps whose `attrs_json` / `output_json` / lineage reference that metadata). If enumeration fails, **block** overwrite and show **R-N1**-style messaging. **Implementation:** `RunAnnotReferenceScanner` treats a run as dependent if its JSON references the **`annot_id`** (and common `*_annot_id` keys), an exact **LOOM path** string for `/col_attrs/` or `/row_attrs/`, lists the annot’s **producing run** in **`input_run_ids`** / **`input_run_id`** / nested **`lineage_run_ids`**, or carries that producing run in the run’s own **`lineage_run_ids`** (downstream steps). The producing run is **`Annot#run_id`** or **`Annot#ori_run_id`** and is excluded from the hit set.
 
 #### 6.3.5 Reserved and ASAP-like metadata names (imports and user-chosen names)
 
@@ -233,7 +233,7 @@ Distinguish:
 2. **Discovery service (Mode A):** Given **`project_id`** + **`cell_set_id`** (or key), list **other projects** with the same **`project_cell_set_id`** / cell-set identity where the user is **`readable?`**, and list **compatible** `Annot` candidates.
 3. **Explicit project picker (Mode B):** Given **`readable?`** source **`project_id`**, list **compatible** metadata for multi-select import (**R-M1b–R-M1c**). **API done:** `GET /projects/:id/discover_metadata_import_from_project` with `source_project_id` or `source_project_key`; see **section 9** and [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 3. **UI:** Phase 1 item 4.
 4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable. **Done (API + UI):** see [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 4.
-5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**.
+5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**. **Done:** see **`RunAnnotReferenceScanner`** and Phase 1 item **5** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
 6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**.
 7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
 
@@ -263,7 +263,7 @@ Distinguish:
 3. When the **source** public project **deletes** metadata, should import/sync **default source** prefer another **`Project`** in the same **`project_cell_set_id`** lineage, or treat lineage as **immutable** for hints? (Cell identity itself stays keyed by **`project_cell_set_id`**; this is only about **which project id** the UI suggests.)
 4. **Resolved:** Voting requires **ORCID** (**Rule V1**, **R-VT3**); no votes for users without an associated ORCID.
 5. **Private projects in federation:** Confirm that **shared-with-view** private projects participate in **both** metadata import discovery and federated CLA lists for users who have access (expected: yes, per **readable?**).
-6. **Overwrite scope:** Must **overwrite** remove **all** runs downstream of the replaced metadata, or only runs that **directly** reference it (stricter graph)? Product must confirm default for **R-M5** messaging.
+6. **Overwrite scope (R-M5 default shipped):** Overwrite is blocked when **`RunAnnotReferenceScanner`** finds **direct JSON references** to the annot or path, **input run lists** that include the annot’s producing run, or **lineage** that includes that producer (see **R-M5** above). Product may still tighten or relax messaging; removing downstream runs from the project is **not** automatic on import.
 
 ---
 
@@ -278,6 +278,7 @@ Distinguish:
 - `app/services/metadata_import_mode_a_discovery_service.rb` — Mode A (R-M1a)
 - `app/services/metadata_import_mode_b_discovery_service.rb` — Mode B (R-M1b)
 - `app/services/metadata_name_authorization_service.rb` — reserved **regexp** policy for metadata names (R-NM0–R-NM4)
+- `app/services/run_annot_reference_scanner.rb` — dependent runs before metadata **overwrite** (R-M5); used by **`MetadataFileImportValidation`**
 - `app/models/cla_vote.rb` — `ClaVote` model
 - `lib/basic.rb` — `add_clas`, `marker_groups_annot_id`
 - `lib/tasks/compliance_audit.rake` — versioned **`Annot`** names (`%.v%`, **`\.v\d+\z`** pattern)

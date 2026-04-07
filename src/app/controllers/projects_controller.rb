@@ -9927,7 +9927,9 @@ class ProjectsController < ApplicationController
         if cell_set_ids.empty?
           {}
         else
-          Cla.active.where(cell_set_id: cell_set_ids).group_by(&:cell_set_id)
+          all_for_sets = Cla.active.where(cell_set_id: cell_set_ids).includes(:project).to_a
+          readable_for_sets = all_for_sets.select { |cla| cla.project && readable?(cla.project) }
+          readable_for_sets.group_by(&:cell_set_id)
         end
 
       annot_cell_sets.each do |annot_cell_set|

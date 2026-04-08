@@ -81,7 +81,6 @@ class ProjectBroadcastJob < ApplicationJob
 
     h_res = {
       :step_name => step.name,
-      :step => step,
       :h_nber_analyses => {},
       #      :h_statuses_json => h_status.to_json, 
       #      :summary_step_id => Step.find_by_name("summary").id,

@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import consumer from "channels/consumer"
+import consumer, { dispatchProjectStepRunsChangedFromCable } from "channels/consumer"
 
 export default class extends Controller {
   static targets = ["statusCount", "statusIcon", "statusButton", "cellCount"]
@@ -41,6 +41,7 @@ export default class extends Controller {
         },
         received: (data) => {
           console.log('[HeaderRunStatus] Received broadcast:', JSON.stringify(data))
+          dispatchProjectStepRunsChangedFromCable(data)
           this.handleStatusUpdate(data)
         }
       }

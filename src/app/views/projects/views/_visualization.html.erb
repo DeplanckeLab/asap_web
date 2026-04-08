@@ -293,6 +293,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
                             <span class="metadata-category-header-cell metadata-category-header-best">Best annotation</span>
                             <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                            <span class="metadata-category-header-cell metadata-category-header-markers" title="FindMarkers status for this category"><i class="fas fa-microscope" style="font-size:10px;color:#9ca3af;"></i></span>
                             <span class="metadata-category-header-cell metadata-category-header-annot" aria-hidden="true"></span>
                           </div>
                         <% end %>
@@ -340,6 +341,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <% best_annotation_name = best_cla&.dig(:name).presence || '-' %>
                               <div class="metadata-category-best" title="<%= best_annotation_name %>"><%= best_annotation_name %></div>
                               <div class="metadata-category-count"><%= count %></div>
+                              <span class="metadata-markers-status" data-markers-status-key="<%= metadata.id %>-<%= canonical_cat_idx %>" data-markers-state="idle" title="Markers not yet computed for this metadata"><i class="fas fa-circle" style="font-size:7px;color:#e5e7eb;"></i></span>
                               <% has_annots = best_cla.present? %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
@@ -370,6 +372,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             <span class="metadata-category-header-cell metadata-category-header-name">Category</span>
                             <span class="metadata-category-header-cell metadata-category-header-best">Best annotation</span>
                             <span class="metadata-category-header-cell metadata-category-header-count">Cells</span>
+                            <span class="metadata-category-header-cell metadata-category-header-markers" title="FindMarkers status for this category"><i class="fas fa-microscope" style="font-size:10px;color:#9ca3af;"></i></span>
                             <span class="metadata-category-header-cell metadata-category-header-annot" aria-hidden="true"></span>
                           </div>
                         <% end %>
@@ -412,6 +415,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <% best_annotation_name_arr = best_cla&.dig(:name).presence || '-' %>
                               <div class="metadata-category-best" title="<%= best_annotation_name_arr %>"><%= best_annotation_name_arr %></div>
                               <div class="metadata-category-count">Category <%= index + 1 %></div>
+                              <span class="metadata-markers-status" data-markers-status-key="<%= metadata.id %>-<%= canonical_cat_idx %>" data-markers-state="idle" title="Markers not yet computed for this metadata"><i class="fas fa-circle" style="font-size:7px;color:#e5e7eb;"></i></span>
                               <% has_annots_arr = best_cla.present? %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
@@ -983,10 +987,10 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             align-items: center;
             gap: 4px;
             padding: 2px 0;
-            grid-template-columns: minmax(0, 1fr) 72px 24px;
+            grid-template-columns: minmax(0, 1fr) 72px 18px 24px;
           }
           .metadata-category-row--wide {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 24px;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 18px 24px;
           }
           .metadata-category-header {
             display: grid;
@@ -997,13 +1001,13 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             text-transform: uppercase;
             letter-spacing: 0.02em;
             align-items: center;
-            grid-template-columns: minmax(0, 1fr) 72px 24px;
+            grid-template-columns: minmax(0, 1fr) 72px 18px 24px;
             gap: 4px;
             margin-bottom: 4px;
           }
           .metadata-category-header--wide {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 24px;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 18px 24px;
             gap: 4px;
             margin-bottom: 4px;
           }
@@ -1016,6 +1020,20 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             justify-self: end;
             width: 100%;
             text-align: right;
+          }
+          .metadata-category-header-markers {
+            justify-self: center;
+            width: 100%;
+            text-align: center;
+          }
+          .metadata-markers-status {
+            justify-self: center;
+            align-self: center;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 14px;
+            cursor: default;
           }
           .metadata-category-header-annot {
             justify-self: center;
@@ -3236,6 +3254,7 @@ var _annotPopupData = {
   evidencesUrl: '',
   clas: [],
   activeTab: 'existing',
+  uiReady: false,
   evidences: {
     state: 'idle',
     loading: false,
@@ -3328,6 +3347,105 @@ function buildAnnotPopupTitleHtml(catIdx, catName, metadataName) {
   return dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>'
 }
 
+function markersStatusKey(metadataId, catIdx) {
+  return String(metadataId) + '-' + String(catIdx)
+}
+
+function markersStatusTooltip(state) {
+  var s = (state || 'idle').toString()
+  if (s === 'completed') return 'Markers computed for this metadata'
+  if (s === 'running' || s === 'queued' || s === 'loading') return 'Markers being computed for this metadata'
+  if (s === 'failed' || s === 'error') return 'Markers computation failed for this metadata'
+  if (s === 'unsupported') return 'Markers are not available for this metadata'
+  return 'Markers not yet computed for this metadata'
+}
+
+function applyMarkersStatusToElement(el, state) {
+  if (!el) return
+  var s = (state || 'idle').toString()
+  var iconClass = 'fas fa-circle'
+  var color = '#d1d5db'
+  var size = '11px'
+  if (s === 'completed') {
+    iconClass = 'fas fa-check-circle'
+    color = '#16a34a'
+  } else if (s === 'running' || s === 'queued' || s === 'loading') {
+    iconClass = 'fas fa-spinner fa-spin'
+    color = '#2563eb'
+  } else if (s === 'failed' || s === 'error') {
+    iconClass = 'fas fa-times-circle'
+    color = '#dc2626'
+  } else if (s === 'unsupported') {
+    iconClass = 'fas fa-minus-circle'
+    color = '#9ca3af'
+  } else {
+    size = '7px'
+    color = '#e5e7eb'
+  }
+  el.innerHTML = '<i class="' + iconClass + '" style="font-size:' + size + ';color:' + color + ';"></i>'
+  el.setAttribute('title', markersStatusTooltip(s))
+  el.dataset.markersState = s
+}
+
+function updateMarkersStatusInMetadataPanel(metadataId, catIdx, state) {
+  var key = markersStatusKey(metadataId, catIdx)
+  var el = document.querySelector('.metadata-markers-status[data-markers-status-key="' + key + '"]')
+  applyMarkersStatusToElement(el, state)
+}
+
+function syncMarkersStatusFromResponse(metadataId, catIdx, data) {
+  var state = 'idle'
+  if (!data) {
+    state = 'error'
+  } else if (data.error && !data.state) {
+    state = 'error'
+  } else {
+    state = (data.state || 'idle').toString()
+  }
+  window._annotMarkersStatus = window._annotMarkersStatus || {}
+  window._annotMarkersStatus[markersStatusKey(metadataId, catIdx)] = state
+  updateMarkersStatusInMetadataPanel(metadataId, catIdx, state)
+  var mid = _annotPopupData.metadataId
+  var cidx = _annotPopupData.catIdx
+  if (mid == null || cidx == null || String(mid) !== String(metadataId) || Number(cidx) !== Number(catIdx)) return
+  if (!_annotPopupData.uiReady && _annotPopupData.activeTab !== 'evidences') return
+  renderAnnotationPanel()
+}
+
+function peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl) {
+  if (!evidencesUrl || metadataId == null || catIdx == null) return
+  var url = evidencesUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx)
+  fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) {
+      return r.json()
+    })
+    .then(function(data) {
+      syncMarkersStatusFromResponse(metadataId, catIdx, data)
+    })
+    .catch(function() {
+      syncMarkersStatusFromResponse(metadataId, catIdx, { state: 'error' })
+    })
+}
+
+function identifyMarkersTabStatusBadgeHtml() {
+  var ev = _annotPopupData.evidences || {}
+  var st = ev.loading ? 'loading' : (ev.state || 'idle')
+  var tip = markersStatusTooltip(st)
+  if (st === 'completed') {
+    return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-check-circle" aria-hidden="true" style="color:#16a34a;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>'
+  }
+  if (st === 'running' || st === 'queued' || st === 'loading') {
+    return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-spinner fa-spin" aria-hidden="true" style="color:#2563eb;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>'
+  }
+  if (st === 'failed' || st === 'error') {
+    return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-times-circle" aria-hidden="true" style="color:#dc2626;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>'
+  }
+  if (st === 'unsupported') {
+    return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-minus-circle" aria-hidden="true" style="color:#9ca3af;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>'
+  }
+  return ''
+}
+
 function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx) {
   var overlay = document.getElementById('annotation-popup-overlay')
   var dialog = document.getElementById('annotation-popup-dialog')
@@ -3346,6 +3464,9 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   _annotPopupData.evidencesUrl = evidencesUrl || ''
   _annotPopupData.clas = []
   _annotPopupData.activeTab = 'existing'
+  _annotPopupData.uiReady = false
+  updateMarkersStatusInMetadataPanel(metadataId, catIdx, 'loading')
+  peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '')
   _annotPopupData.evidences = {
     state: 'idle',
     loading: false,
@@ -3382,15 +3503,18 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
     .then(function(data) {
       _annotPopupData.clas = data.clas || []
       _annotPopupData.activeTab = _annotPopupData.clas.length > 0 ? 'existing' : 'new'
+      _annotPopupData.uiReady = true
       renderAnnotationPanel()
     })
     .catch(function(err) {
+      _annotPopupData.uiReady = true
       panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + err.message + '</div>'
     })
 }
 
 function closeAnnotationPopup() {
   document.getElementById('annotation-popup-overlay').style.display = 'none'
+  _annotPopupData.activeTab = 'existing'
 }
 
 function setAnnotationTab(tabName) {
@@ -3426,9 +3550,9 @@ function submitNewAnnotation() {
   setNewAnnotationStatus('Submit clicked. Backend create endpoint is not wired yet in this view.')
 }
 
-function loadAnnotationEvidences() {
+function loadAnnotationEvidences(force) {
   var ev = _annotPopupData.evidences || {}
-  if (ev.loading) return
+  if (!force && ev.loading) return
   if (!_annotPopupData.evidencesUrl || !_annotPopupData.metadataId) {
     _annotPopupData.evidences = {
       state: 'error',
@@ -3438,6 +3562,7 @@ function loadAnnotationEvidences() {
       rowsUp: [],
       rowsDown: []
     }
+    syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, { state: 'error' })
     if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
     return
   }
@@ -3445,6 +3570,7 @@ function loadAnnotationEvidences() {
   _annotPopupData.evidences.loading = true
   _annotPopupData.evidences.state = 'loading'
   _annotPopupData.evidences.message = 'Checking FindMarkers run...'
+  updateMarkersStatusInMetadataPanel(_annotPopupData.metadataId, _annotPopupData.catIdx, 'loading')
   if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
 
   var url = _annotPopupData.evidencesUrl + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) + '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx)
@@ -3462,7 +3588,7 @@ function loadAnnotationEvidences() {
         rowsUp: Array.isArray(data.rows_up) ? data.rows_up : [],
         rowsDown: Array.isArray(data.rows_down) ? data.rows_down : []
       }
-      if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
+      syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, data)
     })
     .catch(function(err) {
       _annotPopupData.evidences = {
@@ -3473,9 +3599,38 @@ function loadAnnotationEvidences() {
         rowsUp: [],
         rowsDown: []
       }
-      if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
+      syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, { state: 'error' })
     })
 }
+
+window.loadAnnotationEvidences = loadAnnotationEvidences
+window.peekAnnotationMarkersStatus = peekAnnotationMarkersStatus
+
+;(function bindAnnotationEvidencesWebsocketRefresh() {
+  if (window.__asapAnnotEvidencesWsBound) return
+  window.__asapAnnotEvidencesWsBound = true
+  var evidencesWsTimer = null
+  document.addEventListener('asap:project-step-runs-changed', function(ev) {
+    var d = ev.detail || {}
+    if (d.step_name !== 'markers') return
+    var overlay = document.getElementById('annotation-popup-overlay')
+    if (!overlay) return
+    var visible = overlay.style.display !== 'none' && window.getComputedStyle(overlay).display !== 'none'
+    if (!visible) return
+    var apd = window._annotPopupData
+    if (!apd || apd.metadataId == null) return
+    if (typeof window.loadAnnotationEvidences !== 'function' || typeof window.peekAnnotationMarkersStatus !== 'function') return
+    if (evidencesWsTimer) clearTimeout(evidencesWsTimer)
+    evidencesWsTimer = setTimeout(function() {
+      evidencesWsTimer = null
+      if (apd.activeTab === 'evidences') {
+        window.loadAnnotationEvidences(true)
+      } else {
+        window.peekAnnotationMarkersStatus(apd.metadataId, apd.catIdx, apd.evidencesUrl)
+      }
+    }, 200)
+  })
+})()
 
 function parseGeneAutocompleteEntry(entry) {
   if (!entry) return null
@@ -3926,7 +4081,7 @@ function renderAnnotationPanel() {
   html += '<div style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;padding:0 12px;background:#fff;">'
   html += '<button type="button" onclick="setAnnotationTab(\'new\')" style="' + navButtonStyle('new') + '">New annotation</button>'
   html += '<button type="button" onclick="setAnnotationTab(\'existing\')" style="' + navButtonStyle('existing') + '">Existing annotations <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;line-height:1;">' + clas.length + '</span></button>'
-  html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '">Identify markers</button>'
+  html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '" title="' + escapeHtml(markersStatusTooltip((_annotPopupData.evidences && _annotPopupData.evidences.loading) ? 'loading' : ((_annotPopupData.evidences && _annotPopupData.evidences.state) || 'idle'))) + '">Identify markers' + identifyMarkersTabStatusBadgeHtml() + '</button>'
   html += '</div>'
   html += '<div style="overflow-y:auto;flex:1;padding:12px 16px;">'
   if (activeTab === 'new') {

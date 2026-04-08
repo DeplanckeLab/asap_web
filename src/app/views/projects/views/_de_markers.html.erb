@@ -579,6 +579,7 @@ if (typeof openAnnotationPopup !== 'function') {
     evidencesUrl: '',
     clas: [],
     activeTab: 'existing',
+    uiReady: false,
     evidences: {
       state: 'idle',
       loading: false,
@@ -588,6 +589,7 @@ if (typeof openAnnotationPopup !== 'function') {
       rowsDown: []
     }
   };
+  var _annotPopupData = window._annotPopupData;
 
   function escapeHtml(value) {
     return String(value || '')
@@ -601,6 +603,95 @@ if (typeof openAnnotationPopup !== 'function') {
   function templateHtml(templateId) {
     var tpl = document.getElementById(templateId);
     return tpl ? tpl.innerHTML : '';
+  }
+
+  function markersStatusKey(metadataId, catIdx) {
+    return String(metadataId) + '-' + String(catIdx);
+  }
+
+  function markersStatusTooltip(state) {
+    var s = (state || 'idle').toString();
+    if (s === 'completed') return 'Markers computed for this metadata';
+    if (s === 'running' || s === 'queued' || s === 'loading') return 'Markers being computed for this metadata';
+    if (s === 'failed' || s === 'error') return 'Markers computation failed for this metadata';
+    if (s === 'unsupported') return 'Markers are not available for this metadata';
+    return 'Markers not yet computed for this metadata';
+  }
+
+  function applyMarkersStatusToElement(el, state) {
+    if (!el) return;
+    var s = (state || 'idle').toString();
+    var iconClass = 'fas fa-circle';
+    var color = '#d1d5db';
+    var size = '11px';
+    if (s === 'completed') {
+      iconClass = 'fas fa-check-circle';
+      color = '#16a34a';
+    } else if (s === 'running' || s === 'queued' || s === 'loading') {
+      iconClass = 'fas fa-spinner fa-spin';
+      color = '#2563eb';
+    } else if (s === 'failed' || s === 'error') {
+      iconClass = 'fas fa-times-circle';
+      color = '#dc2626';
+    } else if (s === 'unsupported') {
+      iconClass = 'fas fa-minus-circle';
+      color = '#9ca3af';
+    } else {
+      size = '7px';
+      color = '#e5e7eb';
+    }
+    el.innerHTML = '<i class="' + iconClass + '" style="font-size:' + size + ';color:' + color + ';"></i>';
+    el.setAttribute('title', markersStatusTooltip(s));
+    el.dataset.markersState = s;
+  }
+
+  function updateMarkersStatusInMetadataPanel(metadataId, catIdx, state) {
+    var key = markersStatusKey(metadataId, catIdx);
+    var el = document.querySelector('.metadata-markers-status[data-markers-status-key="' + key + '"]');
+    applyMarkersStatusToElement(el, state);
+  }
+
+  function syncMarkersStatusFromResponse(metadataId, catIdx, data) {
+    var state = 'idle';
+    if (!data) state = 'error';
+    else if (data.error && !data.state) state = 'error';
+    else state = (data.state || 'idle').toString();
+    window._annotMarkersStatus = window._annotMarkersStatus || {};
+    window._annotMarkersStatus[markersStatusKey(metadataId, catIdx)] = state;
+    updateMarkersStatusInMetadataPanel(metadataId, catIdx, state);
+    var mid = _annotPopupData.metadataId;
+    var cidx = _annotPopupData.catIdx;
+    if (mid == null || cidx == null || String(mid) !== String(metadataId) || Number(cidx) !== Number(catIdx)) return;
+    if (!_annotPopupData.uiReady && _annotPopupData.activeTab !== 'evidences') return;
+    renderAnnotationPanel();
+  }
+
+  function peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl) {
+    if (!evidencesUrl || metadataId == null || catIdx == null) return;
+    var url = evidencesUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx);
+    fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) { syncMarkersStatusFromResponse(metadataId, catIdx, data); })
+      .catch(function() { syncMarkersStatusFromResponse(metadataId, catIdx, { state: 'error' }); });
+  }
+
+  function identifyMarkersTabStatusBadgeHtml() {
+    var ev = _annotPopupData.evidences || {};
+    var st = ev.loading ? 'loading' : (ev.state || 'idle');
+    var tip = markersStatusTooltip(st);
+    if (st === 'completed') {
+      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-check-circle" aria-hidden="true" style="color:#16a34a;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    }
+    if (st === 'running' || st === 'queued' || st === 'loading') {
+      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-spinner fa-spin" aria-hidden="true" style="color:#2563eb;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    }
+    if (st === 'failed' || st === 'error') {
+      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-times-circle" aria-hidden="true" style="color:#dc2626;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    }
+    if (st === 'unsupported') {
+      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-minus-circle" aria-hidden="true" style="color:#9ca3af;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    }
+    return '';
   }
 
   window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx) {
@@ -650,6 +741,9 @@ if (typeof openAnnotationPopup !== 'function') {
     _annotPopupData.evidencesUrl = evidencesUrl || '';
     _annotPopupData.clas = [];
     _annotPopupData.activeTab = 'existing';
+    _annotPopupData.uiReady = false;
+    updateMarkersStatusInMetadataPanel(metadataId, catIdx, 'loading');
+    peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '');
     _annotPopupData.evidences = {
       state: 'idle',
       loading: false,
@@ -676,9 +770,11 @@ if (typeof openAnnotationPopup !== 'function') {
       .then(function(data) {
         _annotPopupData.clas = data.clas || [];
         _annotPopupData.activeTab = 'existing';
+        _annotPopupData.uiReady = true;
         renderAnnotationPanel();
       })
       .catch(function(err) {
+        _annotPopupData.uiReady = true;
         panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + escapeHtml(err.message) + '</div>';
       });
   };
@@ -686,6 +782,7 @@ if (typeof openAnnotationPopup !== 'function') {
   window.closeAnnotationPopup = function() {
     var overlay = document.getElementById('annotation-popup-overlay');
     if (overlay) overlay.style.display = 'none';
+    window._annotPopupData.activeTab = 'existing';
   };
 
   window.setAnnotationTab = function(tabName) {
@@ -812,9 +909,12 @@ if (typeof openAnnotationPopup !== 'function') {
     return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
   }
 
-  function loadAnnotationEvidences() {
+  function loadAnnotationEvidences(force) {
+    var ev = _annotPopupData.evidences || {};
+    if (!force && ev.loading) return;
     if (!_annotPopupData.evidencesUrl || !_annotPopupData.metadataId) return;
     _annotPopupData.evidences = { state: 'loading', loading: true, message: 'Checking FindMarkers run...', runId: null, rowsUp: [], rowsDown: [] };
+    updateMarkersStatusInMetadataPanel(_annotPopupData.metadataId, _annotPopupData.catIdx, 'loading');
     renderAnnotationPanel();
     var url = _annotPopupData.evidencesUrl + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) + '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx);
     fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
@@ -831,13 +931,42 @@ if (typeof openAnnotationPopup !== 'function') {
           rowsUp: Array.isArray(data.rows_up) ? data.rows_up : [],
           rowsDown: Array.isArray(data.rows_down) ? data.rows_down : []
         };
-        renderAnnotationPanel();
+        syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, data);
       })
       .catch(function(err) {
         _annotPopupData.evidences = { state: 'error', loading: false, message: 'Error loading evidences: ' + err.message, runId: null, rowsUp: [], rowsDown: [] };
-        renderAnnotationPanel();
+        syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, { state: 'error' });
       });
   }
+
+  window.loadAnnotationEvidences = loadAnnotationEvidences;
+  window.peekAnnotationMarkersStatus = peekAnnotationMarkersStatus;
+
+  (function bindAnnotationEvidencesWebsocketRefresh() {
+    if (window.__asapAnnotEvidencesWsBound) return;
+    window.__asapAnnotEvidencesWsBound = true;
+    var evidencesWsTimer = null;
+    document.addEventListener('asap:project-step-runs-changed', function(ev) {
+      var d = ev.detail || {};
+      if (d.step_name !== 'markers') return;
+      var overlay = document.getElementById('annotation-popup-overlay');
+      if (!overlay) return;
+      var visible = overlay.style.display !== 'none' && window.getComputedStyle(overlay).display !== 'none';
+      if (!visible) return;
+      var apd = window._annotPopupData;
+      if (!apd || apd.metadataId == null) return;
+      if (typeof window.loadAnnotationEvidences !== 'function' || typeof window.peekAnnotationMarkersStatus !== 'function') return;
+      if (evidencesWsTimer) clearTimeout(evidencesWsTimer);
+      evidencesWsTimer = setTimeout(function() {
+        evidencesWsTimer = null;
+        if (apd.activeTab === 'evidences') {
+          window.loadAnnotationEvidences(true);
+        } else {
+          window.peekAnnotationMarkersStatus(apd.metadataId, apd.catIdx, apd.evidencesUrl);
+        }
+      }, 200);
+    });
+  })();
 
   function renderAnnotationPanel() {
     var panel = document.getElementById('annot-popup-panel');
@@ -853,7 +982,7 @@ if (typeof openAnnotationPopup !== 'function') {
     var html = '';
     html += '<div style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;padding:0 12px;background:#fff;">';
     html += '<button type="button" onclick="setAnnotationTab(\'existing\')" style="' + navButtonStyle('existing') + '">Existing annotations <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;line-height:1;">' + clas.length + '</span></button>';
-    html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '">Identify markers</button>';
+    html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '" title="' + escapeHtml(markersStatusTooltip((_annotPopupData.evidences && _annotPopupData.evidences.loading) ? 'loading' : ((_annotPopupData.evidences && _annotPopupData.evidences.state) || 'idle'))) + '">Identify markers' + identifyMarkersTabStatusBadgeHtml() + '</button>';
     html += '</div>';
     html += '<div style="overflow-y:auto;flex:1;padding:12px 16px;">';
     html += activeTab === 'evidences' ? renderEvidencesTab() : renderExistingAnnotationsTab(clas);

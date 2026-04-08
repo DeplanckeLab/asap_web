@@ -1,4 +1,0 @@
-# Optional: Puma only (skip Tailwind watch). Use when setting FOREMAN_PROCFILE=Procfile.docker
-# e.g. lower CPU in a throwaway container. The main image installs Debian `watchman` so
-# Procfile.dev (web + tailwindcss:watch) works under Foreman without 502s.
-web: bin/rails server -b '0.0.0.0'

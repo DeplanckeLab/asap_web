@@ -1,4 +1,0 @@
-# Build context is this directory (root Dockerfile: COPY src/. ./).
-# Docker only reads .dockerignore from the context root, not src/.dockerignore.
-
-src/tmp

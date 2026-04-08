@@ -1734,7 +1734,7 @@ class ProjectsController < ApplicationController
 
         file_body = File.read(filepath)
         safe_body = file_body.gsub("'", "'\\''")
-        list_cmds.push("docker run --network=asap2_asap_network --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"echo '#{safe_body}' > #{local_filepath}\"")
+        list_cmds.push("docker run --net=host --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"echo '#{safe_body}' > #{local_filepath}\"")
         list_cmds.push('')
       end
 

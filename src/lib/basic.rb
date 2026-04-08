@@ -2423,16 +2423,14 @@ module Basic
         # Keep docker network configurable from env to avoid hardcoded stack names.
         # This must point to the same compose network as the website/postgres services.
         # Always replace legacy network names; they are deployment-specific and brittle.
-       # run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
-       # has_network_flag = h_cmd['docker_call'].match?(/--network(?:=|\s+)\S+/)
-       # uses_legacy_network = h_cmd['docker_call'].match?(/--network(?:=|\s+)asap2_asap_network(?:\s|$)/)
-       # if run_network.present? && has_network_flag
-       #   h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "--network=#{run_network}")
-       # elsif uses_legacy_network
-       #   raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
-       # end
-
-         h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "")
+        run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
+        has_network_flag = h_cmd['docker_call'].match?(/--network(?:=|\s+)\S+/)
+        uses_legacy_network = h_cmd['docker_call'].match?(/--network(?:=|\s+)asap2_asap_network(?:\s|$)/)
+        if run_network.present? && has_network_flag
+          h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "--network=#{run_network}")
+        elsif uses_legacy_network
+          raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
+        end
         
         # Ensure the host root that contains USER_DATA_DIR is mounted so parser
         # containers can read/write project paths like /data/asap2_test/users/...

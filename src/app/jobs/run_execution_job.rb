@@ -33,6 +33,7 @@ class RunExecutionJob < ApplicationJob
       
       core_cmd = build_core_command(h_cmd)
       docker_cmd = Basic.build_docker_cmd(h_cmd, core_cmd)
+      Rails.logger.info("[RunExecutionJob] Resolved docker command for Run##{run.id}: #{docker_cmd}")
       
       if slurm_available?
         execute_via_slurm(run, project, step, docker_cmd)
@@ -82,7 +83,6 @@ class RunExecutionJob < ApplicationJob
     slurm_service = SlurmService.new(logger: Rails.logger)
 
     Rails.logger.info("[RunExecutionJob] Submitting Run##{run.id} to SLURM")
-    Rails.logger.debug("[RunExecutionJob] Command: #{docker_cmd}")
     
     slurm_job_id = slurm_service.submit_job(
       run,

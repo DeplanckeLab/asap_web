@@ -15,6 +15,8 @@ class Project < ApplicationRecord
   belongs_to :version, optional: true
   belongs_to :archive_status, optional: true
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
+  belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
+  has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
   has_many :annots, dependent: :destroy
   has_many :ot_projects, dependent: :destroy
   has_many :ott_projects, dependent: :destroy
@@ -124,6 +126,13 @@ class Project < ApplicationRecord
     return embedded if embedded
 
     public_projects.order(:id).first || order(:id).first
+  end
+
+  # Canonical root of a clone lineage (+cloned_project_id+ chain). Used when creating a new clone.
+  def self.root_project_id_for_clone_source(source)
+    return nil unless source
+
+    source.root_project_id.presence || source.id
   end
 
   # Elasticsearch search functionality

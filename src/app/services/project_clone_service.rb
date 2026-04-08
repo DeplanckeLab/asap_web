@@ -66,6 +66,7 @@ class ProjectCloneService
       public: false,
       user_id: user&.id || 1,
       cloned_project_id: source_project.id,
+      root_project_id: Project.root_project_id_for_clone_source(source_project),
       nber_views: 0,
       nber_cloned: 0,
       last_day_session_ids: '',

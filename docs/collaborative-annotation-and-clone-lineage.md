@@ -87,9 +87,7 @@ On clone, the service:
 
 **Rule K2 (identity across clone generations):** Clones **keep the same `project_cell_set_id`** as the source (`ProjectCloneService` copies it). All **`CellSet`** rows in that lineage share that **`ProjectCellSet`**, so **`project_cell_set_id`** together with **`cell_sets.key`** is already the **stable identifier** for the same cells in a **clone of a clone** as well as a **first-generation** clone. **Federation, import discovery by shared cell set, and aligning `cell_set_id` do not need `root_project_id` or walking `cloned_project_id`.**
 
-**Note:** **`cloned_project_id`** only points to the **immediate** parent **`Project`**. That still matters for code that resolves metadata by **one hop** (e.g. **`Basic.marker_groups_annot_id`** on `cloned_project_id` + name) or for product that must pick a **specific project record** (e.g. a fixed “cited” public URL). Walking the chain or adding **`root_project_id`** would only be for those **project-level** cases — **not** for answering “is this the same cell set?” (**`project_cell_set_id`** already does).
-
-Not sure we need to have root_project_id: I do not find a case where we need it.
+**Note:** **`cloned_project_id`** only points to the **immediate** parent **`Project`**. That still matters for code that resolves metadata by **one hop** (e.g. **`Basic.marker_groups_annot_id`** on `cloned_project_id` + name) or for product that must pick a **specific project record** (e.g. a fixed “cited” public URL). **`root_project_id`** (see **`projects`** table, **`ProjectCloneService`**) points to the **root** of the clone chain for **project-level** grouping or labeling in the UI — **not** for answering “is this the same cell set?” (**`project_cell_set_id`** already does).
 
 ---
 
@@ -236,7 +234,7 @@ Distinguish:
 4. **Import wizard / API:** Apply **R-M2–R-M5**, **R-M4** (collision UI: overwrite / cancel / keep both with **`.vN`**), **R-NM1–R-NM4**; reuse validation and run orchestration from **`prepare_metadata` / `do_import_metadata`** and related jobs where applicable. **Done (API + UI):** see [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md) Phase 1 item 4.
 5. **Dependency graph:** Implement **R-M5** — query runs that reference target `Annot` / paths before allowing **overwrite**. **Done:** see **`RunAnnotReferenceScanner`** and Phase 1 item **5** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
 6. **Reserved-pattern builder:** Implement **R-NM1–R-NM3** as a **finite regexp list** (plus optional fixed strings) from **`Version`**, **`Step`**, **`StdMethod`**, and **`env_json`** for the **target** project’s version; wire into **`MetadataNameAuthorizationService`**. **Done:** see Phase 1 item **6** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
-7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**.
+7. **Optional:** If the UI must rank or label **which `Project` row** to cite (not needed for cell-set matching — use **`project_cell_set_id`**), walk **`cloned_project_id`** or add **`root_project_id`**. **Done:** see Phase 1 item **7** in [collaborative-annotation-implementation-plan.md](./collaborative-annotation-implementation-plan.md).
 
 ### Phase 2 — Federated CLA UI and vote policy (medium–long)
 
@@ -284,7 +282,7 @@ Distinguish:
 - `app/models/cla_vote.rb` — `ClaVote` model
 - `lib/basic.rb` — `add_clas`, `marker_groups_annot_id`
 - `lib/tasks/compliance_audit.rake` — versioned **`Annot`** names (`%.v%`, **`\.v\d+\z`** pattern)
-- `db/schema.rb` — `annot_cell_sets`, `cell_sets`, `clas`, `cla_votes`, `annots`, `projects` (`version_nber`, `latest_version` on `annots`)
+- `db/schema.rb` — `annot_cell_sets`, `cell_sets`, `clas`, `cla_votes`, `annots`, `projects` (`cloned_project_id`, `root_project_id`, `version_nber`, `latest_version` on `annots`)
 
 ---
 

@@ -12,7 +12,9 @@ module MetadataImportDiscoveryHelpers
       public_id: project.public_id,
       nber_cols: project.nber_cols,
       nber_rows: project.nber_rows,
-      project_cell_set_id: project.project_cell_set_id
+      project_cell_set_id: project.project_cell_set_id,
+      cloned_project_id: project.cloned_project_id,
+      root_project_id: project.root_project_id
     }
   end
 

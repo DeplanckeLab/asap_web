@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_06_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1073,6 +1073,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_01_120000) do
     t.integer "version_id"
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
+    t.index ["root_project_id"], name: "index_projects_on_root_project_id"
   end
 
   create_table "projects_provider_projects", id: false, force: :cascade do |t|
@@ -1580,6 +1581,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_01_120000) do
   add_foreign_key "projects", "organisms", name: "fk_organism_id"
   add_foreign_key "projects", "project_cell_sets", name: "projects_project_cell_set_id_fkey"
   add_foreign_key "projects", "project_types", name: "projects_project_type_id_fkey"
+  add_foreign_key "projects", "projects", column: "root_project_id", on_delete: :nullify
   add_foreign_key "projects", "statuses", name: "projects_status_id_fkey"
   add_foreign_key "projects", "steps", name: "projects_step_id_fkey"
   add_foreign_key "projects", "users", name: "projects_user_id_fkey"

@@ -75,8 +75,10 @@ class SlurmJobMonitorJob < ApplicationJob
         # No output.json - check exec.out for displayed_error (indicates job failed)
         exec_out = output_dir + 'exec.out'
         exec_run_details = output_dir + 'exec_run_details.log'
+        # When SLURM history is gone (restart, purged id), status is nil; logs may be older than 1 hour.
+        exec_mtime_cutoff = attempt >= 2 ? 365.days.ago : 30.days.ago
         
-        if File.exist?(exec_out) && File.mtime(exec_out) > 1.hour.ago
+        if File.exist?(exec_out) && File.mtime(exec_out) > exec_mtime_cutoff
           begin
             exec_content = File.read(exec_out)
             exec_json = JSON.parse(exec_content)
@@ -106,7 +108,7 @@ class SlurmJobMonitorJob < ApplicationJob
         end
         
         # Check exec_run_details.log for exit code
-        if File.exist?(exec_run_details) && File.mtime(exec_run_details) > 1.hour.ago
+        if File.exist?(exec_run_details) && File.mtime(exec_run_details) > exec_mtime_cutoff
           details_content = File.read(exec_run_details)
           if details_content.include?('Command exited with non-zero status')
             error_msg = extract_error_message(run) || "Job exited with non-zero status (see exec.err or exec.out for details)"
@@ -115,7 +117,7 @@ class SlurmJobMonitorJob < ApplicationJob
             # Create output.json with displayed_error if it doesn't exist
             unless File.exist?(output_json_filename)
               # Try to get error from exec.out first (might have displayed_error JSON)
-              if File.exist?(exec_out) && File.mtime(exec_out) > 1.hour.ago
+              if File.exist?(exec_out) && File.mtime(exec_out) > exec_mtime_cutoff
                 begin
                   exec_content = File.read(exec_out)
                   exec_json = JSON.parse(exec_content)
@@ -187,10 +189,10 @@ class SlurmJobMonitorJob < ApplicationJob
         output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
         output_json_filename = output_dir + 'output.json'
         
-        # First, update status to running if SLURM reports running and run is still waiting
+        # First, update status to running if SLURM reports running and run is still waiting or scheduler-submitted (6).
         # This ensures the running status is set before checking for output.json
-        if status == :running && run.status_id == 1
-          Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} SLURM reports running, updating status from waiting to running")
+        if status == :running && [1, 6].include?(run.status_id)
+          Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} SLURM reports running, updating status from waiting/submitted to running")
           broadcast_queue_position_cleared(run)
           
           # Calculate waiting_duration from submitted_at to now
@@ -209,10 +211,23 @@ class SlurmJobMonitorJob < ApplicationJob
           project.update(status_id: 2) if project.status_id != 2
 
           project.broadcast(step.id) if project.respond_to?(:broadcast)
+          broadcast_markers_run_status_changed_from_monitor(project, step, run)
+        end
+
+        # DB said "running" but SLURM still has the job in the queue (pending). Typical after slurmctld
+        # restart or if status was advanced too early. Align DB with SLURM so the UI shows queued, not running.
+        if status == :pending && run.status_id == 2
+          Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} was running in DB but SLURM job #{slurm_job_id} is pending; correcting run to waiting (queued)")
+          run.update(status_id: 1, start_time: nil)
+          broadcast_queue_position_cleared(run)
+          Basic.upd_project_step(project, step.id)
+          project.reload
+          project.broadcast(step.id) if project.respond_to?(:broadcast)
+          run.reload
         end
 
         # While waiting in queue, push queue position updates via websocket.
-        if status == :pending && run.status_id == 1
+        if status == :pending && [1, 6].include?(run.status_id)
           broadcast_queue_position_if_changed(run, slurm_service)
         end
         
@@ -303,6 +318,22 @@ class SlurmJobMonitorJob < ApplicationJob
 
   private
 
+  def broadcast_markers_run_status_changed_from_monitor(project, step, run)
+    return unless step&.name == 'markers'
+
+    ActionCable.server.broadcast(
+      "project_#{project.id}",
+      {
+        event: 'markers_run_status_changed',
+        project_id: project.id,
+        run_id: run.id,
+        annot_id: run.marker_metadata_annot_id
+      }
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[SlurmJobMonitorJob] markers_run_status_changed: #{e.class} #{e.message}")
+  end
+
   def queue_position_cache_key(run_id)
     "queue_position:last:run:#{run_id}"
   end
@@ -311,19 +342,34 @@ class SlurmJobMonitorJob < ApplicationJob
     return unless run&.project_id && run&.slurm_job_id
 
     queue_position = slurm_service.get_job_queue_position(run.slurm_job_id, run.status_id)
-    previous_position = Rails.cache.read(queue_position_cache_key(run.id))
-    return if previous_position == queue_position
+    snap = slurm_service.pending_job_queue_snapshot(run.slurm_job_id)
+    signature = [queue_position, snap&.dig(:pending_count), snap&.dig(:partition)&.to_s]
+    previous = Rails.cache.read(queue_position_cache_key(run.id))
+    return if previous == signature
 
-    Rails.cache.write(queue_position_cache_key(run.id), queue_position, expires_in: 12.hours)
+    Rails.cache.write(queue_position_cache_key(run.id), signature, expires_in: 12.hours)
 
-    ActionCable.server.broadcast("project_#{run.project_id}", {
+    payload = {
       event: 'queue_position_changed',
       project_id: run.project_id,
       step_id: run.step_id,
       run_id: run.id,
       slurm_job_id: run.slurm_job_id,
-      queue_position: queue_position
-    })
+      queue_position: queue_position,
+      show_slurm_queue: true,
+      queue_pending_total: snap&.dig(:pending_count),
+      queue_partition: snap&.dig(:partition)&.to_s
+    }
+    if run.step&.name == 'markers'
+      aid = run.marker_metadata_annot_id
+      payload[:annot_id] = aid if aid.present?
+      note = MarkerQueueText.partition_pending_explanation(snap)
+      payload[:markers_queue_note] = note if note.present?
+    end
+    hover = MarkerQueueText.hover_summary(snap, queue_position)
+    payload[:slurm_queue_hover] = hover if hover.present?
+
+    ActionCable.server.broadcast("project_#{run.project_id}", payload)
   rescue StandardError => e
     Rails.logger.warn("[SlurmJobMonitorJob] queue position broadcast failed for run #{run&.id}: #{e.class} - #{e.message}")
   end
@@ -332,18 +378,24 @@ class SlurmJobMonitorJob < ApplicationJob
     return unless run&.project_id
 
     key = queue_position_cache_key(run.id)
-    had_cached_position = Rails.cache.exist?(key)
     Rails.cache.delete(key)
-    return unless had_cached_position
 
-    ActionCable.server.broadcast("project_#{run.project_id}", {
+    payload = {
       event: 'queue_position_changed',
       project_id: run.project_id,
       step_id: run.step_id,
       run_id: run.id,
       slurm_job_id: run.slurm_job_id,
-      queue_position: nil
-    })
+      queue_position: nil,
+      show_slurm_queue: false
+    }
+    if run.step&.name == 'markers'
+      aid = run.marker_metadata_annot_id
+      payload[:annot_id] = aid if aid.present?
+    end
+    payload[:slurm_queue_hover] = "Slurm queue position: job left the pending queue or started."
+
+    ActionCable.server.broadcast("project_#{run.project_id}", payload)
   rescue StandardError => e
     Rails.logger.warn("[SlurmJobMonitorJob] queue position clear broadcast failed for run #{run&.id}: #{e.class} - #{e.message}")
   end

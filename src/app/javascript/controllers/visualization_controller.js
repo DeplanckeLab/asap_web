@@ -12,6 +12,7 @@ import { DownloadManager } from "visualization/download_manager"
 import { GeneManager } from "visualization/gene_manager"
 import { CustomPlotManager } from "visualization/custom_plot_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
+import { readStoredDiscretePaletteId, writeStoredDiscretePaletteId } from "visualization/discrete_palettes"
 import consumer from "channels/consumer"
 
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
@@ -132,6 +133,9 @@ export default class extends Controller {
   }
 
   connect() {
+    if (this.discretePaletteId === undefined) {
+      this.discretePaletteId = readStoredDiscretePaletteId()
+    }
     // Generate unique ID for this controller instance
     this.instanceId = Math.random().toString(36).substring(7)
     // Keep global reference aligned with the main visualization instance only.
@@ -4438,6 +4442,9 @@ export default class extends Controller {
         
         // Refresh 2D plot if open
         this.customPlotManager.refresh2DPlotIfOpen()
+        if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+          this.geneManager.refreshGeneCategoryBoxplots()
+        }
         return
       }
       
@@ -4446,6 +4453,9 @@ export default class extends Controller {
       
       // Refresh 2D plot if open
       this.customPlotManager.refresh2DPlotIfOpen()
+      if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+        this.geneManager.refreshGeneCategoryBoxplots()
+      }
       return
     }
     
@@ -4554,6 +4564,9 @@ export default class extends Controller {
           
           // Refresh 2D plot if open
           this.customPlotManager.refresh2DPlotIfOpen()
+          if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+            this.geneManager.refreshGeneCategoryBoxplots()
+          }
           return // Early exit - reordering already rendered everything
         }
         
@@ -4652,6 +4665,9 @@ export default class extends Controller {
           
           // Refresh 2D plot if open
           this.customPlotManager.refresh2DPlotIfOpen()
+          if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+            this.geneManager.refreshGeneCategoryBoxplots()
+          }
           return // Early exit - reordering already rendered everything
         } else {
           // Just render without reordering
@@ -4734,6 +4750,10 @@ export default class extends Controller {
     
     // Refresh fixed tooltip if one is displayed
     this.refreshFixedTooltipIfNeeded()
+
+    if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+      this.geneManager.refreshGeneCategoryBoxplots()
+    }
   }
 
   // Create color map for discrete categories
@@ -7854,6 +7874,60 @@ export default class extends Controller {
     
     return categories
   }
+
+  // HTML data-category is always a string; vector values may be numbers. Do not use === alone.
+  metadataValueEqualsDatasetCategory (vectorValue, datasetCategory) {
+    if (vectorValue === datasetCategory) return true
+    if (vectorValue == null || datasetCategory == null || datasetCategory === '') return false
+    return String(vectorValue) === String(datasetCategory)
+  }
+
+  // Object.keys() yields strings; counts may be stored under numeric keys from vector values.
+  countInCategoryMap (counts, categoryKey) {
+    if (counts == null) return 0
+    if (counts[categoryKey] != null) return counts[categoryKey]
+    const n = Number(categoryKey)
+    if (Number.isFinite(n) && counts[n] != null) return counts[n]
+    const s = String(categoryKey)
+    if (counts[s] != null) return counts[s]
+    return 0
+  }
+
+  // Bar vs dot color debugging: localStorage.setItem('vizDebugCategoryBars','1') then reload. Off: removeItem or set '0'.
+  vizDebugCategoryBarsEnabled () {
+    try {
+      return localStorage.getItem('vizDebugCategoryBars') === '1'
+    } catch (_) {
+      return false
+    }
+  }
+
+  // Palette slot for a category: same stable sort as createDiscreteColorMap / scatter points (not DOM row order).
+  getStablePaletteIndexForCategory (metadataId, categoryName) {
+    if (metadataId == null || categoryName == null || categoryName === '') return -1
+    const mid = Number(metadataId)
+    const vector =
+      this.loadedMetadataVectors?.[mid] ||
+      this.loadedMetadataVectors?.[String(mid)]
+    if (!vector || !vector.values) return -1
+    const dt = vector.data_type
+    if (dt !== 'DISCRETE' && dt !== 'STRING') return -1
+
+    let allCategories
+    if (vector.compression_info && vector.compression_info.categories) {
+      allCategories = [...vector.compression_info.categories]
+    } else {
+      allCategories = [...new Set(vector.values)]
+    }
+    const stableSortedCategories = this.getStableSortedCategories(vector.values, allCategories)
+    const idx = stableSortedCategories.indexOf(categoryName)
+    if (idx >= 0) return idx
+    const catStr = String(categoryName)
+    for (let i = 0; i < stableSortedCategories.length; i++) {
+      if (String(stableSortedCategories[i]) === catStr) return i
+    }
+    return -1
+  }
   
   // Get color for a category (using the same color palette as the plot)
   getCategoryColor(categoryName, index, metadataId) {
@@ -7865,11 +7939,19 @@ export default class extends Controller {
       //console.log(`Using stored color for "${categoryName}" in metadata ${metadataId}: ${storedColor}`)
       return storedColor
     }
-    
-    // Use the same color palette as the plot
+
+    const stableIdx = this.getStablePaletteIndexForCategory(metadataId, categoryName)
+    const paletteSlot = stableIdx >= 0 ? stableIdx : index
+
+    if (this.colorManager) {
+      const paletteHex = this.colorManager.getCategoryColorsCssHex()
+      if (paletteHex.length > 0) {
+        return paletteHex[paletteSlot % paletteHex.length]
+      }
+    }
+
     if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
-      //console.log(`Using default color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${color}`)
+      const color = window.CATEGORY_COLORS[paletteSlot % window.CATEGORY_COLORS.length]
       return color
     }
     
@@ -7885,7 +7967,7 @@ export default class extends Controller {
       '#f97316'  // orange
     ]
     
-    const fallbackColor = defaultColors[index % defaultColors.length]
+    const fallbackColor = defaultColors[paletteSlot % defaultColors.length]
     // console.log(`Using fallback color for "${categoryName}" (index ${index}) in metadata ${metadataId}: ${fallbackColor}`)
     return fallbackColor
   }
@@ -7908,7 +7990,10 @@ export default class extends Controller {
         const categoryName = nameEl.textContent ? nameEl.textContent.trim() : ''
         if (!categoryName) return
 
-        dot.style.backgroundColor = this.getCategoryColor(categoryName, index, dotMetadataId)
+        const color = this.getCategoryColor(categoryName, index, dotMetadataId)
+        dot.style.backgroundColor = color
+        const disk = row.querySelector('.category-color-disk')
+        if (disk) disk.style.backgroundColor = color
       })
     })
   }
@@ -7946,6 +8031,106 @@ export default class extends Controller {
     
     //console.log(`Cleared ${keysToRemove.length} stored colors`)
   }
+
+  hasAnyCategoryColorOverrides () {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('category_color_')) return true
+    }
+    return false
+  }
+
+  clearAllCategoryColorOverrides () {
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('category_color_')) keysToRemove.push(key)
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key))
+  }
+
+  applyDiscretePalette (paletteId, { clearManual }) {
+    if (this.vizDebugCategoryBarsEnabled()) {
+      console.warn('[vizDebugCategoryBars] applyDiscretePalette', { paletteId, clearManual })
+    }
+    this.discretePaletteId = paletteId
+    writeStoredDiscretePaletteId(paletteId)
+    if (clearManual) this.clearAllCategoryColorOverrides()
+    if (this.colorManager) {
+      this.colorManager.clearCategoryColorsCache()
+      this.colorManager.clearColorMapCache()
+    }
+    this.lastColorUpdateHash = null
+    this.syncStaticCategoryDots()
+    try {
+      this.renderPointsWithCurrentColoring()
+    } catch (e) {
+      console.warn('renderPointsWithCurrentColoring after palette change:', e)
+    }
+    if (this.dataManager && typeof this.dataManager.updateAllCategoryDistributions === 'function') {
+      this.dataManager.updateAllCategoryDistributions()
+    }
+    if (this.currentMetadataId != null) {
+      this.drawCategoryDistributions(Number(this.currentMetadataId))
+    }
+    if (this.rendererManager && this.rendererType === 'regl') {
+      try {
+        this.rendererManager.renderGrid()
+      } catch (e2) {
+        console.warn('renderGrid after palette change:', e2)
+      }
+    }
+  }
+
+  beginDiscretePaletteChange (newPaletteId, selectEl) {
+    if (newPaletteId === this.discretePaletteId) return
+    this._pendingDiscretePaletteId = newPaletteId
+    this._pendingDiscretePaletteSelect = selectEl
+    const hasManual = this.hasAnyCategoryColorOverrides()
+    const ov = document.getElementById('discrete-palette-confirm-overlay')
+    if (!ov) {
+      if (selectEl) selectEl.value = this.discretePaletteId
+      return
+    }
+    const titleEl = document.getElementById('discrete-palette-modal-title')
+    const descEl = document.getElementById('discrete-palette-modal-desc')
+    const manualBtns = document.getElementById('discrete-palette-modal-buttons-manual')
+    const simpleBtns = document.getElementById('discrete-palette-modal-buttons-simple')
+    if (titleEl && descEl && manualBtns && simpleBtns) {
+      if (hasManual) {
+        titleEl.textContent = 'Apply palette change'
+        descEl.textContent = 'Some category colors were set manually. You can replace every category color (and clear manual picks), apply the new palette to all categories except those with a manual color, or cancel.'
+        manualBtns.style.display = 'flex'
+        simpleBtns.style.display = 'none'
+      } else {
+        titleEl.textContent = 'Change discrete palette?'
+        descEl.textContent = 'Confirm switching to this palette for discrete category coloring.'
+        manualBtns.style.display = 'none'
+        simpleBtns.style.display = 'flex'
+      }
+    }
+    ov.style.display = 'flex'
+  }
+
+  confirmDiscretePaletteChoice (clearManual) {
+    const id = this._pendingDiscretePaletteId
+    this.closeDiscretePaletteModal()
+    if (id) this.applyDiscretePalette(id, { clearManual: !!clearManual })
+  }
+
+  cancelDiscretePaletteChoice () {
+    const sel = this._pendingDiscretePaletteSelect
+    if (sel) sel.value = this.discretePaletteId
+    this.closeDiscretePaletteModal()
+  }
+
+  closeDiscretePaletteModal () {
+    this._pendingDiscretePaletteId = null
+    this._pendingDiscretePaletteSelect = null
+    const ov = document.getElementById('discrete-palette-confirm-overlay')
+    if (ov) ov.style.display = 'none'
+  }
+
   // Add reset colors button for a metadata
   addResetColorsButton(metadataContainer, metadataId) {
     // Check if there are customized colors
@@ -8052,11 +8237,19 @@ export default class extends Controller {
   }
 
   // Get default color for a category (ignoring localStorage)
-  getDefaultCategoryColor(categoryName, index) {
-    // Use the same color palette as the plot
+  getDefaultCategoryColor (categoryName, fallbackIndex, metadataId = null) {
+    const stableIdx =
+      metadataId != null ? this.getStablePaletteIndexForCategory(metadataId, categoryName) : -1
+    const paletteSlot = stableIdx >= 0 ? stableIdx : fallbackIndex
+
+    if (this.colorManager) {
+      const paletteHex = this.colorManager.getCategoryColorsCssHex()
+      if (paletteHex.length > 0) {
+        return paletteHex[paletteSlot % paletteHex.length]
+      }
+    }
     if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      const color = window.CATEGORY_COLORS[index % window.CATEGORY_COLORS.length]
-      return color
+      return window.CATEGORY_COLORS[paletteSlot % window.CATEGORY_COLORS.length]
     }
     
     // Fallback to default colors if global colors are not available
@@ -8071,7 +8264,7 @@ export default class extends Controller {
       '#f97316'  // orange
     ]
     
-    return defaultColors[index % defaultColors.length]
+    return defaultColors[paletteSlot % defaultColors.length]
   }
 
   // Update legend colors to default
@@ -8082,7 +8275,8 @@ export default class extends Controller {
     const colorDisks = metadataContainer.querySelectorAll('.category-color-disk')
     colorDisks.forEach((disk, index) => {
       const categoryName = disk.dataset.categoryName
-      const defaultColor = this.getDefaultCategoryColor(categoryName, index)
+      const diskMetaId = disk.dataset.metadataId != null ? disk.dataset.metadataId : metadataId
+      const defaultColor = this.getDefaultCategoryColor(categoryName, index, diskMetaId)
       disk.style.backgroundColor = defaultColor
       //console.log(`Updated legend color for "${categoryName}" to default: ${defaultColor}`)
     })
@@ -13064,11 +13258,15 @@ export default class extends Controller {
         throw new Error(payload.errors || payload.message || `HTTP ${response.status}`)
       }
 
-      const duplicateRun = String(payload.errors || '').toLowerCase().includes('already launched')
-      if (duplicateRun) {
-        this.showDeRunFeedback('A DE run already exists for this configuration.', { tone: 'info', autoHideMs: 2500 })
+      if (payload.notice) {
+        this.showDeRunFeedback(String(payload.notice), { tone: 'info', autoHideMs: 5000 })
       } else {
-        this.showDeRunFeedback('DE submitted.', { tone: 'success', autoHideMs: 1800 })
+        const duplicateRun = String(payload.errors || '').toLowerCase().includes('already launched')
+        if (duplicateRun) {
+          this.showDeRunFeedback('A DE run already exists for this configuration.', { tone: 'info', autoHideMs: 2500 })
+        } else {
+          this.showDeRunFeedback('DE submitted.', { tone: 'success', autoHideMs: 1800 })
+        }
       }
     } catch (error) {
       this.showDeRunFeedback(`Failed to submit DE run: ${error.message}`, { tone: 'error', autoHideMs: 3000 })
@@ -18930,15 +19128,16 @@ export default class extends Controller {
     // Get all canvases for this metadata
     const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
     
-    // Get filtered cell indices (if any filters are active)
-    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    // Same cell set as ReGL point colors (incremental path when filters are on).
+    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     
     // Keep category count tooltips up to date even when coloring is disabled.
     this.updateCategoryCountTooltips(metadataId, displayedMetadataVector, filteredSet)
     
-    // Get the metadata vector used for coloring (currentMetadataVector)
-    const coloringMetadataVector = this.currentMetadataVector
+    // Same source as scatter / ReGL (not only currentMetadataVector; can differ after restore / DOM state).
+    const coloringMetadataVector =
+      (this.colorManager && this.colorManager.getColoringMetadataVector()) || this.currentMetadataVector
     if (!coloringMetadataVector || !coloringMetadataVector.values) {
       // No coloring active, hide bar plots to make categories more compact
       canvases.forEach(canvas => {
@@ -18983,21 +19182,33 @@ export default class extends Controller {
       allCategories = [...new Set(coloringMetadataVector.values)]
     }
     
-    // Get stable sorted categories (same as points and legend) for consistent color assignment
     const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
-    
-    // Create a map from category name to its stable color index
-    const categoryToColorIndex = {}
-    stableSortedCategories.forEach((cat, idx) => {
-      categoryToColorIndex[cat] = idx
-    })
-    
-    // Get category colors from color manager (use full palette)
-    const categoryColors = this.colorManager.getCategoryColors()
-    const discreteColorMap = this.colorManager.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
-    
+    const rawColoringMetaId = coloringMetadataVector.id
+    const coloringMetaId = Number.isFinite(Number(rawColoringMetaId)) ? Number(rawColoringMetaId) : rawColoringMetaId
+
+    const debugBars = this.vizDebugCategoryBarsEnabled()
+    let debugBarRowsLogged = 0
+    const debugBarRowLimit = 20
+    if (debugBars) {
+      let paletteLen = null
+      try {
+        paletteLen = this.colorManager?.getCategoryColorsCssHex?.()?.length ?? null
+      } catch (_) {
+        paletteLen = null
+      }
+      console.warn('[vizDebugCategoryBars] drawCategoryDistributions context', {
+        displayedMetadataId: metadataId,
+        coloringMetadataId: coloringMetaId,
+        discretePaletteId: this.discretePaletteId,
+        paletteCssHexLength: paletteLen,
+        displayedValuesLength: displayedMetadataVector.values?.length,
+        coloringValuesLength: coloringMetadataVector.values?.length,
+        valueLengthsMatch:
+          displayedMetadataVector.values?.length === coloringMetadataVector.values?.length
+      })
+    }
+
     // Sort visible coloring categories by count (largest first) for display order only
-    // But use stable color indices for actual color assignment
     const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
@@ -19008,7 +19219,10 @@ export default class extends Controller {
       // Find all cells that belong to this displayed category (filtered only)
       const cellsInDisplayedCategory = []
       for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+        if (
+          this.metadataValueEqualsDatasetCategory(displayedMetadataVector.values[i], displayedCategory) &&
+          (!filteredSet || filteredSet.has(i))
+        ) {
           cellsInDisplayedCategory.push(i)
         }
       }
@@ -19025,28 +19239,75 @@ export default class extends Controller {
       let currentX = 0
       
       sortedColoringCategories.forEach((coloringCategory) => {
-        const count = distributionCounts[coloringCategory] || 0
+        const count = this.countInCategoryMap(distributionCounts, coloringCategory)
         if (count > 0) {
-          // Use stable color index (not the index in the filtered sorted list)
-          const stableColorIndex = categoryToColorIndex[coloringCategory] !== undefined ? categoryToColorIndex[coloringCategory] : 0
-          const fallbackColor = categoryColors[stableColorIndex % categoryColors.length]
-          const color = discreteColorMap[coloringCategory] !== undefined ? discreteColorMap[coloringCategory] : fallbackColor
-          
+          let paletteSlot = this.getStablePaletteIndexForCategory(coloringMetaId, coloringCategory)
+          if (paletteSlot < 0) {
+            const j = stableSortedCategories.findIndex((c) => String(c) === String(coloringCategory))
+            paletteSlot = j >= 0 ? j : 0
+          }
+          const colorHex = this.getCategoryColor(coloringCategory, paletteSlot, coloringMetaId)
+
           const percentage = (count / cellsInDisplayedCategory.length) * 100
           const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width
-          
+
           segments.push({
             category: coloringCategory,
             count: count,
             percentage: percentage,
             startX: currentX,
             endX: currentX + segmentWidth,
-            color: color
+            color: colorHex
           })
-          
+
           currentX += segmentWidth
         }
       })
+
+      if (debugBars && debugBarRowsLogged < debugBarRowLimit) {
+        let dotComputedBg = null
+        const panel = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+        if (panel) {
+          panel.querySelectorAll('.metadata-category-row').forEach((row) => {
+            const cb = row.querySelector('.category-checkbox[data-category]')
+            const nameEl = row.querySelector('.metadata-category-name')
+            const rowCat = cb?.dataset?.category ?? nameEl?.textContent?.trim()
+            if (rowCat != null && this.metadataValueEqualsDatasetCategory(rowCat, displayedCategory)) {
+              const dot = row.querySelector('.metadata-category-dot')
+              if (dot) dotComputedBg = window.getComputedStyle(dot).backgroundColor
+            }
+          })
+        }
+        const segBrief = segments.map((s) => ({
+          category: s.category,
+          hex: s.color
+        }))
+        const disk = panel?.querySelectorAll('.metadata-category-row')?.length
+          ? (() => {
+              let d = null
+              panel.querySelectorAll('.metadata-category-row').forEach((row) => {
+                const cb = row.querySelector('.category-checkbox[data-category]')
+                const nameEl = row.querySelector('.metadata-category-name')
+                const rowCat = cb?.dataset?.category ?? nameEl?.textContent?.trim()
+                if (rowCat != null && this.metadataValueEqualsDatasetCategory(rowCat, displayedCategory)) {
+                  const el = row.querySelector('.category-color-disk')
+                  if (el) d = window.getComputedStyle(el).backgroundColor
+                }
+              })
+              return d
+            })()
+          : null
+        console.warn('[vizDebugCategoryBars] row', {
+          displayedMetadataId: metadataId,
+          displayedCategory,
+          cellsInDisplayedCategory: cellsInDisplayedCategory.length,
+          dotComputedBackground: dotComputedBg,
+          colorDiskComputedBackground: disk,
+          segmentHex0: segments[0] && segments[0].color,
+          segmentColors: segBrief
+        })
+        debugBarRowsLogged += 1
+      }
       
       // Store segments data on canvas for tooltip
       canvas.dataset.segments = JSON.stringify(segments)
@@ -19066,7 +19327,10 @@ export default class extends Controller {
       // Draw cumulative stacked bar
       segments.forEach(segment => {
         const colorValue = segment.color
-        const color = typeof colorValue === 'string' ? colorValue : `#${colorValue.toString(16).padStart(6, '0')}`
+        const color =
+          typeof colorValue === 'string'
+            ? colorValue
+            : `#${((colorValue >>> 0) & 0xffffff).toString(16).padStart(6, '0')}`
         
         ctx.fillStyle = color
         const segmentWidth = segment.endX - segment.startX
@@ -19248,8 +19512,7 @@ export default class extends Controller {
     // console.log('🎨 [BAR PLOTS] drawContinuousDistributions called for metadata:', metadataId)
     // console.log('🎨 [BAR PLOTS] Current gradient points:', this.customGradientControlPoints || this.gradientControlPoints)
     
-    // Get filtered cell indices (if any filters are active)
-    const filteredIndices = this.dataManager.getFilteredCellIndices()
+    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     
     // Get all canvases for this metadata
@@ -19288,7 +19551,10 @@ export default class extends Controller {
       // Find all cells that belong to this displayed category (filtered only)
       const cellsInDisplayedCategory = []
       for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
+        if (
+          this.metadataValueEqualsDatasetCategory(displayedMetadataVector.values[i], displayedCategory) &&
+          (!filteredSet || filteredSet.has(i))
+        ) {
           cellsInDisplayedCategory.push(i)
         }
       }
@@ -20063,6 +20329,376 @@ export default class extends Controller {
         controller.updateButtonAppearance()
       }
     })
+  }
+
+  resolveAnnotEvidenceRowToStableGene (row) {
+    const gm = this.geneManager
+    if (!gm || !row) return null
+    const gidRaw = row.gene_id != null ? String(row.gene_id).trim() : ''
+    const symRaw = row.gene != null ? String(row.gene).trim() : ''
+    if (/^\d+$/.test(gidRaw)) {
+      return { stableId: gidRaw, symbol: symRaw || gidRaw }
+    }
+    const tryQueries = [symRaw, gidRaw].filter((q) => q && q.length > 0)
+    for (const q of tryQueries) {
+      const m = gm.findGeneInAutocomplete(q)
+      if (m) {
+        return { stableId: String(m.stableId), symbol: m.symbol || symRaw || gidRaw }
+      }
+    }
+    const data = gm.autocompleteData
+    if (data && data.length > 0) {
+      const symLow = symRaw.toLowerCase()
+      const ensLow = gidRaw.toLowerCase()
+      for (const entry of data) {
+        const p = gm.parseAutocompleteEntry(entry)
+        if (!p) continue
+        if (symLow && p.symbol && String(p.symbol).toLowerCase() === symLow) {
+          return { stableId: String(p.stableId), symbol: p.symbol }
+        }
+        if (ensLow && p.ensemblId && String(p.ensemblId).toLowerCase() === ensLow) {
+          return { stableId: String(p.stableId), symbol: p.symbol || symRaw }
+        }
+      }
+    }
+    return null
+  }
+
+  resolveAnnotPopupMetadataVector (metadataId) {
+    const lm = this.loadedMetadataVectors
+    if (!lm || metadataId == null) return null
+    return lm[metadataId] || lm[String(metadataId)] || lm[Number(metadataId)] || null
+  }
+
+  async renderAnnotEvidenceBoxplotPanel () {
+    const root = document.getElementById('annot-evidence-boxplot-root')
+    if (!root) return
+    const apd = window._annotPopupData
+    if (!apd) return
+    if (this._annotViolinsResizeObserver) {
+      this._annotViolinsResizeObserver.disconnect()
+      this._annotViolinsResizeObserver = null
+    }
+    this._annotViolinReplay = null
+    const order = apd.evidencesSelectedOrder || []
+    const rowsMap = apd.evidencesSelectedRows || {}
+    const gm = this.geneManager
+    if (!gm) {
+      root.innerHTML = '<p style="font-size:12px;color:#b91c1c;">Gene manager is not available.</p>'
+      return
+    }
+    const metaId = apd.metadataId
+    if (metaId == null) {
+      root.innerHTML = '<p style="font-size:12px;color:#b91c1c;">Missing metadata for this category.</p>'
+      return
+    }
+
+    if (typeof window.populateAnnotViolinMatrixSelect === 'function') {
+      window.populateAnnotViolinMatrixSelect()
+    }
+    if (typeof window.populateAnnotViolinSortSelect === 'function') {
+      window.populateAnnotViolinSortSelect()
+    }
+
+    const matrixSel = document.getElementById('annot-violin-matrix-select')
+    let matrixLayer = '/matrix'
+    let matrixAnnotId = null
+    if (matrixSel && matrixSel.options.length > 0) {
+      const opt = matrixSel.options[matrixSel.selectedIndex]
+      matrixLayer = opt.value || '/matrix'
+      const rawAnnot = opt.getAttribute('data-annot-id')
+      matrixAnnotId = rawAnnot && String(rawAnnot).trim() !== '' ? String(rawAnnot).trim() : null
+    } else {
+      gm.syncMatrixSelectionFromUI()
+      matrixLayer = gm.currentMatrixLayer || '/matrix'
+      matrixAnnotId = gm.currentMatrixAnnotId
+    }
+
+    const layoutRadio = document.querySelector('input[name="annot-violin-layout"]:checked')
+    const layoutMode = layoutRadio && layoutRadio.value === 'combined' ? 'combined' : 'separate'
+    apd.violinLayoutMode = layoutMode
+
+    const sortSel = document.getElementById('annot-violin-sort-by')
+    let violinSortBy = apd.violinSortBy
+    if (violinSortBy !== 'mean' && violinSortBy !== 'max') violinSortBy = 'median'
+    if (sortSel && sortSel.value) {
+      const sv = sortSel.value
+      violinSortBy = (sv === 'mean' || sv === 'max') ? sv : 'median'
+    }
+    apd.violinSortBy = violinSortBy
+
+    root.innerHTML = '<div class="annot-violin-loading-el" role="status" aria-live="polite"><div class="annot-violin-loading-spinner" aria-hidden="true"></div><span class="annot-violin-loading-text">Loading...</span></div>'
+    const {
+      renderAnnotSplitViolinPlot,
+      renderAnnotSplitViolinPlotMulti,
+      categoryCellSortValue,
+      ANNOT_COMBINED_VIOLIN_MIN_COL_PX
+    } = await import('visualization/annot_split_violin_plot')
+    const minViolinColPx = ANNOT_COMBINED_VIOLIN_MIN_COL_PX
+    this._annotSplitViolinFns = { renderAnnotSplitViolinPlot, renderAnnotSplitViolinPlotMulti }
+
+    let metaVec = this.resolveAnnotPopupMetadataVector(metaId)
+    if (!metaVec || !metaVec.values) {
+      try {
+        await this.dataManager.loadSingleMetadataVector(metaId)
+      } catch (e) {
+        root.innerHTML = '<p style="font-size:12px;color:#b91c1c;">Could not load cell categories for this metadata.</p>'
+        return
+      }
+      metaVec = this.resolveAnnotPopupMetadataVector(metaId)
+    }
+    if (!metaVec || !metaVec.values) {
+      root.innerHTML = '<p style="font-size:12px;color:#b91c1c;">Metadata vector is not available.</p>'
+      return
+    }
+    const dt = metaVec.data_type
+    if (dt !== 'DISCRETE' && dt !== 'STRING') {
+      root.innerHTML = '<p style="font-size:12px;color:#92400e;">This metadata is not categorical; split violins need discrete or string labels.</p>'
+      return
+    }
+
+    const filteredIndices = this.dataManager && this.dataManager.getIncrementalFilteredIndices()
+    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+    const catName = apd.catName
+    const catIdx = apd.catIdx
+    const leftLabel = catName != null && String(catName).trim() !== '' ? String(catName).trim() : 'This category'
+    const ccRaw = apd.categoryColor != null ? String(apd.categoryColor).trim() : ''
+    const violinCategoryColor = (/^#[0-9A-Fa-f]{6}$/.test(ccRaw) || /^#[0-9A-Fa-f]{3}$/.test(ccRaw)) ? ccRaw : ''
+    const violinOptsBase = {
+      leftLabel,
+      rightLabel: 'Rest',
+      yLabel: 'Expression',
+      ...(violinCategoryColor ? { categoryColor: violinCategoryColor } : {})
+    }
+
+    const buildSplitForGene = async (row) => {
+      const geneObj = this.resolveAnnotEvidenceRowToStableGene(row)
+      if (!geneObj) {
+        return { error: 'Could not resolve this gene in the project index.' }
+      }
+      let expr
+      try {
+        expr = await gm.fetchExpressionForAnnotViolin(
+          { stableId: geneObj.stableId, symbol: geneObj.symbol },
+          matrixLayer,
+          matrixAnnotId
+        )
+      } catch (e) {
+        return { error: 'Failed to load expression: ' + (e.message || String(e)) }
+      }
+      if (!expr || !expr.values) {
+        return { error: 'No expression data returned.' }
+      }
+      if (metaVec.values.length !== expr.values.length) {
+        return { error: 'Metadata length does not match expression vector.' }
+      }
+      const split = gm.splitExpressionByAnnotCategory(expr.values, metaVec, catName, catIdx, visibleSet)
+      if (!split) {
+        return { error: 'Could not split cells by category.' }
+      }
+      if (split.inCategory.length === 0 && split.rest.length === 0) {
+        return { error: 'No visible cells with numeric expression.' }
+      }
+      return { split, geneObj, emptyCategory: split.inCategory.length === 0 }
+    }
+
+    const sortKeyViolin = violinSortBy === 'mean' || violinSortBy === 'max' ? violinSortBy : 'median'
+
+    if (layoutMode === 'combined') {
+      const panels = []
+      const skipped = []
+      for (let i = 0; i < order.length; i++) {
+        const key = order[i]
+        const row = rowsMap[key]
+        if (!row) continue
+        const res = await buildSplitForGene(row)
+        if (res.error) {
+          skipped.push({ label: row.gene || row.gene_id || 'Gene', message: res.error })
+          continue
+        }
+        panels.push({
+          leftValues: res.split.inCategory,
+          rightValues: res.split.rest,
+          title: row.gene || row.gene_id || res.geneObj.symbol || 'Gene'
+        })
+      }
+      panels.sort((a, b) => {
+        const va = categoryCellSortValue(a.leftValues, sortKeyViolin)
+        const vb = categoryCellSortValue(b.leftValues, sortKeyViolin)
+        if (vb !== va) return vb - va
+        return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' })
+      })
+      root.innerHTML = ''
+      if (panels.length === 0) {
+        const pEmpty = document.createElement('p')
+        pEmpty.style.cssText = 'font-size:12px;color:#b91c1c;'
+        pEmpty.textContent = 'No violin could be drawn for the selected genes.'
+        root.appendChild(pEmpty)
+        if (skipped.length > 0) {
+          const ul = document.createElement('ul')
+          ul.style.cssText = 'font-size:11px;color:#6b7280;margin:8px 0 0 18px;padding:0;'
+          skipped.forEach((s) => {
+            const li = document.createElement('li')
+            li.textContent = String(s.label) + ': ' + String(s.message)
+            ul.appendChild(li)
+          })
+          root.appendChild(ul)
+        }
+        return
+      }
+      if (skipped.length > 0) {
+        const note = document.createElement('p')
+        note.style.cssText = 'font-size:11px;color:#92400e;margin:0 0 8px 0;line-height:1.4;'
+        note.textContent = skipped.length + ' gene(s) skipped (see table in Identify markers for details). First error: ' + skipped[0].message
+        root.appendChild(note)
+      }
+      const wrap = document.createElement('div')
+      wrap.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;'
+      const scrollOuter = document.createElement('div')
+      scrollOuter.id = 'annot-violin-combined-scroll'
+      scrollOuter.style.cssText = 'width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;'
+      const inner = document.createElement('div')
+      const plotH = Math.min(400, Math.max(220, 160 + panels.length * 36))
+      inner.style.cssText = 'position:relative;height:' + plotH + 'px;'
+      const canvas = document.createElement('canvas')
+      canvas.style.cssText = 'display:block;height:' + plotH + 'px;'
+      inner.appendChild(canvas)
+      scrollOuter.appendChild(inner)
+      wrap.appendChild(scrollOuter)
+      root.appendChild(wrap)
+      const layoutCombinedPlot = () => {
+        if (!scrollOuter.isConnected) return
+        const avail = Math.max(160, scrollOuter.clientWidth || 0)
+        const plotW = Math.max(avail, panels.length * minViolinColPx)
+        inner.style.width = plotW + 'px'
+        canvas.style.width = plotW + 'px'
+        renderAnnotSplitViolinPlotMulti(canvas, panels, violinOptsBase)
+      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(layoutCombinedPlot)
+      })
+      if (typeof ResizeObserver !== 'undefined') {
+        this._annotViolinsResizeObserver = new ResizeObserver(() => {
+          layoutCombinedPlot()
+        })
+        this._annotViolinsResizeObserver.observe(scrollOuter)
+      }
+      this._annotViolinReplay = {
+        mode: 'combined',
+        panels,
+        violinOptsBase,
+        minViolinColPx,
+        plotH
+      }
+      return
+    }
+
+    const separateItems = []
+    for (let i = 0; i < order.length; i++) {
+      const key = order[i]
+      const row = rowsMap[key]
+      if (!row) continue
+      const res = await buildSplitForGene(row)
+      separateItems.push({ row, res })
+    }
+    separateItems.sort((a, b) => {
+      const errA = !!a.res.error
+      const errB = !!b.res.error
+      if (errA !== errB) return errA ? 1 : -1
+      if (errA) {
+        return String(a.row.gene || a.row.gene_id || '').localeCompare(String(b.row.gene || b.row.gene_id || ''), undefined, { sensitivity: 'base' })
+      }
+      const va = categoryCellSortValue(a.res.split.inCategory, sortKeyViolin)
+      const vb = categoryCellSortValue(b.res.split.inCategory, sortKeyViolin)
+      if (vb !== va) return vb - va
+      return String(a.row.gene || a.row.gene_id || '').localeCompare(String(b.row.gene || b.row.gene_id || ''), undefined, { sensitivity: 'base' })
+    })
+    root.innerHTML = ''
+    if (separateItems.length === 0) {
+      const pEmpty = document.createElement('p')
+      pEmpty.style.cssText = 'font-size:12px;color:#b91c1c;'
+      pEmpty.textContent = 'No violin could be drawn for the selected genes.'
+      root.appendChild(pEmpty)
+      return
+    }
+    const separateReplayPlots = []
+    for (let i = 0; i < separateItems.length; i++) {
+      const { row, res } = separateItems[i]
+      const wrap = document.createElement('div')
+      wrap.style.marginBottom = '14px'
+      wrap.style.border = '1px solid #e5e7eb'
+      wrap.style.borderRadius = '8px'
+      wrap.style.padding = '8px'
+      wrap.style.background = '#fff'
+      const title = document.createElement('div')
+      title.style.cssText = 'font-size:12px;font-weight:600;color:#111827;margin-bottom:6px;'
+      title.textContent = row.gene || row.gene_id || 'Gene'
+      const inner = document.createElement('div')
+      inner.style.cssText = 'position:relative;width:100%;height:220px;'
+      const canvas = document.createElement('canvas')
+      canvas.style.cssText = 'display:block;width:100%;height:100%;'
+      inner.appendChild(canvas)
+      wrap.appendChild(title)
+      wrap.appendChild(inner)
+      root.appendChild(wrap)
+
+      if (res.error) {
+        const err = document.createElement('p')
+        err.style.cssText = 'font-size:11px;color:#b91c1c;margin:0;'
+        err.textContent = res.error
+        wrap.appendChild(err)
+        continue
+      }
+      if (res.emptyCategory) {
+        const note = document.createElement('p')
+        note.style.cssText = 'font-size:10px;color:#92400e;margin:0 0 4px 0;'
+        note.textContent = 'No visible cells in this category; left violin is empty.'
+        wrap.insertBefore(note, inner)
+      }
+      wrap.setAttribute('data-annot-violin-plot', '1')
+      separateReplayPlots.push({ inCategory: res.split.inCategory, rest: res.split.rest })
+      const c = canvas
+      const s = res.split
+      requestAnimationFrame(() => {
+        renderAnnotSplitViolinPlot(c, s.inCategory, s.rest, violinOptsBase)
+      })
+    }
+    if (separateReplayPlots.length > 0) {
+      this._annotViolinReplay = { mode: 'separate', plots: separateReplayPlots, violinOptsBase }
+    }
+  }
+
+  redrawAnnotEvidenceViolinsAfterResize () {
+    const r = this._annotViolinReplay
+    const fns = this._annotSplitViolinFns
+    if (!r || !fns) return
+    if (r.mode === 'combined') {
+      const scroll = document.getElementById('annot-violin-combined-scroll')
+      if (!scroll || !scroll.isConnected) return
+      const inner = scroll.firstElementChild
+      const canvas = inner && inner.querySelector('canvas')
+      if (!inner || !canvas) return
+      const plotH = r.plotH
+      inner.style.height = plotH + 'px'
+      canvas.style.height = plotH + 'px'
+      const avail = Math.max(160, scroll.clientWidth || 0)
+      const plotW = Math.max(avail, r.panels.length * r.minViolinColPx)
+      inner.style.width = plotW + 'px'
+      canvas.style.width = plotW + 'px'
+      fns.renderAnnotSplitViolinPlotMulti(canvas, r.panels, r.violinOptsBase)
+      return
+    }
+    if (r.mode === 'separate') {
+      const root = document.getElementById('annot-evidence-boxplot-root')
+      if (!root) return
+      const wraps = root.querySelectorAll('[data-annot-violin-plot]')
+      for (let i = 0; i < wraps.length; i++) {
+        const canvas = wraps[i].querySelector('canvas')
+        const p = r.plots[i]
+        if (!canvas || !p) continue
+        fns.renderAnnotSplitViolinPlot(canvas, p.inCategory, p.rest, r.violinOptsBase)
+      }
+    }
   }
 
 }

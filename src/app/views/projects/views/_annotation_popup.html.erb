@@ -1,13 +1,97 @@
+<style>
+  /* Native checkboxes: @tailwindcss/forms uses appearance:none; keep marker table toggles visible. */
+  #annotation-popup-overlay .annot-marker-plot-cb {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    margin: 0 !important;
+    flex-shrink: 0;
+    cursor: pointer;
+    vertical-align: middle;
+    opacity: 1 !important;
+    appearance: auto !important;
+    -webkit-appearance: checkbox !important;
+    accent-color: #2563eb;
+    box-sizing: border-box;
+  }
+  #annotation-popup-overlay .annot-evidence-sortable-table th.annot-marker-plot-th,
+  #annotation-popup-overlay .annot-evidence-sortable-table td.annot-marker-plot-td {
+    width: 42px;
+    min-width: 42px;
+    max-width: 48px;
+    box-sizing: border-box;
+  }
+  #annotation-popup-overlay #annotation-popup-dialog {
+    width: 560px;
+    height: 500px;
+    min-width: 380px;
+    min-height: 280px;
+    max-width: 96vw;
+    max-height: 92vh;
+    resize: both;
+    overflow: hidden;
+    box-sizing: border-box;
+    background-color: #fff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+  }
+  #annotation-popup-overlay #annot-popup-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #annotation-popup-overlay #annot-popup-panel > div:first-child {
+    flex-shrink: 0;
+  }
+  #annotation-popup-overlay #annot-popup-panel > div:nth-child(2) {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  @keyframes annot-violin-loading-spin {
+    to { transform: rotate(360deg); }
+  }
+  #annotation-popup-overlay .annot-violin-loading-el {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 260px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fafafa;
+    box-sizing: border-box;
+  }
+  #annotation-popup-overlay .annot-violin-loading-el .annot-violin-loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    box-sizing: border-box;
+    animation: annot-violin-loading-spin 0.75s linear infinite;
+  }
+  #annotation-popup-overlay .annot-violin-loading-el .annot-violin-loading-text {
+    font-size: 13px;
+    color: #4b5563;
+  }
+</style>
 <!-- Annotation Popup Overlay -->
 <div id="annotation-popup-overlay" data-annotable="<%= annotable?(@project) %>" data-current-project-id="<%= @project.id %>" data-search-gene-url="<%= search_gene_project_path(@project) %>" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.15); z-index: 10000; align-items: center; justify-content: center;" onclick="if(event.target === this) closeAnnotationPopup()">
-  <div id="annotation-popup-dialog" style="width: 560px; max-width: 90vw; height: 500px; max-height: 80vh; background-color: white; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden;">
-    <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: grab; user-select: none; border-radius: 12px 12px 0 0;">
+  <div id="annotation-popup-dialog">
+    <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: grab; user-select: none; border-radius: 12px 12px 0 0; flex-shrink: 0;">
       <div id="annot-popup-title" style="font-size: 15px; font-weight: 600; color: #111827; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;">Annotations</div>
       <button onclick="closeAnnotationPopup()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
         <i class="fas fa-times" style="font-size: 18px;"></i>
       </button>
     </div>
-    <div id="annot-popup-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;"></div>
+    <div id="annot-popup-panel"></div>
   </div>
 </div>
 
@@ -51,7 +135,6 @@
     <div style="font-size: 13px; font-weight: 600; color: #111827;">Existing annotations</div>
     <div style="font-size: 12px; color: #6b7280;">__TOTAL__ total</div>
   </div>
-  <p style="font-size: 11px; color: #6b7280; margin: 0 0 10px 0; line-height: 1.45;">One list for this cell set, best net votes first. Each row header shows from which project, metadata, and category. Local annotations use a green this project label. Hover the project pill for the full title.</p>
   __CONTENT__
 </template>
 
@@ -93,29 +176,63 @@
     html += '<span style="font-size: 12px; color: #6b7280; font-weight: 500;">' + escAttr(label) + '</span>'
     html += '<div class="flex flex-wrap gap-1 mt-1">'
     genes.forEach(function(g) {
-      var sym = escAttr(String(g.symbol != null ? g.symbol : (g.gene_id || '-')))
+      var symRaw = String(g.symbol != null ? g.symbol : (g.gene_id || '-')).trim()
+      var sym = escAttr(symRaw)
       var ens = g.ensembl_id != null ? String(g.ensembl_id).trim() : ''
-      var cls = ens ? highlightCls : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-      var curs = ens ? 'cursor-pointer' : 'cursor-default'
+      var symLookup = (g.symbol != null && String(g.symbol).trim() !== '') ? String(g.symbol).trim() : ''
+      if (!symLookup && g.gene_id != null && !/^ENS[0-9A-Za-z._-]+$/i.test(String(g.gene_id).trim())) {
+        symLookup = String(g.gene_id).trim()
+      }
+      var remoteGid = ''
+      var st = g.stable_id != null ? String(g.stable_id).trim() : ''
+      var gidRaw = g.gene_id != null ? String(g.gene_id).trim() : ''
+      if (/^\d+$/.test(st)) remoteGid = st
+      else if (/^\d+$/.test(gidRaw)) remoteGid = gidRaw
+      var canOpen = !!(remoteGid || ens || symLookup)
+      var cls = highlightCls
+      var curs = canOpen ? 'cursor-pointer' : 'cursor-default'
       html += '<span class="annot-popup-gene-badge gene-badge ' + cls + ' ' + curs + ' inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"'
+      if (remoteGid) html += ' data-remote-gene-id="' + escAttr(remoteGid) + '"'
       if (ens) html += ' data-ensembl-id="' + escAttr(ens) + '"'
-      html += ' title="' + escAttr(ens || sym) + '">' + sym + '</span>'
+      if (symLookup) html += ' data-gene-symbol="' + escAttr(symLookup) + '"'
+      html += ' title="' + escAttr(ens || symRaw || symLookup) + '">' + sym + '</span>'
     })
     html += '</div></div>'
     return html
   }
 
-  window.openAnnotationPopupGeneModal = function(ensemblId, searchUrl) {
+  window.openAnnotationPopupGeneModal = function(ensemblId, searchUrl, geneSymbol, remoteGeneId) {
     var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
     var body = document.getElementById('annotation-popup-gene-modal-body')
     var title = document.getElementById('annotation-popup-gene-modal-title')
     if (!overlay || !body || !title) return
-    title.textContent = ensemblId
-    body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>'
+    var ens = ensemblId != null ? String(ensemblId).trim() : ''
+    var sym = geneSymbol != null ? String(geneSymbol).trim() : ''
+    var rid = remoteGeneId != null ? String(remoteGeneId).trim() : ''
+    var parts = []
+    if (/^\d+$/.test(rid)) parts.push('gene_id=' + encodeURIComponent(rid))
+    if (ens) parts.push('ensembl_id=' + encodeURIComponent(ens))
+    if (sym) parts.push('gene_symbol=' + encodeURIComponent(sym))
+    if (parts.length === 0) return
+    if (sym) title.textContent = sym
+    else if (ens) title.textContent = ens
+    else title.textContent = rid
+    body.textContent = ''
+    var loadWrap = document.createElement('div')
+    loadWrap.className = 'space-y-2'
+    var headLine = document.createElement('p')
+    headLine.className = 'text-gray-800 text-sm font-medium'
+    headLine.textContent = sym || ens || rid
+    var subLine = document.createElement('p')
+    subLine.className = 'text-gray-500 text-sm'
+    subLine.textContent = 'Loading reference gene details from the annotation database...'
+    loadWrap.appendChild(headLine)
+    loadWrap.appendChild(subLine)
+    body.appendChild(loadWrap)
     overlay.classList.remove('hidden')
     var csrfMeta = document.querySelector('meta[name="csrf-token"]')
     var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
-    var url = searchUrl + (searchUrl.indexOf('?') >= 0 ? '&' : '?') + 'ensembl_id=' + encodeURIComponent(ensemblId)
+    var url = searchUrl + (searchUrl.indexOf('?') >= 0 ? '&' : '?') + parts.join('&')
     fetch(url, { headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }, credentials: 'same-origin' })
       .then(function(r) { return r.text() })
       .then(function(html) { body.innerHTML = html })
@@ -125,6 +242,216 @@
   window.closeAnnotationPopupGeneModal = function() {
     var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
     if (overlay) overlay.classList.add('hidden')
+  }
+
+  function annotEvidenceSortGeneKey(row) {
+    var s = (row.gene != null && String(row.gene).trim() !== '') ? String(row.gene).trim() : (row.gene_id != null ? String(row.gene_id) : '-')
+    return s.toLowerCase()
+  }
+
+  window.annotEvidenceGeneSortValue = annotEvidenceSortGeneKey
+
+  function annotEvidenceSortNumField(row, col) {
+    var v
+    if (col === 1) v = row.log2fc
+    else if (col === 2) v = row.fdr
+    else if (col === 3) v = row.p_value
+    else return 0
+    if (v === null || v === undefined || v === '') return 0
+    var n = parseFloat(v)
+    return Number.isFinite(n) ? n : 0
+  }
+
+  window.annotEvidenceSortedRows = function(rows, tone) {
+    var apd = window._annotPopupData
+    if (!apd || !rows || rows.length === 0) return (rows || []).slice()
+    if (!apd.evidencesSort) apd.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } }
+    var st = apd.evidencesSort[tone === 'down' ? 'down' : 'up']
+    if (!st || st.col === null || st.col === undefined) return rows.slice()
+    var col = st.col
+    var asc = st.asc !== false
+    return rows.slice().sort(function(a, b) {
+      var cmp = 0
+      if (col === 0) {
+        cmp = annotEvidenceSortGeneKey(a).localeCompare(annotEvidenceSortGeneKey(b))
+      } else {
+        cmp = annotEvidenceSortNumField(a, col) - annotEvidenceSortNumField(b, col)
+      }
+      return asc ? cmp : -cmp
+    })
+  }
+
+  window.annotEvidenceSortColumnClick = function(colIdx) {
+    var apd = window._annotPopupData
+    if (!apd || apd.activeTab !== 'evidences') return
+    var sub = apd.evidencesSubTab === 'down' ? 'down' : 'up'
+    if (!apd.evidencesSort) apd.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } }
+    var st = apd.evidencesSort[sub]
+    if (st.col === colIdx) st.asc = !st.asc
+    else { st.col = colIdx; st.asc = true }
+    var fn = window._annotPopupRenderPanel
+    if (typeof fn === 'function') fn()
+  }
+
+  window.annotEvidenceSortThHtml = function(tone, colIdx, label, stickyStyle) {
+    var apd = window._annotPopupData
+    var ind = ''
+    if (apd && apd.evidencesSort) {
+      var st = apd.evidencesSort[tone === 'down' ? 'down' : 'up']
+      if (st && st.col === colIdx) ind = st.asc ? ' \u25B2' : ' \u25BC'
+    }
+    var base = stickyStyle + 'cursor:pointer;user-select:none;'
+    return '<th data-sort-col="' + colIdx + '" style="' + base + '" onclick="annotEvidenceSortColumnClick(' + colIdx + '); return false;" title="Sort">' + escAttr(label) + '<span class="sort-indicator">' + ind + '</span></th>'
+  }
+
+  window.annotEvidenceSelectionKey = function(tone, row) {
+    var g = (row && row.gene_id != null) ? String(row.gene_id) : ''
+    var s = (row && row.gene != null) ? String(row.gene) : ''
+    return String(tone) + '|' + g + '|' + s
+  }
+
+  window.annotEvidenceEnsureSelectionStore = function() {
+    var apd = window._annotPopupData
+    if (!apd) return null
+    if (!Array.isArray(apd.evidencesSelectedOrder)) apd.evidencesSelectedOrder = []
+    if (!apd.evidencesSelectedRows || typeof apd.evidencesSelectedRows !== 'object') apd.evidencesSelectedRows = {}
+    return apd
+  }
+
+  window.annotEvidenceSelectedCount = function() {
+    var apd = window.annotEvidenceEnsureSelectionStore()
+    return apd ? apd.evidencesSelectedOrder.length : 0
+  }
+
+  window.annotEvidenceCheckboxChange = function(el) {
+    var apd = window.annotEvidenceEnsureSelectionStore()
+    if (!apd || !el) return
+    var key = el.getAttribute('data-evidence-key')
+    var tone = el.getAttribute('data-evidence-tone') || 'up'
+    var geneId = el.getAttribute('data-evidence-gene-id') || ''
+    var gene = el.getAttribute('data-evidence-gene-symbol') || ''
+    if (!key) return
+    if (el.checked) {
+      if (apd.evidencesSelectedOrder.indexOf(key) < 0) apd.evidencesSelectedOrder.push(key)
+      apd.evidencesSelectedRows[key] = { tone: tone, gene_id: geneId, gene: gene }
+    } else {
+      var next = []
+      apd.evidencesSelectedOrder.forEach(function(k) { if (k !== key) next.push(k) })
+      apd.evidencesSelectedOrder = next
+      delete apd.evidencesSelectedRows[key]
+    }
+    var upd = window._annotPopupUpdateBoxplotTabLabel
+    if (typeof upd === 'function') upd()
+    if (apd.activeTab === 'evidence_boxplot' && typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') {
+      window.scheduleAnnotEvidenceBoxplotRender()
+    }
+  }
+
+  window.annotEvidenceBoxplotSupported = function() {
+    var c = window.visualizationController
+    return !!(c && typeof c.renderAnnotEvidenceBoxplotPanel === 'function')
+  }
+
+  window.populateAnnotViolinMatrixSelect = function() {
+    var sel = document.getElementById('annot-violin-matrix-select')
+    if (!sel) return
+    var apd = window._annotPopupData
+    var gm = window.geneManager
+    sel.innerHTML = ''
+    function addOpt(value, label, annotId) {
+      var o = document.createElement('option')
+      o.value = value || '/matrix'
+      o.textContent = label || value || '/matrix'
+      if (annotId) o.setAttribute('data-annot-id', String(annotId))
+      sel.appendChild(o)
+    }
+    var src = document.getElementById('gene-expression-matrix-select')
+    if (src && src.options && src.options.length) {
+      for (var i = 0; i < src.options.length; i++) {
+        var opt = src.options[i]
+        var aid = opt.getAttribute('data-annot-id') || ''
+        addOpt(opt.value, opt.textContent || opt.value, aid)
+      }
+    } else {
+      var menu = document.getElementById('matrix-selection-menu')
+      if (menu) {
+        menu.querySelectorAll('div[data-value]').forEach(function(el) {
+          addOpt(el.getAttribute('data-value'), el.getAttribute('data-label') || el.getAttribute('data-value'), el.getAttribute('data-annot-id'))
+        })
+      }
+      if (sel.options.length === 0) {
+        addOpt('/matrix', '/matrix', '')
+      }
+    }
+    if (gm && typeof gm.syncMatrixSelectionFromUI === 'function') gm.syncMatrixSelectionFromUI()
+    var wantLayer = (apd && apd.violinMatrixLayer != null && apd.violinMatrixLayer !== '') ? apd.violinMatrixLayer : (gm ? gm.currentMatrixLayer : '/matrix')
+    var wantAnnot = ''
+    if (apd && apd.violinMatrixAnnotId != null && String(apd.violinMatrixAnnotId) !== '') {
+      wantAnnot = String(apd.violinMatrixAnnotId)
+    } else if (gm && gm.currentMatrixAnnotId) {
+      wantAnnot = String(gm.currentMatrixAnnotId)
+    }
+    var matched = false
+    for (var j = 0; j < sel.options.length; j++) {
+      var o = sel.options[j]
+      var oa = o.getAttribute('data-annot-id') ? String(o.getAttribute('data-annot-id')) : ''
+      if (String(o.value) === String(wantLayer) && oa === wantAnnot) {
+        sel.selectedIndex = j
+        matched = true
+        break
+      }
+    }
+    if (!matched && sel.options.length) sel.selectedIndex = 0
+    var cur = sel.options[sel.selectedIndex]
+    if (cur && apd) {
+      apd.violinMatrixLayer = cur.value
+      apd.violinMatrixAnnotId = cur.getAttribute('data-annot-id') && cur.getAttribute('data-annot-id') !== '' ? cur.getAttribute('data-annot-id') : null
+    }
+    if (typeof window.populateAnnotViolinSortSelect === 'function') {
+      window.populateAnnotViolinSortSelect()
+    }
+  }
+
+  window.populateAnnotViolinSortSelect = function() {
+    var sel = document.getElementById('annot-violin-sort-by')
+    if (!sel || !window._annotPopupData) return
+    var v = window._annotPopupData.violinSortBy
+    if (v !== 'mean' && v !== 'max') v = 'median'
+    sel.value = v
+  }
+
+  window.onAnnotViolinMatrixSelectChange = function() {
+    var apd = window._annotPopupData
+    var s = document.getElementById('annot-violin-matrix-select')
+    if (!apd || !s || !s.options.length) return
+    var opt = s.options[s.selectedIndex]
+    apd.violinMatrixLayer = opt.value
+    apd.violinMatrixAnnotId = opt.getAttribute('data-annot-id') && opt.getAttribute('data-annot-id') !== '' ? opt.getAttribute('data-annot-id') : null
+    if (typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') window.scheduleAnnotEvidenceBoxplotRender()
+  }
+
+  window.onAnnotViolinLayoutRadioChange = function() {
+    var apd = window._annotPopupData
+    var el = document.querySelector('input[name="annot-violin-layout"]:checked')
+    if (!apd || !el) return
+    apd.violinLayoutMode = el.value === 'combined' ? 'combined' : 'separate'
+    if (typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') window.scheduleAnnotEvidenceBoxplotRender()
+  }
+
+  window.onAnnotViolinSortChange = function() {
+    var apd = window._annotPopupData
+    var s = document.getElementById('annot-violin-sort-by')
+    if (!apd || !s) return
+    var v = s.value
+    apd.violinSortBy = (v === 'mean' || v === 'max') ? v : 'median'
+    if (typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') window.scheduleAnnotEvidenceBoxplotRender()
+  }
+
+  window._annotPopupUpdateBoxplotTabLabel = function() {
+    var btn = document.querySelector('[data-annot-tab="evidence_boxplot"]')
+    if (!btn) return
+    var n = window.annotEvidenceSelectedCount()
+    btn.textContent = 'Violin (' + n + ' selected)'
   }
 
   function initAnnotationPopupGeneUi() {
@@ -137,7 +464,11 @@
       var badge = e.target.closest('.annot-popup-gene-badge')
       if (!badge || !panel.contains(badge)) return
       var ens = badge.getAttribute('data-ensembl-id')
-      if (ens && searchUrl) window.openAnnotationPopupGeneModal(ens, searchUrl)
+      var sym = badge.getAttribute('data-gene-symbol')
+      var rid = badge.getAttribute('data-remote-gene-id')
+      if (searchUrl) {
+        window.openAnnotationPopupGeneModal(ens || '', searchUrl, sym || '', rid || '')
+      }
     })
     geneOverlay.addEventListener('click', function(e) {
       if (e.target === geneOverlay) window.closeAnnotationPopupGeneModal()
@@ -149,5 +480,36 @@
   } else {
     initAnnotationPopupGeneUi()
   }
+
+  ;(function setupAnnotDialogResizeViolinRedraw() {
+    var ptr = { active: false, w: 0, h: 0 }
+    function overlayVisible() {
+      var ov = document.getElementById('annotation-popup-overlay')
+      if (!ov) return false
+      return window.getComputedStyle(ov).display !== 'none'
+    }
+    document.addEventListener('mousedown', function(e) {
+      var d = document.getElementById('annotation-popup-dialog')
+      if (!d || !overlayVisible()) return
+      if (!d.contains(e.target)) return
+      ptr.active = true
+      var r = d.getBoundingClientRect()
+      ptr.w = r.width
+      ptr.h = r.height
+    }, true)
+    document.addEventListener('mouseup', function() {
+      if (!ptr.active) return
+      ptr.active = false
+      var d = document.getElementById('annotation-popup-dialog')
+      if (!d || !overlayVisible()) return
+      var apd = window._annotPopupData
+      if (!apd || apd.activeTab !== 'evidence_boxplot') return
+      var r = d.getBoundingClientRect()
+      if (Math.abs(r.width - ptr.w) < 1 && Math.abs(r.height - ptr.h) < 1) return
+      if (typeof window.scheduleAnnotEvidenceViolinResizeRedraw === 'function') {
+        window.scheduleAnnotEvidenceViolinResizeRedraw()
+      }
+    })
+  })()
 })()
 </script>

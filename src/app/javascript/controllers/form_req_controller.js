@@ -847,11 +847,14 @@ export default class extends Controller {
         }
       }
 
-      // Handle errors if any
+      // Surface server notices (duplicate runs, etc.) in the step panel via step_results params
       let otherParams = ''
-      if (data.errors) {
-        otherParams += '&errors=' + encodeURIComponent(data.errors)
-        console.warn("[FormReqController] Errors in response:", data.errors)
+      const panelMessage = data.notice || data.errors
+      if (panelMessage) {
+        otherParams += '&notice=' + encodeURIComponent(panelMessage)
+        if (data.errors && data.errors !== data.notice) {
+          console.warn("[FormReqController] Response errors:", data.errors)
+        }
       }
 
       // Refresh step results
@@ -895,7 +898,7 @@ export default class extends Controller {
         console.log("[FormReqController] Using step-selector controller to refresh")
         const stepElement = stepSelectorElement.querySelector(`[data-step-id="${this.stepIdValue}"]`)
         if (stepElement) {
-          stepSelectorController.loadStepResults(this.stepIdValue, stepElement, false)
+          stepSelectorController.loadStepResults(this.stepIdValue, stepElement, false, otherParams)
           return
         }
       }

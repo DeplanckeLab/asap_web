@@ -5,10 +5,11 @@
 class ProjectCloneService
   attr_reader :source_project, :user, :session, :new_project, :errors
 
-  def initialize(source_project, user:, session:)
+  def initialize(source_project, user:, session:, admin: false)
     @source_project = source_project
     @user = user
     @session = session
+    @admin = admin
     @errors = []
     @h_runs = {}
     @h_annots = {}
@@ -124,6 +125,9 @@ class ProjectCloneService
     
     # Copy directory if they're different
     if @source_project_dir != @new_project_dir
+      # If the destination already exists, cp_r nests src inside it (e.g. new_key/old_key/...),
+      # which breaks layout and can raise Errno::EEXIST. Remove stale dirs from failed clones.
+      FileUtils.rm_rf(@new_project_dir) if File.exist?(@new_project_dir)
       FileUtils.cp_r(@source_project_dir, @new_project_dir)
     end
   end
@@ -385,7 +389,7 @@ class ProjectCloneService
 
   def update_source_clone_count
     current_count = source_project.nber_cloned || 0
-    source_project.update_column(:nber_cloned, current_count + 1) if !admin?
+    source_project.update_column(:nber_cloned, current_count + 1) unless @admin
   end
 
   def cleanup_failed_clone

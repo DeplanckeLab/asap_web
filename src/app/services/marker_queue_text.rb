@@ -1,0 +1,41 @@
+# Slurm pending-queue copy for any run (HTTP JSON, Action Cable, tooltips).
+class MarkerQueueText
+  # Short line for title/tooltip on waiting icons (hover).
+  def self.hover_summary(snap, queue_position)
+    if snap.is_a?(Hash)
+      part = snap[:partition].to_s
+      tot = snap[:pending_count].to_i
+      pos = snap[:position].to_i
+      if tot <= 1
+        "Slurm queue position: only pending job in partition #{part} (cluster-wide list)."
+      else
+        "Slurm queue position: about #{pos} of #{tot} pending jobs in partition #{part} (cluster-wide)."
+      end
+    elsif !queue_position.nil?
+      if queue_position.to_i.zero?
+        "Slurm queue position: no other pending jobs ahead in this Slurm partition (cluster-wide list)."
+      else
+        "Slurm queue position: #{queue_position}."
+      end
+    end
+  end
+
+  def self.partition_pending_explanation(snap)
+    return nil unless snap.is_a?(Hash)
+
+    part = snap[:partition].to_s
+    tot = snap[:pending_count].to_i
+    pos = snap[:position].to_i
+    queue_note =
+      if tot <= 1
+        "In Slurm partition #{part}, this job is currently the only one in the pending queue. " \
+          "That is the full pending list for this partition (all users and projects), not a count of metadata columns and not only this project."
+      else
+        "In Slurm partition #{part}, this job is about #{pos} of #{tot} pending jobs. " \
+          "The #{tot} figure is every pending job in that partition (cluster-wide for that queue), not per metadata column and not only this project."
+      end
+    queue_note += " Pending means Slurm has not assigned this job to a compute node yet. " \
+      "You can see no running jobs and still be pending: placement depends on CPUs, memory, partition or QOS limits, and node state, not only on other jobs being ahead in the queue."
+    queue_note
+  end
+end

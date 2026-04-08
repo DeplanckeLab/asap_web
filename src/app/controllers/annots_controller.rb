@@ -193,6 +193,10 @@ class AnnotsController < ApplicationController
         @categories = {}
       end
     end
+
+    if editable?(@project) && metadata_type_editable?(@annot)
+      @data_type_options = DataType.order(:id).map { |dt| [dt.label.presence || dt.name, dt.id] }
+    end
   end
 
   # GET /annots/:id/categories.json
@@ -317,7 +321,7 @@ class AnnotsController < ApplicationController
     unless metadata_type_editable?(@annot)
       redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
     end
-    @data_type_options = DataType.order(:id).map { |dt| [dt.label.presence || dt.name, dt.id] }
+    redirect_to "#{annot_path(@annot, annot_back_params)}#annot-data-type"
   end
 
   def update
@@ -332,7 +336,7 @@ class AnnotsController < ApplicationController
     permitted = annot_params
     new_type_id = permitted[:data_type_id].presence&.to_i
     unless new_type_id.positive? && DataType.exists?(id: new_type_id)
-      redirect_to edit_annot_path(@annot, annot_back_params), alert: 'Invalid data type.' and return
+      redirect_to annot_path(@annot, annot_back_params), alert: 'Invalid data type.' and return
     end
 
     h_annot = {
@@ -352,8 +356,17 @@ class AnnotsController < ApplicationController
 
     all_annots = Annot.where(project_id: @project.id, name: @annot.name).order(:id)
     if all_annots.any? { |a| a.run_id.blank? }
-      redirect_to edit_annot_path(@annot, annot_back_params), alert: 'Cannot update: a related row is missing its run.' and return
+      redirect_to annot_path(@annot, annot_back_params), alert: 'Cannot update: a related row is missing its run.' and return
     end
+
+    old_type_label = @annot.data_type&.then { |dt| dt.label.presence || dt.name } || 'none'
+    new_dt = h_data_types[new_type_id]
+    new_type_label = new_dt ? (new_dt.label.presence || new_dt.name) : 'unknown'
+    instances = all_annots.size
+    instance_word = (instances == 1) ? 'instance' : 'instances'
+    notice =
+      "Data type of all metadata named #{@annot.name} in the different loom files " \
+      "(#{instances} #{instance_word}) were changed from #{old_type_label} to #{new_type_label}."
 
     ActiveRecord::Base.transaction do
       ori_annot.update!(h_annot)
@@ -366,20 +379,20 @@ class AnnotsController < ApplicationController
       end
     end
 
-    redirect_to annot_path(@annot, annot_back_params), notice: 'Data type was updated. Related annotations were refreshed.'
+    redirect_to annot_path(@annot, annot_back_params), notice: notice
   rescue StandardError => e
     Rails.logger.error("[annots#update] #{e.class}: #{e.message}\n#{e.backtrace&.first(12)&.join("\n")}")
-    redirect_to edit_annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}"
+    redirect_to annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}"
+  end
+
+  def annot_back_params
+    { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact
   end
 
   private
 
   def annot_params
     params.require(:annot).permit(:data_type_id, :data_class_ids)
-  end
-
-  def annot_back_params
-    { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact
   end
 
   def metadata_type_editable?(annot)

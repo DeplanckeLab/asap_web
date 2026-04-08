@@ -57,6 +57,9 @@ export default class extends Controller {
   }
 
   handleStatusUpdate(data) {
+    if (data && data.event === 'queue_position_changed') {
+      return
+    }
     console.log('[HeaderRunStatus] handleStatusUpdate payload:', {
       step_id: data?.step_id,
       step_name: data?.step_name,
@@ -156,7 +159,7 @@ export default class extends Controller {
     // Update button disabled state and title
     const btnEl = this.statusButtonTargets.find(el => el.dataset.statusKey === statusKey)
     if (btnEl) {
-      const label = iconEl?.dataset.label || statusKey
+      const label = iconEl?.dataset.uiLabel || statusKey
       btnEl.title = `${label} (${count})`
       btnEl.disabled = !isActive
       if (isActive) {

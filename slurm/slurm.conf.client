@@ -86,7 +86,9 @@ Waittime=0
 #MaxMemPerCPU=0
 #SchedulerTimeSlice=30
 SchedulerType=sched/backfill
-SelectType=select/linear
+SelectType=select/cons_tres
+SelectTypeParameters=CR_Core_Memory
+SchedulerParameters=bf_continue
 #
 #
 # JOB PRIORITY
@@ -97,10 +99,10 @@ PriorityType=priority/multifactor
 #PriorityFavorSmall=
 #PriorityMaxAge=
 #PriorityUsageResetPeriod=
-PriorityWeightAge=100
-PriorityWeightFairShare=1000
-PriorityWeightJobSize=1000
-PriorityWeightPartition=1000
+PriorityWeightAge=5000
+PriorityWeightFairShare=50000
+PriorityWeightJobSize=50
+PriorityWeightPartition=100
 PriorityWeightQOS=0
 PriorityMaxAge=7-0
 PriorityDecayHalfLife=7-0

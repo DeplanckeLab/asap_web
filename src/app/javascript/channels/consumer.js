@@ -13,7 +13,36 @@ console.log('[ActionCable] Consumer created from meta tag URL', consumer)
 // not only when step-selector is active.
 export function dispatchProjectStepRunsChangedFromCable(data) {
   if (!data || data.initial_snapshot) return
-  if (data.event === 'queue_position_changed') return
+  if (data.event === "queue_position_changed") {
+    if (data.annot_id != null && data.annot_id !== "" && data.markers_queue_note) {
+      document.dispatchEvent(
+        new CustomEvent("asap:markers-queue-position-changed", {
+          bubbles: true,
+          detail: {
+            projectId: data.project_id,
+            runId: data.run_id,
+            annotId: data.annot_id,
+            markersQueueNote: data.markers_queue_note,
+            slurmQueueHover: data.slurm_queue_hover
+          }
+        })
+      )
+    }
+    return
+  }
+  if (data.event === 'markers_run_status_changed') {
+    document.dispatchEvent(
+      new CustomEvent('asap:markers-run-status-changed', {
+        bubbles: true,
+        detail: {
+          projectId: data.project_id,
+          runId: data.run_id,
+          annotId: data.annot_id
+        }
+      })
+    )
+    return
+  }
   const stepName = (data.step_name || '').toString().toLowerCase()
   if (!stepName) return
   document.dispatchEvent(

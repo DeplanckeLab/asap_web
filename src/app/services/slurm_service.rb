@@ -1,3 +1,5 @@
+require 'shellwords'
+
 class SlurmService
   class SlurmError < StandardError; end
 
@@ -21,14 +23,18 @@ class SlurmService
       (options[:memory_mb] || 4096).to_i
     end
     time_limit = (run.pred_process_duration || options[:time_limit] || 3600).to_i
-    
+
     # Add 5 minutes (300 seconds) buffer to predicted time to account for variability
     time_limit = time_limit + 300
-    
+
+    # Prediction is often too low for long-running steps (e.g. FindMarkers). Slurm kills the job at --time.
+    min_walltime = 2.hours.to_i
+    time_limit = [time_limit, min_walltime].max
+
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
     @logger.info("  - Memory: #{memory_mb}MB (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
-    @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration})")
+    @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration}, min #{min_walltime}s)")
     
     if options[:check_resources] != false
       resource_check = check_resource_availability(cores: cores, memory_mb: memory_mb, time_limit: time_limit)
@@ -212,86 +218,110 @@ class SlurmService
     nil
   end
 
-  def get_job_queue_position(slurm_job_id, run_status_id = nil)
+  # Pending jobs in the job partition, ordered by higher priority first then job id (ties).
+  # Returns { position: Integer, pending_count: Integer, partition: String } or nil if not pending or query failed.
+  def pending_job_queue_snapshot(slurm_job_id)
+    id = slurm_job_id.to_i
+    return nil if id <= 0
+
+    meta = `squeue -h -j #{id} -o '%t|%P|%i|%p' 2>&1`.strip
+    return nil unless $?.success?
+    return nil if meta.blank? || meta.downcase.include?('invalid')
+
+    st, partition, full_id, prio_s = meta.split('|', 4)
+    return nil if st.blank? || partition.blank? || full_id.blank? || prio_s.nil?
+
+    st = st.strip
+    partition = partition.strip
+    full_id = full_id.strip
+    return nil unless st == 'PD'
+
+    escaped_part = Shellwords.escape(partition)
+    raw = `squeue -h -t PD -p #{escaped_part} -o '%i %p' 2>&1`
+    return nil unless $?.success?
+
+    rows = []
+    raw.each_line do |line|
+      line = line.strip
+      next if line.blank?
+
+      jid_str, pr = line.split(/\s+/, 2)
+      next if jid_str.blank? || pr.blank?
+
+      rows << { full_id: jid_str.strip, prio: pr.strip.to_f }
+    end
+    return nil if rows.empty?
+    return nil unless rows.any? { |r| r[:full_id] == full_id }
+
+    rows.sort_by! { |r| [-r[:prio], full_id_sort_tuple(r[:full_id])] }
+    idx = rows.index { |r| r[:full_id] == full_id }
+    return nil if idx.nil?
+
+    {
+      position: idx + 1,
+      pending_count: rows.size,
+      partition: partition
+    }
+  rescue StandardError => e
+    @logger.warn("[SlurmService] pending_job_queue_snapshot failed for #{slurm_job_id.inspect}: #{e.class} #{e.message}")
+    nil
+  end
+
+  # True when the UI should show the Slurm queue line (job is pending in Slurm).
+  def show_slurm_queue_line?(slurm_job_id, job_status)
+    return false if slurm_job_id.blank?
+
+    return true if job_status == :pending
+    return false if job_status == :running
+    return false if [:completed, :failed, :cancelled, :timeout, :node_fail, :invalid_job].include?(job_status)
+
+    pending_job_queue_snapshot(slurm_job_id).present?
+  end
+
+  # Numeric queue index when the job is still pending; nil when the job is running or finished.
+  # Pass job_status when already known to avoid duplicate squeue.
+  def get_job_queue_position(slurm_job_id, run_status_id = nil, job_status: nil, run: nil)
     return nil if slurm_job_id.blank?
-    
+
     @logger.info("[SlurmService] get_job_queue_position called: slurm_job_id=#{slurm_job_id}, run_status_id=#{run_status_id.inspect}")
-    
-    # First check if job is running or completed - if so, return nil (no queue position)
-    # BUT: if run_status_id is 1 (waiting), the run thinks it's waiting, so check the queue anyway
-    # This handles cases where SLURM shows completed but run hasn't been updated yet
-    job_status = get_job_status(slurm_job_id)
+
+    waiting_like = [1, 6].include?(run_status_id.to_i)
+    job_status = get_job_status(slurm_job_id, run) if job_status.nil?
     @logger.info("[SlurmService] Job #{slurm_job_id} SLURM status: #{job_status.inspect}")
-    
-    # Only skip queue check if job is running/completed AND run is NOT waiting
-    # If run is waiting (status_id == 1), check the queue even if SLURM says completed/running
-    # (this handles timing issues where run status hasn't updated yet)
-    if (job_status == :running || job_status == :completed) && run_status_id != 1
-      @logger.info("[SlurmService] Job #{slurm_job_id} is #{job_status} and run_status_id is #{run_status_id} (not waiting), no queue position - returning nil")
+
+    if job_status == :running
+      @logger.info("[SlurmService] Job #{slurm_job_id} is running; no queue position")
       return nil
-    elsif (job_status == :running || job_status == :completed) && run_status_id == 1
-      @logger.info("[SlurmService] Job #{slurm_job_id} is #{job_status} but run_status_id is 1 (waiting) - checking queue anyway (possible timing issue)")
     end
-    
-    # Get queue position by counting pending jobs ahead of this one
-    # Get all pending jobs sorted by priority/submission time
-    result = `squeue -t PENDING -h -o "%i %Q" --sort=+Q 2>&1`
-    
-    @logger.info("[SlurmService] squeue command result: exit_code=#{$?.exitstatus}, output_length=#{result.strip.length}, output=#{result.strip.inspect}")
-    
-    if $?.success?
-      if result.strip.empty?
-        # No pending jobs in queue
-        # If run status is waiting (status_id == 1) or SLURM status is pending, queue is empty
-        if run_status_id == 1 || job_status == :pending
-          @logger.info("[SlurmService] No pending jobs found, job #{slurm_job_id} is next in line (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - returning 0")
-          return 0  # Special value: 0 means "next in queue, will start shortly"
-        else
-          # Job is not waiting/pending, might have started or failed
-          @logger.info("[SlurmService] No pending jobs found, job #{slurm_job_id} status is #{job_status}, run_status_id: #{run_status_id} - returning nil")
-          return nil
-        end
-      end
-      
-      # Parse pending jobs to find this job's position
-      lines = result.strip.split("\n")
-      @logger.info("[SlurmService] Parsing #{lines.length} pending job lines, looking for job #{slurm_job_id}")
-      position = nil
-      lines.each_with_index do |line, index|
-        parts = line.strip.split
-        @logger.info("[SlurmService] Line #{index + 1}: #{line.inspect}, parts: #{parts.inspect}, comparing '#{parts[0]}' with '#{slurm_job_id.to_s}'")
-        if parts.size >= 1 && parts[0] == slurm_job_id.to_s
-          # Position is 1-indexed (1st in queue, 2nd in queue, etc.)
-          position = index + 1
-          @logger.info("[SlurmService] Found job #{slurm_job_id} at position #{position} in queue")
-          break
-        end
-      end
-      
-      if position.nil?
-        # Job not found in pending queue
-        # If run status is waiting (status_id == 1) or SLURM status is pending, queue is empty
-        @logger.info("[SlurmService] Job #{slurm_job_id} not found in pending queue. run_status_id: #{run_status_id.inspect}, slurm_status: #{job_status.inspect}")
-        if run_status_id == 1 || job_status == :pending
-          @logger.info("[SlurmService] Job #{slurm_job_id} not in pending queue but run is waiting (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - returning 0 (next in line)")
-          return 0  # Next in queue, will start shortly
-        else
-          # Job might have started or failed
-          @logger.info("[SlurmService] Job #{slurm_job_id} not found in pending queue, status: #{job_status}, run_status_id: #{run_status_id} - returning nil")
-          return nil
-        end
-      end
-      
-      return position
-    else
-      @logger.warn("[SlurmService] squeue command failed: #{result.strip}")
-      # If command failed but run is waiting, assume it's next in line
-      if run_status_id == 1 || job_status == :pending
-        @logger.debug("[SlurmService] squeue failed but run is waiting (run_status_id: #{run_status_id}, slurm_status: #{job_status}) - assuming next in line")
-        return 0
-      end
+
+    if [:completed, :failed, :cancelled, :timeout, :node_fail, :invalid_job].include?(job_status)
+      @logger.info("[SlurmService] Job #{slurm_job_id} is #{job_status}; no queue position")
+      return nil
     end
-    
+
+    snap = pending_job_queue_snapshot(slurm_job_id)
+    if snap
+      @logger.info("[SlurmService] pending_job_queue_snapshot for #{slurm_job_id}: #{snap.inspect}")
+      return snap[:position]
+    end
+
+    @logger.info("[SlurmService] pending snapshot nil; job_status=#{job_status.inspect}, waiting_like=#{waiting_like}")
+
+    if job_status == :pending
+      @logger.info("[SlurmService] Fallback queue position 0 (pending, snapshot unavailable)")
+      return 0
+    end
+
+    if waiting_like && job_status.nil?
+      @logger.info("[SlurmService] Fallback queue position 0 (waiting run, Slurm status unknown)")
+      return 0
+    end
+
+    if waiting_like && [:unknown, :accounting_unavailable].include?(job_status)
+      @logger.info("[SlurmService] Fallback queue position 0 (waiting run, job_status=#{job_status})")
+      return 0
+    end
+
     nil
   end
 
@@ -375,6 +405,10 @@ class SlurmService
   end
 
   private
+
+  def full_id_sort_tuple(full_id)
+    full_id.to_s.split('_').map(&:to_i)
+  end
 
   def parse_cpu_availability(cpu_info)
     return 0 if cpu_info.blank?
@@ -468,10 +502,15 @@ class SlurmService
       # Don't escape it since it's executed directly (not wrapped in quotes)
       options[:command]
     else
+      compose = ENV['COMPOSE_PROJECT_NAME'].to_s.strip
+      if compose.empty?
+        raise SlurmError,
+              'COMPOSE_PROJECT_NAME must be set to the docker-compose project name so batch scripts can run docker exec <project>-website-1 (see .env / compose docs). Without it, Slurm jobs fail at launch with launch_failed_requeued_held.'
+      end
       # Command needs Rails - execute in website container
       # Escape single quotes for use in bash -c '...'
       escaped_command = options[:command].gsub("'", "'\"'\"'")
-      "docker exec #{ENV["COMPOSE_PROJECT_NAME"]}-website-1 bash -c '#{escaped_command}'"
+      "docker exec #{compose}-website-1 bash -c '#{escaped_command}'"
     end
     
     <<~SCRIPT

@@ -8,14 +8,8 @@
           <%= run_card_title(@run, @step, @std_method) %>
         </h3>
         <% if @status %>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= case @run.status_id
-                                                                                                    when 1 then 'bg-yellow-100 text-yellow-800'
-                                                                                                    when 2 then 'bg-blue-100 text-blue-800'
-                                                                                                    when 3 then 'bg-green-100 text-green-800'
-                                                                                                    when 4 then 'bg-red-100 text-red-800'
-                                                                                                    else 'bg-gray-100 text-gray-800'
-                                                                                                    end %>">
-            <%= @status.name.humanize %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= @status.run_badge_bg_class %> <%= @status.run_badge_text_class %>">
+            <%= @status.ui_label %>
           </span>
         <% end %>
       </div>

@@ -1,4 +1,5 @@
 # coding: utf-8
+require 'ostruct'
 require 'open3'
 require 'zlib'
 require 'base64'
@@ -15,6 +16,9 @@ class ProjectsController < ApplicationController
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
+  GENE_DETAILS_CACHE_ATTRS = %w[ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
+  GENE_DETAILS_CACHE_TTL = 24.hours
+
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
@@ -23,6 +27,8 @@ class ProjectsController < ApplicationController
   GENE_SET_COLLECTION_TYPE_GLOBAL = 'global'.freeze
   GENE_SET_COLLECTION_TYPE_FROM_DE = 'from_de'.freeze
   GENE_SET_COLLECTION_TYPE_FROM_FIND_MARKERS = 'from_find_markers'.freeze
+  MARKER_EVIDENCES_ANALYZE_FORBIDDEN_MESSAGE =
+    'FindMarkers requires analyze permission on this project. You can view completed marker tables when a run has already finished.'.freeze
 
   # GET /projects or /projects.json
   def index
@@ -1499,7 +1505,7 @@ class ProjectsController < ApplicationController
       return
     end
 
-    clone_service = ProjectCloneService.new(@project, user: current_user, session: session)
+    clone_service = ProjectCloneService.new(@project, user: current_user, session: session, admin: admin?)
     new_project = clone_service.call
 
     if new_project
@@ -2157,15 +2163,46 @@ class ProjectsController < ApplicationController
   end
 
   # GET /projects/1/search_gene
+  # Params (any subset): gene_id (remote genes.id), ensembl_id, gene_symbol.
+  # Resolution order: gene_id; then organism_id + ensembl_id; organism_id + symbol;
+  # then global ensembl_id; then global symbol (uses organism indexes when possible).
   def search_gene
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
     db_version = asap_data_db_name_for_env(h_env, context: "search_gene")
 
-    @gene = nil
-    if params[:ensembl_id].present?
-      @gene = RemoteGene.find_by_ensembl_id(params[:ensembl_id], version: db_version)
-    end
+    gid_q = params[:gene_id].to_s.strip
+    ens_q = params[:ensembl_id].to_s.strip
+    sym_q = params[:gene_symbol].to_s.strip
 
+    cache_key =
+      if gid_q.present? || ens_q.present? || sym_q.present?
+        [
+          "search_gene/v2",
+          db_version.to_s,
+          @project.organism_id.to_s,
+          gid_q,
+          ens_q,
+          sym_q.downcase
+        ]
+      end
+
+    payload =
+      if cache_key
+        Rails.cache.fetch(cache_key, expires_in: GENE_DETAILS_CACHE_TTL) do
+          gene_row = search_gene_resolve_remote_gene(db_version)
+          if gene_row
+            { "hit" => true, "attrs" => gene_row.attributes.slice(*GENE_DETAILS_CACHE_ATTRS) }
+          else
+            { "hit" => false }
+          end
+        end
+      else
+        { "hit" => false }
+      end
+
+    @gene = payload["hit"] ? OpenStruct.new(payload["attrs"]) : nil
+
+    response.headers["Cache-Control"] = "private, max-age=3600"
     render partial: 'projects/views/gene_details', layout: false
   end
 
@@ -4583,10 +4620,81 @@ class ProjectsController < ApplicationController
     unless marker_compatible_metadata?(annot)
       return render json: {
         state: 'unsupported',
-        message: 'FindMarkers evidences are available only for categorical metadata (for example clustering or selections).',
+        message: 'FindMarkers evidences are available only for categorical metadata with more than one category (for example clustering or selections).',
         rows_up: [],
         rows_down: []
       }
+    end
+
+    unless analyzable?(@project)
+      if %w[1 true].include?(params[:status_only].to_s.downcase)
+        return render json: marker_evidences_status_json_non_analyzable_peek(annot)
+      end
+
+      marker_run = marker_run_for_annot(annot)
+      unless marker_run
+        return render json: {
+          state: 'analyze_forbidden',
+          message: MARKER_EVIDENCES_ANALYZE_FORBIDDEN_MESSAGE,
+          rows_up: [],
+          rows_down: []
+        }
+      end
+
+      status_id = marker_run.status_id.to_i
+      status_name = marker_run.status&.name.to_s
+
+      if status_id == 4
+        return render json: {
+          state: 'failed',
+          run_id: marker_run.id,
+          status_id: status_id,
+          status_name: status_name,
+          message: markers_failed_user_message(marker_run),
+          rows_up: [],
+          rows_down: []
+        }
+      end
+
+      if status_id == 3
+        parsed = parse_marker_rows_for_category(marker_run, cat_idx)
+        if parsed[:error]
+          return render json: {
+            state: 'failed',
+            run_id: marker_run.id,
+            status_id: status_id,
+            status_name: status_name,
+            message: parsed[:error],
+            rows_up: [],
+            rows_down: []
+          }
+        end
+
+        return render json: {
+          state: 'completed',
+          run_id: marker_run.id,
+          status_id: status_id,
+          status_name: status_name,
+          message: "FindMarkers evidences loaded for category #{cat_idx + 1}.",
+          rows_up: parsed[:rows_up],
+          rows_down: parsed[:rows_down]
+        }
+      end
+
+      return render json: {
+        state: 'analyze_forbidden',
+        message: MARKER_EVIDENCES_ANALYZE_FORBIDDEN_MESSAGE,
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    # Read-only poll: existing run status only; does not create or enqueue FindMarkers.
+    if %w[1 true].include?(params[:status_only].to_s.downcase)
+      return render json: marker_evidences_status_json_readonly(annot, cat_idx)
     end
 
     run_data = find_or_start_marker_run_for_annot(annot)
@@ -4608,6 +4716,24 @@ class ProjectsController < ApplicationController
       }
     end
 
+    if marker_run_slurm_executing?(marker_run) && [1, 2, 6].include?(status_id)
+      broadcast_markers_run_status_changed(marker_run) if [1, 6].include?(status_id)
+      msg = if run_data[:started]
+              'FindMarkers started for this metadata. Results will appear when the run is complete.'
+            else
+              'FindMarkers is running for this metadata.'
+            end
+      return render json: {
+        state: 'running',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: msg,
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
     if status_id == 1 || (status_id == 6 && marker_run.slurm_job_id.blank?)
       msg = if marker_run.slurm_job_id.present?
               'FindMarkers is queued for execution.'
@@ -4618,19 +4744,51 @@ class ProjectsController < ApplicationController
             else
               'FindMarkers is pending scheduling.'
             end
+      details = { message: msg }
+      if marker_run.slurm_job_id.present?
+        snap = marker_slurm.pending_job_queue_snapshot(marker_run.slurm_job_id)
+        details = marker_queued_json_from_snapshot(snap, msg) if snap
+      end
       return render json: {
         state: 'queued',
         run_id: marker_run.id,
         status_id: status_id,
         status_name: status_name,
-        message: msg,
         rows_up: [],
         rows_down: []
-      }
+      }.merge(details)
     end
 
     if status_id == 2 || (status_id == 6 && marker_run.slurm_job_id.present?)
-      msg = run_data[:started] ? 'FindMarkers started for this category. Results will appear when the run is complete.' : 'FindMarkers is running for this category.'
+      jid = marker_run.slurm_job_id
+      if jid.present?
+        snap = marker_slurm.pending_job_queue_snapshot(jid)
+        if snap
+          base = 'FindMarkers is queued on the cluster. The job has not started on a compute node yet.'
+          return render json: {
+            state: 'queued',
+            run_id: marker_run.id,
+            status_id: status_id,
+            status_name: status_name,
+            rows_up: [],
+            rows_down: []
+          }.merge(marker_queued_json_from_snapshot(snap, base))
+        end
+
+        if slurm_job_pending_in_scheduler?(jid)
+          return render json: {
+            state: 'queued',
+            run_id: marker_run.id,
+            status_id: status_id,
+            status_name: status_name,
+            message: 'FindMarkers is queued on the cluster. The job has not started on a compute node yet.',
+            rows_up: [],
+            rows_down: []
+          }
+        end
+      end
+
+      msg = run_data[:started] ? 'FindMarkers started for this metadata. Results will appear when the run is complete.' : 'FindMarkers is running for this metadata.'
       return render json: {
         state: 'running',
         run_id: marker_run.id,
@@ -4648,7 +4806,7 @@ class ProjectsController < ApplicationController
         run_id: marker_run.id,
         status_id: status_id,
         status_name: status_name,
-        message: 'FindMarkers failed for this category. Retry once the run issue is resolved.',
+        message: markers_failed_user_message(marker_run),
         rows_up: [],
         rows_down: []
       }
@@ -4809,6 +4967,7 @@ class ProjectsController < ApplicationController
       end
     end
     
+    @h_statuses = Status.all.index_by(&:id)
     render partial: 'projects/views/pipeline_runs_list', layout: false
   end
 
@@ -5415,13 +5574,13 @@ class ProjectsController < ApplicationController
         else
           [@step.id]
         end
-      runs_scope = @project.runs.where(step_id: step_ids_for_runs)
+      runs_scope = @project.runs.where(step_id: step_ids_for_runs).includes(:status)
       if @selected_loom_file.present? && all_annots_for_loom
         loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
         runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
       end
       runs_scope = apply_publication_snapshot_to_runs(runs_scope)
-      @runs = runs_scope.includes(:annots).order(created_at: :desc)
+      @runs = runs_scope.includes(:annots, :status).order(created_at: :desc)
       Rails.logger.info("[step_results][debug] step_id=#{step_id} step_name=#{@step&.name} selected_loom_file=#{@selected_loom_file.inspect} show_form_param=#{params[:show_form].inspect} prefer_runs_list_param=#{params[:prefer_runs_list].inspect} runs_count=#{@runs.size} run_ids=#{@runs.map(&:id).join(',')}")
       @missing_single_run_in_loom_context =
         @step &&
@@ -5444,7 +5603,7 @@ class ProjectsController < ApplicationController
             raise
           end
         end
-        @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: step_id)).includes(:annots).order(created_at: :desc)
+        @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: step_id)).includes(:annots, :status).order(created_at: :desc)
       end
       
       # Get project step status (ensure it exists)
@@ -5474,11 +5633,22 @@ class ProjectsController < ApplicationController
         
         # Get queue position if run is waiting (for any step, not just parsing)
         @queue_position = nil
-        if @current_run && @current_run.status_id == 1 && @current_run.slurm_job_id
+        @slurm_queue_hover = nil
+        if @current_run && [1, 6].include?(@current_run.status_id) && @current_run.slurm_job_id
           begin
             slurm_service = SlurmService.new(logger: Rails.logger)
-            @queue_position = slurm_service.get_job_queue_position(@current_run.slurm_job_id)
-            Rails.logger.info("[step_results] Queue position for Run##{@current_run.id}: #{@queue_position}")
+            job_status = slurm_service.get_job_status(@current_run.slurm_job_id, @current_run)
+            if slurm_service.show_slurm_queue_line?(@current_run.slurm_job_id, job_status)
+              @queue_position = slurm_service.get_job_queue_position(
+                @current_run.slurm_job_id,
+                @current_run.status_id,
+                job_status: job_status,
+                run: @current_run
+              )
+              snap = slurm_service.pending_job_queue_snapshot(@current_run.slurm_job_id)
+              @slurm_queue_hover = MarkerQueueText.hover_summary(snap, @queue_position)
+            end
+            Rails.logger.info("[step_results] Queue position for Run##{@current_run.id}: #{@queue_position.inspect}")
           rescue => e
             Rails.logger.warn("[step_results] Could not get queue position: #{e.message}")
           end
@@ -5674,6 +5844,8 @@ class ProjectsController < ApplicationController
       return
     end
     
+    @h_statuses ||= Status.all.index_by(&:id)
+
     Rails.logger.info("About to render step_results partial")
     Rails.logger.info("@step: #{@step.inspect}")
     Rails.logger.info("@step.name: #{@step&.name}")
@@ -5770,12 +5942,14 @@ class ProjectsController < ApplicationController
     
     queue_position = nil
     wait_time = nil
-    
+    slurm_queue_hover = nil
+    show_slurm_queue = nil
+
     if slurm_job_id.present?
       begin
         run = nil
         run_status_id = nil
-        
+
         # Verify run belongs to this project if run_id is provided
         if run_id.present?
           run = Run.find_by(id: run_id, project_id: @project.id)
@@ -5783,30 +5957,38 @@ class ProjectsController < ApplicationController
             render json: { error: 'Run not found or does not belong to this project' }, status: :not_found
             return
           end
-          
+
           run_status_id = run.status_id
           Rails.logger.info("[queue_position] Run found: id=#{run.id}, status_id=#{run_status_id.inspect}, slurm_job_id=#{run.slurm_job_id}")
-          
+
           if run.submitted_at
             wait_time = (Time.now - run.submitted_at).to_i
           end
         end
-        
+
         slurm_service = SlurmService.new(logger: Rails.logger)
-        # Pass the run's status_id to help determine if queue is empty
-        Rails.logger.info("[queue_position] Calling get_job_queue_position with slurm_job_id=#{slurm_job_id}, run_status_id=#{run_status_id.inspect}")
-        queue_position = slurm_service.get_job_queue_position(slurm_job_id, run_status_id)
+        job_status = slurm_service.get_job_status(slurm_job_id, run)
+        show_slurm_queue = slurm_service.show_slurm_queue_line?(slurm_job_id, job_status)
+        Rails.logger.info("[queue_position] slurm_job_id=#{slurm_job_id}, job_status=#{job_status.inspect}, show_slurm_queue=#{show_slurm_queue}")
+
+        if show_slurm_queue
+          queue_position = slurm_service.get_job_queue_position(slurm_job_id, run_status_id, job_status: job_status, run: run)
+          snap = slurm_service.pending_job_queue_snapshot(slurm_job_id)
+          slurm_queue_hover = MarkerQueueText.hover_summary(snap, queue_position)
+        end
         Rails.logger.info("[queue_position] For SLURM job #{slurm_job_id}, run status_id: #{run_status_id}, queue_position: #{queue_position.inspect}, wait_time: #{wait_time.inspect}")
       rescue => e
         Rails.logger.warn("[queue_position] Error getting queue position: #{e.message}")
         Rails.logger.warn("[queue_position] Backtrace: #{e.backtrace.first(5).join("\n")}")
       end
     end
-    
-    Rails.logger.info("[queue_position] Returning: queue_position=#{queue_position.inspect}, wait_time=#{wait_time.inspect}")
+
+    Rails.logger.info("[queue_position] Returning: queue_position=#{queue_position.inspect}, wait_time=#{wait_time.inspect}, show_slurm_queue=#{show_slurm_queue.inspect}")
     render json: {
       queue_position: queue_position,
-      wait_time: wait_time
+      wait_time: wait_time,
+      slurm_queue_hover: slurm_queue_hover,
+      show_slurm_queue: show_slurm_queue
     }
   end
 
@@ -5852,13 +6034,7 @@ class ProjectsController < ApplicationController
     render json: {
       run_id: run.id,
       status_id: run.status_id,
-      status_name: case run.status_id
-                   when 1 then 'Waiting'
-                   when 2 then 'Running'
-                   when 3 then 'Completed'
-                   when 4 then 'Failed'
-                   else 'Unknown'
-                   end,
+      status_name: Status.find_by(id: run.status_id)&.ui_label || 'Unknown',
       duration: run.duration ? run.duration.to_i : nil,
       start_time: run.start_time ? run.start_time.iso8601 : nil,
       submitted_at: run.submitted_at ? run.submitted_at.iso8601 : nil,
@@ -6807,6 +6983,41 @@ class ProjectsController < ApplicationController
           }
         end
       }
+    end
+
+    def search_gene_resolve_remote_gene(db_version)
+      org_id = @project.organism_id
+      gid_str = params[:gene_id].to_s.strip
+      ens = params[:ensembl_id].to_s.strip
+      sym = params[:gene_symbol].to_s.strip
+
+      if gid_str.match?(/\A\d+\z/)
+        gid = gid_str.to_i
+        if gid.positive?
+          row = RemoteGene.find_by_remote_id(gid, version: db_version)
+          return row if row
+        end
+      end
+
+      if org_id.present?
+        if ens.present?
+          row = RemoteGene.find_by_organism_and_ensembl(org_id, ens, version: db_version)
+          return row if row
+        end
+        if sym.present?
+          row = RemoteGene.find_by_organism_and_symbol(org_id, sym, version: db_version)
+          return row if row
+        end
+      end
+
+      if ens.present?
+        row = RemoteGene.find_by_ensembl_id(ens, version: db_version)
+        return row if row
+      end
+
+      return RemoteGene.find_by_gene_symbol(sym, version: db_version) if sym.present?
+
+      nil
     end
 
     def apply_publication_snapshot_to_runs(relation)
@@ -9000,6 +9211,87 @@ class ProjectsController < ApplicationController
     false
   end
 
+  # Compact state from squeue (e.g. PD pending, R running). Nil if job is absent or query failed.
+  def slurm_job_compact_state(job_id)
+    id = job_id.to_i
+    return nil if id <= 0
+
+    output = `squeue -h -j #{id} -o '%t' 2>&1`.strip
+    return nil unless $?.success?
+    return nil if output.blank?
+    return nil if output.downcase.include?('invalid')
+
+    output.lines.first&.strip
+  rescue StandardError
+    nil
+  end
+
+  def slurm_job_pending_in_scheduler?(job_id)
+    slurm_job_compact_state(job_id) == 'PD'
+  end
+
+  def marker_slurm
+    @marker_slurm ||= SlurmService.new(logger: Rails.logger)
+  end
+
+  # Slurm reports the batch step on a node (R) while Run.status_id can still be 1 until the next
+  # SlurmJobMonitorJob tick (MONITOR_INTERVAL 30s). Without this check, get_annot_evidences and
+  # status_only would keep returning queued even when the job is already executing.
+  def marker_run_slurm_executing?(marker_run)
+    jid = marker_run.slurm_job_id
+    return false if jid.blank? || jid.to_i.zero?
+
+    marker_slurm.get_job_status(jid.to_s, marker_run) == :running
+  rescue StandardError => e
+    Rails.logger.warn("[marker_run_slurm_executing?] Run##{marker_run&.id}: #{e.class} #{e.message}")
+    false
+  end
+
+  # Run#error is set by SlurmJobMonitorJob / finish_run paths; expose it so the Identify tab is not opaque.
+  def markers_failed_user_message(marker_run, fallback: 'FindMarkers failed for this category. Retry once the run issue is resolved.')
+    text = marker_run&.error.to_s.strip
+    return text if text.present?
+
+    fallback
+  end
+
+  # Targeted ActionCable signal: Stimulus refreshes this metadata markers icon and the Identify markers tab.
+  def broadcast_markers_run_status_changed(marker_run)
+    return unless @project.respond_to?(:id)
+
+    throttle_key = "markers_run_status_changed_sent:#{marker_run.id}"
+    return if Rails.cache.read(throttle_key)
+
+    Rails.cache.write(throttle_key, true, expires_in: 5.seconds)
+    ActionCable.server.broadcast(
+      "project_#{@project.id}",
+      {
+        event: 'markers_run_status_changed',
+        project_id: @project.id,
+        run_id: marker_run.id,
+        annot_id: marker_run.marker_metadata_annot_id
+      }
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[broadcast_markers_run_status_changed] #{e.class} #{e.message}")
+  end
+
+  def marker_queued_json_from_snapshot(snap, base_message)
+    queue_note = MarkerQueueText.partition_pending_explanation(snap)
+    base = base_message.to_s.strip
+    return { message: base } if queue_note.blank?
+
+    {
+      message: "#{base} #{queue_note}",
+      markers_queue_base: base,
+      markers_queue_note: queue_note,
+      slurm_queue_hover: MarkerQueueText.hover_summary(snap, snap[:position].to_i),
+      queue_position: snap[:position].to_i,
+      queue_pending_total: snap[:pending_count].to_i,
+      queue_partition: snap[:partition].to_s
+    }
+  end
+
   def slurm_controller_available?
     # `scontrol ping` can report false DOWN in some container/client setups.
     # Use a read query against the controller instead.
@@ -9030,6 +9322,207 @@ class ProjectsController < ApplicationController
     Run.where(project_id: @project.id, step_id: marker_step.id, attrs_json: attrs.to_json).order(id: :desc).first
   end
 
+  # Metadata panel badge when the user has read access but not analyze (guest, view-only share, etc.).
+  # No Slurm reconciliation or job side effects.
+  def marker_evidences_status_json_non_analyzable_peek(annot)
+    marker_run = marker_run_for_annot(annot)
+    unless marker_run
+      return {
+        state: 'idle',
+        message: '',
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    status_id = marker_run.status_id.to_i
+    status_name = marker_run.status&.name.to_s
+    common = {
+      run_id: marker_run.id,
+      status_id: status_id,
+      status_name: status_name,
+      rows_up: [],
+      rows_down: []
+    }
+
+    case status_id
+    when 3
+      common.merge(state: 'completed', message: '')
+    when 4
+      common.merge(
+        state: 'failed',
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers failed for this category.')
+      )
+    else
+      common.merge(
+        state: 'analyze_forbidden',
+        message: MARKER_EVIDENCES_ANALYZE_FORBIDDEN_MESSAGE
+      )
+    end
+  end
+
+  # Status for UI badges only. Never calls Basic.find_markers or exec_run.
+  def marker_evidences_status_json_readonly(annot, cat_idx)
+    marker_run = marker_run_for_annot(annot)
+    unless marker_run
+      Rails.logger.debug do
+        "[marker_evidences_status_readonly] project_id=#{@project.id} annot_id=#{annot.id} annot_name=#{annot.name.inspect} " \
+          "cat_idx=#{cat_idx} marker_run=none (idle)"
+      end
+      return {
+        state: 'idle',
+        message: '',
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    # DB says "running" but SLURM still has the job in PD (queue). Same fix as SlurmJobMonitorJob so status_only polls align.
+    if marker_run.slurm_job_id.present? && marker_run.status_id.to_i == 2 && slurm_job_pending_in_scheduler?(marker_run.slurm_job_id)
+      SlurmJobMonitorJob.perform_now(marker_run.id, marker_run.slurm_job_id)
+      marker_run.reload
+    end
+
+    status_before = marker_run.status_id.to_i
+    slurm_id = marker_run.slurm_job_id
+    slurm_active_before = slurm_id.present? ? slurm_job_still_active?(slurm_id) : nil
+    reconcile_ran = false
+
+    # Same reconciliation as find_or_start_marker_run_for_annot: if the DB still says running but
+    # the SLURM job is gone, sync so the UI does not stay on "running" when nothing is on the cluster.
+    if slurm_id.present? && [2, 6].include?(status_before)
+      unless slurm_job_still_active?(slurm_id)
+        Rails.logger.info(
+          "[marker_evidences_status_readonly] SLURM/DB mismatch before sync: project_id=#{@project.id} " \
+            "annot_id=#{annot.id} annot_name=#{annot.name.inspect} cat_idx=#{cat_idx} run_id=#{marker_run.id} " \
+            "status_id=#{status_before} slurm_job_id=#{slurm_id} slurm_job_still_active=false " \
+            "calling SlurmJobMonitorJob.perform_now"
+        )
+        SlurmJobMonitorJob.perform_now(marker_run.id, slurm_id)
+        marker_run.reload
+        reconcile_ran = true
+      end
+    end
+
+    status_id = marker_run.status_id.to_i
+    status_name = marker_run.status&.name.to_s
+    slurm_active_after = slurm_id.present? ? slurm_job_still_active?(slurm_id) : nil
+
+    Rails.logger.info(
+      "[marker_evidences_status_readonly] project_id=#{@project.id} annot_id=#{annot.id} annot_name=#{annot.name.inspect} " \
+        "cat_idx=#{cat_idx} run_id=#{marker_run.id} status_id=#{status_id} status_name=#{status_name.inspect} " \
+        "status_id_before=#{status_before} slurm_job_id=#{slurm_id.inspect} " \
+        "slurm_job_still_active_before=#{slurm_active_before.inspect} slurm_job_still_active_after=#{slurm_active_after.inspect} " \
+        "reconcile_ran=#{reconcile_ran}"
+    )
+    common = {
+      run_id: marker_run.id,
+      status_id: status_id,
+      status_name: status_name,
+      rows_up: [],
+      rows_down: []
+    }
+
+    if marker_run_slurm_executing?(marker_run) && [1, 2, 6].include?(status_id)
+      broadcast_markers_run_status_changed(marker_run) if [1, 6].include?(status_id)
+      return common.merge(state: 'running', message: 'FindMarkers is running for this metadata.')
+    end
+
+    if status_id == 1 || (status_id == 6 && marker_run.slurm_job_id.blank?)
+      msg = if marker_run.slurm_job_id.present?
+              'FindMarkers is queued for execution.'
+            else
+              'FindMarkers is pending scheduling.'
+            end
+      details = { message: msg }
+      if marker_run.slurm_job_id.present?
+        snap = marker_slurm.pending_job_queue_snapshot(marker_run.slurm_job_id)
+        details = marker_queued_json_from_snapshot(snap, msg) if snap
+      end
+      return common.merge({ state: 'queued' }.merge(details))
+    end
+
+    if status_id == 2 || (status_id == 6 && marker_run.slurm_job_id.present?)
+      if slurm_id.present?
+        snap = marker_slurm.pending_job_queue_snapshot(slurm_id)
+        if snap
+          base = 'FindMarkers is queued on the cluster. The job has not started on a compute node yet.'
+          return common.merge({ state: 'queued' }.merge(marker_queued_json_from_snapshot(snap, base)))
+        end
+
+        if slurm_job_pending_in_scheduler?(slurm_id)
+          return common.merge(
+            state: 'queued',
+            message: 'FindMarkers is queued on the cluster. The job has not started on a compute node yet.'
+          )
+        end
+      end
+
+      return common.merge(state: 'running', message: 'FindMarkers is running for this metadata.')
+    end
+
+    if status_id == 4
+      return common.merge(
+        state: 'failed',
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers failed for this category.')
+      )
+    end
+
+    unless status_id == 3
+      return common.merge(state: 'running', message: 'FindMarkers status is being updated. Please refresh in a few seconds.')
+    end
+
+    common.merge(
+      state: 'completed',
+      message: '',
+      rows_up: [],
+      rows_down: []
+    )
+  end
+
+  def parse_marker_tsv_float(cell)
+    s = cell.to_s.strip
+    return nil if s.empty?
+    return nil if s.casecmp('na').zero?
+
+    Float(s)
+  rescue ArgumentError
+    nil
+  end
+
+  def parse_marker_tsv_normalize_header_token(cell)
+    cell.to_s.strip.sub(/\A\uFEFF/, '').downcase.gsub(/[^a-z0-9]+/, '')
+  end
+
+  def parse_marker_tsv_looks_like_header_row?(cells)
+    return false if cells.blank? || cells.size < 3
+
+    norms = cells.map { |c| parse_marker_tsv_normalize_header_token(c) }
+    return true if norms.any? { |n| %w[pval pvalue pvaladj padj fdr].include?(n) }
+    return true if norms.any? { |n| n.include?('log2fc') || (n.include?('log') && n.include?('fc')) }
+
+    norms.any? { |n| %w[gene genename symbol ensembl accession].include?(n) } &&
+      norms.any? { |n| n.start_with?('pval') || n == 'fdr' || n == 'padj' }
+  end
+
+  def parse_marker_tsv_column_indices_from_header(header_cells)
+    norms = header_cells.map { |c| parse_marker_tsv_normalize_header_token(c) }
+    idx = {}
+    norms.each_with_index { |n, i| idx[n] ||= i }
+
+    pick = lambda do |*keys|
+      keys.map { |k| idx[k] }.compact.first
+    end
+
+    {
+      log2fc: pick.call('avglog2fc', 'avglogfc', 'log2fc', 'logfc'),
+      p_value: pick.call('pval', 'pvalue', 'pvalues'),
+      fdr: pick.call('pvaladj', 'padj', 'fdr', 'adjpval', 'adjp'),
+      gene_id: pick.call('ensembl', 'ensemblid', 'accession', 'geneid', 'stableid'),
+      gene: pick.call('gene', 'genename', 'symbol', 'name')
+    }
+  end
+
   def parse_marker_rows_for_category(marker_run, cat_idx)
     marker_file = project_data_dir + 'markers' + marker_run.id.to_s + "cat_#{cat_idx + 1}.tsv"
     return { error: 'FindMarkers output is not available yet. Please refresh shortly.' } unless File.exist?(marker_file)
@@ -9040,22 +9533,70 @@ class ProjectsController < ApplicationController
     fc_cutoff = Math.log2(2.0)
     max_rows_per_group = 100
 
-    File.foreach(marker_file).with_index do |line, line_idx|
-      next if line_idx.zero? && line.include?('gene')
-      cols = line.rstrip.split("\t")
-      next if cols.size < 9
+    first_line = File.open(marker_file, 'r', &:gets)
+    return { rows_up: rows_up, rows_down: rows_down } if first_line.blank?
 
-      log2fc = cols[4].to_f
-      p_value = cols[5].to_f
-      fdr = cols[6].to_f
+    first_cells = first_line.rstrip.split("\t")
+    col = nil
+    skip_first = false
+    if parse_marker_tsv_looks_like_header_row?(first_cells)
+      col = parse_marker_tsv_column_indices_from_header(first_cells)
+      skip_first = col[:log2fc].present? && col[:fdr].present?
+    end
+
+    File.foreach(marker_file).with_index do |line, line_idx|
+      next if skip_first && line_idx.zero?
+
+      cols = line.rstrip.split("\t")
+      next if cols.size < 3
+
+      log2fc = nil
+      fdr = nil
+      p_value = nil
+      gene_id = ''
+      gene = ''
+
+      if col && col[:log2fc] && col[:fdr] && col[:log2fc] < cols.size && col[:fdr] < cols.size
+        log2fc = parse_marker_tsv_float(cols[col[:log2fc]])
+        fdr = parse_marker_tsv_float(cols[col[:fdr]])
+        if col[:p_value] && col[:p_value] < cols.size
+          p_value = parse_marker_tsv_float(cols[col[:p_value]])
+        end
+        gid_i = col[:gene_id]
+        g_i = col[:gene]
+        gene_id = (gid_i && gid_i < cols.size) ? cols[gid_i].to_s : ''
+        gene = (g_i && g_i < cols.size) ? cols[g_i].to_s : ''
+        if gene.blank? && cols[0].to_s.strip.present?
+          gene = cols[0].to_s.strip
+          gene_id = gene_id.presence || gene
+        end
+        gene_id = gene_id.presence || gene
+      elsif cols.size >= 9
+        log2fc = parse_marker_tsv_float(cols[4])
+        p_value = parse_marker_tsv_float(cols[5])
+        fdr = parse_marker_tsv_float(cols[6])
+        gene_id = cols[0].to_s
+        gene = cols[2].to_s
+      elsif cols.size >= 8
+        log2fc = parse_marker_tsv_float(cols[5])
+        p_value = parse_marker_tsv_float(cols[6])
+        fdr = parse_marker_tsv_float(cols[7])
+        gene_id = cols[1].to_s
+        gene = cols[2].to_s
+      else
+        next
+      end
+
+      next if log2fc.nil? || fdr.nil?
+      next unless log2fc.finite? && fdr.finite?
       next if fdr > fdr_cutoff
       next if log2fc.abs < fc_cutoff
 
       row = {
-        gene_id: cols[0].to_s,
-        gene: cols[2].to_s,
+        gene_id: gene_id,
+        gene: gene.presence || gene_id,
         log2fc: log2fc.round(4),
-        p_value: p_value,
+        p_value: (p_value.nil? || !p_value.finite?) ? nil : p_value,
         fdr: fdr
       }
 
@@ -11720,14 +12261,7 @@ class ProjectsController < ApplicationController
           end
         end
         
-        status_name = (@h_statuses[run.status_id] && @h_statuses[run.status_id].respond_to?(:name)) ? @h_statuses[run.status_id].name : 
-                      (case run.status_id
-                       when 1 then 'Waiting'
-                       when 2 then 'Running'
-                       when 3 then 'Completed'
-                       when 4 then 'Failed'
-                       else 'Unknown'
-                       end)
+        status_name = @h_statuses[run.status_id]&.ui_label || Status.find_by(id: run.status_id)&.ui_label || 'Unknown'
         status_badge_classes = case run.status_id
         when 1 then 'bg-yellow-100 text-yellow-800'
         when 2 then 'bg-blue-100 text-blue-800'
@@ -11797,18 +12331,7 @@ class ProjectsController < ApplicationController
     
     # Get status name for display
     def get_status_name(status_id)
-      case status_id
-      when 1
-        'Waiting'
-      when 2
-        'Running'
-      when 3
-        'Completed'
-      when 4
-        'Failed'
-      else
-        'Unknown'
-      end
+      (@h_statuses && @h_statuses[status_id])&.ui_label || Status.find_by(id: status_id)&.ui_label || 'Unknown'
     end
 
     def render_run_panel_to_string(run, step)

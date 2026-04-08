@@ -59,7 +59,8 @@ class ReqsController < ApplicationController
   def create_runs
 
     t = Time.now
-    
+    @req_duplicate_notice = nil
+
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user.id.to_s + @project.key
     
     ## create runs
@@ -162,22 +163,39 @@ class ReqsController < ApplicationController
       existing_runs.each do |r|
         h_existing_runs_by_attrs_json[r.attrs_json] = 1
       end
-      list_already_existing_run_i = [] 
+      list_already_existing_run_i = []
       list_of_runs.each_index do |run_i|
         run = list_of_runs[run_i]
-#        nber_existing_runs = Run.where(:project_id => @project.id, :step_id => @step.id, :std_method_id =>  @std_method.id, :attrs_json => run[0].attrs_json).count
-#        if nber_existing_runs > 0
-        if h_existing_runs_by_attrs_json[run[0].attrs_json]
-          @h_errors[:already_existing]||=0
-          @h_errors[:already_existing]+=1
-          list_already_existing_run_i.push run_i
+        attrs_json = run[0].attrs_json
+        matched = find_duplicate_existing_run(attrs_json, h_existing_runs_by_attrs_json, existing_runs, @step)
+        next unless matched
+
+        @h_errors[:already_existing] ||= 0
+        @h_errors[:already_existing] += 1
+        if matched.status_id.to_i == 3
+          @h_errors[:already_existing_success] ||= 0
+          @h_errors[:already_existing_success] += 1
+        else
+          @h_errors[:already_existing_active] ||= 0
+          @h_errors[:already_existing_active] += 1
         end
+        list_already_existing_run_i.push run_i
       end
-      
+
+      skipped_total = list_already_existing_run_i.size
+      requested_total = list_of_runs.size
+      if skipped_total.positive?
+        @req_duplicate_notice = build_req_skipped_runs_notice(
+          requested_total,
+          @h_errors[:already_existing_success].to_i,
+          @h_errors[:already_existing_active].to_i
+        )
+      end
+
       puts "Elapsed time 6:" + (Time.now-t).to_s
 
       ### delete already existing runs
-      list_of_runs2 = list_of_runs.reject.with_index { |e, run_i| list_already_existing_run_i.include? run_i } 
+      list_of_runs2 = list_of_runs.reject.with_index { |e, run_i| list_already_existing_run_i.include? run_i }
 
       # For single-run steps, ensure we create at most one run and remove existing ones first.
       if !@step.multiple_runs
@@ -198,6 +216,10 @@ class ReqsController < ApplicationController
             raise
           end
         end
+      end
+
+      if @step.multiple_runs && list_of_runs2.any?
+        destroy_failed_runs_replaced_by_new_configs(list_of_runs2)
       end
 
       ### define num for each run after creation                                                                                                                               
@@ -425,16 +447,19 @@ class ReqsController < ApplicationController
       if @req.save
 
         create_runs()
-        errors_txt = nil
-        list_errors = []
-        if @h_errors[:already_existing]
-          list_errors.push("#{@h_errors[:already_existing]} configuration#{(@h_errors[:already_existing] > 1) ? 's' : ''} #{(@h_errors[:already_existing] > 1) ? 'were' : 'was'} already launched, #{(@h_errors[:already_existing] > 1) ? 'they were' : 'it was'} not added.")
+        errors_txt = @req_duplicate_notice.presence
+        if errors_txt.blank? && @h_errors[:already_existing].to_i.positive?
+          n = @h_errors[:already_existing]
+          errors_txt = "#{n} configuration#{(n > 1) ? 's' : ''} #{(n > 1) ? 'were' : 'was'} already launched, #{(n > 1) ? 'they were' : 'it was'} not added."
         end
-        if list_errors.size > 0
-          errors_txt = list_errors.join(" ")
+
+        format.json do
+          render json: {
+            status: 'success',
+            errors: errors_txt,
+            notice: @req_duplicate_notice
+          }
         end
-        
-        format.json { render :json => {:status => 'success', :errors => errors_txt}}
  #       format.html { redirect_to @req, notice: 'Req was successfully created.' }
  #       format.json { render :show, status: :created, location: @req }
       else
@@ -477,6 +502,74 @@ class ReqsController < ApplicationController
   end
 
   private
+
+    def find_duplicate_existing_run(attrs_json, h_existing_hashes, existing_runs, step)
+      if h_existing_hashes[attrs_json]
+        return existing_runs.find { |r| r.attrs_json == attrs_json }
+      end
+      return nil unless step&.name == 'normalization' && existing_runs.any?
+
+      fp_new = normalization_run_fingerprint(attrs_json)
+      return nil if fp_new[:run_id].to_i <= 0
+
+      existing_runs.find { |r| normalization_run_fingerprint(r.attrs_json) == fp_new }
+    end
+
+    def build_req_skipped_runs_notice(requested, success_count, active_count)
+      skipped = success_count + active_count
+      return nil if skipped <= 0
+
+      if success_count.positive? && active_count.positive?
+        "#{skipped} of #{requested} requested runs were not created: #{success_count} because the same configuration already finished successfully; #{active_count} because the same configuration is already running or queued."
+      elsif success_count.positive?
+        "#{skipped} of #{requested} requested runs were not created because the same configuration already finished successfully."
+      else
+        "#{skipped} of #{requested} requested runs were not created because the same configuration is already running or queued."
+      end
+    end
+
+    def destroy_failed_runs_replaced_by_new_configs(list_of_runs2)
+      failed = Run.where(
+        project_id: @project.id,
+        step_id: @step.id,
+        std_method_id: @std_method.id,
+        status_id: 4
+      ).to_a
+      return if failed.empty?
+
+      doomed = []
+      list_of_runs2.each do |tuple|
+        attrs_json = tuple[0].attrs_json
+        failed.each do |fr|
+          doomed << fr if attrs_json_equivalent_for_req_dedupe?(fr.attrs_json, attrs_json, @step)
+        end
+      end
+      doomed.uniq.each do |run|
+        next if @project.locked_from_publication?(run)
+
+        RunsController.destroy_run_call(@project, run)
+      end
+    end
+
+    def attrs_json_equivalent_for_req_dedupe?(a_json, b_json, step)
+      return true if a_json == b_json
+      return false unless step&.name == 'normalization'
+
+      normalization_run_fingerprint(a_json) == normalization_run_fingerprint(b_json)
+    end
+
+    def normalization_run_fingerprint(attrs_json)
+      h = Basic.safe_parse_json(attrs_json, {})
+      im = h['input_matrix'] || h[:input_matrix]
+      im = im.first if im.is_a?(Array)
+      im = im || {}
+      {
+        run_id: (im['run_id'] || im[:run_id]).to_i,
+        annot_id: (im['annot_id'] || im[:annot_id]).to_i,
+        scale_factor: h['scale_factor'].to_s
+      }
+    end
+
     # Use callbacks to share common setup or constraints between actions.
     def set_project
       @project = Project.find_by_key(params[:project_key])

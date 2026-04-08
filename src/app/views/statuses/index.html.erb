@@ -21,7 +21,7 @@
           <th scope="col" class="px-3 py-2 text-left">ID</th>
           <th scope="col" class="px-3 py-2 text-left">Rank</th>
           <th scope="col" class="px-3 py-2 text-left">Name</th>
-          <th scope="col" class="px-3 py-2 text-left">Label</th>
+          <th scope="col" class="px-3 py-2 text-left">Display label</th>
           <th scope="col" class="px-3 py-2 text-left">Color</th>
           <th scope="col" class="px-3 py-2 text-right"></th>
         </tr>
@@ -34,7 +34,7 @@
             <td class="px-3 py-2">
               <span class="font-medium text-gray-900"><%= status.name.presence || '—' %></span>
             </td>
-            <td class="px-3 py-2 text-gray-700"><%= status.label.presence || '—' %></td>
+            <td class="px-3 py-2 text-gray-700"><%= status.ui_label.presence || '—' %></td>
             <td class="px-3 py-2 text-gray-700"><%= status.color.presence || '—' %></td>
             <td class="px-3 py-2 text-right">
               <%= link_to 'Show', status_path(status), class: 'text-gray-600 hover:text-gray-800' %>

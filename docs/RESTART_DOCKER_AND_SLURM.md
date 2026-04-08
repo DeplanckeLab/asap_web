@@ -1,0 +1,158 @@
+# Restarting Docker Compose and Slurm
+
+This runbook describes what to do after restarting the application stack (**Docker Compose**) or **Slurm** daemons, so scheduling and in-flight jobs behave predictably. Your site may run Slurm **inside Compose** (containers such as `slurmctld` / `slurmd`) or **on the host** with `systemd`; both patterns are noted below.
+
+Related docs:
+
+- **[SLURM_SETUP.md](SLURM_SETUP.md)** — architecture and daily commands  
+- **[SLURM_CONCURRENT_JOBS.md](SLURM_CONCURRENT_JOBS.md)** — `select/cons_tres`, fair share, troubleshooting pending jobs  
+- Scripts under **`slurm/`**: `diagnose_slurm.sh`, `cancel_stuck_jobs_after_restart.sh`
+
+---
+
+## 1. Quick checklist (any restart)
+
+After Slurm or the stack has been down or restarted:
+
+1. **Confirm Slurm is up** — controller answers and at least one node is usable (`sinfo`; see section 4).
+2. **Inspect the queue** — `squeue` for unexpected `PD` jobs with odd reasons.
+3. **Clear known-bad pending jobs** — if you see **`launch_failed`** in the pending reason, run **`slurm/cancel_stuck_jobs_after_restart.sh`** (dry run, then `--apply`). Users can resubmit or the app will enqueue new runs.
+4. **Reconcile Rails vs Slurm** — if the UI still shows runs **running** but Slurm has no matching job (or the job already **failed** / **completed**), run the rake tasks in **section 6** so **`SlurmJobMonitorJob`** updates **`Run`** / project step state.
+5. **Optional** — run **`slurm/diagnose_slurm.sh`** and keep the output if you need to debug.
+
+---
+
+## 2. Restart Docker Compose (full stack or selected services)
+
+Typical project root (adjust paths):
+
+```bash
+cd /srv/asap2_test
+# Use your real compose file, for example:
+docker compose -f docker-compose.test.yml up -d
+# or restart everything:
+docker compose -f docker-compose.test.yml restart
+```
+
+**Suggested order** when starting from scratch:
+
+1. Dependencies the stack needs (e.g. database, Redis) per your compose file.  
+2. Slurm data plane if applicable: **`slurmdb`** → **`slurmdbd`** → **`slurmctld`** → **`slurmd`**.  
+3. Application services (**`website`**, **`nginx`**, etc.).
+
+After Compose is healthy:
+
+- If the Rails app submits jobs **through `slurmctld` in Docker**, verify from a host that has the compose CLI:  
+  `docker exec slurmctld sinfo`  
+- If jobs are submitted from the **host** (`sbatch` on the host), verify on the host:  
+  `sinfo`
+
+Then follow **section 1** (queue + stuck-job script).
+
+**User data and mounts:** ensure volume paths (e.g. project data under `/data/...`) are unchanged so batch scripts and `docker run` inside jobs still see the same directories.
+
+---
+
+## 3. Restart only Slurm-related containers (Compose)
+
+When you change **`slurm.conf`** or other Slurm config shipped in the repo:
+
+```bash
+docker compose -f docker-compose.test.yml restart slurmctld slurmd slurmdbd
+```
+
+**`SelectType` changes** (for example switching to **`select/cons_tres`**) are often ignored until the controller daemon is fully restarted. If `scontrol reconfigure` reports that **`slurmctld` must be restarted**, restart **`slurmctld`** and **`slurmd`** (and on multi-node clusters, **`slurmd` on every compute node**).
+
+After restart, run **section 1**.
+
+---
+
+## 4. Restart Slurm on the host (`systemd`)
+
+Some installations run **`slurmctld`** and **`slurmd`** as host services (not in Compose). Typical sequence after editing **`/etc/slurm/slurm.conf`**:
+
+```bash
+sudo scontrol reconfigure
+# If the daemon requires a full restart (common after SelectType changes):
+sudo systemctl restart slurmctld
+sudo systemctl restart slurmd
+```
+
+On **multiple nodes**, restart **`slurmd`** on each execute host.
+
+Then:
+
+```bash
+scontrol ping
+sinfo -N -l
+squeue
+```
+
+Follow **section 1** for stuck **`launch_failed`** pending jobs.
+
+**Optional automation:** to cancel only pending jobs stuck after a bad launch, you can hook **`slurm/cancel_stuck_jobs_after_restart.sh --apply`** as **`ExecStartPost`** on **`slurmd.service`** (example in [SLURM_SETUP.md](SLURM_SETUP.md)).
+
+---
+
+## 5. Stuck pending jobs (`launch_failed_*`)
+
+After **`slurmd`** or Docker restarts, jobs can remain **PENDING** with a reason such as **`launch_failed_requeued_held`**. They usually **do not** become **RUNNING** until cancelled and re-submitted.
+
+Use the helper script (on the host where **`squeue` / `scancel`** apply to your cluster):
+
+```bash
+/srv/asap2_test/slurm/cancel_stuck_jobs_after_restart.sh           # dry run: list IDs only
+/srv/asap2_test/slurm/cancel_stuck_jobs_after_restart.sh --apply   # cancel matching jobs
+```
+
+The script only targets **pending** jobs whose reason contains **`launch_failed`**. It does **not** cancel normal queued jobs or running jobs.
+
+---
+
+## 6. Runs that look “running” or “failed” in the app (rake tasks)
+
+Slurm and the Rails DB can disagree after a daemon restart, a node crash, or a **`scancel`**: the **`Run`** row may stay **`status_id = 2`** (running) while the Slurm job is **gone**, **failed**, or **completed**. The UI and FindMarkers markers can stay wrong until **`SlurmJobMonitorJob`** logic runs.
+
+These tasks live in **`src/lib/tasks/slurm_scheduler.rake`** (namespace **`slurm:`**). Run them **from the Rails environment** (same place you run **`rails`** / **`rake`** for this app), for example:
+
+```bash
+cd /srv/asap2_test
+docker compose -f docker-compose.test.yml exec website bundle exec rake slurm:monitor_jobs
+```
+
+(Adjust compose file and service name if your deployment differs; **`working_dir`** in the **`website`** image is typically **`/app`**, i.e. the **`src`** tree.)
+
+| Task | When it helps |
+|------|----------------|
+| **`slurm:reconcile_stale_running`** | Right after an outage or restart: for every **`Run`** with **`status_id = 2`**, runs **`SlurmJobMonitorJob.perform_now`** so the DB catches up **synchronously** (failed, completed, or still running in Slurm). Optional filter: **`RUN_IDS=123,456`**. Use when operators want an immediate fix without waiting for background jobs. |
+| **`slurm:monitor_jobs`** | Same **`status_id = 2`** scope, but usually enqueues **`SlurmJobMonitorJob.perform_later`** (async). Lighter for production if **`perform_now` on many runs** is too heavy; good for periodic checks or cron. |
+| **`slurm:process_waiting_runs`** | Picks up **`Run`** rows in **waiting** (**`status_id = 1`**) and enqueues **`RunExecutionJob`** (up to 10). Use if work should have been submitted to Slurm but is sitting idle. |
+| **`slurm:resubmit_failed`** | Targets **waiting** runs with **no** **`slurm_job_id`** (submit never succeeded). Resubmits **parsing** via the dedicated path; other steps via **`RunExecutionJob`**. Use after fixing Slurm or Docker submit errors. |
+| **`slurm:start_scheduler`** | Long-running loop (**process_waiting_runs** + **monitor_jobs** every 30s). Only if you intentionally run a simple scheduler **outside** normal job runners (Sidekiq, etc.); most installs rely on **`SlurmJobMonitorJob`** and the app instead. |
+
+**Single-run inspection:** **`run_diagnostics`** (see **`src/lib/tasks/run_diagnostics.rake`**) prints Slurm status and hints for one **`RUN_ID`**, useful before changing data by hand.
+
+**Older / narrow helper:** **`rescue_runs`** compares **`status_id = 2`** to **`get_job_status`** and prints results; it does not replace **`SlurmJobMonitorJob`**. Prefer **`slurm:reconcile_stale_running`** or **`slurm:monitor_jobs`** for real reconciliation.
+
+**Order of operations after a bad restart:** (1) Slurm healthy and **`squeue`** sensible, (2) **`cancel_stuck_jobs_after_restart.sh --apply`** if needed for **`launch_failed`** pending jobs, (3) **`slurm:reconcile_stale_running`** (or **monitor_jobs**) so Rails matches Slurm, (4) **`slurm:resubmit_failed`** or **`process_waiting_runs`** if new work must be submitted.
+
+---
+
+## 7. Diagnostics
+
+```bash
+/srv/asap2_test/slurm/diagnose_slurm.sh
+/srv/asap2_test/slurm/diagnose_slurm.sh JOBID
+```
+
+Read **`Reason`** / **`NODELIST(REASON)`** in **`squeue`** and, for a specific job, **`scontrol show job JOBID`**. Slurm node logs (e.g. **`journalctl -u slurmd`**) explain **launch** failures that never wrote the job’s **`exec.err`**.
+
+---
+
+## 8. What you do **not** need to do every time
+
+- You do **not** need to rebuild Docker images for a simple config or compose restart.  
+- You do **not** need to cancel **all** jobs; use the stuck-job script or **`scancel`** only for known-bad job IDs.  
+- Rails does not require a special “Slurm reconnect” step beyond normal app health; new submissions use **`SlurmService`** once **`sbatch` / `squeue`** work from the environment the app uses.
+
+If behaviour is still wrong after this checklist, capture **`diagnose_slurm.sh`** output and the relevant **`journalctl -u slurmd`** lines around the failure time and continue from [SLURM_CONCURRENT_JOBS.md](SLURM_CONCURRENT_JOBS.md) troubleshooting. If the database and UI are out of sync with Slurm, run **section 6** rake tasks before deeper debugging.

@@ -53,7 +53,7 @@
   </div>
 
   <div class="px-6 py-5 space-y-6 flex-1">
-    <%= render partial: 'projects/views/run_metadata', locals: { run: run, results: @h_res, queue_position: @queue_position } if run %>
+    <%= render partial: 'projects/views/run_metadata', locals: { run: run, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } if run %>
 
     <div class="bg-white rounded-lg shadow-sm border border-red-200">
       <div class="px-6 py-5">

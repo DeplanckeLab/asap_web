@@ -153,7 +153,7 @@
                               data-nav-dropdown-toggle
                               data-header-run-status-target="statusButton"
                               data-status-key="<%= status_icon[:key] %>"
-                              title="<%= status_icon[:label] %> (<%= count %>)"
+                              title="<%= status_icon[:ui_label] %> (<%= count %>)"
                               <%= 'disabled' unless is_active %>>
                         <i class="<%= icon_class %> text-base <%= color_class %>"
                            data-header-run-status-target="statusIcon"
@@ -162,13 +162,13 @@
                            data-icon-spin="<%= status_icon[:icon_spin] %>"
                            data-active-color="<%= status_icon[:active_color] %>"
                            data-inactive-color="<%= status_icon[:inactive_color] %>"
-                           data-label="<%= status_icon[:label] %>"></i>
+                           data-ui-label="<%= status_icon[:ui_label] %>"></i>
                         <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
                       </button>
                       <div class="hidden w-max max-h-96 flex flex-col bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[9999]"
                            data-nav-menu>
                           <div class="sticky top-0 bg-white rounded-t-lg px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 flex items-center justify-between z-10">
-                            <span><%= status_icon[:label] %> Runs (<%= count %>)</span>
+                            <span><%= status_icon[:ui_label] %> Runs (<%= count %>)</span>
                             <button type="button" 
                                     class="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
                                     data-action="click->nav-dropdown#closeMenu"

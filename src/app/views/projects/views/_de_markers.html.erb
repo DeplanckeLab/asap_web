@@ -208,6 +208,8 @@
   end
 %>
 
+<div data-controller="markers-run-status" data-markers-run-status-project-id-value="<%= @project.id %>" class="hidden" aria-hidden="true"></div>
+
 <% if markers_data.any? %>
 <div id="markers-results">
   <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -223,6 +225,7 @@
     </thead>
     <tbody class="bg-white divide-y divide-gray-200">
       <% markers_data.each do |md| %>
+        <% md_cat_color = category_colors[md[:annotation_cat_idx].to_i % category_colors.length] %>
         <tr class="hover:bg-gray-50 align-top">
           <td class="px-3 py-2 text-gray-900 font-semibold whitespace-nowrap" data-sort-value="<%= md[:run].num || md[:run].id %>">#<%= md[:run].num || md[:run].id %></td>
           <td class="px-3 py-2 text-gray-700 whitespace-nowrap" data-sort-value="<%= md[:group_ref].to_s.gsub(/\D/, '') %>"><%= md[:group_ref] || '-' %></td>
@@ -296,13 +299,15 @@
                     data-metadata-name="<%= h(md[:annotation_metadata_name].to_s) %>"
                     data-cat-idx="<%= md[:annotation_cat_idx] %>"
                     data-cat-name="<%= md[:annotation_cat_name] %>"
+                    data-category-color="<%= md_cat_color %>"
+                    data-category-has-annots="<%= has_metadata ? 'true' : 'false' %>"
                     data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                     data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
                     style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_metadata ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'"
                     onmouseout="this.style.backgroundColor=''"
                     title="<%= has_metadata ? 'View annotations' : 'No annotations yet' %>"
-                    onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName); }">
+                    onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, undefined, this.dataset.categoryHasAnnots === 'true', this.dataset.categoryColor); }">
               <i class="fas fa-bookmark" style="font-size: 11px;"></i>
             </button>
           </td>
@@ -576,9 +581,17 @@ if (typeof openAnnotationPopup !== 'function') {
     catName: '',
     catIdx: 0,
     metadataId: null,
+    metadataName: '',
+    categoryColor: '',
+    violinSortBy: 'median',
     evidencesUrl: '',
     clas: [],
     activeTab: 'existing',
+    evidencesSubTab: 'up',
+    evidencesSort: { up: { col: 1, asc: false }, down: { col: 1, asc: true } },
+    evidencesSelectedOrder: [],
+    evidencesSelectedRows: {},
+    titleAnnotHint: null,
     uiReady: false,
     evidences: {
       state: 'idle',
@@ -600,25 +613,31 @@ if (typeof openAnnotationPopup !== 'function') {
       .replace(/'/g, '&#39;');
   }
 
+  function escapeAttr(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+  }
+
   function templateHtml(templateId) {
     var tpl = document.getElementById(templateId);
     return tpl ? tpl.innerHTML : '';
   }
 
-  function markersStatusKey(metadataId, catIdx) {
-    return String(metadataId) + '-' + String(catIdx);
-  }
-
   function markersStatusTooltip(state) {
     var s = (state || 'idle').toString();
     if (s === 'completed') return 'Markers computed for this metadata';
-    if (s === 'running' || s === 'queued' || s === 'loading') return 'Markers being computed for this metadata';
+    if (s === 'queued') return 'FindMarkers is queued on the cluster for this metadata';
+    if (s === 'running') return 'FindMarkers is running for this metadata';
+    if (s === 'loading') return 'Checking FindMarkers status for this metadata';
     if (s === 'failed' || s === 'error') return 'Markers computation failed for this metadata';
     if (s === 'unsupported') return 'Markers are not available for this metadata';
+    if (s === 'analyze_forbidden') return 'FindMarkers requires analyze permission on this project';
     return 'Markers not yet computed for this metadata';
   }
 
-  function applyMarkersStatusToElement(el, state) {
+  function applyMarkersStatusToElement(el, state, slurmQueueHoverOverride) {
     if (!el) return;
     var s = (state || 'idle').toString();
     var iconClass = 'fas fa-circle';
@@ -627,28 +646,43 @@ if (typeof openAnnotationPopup !== 'function') {
     if (s === 'completed') {
       iconClass = 'fas fa-check-circle';
       color = '#16a34a';
-    } else if (s === 'running' || s === 'queued' || s === 'loading') {
+    } else if (s === 'queued') {
+      iconClass = 'fas fa-hourglass-half';
+      color = '#2563eb';
+    } else if (s === 'running' || s === 'loading') {
       iconClass = 'fas fa-spinner fa-spin';
       color = '#2563eb';
     } else if (s === 'failed' || s === 'error') {
       iconClass = 'fas fa-times-circle';
       color = '#dc2626';
-    } else if (s === 'unsupported') {
+    } else if (s === 'unsupported' || s === 'analyze_forbidden') {
       iconClass = 'fas fa-minus-circle';
       color = '#9ca3af';
     } else {
-      size = '7px';
-      color = '#e5e7eb';
+      iconClass = 'fas fa-check-circle';
+      size = '13px';
+      color = '#d1d5db';
     }
-    el.innerHTML = '<i class="' + iconClass + '" style="font-size:' + size + ';color:' + color + ';"></i>';
-    el.setAttribute('title', markersStatusTooltip(s));
+    var mid = el.dataset ? el.dataset.metadataId : null;
+    var store = window._annotSlurmQueueHover || {};
+    var tip = markersStatusTooltip(s);
+    if (s === 'queued') {
+      tip = (slurmQueueHoverOverride != null && String(slurmQueueHoverOverride).trim() !== '') ? String(slurmQueueHoverOverride) : (mid != null && store[String(mid)] ? store[String(mid)] : tip);
+      el.setAttribute('data-slurm-queue-waiting-icon', 'true');
+      el.classList.add('cursor-help');
+    } else {
+      el.removeAttribute('data-slurm-queue-waiting-icon');
+      el.classList.remove('cursor-help');
+    }
+    el.innerHTML = '<i class="' + iconClass + '" style="font-size:' + size + ';color:' + color + ';" aria-hidden="true"></i>';
+    el.setAttribute('title', tip);
+    el.setAttribute('aria-label', tip);
     el.dataset.markersState = s;
   }
 
-  function updateMarkersStatusInMetadataPanel(metadataId, catIdx, state) {
-    var key = markersStatusKey(metadataId, catIdx);
-    var el = document.querySelector('.metadata-markers-status[data-markers-status-key="' + key + '"]');
-    applyMarkersStatusToElement(el, state);
+  function updateMarkersStatusInMetadataPanel(metadataId, catIdx, state, slurmQueueHover) {
+    var el = document.querySelector('.metadata-markers-status[data-metadata-id="' + String(metadataId) + '"]');
+    applyMarkersStatusToElement(el, state, slurmQueueHover);
   }
 
   function syncMarkersStatusFromResponse(metadataId, catIdx, data) {
@@ -657,101 +691,184 @@ if (typeof openAnnotationPopup !== 'function') {
     else if (data.error && !data.state) state = 'error';
     else state = (data.state || 'idle').toString();
     window._annotMarkersStatus = window._annotMarkersStatus || {};
-    window._annotMarkersStatus[markersStatusKey(metadataId, catIdx)] = state;
-    updateMarkersStatusInMetadataPanel(metadataId, catIdx, state);
+    window._annotMarkersStatus[String(metadataId)] = state;
+    window._annotSlurmQueueHover = window._annotSlurmQueueHover || {};
+    var hoverForRow = null;
+    if (state === 'queued' && data && data.slurm_queue_hover != null && String(data.slurm_queue_hover).trim() !== '') {
+      window._annotSlurmQueueHover[String(metadataId)] = data.slurm_queue_hover;
+      hoverForRow = data.slurm_queue_hover;
+    } else if (state !== 'queued') {
+      delete window._annotSlurmQueueHover[String(metadataId)];
+    }
+    updateMarkersStatusInMetadataPanel(metadataId, catIdx, state, hoverForRow);
     var mid = _annotPopupData.metadataId;
-    var cidx = _annotPopupData.catIdx;
-    if (mid == null || cidx == null || String(mid) !== String(metadataId) || Number(cidx) !== Number(catIdx)) return;
-    if (!_annotPopupData.uiReady && _annotPopupData.activeTab !== 'evidences') return;
+    if (mid != null && String(mid) === String(metadataId)) {
+      _annotPopupData.evidences = _annotPopupData.evidences || {};
+      _annotPopupData.evidences.state = state;
+      _annotPopupData.evidences.loading = false;
+      if (data && data.message != null) _annotPopupData.evidences.message = data.message;
+      if (data && data.run_id != null) _annotPopupData.evidences.runId = data.run_id;
+      if (state === 'queued' && data) {
+        _annotPopupData.evidences.markersQueueBase = data.markers_queue_base != null ? data.markers_queue_base : '';
+        _annotPopupData.evidences.markersQueueNote = data.markers_queue_note != null ? data.markers_queue_note : '';
+        _annotPopupData.evidences.slurmQueueHover = data.slurm_queue_hover != null ? data.slurm_queue_hover : '';
+      } else {
+        _annotPopupData.evidences.markersQueueBase = '';
+        _annotPopupData.evidences.markersQueueNote = '';
+        _annotPopupData.evidences.slurmQueueHover = '';
+      }
+      if (typeof refreshAnnotPopupTitle === 'function') refreshAnnotPopupTitle();
+    }
+    if (mid == null || String(mid) !== String(metadataId)) return;
+    if (!_annotPopupData.uiReady) return;
     renderAnnotationPanel();
   }
 
   function peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl) {
     if (!evidencesUrl || metadataId == null || catIdx == null) return;
-    var url = evidencesUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx);
+    var url = evidencesUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx) + '&status_only=1';
     fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(data) { syncMarkersStatusFromResponse(metadataId, catIdx, data); })
       .catch(function() { syncMarkersStatusFromResponse(metadataId, catIdx, { state: 'error' }); });
   }
 
-  function identifyMarkersTabStatusBadgeHtml() {
-    var ev = _annotPopupData.evidences || {};
-    var st = ev.loading ? 'loading' : (ev.state || 'idle');
-    var tip = markersStatusTooltip(st);
-    if (st === 'completed') {
-      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-check-circle" aria-hidden="true" style="color:#16a34a;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+  function annotationCategoryLeadingIconMarkup(hasAnnotations) {
+    var has = !!hasAnnotations;
+    var color = has ? '#16a34a' : '#d1d5db';
+    var tip = has ? 'View annotations' : 'No annotations yet';
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" title="' + escapeAttr(tip) + '" aria-label="' + escapeAttr(tip) + '">' +
+      '<i class="fas fa-bookmark" style="font-size:11px;color:' + color + ';"></i></span>';
+  }
+
+  function effectiveAnnotTitleHasAnnotations() {
+    if (_annotPopupData.uiReady) {
+      return (_annotPopupData.clas && _annotPopupData.clas.length > 0);
     }
-    if (st === 'running' || st === 'queued' || st === 'loading') {
-      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-spinner fa-spin" aria-hidden="true" style="color:#2563eb;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    if (_annotPopupData.titleAnnotHint === true || _annotPopupData.titleAnnotHint === false) {
+      return _annotPopupData.titleAnnotHint;
+    }
+    return false;
+  }
+
+  function markersStateLeadingIconMarkup(state, loading, slurmQueueHover) {
+    var st = loading ? 'loading' : (state || 'idle').toString();
+    var wrapStart = '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" aria-hidden="true">';
+    var wrapEnd = '</span>';
+    if (st === 'completed') {
+      return wrapStart + '<i class="fas fa-check-circle" style="color:#16a34a;font-size:13px;"></i>' + wrapEnd;
+    }
+    if (st === 'queued') {
+      var tip = (slurmQueueHover && String(slurmQueueHover).trim() !== '') ? String(slurmQueueHover) : markersStatusTooltip('queued');
+      return '<span data-slurm-queue-waiting-icon="true" title="' + escapeAttr(tip) + '" aria-label="' + escapeAttr(tip) + '" class="cursor-help" style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;">' +
+        '<i class="fas fa-hourglass-half" style="color:#2563eb;font-size:13px;" aria-hidden="true"></i></span>';
+    }
+    if (st === 'running' || st === 'loading') {
+      return wrapStart + '<span style="position:relative;width:15px;height:15px;display:inline-flex;align-items:center;justify-content:center;">' +
+        '<i class="fas fa-circle-notch fa-spin" style="position:absolute;color:#9ca3af;font-size:15px;"></i>' +
+        '<i class="fas fa-check" style="position:relative;color:#d1d5db;font-size:8px;"></i>' +
+        '</span>' + wrapEnd;
     }
     if (st === 'failed' || st === 'error') {
-      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-times-circle" aria-hidden="true" style="color:#dc2626;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+      return wrapStart + '<i class="fas fa-times-circle" style="color:#dc2626;font-size:13px;"></i>' + wrapEnd;
     }
-    if (st === 'unsupported') {
-      return '<span title="' + escapeHtml(tip) + '"><i class="fas fa-minus-circle" aria-hidden="true" style="color:#9ca3af;font-size:12px;margin-left:4px;vertical-align:middle;"></i></span>';
+    if (st === 'unsupported' || st === 'analyze_forbidden') {
+      return wrapStart + '<i class="fas fa-minus-circle" style="color:#9ca3af;font-size:13px;"></i>' + wrapEnd;
     }
+    return wrapStart + '<i class="fas fa-check-circle" style="color:#d1d5db;font-size:13px;"></i>' + wrapEnd;
+  }
+
+  function safeHexCategoryColorForTitle(cssColor) {
+    var s = String(cssColor || '').trim();
+    if (/^#[0-9A-Fa-f]{6}$/.test(s) || /^#[0-9A-Fa-f]{3}$/.test(s)) return s;
     return '';
   }
 
-  window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx) {
+  function annotPopupCategoryColorDotMarkup(hex) {
+    var c = safeHexCategoryColorForTitle(hex);
+    if (!c) return '';
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" title="' + escapeAttr('Category color') + '" aria-hidden="true">' +
+      '<span style="width:10px;height:10px;border-radius:9999px;background-color:' + c + ';border:1px solid rgba(15,23,42,0.15);"></span></span>';
+  }
+
+  function buildAnnotPopupTitleHtml(catName, metadataName, hasAnnotations, categoryColor) {
+    var prefix = annotationCategoryLeadingIconMarkup(hasAnnotations);
+    var colorDot = annotPopupCategoryColorDotMarkup(categoryColor);
+    var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>';
+    var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : '';
+    var catStr = String(catName || '');
+    function textTwoPart(left, right) {
+      return '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
+        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
+        sep +
+        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
+        '</span>';
+    }
+    var textHtml;
+    if (metaTrim) {
+      textHtml = textTwoPart(metaTrim, catStr);
+    } else {
+      var slashIdx = catStr.indexOf('/');
+      if (slashIdx > 0 && slashIdx < catStr.length - 1) {
+        var left = catStr.slice(0, slashIdx).trim();
+        var right = catStr.slice(slashIdx + 1).trim();
+        textHtml = (left !== '' && right !== '') ? textTwoPart(left, right) : ('<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>');
+      } else {
+        textHtml = '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>';
+      }
+    }
+    return '<span style="display:flex;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%;">' + prefix + colorDot + textHtml + '</span>';
+  }
+
+  function refreshAnnotPopupTitle() {
+    var titleEl = document.getElementById('annot-popup-title');
+    if (!titleEl || _annotPopupData.metadataId == null) return;
+    titleEl.innerHTML = buildAnnotPopupTitleHtml(_annotPopupData.catName, _annotPopupData.metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor || '');
+  }
+  window.refreshAnnotPopupTitle = refreshAnnotPopupTitle;
+
+  function identifyMarkersTabLeadingIconHtml() {
+    var ev = _annotPopupData.evidences || {};
+    var mid = _annotPopupData.metadataId != null ? String(_annotPopupData.metadataId) : '';
+    var hover = (ev.slurmQueueHover && String(ev.slurmQueueHover).trim() !== '') ? ev.slurmQueueHover : ((window._annotSlurmQueueHover && mid && window._annotSlurmQueueHover[mid]) || '');
+    return markersStateLeadingIconMarkup(ev.state || 'idle', !!ev.loading, hover);
+  }
+
+  window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx, categoryHasAnnots, categoryColor) {
     var overlay = document.getElementById('annotation-popup-overlay');
     var dialog = document.getElementById('annotation-popup-dialog');
     var panel = document.getElementById('annot-popup-panel');
     var titleEl = document.getElementById('annot-popup-title');
     if (!overlay || !dialog || !panel || !titleEl) return;
 
-    var colors = window.CATEGORY_COLORS || [];
-    var colorIdx = catIdx;
-    if (displayCatIdx !== undefined && displayCatIdx !== null && !Number.isNaN(Number(displayCatIdx))) {
-      colorIdx = Number(displayCatIdx);
-    }
-    var color = colors.length > 0 ? (colors[colorIdx % colors.length] || '#9ca3af') : '#9ca3af';
-    var dot = '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:' + color + ';flex-shrink:0;"></span>';
-    var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>';
-    var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : '';
-    var catStr = String(catName || '');
-
-    function twoPartHtml(left, right) {
-      return dot + '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
-        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
-        sep +
-        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
-        '</span>';
-    }
-
-    var titleText;
-    if (metaTrim) {
-      titleText = twoPartHtml(metaTrim, catStr);
-    } else {
-      var slashIdx = catStr.indexOf('/');
-      if (slashIdx > 0 && slashIdx < catStr.length - 1) {
-        var left = catStr.slice(0, slashIdx).trim();
-        var right = catStr.slice(slashIdx + 1).trim();
-        titleText = (left !== '' && right !== '') ? twoPartHtml(left, right) : (dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>');
-      } else {
-        titleText = dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>';
-      }
-    }
-    titleEl.innerHTML = titleText;
-
     _annotPopupData.catName = catName;
     _annotPopupData.catIdx = catIdx;
     _annotPopupData.metadataId = metadataId;
+    _annotPopupData.metadataName = metadataName != null ? String(metadataName) : '';
+    _annotPopupData.categoryColor = categoryColor != null && String(categoryColor).trim() !== '' ? String(categoryColor).trim() : '';
     _annotPopupData.evidencesUrl = evidencesUrl || '';
     _annotPopupData.clas = [];
+    _annotPopupData.titleAnnotHint = (categoryHasAnnots === true) ? true : (categoryHasAnnots === false ? false : null);
     _annotPopupData.activeTab = 'existing';
+    _annotPopupData.evidencesSubTab = 'up';
+    _annotPopupData.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } };
+    _annotPopupData.evidencesSelectedOrder = [];
+    _annotPopupData.evidencesSelectedRows = {};
     _annotPopupData.uiReady = false;
-    updateMarkersStatusInMetadataPanel(metadataId, catIdx, 'loading');
-    peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '');
+    var cachedMarkerState = (window._annotMarkersStatus && window._annotMarkersStatus[String(metadataId)]) || 'idle';
     _annotPopupData.evidences = {
-      state: 'idle',
+      state: cachedMarkerState,
       loading: false,
       message: '',
       runId: null,
       rowsUp: [],
-      rowsDown: []
+      rowsDown: [],
+      markersQueueBase: '',
+      markersQueueNote: '',
+      slurmQueueHover: ''
     };
+    titleEl.innerHTML = buildAnnotPopupTitleHtml(catName, metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor);
+    peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '');
 
     panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>';
     overlay.style.display = 'flex';
@@ -771,15 +888,19 @@ if (typeof openAnnotationPopup !== 'function') {
         _annotPopupData.clas = data.clas || [];
         _annotPopupData.activeTab = 'existing';
         _annotPopupData.uiReady = true;
+        refreshAnnotPopupTitle();
         renderAnnotationPanel();
       })
       .catch(function(err) {
         _annotPopupData.uiReady = true;
+        refreshAnnotPopupTitle();
         panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + escapeHtml(err.message) + '</div>';
       });
   };
 
   window.closeAnnotationPopup = function() {
+    var tip = document.getElementById('annot-split-violin-tooltip');
+    if (tip) tip.style.display = 'none';
     var overlay = document.getElementById('annotation-popup-overlay');
     if (overlay) overlay.style.display = 'none';
     window._annotPopupData.activeTab = 'existing';
@@ -790,6 +911,22 @@ if (typeof openAnnotationPopup !== 'function') {
     if (tabName === 'evidences') loadAnnotationEvidences();
     renderAnnotationPanel();
   };
+
+  window.setEvidencesSubTab = function(dir) {
+    _annotPopupData.evidencesSubTab = (dir === 'down') ? 'down' : 'up';
+    if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel();
+  };
+
+  function normalizeEvidencesSubTabAfterLoad(upRows, downRows) {
+    var upLen = Array.isArray(upRows) ? upRows.length : 0;
+    var downLen = Array.isArray(downRows) ? downRows.length : 0;
+    var sub = _annotPopupData.evidencesSubTab || 'up';
+    if (sub === 'up' && upLen === 0 && downLen > 0) {
+      _annotPopupData.evidencesSubTab = 'down';
+    } else if (sub === 'down' && downLen === 0 && upLen > 0) {
+      _annotPopupData.evidencesSubTab = 'up';
+    }
+  }
 
   function claProvenanceBadgeHtml(cla) {
     var overlay = document.getElementById('annotation-popup-overlay');
@@ -855,22 +992,124 @@ if (typeof openAnnotationPopup !== 'function') {
       .replace('__CONTENT__', content);
   }
 
-  function renderEvidenceRowsTable(rows, title, tone) {
-    if (!rows || rows.length === 0) return '';
+  function formatEvidenceNumericCell(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'number' && !Number.isFinite(v)) return '';
+    return String(v);
+  }
+
+  function evidenceGeneBadgeCellHtml(row, tone) {
+    var symRaw = (row.gene != null && String(row.gene).trim() !== '') ? String(row.gene).trim() : (row.gene_id != null ? String(row.gene_id) : '-');
+    var sym = escapeHtml(symRaw);
+    var ens = '';
+    if (row.ensembl_id != null && String(row.ensembl_id).trim() !== '') {
+      ens = String(row.ensembl_id).trim();
+    } else if (row.gene_id != null && /^ENS[0-9A-Za-z._-]+/i.test(String(row.gene_id).trim())) {
+      ens = String(row.gene_id).trim();
+    }
+    var symLookup = '';
+    if (row.gene != null && String(row.gene).trim() !== '') {
+      symLookup = String(row.gene).trim();
+    } else if (row.gene_id != null && !/^ENS[0-9A-Za-z._-]+$/i.test(String(row.gene_id).trim())) {
+      symLookup = String(row.gene_id).trim();
+    }
+    var remoteGid = '';
+    var st = row.stable_id != null ? String(row.stable_id).trim() : '';
+    var gidRaw = row.gene_id != null ? String(row.gene_id).trim() : '';
+    if (/^\d+$/.test(st)) remoteGid = st;
+    else if (/^\d+$/.test(gidRaw)) remoteGid = gidRaw;
+    var isUp = tone === 'up';
+    var highlightCls = isUp ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200';
+    var canOpen = !!(remoteGid || ens || symLookup);
+    var cls = highlightCls;
+    var curs = canOpen ? 'cursor-pointer' : 'cursor-default';
+    var html = '<span class="annot-popup-gene-badge gene-badge ' + cls + ' ' + curs + ' inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style="max-width:11rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"';
+    if (remoteGid) html += ' data-remote-gene-id="' + escapeAttr(remoteGid) + '"';
+    if (ens) html += ' data-ensembl-id="' + escapeAttr(ens) + '"';
+    if (symLookup) html += ' data-gene-symbol="' + escapeAttr(symLookup) + '"';
+    html += ' title="' + escapeAttr(ens || symRaw || symLookup) + '">' + sym + '</span>';
+    return html;
+  }
+
+  function evidenceNumSortAttr(val) {
+    if (val === null || val === undefined || val === '') return '0';
+    var n = parseFloat(val);
+    return Number.isFinite(n) ? String(n) : '0';
+  }
+
+  function renderEvidenceBoxplotTab() {
+    var html = '<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Split violin plots</div>';
+    var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0;
+    if (typeof window.annotEvidenceBoxplotSupported === 'function' && !window.annotEvidenceBoxplotSupported()) {
+      html += '<p style="font-size:12px;color:#6b7280;line-height:1.5;">Open this project in the visualization view. Split violins compare this category to the rest of the dataset using the same metadata column as annotations.</p>';
+      return html;
+    }
+    if (n === 0) {
+      html += '<p style="font-size:12px;color:#6b7280;line-height:1.5;">Select genes in the Identify markers tab, then open this tab.</p>';
+      return html;
+    }
+    html += '<p style="font-size:11px;color:#6b7280;margin:0 0 8px 0;line-height:1.45;">Split violins compare this category on the left to all other visible cells on the right (same metadata column and cell filter as annotations). The left fill uses the category color when available. Choose the expression matrix like in the gene panel; layout is one plot per gene or a single combined plot.</p>';
+    var layout = (window._annotPopupData && window._annotPopupData.violinLayoutMode === 'combined') ? 'combined' : 'separate';
+    var sortBy = (window._annotPopupData && (window._annotPopupData.violinSortBy === 'mean' || window._annotPopupData.violinSortBy === 'max')) ? window._annotPopupData.violinSortBy : 'median';
+    html += '<div id="annot-violin-controls" style="margin-bottom:12px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">';
+    html += '<label for="annot-violin-matrix-select" style="display:block;font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">Expression matrix</label>';
+    html += '<select id="annot-violin-matrix-select" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#fff;" onchange="if(window.onAnnotViolinMatrixSelectChange)window.onAnnotViolinMatrixSelectChange()"></select>';
+    html += '<div style="margin-top:10px;font-size:11px;color:#374151;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">';
+    html += '<span style="font-weight:600;">Layout:</span>';
+    html += '<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="radio" name="annot-violin-layout" value="separate"' + (layout === 'separate' ? ' checked' : '') + ' onchange="if(window.onAnnotViolinLayoutRadioChange)window.onAnnotViolinLayoutRadioChange()"/>One plot per gene</label>';
+    html += '<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="radio" name="annot-violin-layout" value="combined"' + (layout === 'combined' ? ' checked' : '') + ' onchange="if(window.onAnnotViolinLayoutRadioChange)window.onAnnotViolinLayoutRadioChange()"/>Single combined plot</label>';
+    html += '</div>';
+    html += '<label for="annot-violin-sort-by" style="display:block;margin-top:10px;font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">Order genes by (category side, high to low)</label>';
+    html += '<select id="annot-violin-sort-by" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#fff;" onchange="if(window.onAnnotViolinSortChange)window.onAnnotViolinSortChange()">';
+    html += '<option value="median"' + (sortBy === 'median' ? ' selected' : '') + '>Median</option>';
+    html += '<option value="mean"' + (sortBy === 'mean' ? ' selected' : '') + '>Mean</option>';
+    html += '<option value="max"' + (sortBy === 'max' ? ' selected' : '') + '>Max</option>';
+    html += '</select></div>';
+    html += '<div id="annot-evidence-boxplot-root"></div>';
+    return html;
+  }
+
+  function renderEvidenceGeneTableBlock(rows, tone, emptyMsg) {
     var borderColor = tone === 'up' ? '#bbf7d0' : '#fecaca';
-    var textColor = tone === 'up' ? '#166534' : '#991b1b';
+    if (!rows || rows.length === 0) {
+      return '<div style="text-align:center;padding:24px;border:1px dashed ' + borderColor + ';border-radius:8px;color:#6b7280;background:#fff;font-size:13px;">' + escapeHtml(emptyMsg) + '</div>';
+    }
+    var rowsToRender = (typeof window.annotEvidenceSortedRows === 'function')
+      ? window.annotEvidenceSortedRows(rows, tone)
+      : rows.slice();
     var html = '';
+    var thSticky = 'padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:left;font-weight:600;position:sticky;top:0;z-index:1;background:#fff;';
+    var thStickyPlot = thSticky + 'text-align:center;';
+    var apdSel = (typeof window.annotEvidenceEnsureSelectionStore === 'function') ? window.annotEvidenceEnsureSelectionStore() : null;
     html += '<div style="border:1px solid ' + borderColor + ';border-radius:8px;background:#fff;overflow:hidden;">';
-    html += '<div style="padding:8px 10px;font-size:12px;font-weight:600;color:' + textColor + ';border-bottom:1px solid ' + borderColor + ';background:#fff;">' + escapeHtml(title) + ' (' + rows.length + ')</div>';
-    html += '<div style="max-height:220px;overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#fff;color:#4b5563;text-align:left;">';
-    html += '<th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">Gene</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">log2FC</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">FDR</th><th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">P value</th>';
+    html += '<div style="max-height:280px;overflow:auto;">';
+    html += '<table class="annot-evidence-sortable-table" style="width:100%;border-collapse:separate;border-spacing:0;font-size:12px;color:#4b5563;">';
+    html += '<thead><tr>';
+    html += '<th class="annot-marker-plot-th" style="' + thStickyPlot + '" title="Include in violin tab">Plot</th>';
+    var thLabels = ['Gene', 'log2FC', 'FDR', 'P value'];
+    var hci;
+    for (hci = 0; hci < 4; hci++) {
+      if (typeof window.annotEvidenceSortThHtml === 'function') {
+        html += window.annotEvidenceSortThHtml(tone, hci, thLabels[hci], thSticky);
+      } else {
+        html += '<th style="' + thSticky + '">' + escapeHtml(thLabels[hci]) + '</th>';
+      }
+    }
     html += '</tr></thead><tbody>';
-    rows.forEach(function(row) {
+    rowsToRender.forEach(function(row) {
+      var gsv = (typeof window.annotEvidenceGeneSortValue === 'function')
+        ? window.annotEvidenceGeneSortValue(row)
+        : (((row.gene != null && String(row.gene).trim() !== '') ? String(row.gene).trim() : String(row.gene_id || '-'))).toLowerCase();
+      var selKey = (typeof window.annotEvidenceSelectionKey === 'function') ? window.annotEvidenceSelectionKey(tone, row) : '';
+      var isChecked = apdSel && apdSel.evidencesSelectedRows && apdSel.evidencesSelectedRows[selKey];
       html += '<tr>';
-      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(row.gene || row.gene_id || '-') + '</td>';
-      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.log2fc || '')) + '</td>';
-      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.fdr || '')) + '</td>';
-      html += '<td style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(String(row.p_value || '')) + '</td>';
+      html += '<td class="annot-marker-plot-td" style="padding:4px 6px;border-top:1px solid #f3f4f6;vertical-align:middle;text-align:center;">';
+      html += '<input type="checkbox" class="annot-marker-plot-cb"' + (isChecked ? ' checked' : '') + ' data-evidence-key="' + escapeAttr(selKey) + '" data-evidence-tone="' + escapeAttr(tone) + '" data-evidence-gene-id="' + escapeAttr(String(row.gene_id != null ? row.gene_id : '')) + '" data-evidence-gene-symbol="' + escapeAttr(String(row.gene != null ? row.gene : '')) + '" aria-label="Include in violin plot" onchange="annotEvidenceCheckboxChange(this)" onclick="event.stopPropagation()" />';
+      html += '</td>';
+      html += '<td data-sort-value="' + escapeAttr(gsv) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;vertical-align:middle;">' + evidenceGeneBadgeCellHtml(row, tone) + '</td>';
+      html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.log2fc)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.log2fc)) + '</td>';
+      html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.fdr)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.fdr)) + '</td>';
+      html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.p_value)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.p_value)) + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -890,15 +1129,59 @@ if (typeof openAnnotationPopup !== 'function') {
       if (upRows.length === 0 && downRows.length === 0) {
         content += '<div style="text-align:center;padding:18px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;">No marker evidence matched the current thresholds.</div>';
       } else {
-        content += '<div style="display:grid;grid-template-columns:1fr;gap:10px;">';
-        content += renderEvidenceRowsTable(upRows, 'Up-regulated markers', 'up');
-        content += renderEvidenceRowsTable(downRows, 'Down-regulated markers', 'down');
+        var sub = _annotPopupData.evidencesSubTab || 'up';
+        if (sub !== 'up' && sub !== 'down') sub = 'up';
+        var evidSubNavStyle = function(dir) {
+          var active = sub === dir;
+          var accent = dir === 'up' ? '#16a34a' : '#dc2626';
+          var color = active ? accent : '#6b7280';
+          var border = active ? ('2px solid ' + accent) : '2px solid transparent';
+          return 'background:none;border:none;border-bottom:' + border + ';color:' + color + ';font-size:12px;font-weight:600;padding:8px 12px;cursor:pointer;margin-bottom:-1px;';
+        };
+        content += '<div style="display:flex;gap:0;border-bottom:1px solid #e5e7eb;margin-bottom:10px;">';
+        content += '<button type="button" onclick="setEvidencesSubTab(\'up\')" style="' + evidSubNavStyle('up') + '">Up-regulated genes (' + upRows.length + ')</button>';
+        content += '<button type="button" onclick="setEvidencesSubTab(\'down\')" style="' + evidSubNavStyle('down') + '">Down-regulated genes (' + downRows.length + ')</button>';
         content += '</div>';
+        if (sub === 'up') {
+          content += renderEvidenceGeneTableBlock(upRows, 'up', 'No up-regulated genes for this category at the current thresholds.');
+        } else {
+          content += renderEvidenceGeneTableBlock(downRows, 'down', 'No down-regulated genes for this category at the current thresholds.');
+        }
       }
       return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
     }
-    if (ev.state === 'running' || ev.state === 'queued') {
-      content += '<div style="padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;">' + escapeHtml(ev.message || 'FindMarkers is processing for this category.') + '</div>';
+    if (ev.state === 'running') {
+      content += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;color:#1e3a8a;background:#fff;">';
+      content += '<div><i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>' + escapeHtml(ev.message || 'FindMarkers is running for this metadata.') + '</div>';
+      content += '<button type="button" onclick="loadAnnotationEvidences()" style="border:1px solid #93c5fd;background:#fff;color:#1d4ed8;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button></div>';
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    if (ev.state === 'queued') {
+      content += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;">';
+      content += '<div style="flex:1;min-width:0;">';
+      var qNote = (ev.markersQueueNote || '').toString();
+      var qBase = (ev.markersQueueBase || '').toString();
+      var qHover = (ev.slurmQueueHover || '').toString();
+      var qp = ev.queuePosition;
+      if (qNote && qBase) {
+        var mid = _annotPopupData.metadataId != null ? String(_annotPopupData.metadataId) : '';
+        var rid = ev.runId != null ? String(ev.runId) : '';
+        var iconWrapOpen = qHover ? ('<span data-slurm-queue-waiting-icon="true" title="' + escapeAttr(qHover) + '" aria-label="' + escapeAttr(qHover) + '" class="cursor-help">') : '<span>';
+        content += '<div>' + iconWrapOpen + '<i class="fas fa-hourglass-half" style="margin-right:8px;" aria-hidden="true"></i></span>' + escapeHtml(qBase) + '</div>';
+        if (qp != null && qp !== '' && Number(qp) > 0) {
+          content += '<div style="margin-top:6px;font-size:12px;color:#374151;"><span data-slurm-queue-position-label>Slurm queue position:</span> <span data-slurm-queue-position="' + escapeAttr(String(qp)) + '">' + escapeHtml(String(qp)) + '</span></div>';
+        }
+        content += '<div style="margin-top:8px;font-size:12px;color:#6b7280;line-height:1.45;" data-slurm-queue-explanation data-markers-queue-live data-annot-id="' + escapeHtml(mid) + '" data-run-id="' + escapeHtml(rid) + '">' + escapeHtml(qNote) + '</div>';
+      } else {
+        var iconOnlyOpen = qHover ? ('<span data-slurm-queue-waiting-icon="true" title="' + escapeAttr(qHover) + '" aria-label="' + escapeAttr(qHover) + '" class="cursor-help">') : '<span>';
+        content += '<div>' + iconOnlyOpen + '<i class="fas fa-hourglass-half" style="margin-right:8px;" aria-hidden="true"></i></span>' + escapeHtml(ev.message || 'FindMarkers is queued for execution.') + '</div>';
+      }
+      content += '</div>';
+      content += '<button type="button" onclick="loadAnnotationEvidences()" style="flex-shrink:0;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button></div>';
+      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    }
+    if (ev.state === 'analyze_forbidden') {
+      content += '<div style="display:flex;align-items:flex-start;gap:8px;padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;"><i class="fas fa-info-circle" style="margin-top:2px;"></i><div>' + escapeHtml(ev.message || 'FindMarkers requires analyze permission on this project.') + '</div></div>';
       return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
     }
     if (ev.state === 'error' || ev.state === 'failed' || ev.state === 'unsupported') {
@@ -914,7 +1197,8 @@ if (typeof openAnnotationPopup !== 'function') {
     if (!force && ev.loading) return;
     if (!_annotPopupData.evidencesUrl || !_annotPopupData.metadataId) return;
     _annotPopupData.evidences = { state: 'loading', loading: true, message: 'Checking FindMarkers run...', runId: null, rowsUp: [], rowsDown: [] };
-    updateMarkersStatusInMetadataPanel(_annotPopupData.metadataId, _annotPopupData.catIdx, 'loading');
+    updateMarkersStatusInMetadataPanel(_annotPopupData.metadataId, _annotPopupData.catIdx, 'loading', null);
+    refreshAnnotPopupTitle();
     renderAnnotationPanel();
     var url = _annotPopupData.evidencesUrl + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) + '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx);
     fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
@@ -929,8 +1213,17 @@ if (typeof openAnnotationPopup !== 'function') {
           message: data.message || '',
           runId: data.run_id || null,
           rowsUp: Array.isArray(data.rows_up) ? data.rows_up : [],
-          rowsDown: Array.isArray(data.rows_down) ? data.rows_down : []
+          rowsDown: Array.isArray(data.rows_down) ? data.rows_down : [],
+          markersQueueBase: data.markers_queue_base || '',
+          markersQueueNote: data.markers_queue_note || '',
+          slurmQueueHover: data.slurm_queue_hover || '',
+          queuePosition: data.queue_position,
+          queuePendingTotal: data.queue_pending_total,
+          queuePartition: data.queue_partition
         };
+        if ((_annotPopupData.evidences.state || '') === 'completed') {
+          normalizeEvidencesSubTabAfterLoad(_annotPopupData.evidences.rowsUp, _annotPopupData.evidences.rowsDown);
+        }
         syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, data);
       })
       .catch(function(err) {
@@ -942,6 +1235,35 @@ if (typeof openAnnotationPopup !== 'function') {
   window.loadAnnotationEvidences = loadAnnotationEvidences;
   window.peekAnnotationMarkersStatus = peekAnnotationMarkersStatus;
 
+  function prefetchMarkersStatusForVisibleMetadata() {
+    if (typeof window.peekAnnotationMarkersStatus !== 'function') return;
+    var seen = {};
+    document.querySelectorAll('.category-annot-btn[data-metadata-id][data-annot-evidences-url]').forEach(function(btn) {
+      var mid = btn.dataset.metadataId;
+      if (!mid || seen[mid]) return;
+      seen[mid] = true;
+      var evidencesUrl = btn.dataset.annotEvidencesUrl;
+      if (!evidencesUrl) return;
+      var catIdx = parseInt(btn.dataset.catIdx, 10);
+      if (Number.isNaN(catIdx)) catIdx = 0;
+      window.peekAnnotationMarkersStatus(mid, catIdx, evidencesUrl);
+    });
+  }
+  window.prefetchMarkersStatusForVisibleMetadata = prefetchMarkersStatusForVisibleMetadata;
+
+  function schedulePrefetchMarkersStatusOnLoad() {
+    function run() {
+      prefetchMarkersStatusForVisibleMetadata();
+    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(run, 0);
+    } else {
+      document.addEventListener('DOMContentLoaded', function() { setTimeout(run, 0); });
+    }
+    document.addEventListener('turbo:load', function() { setTimeout(run, 0); });
+  }
+  schedulePrefetchMarkersStatusOnLoad();
+
   (function bindAnnotationEvidencesWebsocketRefresh() {
     if (window.__asapAnnotEvidencesWsBound) return;
     window.__asapAnnotEvidencesWsBound = true;
@@ -949,16 +1271,16 @@ if (typeof openAnnotationPopup !== 'function') {
     document.addEventListener('asap:project-step-runs-changed', function(ev) {
       var d = ev.detail || {};
       if (d.step_name !== 'markers') return;
-      var overlay = document.getElementById('annotation-popup-overlay');
-      if (!overlay) return;
-      var visible = overlay.style.display !== 'none' && window.getComputedStyle(overlay).display !== 'none';
-      if (!visible) return;
-      var apd = window._annotPopupData;
-      if (!apd || apd.metadataId == null) return;
-      if (typeof window.loadAnnotationEvidences !== 'function' || typeof window.peekAnnotationMarkersStatus !== 'function') return;
+      if (typeof window.prefetchMarkersStatusForVisibleMetadata !== 'function' || typeof window.loadAnnotationEvidences !== 'function' || typeof window.peekAnnotationMarkersStatus !== 'function') return;
       if (evidencesWsTimer) clearTimeout(evidencesWsTimer);
       evidencesWsTimer = setTimeout(function() {
         evidencesWsTimer = null;
+        window.prefetchMarkersStatusForVisibleMetadata();
+        var overlay = document.getElementById('annotation-popup-overlay');
+        var visible = overlay && overlay.style.display !== 'none' && window.getComputedStyle(overlay).display !== 'none';
+        if (!visible) return;
+        var apd = window._annotPopupData;
+        if (!apd || apd.metadataId == null) return;
         if (apd.activeTab === 'evidences') {
           window.loadAnnotationEvidences(true);
         } else {
@@ -982,17 +1304,40 @@ if (typeof openAnnotationPopup !== 'function') {
     var html = '';
     html += '<div style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;padding:0 12px;background:#fff;">';
     html += '<button type="button" onclick="setAnnotationTab(\'existing\')" style="' + navButtonStyle('existing') + '">Existing annotations <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;line-height:1;">' + clas.length + '</span></button>';
-    html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '" title="' + escapeHtml(markersStatusTooltip((_annotPopupData.evidences && _annotPopupData.evidences.loading) ? 'loading' : ((_annotPopupData.evidences && _annotPopupData.evidences.state) || 'idle'))) + '">Identify markers' + identifyMarkersTabStatusBadgeHtml() + '</button>';
+    html += '<button type="button" onclick="setAnnotationTab(\'evidences\')" style="' + navButtonStyle('evidences') + '" title="' + escapeHtml(markersStatusTooltip((_annotPopupData.evidences && _annotPopupData.evidences.loading) ? 'loading' : ((_annotPopupData.evidences && _annotPopupData.evidences.state) || 'idle'))) + '">' + identifyMarkersTabLeadingIconHtml() + 'Identify markers</button>';
+    var boxN = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0;
+    html += '<button type="button" data-annot-tab="evidence_boxplot" onclick="setAnnotationTab(\'evidence_boxplot\')" style="' + navButtonStyle('evidence_boxplot') + '">Violin (' + boxN + ' selected)</button>';
     html += '</div>';
     html += '<div style="overflow-y:auto;flex:1;padding:12px 16px;">';
-    html += activeTab === 'evidences' ? renderEvidencesTab() : renderExistingAnnotationsTab(clas);
+    if (activeTab === 'evidences') {
+      html += renderEvidencesTab();
+    } else if (activeTab === 'evidence_boxplot') {
+      html += renderEvidenceBoxplotTab();
+    } else {
+      html += renderExistingAnnotationsTab(clas);
+    }
     html += '</div>';
     panel.innerHTML = html;
+    if (activeTab === 'evidence_boxplot' && typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') {
+      window.scheduleAnnotEvidenceBoxplotRender();
+    }
   }
+
+  window._annotPopupRenderPanel = renderAnnotationPanel;
 }
 </script>
 
 <%= render 'projects/views/annotation_popup' %>
+<script>
+(function() {
+  if (typeof window.scheduleAnnotEvidenceBoxplotRender !== 'function') {
+    window.scheduleAnnotEvidenceBoxplotRender = function() {};
+  }
+  if (typeof window.scheduleAnnotEvidenceViolinResizeRedraw !== 'function') {
+    window.scheduleAnnotEvidenceViolinResizeRedraw = function() {};
+  }
+})();
+</script>
 
 <% else %>
   <div class="text-gray-500 text-center py-8">No marker genes found with the current filter criteria.</div>

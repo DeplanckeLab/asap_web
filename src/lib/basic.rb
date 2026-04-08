@@ -430,29 +430,44 @@ module Basic
     def ensure_markers_original_gene_attr logger, loom_filename
       return if loom_filename.blank? || !File.exist?(loom_filename)
 
-      py_script = <<~PY
-        import h5py
-        p = #{loom_filename.to_s.inspect}
-        with h5py.File(p, "r+") as f:
-            if "row_attrs" not in f:
-                raise RuntimeError("Loom row_attrs group is missing")
-            row = f["row_attrs"]
-            if "Original_Gene" in row:
-                print("original_gene_exists")
-            elif "Gene" in row:
-                data = row["Gene"][...]
-                row.create_dataset("Original_Gene", data=data)
-                print("original_gene_created")
-            else:
-                raise RuntimeError("Loom row_attrs/Gene dataset is missing")
-      PY
+      # Many FindMarkers runs share the same loom; h5py "r+" takes an exclusive HDF5 lock and
+      # concurrent opens raise BlockingIOError. Serialize per loom path with flock.
+      lock_path = "#{loom_filename}.markers_loom_lock"
+      File.open(lock_path, File::CREAT | File::RDWR) do |lockf|
+        lockf.flock(File::LOCK_EX)
 
-      require 'open3'
-      out, err, status = Open3.capture3('docker', 'exec', '-i', ENV.fetch('ASAP_RUN_CONTAINER'), 'python', '-', stdin_data: py_script)
-      if !status.success?
-        raise "Failed to ensure /row_attrs/Original_Gene in loom file #{loom_filename}: #{out} #{err}"
+        py_script = <<~PY
+          import h5py
+          import sys
+          p = #{loom_filename.to_s.inspect}
+          with h5py.File(p, "r") as f:
+              if "row_attrs" not in f:
+                  raise RuntimeError("Loom row_attrs group is missing")
+              row = f["row_attrs"]
+              if "Original_Gene" in row:
+                  print("original_gene_exists")
+                  sys.exit(0)
+              if "Gene" not in row:
+                  raise RuntimeError("Loom row_attrs/Gene dataset is missing")
+          with h5py.File(p, "r+") as f:
+              row = f["row_attrs"]
+              if "Original_Gene" in row:
+                  print("original_gene_exists")
+              elif "Gene" in row:
+                  data = row["Gene"][...]
+                  row.create_dataset("Original_Gene", data=data)
+                  print("original_gene_created")
+              else:
+                  raise RuntimeError("Loom row_attrs/Gene dataset is missing")
+        PY
+
+        require 'open3'
+        out, err, status = Open3.capture3('docker', 'exec', '-i', ENV.fetch('ASAP_RUN_CONTAINER'), 'python', '-', stdin_data: py_script)
+        if !status.success?
+          raise "Failed to ensure /row_attrs/Original_Gene in loom file #{loom_filename}: #{out} #{err}"
+        end
+        logger.debug("[FindMarkers] #{out.strip}") unless out.to_s.strip.empty?
       end
-      logger.debug("[FindMarkers] #{out.strip}") unless out.to_s.strip.empty?
     end
     
     def find_marker_enrichment logger, project, meta, find_marker_run, user_id

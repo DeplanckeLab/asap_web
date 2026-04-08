@@ -2006,6 +2006,7 @@ export class DataManager {
     return JSON.stringify({
       currentMetadataId: this.controller.currentMetadataId,
       currentMetadataType: this.controller.currentMetadataVector?.data_type,
+      discretePaletteId: this.controller.discretePaletteId,
       categoryOrder: this.controller.categoryOrder,
       customColorRange: this.controller.customColorRange,
       currentColorScheme: this.controller.currentColorScheme,
@@ -2058,87 +2059,90 @@ export class DataManager {
     return button ? button.dataset.metadataName : null
   }
 
-  // Get metadata vector by ID
-  getMetadataVectorById(metadataId) {
-    // Check if it's the current metadata vector (fully loaded and decompressed)
-    if (this.controller.currentMetadataId === metadataId && this.controller.currentMetadataVector) {
-      // Update usage tracker for current metadata
-      this.controller.memoryManager.updateMetadataUsage(metadataId)
+  // Get metadata vector by ID (IDs may be number or string depending on source; cache keys must match).
+  getMetadataVectorById (rawMetadataId) {
+    if (rawMetadataId == null || rawMetadataId === '') return null
+
+    const asNum = Number(rawMetadataId)
+    const idsToTry = [rawMetadataId]
+    if (Number.isFinite(asNum)) idsToTry.push(asNum)
+    idsToTry.push(String(rawMetadataId))
+
+    const currentId = this.controller.currentMetadataId
+    const currentMatches =
+      currentId === rawMetadataId ||
+      (Number.isFinite(asNum) && currentId === asNum) ||
+      String(currentId) === String(rawMetadataId)
+
+    if (currentMatches && this.controller.currentMetadataVector) {
+      this.controller.memoryManager.updateMetadataUsage(rawMetadataId)
       return this.controller.currentMetadataVector
     }
-    
-    // Check stored metadata vectors in memory
-    if (this.controller.loadedMetadataVectors && this.controller.loadedMetadataVectors[metadataId]) {
-      const vectorData = this.controller.loadedMetadataVectors[metadataId]
-      
-      // Update usage tracker
-      this.controller.memoryManager.updateMetadataUsage(metadataId)
-      
-      // If it's already decompressed (has values), return it
-      if (vectorData.values) {
-        return vectorData
+
+    const vecs = this.controller.loadedMetadataVectors
+    if (!vecs) return null
+
+    let cacheKey = null
+    let vectorData = null
+    for (let i = 0; i < idsToTry.length; i++) {
+      const k = idsToTry[i]
+      if (vecs[k] != null) {
+        cacheKey = k
+        vectorData = vecs[k]
+        break
       }
-      
-      // Check if compression_info is invalid (error string instead of object)
-      const isInvalidCompression = vectorData.compression_info && 
-        typeof vectorData.compression_info === 'string' &&
-        (vectorData.compression_info.includes('No categories available') || 
-         vectorData.compression_info.includes('Failed to parse'))
-      
-      // If invalid compression, remove from cache and return null to force reload
-      if (isInvalidCompression) {
-        console.warn(`⚠️ [DataManager] Metadata ${metadataId} has invalid compression_info: ${vectorData.compression_info}`)
-        console.warn(`⚠️ [DataManager] Removing from cache - will reload from server`)
-        delete this.controller.loadedMetadataVectors[metadataId]
-        return null
-      }
-      
-      // If it's compressed, decompress it on demand (matching original controller logic)
-      // Handle both regular compression and single_category optimization
-      if (vectorData.compression_info && typeof vectorData.compression_info === 'object' && 
-          (vectorData.compressed_data || vectorData.compression_info.single_category)) {
-        // console.log(`💾 [MEMORY] Decompressing metadata ${metadataId} from memory...`) */
-        try {
-          let values
-          if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
-            values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
-          } else if (vectorData.data_type === 'NUMERIC') {
-            values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
-          } else {
-            console.warn(`Unknown data type for metadata ${metadataId}: ${vectorData.data_type}`)
-            return null
-          }
-          
-          // Create a fully loaded metadata vector object
-          const decompressedVector = {
-            id: metadataId,
-            name: vectorData.name,
-            data_type: vectorData.data_type,
-            values: values,
-            compression_info: vectorData.compression_info
-          }
-          
-          // Store the decompressed version
-          this.controller.loadedMetadataVectors[metadataId] = decompressedVector
-          
-          // console.log(`💾 [MEMORY] Decompressed and cached metadata ${metadataId}: ${values.length} values`) */
-          return decompressedVector
-          
-        } catch (error) {
-          console.error(`Error decompressing metadata vector ${metadataId}:`, error)
-          return null
-        }
-      }
-      
+    }
+    if (!vectorData) return null
+
+    this.controller.memoryManager.updateMetadataUsage(cacheKey)
+
+    if (vectorData.values) {
       return vectorData
     }
-    
-    // If metadata is not in memory but we need it (e.g., for filtering), try to load it
-    // console.log(`💾 Metadata ${metadataId} not in memory, attempting to load...`) */
-    
-    // Note: This is a synchronous method, so we can't await here
-    // We'll need to handle this case differently in the filtering logic
-    return null
+
+    const isInvalidCompression = vectorData.compression_info &&
+      typeof vectorData.compression_info === 'string' &&
+      (vectorData.compression_info.includes('No categories available') ||
+        vectorData.compression_info.includes('Failed to parse'))
+
+    if (isInvalidCompression) {
+      console.warn(`⚠️ [DataManager] Metadata ${rawMetadataId} has invalid compression_info: ${vectorData.compression_info}`)
+      console.warn('⚠️ [DataManager] Removing from cache - will reload from server')
+      delete vecs[cacheKey]
+      return null
+    }
+
+    if (vectorData.compression_info && typeof vectorData.compression_info === 'object' &&
+        (vectorData.compressed_data || vectorData.compression_info.single_category)) {
+      try {
+        let values
+        if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
+          values = this.decompressDiscreteMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else if (vectorData.data_type === 'NUMERIC') {
+          values = this.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
+        } else {
+          console.warn(`Unknown data type for metadata ${rawMetadataId}: ${vectorData.data_type}`)
+          return null
+        }
+
+        const resolvedId = vectorData.id != null ? vectorData.id : (Number.isFinite(asNum) ? asNum : rawMetadataId)
+        const decompressedVector = {
+          id: resolvedId,
+          name: vectorData.name,
+          data_type: vectorData.data_type,
+          values: values,
+          compression_info: vectorData.compression_info
+        }
+
+        vecs[cacheKey] = decompressedVector
+        return decompressedVector
+      } catch (error) {
+        console.error(`Error decompressing metadata vector ${rawMetadataId}:`, error)
+        return null
+      }
+    }
+
+    return vectorData
   }
 
   // Preload metadata vector on hover for better UX
@@ -2372,8 +2376,9 @@ export class DataManager {
       // (not by checking canvas visibility, as canvases might be hidden when no coloring is active)
       const header = section.querySelector('[data-action*="toggleMetadata"]')
       if (!header) return
-      
-      const categoriesDiv = header.nextElementSibling
+
+      const categoriesDiv =
+        section.querySelector('[style*="padding-left: 32px"]') || header.nextElementSibling
       if (!categoriesDiv || categoriesDiv.style.display === 'none') {
         // Section is not expanded, skip it
         return

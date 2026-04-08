@@ -57,7 +57,7 @@
             <span><%= duration(wait_time) %></span>
           </div>
         </div>
-      <% elsif run.status_id == 1 && run.submitted_at %>
+      <% elsif [1, 6].include?(run.status_id) && run.submitted_at %>
         <% wait_time = (Time.now - run.submitted_at).round %>
         <div>
           <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>

@@ -3,6 +3,14 @@
  * Handles UI elements, tooltips, and settings
  */
 
+import {
+  getDiscretePaletteSelectLabels,
+  DISCRETE_PALETTE_COLORBLIND,
+  DISCRETE_PALETTE_EXTENDED,
+  DISCRETE_PALETTE_EXTENDED_200,
+  VALID_DISCRETE_PALETTE_IDS
+} from 'visualization/discrete_palettes'
+
 export class UIManager {
   constructor(controller) {
     this.controller = controller
@@ -1677,6 +1685,50 @@ export class UIManager {
         // console.log('📊 Numerical order changed:', e.target.value)
         this.changeNumericalOrder(e)
       })
+    }
+
+    const discretePaletteSelect = document.getElementById('discrete-palette-select')
+    if (discretePaletteSelect) {
+      const labels = getDiscretePaletteSelectLabels()
+      const optCb = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_COLORBLIND}"]`)
+      const optEx = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_EXTENDED}"]`)
+      const opt200 = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_EXTENDED_200}"]`)
+      if (optCb) optCb.textContent = labels[DISCRETE_PALETTE_COLORBLIND]
+      if (optEx) optEx.textContent = labels[DISCRETE_PALETTE_EXTENDED]
+      if (opt200) opt200.textContent = labels[DISCRETE_PALETTE_EXTENDED_200]
+      discretePaletteSelect.value = this.controller.discretePaletteId || DISCRETE_PALETTE_EXTENDED
+      if (!discretePaletteSelect.dataset.paletteListenerBound) {
+        discretePaletteSelect.dataset.paletteListenerBound = '1'
+        discretePaletteSelect.addEventListener('change', (e) => {
+          const v = e.target.value
+          if (!VALID_DISCRETE_PALETTE_IDS.has(v)) return
+          this.controller.beginDiscretePaletteChange(v, discretePaletteSelect)
+        })
+      }
+    }
+
+    const discretePaletteOverlay = document.getElementById('discrete-palette-confirm-overlay')
+    if (discretePaletteOverlay && !discretePaletteOverlay.dataset.paletteModalInit) {
+      discretePaletteOverlay.dataset.paletteModalInit = '1'
+      discretePaletteOverlay.addEventListener('click', (e) => {
+        if (e.target === discretePaletteOverlay) this.controller.cancelDiscretePaletteChoice()
+      })
+      const btnAll = document.getElementById('discrete-palette-apply-all-btn')
+      const btnExceptManual = document.getElementById('discrete-palette-apply-except-manual-btn')
+      const btnCancel = document.getElementById('discrete-palette-cancel-btn')
+      if (btnAll) {
+        btnAll.addEventListener('click', () => this.controller.confirmDiscretePaletteChoice(true))
+      }
+      if (btnExceptManual) {
+        btnExceptManual.addEventListener('click', () => this.controller.confirmDiscretePaletteChoice(false))
+      }
+      if (btnCancel) {
+        btnCancel.addEventListener('click', () => this.controller.cancelDiscretePaletteChoice())
+      }
+      const btnSimple = document.getElementById('discrete-palette-apply-simple-btn')
+      if (btnSimple) {
+        btnSimple.addEventListener('click', () => this.controller.confirmDiscretePaletteChoice(false))
+      }
     }
 
     const xScaleSelect = document.getElementById('custom-plot-x-scale')

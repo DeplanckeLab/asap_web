@@ -87,53 +87,116 @@ namespace :slurm do
     logger.info("[SlurmScheduler] Finished processing waiting runs")
   end
 
-  desc "Monitor SLURM jobs and update run statuses"
+  desc "Monitor SLURM jobs and update run statuses (async handoff to SlurmJobMonitorJob)"
   task monitor_jobs: :environment do
     logger = Rails.logger
     logger.info("[SlurmMonitor] Starting to monitor SLURM jobs")
-    
-    running_runs = Run.where(status_id: 2).where.not(pid: nil)
-    
+    puts "[slurm:monitor_jobs] Starting"
+
+    running_runs = Run.where(status_id: 2)
+
     if running_runs.empty?
-      logger.debug("[SlurmMonitor] No running runs found")
+      msg = "[SlurmMonitor] No runs with status_id=2 (running)"
+      logger.info(msg)
+      puts msg
       exit 0
     end
-    
-    logger.info("[SlurmMonitor] Found #{running_runs.count} running runs to check")
-    
+
+    logger.info("[SlurmMonitor] Found #{running_runs.count} runs in running state")
+    puts "[slurm:monitor_jobs] Checking #{running_runs.count} run(s) with status_id=2"
+
     slurm_service = SlurmService.new(logger: logger)
-    
+
     running_runs.each do |run|
       begin
         slurm_job_id = (run.slurm_job_id || run.pid).to_s
-        next if slurm_job_id.blank? || slurm_job_id == '0'
-        
-        status = slurm_service.get_job_status(slurm_job_id)
-        
-        if status.nil?
-          logger.warn("[SlurmMonitor] Could not get status for Run##{run.id}, SLURM Job##{slurm_job_id}")
+        if slurm_job_id.blank? || slurm_job_id == '0'
+          warn_msg = "[SlurmMonitor] Run##{run.id} has no slurm_job_id/pid; cannot query SLURM. Fix manually or set id from logs."
+          logger.warn(warn_msg)
+          puts warn_msg
           next
         end
-        
+
+        status = slurm_service.get_job_status(slurm_job_id, run)
+        logger.info("[SlurmMonitor] Run##{run.id} SLURM job #{slurm_job_id} status=#{status.inspect}")
+
+        if status.nil?
+          # Lost job id / purged history / ambiguous: full logic lives in SlurmJobMonitorJob (output.json, exec.out, fail after max attempts).
+          logger.warn("[SlurmMonitor] Run##{run.id} ambiguous SLURM status (nil); handing off to SlurmJobMonitorJob")
+          puts "[slurm:monitor_jobs] Run #{run.id} job #{slurm_job_id}: status unknown (nil) -> SlurmJobMonitorJob"
+          SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
+          next
+        end
+
         case status
         when :pending, :running
           logger.debug("[SlurmMonitor] Run##{run.id} still #{status}")
+          puts "[slurm:monitor_jobs] Run #{run.id}: still #{status} in SLURM"
         when :completed
           logger.info("[SlurmMonitor] Run##{run.id} completed, triggering finish")
+          puts "[slurm:monitor_jobs] Run #{run.id}: completed -> SlurmJobMonitorJob"
           SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
         when :failed, :timeout, :node_fail, :cancelled
           logger.warn("[SlurmMonitor] Run##{run.id} finished with status: #{status}")
+          puts "[slurm:monitor_jobs] Run #{run.id}: #{status} -> SlurmJobMonitorJob"
+          SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
+        when :invalid_job, :accounting_unavailable
+          logger.warn("[SlurmMonitor] Run##{run.id} SLURM job #{slurm_job_id} status=#{status}, reconciling via SlurmJobMonitorJob")
+          puts "[slurm:monitor_jobs] Run #{run.id}: #{status} -> SlurmJobMonitorJob"
           SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
         else
-          logger.warn("[SlurmMonitor] Run##{run.id} has unknown status: #{status}")
+          logger.warn("[SlurmMonitor] Run##{run.id} has unknown status: #{status}, handing off")
+          puts "[slurm:monitor_jobs] Run #{run.id}: unknown #{status} -> SlurmJobMonitorJob"
+          SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
         end
       rescue StandardError => e
         logger.error("[SlurmMonitor] Error checking Run##{run.id}: #{e.class} - #{e.message}")
         logger.error(e.backtrace.join("\n")) if e.backtrace
+        puts "[slurm:monitor_jobs] ERROR Run #{run.id}: #{e.class} #{e.message}"
       end
     end
-    
-    logger.info("[SlurmMonitor] Finished monitoring SLURM jobs")
+
+    done = "[SlurmMonitor] Finished monitoring SLURM jobs"
+    logger.info(done)
+    puts done
+  end
+
+  desc "Reconcile runs stuck in running state when SLURM lost the job (e.g. slurmctld restart). Runs SlurmJobMonitorJob synchronously per run."
+  task reconcile_stale_running: :environment do
+    logger = Rails.logger
+    puts "[slurm:reconcile_stale_running] Starting (perform_now per run)"
+
+    scope = Run.where(status_id: 2)
+    ids = ENV['RUN_IDS'].to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+    scope = scope.where(id: ids) if ids.any?
+
+    runs = scope.order(:id)
+    if runs.empty?
+      puts "[slurm:reconcile_stale_running] No runs with status_id=2#{ids.any? ? " for RUN_IDS=#{ids.join(',')}" : ''}"
+      exit 0
+    end
+
+    puts "[slurm:reconcile_stale_running] Processing #{runs.size} run(s)"
+
+    runs.each do |run|
+      slurm_job_id = (run.slurm_job_id || run.pid).to_s
+      if slurm_job_id.blank? || slurm_job_id == '0'
+        puts "[slurm:reconcile_stale_running] SKIP Run #{run.id}: missing slurm_job_id and pid"
+        next
+      end
+
+      begin
+        puts "[slurm:reconcile_stale_running] Run #{run.id} SLURM job #{slurm_job_id} perform_now ..."
+        SlurmJobMonitorJob.perform_now(run.id, slurm_job_id)
+        run.reload
+        puts "[slurm:reconcile_stale_running] Run #{run.id} -> status_id=#{run.status_id}"
+      rescue StandardError => e
+        puts "[slurm:reconcile_stale_running] ERROR Run #{run.id}: #{e.class} #{e.message}"
+        logger.error("[reconcile_stale_running] Run##{run.id}: #{e.class} #{e.message}\n#{e.backtrace&.join("\n")}")
+      end
+    end
+
+    puts "[slurm:reconcile_stale_running] Done"
   end
 
   desc "Resubmit runs that failed to submit to SLURM (no slurm_job_id)"

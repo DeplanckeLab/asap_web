@@ -1,13 +1,7 @@
 <% if @runs && @runs.any? %>
   <div class="space-y-3">
     <% @runs.each do |run| %>
-      <% run_status = case run.status_id
-                      when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
-                      when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
-                      when 3 then { name: 'complete', class: 'success', bg: 'bg-green-100', text: 'text-green-800' }
-                      when 4 then { name: 'failed', class: 'danger', bg: 'bg-red-100', text: 'text-red-800' }
-                      else { name: 'unknown', class: 'secondary', bg: 'bg-gray-100', text: 'text-gray-800' }
-                      end %>
+      <% run_status = run_status_badge_for(run, @h_statuses) %>
       <% step = @h_steps[run.step_id] if defined?(@h_steps) %>
       <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
       <% h_method_attrs = (std_method && step) ? (Basic.get_std_method_attrs(std_method, step)[:h_attrs] rescue Basic.safe_parse_json(std_method.attrs_json, {})) : {} %>
@@ -30,9 +24,9 @@
           <div class="flex items-center gap-3">
             <div class="flex flex-col items-end gap-1">
               <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
-                <%= run_status[:name].humanize %>
+                <%= run_status[:ui_label] %>
               </span>
-              <% if run.status_id == 1 && run.slurm_job_id.present? %>
+              <% if [1, 6].include?(run.status_id) && run.slurm_job_id.present? %>
                 <div class="text-xs text-gray-500"
                      data-controller="queue-position"
                      data-queue-position-run-id-value="<%= run.id %>"
@@ -41,9 +35,11 @@
                      <% if run.submitted_at %>
                        data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
                      <% end %>>
-                  <span class="text-gray-400">Queue: </span>
-                  <span data-queue-position-target="position" class="font-mono text-xs">
-                    <i class="fas fa-spinner fa-spin"></i>
+                  <span data-queue-position-target="queueLine">
+                    <span data-slurm-queue-position-label class="text-gray-400">Slurm queue position:</span>
+                    <span data-queue-position-target="position" class="font-mono text-xs ml-0.5 inline-block">
+                      <i class="fas fa-spinner fa-spin"></i>
+                    </span>
                   </span>
                 </div>
               <% end %>

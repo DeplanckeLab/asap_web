@@ -695,10 +695,9 @@ module ApplicationHelper
       # Build configuration from database statuses (all styling now comes from DB)
       Status.order(:rank, :id).map do |status|
         key = status.name.to_s.downcase.to_sym
-        
-        # Use the database status name for display labels
-        display_label = status.name.humanize
-        
+
+        display_label = status.ui_label
+
         {
           id: status.id,
           key: key,
@@ -708,8 +707,8 @@ module ApplicationHelper
           icon_spin: status.icon_spin.presence || '',
           active_color: status.active_color.presence || 'text-gray-500',
           inactive_color: status.inactive_color.presence || 'text-gray-300',
-          label: display_label,
-          tooltip_label: display_label
+          ui_label: display_label,
+          tooltip_ui_label: display_label
         }
       end
     end
@@ -747,6 +746,31 @@ module ApplicationHelper
   # inside data-*-value="..." attributes. Stimulus decodes entities automatically.
   def status_icons_json
     status_icons_config.to_json
+  end
+
+  # Run table / pipeline badge: ui_label + Tailwind classes from Status (by run.status_id).
+  def run_status_badge_for(run, h_statuses = nil)
+    st = if run.association(:status).loaded? && run.status
+           run.status
+         elsif h_statuses.is_a?(Hash) && h_statuses[run.status_id]
+           h_statuses[run.status_id]
+         else
+           run.status
+         end
+    return { ui_label: 'Unknown', bg: 'bg-gray-100', text: 'text-gray-800' } unless st
+
+    { ui_label: st.ui_label, bg: st.run_badge_bg_class, text: st.run_badge_text_class }
+  end
+
+  # JSON map status_id => { ui_label, bg, text } for step-selector live run row updates.
+  def run_status_badge_options_json
+    Status.order(:id).each_with_object({}) do |s, h|
+      h[s.id.to_s] = {
+        ui_label: s.ui_label,
+        bg: s.run_badge_bg_class,
+        text: s.run_badge_text_class
+      }
+    end.to_json
   end
 
   # Renders a vertical separator line for the header navigation

@@ -29,7 +29,16 @@ if (typeof document !== 'undefined') {
 
 export default class extends Controller {
   static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
-  static values = { projectId: Number, projectKey: String, statusIcons: Array, loadRunPanel: Boolean, loadSubView: Boolean, subViewStepId: Number, loomFile: String }
+  static values = {
+    projectId: Number,
+    projectKey: String,
+    statusIcons: Array,
+    runStatusBadges: Object,
+    loadRunPanel: Boolean,
+    loadSubView: Boolean,
+    subViewStepId: Number,
+    loomFile: String
+  }
 
   get projectIdentifier() {
     return this.projectKeyValue || this.projectIdValue
@@ -341,6 +350,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.clearStepPanelFlash()
     if (this.statusUpdateTimer) {
       clearTimeout(this.statusUpdateTimer)
       this.statusUpdateTimer = null
@@ -544,6 +554,11 @@ export default class extends Controller {
       return true
     }
 
+    if (parsingStatus && this.isParsingInProgressStatus(parsingStatus)) {
+      console.log('[StepSelectorController] Immediate by parsing in progress:', parsingStatus)
+      return true
+    }
+
     const counts = data.h_nber_analyses
     if (!counts) return false
 
@@ -551,6 +566,11 @@ export default class extends Controller {
     const running = parseInt(counts[2] ?? counts['2'] ?? 0, 10) || 0
     const success = parseInt(counts[3] ?? counts['3'] ?? 0, 10) || 0
     const failed = parseInt(counts[4] ?? counts['4'] ?? 0, 10) || 0
+
+    if (pending > 0 || running > 0) {
+      console.log('[StepSelectorController] Immediate by active runs:', { pending, running })
+      return true
+    }
 
     const isTerminal = pending === 0 && running === 0 && (success > 0 || failed > 0)
     console.log('[StepSelectorController] Terminal by h_nber_analyses check:', {
@@ -808,7 +828,7 @@ export default class extends Controller {
       const btnEl = headerRoot.querySelector(`[data-header-run-status-target="statusButton"][data-status-key="${statusKey}"]`)
       if (btnEl) {
         const isActive = count > 0
-        const label = iconEl?.dataset.label || statusKey
+        const label = iconEl?.dataset.uiLabel || statusKey
         btnEl.title = `${label} (${count})`
         btnEl.disabled = !isActive
         if (isActive) {
@@ -1158,7 +1178,7 @@ export default class extends Controller {
   humanizeStatus(status) {
     if (!status) return ''
     const statusConfig = this.getStatusIconConfig(status)
-    if (statusConfig?.label) return statusConfig.label
+    if (statusConfig?.ui_label) return statusConfig.ui_label
     return status.charAt(0).toUpperCase() + status.slice(1)
   }
 
@@ -1368,7 +1388,49 @@ export default class extends Controller {
     }
   }
 
+  clearStepPanelFlash() {
+    const mount = this._stepResultsPanelFlashMount()
+    if (mount) {
+      mount.style.display = 'none'
+      mount.setAttribute('hidden', '')
+      mount.innerHTML = ''
+    }
+  }
+
+  _stepResultsPanelFlashMount() {
+    if (!this.hasContentTarget) return null
+    return this.contentTarget.querySelector('[data-step-results-panel-flash-mount]')
+  }
+
+  showStepPanelFlashFromQuery(queryString) {
+    if (!queryString) return
+    const params = new URLSearchParams(queryString)
+    const notice = params.get('notice') || params.get('errors')
+    if (!notice || !String(notice).trim()) return
+
+    const mount = this._stepResultsPanelFlashMount()
+    if (!mount) return
+
+    const text = this._escapeHtmlForPanelFlash(notice)
+    mount.innerHTML =
+      '<div class="flex items-start gap-3 px-3 py-2.5">' +
+      '<span class="fas fa-exclamation-triangle text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true"></span>' +
+      '<span class="leading-snug">' +
+      text +
+      '</span>' +
+      '</div>'
+    mount.removeAttribute('hidden')
+    mount.style.display = 'block'
+  }
+
+  _escapeHtmlForPanelFlash(value) {
+    const div = document.createElement('div')
+    div.textContent = value == null ? '' : String(value)
+    return div.innerHTML
+  }
+
   loadStepResults(stepId, stepElement, showLoading = true, extraQuery = '', source = 'unknown') {
+    this.clearStepPanelFlash()
     console.log('[StepSelectorController] ===== LOADING STEP RESULTS =====')
     const callId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     console.log('[StepSelectorController][trace] loadStepResults called:', {
@@ -1588,7 +1650,9 @@ export default class extends Controller {
       if (typeof window.setPipelineHeaderButtonMode === 'function') {
         window.setPipelineHeaderButtonMode('graph')
       }
-      
+
+      controller.showStepPanelFlashFromQuery(query)
+
       // Log information about controllers in the loaded content for debugging
       // Stimulus's MutationObserver should automatically detect and connect them
       if (typeof window !== 'undefined' && window.Stimulus) {
@@ -1880,20 +1944,15 @@ export default class extends Controller {
     }
   }
 
-  // Get status configuration for a status_id
+  // Run row badge label + classes from server (Status#ui_label + Tailwind).
   getStatusConfig(statusId) {
-    switch(statusId) {
-      case 1:
-        return { name: 'Waiting', bg: 'bg-yellow-100', text: 'text-yellow-800' }
-      case 2:
-        return { name: 'Running', bg: 'bg-blue-100', text: 'text-blue-800' }
-      case 3:
-        return { name: 'Completed', bg: 'bg-green-100', text: 'text-green-800' }
-      case 4:
-        return { name: 'Failed', bg: 'bg-red-100', text: 'text-red-800' }
-      default:
-        return { name: 'Unknown', bg: 'bg-gray-100', text: 'text-gray-800' }
+    const id = String(statusId)
+    const map = this.runStatusBadgesValue
+    const row = map && (map[id] || map[statusId])
+    if (row && row.ui_label) {
+      return { name: row.ui_label, bg: row.bg, text: row.text }
     }
+    return { name: "Unknown", bg: "bg-gray-100", text: "text-gray-800" }
   }
 
   // Format duration in seconds to HH:MM:SS or MM:SS

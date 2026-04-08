@@ -10,7 +10,7 @@
   <%# Otherwise, check for step-specific partial %>
   <% if show_single_run_intermediate %>
     <%= render partial: 'projects/views/single_run_intermediate_status', locals: { run: single_run_status_run } %>
-    <%= render partial: 'projects/views/run_metadata', locals: { run: single_run_status_run, results: @h_res, queue_position: @queue_position } %>
+    <%= render partial: 'projects/views/run_metadata', locals: { run: single_run_status_run, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
   <% elsif show_single_run_failed_summary %>
     <%= render partial: 'projects/views/single_run_failed_summary', locals: { run: single_run_status_run } %>
   <% elsif !@step.multiple_runs && !@step.has_std_view && single_run_status_run %>

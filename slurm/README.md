@@ -10,11 +10,14 @@ This directory contains SLURM configuration files for the docker-compose setup.
 
 ## Configuration Details
 
-### Single-Node Cluster
-- **Controller**: `slurmctld` container
-- **Compute Node**: `slurmd` container  
-- **Database**: `slurmdb` (MySQL) for accounting
-- **Database Daemon**: `slurmdbd` for accounting storage
+### Cluster layout
+- **Controller**: `slurmctld` (often on the host; see `MIGRATION_TO_HOST.md`)
+- **Compute nodes**: `slurmd` on each execution host
+- **Database**: MySQL for Slurm accounting (`slurmdbd`)
+- **Scaling**: To run more jobs in parallel, add hosts and register them in `slurm.conf`; see **`docs/SLURM_ADD_COMPUTE_NODES.md`**.
+
+### Legacy single-container layout (reference)
+- Older docs referred to `slurmctld` / `slurmd` **containers**; production may use host `slurmd` instead.
 
 ### Resource Limits
 - **CPUs**: 90% of total system CPUs (automatically configured)

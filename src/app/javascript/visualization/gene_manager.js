@@ -1,4 +1,5 @@
 import consumer from "channels/consumer"
+import { renderGeneCategoryBoxplot } from "visualization/regl_boxplot"
 
 // GeneManager - Handles gene autocomplete and expression visualization
 export class GeneManager {
@@ -1755,6 +1756,133 @@ this.currentMatches = allMatches.filter(item => {
     }
   }
 
+  /**
+   * Split per-cell expression by discrete/STRING coloring metadata (visible cells only).
+   * Categories are sorted by mean expression descending (same idea as legacy Plotly box order).
+   */
+  buildDiscreteExpressionGroups (expressionValues) {
+    const ctrl = this.controller
+    if (!ctrl || !expressionValues || expressionValues.length === 0) return null
+    const meta = ctrl.colorManager && ctrl.colorManager.getColoringMetadataVector()
+    if (!meta || (meta.data_type !== 'DISCRETE' && meta.data_type !== 'STRING')) return null
+    const catValues = meta.values
+    if (!catValues || catValues.length !== expressionValues.length) return null
+
+    const filteredIndices = ctrl.dataManager && ctrl.dataManager.getIncrementalFilteredIndices()
+    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+
+    const map = new Map()
+    for (let i = 0; i < expressionValues.length; i++) {
+      if (visibleSet && !visibleSet.has(i)) continue
+      const cat = catValues[i]
+      const key = cat === null || cat === undefined ? '' : String(cat)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(expressionValues[i])
+    }
+
+    const groups = []
+    map.forEach((values, name) => {
+      const finite = values.filter(v => Number.isFinite(Number(v)))
+      const mean = finite.length ? finite.reduce((a, b) => a + b, 0) / finite.length : 0
+      groups.push({ name, values, mean })
+    })
+    groups.sort((a, b) => b.mean - a.mean)
+    return groups.map(({ name, values }) => ({ name, values }))
+  }
+
+  /**
+   * Whether a cell's metadata value matches the annotation popup category (label and/or index).
+   */
+  cellMatchesAnnotCategory (metaVal, catName, catIdx, metaVector) {
+    if (metaVal === null || metaVal === undefined) return false
+    const mv = String(metaVal).trim()
+    const cn = catName != null ? String(catName).trim() : ''
+    if (cn !== '') {
+      if (mv === cn) return true
+      if (mv.toLowerCase() === cn.toLowerCase()) return true
+    }
+    const cats = metaVector && metaVector.categories
+    if (Array.isArray(cats) && catIdx != null && catIdx !== '') {
+      const idx = parseInt(catIdx, 10)
+      if (!Number.isNaN(idx) && idx >= 0 && idx < cats.length) {
+        const expected = String(cats[idx]).trim()
+        if (mv === expected) return true
+      }
+    }
+    if (catIdx != null && catIdx !== '') {
+      const idxNum = parseInt(catIdx, 10)
+      if (!Number.isNaN(idxNum)) {
+        if (mv === String(idxNum)) return true
+        const nmv = Number(metaVal)
+        if (Number.isFinite(nmv) && nmv === idxNum) return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Split expression into cells in the given category vs all other visible cells (same metadata column as annotations).
+   */
+  splitExpressionByAnnotCategory (expressionValues, metadataVector, catName, catIdx, visibleSet) {
+    if (!this.controller || !metadataVector || !expressionValues || expressionValues.length === 0) return null
+    const dt = metadataVector.data_type
+    if (dt !== 'DISCRETE' && dt !== 'STRING') return null
+    const mv = metadataVector.values
+    if (!mv || mv.length !== expressionValues.length) return null
+
+    const inCategory = []
+    const rest = []
+    for (let i = 0; i < expressionValues.length; i++) {
+      if (visibleSet && !visibleSet.has(i)) continue
+      const num = Number(expressionValues[i])
+      if (!Number.isFinite(num)) continue
+      if (this.cellMatchesAnnotCategory(mv[i], catName, catIdx, metadataVector)) {
+        inCategory.push(num)
+      } else {
+        rest.push(num)
+      }
+    }
+    return { inCategory, rest }
+  }
+
+  updateGeneCategoryBoxplot (stableId) {
+    const idStr = String(stableId)
+    const geneDiv = document.querySelector(`[data-gene-item="${idStr}"]`)
+    if (!geneDiv) return
+    const section = geneDiv.querySelector('.gene-category-boxplot-section')
+    const webgl = geneDiv.querySelector('.gene-category-boxplot-webgl')
+    const labels = geneDiv.querySelector('.gene-category-boxplot-labels')
+    if (!section || !webgl || !labels) return
+
+    const expr = this.geneExpressionData[idStr] ||
+      this.geneExpressionData[stableId] ||
+      this.geneExpressionData[parseInt(idStr, 10)]
+    if (!expr || !expr.values) {
+      section.style.display = 'none'
+      renderGeneCategoryBoxplot(webgl, labels, [], {})
+      return
+    }
+
+    const groups = this.buildDiscreteExpressionGroups(expr.values)
+    if (!groups || groups.length === 0) {
+      section.style.display = 'none'
+      renderGeneCategoryBoxplot(webgl, labels, [], {})
+      return
+    }
+
+    section.style.display = 'block'
+    requestAnimationFrame(() => {
+      renderGeneCategoryBoxplot(webgl, labels, groups, { yAxisLabel: 'Expression' })
+    })
+  }
+
+  refreshGeneCategoryBoxplots () {
+    document.querySelectorAll('[data-gene-item]').forEach((el) => {
+      const id = el.getAttribute('data-gene-item')
+      if (id) this.updateGeneCategoryBoxplot(id)
+    })
+  }
+
   parseBulkGeneInput(inputText) {
     // Split by newlines, commas, spaces, or tabs
     const genes = inputText
@@ -2100,6 +2228,14 @@ this.currentMatches = allMatches.filter(item => {
                     style="width: 100%; height: 80px; border: 1px solid #e5e7eb; border-radius: 4px; background-color: white;"></canvas>
           </div>
         </div>
+        </div>
+        <div class="gene-category-boxplot-section" style="margin-top: 8px; display: none;">
+          <div style="font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 2px;">Gene expression by category</div>
+          <div style="font-size: 11px; color: #6b7280; margin-bottom: 6px; line-height: 1.35;">One box per category from the current discrete point coloring (visible cells only). Orange segment: mean; line in box: median.</div>
+          <div class="gene-category-boxplot-inner" style="position: relative; width: 100%; height: 220px;">
+            <canvas class="gene-category-boxplot-webgl" style="display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%;"></canvas>
+            <canvas class="gene-category-boxplot-labels" style="display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+          </div>
         </div>
       </div>
       <!-- Loading indicator (shown while expression data loads) -->
@@ -2514,6 +2650,93 @@ this.currentMatches = allMatches.filter(item => {
     }
   }
 
+  /**
+   * Load expression values for a specific matrix/layer without mutating geneExpressionData or the main UI caches.
+   * Used by annotation popup violin plots so a different matrix than the gene panel does not overwrite in-memory state.
+   */
+  async fetchExpressionForAnnotViolin (gene, layerPath, annotId) {
+    const geneId = String(gene.stableId)
+    const effectiveLayer = layerPath != null && layerPath !== '' ? String(layerPath) : '/matrix'
+    const effectiveAnnotId = annotId != null && String(annotId).trim() !== '' ? String(annotId).trim() : null
+    const { baseKey: baseMetadataId, layerKey: geneMetadataId } = this.getGeneMetadataKeys(geneId, effectiveAnnotId)
+
+    const pickMatchingGlobal = () => {
+      const candidates = [geneId, parseInt(geneId, 10), String(parseInt(geneId, 10))]
+      for (const k of candidates) {
+        if (k === undefined || Number.isNaN(k)) continue
+        const e = this.geneExpressionData[k]
+        if (e && e.values && e.values.length > 0 && e.metadataId === geneMetadataId) {
+          return e
+        }
+      }
+      return null
+    }
+
+    const fromGlobal = pickMatchingGlobal()
+    if (fromGlobal) {
+      return {
+        values: fromGlobal.values,
+        stats: fromGlobal.stats || this.calculateExpressionStats(fromGlobal.values)
+      }
+    }
+
+    if (this.controller && this.controller.memoryManager) {
+      const dbData = await this.controller.memoryManager.loadGeneExpressionFromIndexedDB(geneId, {
+        metadataKey: geneMetadataId,
+        baseKey: baseMetadataId,
+        expectedAnnotId: effectiveAnnotId
+      })
+      if (dbData && dbData.values && dbData.values.length > 0) {
+        return {
+          values: dbData.values,
+          stats: dbData.stats || this.calculateExpressionStats(dbData.values)
+        }
+      }
+    }
+
+    let loomFile = 'parsing/output.loom'
+    try {
+      if (this.controller && this.controller.getCurrentLoomFileForRequest) {
+        loomFile = this.controller.getCurrentLoomFileForRequest()
+      }
+    } catch (e) {
+      console.warn('GeneManager: Could not get current loom file for annot violin:', e.message)
+    }
+
+    if (!this.projectIdentifier) {
+      throw new Error('Project identifier is not set')
+    }
+
+    let url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(gene.stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+    if (effectiveAnnotId) {
+      url += `&annot_id=${encodeURIComponent(effectiveAnnotId)}`
+    } else if (effectiveLayer && effectiveLayer !== '/matrix') {
+      url += `&layer=${encodeURIComponent(effectiveLayer)}`
+    }
+
+    const response = await fetch(url)
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }))
+      const errorMessage = errorData.message ? `${errorData.error}: ${errorData.message}` : (errorData.error || `HTTP ${response.status}`)
+      throw new Error(errorMessage)
+    }
+
+    const data = await response.json()
+    if (data.error) {
+      const errorMessage = data.message ? `${data.error}: ${data.message}` : data.error
+      throw new Error(errorMessage)
+    }
+    if (!data.expression_values || data.expression_values.length === 0) {
+      throw new Error('No expression values returned from server')
+    }
+
+    const expressionValues = data.expression_values
+    return {
+      values: expressionValues,
+      stats: this.calculateExpressionStats(expressionValues)
+    }
+  }
+
   toggleGeneExpansion(geneId) {
     const geneDiv = document.querySelector(`[data-gene-item="${geneId}"]`)
     if (!geneDiv) return
@@ -2539,7 +2762,7 @@ this.currentMatches = allMatches.filter(item => {
       rangeSection.offsetHeight
       
       // Expand with animation
-      rangeSection.style.maxHeight = '500px'
+      rangeSection.style.maxHeight = '1400px'
       rangeSection.style.opacity = '1'
       
       // Show filter state icon when unfolded
@@ -2568,6 +2791,7 @@ this.currentMatches = allMatches.filter(item => {
                 controller.drawDensityPlot()
               }
             }
+            this.updateGeneCategoryBoxplot(geneId)
           }, 100)
         }, 350)
       } else {
@@ -2711,6 +2935,8 @@ this.currentMatches = allMatches.filter(item => {
         this.controller?.uiManager?.updateGeneFilterSwitchVisibility(geneId, geneMetadataId)
       }, 100)
     }
+
+    this.updateGeneCategoryBoxplot(geneId)
   }
 
   setupGeneButtonHandlers(geneId) {

@@ -88,7 +88,7 @@
 
   <% if run_for_view %>
     <div id="run_metadata_sticky_cell_filtering" class="sticky z-10 flex-shrink-0 bg-white" style="top: 57px;">
-      <%= render partial: 'projects/views/run_metadata', locals: { run: run_for_view, results: @h_res, queue_position: @queue_position } %>
+      <%= render partial: 'projects/views/run_metadata', locals: { run: run_for_view, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
     </div>
   <% end %>
 

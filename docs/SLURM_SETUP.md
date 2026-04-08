@@ -2,6 +2,10 @@
 
 This document describes the SLURM integration for the docker-compose environment.
 
+**Restarting Compose or Slurm** (checklist, stuck jobs, verification): see **`RESTART_DOCKER_AND_SLURM.md`**.
+
+**Adding compute nodes** (more concurrent jobs): see **`SLURM_ADD_COMPUTE_NODES.md`**. That is an operations task (extra machines, `slurmd`, shared `/data`, munge); it cannot be done from the Rails app alone.
+
 ## Overview
 
 SLURM (Simple Linux Utility for Resource Management) has been integrated to manage parsing jobs and other compute-intensive tasks. This provides better resource management, job queuing, and prevents resource exhaustion.
@@ -114,6 +118,10 @@ After modifying SLURM configuration files:
 ```bash
 docker-compose restart slurmctld slurmd slurmdbd
 ```
+
+## Stuck jobs after slurmd or Compose restart
+
+See **[RESTART_DOCKER_AND_SLURM.md](RESTART_DOCKER_AND_SLURM.md)** section 5 and the **`slurm/cancel_stuck_jobs_after_restart.sh`** helper (also documented there with optional **`systemd`** hook).
 
 ## Notes
 

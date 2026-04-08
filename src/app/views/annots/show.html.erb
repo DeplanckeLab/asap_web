@@ -39,6 +39,16 @@
 <!-- Scrollable content area -->
 <div class="flex-1 overflow-y-auto">
   <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24">
+    <% if flash[:notice].present? || flash[:alert].present? %>
+      <div class="mb-4 space-y-2">
+        <% if flash[:notice].present? %>
+          <div class="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"><%= flash[:notice] %></div>
+        <% end %>
+        <% if flash[:alert].present? %>
+          <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><%= flash[:alert] %></div>
+        <% end %>
+      </div>
+    <% end %>
     <div class="space-y-6">
       <!-- General Info Card -->
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -74,7 +84,7 @@
               <% end %>
             </div>
           </div>
-          <div>
+          <div id="annot-data-type">
             <span class="text-sm font-medium text-gray-500">Data Type</span>
             <div class="mt-2">
               <% if @annot.data_type %>
@@ -84,9 +94,9 @@
               <% else %>
                 <span class="text-sm text-gray-500">N/A</span>
               <% end %>
-              <% if editable?(@project) && metadata_type_editable?(@annot) %>
-                <div class="mt-2">
-                  <%= link_to 'Change data type', edit_annot_path(@annot, { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact), class: 'text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline' %>
+              <% if @data_type_options %>
+                <div class="mt-3">
+                  <%= render 'data_type_form', annot: @annot, data_type_options: @data_type_options, back_params: { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact %>
                 </div>
               <% end %>
             </div>

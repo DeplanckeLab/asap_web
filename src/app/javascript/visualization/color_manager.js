@@ -3,6 +3,8 @@
  * Handles color management and customization
  */
 
+import { getDiscretePaletteHexList } from 'visualization/discrete_palettes'
+
 export class ColorManager {
   constructor(controller) {
     this.controller = controller
@@ -104,10 +106,6 @@ export class ColorManager {
 
   getColoringMetadataVector() {
     return this.controller.getColoringMetadataVector()
-  }
-
-  clearColorMapCache() {
-    return this.controller.clearColorMapCache()
   }
 
   shouldRecalculateColors(coloringMetadataVector) {
@@ -333,7 +331,8 @@ export class ColorManager {
   clearColorMapCache() {
     this.controller._cachedColorMap = null
     this.controller._cachedColorMapMetadataId = null
-    // Also clear the new color cache for visibility updates
+    this.controller._cachedCentroids = null
+    this.controller._cachedCentroidsKey = null
     this.controller.cachedColorsByCellIndex = new Map()
     this.controller.lastColoringMetadataId = null
     this.controller.lastColorRange = null
@@ -485,44 +484,47 @@ export class ColorManager {
   }
 
   // Get category colors from global palette
-  getCategoryColors() {
-    // Cache the colors to prevent repeated conversion
-    if (this.controller._cachedCategoryColors) {
+  getCategoryColors () {
+    const paletteId = this.controller.discretePaletteId
+    if (
+      this.controller._cachedCategoryColors &&
+      this.controller._cachedDiscretePaletteId === paletteId
+    ) {
       return this.controller._cachedCategoryColors
     }
-    
-    //console.log('🎨 getCategoryColors called - converting colors for first time')
-    //console.log('🎨 window.CATEGORY_COLORS:', window.CATEGORY_COLORS)
-    
-    // Use colors from the global color palette loaded in layout
-    if (window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0) {
-      //console.log('Converting colors to JavaScript hex numbers')
-      // Convert CSS hex colors (#1f77b4) to JavaScript hex numbers (0x1f77b4)
-      const jsColors = window.CATEGORY_COLORS.map(cssColor => {
-        // Remove # and convert to hex number
-        return parseInt(cssColor.replace('#', ''), 16)
+
+    const hexList = getDiscretePaletteHexList(paletteId)
+    if (hexList.length > 0) {
+      const jsColors = hexList.map(cssColor => {
+        const s = String(cssColor).replace('#', '').trim()
+        const n = parseInt(s, 16)
+        return Number.isFinite(n) ? n : 0x3b82f6
       })
-      //console.log('Converted colors:', jsColors)
-      
-      // Cache the converted colors
       this.controller._cachedCategoryColors = jsColors
+      this.controller._cachedDiscretePaletteId = paletteId
       return jsColors
     }
-    
-    // Temporary fallback to prevent infinite loop - will be removed once colors are properly loaded
+
     console.warn('Using temporary fallback colors to prevent infinite loop')
     const fallbackColors = [
-      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b, 
+      0x1f77b4, 0xff7f0e, 0x2ca02c, 0x9467bd, 0x8c564b,
       0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf, 0x4ecdc4
     ]
-    
-    // Cache the fallback colors too
     this.controller._cachedCategoryColors = fallbackColors
+    this.controller._cachedDiscretePaletteId = paletteId
     return fallbackColors
   }
 
+  getCategoryColorsCssHex () {
+    return this.getCategoryColors().map(n => {
+      const hex = ((n >>> 0) & 0xFFFFFF).toString(16).padStart(6, '0')
+      return '#' + hex
+    })
+  }
+
   // Clear the cached colors (call this when colors are reloaded)
-  clearCategoryColorsCache() {
+  clearCategoryColorsCache () {
     this.controller._cachedCategoryColors = null
+    this.controller._cachedDiscretePaletteId = null
   }
 }

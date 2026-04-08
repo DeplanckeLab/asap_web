@@ -1,5 +1,5 @@
 <%# Run Metadata Partial - Displays run information (ID, date, wait time, run time, RAM, etc.) %>
-<%# Accepts: run (required), results (optional), queue_position (optional) %>
+<%# Accepts: run (required), results (optional), queue_position (optional), slurm_queue_hover (optional tooltip on waiting clock) %>
 <% if run %>
   <div class="bg-gray-50 border-b border-gray-200 px-6 py-3 overflow-x-hidden">
     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 min-w-0">
@@ -17,14 +17,20 @@
       <%# Calculate waiting time from submitted_at to start_time %>
       <%# wait_time = (run.start_time - run.submitted_at).round %>
       <%# metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
-    <% elsif run.status_id == 1 && run.submitted_at %>
+    <% elsif [1, 6].include?(run.status_id) && run.submitted_at %>
       <%# Ongoing wait - calculate from submitted_at to now %>
       <% wait_time = (Time.now - run.submitted_at).round %>
       <% wait_text = "Wait #{duration(wait_time)}" %>
       <% if local_assigns[:queue_position] && queue_position %>
-        <% wait_text += " (queue position: #{queue_position})" %>
+        <% wait_text += " (<span data-slurm-queue-position-label>Slurm queue position:</span> <span data-slurm-queue-position=\"#{queue_position}\">#{queue_position}</span>)" %>
       <% end %>
-      <% metadata_parts << "<span id='ongoing_wait_#{run.id}' class='nowrap'><i class='fas fa-clock text-gray-400 mr-1'></i>#{wait_text}</span>" %>
+      <% slurm_hover_for_clock = local_assigns[:slurm_queue_hover] %>
+      <% clock_i = if slurm_hover_for_clock.present?
+           %(<i class="fas fa-clock text-gray-400 mr-1 cursor-help" data-slurm-queue-waiting-icon="true" title="#{h(slurm_hover_for_clock)}" aria-label="#{h(slurm_hover_for_clock)}"></i>)
+         else
+           %(<i class="fas fa-clock text-gray-400 mr-1"></i>)
+         end %>
+      <% metadata_parts << "<span id='ongoing_wait_#{run.id}' class='nowrap'>#{clock_i}#{wait_text}</span>" %>
     <% end %>
     <%# Running time - use duration if available, otherwise calculate from start_time %>
     <% run_time_display = nil %>

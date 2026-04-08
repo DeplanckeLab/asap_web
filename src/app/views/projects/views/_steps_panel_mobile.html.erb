@@ -153,7 +153,7 @@
                       icon_class = status_icon[:icon_base]
                       icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
                       color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
-                      tooltip_text = "#{status_icon[:tooltip_label]} (#{status_icon[:count]})"
+                      tooltip_text = "#{status_icon[:tooltip_ui_label]} (#{status_icon[:count]})"
                     %>
                     <div class="relative group" style="display: flex; align-items: center; justify-content: center;">
                       <i class="<%= icon_class %> text-sm <%= color_class %>"></i>

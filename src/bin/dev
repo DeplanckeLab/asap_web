@@ -13,4 +13,6 @@ export PORT="${PORT:-3000}"
 export RUBY_DEBUG_OPEN="true"
 export RUBY_DEBUG_LAZY="true"
 
-exec foreman start -f Procfile.dev "$@"
+# FOREMAN_PROCFILE overrides Procfile (e.g. Procfile.docker in compose to avoid watchman).
+PROCFILE="${FOREMAN_PROCFILE:-Procfile.dev}"
+exec foreman start -f "$PROCFILE" "$@"

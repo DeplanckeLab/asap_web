@@ -44,8 +44,8 @@ class SlurmService
     FileUtils.mkdir_p(output_dir) unless File.exist?(output_dir)
     
     job_name = "asap_run_#{run_id}"
-    output_file = output_dir + "slurm.out"
-    error_file = output_dir + "slurm.err"
+    output_file = output_dir + "exec.out"
+    error_file = output_dir + "exec.err"
     script_file = output_dir + "slurm_#{run_id}.sh"
     
     # Ensure SLURM account exists for fair-share scheduling
@@ -137,9 +137,9 @@ class SlurmService
         step_dir = project_dir + step.name
         output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
         
-        output_file = output_dir + "slurm.out"
-        error_file = output_dir + "slurm.err"
-        @logger.info("[SlurmService#get_job_status] fallback run=#{run.id} output_dir=#{output_dir} slurm_out_exists=#{File.exist?(output_file)} slurm_err_exists=#{File.exist?(error_file)}")
+        output_file = output_dir + "exec.out"
+        error_file = output_dir + "exec.err"
+        @logger.info("[SlurmService#get_job_status] fallback run=#{run.id} output_dir=#{output_dir} exec_out_exists=#{File.exist?(output_file)} exec_err_exists=#{File.exist?(error_file)}")
         
         # If output files exist and are recent (modified within last hour), job likely completed
         if File.exist?(output_file) && File.mtime(output_file) > 1.hour.ago

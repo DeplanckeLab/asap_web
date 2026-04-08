@@ -201,6 +201,7 @@
       editor: editor,
       enrichments: enrichments,
       annotation_metadata_id: annot&.id,
+      annotation_metadata_name: (annot&.display_name.presence || annot&.name).to_s,
       annotation_cat_idx: cat_idx,
       annotation_cat_name: cat_name
     }
@@ -292,6 +293,7 @@
             <% has_metadata = md[:annotation_metadata_id].present? %>
             <button class="category-annot-btn"
                     data-metadata-id="<%= md[:annotation_metadata_id] %>"
+                    data-metadata-name="<%= h(md[:annotation_metadata_name].to_s) %>"
                     data-cat-idx="<%= md[:annotation_cat_idx] %>"
                     data-cat-name="<%= md[:annotation_cat_name] %>"
                     data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
@@ -300,7 +302,7 @@
                     onmouseover="this.style.backgroundColor='#f3f4f6'"
                     onmouseout="this.style.backgroundColor=''"
                     title="<%= has_metadata ? 'View annotations' : 'No annotations yet' %>"
-                    onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl); }">
+                    onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName); }">
               <i class="fas fa-bookmark" style="font-size: 11px;"></i>
             </button>
           </td>
@@ -601,7 +603,7 @@ if (typeof openAnnotationPopup !== 'function') {
     return tpl ? tpl.innerHTML : '';
   }
 
-  window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl) {
+  window.openAnnotationPopup = function(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx) {
     var overlay = document.getElementById('annotation-popup-overlay');
     var dialog = document.getElementById('annotation-popup-dialog');
     var panel = document.getElementById('annot-popup-panel');
@@ -609,8 +611,38 @@ if (typeof openAnnotationPopup !== 'function') {
     if (!overlay || !dialog || !panel || !titleEl) return;
 
     var colors = window.CATEGORY_COLORS || [];
-    var color = colors.length > 0 ? (colors[catIdx % colors.length] || '#9ca3af') : '#9ca3af';
-    titleEl.innerHTML = '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ' + color + '; margin-right: 8px;"></span>' + escapeHtml(catName);
+    var colorIdx = catIdx;
+    if (displayCatIdx !== undefined && displayCatIdx !== null && !Number.isNaN(Number(displayCatIdx))) {
+      colorIdx = Number(displayCatIdx);
+    }
+    var color = colors.length > 0 ? (colors[colorIdx % colors.length] || '#9ca3af') : '#9ca3af';
+    var dot = '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:' + color + ';flex-shrink:0;"></span>';
+    var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>';
+    var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : '';
+    var catStr = String(catName || '');
+
+    function twoPartHtml(left, right) {
+      return dot + '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
+        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
+        sep +
+        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
+        '</span>';
+    }
+
+    var titleText;
+    if (metaTrim) {
+      titleText = twoPartHtml(metaTrim, catStr);
+    } else {
+      var slashIdx = catStr.indexOf('/');
+      if (slashIdx > 0 && slashIdx < catStr.length - 1) {
+        var left = catStr.slice(0, slashIdx).trim();
+        var right = catStr.slice(slashIdx + 1).trim();
+        titleText = (left !== '' && right !== '') ? twoPartHtml(left, right) : (dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>');
+      } else {
+        titleText = dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>';
+      }
+    }
+    titleEl.innerHTML = titleText;
 
     _annotPopupData.catName = catName;
     _annotPopupData.catIdx = catIdx;
@@ -662,6 +694,39 @@ if (typeof openAnnotationPopup !== 'function') {
     renderAnnotationPanel();
   };
 
+  function claProvenanceBadgeHtml(cla) {
+    var overlay = document.getElementById('annotation-popup-overlay');
+    var currentId = overlay && overlay.dataset.currentProjectId ? String(overlay.dataset.currentProjectId) : '';
+    var pid = cla.project_id != null ? String(cla.project_id) : '';
+    var p = cla.project || {};
+    var titleBits = [];
+    if (p.name && String(p.name).trim()) titleBits.push(String(p.name).trim());
+    if (p.key) titleBits.push(String(p.key));
+    if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
+      titleBits.push('ASAP' + String(p.public_id));
+    }
+    var titleAttr = titleBits.length ? escapeHtml(titleBits.join(' — ')) : '';
+    var titlePart = titleAttr ? ' title="' + titleAttr + '"' : '';
+    var isLocal = currentId && pid && currentId === pid;
+    var label = isLocal ? 'this project' : (p.key ? escapeHtml(String(p.key)) : ('id ' + escapeHtml(pid)));
+    var cls = isLocal
+      ? 'background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;'
+      : 'background:#f1f5f9;color:#0f172a;border:1px solid #e2e8f0;';
+    return '<span' + titlePart + ' style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default;' + cls + '">' + label + '</span>';
+  }
+
+  function claProvenanceInlineHtml(cla) {
+    var meta = (cla.metadata_name || '').trim();
+    var cat = (cla.category_label || '').trim();
+    var parts = [];
+    if (meta) parts.push(escapeHtml(meta));
+    if (cat) parts.push(escapeHtml(cat));
+    var tail = parts.length
+      ? '<span style="font-size:11px;color:#64748b;font-weight:400;line-height:1.35;word-break:break-word;"> / ' + parts.join(' / ') + '</span>'
+      : '';
+    return '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;line-height:1.35;max-width:100%;min-width:0;"><span style="font-size:11px;color:#64748b;flex-shrink:0;">from </span>' + claProvenanceBadgeHtml(cla) + tail + '</span>';
+  }
+
   function renderExistingAnnotationsTab(clas) {
     var content = '';
     if (!clas || clas.length === 0) {
@@ -672,23 +737,18 @@ if (typeof openAnnotationPopup !== 'function') {
     } else {
       clas.forEach(function(cla) {
         content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">';
-        content += '<div style="font-weight: 600; font-size: 13px; color: #374151; margin-bottom: 6px;">#' + escapeHtml(cla.num || cla.id) + '</div>';
-        if (cla.project) {
-          var p = cla.project;
-          var projBits = [];
-          if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
-            projBits.push('ASAP' + escapeHtml(String(p.public_id)));
-          }
-          if (p.key) projBits.push(escapeHtml(String(p.key)));
-          if (p.name) {
-            var nameEsc = escapeHtml(String(p.name));
-            if (projBits.indexOf(nameEsc) === -1) projBits.push(nameEsc);
-          }
-          if (projBits.length > 0) {
-            content += '<div style="font-size: 11px; color: #6b7280; margin-bottom: 6px;"><strong style="color: #4b5563;">Source project:</strong> ' + projBits.join(' - ') + '</div>';
-          }
-        }
+        content += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">';
+        content += '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-wrap:wrap;">';
+        content += '<span style="font-weight:600;font-size:13px;color:#374151;flex-shrink:0;">#' + escapeHtml(String(cla.num || cla.id)) + '</span>';
+        content += claProvenanceInlineHtml(cla);
+        content += '</div></div>';
         if (cla.name) content += '<div style="font-size: 12px; color: #374151; margin-bottom: 4px;"><strong>Name:</strong> ' + escapeHtml(cla.name) + '</div>';
+        if (typeof claGeneBadgesRowHtml === 'function' && cla.up_genes && cla.up_genes.length > 0) {
+          content += claGeneBadgesRowHtml(cla.up_genes, 'up');
+        }
+        if (typeof claGeneBadgesRowHtml === 'function' && cla.down_genes && cla.down_genes.length > 0) {
+          content += claGeneBadgesRowHtml(cla.down_genes, 'down');
+        }
         if (cla.comment) content += '<div style="font-size: 12px; color: #374151;"><strong>Comment:</strong> ' + escapeHtml(cla.comment) + '</div>';
         content += '</div>';
       });

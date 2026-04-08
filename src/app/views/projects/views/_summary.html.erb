@@ -395,7 +395,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     </div>
 
-    <div id="summary-visual-details-popover" data-guided-tour="summary-collab-popover" data-project-key="<%= @project.key %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
+    <div id="summary-visual-details-popover" data-guided-tour="summary-collab-popover" data-project-key="<%= @project.key %>" data-current-project-id="<%= @project.id %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
       <div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
         <div class="flex items-center gap-2 min-w-0">
           <span id="summary-visual-details-drag-handle" class="inline-flex items-center text-gray-400 cursor-move select-none" title="Drag">
@@ -617,11 +617,12 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                 </button>
                 <span class="text-xs font-medium text-gray-700">Go back to project's annotations</span>
               </div>
+              <p class="text-xs text-gray-500 mb-2">Includes annotations from every project you can read that shares this cell set.</p>
               <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200">
                   <thead class="bg-gray-50">
                     <tr>
-                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Project key</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Source project</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Metadata name</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
@@ -1018,6 +1019,28 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
     const annotationsCellSetTbody = document.getElementById('summary-annotations-cell-set-tbody')
     const annotationsCellSetEmpty = document.getElementById('summary-annotations-cell-set-empty')
     const projectKey = popover.dataset.projectKey
+    const currentProjectId = popover.dataset.currentProjectId ? String(popover.dataset.currentProjectId) : ''
+
+    const renderSourceProjectCell = (row) => {
+      const pid = row.project_id != null ? String(row.project_id) : ''
+      const pk = row.project_key || ''
+      const p = row.project || {}
+      const bits = []
+      if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
+        bits.push('ASAP' + escapeHtml(String(p.public_id)))
+      }
+      if (pk) bits.push(escapeHtml(pk))
+      if (p.name) {
+        const nameEsc = escapeHtml(String(p.name))
+        if (bits.indexOf(nameEsc) === -1) bits.push(nameEsc)
+      }
+      const detail = bits.length > 0 ? bits.join(' - ') : (pid ? 'Project id ' + escapeHtml(pid) : '-')
+      const isLocal = currentProjectId && pid && currentProjectId === pid
+      if (isLocal) {
+        return `<div class="space-y-1"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">This project</span><div class="text-xs text-gray-600">${detail}</div></div>`
+      }
+      return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 max-w-xs">${detail}</span>`
+    }
 
     const refreshAnnotationRows = () => {
       if (!annotationSelect || annotationRows.length === 0) return
@@ -1085,7 +1108,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
           const shortHash = cellSetHash ? `${cellSetHash.slice(0, 10)}...` : '-'
           return `
             <tr>
-              <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.project_key || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-700">${renderSourceProjectCell(row)}</td>
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.metadata_name || '-')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.cluster_category || '-')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.label || '-')}</td>

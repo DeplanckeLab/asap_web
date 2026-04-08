@@ -47,7 +47,8 @@ RUN apt-get update && \
     libtool \
     libssl-dev \
     libpam0g-dev \
-    libhdf5-dev && \
+    libhdf5-dev \
+    watchman && \
     rm -rf /var/lib/apt/lists/*
 
 

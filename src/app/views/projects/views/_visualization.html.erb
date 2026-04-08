@@ -272,6 +272,17 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                     <% begin %>
                       <% categories = JSON.parse(metadata.categories_json) %>
                       <% best_category_map = (@best_clas_by_metadata_category || {})[metadata.id] || {} %>
+                      <% list_cats_arr =
+                           begin
+                             if metadata.list_cat_json.present?
+                               lc = JSON.parse(metadata.list_cat_json)
+                               lc.is_a?(Array) ? lc : []
+                             else
+                               []
+                             end
+                           rescue JSON::ParserError
+                             []
+                           end %>
                       <% if categories.is_a?(Hash) %>
                         <% 
                           # Sort categories by count (largest to smallest) to match plot ordering
@@ -285,11 +296,23 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             <span class="metadata-category-header-cell metadata-category-header-annot" aria-hidden="true"></span>
                           </div>
                         <% end %>
+                        <% hash_key_order = categories.keys %>
                         <% sorted_categories.each_with_index do |(category, count), index| %>
                           <% 
                             # Use the same color palette as the JavaScript plot
                             # Index is now based on sorted order (largest to smallest)
                             category_color = category_colors[index % category_colors.length]
+                            cat_s = category.to_s
+                            canonical_cat_idx = nil
+                            if list_cats_arr.present?
+                              pair = list_cats_arr.each_with_index.find { |c, _i| c.to_s == cat_s }
+                              canonical_cat_idx = pair&.last
+                            end
+                            if canonical_cat_idx.nil?
+                              ki = hash_key_order.index(category) || hash_key_order.each_with_index.find { |k, _i| k.to_s == cat_s }&.last
+                              canonical_cat_idx = ki
+                            end
+                            canonical_cat_idx = index if canonical_cat_idx.nil?
                           %>
                           <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
                             <% normalized_category_key = category.to_s.downcase.strip %>
@@ -320,7 +343,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <% has_annots = best_cla.present? %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
-                                      data-cat-idx="<%= index %>"
+                                      data-metadata-name="<%= h((metadata.display_name.presence || metadata.name).to_s) %>"
+                                      data-cat-idx="<%= canonical_cat_idx %>"
+                                      data-display-cat-idx="<%= index %>"
                                       data-cat-name="<%= category %>"
                                       data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                                       data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
@@ -328,7 +353,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                       onmouseover="this.style.backgroundColor='#f3f4f6'"
                                       onmouseout="this.style.backgroundColor=''"
                                       title="<%= has_annots ? 'View annotations' : 'No annotations yet' %>"
-                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl)">
+                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, parseInt(this.dataset.displayCatIdx, 10))">
                                 <i class="fas fa-bookmark" style="font-size: 11px;"></i>
                               </button>
                             </div>
@@ -353,6 +378,13 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                             # Use the same color palette as the JavaScript plot
                             category_index = categories.index(category)
                             category_color = category_colors[category_index % category_colors.length]
+                            cat_s = category.to_s
+                            canonical_cat_idx = nil
+                            if list_cats_arr.present?
+                              pair = list_cats_arr.each_with_index.find { |c, _i| c.to_s == cat_s }
+                              canonical_cat_idx = pair&.last
+                            end
+                            canonical_cat_idx = index if canonical_cat_idx.nil?
                           %>
                           <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; font-size: 12px;">
                             <% normalized_category_key = category.to_s.downcase.strip %>
@@ -383,7 +415,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                               <% has_annots_arr = best_cla.present? %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
-                                      data-cat-idx="<%= index %>"
+                                      data-metadata-name="<%= h((metadata.display_name.presence || metadata.name).to_s) %>"
+                                      data-cat-idx="<%= canonical_cat_idx %>"
+                                      data-display-cat-idx="<%= category_index %>"
                                       data-cat-name="<%= category %>"
                                       data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                                       data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
@@ -391,7 +425,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                                       onmouseover="this.style.backgroundColor='#f3f4f6'"
                                       onmouseout="this.style.backgroundColor=''"
                                       title="<%= has_annots_arr ? 'View annotations' : 'No annotations yet' %>"
-                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl)">
+                                      onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, parseInt(this.dataset.displayCatIdx, 10))">
                                 <i class="fas fa-bookmark" style="font-size: 11px;"></i>
                               </button>
                             </div>
@@ -3264,15 +3298,47 @@ function templateHtml(templateId) {
   return tpl ? tpl.innerHTML : ''
 }
 
-function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl) {
+function buildAnnotPopupTitleHtml(catIdx, catName, metadataName) {
+  var colors = window.CATEGORY_COLORS || []
+  var color = colors[catIdx % colors.length] || '#9ca3af'
+  var dot = '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:' + color + ';flex-shrink:0;"></span>'
+  var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>'
+  var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : ''
+  var catStr = String(catName || '')
+
+  function twoPartHtml(left, right) {
+    return dot + '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
+      '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
+      sep +
+      '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
+      '</span>'
+  }
+
+  if (metaTrim) {
+    return twoPartHtml(metaTrim, catStr)
+  }
+  var slashIdx = catStr.indexOf('/')
+  if (slashIdx > 0 && slashIdx < catStr.length - 1) {
+    var left = catStr.slice(0, slashIdx).trim()
+    var right = catStr.slice(slashIdx + 1).trim()
+    if (left !== '' && right !== '') {
+      return twoPartHtml(left, right)
+    }
+  }
+  return dot + '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>'
+}
+
+function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl, metadataName, displayCatIdx) {
   var overlay = document.getElementById('annotation-popup-overlay')
   var dialog = document.getElementById('annotation-popup-dialog')
   var panel = document.getElementById('annot-popup-panel')
   var titleEl = document.getElementById('annot-popup-title')
 
-  var colors = window.CATEGORY_COLORS || []
-  var color = colors[catIdx % colors.length] || '#9ca3af'
-  titleEl.innerHTML = '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ' + color + '; margin-right: 8px;"></span>' + catName
+  var colorIdx = catIdx
+  if (displayCatIdx !== undefined && displayCatIdx !== null && !Number.isNaN(Number(displayCatIdx))) {
+    colorIdx = Number(displayCatIdx)
+  }
+  titleEl.innerHTML = buildAnnotPopupTitleHtml(colorIdx, catName, metadataName)
 
   _annotPopupData.catName = catName
   _annotPopupData.catIdx = catIdx
@@ -3297,7 +3363,6 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl)
     downGenes: [],
     status: ''
   }
-
   panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>'
 
   overlay.style.display = 'flex'
@@ -3662,6 +3727,39 @@ function renderNewAnnotationTab() {
   return html
 }
 
+function claProvenanceBadgeHtml(cla) {
+  var overlay = document.getElementById('annotation-popup-overlay')
+  var currentId = overlay && overlay.dataset.currentProjectId ? String(overlay.dataset.currentProjectId) : ''
+  var pid = cla.project_id != null ? String(cla.project_id) : ''
+  var p = cla.project || {}
+  var titleBits = []
+  if (p.name && String(p.name).trim()) titleBits.push(String(p.name).trim())
+  if (p.key) titleBits.push(String(p.key))
+  if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
+    titleBits.push('ASAP' + String(p.public_id))
+  }
+  var titleAttr = titleBits.length ? escapeHtml(titleBits.join(' — ')) : ''
+  var titlePart = titleAttr ? ' title="' + titleAttr + '"' : ''
+  var isLocal = currentId && pid && currentId === pid
+  var label = isLocal ? 'this project' : (p.key ? escapeHtml(String(p.key)) : ('id ' + escapeHtml(pid)))
+  var cls = isLocal
+    ? 'background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;'
+    : 'background:#f1f5f9;color:#0f172a;border:1px solid #e2e8f0;'
+  return '<span' + titlePart + ' style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default;' + cls + '">' + label + '</span>'
+}
+
+function claProvenanceInlineHtml(cla) {
+  var meta = (cla.metadata_name || '').trim()
+  var cat = (cla.category_label || '').trim()
+  var parts = []
+  if (meta) parts.push(escapeHtml(meta))
+  if (cat) parts.push(escapeHtml(cat))
+  var tail = parts.length
+    ? '<span style="font-size:11px;color:#64748b;font-weight:400;line-height:1.35;word-break:break-word;"> / ' + parts.join(' / ') + '</span>'
+    : ''
+  return '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;line-height:1.35;max-width:100%;min-width:0;"><span style="font-size:11px;color:#64748b;flex-shrink:0;">from </span>' + claProvenanceBadgeHtml(cla) + tail + '</span>'
+}
+
 function renderExistingAnnotationsTab(clas) {
   var content = ''
 
@@ -3677,28 +3775,15 @@ function renderExistingAnnotationsTab(clas) {
 
       content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">'
 
-      content += '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">'
-      content += '<div style="font-weight: 600; font-size: 13px; color: #374151;">#' + escapeHtml(String(cla.num || cla.id)) + '</div>'
-      content += '<div style="display: flex; align-items: center; gap: 8px;">'
+      content += '<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px;">'
+      content += '<div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; flex-wrap: wrap;">'
+      content += '<span style="font-weight: 600; font-size: 13px; color: #374151; flex-shrink: 0;">#' + escapeHtml(String(cla.num || cla.id)) + '</span>'
+      content += claProvenanceInlineHtml(cla)
+      content += '</div>'
+      content += '<div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">'
       content += '<span style="font-size: 11px; color: #9ca3af;">' + (cla.created_at || '') + '</span>'
       content += '<span style="font-weight: 600; font-size: 14px; color: ' + scoreColor + ';">' + score + '</span>'
       content += '</div></div>'
-
-      if (cla.project) {
-        var p = cla.project
-        var projBits = []
-        if (p.public_id !== null && p.public_id !== undefined && String(p.public_id).length > 0) {
-          projBits.push('ASAP' + escapeHtml(String(p.public_id)))
-        }
-        if (p.key) projBits.push(escapeHtml(String(p.key)))
-        if (p.name) {
-          var nameEsc = escapeHtml(String(p.name))
-          if (projBits.indexOf(nameEsc) === -1) projBits.push(nameEsc)
-        }
-        if (projBits.length > 0) {
-          content += '<div style="margin-bottom: 8px; font-size: 11px; color: #6b7280;"><span style="font-weight: 600; color: #4b5563;">Source project: </span>' + projBits.join(' - ') + '</div>'
-        }
-      }
 
       if (cla.name) {
         content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Name: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cla.name)) + '</span></div>'
@@ -3709,14 +3794,12 @@ function renderExistingAnnotationsTab(clas) {
         content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cotIds)) + '</span></div>'
       }
 
-      if (cla.sorted_up_gene_ids || cla.up_gene_ids) {
-        var upGenes = cla.sorted_up_gene_ids || cla.up_gene_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Up genes: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(upGenes)) + '</span></div>'
+      if (typeof claGeneBadgesRowHtml === 'function' && cla.up_genes && cla.up_genes.length > 0) {
+        content += claGeneBadgesRowHtml(cla.up_genes, 'up')
       }
 
-      if (cla.sorted_down_gene_ids || cla.down_gene_ids) {
-        var downGenes = cla.sorted_down_gene_ids || cla.down_gene_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Down genes: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(downGenes)) + '</span></div>'
+      if (typeof claGeneBadgesRowHtml === 'function' && cla.down_genes && cla.down_genes.length > 0) {
+        content += claGeneBadgesRowHtml(cla.down_genes, 'down')
       }
 
       if (cla.comment) {

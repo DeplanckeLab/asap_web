@@ -4320,14 +4320,73 @@ class ProjectsController < ApplicationController
     clas_list = []
     if annot_cell_set&.cell_set_id
       clas_list = Cla.active.where(cell_set_id: annot_cell_set.cell_set_id)
-                     .includes(:project)
+                     .includes(:project, :annot)
                      .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
                      .to_a
       clas_list = clas_list.select { |cla| cla.project && readable?(cla.project) }
     end
 
+    symbol_map_by_project_id = {}
+    clas_list.group_by(&:project_id).each do |project_id, project_clas|
+      project = project_clas.first&.project
+      next unless project&.version
+
+      h_env = Basic.safe_parse_json(project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: "annot_info_gene_symbols")
+      next if db_version.blank?
+
+      gene_ids = project_clas.flat_map do |cla|
+        [
+          parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
+          parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+        ].flatten
+      end
+      gene_ids = gene_ids.map { |v| v.to_s.to_i }.select { |id| id.positive? }.uniq
+      next if gene_ids.empty?
+
+      project_map = {}
+      RemoteGene.with_remote(db_version) do
+        RemoteGene.where(id: gene_ids).pluck(:id, :name, :ensembl_id).each do |gene_id, gene_name, ensembl_id|
+          project_map[gene_id.to_s] = {
+            symbol: gene_name.to_s.presence || gene_id.to_s,
+            ensembl_id: ensembl_id.to_s.presence
+          }
+        end
+      end
+      symbol_map_by_project_id[project_id] = project_map
+    end
+
     cla_data = clas_list.map do |cla|
       proj = cla.project
+      meta = cla.annot
+      metadata_name = (meta&.display_name.presence || meta&.name).to_s
+      category_label = cla.cat.to_s.presence || ''
+      sm = symbol_map_by_project_id[cla.project_id] || {}
+      up_ids = parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids)
+      down_ids = parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+      up_genes = up_ids.filter_map do |gid|
+        key = gid.to_s.strip
+        next if key.blank?
+
+        g = sm[key]
+        if g
+          { gene_id: key, symbol: g[:symbol], ensembl_id: g[:ensembl_id] }
+        else
+          { gene_id: key, symbol: key, ensembl_id: nil }
+        end
+      end
+      down_genes = down_ids.filter_map do |gid|
+        key = gid.to_s.strip
+        next if key.blank?
+
+        g = sm[key]
+        if g
+          { gene_id: key, symbol: g[:symbol], ensembl_id: g[:ensembl_id] }
+        else
+          { gene_id: key, symbol: key, ensembl_id: nil }
+        end
+      end
+
       {
         id: cla.id,
         num: cla.num,
@@ -4338,6 +4397,8 @@ class ProjectsController < ApplicationController
         sorted_up_gene_ids: cla.sorted_up_gene_ids,
         down_gene_ids: cla.down_gene_ids,
         sorted_down_gene_ids: cla.sorted_down_gene_ids,
+        up_genes: up_genes,
+        down_genes: down_genes,
         comment: cla.comment,
         nber_agree: cla.nber_agree || 0,
         nber_disagree: cla.nber_disagree || 0,
@@ -4349,7 +4410,11 @@ class ProjectsController < ApplicationController
           key: proj&.key.to_s,
           name: proj&.name.to_s,
           public_id: proj&.public_id
-        }
+        },
+        annot_id: cla.annot_id,
+        cat_idx: cla.cat_idx,
+        metadata_name: metadata_name,
+        category_label: category_label
       }
     end
 
@@ -4357,6 +4422,7 @@ class ProjectsController < ApplicationController
       annot_id: annot.id,
       cat_idx: cat_idx,
       cat_name: cat_name,
+      project_id: @project.id,
       clas: cla_data
     }
   end
@@ -4371,7 +4437,7 @@ class ProjectsController < ApplicationController
     clas = Cla.active.joins(:cell_set)
              .where(cell_sets: { key: cell_set_key })
              .includes(:project, :annot, :cell_set, :user)
-             .order(created_at: :desc)
+             .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
              .to_a
 
     readable_clas = clas.select { |cla| cla.project && readable?(cla.project) }
@@ -4416,8 +4482,15 @@ class ProjectsController < ApplicationController
                         '-'
                       end
 
+      proj = cla.project
       {
-        project_key: cla.project&.key.to_s,
+        project_id: cla.project_id,
+        project_key: proj&.key.to_s,
+        project: {
+          key: proj&.key.to_s,
+          name: proj&.name.to_s,
+          public_id: proj&.public_id
+        },
         metadata_name: (cla.annot&.display_name.presence || cla.annot&.name.to_s),
         cluster_category: cla.cat.presence || cla.name.presence || '-',
         label: cla.name.presence || cla.cat.presence || '-',

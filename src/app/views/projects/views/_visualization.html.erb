@@ -2074,7 +2074,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           </label>
           <select id="discrete-palette-select"
                   style="width: 200px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
-            <option value="extended_200">Extended 200</option>
+            <option value="extended_200" selected>Super-Extended</option>
             <option value="extended">Extended</option>
             <option value="colorblind_friendly">Colorblind friendly</option>
           </select>
@@ -3345,6 +3345,7 @@ var _annotPopupData = {
   metadataName: '',
   categoryColor: '',
   violinSortBy: 'median',
+  violinLayoutMode: 'combined',
   evidencesUrl: '',
   clas: [],
   activeTab: 'existing',
@@ -4290,26 +4291,32 @@ function evidenceGeneBadgeCellHtml(row, tone) {
 }
 
 function renderEvidenceBoxplotTab() {
-  var html = '<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Split violin plots</div>'
+  var addGenesVizBtnHtml = '<button type="button" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;" title="Adds genes selected for Plot in Identify markers to the main visualization gene panel" onclick="if(window.addAnnotEvidenceGenesToVisualizationBulk)window.addAnnotEvidenceGenesToVisualizationBulk()">Add genes to visualization</button>'
   var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0
   if (typeof window.annotEvidenceBoxplotSupported === 'function' && !window.annotEvidenceBoxplotSupported()) {
+    var html = '<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Split violin plots</div>'
     html += '<p style="font-size:12px;color:#6b7280;line-height:1.5;">Open this project in the visualization view. Split violins compare this category to the rest of the dataset using the same metadata column as annotations.</p>'
     return html
   }
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">'
+  html += '<div style="font-size:13px;font-weight:600;color:#111827;">Split violin plots</div>'
+  if (n > 0) {
+    html += '<div style="flex-shrink:0;">' + addGenesVizBtnHtml + '</div>'
+  }
+  html += '</div>'
   if (n === 0) {
     html += '<p style="font-size:12px;color:#6b7280;line-height:1.5;">Select genes in the Identify markers tab, then open this tab.</p>'
     return html
   }
-  html += '<p style="font-size:11px;color:#6b7280;margin:0 0 8px 0;line-height:1.45;">Split violins compare this category on the left to all other visible cells on the right (same metadata column and cell filter as annotations). The left fill uses the category color when available. Choose the expression matrix like in the gene panel; layout is one plot per gene or a single combined plot.</p>'
-  var layout = (window._annotPopupData && window._annotPopupData.violinLayoutMode === 'combined') ? 'combined' : 'separate'
+  var layout = (window._annotPopupData && window._annotPopupData.violinLayoutMode === 'separate') ? 'separate' : 'combined'
   var sortBy = (window._annotPopupData && (window._annotPopupData.violinSortBy === 'mean' || window._annotPopupData.violinSortBy === 'max')) ? window._annotPopupData.violinSortBy : 'median'
   html += '<div id="annot-violin-controls" style="margin-bottom:12px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">'
   html += '<label for="annot-violin-matrix-select" style="display:block;font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">Expression matrix</label>'
   html += '<select id="annot-violin-matrix-select" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#fff;" onchange="if(window.onAnnotViolinMatrixSelectChange)window.onAnnotViolinMatrixSelectChange()"></select>'
   html += '<div style="margin-top:10px;font-size:11px;color:#374151;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">'
   html += '<span style="font-weight:600;">Layout:</span>'
-  html += '<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="radio" name="annot-violin-layout" value="separate"' + (layout === 'separate' ? ' checked' : '') + ' onchange="if(window.onAnnotViolinLayoutRadioChange)window.onAnnotViolinLayoutRadioChange()"/>One plot per gene</label>'
   html += '<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="radio" name="annot-violin-layout" value="combined"' + (layout === 'combined' ? ' checked' : '') + ' onchange="if(window.onAnnotViolinLayoutRadioChange)window.onAnnotViolinLayoutRadioChange()"/>Single combined plot</label>'
+  html += '<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="radio" name="annot-violin-layout" value="separate"' + (layout === 'separate' ? ' checked' : '') + ' onchange="if(window.onAnnotViolinLayoutRadioChange)window.onAnnotViolinLayoutRadioChange()"/>One plot per gene</label>'
   html += '</div>'
   html += '<label for="annot-violin-sort-by" style="display:block;margin-top:10px;font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">Order genes by (category side, high to low)</label>'
   html += '<select id="annot-violin-sort-by" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#fff;" onchange="if(window.onAnnotViolinSortChange)window.onAnnotViolinSortChange()">'
@@ -4347,6 +4354,7 @@ function renderEvidenceGeneTableBlock(rows, tone, emptyMsg) {
       html += '<th style="' + thSticky + '">' + escapeHtml(thLabels[hci]) + '</th>'
     }
   }
+  html += '<th style="' + thSticky + 'text-align:center;white-space:nowrap;" title="Add this gene to the main visualization gene panel">Add to visualization</th>'
   html += '</tr></thead><tbody>'
   rowsToRender.forEach(function(row) {
     var gsv = (typeof window.annotEvidenceGeneSortValue === 'function')
@@ -4362,6 +4370,9 @@ function renderEvidenceGeneTableBlock(rows, tone, emptyMsg) {
     html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.log2fc)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.log2fc)) + '</td>'
     html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.fdr)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.fdr)) + '</td>'
     html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.p_value)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.p_value)) + '</td>'
+    html += '<td style="padding:4px 6px;border-top:1px solid #f3f4f6;vertical-align:middle;text-align:center;white-space:nowrap;">'
+    html += '<button type="button" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;" data-evidence-tone="' + escapeAttr(tone) + '" data-evidence-gene-id="' + escapeAttr(String(row.gene_id != null ? row.gene_id : '')) + '" data-evidence-gene-symbol="' + escapeAttr(String(row.gene != null ? row.gene : '')) + '" onclick="event.stopPropagation();if(window.addAnnotEvidenceGeneToVisualizationFromBtn)window.addAnnotEvidenceGeneToVisualizationFromBtn(this)">Add to visualization</button>'
+    html += '</td>'
     html += '</tr>'
   })
   html += '</tbody></table></div></div>'

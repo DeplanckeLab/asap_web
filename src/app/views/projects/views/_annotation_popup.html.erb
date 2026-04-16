@@ -23,9 +23,9 @@
     box-sizing: border-box;
   }
   #annotation-popup-overlay #annotation-popup-dialog {
-    width: 560px;
+    width: 720px;
     height: 500px;
-    min-width: 380px;
+    min-width: 420px;
     min-height: 280px;
     max-width: 96vw;
     max-height: 92vh;
@@ -344,6 +344,70 @@
     if (typeof upd === 'function') upd()
     if (apd.activeTab === 'evidence_boxplot' && typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') {
       window.scheduleAnnotEvidenceBoxplotRender()
+    }
+  }
+
+  window.addAnnotEvidenceGeneToVisualizationFromBtn = function(btn) {
+    if (!btn) return
+    window.addAnnotEvidenceGeneToVisualization(
+      btn.getAttribute('data-evidence-tone') || 'up',
+      btn.getAttribute('data-evidence-gene-id') || '',
+      btn.getAttribute('data-evidence-gene-symbol') || ''
+    )
+  }
+
+  window.addAnnotEvidenceGeneToVisualization = function(tone, geneId, geneSymbol) {
+    var vc = window.visualizationController
+    var gm = window.geneManager
+    if (!vc || typeof vc.resolveAnnotEvidenceRowToGeneSelectPayload !== 'function') {
+      alert('Gene visualization is not available on this page.')
+      return
+    }
+    if (!gm || typeof gm.selectGene !== 'function') {
+      alert('Gene manager is not available.')
+      return
+    }
+    var row = { gene_id: geneId, gene: geneSymbol }
+    var payload = vc.resolveAnnotEvidenceRowToGeneSelectPayload(row)
+    if (!payload) {
+      alert('Could not resolve this gene in the project index.')
+      return
+    }
+    gm.selectGene(payload)
+  }
+
+  window.addAnnotEvidenceGenesToVisualizationBulk = function() {
+    var apd = window.annotEvidenceEnsureSelectionStore()
+    if (!apd || !apd.evidencesSelectedOrder || apd.evidencesSelectedOrder.length === 0) {
+      alert('Select genes for Plot in the Identify markers tab first.')
+      return
+    }
+    var vc = window.visualizationController
+    var gm = window.geneManager
+    if (!vc || typeof vc.resolveAnnotEvidenceRowToGeneSelectPayload !== 'function') {
+      alert('Gene visualization is not available on this page.')
+      return
+    }
+    if (!gm || typeof gm.selectGene !== 'function') {
+      alert('Gene manager is not available.')
+      return
+    }
+    var failed = []
+    apd.evidencesSelectedOrder.forEach(function(key) {
+      var r = apd.evidencesSelectedRows[key]
+      if (!r) return
+      var row = { gene_id: r.gene_id, gene: r.gene }
+      var payload = vc.resolveAnnotEvidenceRowToGeneSelectPayload(row)
+      if (payload) {
+        gm.selectGene(payload)
+      } else {
+        failed.push((r.gene && String(r.gene).trim()) || (r.gene_id && String(r.gene_id)) || key)
+      }
+    })
+    if (failed.length > 0) {
+      var msg = failed.slice(0, 10).join(', ')
+      if (failed.length > 10) msg += ', ...'
+      alert('Could not resolve some genes in the project index: ' + msg)
     }
   }
 

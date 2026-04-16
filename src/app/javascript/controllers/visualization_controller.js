@@ -20364,6 +20364,65 @@ export default class extends Controller {
     return null
   }
 
+  /**
+   * Resolve an evidence table row to a full autocomplete payload for GeneManager.selectGene
+   * (requires symbol, ensemblId, stableId).
+   */
+  resolveAnnotEvidenceRowToGeneSelectPayload (row) {
+    const gm = this.geneManager
+    if (!gm || !row) return null
+    const gidRaw = row.gene_id != null ? String(row.gene_id).trim() : ''
+    const symRaw = row.gene != null ? String(row.gene).trim() : ''
+    const toPayload = (p) => {
+      if (!p || !p.symbol || !p.ensemblId || !p.stableId) return null
+      return {
+        symbol: p.symbol,
+        ensemblId: p.ensemblId,
+        stableId: String(p.stableId),
+        query: p.symbol
+      }
+    }
+    if (/^\d+$/.test(gidRaw)) {
+      const data = gm.autocompleteData
+      if (data && data.length > 0) {
+        for (const entry of data) {
+          const p = gm.parseAutocompleteEntry(entry)
+          if (p && String(p.stableId) === gidRaw) {
+            const out = toPayload(p)
+            if (out) return out
+          }
+        }
+      }
+      return null
+    }
+    const tryQueries = [symRaw, gidRaw].filter((q) => q && q.length > 0)
+    for (const q of tryQueries) {
+      const m = gm.findGeneInAutocomplete(q)
+      if (m) {
+        const out = toPayload(m)
+        if (out) return out
+      }
+    }
+    const data = gm.autocompleteData
+    if (data && data.length > 0) {
+      const symLow = symRaw.toLowerCase()
+      const ensLow = gidRaw.toLowerCase()
+      for (const entry of data) {
+        const p = gm.parseAutocompleteEntry(entry)
+        if (!p) continue
+        if (symLow && p.symbol && String(p.symbol).toLowerCase() === symLow) {
+          const out = toPayload(p)
+          if (out) return out
+        }
+        if (ensLow && p.ensemblId && String(p.ensemblId).toLowerCase() === ensLow) {
+          const out = toPayload(p)
+          if (out) return out
+        }
+      }
+    }
+    return null
+  }
+
   resolveAnnotPopupMetadataVector (metadataId) {
     const lm = this.loadedMetadataVectors
     if (!lm || metadataId == null) return null
@@ -20415,7 +20474,7 @@ export default class extends Controller {
     }
 
     const layoutRadio = document.querySelector('input[name="annot-violin-layout"]:checked')
-    const layoutMode = layoutRadio && layoutRadio.value === 'combined' ? 'combined' : 'separate'
+    const layoutMode = layoutRadio && layoutRadio.value === 'separate' ? 'separate' : 'combined'
     apd.violinLayoutMode = layoutMode
 
     const sortSel = document.getElementById('annot-violin-sort-by')

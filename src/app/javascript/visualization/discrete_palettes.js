@@ -2,7 +2,7 @@
  * Discrete (categorical) color palettes for the main plot.
  * Colorblind-friendly set = first 10 entries aligned with tab10 / server base.
  * Extended = full server palette (visualization_colors.yml via window.CATEGORY_COLORS) plus extra distinct hues.
- * Extended 200 = same as Extended, then generated distinct colors up to 200 total.
+ * Super-Extended (extended_200 id) = same as Extended, then generated distinct colors up to 200 total.
  */
 
 export const DISCRETE_PALETTE_STORAGE_KEY = 'asap2_discrete_palette_id'
@@ -83,7 +83,7 @@ const EXTENSION_ONLY_HEX = [
 ]
 
 export function getDefaultDiscretePaletteId () {
-  return DISCRETE_PALETTE_EXTENDED
+  return DISCRETE_PALETTE_EXTENDED_200
 }
 
 export const VALID_DISCRETE_PALETTE_IDS = new Set([
@@ -99,7 +99,7 @@ export function readStoredDiscretePaletteId () {
   } catch (e) {
     // ignore
   }
-  return DISCRETE_PALETTE_EXTENDED
+  return getDefaultDiscretePaletteId()
 }
 
 export function writeStoredDiscretePaletteId (id) {
@@ -163,8 +163,8 @@ export function getDiscretePaletteSelectLabels () {
   const ex = getExtendedHexList()
   const x200 = getExtended200HexList()
   return {
-    [DISCRETE_PALETTE_COLORBLIND]: `Colorblind friendly (${cb.length})`,
-    [DISCRETE_PALETTE_EXTENDED]: `Extended (${ex.length})`,
-    [DISCRETE_PALETTE_EXTENDED_200]: `Extended 200 (${x200.length})`
+    [DISCRETE_PALETTE_COLORBLIND]: `Colorblind friendly (${cb.length} colors)`,
+    [DISCRETE_PALETTE_EXTENDED]: `Extended (${ex.length} colors)`,
+    [DISCRETE_PALETTE_EXTENDED_200]: `Super-Extended (${x200.length} colors)`
   }
 }

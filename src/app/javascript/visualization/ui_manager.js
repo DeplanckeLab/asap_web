@@ -5,6 +5,7 @@
 
 import {
   getDiscretePaletteSelectLabels,
+  getDefaultDiscretePaletteId,
   DISCRETE_PALETTE_COLORBLIND,
   DISCRETE_PALETTE_EXTENDED,
   DISCRETE_PALETTE_EXTENDED_200,
@@ -1696,7 +1697,7 @@ export class UIManager {
       if (optCb) optCb.textContent = labels[DISCRETE_PALETTE_COLORBLIND]
       if (optEx) optEx.textContent = labels[DISCRETE_PALETTE_EXTENDED]
       if (opt200) opt200.textContent = labels[DISCRETE_PALETTE_EXTENDED_200]
-      discretePaletteSelect.value = this.controller.discretePaletteId || DISCRETE_PALETTE_EXTENDED
+      discretePaletteSelect.value = this.controller.discretePaletteId || getDefaultDiscretePaletteId()
       if (!discretePaletteSelect.dataset.paletteListenerBound) {
         discretePaletteSelect.dataset.paletteListenerBound = '1'
         discretePaletteSelect.addEventListener('change', (e) => {

@@ -3347,7 +3347,12 @@ puts "TEST RUN"
         Rails.logger.info("[Basic.finish_run] Run##{run.id} status after update: #{run.status_id}")
       end
       upd_project_size project
-      project.broadcast(run.step_id) if run && !skip_broadcast
+      if run && !skip_broadcast
+        # Run-level push so clients can update the specific row directly; it
+        # also carries the same step-level payload as project.broadcast(step_id)
+        # did, keeping the left panel and header in sync.
+        run.broadcast_status_change
+      end
       return h_results
     end
     

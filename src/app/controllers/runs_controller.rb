@@ -671,6 +671,7 @@ class RunsController < ApplicationController
       @step = @run.step
       @std_method = @run.std_method
       @ps = ProjectStep.where(:project_id => @project.id, :step_id => @step.id).first
+      @project_step = @ps
     end
 
     # Never trust parameters from the scary internet, only allow the white list through.

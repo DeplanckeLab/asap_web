@@ -64,16 +64,25 @@ namespace :slurm do
   task process_waiting_runs: :environment do
     logger = Rails.logger
     logger.info("[SlurmScheduler] Starting to process waiting runs")
-    
-    waiting_runs = Run.where(status_id: 1).order(:created_at).limit(10)
-    
+
+    # Only pick up runs that are genuinely not yet submitted to SLURM.
+    # A run with status_id=1 and a slurm_job_id is already queued in SLURM
+    # (submitted by sbatch) and is being watched by SlurmJobMonitorJob. Picking
+    # it up here would call sbatch again and create a duplicate SLURM job,
+    # which causes the run status to flicker (running -> waiting -> running)
+    # in the UI as the monitor switches between the stale and the new job id.
+    waiting_runs = Run.where(status_id: 1)
+                      .where("slurm_job_id IS NULL OR slurm_job_id = 0")
+                      .order(:created_at)
+                      .limit(10)
+
     if waiting_runs.empty?
       logger.debug("[SlurmScheduler] No waiting runs found")
       exit 0
     end
-    
+
     logger.info("[SlurmScheduler] Found #{waiting_runs.count} waiting runs")
-    
+
     waiting_runs.each do |run|
       begin
         logger.info("[SlurmScheduler] Processing Run##{run.id}")
@@ -83,7 +92,7 @@ namespace :slurm do
         logger.error(e.backtrace.join("\n")) if e.backtrace
       end
     end
-    
+
     logger.info("[SlurmScheduler] Finished processing waiting runs")
   end
 

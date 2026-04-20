@@ -36,12 +36,37 @@
                   onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(@run) %>', '<%= @step&.id %>'); }">
             <i class="fas fa-sync sm:mr-1"></i><span class="hidden sm:inline"> Refresh</span>
           </button>
-          <button type="button"
-                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                  style="flex-shrink: 0;"
-                  onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
-            <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to runs</span>
-          </button>
+          <% single_run_resettable = !@step.multiple_runs && @step.name != 'parsing' && @project_step && [3, 4].include?(@project_step.status_id) %>
+          <% if single_run_resettable %>
+            <% if analyzable?(@project) && editable?(@project) %>
+              <button type="button"
+                      class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                      title="Remove this run and all downstream analyses, then configure a new run"
+                      style="flex-shrink: 0;"
+                      data-controller="restart-step"
+                      data-restart-step-project-id-value="<%= @project.id %>"
+                      data-restart-step-step-id-value="<%= @step.id %>"
+                      data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
+                      data-action="click->restart-step#restart">
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              </button>
+            <% else %>
+              <button type="button" disabled
+                      class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                      style="flex-shrink: 0;"
+                      title="You need analysis and edit rights to reset this step">
+                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+              </button>
+            <% end %>
+          <% end %>
+          <% if @step.multiple_runs %>
+            <button type="button"
+                    class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                    style="flex-shrink: 0;"
+                    onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
+              <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to runs</span>
+            </button>
+          <% end %>
         <% end %>
         <% if @step&.embedding_step? %>
           <%= link_to project_path(@project, view: 'visualization'), 

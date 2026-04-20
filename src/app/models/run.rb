@@ -24,6 +24,46 @@ class Run < ApplicationRecord
     step&.name == 'clustering'
   end
 
+  # Push a synchronous run-level status change over ActionCable.
+  #
+  # This is the single source of truth for UI-facing run transitions: it
+  # builds the same step-level payload as ProjectBroadcastJob (so the left
+  # panel icon and the page header stay in sync via h_nber_analyses /
+  # project_run_totals) and adds run-specific fields so the client can
+  # update the run row in the right panel without a follow-up HTTP fetch.
+  #
+  # Call this from the places that actually mutate a run's status (job
+  # submission, SLURM running transition, finish_run, failure paths).
+  def broadcast_status_change
+    return unless project_id && step_id
+
+    project.reload
+    step_record = step || Step.find_by(id: step_id)
+    return unless step_record
+
+    base = ProjectBroadcastJob.build_payload(project, step_id)
+
+    status_record = Status.find_by(id: status_id)
+    base.merge!(
+      event: 'run_status_changed',
+      run_status: {
+        run_id: id,
+        step_id: step_id,
+        status_id: status_id,
+        status_name: status_record&.name ? status_record.name.humanize : 'Unknown',
+        start_time: start_time&.iso8601,
+        submitted_at: submitted_at&.iso8601,
+        waiting_duration: waiting_duration ? waiting_duration.to_i : nil,
+        duration: duration ? duration.to_i : nil,
+        slurm_job_id: slurm_job_id
+      }
+    )
+
+    ActionCable.server.broadcast("project_#{project_id}", base)
+  rescue StandardError => e
+    Rails.logger.warn("[Run#broadcast_status_change] run_id=#{id}: #{e.class} - #{e.message}")
+  end
+
   # Categorical metadata Annot#id for a FindMarkers run (from attrs_json groups_dataset / groups_filename).
   def marker_metadata_annot_id
     return nil unless step&.name == 'markers'

@@ -144,6 +144,8 @@ class ProjectsController < ApplicationController
         @view_type = resolve_project_view_type(params[:view])
         return unless authorize_requested_view_access!(@view_type)
         load_view_context_for(@view_type)
+        return if performed?
+
         respond_to do |format|
           format.html
           format.json { render json: Basic.generate_project_json(@project) }
@@ -705,6 +707,13 @@ class ProjectsController < ApplicationController
     #    @available_metadata = Annot.available_metadata(test_project.id)
     #  end
     #end
+
+    if !selective_project_view_loading_enabled? && @view_type == 'analysis' && request.get? && request.format.html?
+      all_annots_for_loom = load_loom_file_list_context
+      assign_analysis_loom_file_from_session!
+      redirect_analysis_single_run_canonical_url!(all_annots_for_loom)
+      return if performed?
+    end
 
     respond_to do |format|
       format.html # Use application layout
@@ -5503,7 +5512,7 @@ class ProjectsController < ApplicationController
     with_request_profile('projects#step_results', view: params[:view] || params[:step_id]) do
     Rails.logger.info("===== STEP_RESULTS CALLED =====")
     Rails.logger.info("Project ID: #{@project&.id}, Step ID param: #{params[:step_id]}")
-    
+
     begin
       # Reload project to ensure fresh state (in case restart_step left it in a bad state)
       @project.reload
@@ -6006,7 +6015,7 @@ class ProjectsController < ApplicationController
     # Track which step is selected by the client (for blue border)
     # This is separate from is_current (which is for the unlock icon)
     @selected_step_id = params[:selected_step_id].present? ? params[:selected_step_id].to_i : nil
-    
+
     respond_to do |format|
       format.html { render partial: 'projects/views/steps_panel', layout: false }
       format.json { render json: { steps: @steps_with_status } }
@@ -8271,32 +8280,14 @@ class ProjectsController < ApplicationController
       @project_type = @project.project_type
 
       # Load loom file list for contextual dropdowns in analysis views
-      load_loom_file_list_context
+      all_annots_for_loom = load_loom_file_list_context
+      assign_analysis_loom_file_from_session!
 
-      # Persist selected loom file in session (per project)
-      session[:analysis_loom_file] ||= {}
-      project_session_key = @project.id.to_s
-      param_loom = params[:loom_file]
-      stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+      @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
+      @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
 
-      candidate_loom = if param_loom.present?
-                         param_loom
-                       elsif stored_loom.present?
-                         stored_loom
-                       else
-                         '__all__'
-                       end
-
-      if candidate_loom == '__all__'
-        @selected_loom_file = nil
-        session[:analysis_loom_file][project_session_key] = '__all__'
-      elsif @available_loom_files&.include?(candidate_loom)
-        @selected_loom_file = candidate_loom
-        session[:analysis_loom_file][project_session_key] = @selected_loom_file
-      else
-        @selected_loom_file = nil
-        session[:analysis_loom_file][project_session_key] = '__all__'
-      end
+      redirect_analysis_single_run_canonical_url!(all_annots_for_loom)
+      return if performed?
 
       # Warning context for header: indicate when loom filter hides runs
       @loom_filter_hidden_runs_count = 0
@@ -8367,8 +8358,6 @@ class ProjectsController < ApplicationController
 
       @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       prepare_steps_with_status
-      @selected_step_id = params[:step_id].present? ? params[:step_id].to_i : nil
-      @selected_run_id = params[:run_id].present? ? params[:run_id].to_i : nil
 
       @load_run_panel = false
       @run_panel_html = nil
@@ -8510,6 +8499,79 @@ class ProjectsController < ApplicationController
           Rails.logger.error(e.backtrace.first(10).join("\n"))
         end
       end
+    end
+
+    def assign_analysis_loom_file_from_session!
+      session[:analysis_loom_file] ||= {}
+      project_session_key = @project.id.to_s
+      param_loom = params[:loom_file]
+      stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
+
+      candidate_loom = if param_loom.present?
+                         param_loom
+                       elsif stored_loom.present?
+                         stored_loom
+                       else
+                         '__all__'
+                       end
+
+      if candidate_loom == '__all__'
+        @selected_loom_file = nil
+        session[:analysis_loom_file][project_session_key] = '__all__'
+      elsif @available_loom_files&.include?(candidate_loom)
+        @selected_loom_file = candidate_loom
+        session[:analysis_loom_file][project_session_key] = @selected_loom_file
+      else
+        @selected_loom_file = nil
+        session[:analysis_loom_file][project_session_key] = '__all__'
+      end
+    end
+
+    def analysis_single_visible_run_id_for_step(step, all_annots_for_loom, selected_loom_file)
+      step_ids_for_runs =
+        if step.multiple_runs
+          Step.where(docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        else
+          [step.id]
+        end
+      runs_scope = @project.runs.where(step_id: step_ids_for_runs)
+      if selected_loom_file.present? && all_annots_for_loom
+        loom_run_ids = all_annots_for_loom.select { |a| a.filepath == selected_loom_file }.map(&:run_id).compact.uniq
+        runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
+      end
+      runs_scope = apply_publication_snapshot_to_runs(runs_scope)
+      ids = runs_scope.order(created_at: :desc).limit(2).pluck(:id)
+      return nil if ids.size != 1
+
+      ids.first
+    end
+
+    def redirect_analysis_single_run_canonical_url!(all_annots_for_loom)
+      return unless request.get?
+      return unless request.format.html?
+      return if params[:run_id].present?
+      return if params[:step_id].blank?
+      return if params[:show_form].to_s == '1'
+      return if params[:prefer_runs_list].to_s == '1'
+      return if params[:panel_mode].to_s == 'graph'
+      return if params[:sub_view].present?
+
+      step = Step.find_by(id: params[:step_id].to_i)
+      return unless step && !step.multiple_runs
+
+      run_id = analysis_single_visible_run_id_for_step(step, all_annots_for_loom, @selected_loom_file)
+      return unless run_id
+
+      loom_param = @selected_loom_file.present? ? @selected_loom_file : '__all__'
+      target = project_path(
+        @project,
+        view: 'analysis',
+        step_id: step.id,
+        run_id: run_id,
+        panel_mode: 'run_details',
+        loom_file: loom_param
+      )
+      redirect_to target, status: :see_other
     end
 
     def load_loom_file_list_context

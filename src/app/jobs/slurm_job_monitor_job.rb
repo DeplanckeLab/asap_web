@@ -5,6 +5,12 @@ class SlurmJobMonitorJob < ApplicationJob
   MONITOR_INTERVAL = 30.seconds
   ACCOUNTING_UNAVAILABLE_GRACE_ATTEMPTS = 6
 
+  # While a SLURM job is still pending in the queue (just submitted by sbatch),
+  # poll aggressively so the UI reflects the waiting -> running transition
+  # within a few seconds instead of up to 30s. Once the job is running or the
+  # pending phase drags on, fall back to MONITOR_INTERVAL.
+  PENDING_POLL_INTERVALS = [2.seconds, 4.seconds, 8.seconds, 15.seconds, MONITOR_INTERVAL].freeze
+
   def perform(run_id, slurm_job_id, attempt = 1)
     Rails.logger.debug("[SlurmJobMonitorJob] Checking Run##{run_id}, SLURM Job##{slurm_job_id}, attempt #{attempt}")
     
@@ -194,14 +200,14 @@ class SlurmJobMonitorJob < ApplicationJob
         if status == :running && [1, 6].include?(run.status_id)
           Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} SLURM reports running, updating status from waiting/submitted to running")
           broadcast_queue_position_cleared(run)
-          
+
           # Calculate waiting_duration from submitted_at to now
           start_time = Time.now
           waiting_duration = run.submitted_at ? (start_time - run.submitted_at).to_f : nil
-          
+
           update_hash = { status_id: 2, start_time: start_time }
           update_hash[:waiting_duration] = waiting_duration if waiting_duration
-          
+
           run.update(update_hash) unless run.start_time
 
           Basic.upd_project_step(project, step.id)
@@ -210,7 +216,7 @@ class SlurmJobMonitorJob < ApplicationJob
 
           project.update(status_id: 2) if project.status_id != 2
 
-          project.broadcast(step.id) if project.respond_to?(:broadcast)
+          run.reload.broadcast_status_change
           broadcast_markers_run_status_changed_from_monitor(project, step, run)
         end
 
@@ -222,8 +228,7 @@ class SlurmJobMonitorJob < ApplicationJob
           broadcast_queue_position_cleared(run)
           Basic.upd_project_step(project, step.id)
           project.reload
-          project.broadcast(step.id) if project.respond_to?(:broadcast)
-          run.reload
+          run.reload.broadcast_status_change
         end
 
         # While waiting in queue, push queue position updates via websocket.
@@ -251,7 +256,8 @@ class SlurmJobMonitorJob < ApplicationJob
         Rails.logger.debug("[SlurmJobMonitorJob] Run##{run_id} still #{status}, will check again")
 
         if attempt < MAX_MONITOR_ATTEMPTS
-          SlurmJobMonitorJob.set(wait: MONITOR_INTERVAL).perform_later(run_id, slurm_job_id, attempt + 1)
+          wait = next_poll_wait(status, attempt)
+          SlurmJobMonitorJob.set(wait: wait).perform_later(run_id, slurm_job_id, attempt + 1)
         else
           Rails.logger.error("[SlurmJobMonitorJob] Max attempts reached for Run##{run_id}, marking as failed")
           finish_run_with_error(run, "SLURM job did not complete within expected time")
@@ -317,6 +323,18 @@ class SlurmJobMonitorJob < ApplicationJob
   end
 
   private
+
+  # Choose the next poll delay. While the SLURM job is still :pending (queued),
+  # use a short exponential backoff so the waiting -> running UI transition
+  # happens within a few seconds of SLURM actually starting the job. Once the
+  # job is running (or in any other monitored state), fall back to the regular
+  # MONITOR_INTERVAL.
+  def next_poll_wait(status, attempt)
+    return MONITOR_INTERVAL unless status == :pending
+
+    idx = [attempt, PENDING_POLL_INTERVALS.size].min - 1
+    PENDING_POLL_INTERVALS[idx]
+  end
 
   def broadcast_markers_run_status_changed_from_monitor(project, step, run)
     return unless step&.name == 'markers'
@@ -657,9 +675,9 @@ class SlurmJobMonitorJob < ApplicationJob
     
     # Update project_step run counts so UI can display failed status correctly
     Basic.upd_project_step(project, step.id) if project_step
-    
+
     project.update(status_id: 4) if project
-    project.broadcast(step.id) if project.respond_to?(:broadcast)
+    run.reload.broadcast_status_change
   end
 
   def parse_memory(memory_string)

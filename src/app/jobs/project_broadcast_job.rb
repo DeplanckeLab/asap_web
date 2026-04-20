@@ -4,14 +4,34 @@ class ProjectBroadcastJob < ApplicationJob
   queue_as :default
   include Rails.application.routes.url_helpers
 
+  # Build the step-level payload used by websocket broadcasts for a
+  # project/step. Exposed as a class method so other callers (for example
+  # Run#broadcast_status_change) can reuse the exact same structure and
+  # include run-specific fields on top of it without duplicating logic.
+  def self.build_payload(project, step_id)
+    new.send(:build_payload, project, step_id)
+  end
+
   def perform(project_id, step_id)
     project = Project.find(project_id)
+    h_data = build_payload(project, step_id)
+
+    if should_broadcast_payload?(project.id, step_id, h_data)
+      ActionCable.server.broadcast "project_#{project.id}", h_data
+    else
+      Rails.logger.debug("[ProjectBroadcastJob] Skip duplicate broadcast for project=#{project.id} step=#{step_id}")
+    end
+  end
+
+  private
+
+  def build_payload(project, step_id)
     h_data = get_results(project, step_id)
-    
+
     # Determine stage based on step_id - parsing step means we're in creation/parsing stage
     parsing_step = Step.where(name: 'parsing').first
     stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
-    
+
     # Aggregate run counts across all project steps for header display
     run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
     json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
@@ -38,23 +58,15 @@ class ProjectBroadcastJob < ApplicationJob
         failed: run_totals[4]
       }
     })
-    
-    # Always include parsing status information (useful for summary page)
+
     h_data.merge!(get_parsing_status(project, step_id))
-    
-    # Add creation status information if in creation stage
+
     if stage == 'creation'
       h_data.merge!(get_creation_status(project, step_id))
     end
-    
-    if should_broadcast_payload?(project.id, step_id, h_data)
-      ActionCable.server.broadcast "project_#{project.id}", h_data
-    else
-      Rails.logger.debug("[ProjectBroadcastJob] Skip duplicate broadcast for project=#{project.id} step=#{step_id}")
-    end
-  end
 
-  private
+    h_data
+  end
 
   def should_broadcast_payload?(project_id, step_id, payload)
     key = "project_broadcast_signature:#{project_id}:#{step_id}"
@@ -98,18 +110,17 @@ class ProjectBroadcastJob < ApplicationJob
       # Use Run object to get parsing status (Job object is no longer used)
       parsing_run = Run.where(:project_id => project.id, :step_id => step_id).first
       h_res[:parsing_status_id] = parsing_run.status_id if parsing_run
-    else ## update the nbers
-      project_step = ProjectStep.find_by(project_id: project.id, step_id: step_id)
-      if project_step&.nber_runs_json.present?
-        json_counts = project_step.nber_runs_json.is_a?(String) ? JSON.parse(project_step.nber_runs_json) : project_step.nber_runs_json
-        [1, 2, 3, 4, 5].each do |status_id|
-          h_res[:h_nber_analyses][status_id] = json_counts[status_id.to_s].to_i
+    else
+      # Always derive counts from runs in the DB (same step_id scope as step_results).
+      step_ids_for_runs =
+        if step.multiple_runs
+          Step.where(docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        else
+          [step_id]
         end
-      else
-        [1, 2, 3, 4, 5].each do |status_id|
-          tmp_nber = Run.where(:project_id => project.id, :step_id => step_id, :status_id => status_id).count
-          h_res[:h_nber_analyses][status_id] = tmp_nber
-        end
+      counts_by_status = Run.where(project_id: project.id, step_id: step_ids_for_runs).group(:status_id).count
+      [1, 2, 3, 4, 5].each do |status_id|
+        h_res[:h_nber_analyses][status_id] = counts_by_status[status_id].to_i
       end
     end
 

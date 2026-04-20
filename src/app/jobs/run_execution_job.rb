@@ -49,7 +49,7 @@ class RunExecutionJob < ApplicationJob
         status_id: 4,
         error: e.message
       )
-      
+
       project_step = ProjectStep.where(project_id: project.id, step_id: step.id).first
       if project_step
         project_step.update(
@@ -57,13 +57,13 @@ class RunExecutionJob < ApplicationJob
           error_message: e.message
         )
       end
-      
+
       # Update project_step run counts so UI can display failed status correctly
       Basic.upd_project_step(project, step.id) if project_step
-      
+
       project.update(status_id: 4) if project
-      project.broadcast(step.id) if project.respond_to?(:broadcast)
-      
+      run.reload.broadcast_status_change
+
       raise e
     end
   end
@@ -91,24 +91,28 @@ class RunExecutionJob < ApplicationJob
       memory_mb: run.pred_max_ram || run.max_ram,
       time_limit: run.pred_process_duration
     )
-    
-    start_time = Time.now
-    
+
+    # After sbatch returns, the SLURM job is queued (pending), not running yet.
+    # Keep the Run in waiting (status_id: 1) so the UI reflects reality; the
+    # SlurmJobMonitorJob will flip it to running once SLURM actually starts it.
+    # This avoids a running -> waiting -> running flicker in the left/right
+    # panels and header.
     run.update(
-      status_id: 2,
-      start_time: start_time,
-      waiting_duration: start_time - (run.submitted_at || run.created_at),
+      status_id: 1,
+      start_time: nil,
       pid: slurm_job_id.to_i,
       slurm_job_id: slurm_job_id.to_i
     )
-    
-    # Update project_step nber_runs_json so header shows correct running count
+
+    # Update project_step run counts so header reflects the queued run.
     Basic.upd_project_step(project, step.id)
-    project.update(status_id: 2)
-    project.broadcast(step.id) if project.respond_to?(:broadcast)
-    
-    Rails.logger.info("[RunExecutionJob] Run##{run.id} submitted to SLURM with job ID: #{slurm_job_id}")
-    
+    # Do not bump project.status_id to running here: the run is merely queued
+    # in SLURM at this point. SlurmJobMonitorJob will promote to running when
+    # SLURM reports the job has actually started.
+    run.reload.broadcast_status_change
+
+    Rails.logger.info("[RunExecutionJob] Run##{run.id} submitted to SLURM with job ID: #{slurm_job_id} (status=waiting)")
+
     # Start monitoring immediately so failures are surfaced even if delayed
     # in-process jobs are dropped during app restarts.
     SlurmJobMonitorJob.perform_later(run.id, slurm_job_id)
@@ -126,7 +130,7 @@ class RunExecutionJob < ApplicationJob
     # Update project_step nber_runs_json so header shows correct running count
     Basic.upd_project_step(project, step.id)
     project.update(status_id: 2)
-    project.broadcast(step.id) if project.respond_to?(:broadcast)
+    run.reload.broadcast_status_change
 
     # Build the full command via Basic.build_cmd (handles rails prefix, docker wrapping, etc.)
     cmd = Basic.build_cmd(h_cmd)
@@ -170,7 +174,7 @@ class RunExecutionJob < ApplicationJob
           run.update(status_id: 4, error: e.message)
           Basic.upd_project_step(project, step.id)
           project.update(status_id: 4)
-          project.broadcast(step.id) if project.respond_to?(:broadcast)
+          run.reload.broadcast_status_change
         end
       end
     end

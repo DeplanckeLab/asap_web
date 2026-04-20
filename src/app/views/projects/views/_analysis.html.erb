@@ -519,29 +519,29 @@
   function loadFormInRightPanel(formUrl) {
     formUrl = appendLoomContextToUrl(formUrl)
     const isGraphRequest = /\/graph(\?|$)/.test(formUrl)
-    window.__analysisRightPanelRequestSeq = (window.__analysisRightPanelRequestSeq || 0) + 1
-    const panelRequestSeq = window.__analysisRightPanelRequestSeq
     console.log('[loadFormInRightPanel] Loading form from:', formUrl, 'isGraphRequest=', isGraphRequest)
-    
-    // Find the step-selector controller and its content target
+
     const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
     if (!stepSelectorElement) {
       console.error('[loadFormInRightPanel] Step selector element not found')
       return
     }
-    
-    // Get the controller instance
+
     if (!window.Stimulus) {
       console.error('[loadFormInRightPanel] Stimulus not available')
       return
     }
-    
+
     const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
     if (!controller || !controller.hasContentTarget) {
       console.error('[loadFormInRightPanel] Step selector controller or content target not found')
       return
     }
-    
+
+    window.__analysisRightPanelOverlaySeq = (window.__analysisRightPanelOverlaySeq || 0) + 1
+    const overlayTicket = window.__analysisRightPanelOverlaySeq
+    const stepResultsSeqWhenFormFetchStarted = controller._stepResultsRequestSeq
+
     // Save state to localStorage - for forms we save step state (not form state)
     // When user comes back, they'll see the step results, which includes the form if no runs exist
     if (controller.currentStepId && typeof controller.saveState === 'function') {
@@ -574,11 +574,20 @@
       return response.text()
     })
     .then(html => {
-      if (panelRequestSeq !== window.__analysisRightPanelRequestSeq) {
-        console.log('[loadFormInRightPanel] Ignoring stale response for:', formUrl)
+      if (overlayTicket !== window.__analysisRightPanelOverlaySeq) {
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        controller.contentTarget.style.display = 'block'
         return
       }
-      console.log('[loadFormInRightPanel] Form loaded, length:', html.length)
+      if (controller._stepResultsRequestSeq !== stepResultsSeqWhenFormFetchStarted) {
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        controller.contentTarget.style.display = 'block'
+        return
+      }
       
       // Create a temporary container to parse HTML
       const tempDiv = document.createElement('div')
@@ -700,29 +709,29 @@
 
   function loadRunInRightPanel(runUrl, stepId) {
     setPipelineHeaderButtonMode('graph')
-    window.__analysisRightPanelRequestSeq = (window.__analysisRightPanelRequestSeq || 0) + 1
-    const panelRequestSeq = window.__analysisRightPanelRequestSeq
     console.log('[loadRunInRightPanel] Loading run from:', runUrl, 'stepId:', stepId)
-    
-    // Find the step-selector controller and its content target
+
     const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
     if (!stepSelectorElement) {
       console.error('[loadRunInRightPanel] Step selector element not found')
       return
     }
-    
-    // Get the controller instance
+
     if (!window.Stimulus) {
       console.error('[loadRunInRightPanel] Stimulus not available')
       return
     }
-    
+
     const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
     if (!controller || !controller.hasContentTarget) {
       console.error('[loadRunInRightPanel] Step selector controller or content target not found')
       return
     }
-    
+
+    window.__analysisRightPanelOverlaySeq = (window.__analysisRightPanelOverlaySeq || 0) + 1
+    const overlayTicket = window.__analysisRightPanelOverlaySeq
+    const stepResultsSeqWhenRunFetchStarted = controller._stepResultsRequestSeq
+
     // Extract run ID from URL for state persistence
     const runIdMatch = runUrl.match(/\/runs\/(\d+)/)
     const runId = runIdMatch ? runIdMatch[1] : null
@@ -755,15 +764,18 @@
     }
     controller.contentTarget.style.display = 'none'
     
-    // Fetch the run content (with panel parameter to get panel version)
-    const panelUrl = runUrl + (runUrl.includes('?') ? '&' : '?') + 'panel=1'
+    // Fetch the run content (with panel parameter to get panel version). Cache-bust so status
+    // transitions (running -> success) always reflect the latest server-rendered panel.
+    const panelUrl = runUrl + (runUrl.includes('?') ? '&' : '?') + 'panel=1&_t=' + Date.now()
     fetch(panelUrl, {
       method: 'GET',
       headers: {
         'Accept': 'text/html',
-        'X-Requested-With': 'XMLHttpRequest'
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache'
       },
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      cache: 'no-store'
     })
     .then(response => {
       if (!response.ok) {
@@ -772,12 +784,20 @@
       return response.text()
     })
     .then(html => {
-      if (panelRequestSeq !== window.__analysisRightPanelRequestSeq) {
-        console.log('[loadRunInRightPanel] Ignoring stale response for:', runUrl)
+      if (overlayTicket !== window.__analysisRightPanelOverlaySeq) {
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        controller.contentTarget.style.display = 'block'
         return
       }
-      console.log('[loadRunInRightPanel] Run loaded, length:', html.length)
-      
+      if (controller._stepResultsRequestSeq !== stepResultsSeqWhenRunFetchStarted) {
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+        controller.contentTarget.style.display = 'block'
+        return
+      }
       // Update content with run
       controller.contentTarget.innerHTML = html
       controller.contentTarget.style.display = 'block'

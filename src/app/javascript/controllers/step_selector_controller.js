@@ -1402,8 +1402,18 @@ export default class extends Controller {
       (this.hasStepsPanelTarget && this.stepsPanelTarget.querySelector(rowSelector)) || primaryEl
 
     stepElements.forEach((stepElement) => {
-      const iconElement = stepElement.querySelector('.flex-shrink-0 i')
-      if (iconElement) {
+      // Multiple-runs steps render a 2x2 status grid (waiting, running,
+      // completed, failed) in the icon slot, where each cell is tied to a
+      // specific status and is styled based on its per-status count by the
+      // server-rendered _steps_panel partial. Overwriting a single icon
+      // here would corrupt that grid (e.g. painting the top-left "waiting"
+      // cell with the overall "failed" icon). The full grid is refreshed
+      // authoritatively by refreshStepsPanel(); skip the single-icon patch
+      // in that case.
+      const iconContainer = stepElement.querySelector('.flex-shrink-0')
+      const iconCount = iconContainer ? iconContainer.querySelectorAll('i').length : 0
+      if (iconCount === 1) {
+        const iconElement = iconContainer.querySelector('i')
         const statusConfig = this.getStatusIconConfig(status)
         if (statusConfig) {
           const spinClass = status === 'running' && statusConfig.icon_spin ? ' ' + statusConfig.icon_spin : ''
@@ -1411,11 +1421,11 @@ export default class extends Controller {
         } else {
           iconElement.className = 'far fa-circle text-lg opacity-30'
         }
-      }
 
-      const badgeElement = stepElement.querySelector('.inline-flex.items-center')
-      if (badgeElement) {
-        badgeElement.remove()
+        const badgeElement = stepElement.querySelector('.inline-flex.items-center')
+        if (badgeElement) {
+          badgeElement.remove()
+        }
       }
 
       stepElement.setAttribute('data-step-status', status)

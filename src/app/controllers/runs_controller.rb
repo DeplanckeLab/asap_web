@@ -598,6 +598,15 @@ class RunsController < ApplicationController
       log += (Time.now - start_time).to_s + " step 5</br>"
       Basic.upd_project_size project
     end
+
+    ## Broadcast project/step updates so subscribed clients refresh the
+    ## header status summary (project_run_totals) and the left pipeline
+    ## steps panel (h_nber_analyses). Done after the transaction so the
+    ## background job reads committed data.
+    @h_step_ids.each_key do |step_id|
+      project.broadcast(step_id)
+    end
+
     return log
 
   end

@@ -70,6 +70,19 @@ class HomeController < ApplicationController
       User-agent: *
       Allow: /
 
+      User-agent: GPTBot
+      Allow: /
+
+      User-agent: PerplexityBot
+      Allow: /
+
+      User-agent: ClaudeBot
+      Allow: /
+
+      User-agent: Googlebot
+      Allow: /
+
+
       Sitemap: #{base}/sitemap.xml
     ROBOTS
   end

@@ -1,9 +1,18 @@
-<%# locals: annot, data_type_options, back_params (Hash, optional) %>
+<%# locals: annot, data_type_options, back_params (Hash, optional), disabled_data_type_ids (Array, optional) %>
 <% back_params = local_assigns.fetch(:back_params) { {} } %>
+<% disabled_ids = Array(local_assigns.fetch(:disabled_data_type_ids) { [] }) %>
 <%= form_with model: annot, url: annot_path(annot, back_params), method: :patch, local: true, class: 'space-y-3' do |f| %>
   <div>
     <%= f.label :data_type_id, 'Data type', class: 'block text-sm font-medium text-gray-700 mb-1' %>
-    <%= f.select :data_type_id, options_for_select(data_type_options, annot.data_type_id), {}, class: 'block w-full max-w-md rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500' %>
+    <%= f.select :data_type_id,
+                 options_for_select(data_type_options, selected: annot.data_type_id, disabled: disabled_ids),
+                 {},
+                 class: 'block w-full max-w-md rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500' %>
+    <% if disabled_ids.any? && annot.data_type_id == 3 && !annot.categorical_numeric_coercible? %>
+      <p class="mt-1 text-xs text-gray-500">
+        NUMERIC is disabled because some category names are not numeric values.
+      </p>
+    <% end %>
   </div>
   <div>
     <%= f.submit 'Update data type', class: 'inline-flex justify-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 cursor-pointer border-0' %>

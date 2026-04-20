@@ -79,11 +79,11 @@
                       <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
                       <%= dimension_badge(annot.nber_cols, :col, @project) if annot.nber_cols %>
                     <% elsif annot.name.start_with?('/col_attrs/') %>
-                      <%= dimension_badge(1, :row, @project) %>
                       <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
+                      <%= component_dimension_badge(annot.nber_rows) %>
                     <% elsif annot.name.start_with?('/row_attrs/') %>
                       <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
-                      <%= dimension_badge(1, :col, @project) %>
+                      <%= component_dimension_badge(annot.nber_cols) %>
                     <% else %>
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
                         Global
@@ -94,6 +94,7 @@
                         <%= annot.data_type.name %>
                       </span>
                     <% end %>
+                    <%= categorical_categories_badge(annot) %>
                   </div>
                   <% if annot.mem_size %>
                     <div class="mt-2 text-xs text-gray-500">

@@ -85,6 +85,43 @@ module ProjectsHelper
     content_tag(:span, "#{count_int} #{label}", class: badge_class)
   end
 
+  # Generate a neutral badge for the component dimension of a multi-component
+  # metadata annotation (e.g. the 50 PCs of /col_attrs/X_pca or the 2 axes of
+  # /col_attrs/X_umap). This is the per-entry vector length and is NOT a
+  # gene/cell dimension, so it must not be labeled via row_label/col_label.
+  # @param count [Integer] The number of components
+  # @return [String] HTML string for the badge, or '' if count is nil/<= 1
+  def component_dimension_badge(count)
+    return '' unless count.present?
+    count_int = count.to_i
+    return '' if count_int <= 1
+
+    label = (count_int == 1) ? 'component' : 'components'
+    badge_class = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'
+    content_tag(:span, "#{count_int} #{label}", class: badge_class)
+  end
+
+  # Badge showing the number of distinct categories of a categorical annotation.
+  # Returns '' for non-categorical annotations or when categories_json is
+  # missing/unparseable. The count is derived from the persisted
+  # categories_json hash (category => count), so no loom I/O is performed.
+  # @param annot [Annot]
+  # @return [String] HTML string for the badge, or '' if not applicable
+  def categorical_categories_badge(annot)
+    return '' unless annot&.data_type_id == 3
+    return '' if annot.categories_json.blank?
+
+    parsed = JSON.parse(annot.categories_json)
+    return '' unless parsed.is_a?(Hash)
+
+    count_int = parsed.size
+    label = (count_int == 1) ? 'category' : 'categories'
+    badge_class = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200'
+    content_tag(:span, "#{count_int} #{label}", class: badge_class)
+  rescue JSON::ParserError
+    ''
+  end
+
   # Generate a label for a loom file in the format: <step name> <std_method_name> #<run_number>
   # If multiple_runs == false, display only <std_method_name> capitalized
   # @param filepath [String] The filepath of the loom file

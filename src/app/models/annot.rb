@@ -63,6 +63,23 @@ class Annot < ApplicationRecord
     return [] unless categories_json.present?
     JSON.parse(categories_json) rescue []
   end
+
+  # True when this is a DISCRETE (categorical) annotation whose category
+  # names are all numeric-coercible, i.e. safe to re-interpret as NUMERIC.
+  # Returns false for any non-DISCRETE annot, for annots with blank or
+  # unparseable categories_json, or when any category name is not a number.
+  def categorical_numeric_coercible?
+    return false unless data_type_id == 3
+    return false if categories_json.blank?
+    parsed = JSON.parse(categories_json) rescue nil
+    return false unless parsed.is_a?(Hash) && !parsed.empty?
+    parsed.keys.all? do |key|
+      next false if key.nil?
+      str = key.to_s.strip
+      next false if str.empty?
+      !!(Float(str) rescue nil)
+    end
+  end
   
   # Parse attributes from JSON
   def attributes_data

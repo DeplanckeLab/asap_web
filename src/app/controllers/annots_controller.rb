@@ -81,7 +81,17 @@ class AnnotsController < ApplicationController
     @bin_size = nil
     @min = nil
     @h_sums = {}
-    
+    @matrix_preview = nil
+
+    # A col_attrs/row_attrs annotation is 2D (multi-component) when both its
+    # nber_rows and nber_cols are > 1 (e.g. /col_attrs/X_pca shape (50, 5007)
+    # or /col_attrs/X_umap shape (2, 5007)). In that case ExtractMetadata returns
+    # a 2D values array and the usual vector-based preview does not apply.
+    is_2d_metadata = @annot.dim != 3 &&
+                     @annot.nber_rows.to_i > 1 &&
+                     @annot.nber_cols.to_i > 1 &&
+                     (@annot.name.start_with?('/col_attrs/') || @annot.name.start_with?('/row_attrs/'))
+
     if @annot.dim == 3
       # Expression matrix - extract sample and compute distributions
       begin
@@ -142,6 +152,23 @@ class AnnotsController < ApplicationController
       rescue => e
         Rails.logger.error("Error extracting expression matrix data: #{e.message}")
       end
+    elsif is_2d_metadata
+      # 2D metadata annotation (e.g. /col_attrs/X_pca) - extract a 10x10 sample.
+      if File.exist?(loom_path)
+        matrix = H5DataService.get_metadata_matrix(loom_path.to_s, @annot.name)
+        max_preview_rows = 10
+        max_preview_cols = 10
+        sample_rows = matrix[:values].first(max_preview_rows).map { |row| row.first(max_preview_cols) }
+        @matrix_preview = {
+          nber_rows: matrix[:nber_rows],
+          nber_cols: matrix[:nber_cols],
+          shown_rows: sample_rows.size,
+          shown_cols: sample_rows.first&.size.to_i,
+          rows: sample_rows
+        }
+      else
+        Rails.logger.error("Loom file not found: #{loom_path}")
+      end
     else
       # Metadata annotation - extract values
       begin
@@ -196,6 +223,15 @@ class AnnotsController < ApplicationController
 
     if editable?(@project) && metadata_type_editable?(@annot)
       @data_type_options = DataType.order(:id).map { |dt| [dt.label.presence || dt.name, dt.id] }
+
+      # Disable unsafe target data types in the select. Switching a DISCRETE
+      # (categorical) annotation to NUMERIC is unsafe when its category names
+      # are not all numeric-coercible, so we disable NUMERIC in that case.
+      @disabled_data_type_ids = []
+      if @annot.data_type_id == 3 && !@annot.categorical_numeric_coercible?
+        numeric_id = DataType.find_by(name: 'NUMERIC')&.id
+        @disabled_data_type_ids << numeric_id if numeric_id
+      end
     end
   end
 
@@ -337,6 +373,15 @@ class AnnotsController < ApplicationController
     new_type_id = permitted[:data_type_id].presence&.to_i
     unless new_type_id.positive? && DataType.exists?(id: new_type_id)
       redirect_to annot_path(@annot, annot_back_params), alert: 'Invalid data type.' and return
+    end
+
+    # Guard: forbid DISCRETE -> NUMERIC conversion when categories are not
+    # all numeric-coercible. Prevents creating NUMERIC data with non-numeric
+    # category names, which would corrupt downstream numeric interpretation.
+    numeric_type_id = DataType.find_by(name: 'NUMERIC')&.id
+    if numeric_type_id && @annot.data_type_id == 3 && new_type_id == numeric_type_id && !@annot.categorical_numeric_coercible?
+      redirect_to annot_path(@annot, annot_back_params),
+                  alert: "Cannot change data type to NUMERIC: some category names are not numeric values." and return
     end
 
     h_annot = {

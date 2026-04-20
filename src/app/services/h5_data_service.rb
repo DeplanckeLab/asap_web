@@ -207,6 +207,33 @@ class H5DataService
   end
 
   # Extract the full metadata vector for all cells (one value per cell)
+  # Extract a 2D metadata matrix (e.g. /col_attrs/X_pca with shape (n_components, n_cells)).
+  # Returns a hash: { nber_rows:, nber_cols:, values: Array<Array> }.
+  # Raises on failure.
+  def self.get_metadata_matrix(h5_file, metadata_path)
+    cmd = asap_command(
+      '-T', 'ExtractMetadata',
+      '-meta', metadata_path,
+      '-loom', h5_file
+    )
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      raise "ASAP.jar ExtractMetadata failed for #{metadata_path} (exit #{status.exitstatus}): #{stderr}"
+    end
+
+    json_data = JSON.parse(stdout)
+    values = json_data['values']
+    unless values.is_a?(Array) && values.first.is_a?(Array)
+      raise "Metadata #{metadata_path} is not a 2D matrix (values shape is #{values&.class})"
+    end
+
+    {
+      nber_rows: json_data['nber_rows'].to_i,
+      nber_cols: json_data['nber_cols'].to_i,
+      values: values
+    }
+  end
+
   def self.get_metadata_vector(h5_file, metadata_path)
     error_details = {}
     begin

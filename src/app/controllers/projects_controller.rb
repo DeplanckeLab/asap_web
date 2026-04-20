@@ -5822,6 +5822,7 @@ class ProjectsController < ApplicationController
           @show_custom_form = false
           @show_specific_view = false
         end
+
       else
         Rails.logger.info("[step_results] Skipping prepare_std_step_data - step: #{@step.name}, has_std_dashboard: #{@step.has_std_dashboard}, has_std_view: #{@step.has_std_view}, has_std_form: #{@step.has_std_form}")
         # Initialize display flags even if prepare_std_step_data is not called
@@ -6536,27 +6537,68 @@ class ProjectsController < ApplicationController
     end
 
     source_path = canonical_project_input_file_path.to_s
-    source_realpath = begin
-      File.realpath(source_path)
+    bundle_reset = begin
+      File.directory?(File.realpath(source_path))
     rescue StandardError
-      source_path
-    end
-    upload_dir_realpath = File.expand_path(upload_dir.to_s)
-    source_inside_upload_dir = source_realpath == upload_dir_realpath || source_realpath.start_with?(upload_dir_realpath + "/")
-
-    staged_source_path = nil
-    if source_inside_upload_dir
-      staged_source_path = upload_dir.parent + ".reset_staging_#{fu.id}_#{SecureRandom.hex(6)}"
-      FileUtils.cp(source_path, staged_source_path.to_s)
-      source_path = staged_source_path.to_s
+      false
     end
 
-    FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
-    FileUtils.mkdir_p(upload_dir)
-    FileUtils.cp(source_path, upload_file_path)
-    FileUtils.rm_f(staged_source_path.to_s) if staged_source_path
-    restored_file_size = File.size(upload_file_path)
-    Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{source_path}")
+    if bundle_reset
+      bundle_real = File.realpath(source_path)
+      upload_dir_realpath = File.expand_path(upload_dir.to_s)
+      staged_bundle_path = nil
+      if bundle_real == upload_dir_realpath || bundle_real.start_with?(upload_dir_realpath + "/")
+        staged_bundle_path = upload_dir.parent + ".reset_staging_bundle_#{fu.id}_#{SecureRandom.hex(6)}"
+        FileUtils.mkdir_p(staged_bundle_path)
+        FileUtils.cp_r(bundle_real, (staged_bundle_path + "input_file").to_s)
+      end
+
+      FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
+      FileUtils.mkdir_p(upload_dir)
+
+      if staged_bundle_path
+        FileUtils.cp_r((staged_bundle_path + "input_file").to_s, (upload_dir + "input_file").to_s)
+        FileUtils.rm_rf(staged_bundle_path)
+      else
+        FileUtils.cp_r(bundle_real, (upload_dir + "input_file").to_s)
+      end
+
+      matrix_in_bundle = upload_dir + "input_file" + "matrix.mtx"
+      unless matrix_in_bundle.file?
+        mtx_one = Dir[(upload_dir + "input_file" + "*.mtx").to_s].find { |p| File.file?(p) }
+        matrix_in_bundle = Pathname.new(mtx_one) if mtx_one.present?
+      end
+      unless matrix_in_bundle.file?
+        Rails.logger.warn("[reset_parsing] MTX bundle reset: no matrix file under #{upload_dir + 'input_file'}")
+        redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project MTX bundle is missing matrix.mtx. Please re-upload the file before resetting parsing.'
+        return
+      end
+      FileUtils.cp(matrix_in_bundle.to_s, upload_file_path.to_s)
+      restored_file_size = File.size(upload_file_path)
+      Rails.logger.info("[reset_parsing] Restored MTX bundle to #{upload_dir + 'input_file'} and matrix copy to #{upload_file_path}")
+    else
+      source_realpath = begin
+        File.realpath(source_path)
+      rescue StandardError
+        source_path
+      end
+      upload_dir_realpath = File.expand_path(upload_dir.to_s)
+      source_inside_upload_dir = source_realpath == upload_dir_realpath || source_realpath.start_with?(upload_dir_realpath + "/")
+
+      staged_source_path = nil
+      if source_inside_upload_dir
+        staged_source_path = upload_dir.parent + ".reset_staging_#{fu.id}_#{SecureRandom.hex(6)}"
+        FileUtils.cp(source_path, staged_source_path.to_s)
+        source_path = staged_source_path.to_s
+      end
+
+      FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
+      FileUtils.mkdir_p(upload_dir)
+      FileUtils.cp(source_path, upload_file_path)
+      FileUtils.rm_f(staged_source_path.to_s) if staged_source_path
+      restored_file_size = File.size(upload_file_path)
+      Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{source_path}")
+    end
 
     preparsing_options = {
       organism_id: @original_project.organism_id,
@@ -10006,7 +10048,7 @@ class ProjectsController < ApplicationController
                      end
                    end.uniq
                    
-                   "Requires: #{requirement_messages.join('; ')}"
+                   "Missing inputs: #{requirement_messages.join('; ')}"
                  else
                    # Fallback: try to get info from step's and methods' attrs_json
                    required_inputs = []
@@ -10056,7 +10098,7 @@ class ProjectsController < ApplicationController
                    end
                    
                    if required_inputs.any?
-                     "Requires: #{required_inputs.uniq.join('; ')}"
+                     "Missing inputs: #{required_inputs.uniq.join('; ')}"
                    else
                      "Previous steps must be completed first"
                    end
@@ -12075,7 +12117,7 @@ class ProjectsController < ApplicationController
       # Create a new Req object for the form
       @req = Req.new
     end
-    
+
     # Prepare data for a single run view
     def prepare_run_view_data(run)
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key

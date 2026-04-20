@@ -14,133 +14,130 @@
         <% status = step_info[:status] %>
         <% status_counts = step_info[:status_counts] || { waiting: 0, running: 0, completed: 0, failed: 0 } %>
         <% lock_reason = step_info[:lock_reason] %>
-        
+        <% display_name = step.label.presence || step.name %>
+        <% if !step.multiple_runs %>
+          <% run_for_step = Run.where(project_id: @project.id, step_id: step.id).includes(:std_method).first %>
+          <% if run_for_step&.std_method %>
+            <% display_name = run_for_step.std_method.label.presence || run_for_step.std_method.name.titleize %>
+          <% end %>
+        <% end %>
         <% 
-          # Determine if this step is selected (shown in right panel)
           is_selected = @selected_step_id && step.id == @selected_step_id
-          
-          # Determine CSS classes and styles
-          # All steps have white background by default
-          item_classes = 'flex items-center px-4 py-3 border-b border-gray-200 step-item bg-white'
-          # Apply blue left border if this is the selected step
           item_style = is_selected ? 'border-left: 4px solid #007bff;' : 'border-left: 4px solid transparent;'
-          
-          if !is_available
-            item_classes += ' opacity-50 cursor-not-allowed'
-          else
-            item_classes += ' step-item-hover'
-          end
-          
-          if is_selected
-            item_classes += ' active'
-          end
-          
-          # Determine text color
-          # Unlocked steps always display in black, locked steps in gray
+
+          row_classes = 'flex items-center px-4 py-3 border-b border-gray-200 bg-white step-item'
+          row_classes += is_available ? ' step-item-hover cursor-pointer' : ''
+          row_classes += is_selected ? ' active' : ''
+
           text_class = if !is_available
                         'text-gray-500'
                       else
                         'text-gray-900'
                       end
-          
-          # Determine cursor style
-          cursor_style = if !is_available
-                          'cursor: not-allowed !important;'
-                        else
-                          'cursor: pointer;'
-                        end
+
+          inner_area_classes = 'flex items-center min-w-0 flex-1'
+          inner_area_classes += !is_available ? ' opacity-50 cursor-not-allowed' : ''
         %>
         
-        <div class="<%= item_classes %> <%= text_class %>" 
-             style="<%= item_style %> <%= cursor_style %>"
+        <div class="<%= row_classes %> <%= text_class if is_available %>"
+             style="<%= item_style %>"
+             data-step-id="<%= step.id %>"
+             data-step-name="<%= step.name %>"
+             data-step-lock-available="<%= is_available ? 'true' : 'false' %>"
+             data-step-lock-detail="<%= h(lock_reason.to_s) %>"
              <% if is_available %>
                data-action="click->step-selector#selectStep"
                data-step-selector-step-id-param="<%= step.id %>"
              <% else %>
                data-step-locked="true"
-               title="<%= lock_reason.present? ? lock_reason : 'Locked' %>"
-               onclick="event.preventDefault(); event.stopPropagation(); return false;"
-             <% end %>
-             data-step-id="<%= step.id %>"
-             data-step-name="<%= step.name %>">
-          <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; align-self: center;">
-            <% if !is_available %>
-              <i class="fas fa-lock text-sm text-gray-400"></i>
-            <% elsif !step.multiple_runs %>
-              <% 
-                # Single icon for steps with multiple_runs = false
-                # Use status.humanize to display the database value directly
-                tooltip_text = if status.present?
-                                 status.humanize
-                               else
-                                 "Not started"
-                               end
-              %>
-              <div class="relative group">
-                <% if is_complete %>
-                  <% completed_config = status_icons_by_key[:completed] %>
-                  <i class="<%= completed_config[:icon_base] %> text-sm <%= completed_config[:active_color] %>"></i>
-                <% elsif status == 'running' %>
-                  <% running_config = status_icons_by_key[:running] %>
-                  <i class="<%= running_config[:icon_base] %> <%= running_config[:icon_spin] %> text-sm <%= running_config[:active_color] %>"></i>
-                <% elsif status == 'pending' %>
-                  <% waiting_config = status_icons_by_key[:pending] %>
-                  <i class="<%= waiting_config[:icon_base] %> text-sm <%= waiting_config[:active_color] %>"></i>
-                <% elsif status == 'failed' %>
-                  <% failed_config = status_icons_by_key[:failed] %>
-                  <i class="<%= failed_config[:icon_base] %> text-sm <%= failed_config[:active_color] %>"></i>
-                <% else %>
-                  <i class="far fa-circle text-sm text-gray-400"></i>
-                <% end %>
-                <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
-                  <%= tooltip_text %>
-                  <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
-                </div>
-              </div>
-            <% else %>
-              <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%; align-content: center;">
+             <% end %>>
+            <div class="<%= inner_area_classes %>"
+                 <% unless is_available %>
+                   title="<%= lock_reason.present? ? lock_reason : 'Locked' %>"
+                   onclick="event.preventDefault(); event.stopPropagation(); return false;"
+                 <% end %>>
+            <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; align-self: center;">
+              <% if !is_available %>
+                <i class="fas fa-lock text-sm text-gray-400"></i>
+              <% elsif !step.multiple_runs %>
                 <% 
-                  # Get status icons from database, add counts
-                  grid_status_icons = [:waiting, :running, :completed, :failed].map do |key|
-                    config = status_icons_by_key[key]
-                    config.merge(count: status_counts[key] || 0)
-                  end
+                  tooltip_text = if status.present?
+                                   status.humanize
+                                 else
+                                   "Not started"
+                                 end
                 %>
-                <% grid_status_icons.each do |status_icon| %>
-                  <% 
-                    is_active = status_icon[:count] > 0
-                    icon_class = status_icon[:icon_base]
-                    icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
-                    color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
-                    tooltip_text = "#{status_icon[:tooltip_ui_label]} (#{status_icon[:count]})"
-                  %>
-                  <div class="relative group" style="display: flex; align-items: center; justify-content: center;">
-                    <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
-                    <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
-                      <%= tooltip_text %>
-                      <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
-                    </div>
+                <div class="relative group">
+                  <% if is_complete %>
+                    <% completed_config = status_icons_by_key[:completed] %>
+                    <i class="<%= completed_config[:icon_base] %> text-sm <%= completed_config[:active_color] %>"></i>
+                  <% elsif status == 'running' %>
+                    <% running_config = status_icons_by_key[:running] %>
+                    <i class="<%= running_config[:icon_base] %> <%= running_config[:icon_spin] %> text-sm <%= running_config[:active_color] %>"></i>
+                  <% elsif status == 'pending' %>
+                    <% waiting_config = status_icons_by_key[:pending] %>
+                    <i class="<%= waiting_config[:icon_base] %> text-sm <%= waiting_config[:active_color] %>"></i>
+                  <% elsif status == 'failed' %>
+                    <% failed_config = status_icons_by_key[:failed] %>
+                    <i class="<%= failed_config[:icon_base] %> text-sm <%= failed_config[:active_color] %>"></i>
+                  <% else %>
+                    <i class="far fa-circle text-sm text-gray-400"></i>
+                  <% end %>
+                  <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
+                    <%= tooltip_text %>
+                    <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
                   </div>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
-          <div class="flex-grow">
-            <div>
-              <strong class="block"><%
-                display_name = step.label.presence || step.name
-                if !step.multiple_runs
-                  run_for_step = Run.where(project_id: @project.id, step_id: step.id).includes(:std_method).first
-                  if run_for_step&.std_method
-                    display_name = run_for_step.std_method.label.presence || run_for_step.std_method.name.titleize
-                  end
-                end
-              %><%= display_name %></strong>
+                </div>
+              <% else %>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; width: 100%; height: 100%; align-content: center;">
+                  <% 
+                    grid_status_icons = [:waiting, :running, :completed, :failed].map do |key|
+                      config = status_icons_by_key[key]
+                      config.merge(count: status_counts[key] || 0)
+                    end
+                  %>
+                  <% grid_status_icons.each do |status_icon| %>
+                    <% 
+                      is_active = status_icon[:count] > 0
+                      icon_class = status_icon[:icon_base]
+                      icon_class += " #{status_icon[:icon_spin]}" if is_active && status_icon[:icon_spin].present?
+                      color_class = is_active ? status_icon[:active_color] : status_icon[:inactive_color]
+                      tooltip_text = "#{status_icon[:tooltip_ui_label]} (#{status_icon[:count]})"
+                    %>
+                    <div class="relative group" style="display: flex; align-items: center; justify-content: center;">
+                      <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
+                      <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
+                        <%= tooltip_text %>
+                        <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
             </div>
-          </div>
-          <div class="flex-shrink-0 ml-3 flex items-center">
-            <div class="w-3 h-3 rounded-full" style="background-color: <%= get_step_color(step.id) %>;"></div>
-          </div>
+            <div class="flex-grow">
+              <div>
+                <strong class="block"><%= display_name %></strong>
+              </div>
+            </div>
+            </div>
+            <div class="flex-shrink-0 ml-3 flex items-center justify-center self-center" style="min-width: 1.25rem; min-height: 1.25rem;">
+              <% if !is_available %>
+                <button type="button"
+                        class="step-availability-help w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 cursor-pointer opacity-100"
+                        title="Availability details"
+                        data-step-help-trigger
+                        data-step-help-available="false"
+                        data-step-help-title="<%= h(display_name) %>"
+                        data-step-help-detail="<%= h(lock_reason.to_s) %>"
+                        aria-label="Availability details for this step">
+                  <span class="sr-only">Availability details</span>
+                  <i class="far fa-question-circle text-base" aria-hidden="true"></i>
+                </button>
+              <% else %>
+                <div class="w-3 h-3 rounded-full" style="background-color: <%= get_step_color(step.id) %>;"></div>
+              <% end %>
+            </div>
         </div>
       <% end %>
     <% else %>

@@ -321,8 +321,7 @@
             <% end %>
           <% end %>
           
-          <div class="px-6 pt-4 pb-2 space-y-2">
-            <div data-step-results-panel-flash-mount class="rounded-md border border-amber-200 bg-amber-50 text-amber-950 text-sm" style="display: none;" role="status" hidden></div>
+          <div class="px-6 py-2">
             <input type="text" id="runs-search" placeholder="Filter runs"
                    class="form-input rounded border border-gray-300 bg-white text-sm w-full px-3 py-1.5 shadow-inner focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
           </div>
@@ -364,7 +363,13 @@
               <tbody class="bg-white divide-y divide-gray-200">
                 <% @runs.each do |run| %>
                   <% run_locked = @project.locked_from_publication?(run) %>
-                  <% run_status = run_status_badge_for(run, @h_statuses) %>
+                  <% run_status = case run.status_id
+                                  when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
+                                  when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
+                                  when 3 then { name: 'complete', class: 'success', bg: 'bg-green-100', text: 'text-green-800' }
+                                  when 4 then { name: 'failed', class: 'danger', bg: 'bg-red-100', text: 'text-red-800' }
+                                  else { name: 'unknown', class: 'secondary', bg: 'bg-gray-100', text: 'text-gray-800' }
+                                  end %>
                   <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
                   <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
                   <% h_method_attrs = (std_method && @step) ? (Basic.get_std_method_attrs(std_method, @step)[:h_attrs] rescue Basic.safe_parse_json(std_method.attrs_json, {})) : {} %>
@@ -425,7 +430,7 @@
                     <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.status_id %>" data-run-table-status-cell>
                       <div class="flex flex-col gap-1">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
-                          <%= run_status[:ui_label] %>
+                          <%= run_status[:name].humanize %>
                         </span>
                         <%# Duration/Timer below status %>
                         <% if run.status_id == 3 && run.duration %>
@@ -442,37 +447,28 @@
                             <i class="fas fa-clock text-gray-400 mr-1"></i>
                             <span data-run-timer-target="elapsedTime">--:--</span>
                           </div>
-                        <% elsif [1, 6].include?(run.status_id) %>
-                          <%# Waiting or scheduler-submitted (6): timer and Slurm queue position share one queue-position controller %>
+                        <% elsif run.status_id == 1 %>
+                          <%# Waiting: show waiting timer and queue position %>
                           <div class="text-xs text-gray-500 mt-0.5 space-y-0.5">
-                            <% if run.slurm_job_id.present? %>
+                            <% if run.submitted_at %>
+                              <div data-controller="run-timer"
+                                   data-run-timer-submitted-at-value="<%= run.submitted_at.iso8601 %>">
+                                <i class="fas fa-clock text-gray-400 mr-1"></i>
+                                <span data-run-timer-target="elapsedTime">--:--</span>
+                              </div>
+                            <% end %>
+                            <% if run.slurm_job_id %>
                               <div data-controller="queue-position"
                                    data-queue-position-run-id-value="<%= run.id %>"
                                    data-queue-position-slurm-job-id-value="<%= run.slurm_job_id %>"
                                    data-queue-position-project-id-value="<%= @project.key %>"
                                    <% if run.submitted_at %>
                                      data-queue-position-submitted-at-value="<%= run.submitted_at.iso8601 %>"
-                                   <% end %>
-                                   class="space-y-0.5">
-                                <% if run.submitted_at %>
-                                  <div data-controller="run-timer"
-                                       data-run-timer-submitted-at-value="<%= run.submitted_at.iso8601 %>">
-                                    <i class="fas fa-clock text-gray-400 mr-1 cursor-help" data-queue-position-target="waitingIcon" aria-hidden="true"></i>
-                                    <span data-run-timer-target="elapsedTime">--:--</span>
-                                  </div>
-                                <% end %>
-                                <div data-queue-position-target="queueLine">
-                                  <span data-slurm-queue-position-label class="text-gray-400">Slurm queue position:</span>
-                                  <span data-queue-position-target="position" class="font-mono text-xs ml-0.5 inline-block">
-                                    <i class="fas fa-spinner fa-spin"></i>
-                                  </span>
-                                </div>
-                              </div>
-                            <% elsif run.submitted_at %>
-                              <div data-controller="run-timer"
-                                   data-run-timer-submitted-at-value="<%= run.submitted_at.iso8601 %>">
-                                <i class="fas fa-clock text-gray-400 mr-1"></i>
-                                <span data-run-timer-target="elapsedTime">--:--</span>
+                                   <% end %>>
+                                <span class="text-gray-400">Queue: </span>
+                                <span data-queue-position-target="position" class="font-mono text-xs">
+                                  <i class="fas fa-spinner fa-spin"></i>
+                                </span>
                               </div>
                             <% end %>
                           </div>

@@ -499,9 +499,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
               h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
               preparsed_file_path = h_preparsing['file_path'].to_s
               if preparsed_file_path.present?
-                legacy_prefix = "/data/asap2_test/fus/#{fu.id}/"
-                if preparsed_file_path.start_with?(legacy_prefix)
-                  preparsed_file_path = preparsed_file_path.sub(legacy_prefix, "#{fu.upload_dir}/")
+                staging_dir = fu.global_upload_dir.to_s
+                if preparsed_file_path.start_with?(staging_dir)
+                  rest = preparsed_file_path.delete_prefix(staging_dir).sub(/\A\/+/, '')
+                  preparsed_file_path = File.join(fu.upload_dir.to_s, rest)
                 end
                 if File.exist?(preparsed_file_path)
                   filepath = Pathname.new(preparsed_file_path)
@@ -514,6 +515,77 @@ task :parse, [:project_key] => [:environment] do |t, args|
           rescue => e
             logger.warn("[ParseRake] Could not resolve preparsed RAW_TEXT file path: #{e.class} - #{e.message}")
           end
+        end
+
+        if file_type.to_s.upcase == 'MTX' && fu
+            staging_dir = fu.global_upload_dir.to_s
+            preparsing_output_file = fu.upload_dir + "output.json"
+            if File.exist?(preparsing_output_file)
+              h_mtx_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
+              raw_fp = h_mtx_prep['file_path']
+              prep_paths =
+                if raw_fp.is_a?(Array)
+                  raw_fp.map(&:to_s).map(&:strip).reject(&:blank?)
+                else
+                  [raw_fp.to_s.strip].reject(&:blank?)
+                end
+              prep_paths.each do |prep_p|
+                if prep_p.start_with?(staging_dir)
+                  rest = prep_p.delete_prefix(staging_dir).sub(/\A\/+/, '')
+                  prep_p = File.join(fu.upload_dir.to_s, rest)
+                end
+                next unless prep_p.downcase.end_with?('.mtx') && File.file?(prep_p)
+
+                filepath = Pathname.new(prep_p)
+                logger.info("[ParseRake] Using preparsed MTX matrix path #{filepath} for v8 parsing")
+                break
+              end
+            end
+
+            fp_s = filepath.to_s
+            fp_resolved = begin
+              File.realpath(fp_s)
+            rescue StandardError
+              fp_s
+            end
+            if File.directory?(fp_resolved)
+              matrix_candidate = File.join(fp_resolved, 'matrix.mtx')
+              unless File.file?(matrix_candidate)
+                mtx_list = Dir[File.join(fp_resolved, '*.mtx')].select { |p| File.file?(p) }
+                matrix_candidate = mtx_list.size == 1 ? mtx_list.first : nil
+              end
+              if matrix_candidate.present? && File.file?(matrix_candidate)
+                filepath = Pathname.new(matrix_candidate)
+                logger.info("[ParseRake] MTX project input is a directory; using matrix file #{filepath}")
+              end
+            end
+
+            mtx_final = filepath.to_s
+            unless mtx_final.downcase.end_with?('.mtx') && File.file?(mtx_final)
+              bundle_dir = fu.upload_dir + 'input_file'
+              if bundle_dir.directory?
+                bd = begin
+                  File.realpath(bundle_dir.to_s)
+                rescue StandardError
+                  bundle_dir.to_s
+                end
+                matrix_candidate = File.join(bd, 'matrix.mtx')
+                unless File.file?(matrix_candidate)
+                  mtx_list = Dir[File.join(bd, '*.mtx')].select { |p| File.file?(p) }
+                  matrix_candidate = mtx_list.size == 1 ? mtx_list.first : nil
+                end
+                if matrix_candidate.present? && File.file?(matrix_candidate)
+                  filepath = Pathname.new(matrix_candidate)
+                  logger.info("[ParseRake] MTX matrix resolved from Fu bundle directory #{filepath}")
+                end
+              end
+            end
+
+            mtx_final = filepath.to_s
+            unless mtx_final.downcase.end_with?('.mtx') && File.file?(mtx_final)
+              logger.error("[ParseRake] v8 MTX: could not resolve a .mtx file; last candidate was #{filepath.inspect}")
+              raise "v8 MTX parsing requires a readable path to a .mtx file; resolved input was #{filepath.inspect}"
+            end
         end
 
 
@@ -565,7 +637,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
         h_cmd_parse = {
           'host_name' => "localhost",
           # v8 parsing runs in a container context that does not always mount USER_DATA_DIR
-          # (for example /data/asap2_test), so legacy `time -o <output_dir>/exec_run_details.log`
+          # when USER_DATA_DIR is not mounted in the container, so legacy `time -o <output_dir>/exec_run_details.log`
           # can fail before parser execution. Keep time_call empty for v8 and rely on parser output.
           'time_call' => nil,
           'container_name' => asap_instance_name + "_" + run.id.to_s,

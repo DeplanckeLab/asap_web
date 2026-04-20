@@ -28,7 +28,7 @@ if (typeof document !== 'undefined') {
 }
 
 export default class extends Controller {
-  static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel"]
+  static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel", "stepHelpModal", "stepHelpTitle", "stepHelpBody"]
   static values = {
     projectId: Number,
     projectKey: String,
@@ -124,6 +124,9 @@ export default class extends Controller {
     this._isBootstrapping = true
     this._hasLoadedInitialStep = false
     this._realtimeReloadCooldownUntil = Date.now() + 4000
+
+    this.boundStepHelpCapture = this.onStepHelpCaptureClick.bind(this)
+    this.element.addEventListener('click', this.boundStepHelpCapture, true)
     
     // Remove any blue background from server-rendered steps (all should be white)
     // This ensures consistency with the new design
@@ -351,6 +354,11 @@ export default class extends Controller {
 
   disconnect() {
     this.clearStepPanelFlash()
+    if (this.boundStepHelpCapture) {
+      this.element.removeEventListener('click', this.boundStepHelpCapture, true)
+      this.boundStepHelpCapture = null
+    }
+    this.closeStepHelp()
     if (this.statusUpdateTimer) {
       clearTimeout(this.statusUpdateTimer)
       this.statusUpdateTimer = null
@@ -360,6 +368,96 @@ export default class extends Controller {
       this.boundResetParsingClick = null
     }
     this.unsubscribeFromProject()
+  }
+
+  onStepHelpCaptureClick(event) {
+    const el = event.target
+    if (!el || typeof el.closest !== 'function') return
+    const trigger = el.closest('[data-step-help-trigger]')
+    if (!trigger || !this.element.contains(trigger)) return
+    event.stopPropagation()
+    this.openStepHelp(trigger)
+  }
+
+  openStepHelp(trigger) {
+    if (!this.hasStepHelpModalTarget || !this.hasStepHelpTitleTarget || !this.hasStepHelpBodyTarget) return
+
+    const title = (trigger.dataset.stepHelpTitle || 'Step').trim()
+    const available = trigger.dataset.stepHelpAvailable === 'true'
+    const detail = (trigger.dataset.stepHelpDetail || '').trim()
+
+    this.stepHelpTitleTarget.textContent = title
+    this.fillStepHelpBody(available, detail)
+
+    this.stepHelpModalTarget.classList.remove('hidden')
+    document.body.classList.add('overflow-hidden')
+  }
+
+  fillStepHelpBody(available, detail) {
+    const body = this.stepHelpBodyTarget
+    while (body.firstChild) body.removeChild(body.firstChild)
+
+    if (available) {
+      const p = document.createElement('p')
+      p.className = 'text-gray-700 m-0 leading-relaxed'
+      p.textContent = 'All required inputs for this step are available. You can open it from the pipeline list.'
+      body.appendChild(p)
+      return
+    }
+
+    const intro = document.createElement('p')
+    intro.className = 'text-gray-800 font-medium m-0 mb-3 leading-relaxed'
+    intro.textContent = 'This step is not available yet because some inputs are still missing.'
+    body.appendChild(intro)
+
+    if (!detail) {
+      const p = document.createElement('p')
+      p.className = 'text-gray-600 m-0 leading-relaxed'
+      p.textContent = 'No further detail is available. If this persists, try refreshing the page.'
+      body.appendChild(p)
+      return
+    }
+
+    const prefix = /^Missing inputs:\s*/i
+    let remainder = detail
+    if (prefix.test(detail)) {
+      remainder = detail.replace(prefix, '').trim()
+    }
+
+    const parts = remainder.split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean)
+    if (parts.length <= 1) {
+      const p = document.createElement('p')
+      p.className = 'text-gray-700 m-0 leading-relaxed'
+      p.textContent = remainder
+      body.appendChild(p)
+      return
+    }
+
+    const ul = document.createElement('ul')
+    ul.className = 'list-disc pl-5 m-0 mt-2 space-y-2 text-gray-700 leading-relaxed'
+    parts.forEach((part) => {
+      const li = document.createElement('li')
+      li.textContent = part
+      ul.appendChild(li)
+    })
+    body.appendChild(ul)
+  }
+
+  closeStepHelp() {
+    if (!this.hasStepHelpModalTarget) return
+    this.stepHelpModalTarget.classList.add('hidden')
+    document.body.classList.remove('overflow-hidden')
+  }
+
+  closeStepHelpOnEscape(event) {
+    if (event.key !== 'Escape') return
+    if (!this.hasStepHelpModalTarget || this.stepHelpModalTarget.classList.contains('hidden')) return
+    event.preventDefault()
+    this.closeStepHelp()
+  }
+
+  stopStepHelpPanelClick(event) {
+    event.stopPropagation()
   }
 
   subscribeToProject() {
@@ -463,6 +561,12 @@ export default class extends Controller {
         this.handleStatusUpdate(update)
       }
     }, this.statusUpdateDebounceMs)
+  }
+
+  sumWebsocketStepRunCounts(data) {
+    const counts = data && data.h_nber_analyses
+    if (!counts || typeof counts !== 'object') return 0
+    return Object.values(counts).reduce((sum, v) => sum + (parseInt(v, 10) || 0), 0)
   }
 
   reconcileCurrentStepOnConnect() {
@@ -683,9 +787,12 @@ export default class extends Controller {
 
         if (isShowingFailedPanel && this.isParsingInProgressStatus(parsingStatus)) {
           console.log(`[StepSelectorController] Parsing recovered (${parsingStatus}) from failed panel, reloading content`)
+          const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
-            this.loadStepResults(this.currentStepId, currentStepElement, false)
+            if (stepElForReload) {
+              this.loadStepResults(this.currentStepId, stepElForReload, false)
+            }
           }, 300)
         } else {
           console.log(`[StepSelectorController] Parsing step in progress (${parsingStatus}), skipping content reload`)
@@ -708,7 +815,20 @@ export default class extends Controller {
             this.updateRunStatus(runId)
           })
         } else if (runRows.length === 0 && this.contentTarget.innerHTML.trim().length > 0) {
-          console.log(`[StepSelectorController] No run rows found but content exists, skipping reload to preserve current sub-view`)
+          const runsTotal = this.sumWebsocketStepRunCounts(data)
+          const showingRunsEmptyState = !!this.contentTarget.querySelector('[data-step-runs-empty-state="true"]')
+          if (runsTotal > 0 && showingRunsEmptyState) {
+            const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
+            console.log('[StepSelectorController] Server reports runs for this step but panel still shows empty state, reloading step results')
+            if (stepElForReload) {
+              clearTimeout(this.reloadTimeout)
+              this.reloadTimeout = setTimeout(() => {
+                this.loadStepResults(this.currentStepId, stepElForReload, false)
+              }, 300)
+            }
+          } else {
+            console.log(`[StepSelectorController] No run rows found but content exists, skipping reload to preserve current sub-view`)
+          }
         }
       } else {
         console.warn(`[StepSelectorController] No content target available`)
@@ -776,6 +896,16 @@ export default class extends Controller {
       stepElementFound: !!stepElement
     })
     if (!stepElement) return
+
+    const viewingStepIdStr = this.currentStepId || this.element.getAttribute('data-current-step-id')
+    const viewingStepId = viewingStepIdStr ? parseInt(viewingStepIdStr, 10) : null
+    if (!viewingStepId || viewingStepId !== stepId) {
+      console.log('[StepSelectorController] Terminal parsing broadcast ignored for right panel (user is not viewing parsing)', {
+        viewingStepId,
+        parsingStepId: stepId
+      })
+      return
+    }
 
     this.currentStepId = stepId.toString()
     this.element.setAttribute('data-current-step-id', this.currentStepId)
@@ -1339,9 +1469,11 @@ export default class extends Controller {
     
     // Get step info from the step element
     const stepName = stepElement.querySelector('strong')?.textContent?.trim() || 'Unknown Step'
+    const lockDetail = (stepElement.dataset.stepLockDetail || '').trim()
+    const lockAvail = stepElement.dataset.stepLockAvailable === 'true'
     
-    // Get icon and status from the step element
-    const iconElement = stepElement.querySelector('i')
+    const statusCol = stepElement.querySelector('.flex-shrink-0.mr-3')
+    const iconElement = statusCol ? statusCol.querySelector('i') : stepElement.querySelector('i')
     const iconClass = iconElement ? iconElement.className : 'far fa-circle text-base text-gray-400'
     
     // Get text color class
@@ -1349,11 +1481,38 @@ export default class extends Controller {
                           stepElement.classList.contains('text-green-600') ? 'text-green-600' :
                           'text-gray-900'
     
-    // Add blue left border to button (since this step is selected)
-    button.style.borderLeft = '4px solid #007bff'
-    button.style.setProperty('border-left', '4px solid #007bff', 'important')
-    
-    // Update button content
+    const headerRow = dropdownContainer.firstElementChild
+    if (headerRow && headerRow.classList.contains('flex')) {
+      headerRow.style.setProperty('border-left', '4px solid #007bff', 'important')
+    }
+    button.style.removeProperty('border-left')
+
+    let helpBtn = dropdownContainer.querySelector('[data-step-help-trigger]')
+    if (lockAvail) {
+      if (helpBtn) {
+        helpBtn.remove()
+        helpBtn = null
+      }
+    } else if (headerRow && button) {
+      if (!helpBtn) {
+        helpBtn = document.createElement('button')
+        helpBtn.type = 'button'
+        helpBtn.className = 'step-availability-help flex-shrink-0 w-10 flex items-center justify-center border-0 border-l border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 cursor-pointer'
+        helpBtn.setAttribute('data-step-help-trigger', '')
+        helpBtn.setAttribute('title', 'Availability details')
+        helpBtn.setAttribute('aria-label', 'Availability details for this step')
+        helpBtn.innerHTML = '<span class="sr-only">Availability details</span><i class="far fa-question-circle text-base" aria-hidden="true"></i>'
+        if (button.nextSibling) {
+          headerRow.insertBefore(helpBtn, button.nextSibling)
+        } else {
+          headerRow.appendChild(helpBtn)
+        }
+      }
+      helpBtn.setAttribute('data-step-help-available', 'false')
+      helpBtn.setAttribute('data-step-help-title', stepName)
+      helpBtn.setAttribute('data-step-help-detail', lockDetail)
+    }
+
     const buttonContent = button.querySelector('.flex.items-center')
     if (buttonContent) {
       buttonContent.innerHTML = `
@@ -1361,10 +1520,25 @@ export default class extends Controller {
           <i class="${iconClass}"></i>
         </div>
         <span class="${textColorClass} font-semibold truncate">
-          ${stepName}
+          ${this.escapeForHtmlText(stepName)}
         </span>
       `
     }
+  }
+
+  escapeForHtmlAttribute(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/\r?\n/g, ' ')
+  }
+
+  escapeForHtmlText(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
   }
 
   updateDropdownListSelection(stepId) {

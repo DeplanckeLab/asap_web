@@ -749,6 +749,19 @@ module ApplicationHelper
     status_icons_config.to_json
   end
 
+  # Status id => { ui_label, bg, text } for run row badges (StepSelectorController#getStatusConfig).
+  # Same fields as Status#ui_label, #run_badge_bg_class, #run_badge_text_class.
+  # Do not use .html_safe: value is HTML-escaped inside data-* attributes.
+  def run_status_badge_options_json
+    Status.order(:id).each_with_object({}) do |st, h|
+      h[st.id.to_s] = {
+        'ui_label' => st.ui_label,
+        'bg' => st.run_badge_bg_class,
+        'text' => st.run_badge_text_class
+      }
+    end.to_json
+  end
+
   # Renders a vertical separator line for the header navigation
   def header_separator
     content_tag(:div, nil, class: "border-l border-gray-700 h-12 ml-3 mr-2")

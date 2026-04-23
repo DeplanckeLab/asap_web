@@ -7,8 +7,7 @@ import {
   getDiscretePaletteSelectLabels,
   getDefaultDiscretePaletteId,
   DISCRETE_PALETTE_COLORBLIND,
-  DISCRETE_PALETTE_EXTENDED,
-  DISCRETE_PALETTE_EXTENDED_200,
+  DISCRETE_PALETTE_HIGH_CONTRAST,
   VALID_DISCRETE_PALETTE_IDS
 } from 'visualization/discrete_palettes'
 
@@ -1692,11 +1691,9 @@ export class UIManager {
     if (discretePaletteSelect) {
       const labels = getDiscretePaletteSelectLabels()
       const optCb = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_COLORBLIND}"]`)
-      const optEx = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_EXTENDED}"]`)
-      const opt200 = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_EXTENDED_200}"]`)
+      const optHc = discretePaletteSelect.querySelector(`option[value="${DISCRETE_PALETTE_HIGH_CONTRAST}"]`)
       if (optCb) optCb.textContent = labels[DISCRETE_PALETTE_COLORBLIND]
-      if (optEx) optEx.textContent = labels[DISCRETE_PALETTE_EXTENDED]
-      if (opt200) opt200.textContent = labels[DISCRETE_PALETTE_EXTENDED_200]
+      if (optHc) optHc.textContent = labels[DISCRETE_PALETTE_HIGH_CONTRAST]
       discretePaletteSelect.value = this.controller.discretePaletteId || getDefaultDiscretePaletteId()
       if (!discretePaletteSelect.dataset.paletteListenerBound) {
         discretePaletteSelect.dataset.paletteListenerBound = '1'

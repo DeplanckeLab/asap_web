@@ -7,32 +7,22 @@ class Status < ApplicationRecord
     name
   end
 
-  # User-facing text for run badges (prefer +label+ from DB, then normalize casing).
-  # Raw +label+ values are often lowercase (e.g. "success"); +humanize+ yields "Success".
+  # User-facing text for run badges.
+  # The +display_label+ column stores the intended display string (e.g.
+  # "Pending", "Stopped"); we fall back to humanizing +name+ only if the column
+  # has not been populated for some status row.
   def ui_label
-    raw = self[:label].presence || name.to_s
-    raw.to_s.strip.humanize
+    self[:display_label].presence || name.to_s.strip.humanize
   end
 
+  # Tailwind background class for run badges. Stored in the database so every
+  # caller renders the same pill style without duplicating a case/when mapping.
   def run_badge_bg_class
-    case name.to_s.downcase
-    when 'pending', 'waiting' then 'bg-yellow-100'
-    when 'running' then 'bg-blue-100'
-    when 'success' then 'bg-green-100'
-    when 'failed' then 'bg-red-100'
-    when 'stopped' then 'bg-gray-100'
-    else 'bg-gray-100'
-    end
+    self[:badge_bg_class].to_s
   end
 
+  # Tailwind text color class for run badges. Same rationale as +run_badge_bg_class+.
   def run_badge_text_class
-    case name.to_s.downcase
-    when 'pending', 'waiting' then 'text-yellow-800'
-    when 'running' then 'text-blue-800'
-    when 'success' then 'text-green-800'
-    when 'failed' then 'text-red-800'
-    when 'stopped' then 'text-gray-800'
-    else 'text-gray-800'
-    end
+    self[:badge_text_class].to_s
   end
 end

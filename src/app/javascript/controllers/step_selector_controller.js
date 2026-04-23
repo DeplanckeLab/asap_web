@@ -238,10 +238,13 @@ export default class extends Controller {
         console.log('[StepSelectorController] Step element found:', stepElement)
         if (stepElement) {
           const stepId = stepElement.getAttribute('data-step-id')
+          const stepName = stepElement.getAttribute('data-step-name')
           console.log('[StepSelectorController] Loading step results for step_id:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
-          if (runIdFromUrl && typeof loadRunInRightPanel === 'function') {
+          // Parsing has its own custom results view; it must never be rendered
+          // through the generic run panel even when a run_id is present.
+          if (runIdFromUrl && stepName !== 'parsing' && typeof loadRunInRightPanel === 'function') {
             controller.saveState(stepId, 'run', runIdFromUrl)
             setTimeout(() => {
               loadRunInRightPanel(`/runs/${runIdFromUrl}`, stepId)
@@ -264,12 +267,14 @@ export default class extends Controller {
         const stepElement = controller.element.querySelector(`[data-step-id="${savedState.stepId}"]`)
         if (stepElement) {
           const stepId = savedState.stepId
+          const stepName = stepElement.getAttribute('data-step-name')
           console.log('[StepSelectorController] Restoring step_id from localStorage:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
           
           // If saved state was showing a run, load the run directly
-          if (savedState.contentType === 'run' && savedState.runId) {
+          // (except for parsing, which always uses its own results view).
+          if (savedState.contentType === 'run' && savedState.runId && stepName !== 'parsing') {
             console.log('[StepSelectorController] Restoring run panel for run_id:', savedState.runId)
             // Hide empty state and loading state, show loading
             if (controller.hasEmptyStateTarget) {
@@ -1761,9 +1766,12 @@ export default class extends Controller {
     
     // Save state to localStorage for when user returns from visualization view
     const canonicalForSave = this._analysisCanonicalRunDetailsFromUrl()
+    const stepElementForSave = this.element.querySelector(`[data-step-id="${stepIdString}"]`)
+    const stepNameForSave = stepElementForSave ? stepElementForSave.getAttribute('data-step-name') : null
     const preserveRunInStorage =
       canonicalForSave &&
       canonicalForSave.stepId === String(stepIdString) &&
+      stepNameForSave !== 'parsing' &&
       this._analysisUriAllowsAutoOpenRunPanel() &&
       this._analysisStepQueryAllowsAutoOpenRunPanel(extraQuery) &&
       !String(extraQuery || '').includes('show_form') &&

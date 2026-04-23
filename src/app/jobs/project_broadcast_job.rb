@@ -32,8 +32,10 @@ class ProjectBroadcastJob < ApplicationJob
     parsing_step = Step.where(name: 'parsing').first
     stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
 
-    # Aggregate run counts across all project steps for header display
-    run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+    # Aggregate run counts across all project steps for header display.
+    # Stopped runs (status_id 5) are folded into the `failed` bucket so the
+    # header icon matches the summarized semantics (failed/stopped).
+    run_totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0 }
     json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
     json_data ||= {}
     json_data.each do |sid, count|
@@ -55,7 +57,7 @@ class ProjectBroadcastJob < ApplicationJob
         pending: run_totals[1],
         running: run_totals[2],
         success: run_totals[3],
-        failed: run_totals[4]
+        failed: run_totals[4] + run_totals[5]
       }
     })
 

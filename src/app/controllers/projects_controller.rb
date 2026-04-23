@@ -6553,24 +6553,16 @@ class ProjectsController < ApplicationController
     end
 
     if bundle_reset
-      bundle_real = File.realpath(source_path)
-      upload_dir_realpath = File.expand_path(upload_dir.to_s)
-      staged_bundle_path = nil
-      if bundle_real == upload_dir_realpath || bundle_real.start_with?(upload_dir_realpath + "/")
-        staged_bundle_path = upload_dir.parent + ".reset_staging_bundle_#{fu.id}_#{SecureRandom.hex(6)}"
-        FileUtils.mkdir_p(staged_bundle_path)
-        FileUtils.cp_r(bundle_real, (staged_bundle_path + "input_file").to_s)
-      end
-
-      FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
-      FileUtils.mkdir_p(upload_dir)
-
-      if staged_bundle_path
-        FileUtils.cp_r((staged_bundle_path + "input_file").to_s, (upload_dir + "input_file").to_s)
-        FileUtils.rm_rf(staged_bundle_path)
-      else
-        FileUtils.cp_r(bundle_real, (upload_dir + "input_file").to_s)
-      end
+      # For MTX bundle projects (pre-extracted triplet under fus/<fu_id>/input_file/),
+      # upload_dir must retain BOTH the real uploaded archive (upload_file_path) and
+      # the pre-extracted bundle. Previous logic removed the whole upload_dir and then
+      # wrote matrix.mtx on top of upload_file_path, which destroyed the original
+      # tar.gz and left a plain MatrixMarket file under a *.tar.gz name. The next
+      # preparsing then classified that as a bare MTX and never re-created the
+      # bundle, and parsing later failed with "This file type 'MTX' does not exist."
+      # The bundle and original archive are already on disk from the initial
+      # project creation, so the reset only needs to clear preparsing artifacts
+      # and rerun preparsing on the untouched archive.
 
       matrix_in_bundle = upload_dir + "input_file" + "matrix.mtx"
       unless matrix_in_bundle.file?
@@ -6582,9 +6574,19 @@ class ProjectsController < ApplicationController
         redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project MTX bundle is missing matrix.mtx. Please re-upload the file before resetting parsing.'
         return
       end
-      FileUtils.cp(matrix_in_bundle.to_s, upload_file_path.to_s)
+
+      unless File.exist?(upload_file_path)
+        Rails.logger.warn("[reset_parsing] MTX bundle reset: original upload missing at #{upload_file_path}")
+        redirect_to project_path(@original_project, view: 'analysis'), alert: 'Original upload file is missing from the project. Please re-upload before resetting parsing.'
+        return
+      end
+
+      %w[output.json output.err].each do |name|
+        FileUtils.rm_f((upload_dir + name).to_s)
+      end
+
       restored_file_size = File.size(upload_file_path)
-      Rails.logger.info("[reset_parsing] Restored MTX bundle to #{upload_dir + 'input_file'} and matrix copy to #{upload_file_path}")
+      Rails.logger.info("[reset_parsing] MTX bundle reset: kept bundle at #{upload_dir + 'input_file'} and original upload at #{upload_file_path}")
     else
       source_realpath = begin
         File.realpath(source_path)
@@ -8558,6 +8560,9 @@ class ProjectsController < ApplicationController
 
       step = Step.find_by(id: params[:step_id].to_i)
       return unless step && !step.multiple_runs
+      # Parsing has its own custom results view (_parsing.html.erb) rendered via
+      # step_results; it must never be redirected to the generic run panel URL.
+      return if step.name == 'parsing'
 
       run_id = analysis_single_visible_run_id_for_step(step, all_annots_for_loom, @selected_loom_file)
       return unless run_id
@@ -10735,20 +10740,22 @@ class ProjectsController < ApplicationController
         end
         
         # Count runs by status using ProjectStep aggregate (single source of truth for icons/counters).
+        # Stopped runs (status_id 5) are folded into the `failed` bucket so they render under the
+        # shared failed/stopped icon in the pipeline left panel.
         if project_step&.nber_runs_json.present?
           json_counts = project_step.nber_runs_json.is_a?(String) ? JSON.parse(project_step.nber_runs_json) : project_step.nber_runs_json
           status_counts = {
             waiting: json_counts['1'].to_i,
             running: json_counts['2'].to_i,
             completed: json_counts['3'].to_i,
-            failed: json_counts['4'].to_i
+            failed: json_counts['4'].to_i + json_counts['5'].to_i
           }
         else
           status_counts = {
             waiting: step_runs.count { |r| r.status_id == 1 },
             running: step_runs.count { |r| r.status_id == 2 },
             completed: step_runs.count { |r| r.status_id == 3 },
-            failed: step_runs.count { |r| r.status_id == 4 }
+            failed: step_runs.count { |r| r.status_id == 4 || r.status_id == 5 }
           }
         end
         

@@ -30,7 +30,10 @@ export default class extends Controller {
     "resetButton",
     "fileFormatsData",
     "projectTypesData",
-    "projectName"
+    "projectName",
+    "versionSelect",
+    "supportedFormatsText",
+    "formatMention"
   ]
 
   static values = {
@@ -73,6 +76,7 @@ export default class extends Controller {
     this.preparsingResultData = null  // Store preparsing result for re-rendering
     // Initialize labels from current project_type selection
     this.updateProjectTypeLabels()
+    this.updateSupportedFormats()  // Filter format list + UI text based on current version
     this.resetPreparsingState()
     this.showUploadInputs()
     this.updateResetButtonState()
@@ -2061,10 +2065,12 @@ export default class extends Controller {
     const multiExtensionPatterns = [] // Store patterns with dots for multi-extension matching
     const compressionExtensions = [] // Store compression-only extensions (from COMPRESSED format)
     const formatsMap = this.fileFormatsMap
+    const selectedVersionId = this.currentVersionId()
 
     // Build reverse lookup: extension -> format key
     Object.keys(formatsMap).forEach(formatKey => {
       const format = formatsMap[formatKey]
+      if (!this.isFormatSupportedInVersion(format, selectedVersionId)) return
       if (format && Array.isArray(format.extensions)) {
         format.extensions.forEach(ext => {
           // Normalize extension (remove leading dot if present, convert to lowercase)
@@ -2095,6 +2101,46 @@ export default class extends Controller {
     })
 
     return { single: extensionMap, multi: multiExtensionPatterns, compression: compressionExtensions }
+  }
+
+  currentVersionId() {
+    // Prefer the explicit target; fall back to a form-scoped query for safety.
+    let raw = null
+    if (this.hasVersionSelectTarget) {
+      raw = this.versionSelectTarget.value
+    } else if (this.form) {
+      const el = this.form.querySelector('[name="project[version_id]"]')
+      raw = el ? el.value : null
+    }
+    const parsed = parseInt(raw, 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  isFormatSupportedInVersion(format, versionId) {
+    if (!format) return false
+    const introducedIn = parseInt(format.introduced_in_version_id, 10)
+    // Formats without a recorded introduction version (e.g. UNKNOWN) are always kept.
+    if (!Number.isFinite(introducedIn)) return true
+    // When no version is selected yet, assume the most permissive view (show all
+    // formats). Extension detection will be refined once the user picks a release.
+    if (!Number.isFinite(versionId)) return true
+    return versionId >= introducedIn
+  }
+
+  updateSupportedFormats() {
+    // Refresh the extension -> format map so file-type detection respects the
+    // currently selected ASAP release.
+    this._extensionToFormatMap = this.buildExtensionToFormatMap()
+
+    const versionId = this.currentVersionId()
+    if (this.hasFormatMentionTarget) {
+      this.formatMentionTargets.forEach(el => {
+        const key = (el.dataset.formatKey || '').toUpperCase()
+        const format = this.fileFormatsMap[key]
+        const supported = this.isFormatSupportedInVersion(format, versionId)
+        el.hidden = !supported
+      })
+    }
   }
 
   getFileFormatIcon(formatName) {

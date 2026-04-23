@@ -1,6 +1,53 @@
 <%# Simplified attributes partial for rendering attribute fields %>
 <% @h_attr_vals ||= {} %>
 
+<%
+  # Build compact constraint badges to display next to the field label
+  # (required / min-max items / min-max values). Keeps the user informed of
+  # field rules without stealing vertical space below the input.
+  render_constraint_badges = lambda do |attr|
+    badges = []
+    if attr['not_null']
+      badges << %(<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">required</span>)
+    end
+
+    widget = attr['widget']
+    min_items = attr['min_nber_items']
+    max_items = attr['max_nber_items']
+    show_item_badges = widget == 'input_data' || attr['req_data_structure'] == 'array'
+    if show_item_badges
+      # Skip grey "exactly N items" when min == max: the input-data inline
+      # messages already say "Please select exactly N" / "N items selected".
+      exact_count = min_items && max_items && min_items.to_i > 0 && max_items.to_i > 0 && min_items.to_i == max_items.to_i
+      unless exact_count
+        if min_items && min_items.to_i > 0
+          badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">min #{min_items.to_i} item#{min_items.to_i > 1 ? 's' : ''}</span>)
+        end
+        if max_items && max_items.to_i > 0
+          badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">max #{max_items.to_i} item#{max_items.to_i > 1 ? 's' : ''}</span>)
+        end
+      end
+    end
+
+    # Numeric range applies to textfield/number inputs; for a select with a
+    # min_val/max_val pair, the range is already rendered as the list of
+    # options, so we skip badges there to avoid redundancy.
+    if widget != 'select'
+      min_val = attr['min_val']
+      max_val = attr['max_val']
+      if min_val.present? && max_val.present?
+        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">#{min_val} &le; value &le; #{max_val}</span>)
+      elsif min_val.present?
+        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&ge; #{min_val}</span>)
+      elsif max_val.present?
+        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&le; #{max_val}</span>)
+      end
+    end
+
+    badges.empty? ? '' : %(<span class="ml-2 inline-flex flex-wrap gap-1 align-middle">#{badges.join}</span>)
+  end
+%>
+
 <div class="space-y-4">
   <% @attr_layout.each do |vertical_el| %>
     <div class="space-y-4">
@@ -27,6 +74,12 @@
                     <%= raw(attr['label'] || attr_name.humanize) %>
                     <% if attr['description'].present? %>
                       <span class="text-gray-400 text-xs ml-1" title="<%= attr['description'] %>">?</span>
+                    <% end %>
+                    <%= raw(render_constraint_badges.call(attr)) %>
+                    <% if attr['widget'] == 'input_data' %>
+                      <span data-input-data-validation-inline="<%= attr_name %>"
+                            class="ml-2 hidden"
+                            role="status"></span>
                     <% end %>
                   </label>
                 <% end %>
@@ -142,7 +195,6 @@
 
                         <div data-input-data-selector-target="selectedDiv" class="mt-2 space-y-1 hidden"></div>
                         <%= hidden_field_tag form_attr_name, initial_hidden_value, { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
-                        <div data-input-data-selector-target="validationDiv" class="mt-1 text-xs"></div>
                       </div>
                     <% else %>
                       <p class="text-sm text-red-600">No matching metadata found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>
@@ -177,6 +229,7 @@
                         { id: "attrs_#{attr_name}" } %>
                     <label for="checkbox-<%= attr_name %>" class="ml-2 text-sm text-gray-700">
                       <%= raw(attr['label'] || attr_name.humanize) %>
+                      <%= raw(render_constraint_badges.call(attr)) %>
                     </label>
                   </div>
                   <% if attr['description'].present? %>

@@ -2,9 +2,14 @@
 <%   key = ff.name.to_s.upcase %>
 <%   next if key.blank? %>
 <%   extensions = ff.ext.presence ? ff.ext.split(',').map(&:strip).reject(&:blank?) : [] %>
-<%   hash[key] = { color: ff.color.presence || '#6B7280', label: ff.label.presence || key, extensions: extensions } %>
+<%   hash[key] = {
+        color: ff.color.presence || '#6B7280',
+        label: ff.label.presence || key,
+        extensions: extensions,
+        introduced_in_version_id: ff.introduced_in_version_id
+      } %>
 <% end %>
-<% file_formats_for_js["UNKNOWN"] ||= { color: '#6B7280', label: '?', extensions: [] } %>
+<% file_formats_for_js["UNKNOWN"] ||= { color: '#6B7280', label: '?', extensions: [], introduced_in_version_id: nil } %>
 <%= form_with(model: project, local: true, data: { turbo: false }, class: "contents") do |form| %>
   <% if project.errors.any? %>
     <div id="error_explanation" class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md mb-6">
@@ -73,7 +78,7 @@
           <%= form.select :version_id,
                 options_from_collection_for_select(@versions || [], :id, lambda { |v| v.respond_to?(:beta) && v.beta ? "#{v.id} (beta)" : v.id.to_s }, project.version_id),
                 { prompt: "Select ASAP release" },
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { action: "change->file-upload#checkSubmitButton change->organism-selector#reloadOrganisms" } } %>
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { file_upload_target: "versionSelect", action: "change->file-upload#checkSubmitButton change->file-upload#updateSupportedFormats change->organism-selector#reloadOrganisms" } } %>
         </div>
         </div>
 
@@ -204,8 +209,11 @@
         </button>
       </div>
       <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-        Supported formats: 10x (.h5), loom, text (.csv, .tsv, .txt), H5AD, RDS, archives (.zip, .tar, .tgz), MEX/MTX formats, and compressed variants (.zip, .gz, .bz2, .xz).
-      <%= link_to "Learn more about file formats", file_format_home_index_path, class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+        Supported formats:
+        <span data-file-upload-target="supportedFormatsText">
+          10x (.h5), loom, text (.csv, .tsv, .txt),<span data-file-upload-target="formatMention" data-format-key="H5AD"> H5AD,</span> RDS, archives (.zip, .tar, .tgz), MEX/MTX formats, and compressed variants (.zip, .gz, .bz2, .xz).
+        </span>
+        <%= link_to "Learn more about file formats", file_format_home_index_path, class: "text-blue-600 dark:text-blue-400 hover:underline" %>
       </p>
       
       <!-- File Upload Container -->

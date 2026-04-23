@@ -60,10 +60,58 @@
             <% end %>
           <% end %>
           <% if @step.multiple_runs %>
+            <% run_status_id = @run.status_id.to_i %>
+            <% can_manage_run = analyzable?(@project) && editable?(@project) %>
+            <% runs_list_url = step_results_project_path(@project, step_id: @step.id, format: :html) %>
+            <% if [4, 5].include?(run_status_id) %>
+              <% if can_manage_run %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        title="Re-submit this run with the same parameters"
+                        style="flex-shrink: 0;"
+                        data-controller="restart-run"
+                        data-restart-run-run-id-value="<%= @run.id %>"
+                        data-restart-run-step-id-value="<%= @step.id %>"
+                        data-restart-run-restart-url-value="<%= restart_run_path(@run) %>"
+                        data-restart-run-runs-list-url-value="<%= runs_list_url %>"
+                        data-action="click->restart-run#restart">
+                  <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Restart</span>
+                </button>
+              <% else %>
+                <button type="button" disabled
+                        class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                        style="flex-shrink: 0;"
+                        title="You need analysis and edit rights to restart this run">
+                  <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Restart</span>
+                </button>
+              <% end %>
+            <% elsif [1, 2, 6].include?(run_status_id) %>
+              <% if can_manage_run %>
+                <button type="button"
+                        class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        title="Stop this run"
+                        style="flex-shrink: 0;"
+                        data-controller="stop-run"
+                        data-stop-run-run-id-value="<%= @run.id %>"
+                        data-stop-run-step-id-value="<%= @step.id %>"
+                        data-stop-run-stop-url-value="<%= stop_run_path(@run) %>"
+                        data-stop-run-runs-list-url-value="<%= runs_list_url %>"
+                        data-action="click->stop-run#stop">
+                  <i class="fas fa-stop sm:mr-1"></i><span class="hidden sm:inline"> Stop</span>
+                </button>
+              <% else %>
+                <button type="button" disabled
+                        class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                        style="flex-shrink: 0;"
+                        title="You need analysis and edit rights to stop this run">
+                  <i class="fas fa-stop sm:mr-1"></i><span class="hidden sm:inline"> Stop</span>
+                </button>
+              <% end %>
+            <% end %>
             <button type="button"
                     class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                     style="flex-shrink: 0;"
-                    onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
+                    onclick="loadFormInRightPanel('<%= runs_list_url %>')">
               <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to runs</span>
             </button>
           <% end %>

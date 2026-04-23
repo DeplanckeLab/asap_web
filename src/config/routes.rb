@@ -105,6 +105,8 @@ Rails.application.routes.draw do
     member do
       get :get_de_gene_list
       get :get_ge_geneset_list
+      post :restart
+      post :stop
     end
   end
   resources :reqs

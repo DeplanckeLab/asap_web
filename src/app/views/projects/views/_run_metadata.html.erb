@@ -18,19 +18,43 @@
       <%# wait_time = (run.start_time - run.submitted_at).round %>
       <%# metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
     <% elsif [1, 6].include?(run.status_id) && run.submitted_at %>
-      <%# Ongoing wait - calculate from submitted_at to now %>
-      <% wait_time = (Time.now - run.submitted_at).round %>
-      <% wait_text = "Wait #{duration(wait_time)}" %>
-      <% if local_assigns[:queue_position] && queue_position %>
-        <% wait_text += " (<span data-slurm-queue-position-label>Slurm queue position:</span> <span data-slurm-queue-position=\"#{queue_position}\">#{queue_position}</span>)" %>
-      <% end %>
+      <%# Ongoing wait: the run-timer Stimulus controller ticks every second
+         using submitted_at as the reference point, same mechanism as the
+         running timer and the parsing page. %>
+      <% wait_time_display = duration((Time.now - run.submitted_at).round) %>
       <% slurm_hover_for_clock = local_assigns[:slurm_queue_hover] %>
       <% clock_i = if slurm_hover_for_clock.present?
            %(<i class="fas fa-clock text-gray-400 mr-1 cursor-help" data-slurm-queue-waiting-icon="true" title="#{h(slurm_hover_for_clock)}" aria-label="#{h(slurm_hover_for_clock)}"></i>)
          else
            %(<i class="fas fa-clock text-gray-400 mr-1"></i>)
          end %>
-      <% metadata_parts << "<span id='ongoing_wait_#{run.id}' class='nowrap'>#{clock_i}#{wait_text}</span>" %>
+      <% wait_html = "<span id='ongoing_wait_#{run.id}' class='nowrap' data-controller='run-timer' data-run-timer-submitted-at-value='#{run.submitted_at.iso8601}'>" \
+                    "#{clock_i}Wait " \
+                    "<span data-run-timer-target='elapsedTime' class='font-mono'>#{wait_time_display}</span>" \
+                    "</span>" %>
+      <% metadata_parts << wait_html %>
+
+      <%# Slurm queue position for pending runs: renders the queue-position
+         Stimulus controller, which fetches the position on connect and then
+         stays in sync via ProjectChannel broadcasts. The element removes
+         itself automatically when the run leaves the pending/waiting state
+         (see queue_position_controller.js). %>
+      <% if run.slurm_job_id.present? %>
+        <% initial_position = (local_assigns[:queue_position] if local_assigns[:queue_position]) %>
+        <% queue_html = "<span class='nowrap'" \
+                       " data-controller='queue-position'" \
+                       " data-queue-position-run-id-value='#{run.id}'" \
+                       " data-queue-position-slurm-job-id-value='#{h(run.slurm_job_id)}'" \
+                       " data-queue-position-project-id-value='#{h(run.project&.key)}'" \
+                       "#{run.submitted_at ? " data-queue-position-submitted-at-value='#{run.submitted_at.iso8601}'" : ''}>" \
+                       "<i class='fas fa-list-ol text-gray-400 mr-1'></i>" \
+                       "<span data-slurm-queue-position-label class='text-gray-500'>Slurm queue position:</span> " \
+                       "<span data-queue-position-target='position' class='font-mono ml-0.5'>" \
+                       "#{initial_position ? h(initial_position) : %(<i class='fas fa-spinner fa-spin'></i>)}" \
+                       "</span>" \
+                       "</span>" %>
+        <% metadata_parts << queue_html %>
+      <% end %>
     <% end %>
     <%# Running time - use duration if available, otherwise calculate from start_time %>
     <% run_time_display = nil %>
@@ -48,14 +72,22 @@
     <% end %>
     
     <% if run_time_display %>
-      <%# run_time_text = "<i class='fas fa-play-circle text-gray-400 mr-1'></i>Run #{run_time_display}" %>
-      <% run_time_text = "<i class='fas fa-clock text-gray-400 mr-1'></i>Run #{run_time_display}" %>
-      <% if run.pred_process_duration %>
-        <% run_time_text += " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" %>
-      <% end %>
       <% if is_running %>
-        <% metadata_parts << "<span id='ongoing_run_#{run.id}' class='nowrap'>#{run_time_text}</span>" %>
+        <%# Live-updating running time (same mechanism as the parsing page):
+           the run-timer Stimulus controller ticks every second using
+           data-run-timer-start-time-value as its reference point. %>
+        <% expected_suffix = run.pred_process_duration ? " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" : "" %>
+        <% run_time_html = "<span id='ongoing_run_#{run.id}' class='nowrap' data-controller='run-timer' data-run-timer-start-time-value='#{run.start_time.iso8601}'>" \
+                          "<i class='fas fa-clock text-gray-400 mr-1'></i>Run " \
+                          "<span data-run-timer-target='elapsedTime' class='font-mono'>#{run_time_display}</span>" \
+                          "#{expected_suffix}" \
+                          "</span>" %>
+        <% metadata_parts << run_time_html %>
       <% else %>
+        <% run_time_text = "<i class='fas fa-clock text-gray-400 mr-1'></i>Run #{run_time_display}" %>
+        <% if run.pred_process_duration %>
+          <% run_time_text += " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" %>
+        <% end %>
         <% metadata_parts << "<span class='nowrap'>#{run_time_text}</span>" %>
       <% end %>
     <% end %>
@@ -83,6 +115,11 @@
         <% ram_text += " <span class='text-gray-500'>(expected #{pred_ram_display})</span>" %>
       <% end %>
       <% metadata_parts << "<span class='nowrap'>#{ram_text}</span>" %>
+    <% end %>
+    <%# Email of the user that created this run %>
+    <% run_user_email = run.user&.email %>
+    <% if run_user_email.present? %>
+      <% metadata_parts << "<span class='nowrap'><i class='fas fa-user text-gray-400 mr-1'></i>#{h(run_user_email)}</span>" %>
     <% end %>
     <%= raw metadata_parts.compact.join(" <span class='text-gray-300'>•</span> ") %>
     <%# Hidden spans for JavaScript - add separately after visible metadata to avoid extra separators %>

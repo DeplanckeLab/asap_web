@@ -52,7 +52,28 @@ export default class extends Controller {
   }
 
   handleProjectBroadcast(data) {
-    if (!data || data.event !== "queue_position_changed") {
+    if (!data) {
+      return
+    }
+
+    // When the run this controller belongs to leaves the pending/waiting state,
+    // the queue information is meaningless and must disappear. Use
+    // hideSlurmQueueRow so single-run waiting panels only hide the queue line
+    // (keeping the surrounding waiting UI) while compact list rows remove the
+    // whole "Queue: ..." element.
+    if (data.event === "run_status_changed" && data.run_status) {
+      if (Number(data.run_status.run_id) !== Number(this.runIdValue)) {
+        return
+      }
+      const statusId = Number(data.run_status.status_id)
+      const isWaiting = statusId === 1 || statusId === 6
+      if (!isWaiting) {
+        this.hideSlurmQueueRow()
+      }
+      return
+    }
+
+    if (data.event !== "queue_position_changed") {
       return
     }
     if (!data.run_id || Number(data.run_id) !== Number(this.runIdValue)) {
@@ -78,6 +99,16 @@ export default class extends Controller {
     this.applyQueuePosition(data.queue_position, data.slurm_queue_hover)
   }
 
+  // Fully tears down the controller and removes its root element from the DOM.
+  // Safe to call multiple times.
+  removeElement() {
+    this.stopWaitingTimer()
+    this.unsubscribeFromProject()
+    if (this.element && this.element.parentNode) {
+      this.element.parentNode.removeChild(this.element)
+    }
+  }
+
   syncSlurmHover(text) {
     if (!text) {
       this.clearSlurmHover()
@@ -97,14 +128,28 @@ export default class extends Controller {
   }
 
   hideSlurmQueueRow() {
+    // Preferred path: templates that expose named targets (single-run and
+    // parsing views) hide only the queue row so the surrounding waiting UI
+    // stays visible.
     if (this.hasQueueLineTarget) {
       this.queueLineTarget.classList.add("hidden")
-    } else if (this.hasQueueInfoTarget) {
+      if (this.hasEmptyQueueTarget) {
+        this.emptyQueueTarget.classList.add("hidden")
+      }
+      return
+    }
+    if (this.hasQueueInfoTarget) {
       this.queueInfoTarget.classList.add("hidden")
+      if (this.hasEmptyQueueTarget) {
+        this.emptyQueueTarget.classList.add("hidden")
+      }
+      return
     }
-    if (this.hasEmptyQueueTarget) {
-      this.emptyQueueTarget.classList.add("hidden")
-    }
+
+    // Fallback for compact templates (runs table, pipeline runs list) that do
+    // not wrap the queue line in a dedicated target: drop the whole
+    // controller root, which is the "Queue: ..." element itself.
+    this.removeElement()
   }
 
   showSlurmQueueRow() {

@@ -322,6 +322,24 @@ task :parse, [:project_key] => [:environment] do |t, args|
       # Legacy parsing compatibility (< v8): reuse the historical conversion path
       # used by the original application to handle archives/compressed/MTX inputs.
       if version.id < 8
+        # v8 preparsing pre-extracts MTX archives into fus/<fu_id>/input_file/ and
+        # symlinks the project root to it. If a prior failed legacy run mangled
+        # the root symlink (e.g. overwrote it with a regular file), fall back to
+        # the canonical pre-extracted bundle in the fu upload dir. Matching v8's
+        # MTX short-circuit at line 520 below.
+        if file_type.to_s.upcase == 'MTX' && fu
+          begin
+            fu_upload_dir = fu.upload_dir.to_s
+            preparsed_mtx_dir = File.join(fu_upload_dir, 'input_file')
+            if File.directory?(preparsed_mtx_dir) && File.file?(File.join(preparsed_mtx_dir, 'matrix.mtx'))
+              filepath = Pathname.new(preparsed_mtx_dir)
+              logger.info("[ParseRake] Using pre-extracted MTX bundle from fu upload dir: #{filepath}")
+            end
+          rescue => e
+            logger.warn("[ParseRake] Could not resolve preparsed MTX bundle from fu: #{e.class} - #{e.message}")
+          end
+        end
+
         begin
           conv_res = Basic.convert_other_formats(filepath, logger)
           if conv_res && conv_res[:file_path].present? && conv_res[:file_path].to_s != filepath.to_s
@@ -332,10 +350,20 @@ task :parse, [:project_key] => [:environment] do |t, args|
           converted_type = conv_res && conv_res[:type]
           if converted_type.present?
             # Respect explicit type when already meaningful; otherwise adopt converted type.
-            if file_type.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(file_type)
+            # 'MTX' is listed as a placeholder because the legacy pipeline converts the
+            # MTX triplet to an H5 file (type 'MEX' which maps to Java 'H5_10x'); after
+            # conversion the original MTX type no longer describes the file on disk.
+            convertible_placeholders = ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT', 'MTX']
+            if file_type.blank? || convertible_placeholders.include?(file_type)
               file_type = converted_type
               p['file_type'] = converted_type
               logger.info("[ParseRake] Legacy conversion set file_type to #{file_type}")
+              # mtx_to_h5.R writes the matrix under the "/mtx" group. The Java
+              # parser needs -sel mtx to read that group. Without this, the
+              # H5_10x selection fallback below would pick a group from the
+              # preparsing list_groups (e.g. "input_file.tar.gz") which is not
+              # a real H5 path in the converted file.
+              p['sel_name'] = 'mtx' if converted_type == 'MEX' && p['sel_name'].blank?
             end
           end
         rescue => e

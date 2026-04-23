@@ -41,7 +41,8 @@
       </div>
     <% end %>
 
-    <!-- Compliance Schemas -->
+    <!-- Compliance Schemas (only for ASAP 2 releases, starting from Release 4) -->
+    <% if version.id >= 4 %>
     <div>
       <h2 class="text-sm font-semibold text-gray-800 mb-2">Compliance Schemas</h2>
       
@@ -120,6 +121,7 @@
         <% end %>
       </div>
     </div>
+    <% end %>
 
     <% if tool_versions.present? %>
     

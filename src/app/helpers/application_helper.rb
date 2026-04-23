@@ -762,6 +762,21 @@ module ApplicationHelper
     end.to_json
   end
 
+  # Returns the badge info for a run's status by reading the corresponding
+  # Status row from the database. Callers pass an optional +h_statuses+
+  # ({id => Status}) to avoid per-run lookups when rendering long lists.
+  # Keys are the same as +run_status_badge_options_json+ (ui_label, bg, text).
+  def run_status_badge_for(run, h_statuses = nil)
+    return { ui_label: '', bg: '', text: '' } unless run
+    status = (h_statuses && h_statuses[run.status_id]) || Status.find_by(id: run.status_id)
+    return { ui_label: '', bg: '', text: '' } unless status
+    {
+      ui_label: status.ui_label,
+      bg: status.run_badge_bg_class,
+      text: status.run_badge_text_class
+    }
+  end
+
   # Renders a vertical separator line for the header navigation
   def header_separator
     content_tag(:div, nil, class: "border-l border-gray-700 h-12 ml-3 mr-2")
@@ -771,12 +786,17 @@ module ApplicationHelper
   # More efficient than counting runs directly
   # Returns { pending: N, running: N, success: N, failed: N }
   #
+  # The `:failed` bucket aggregates both failed (status_id 4) and stopped
+  # (status_id 5) runs: in summarized displays (projects list, project
+  # header, pipeline left panel) they are shown together under a single
+  # failed icon with a "Failed/Stopped" tooltip.
+  #
   # For published public projects (public_at set), guests and other snapshot readers must only
   # see runs in the public snapshot (same rule as run_visible_under_publication_rules? / green lock).
   def project_run_counts(project)
     visible_ids = visible_step_ids_for_run_counts
     if project.publication_lock_active? && publication_snapshot_reader?(project)
-      tallies = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+      tallies = { 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0 }
       project.runs
              .where(step_id: visible_ids)
              .where('runs.created_at < ?', project.public_at)
@@ -790,10 +810,10 @@ module ApplicationHelper
         pending: tallies[1],
         running: tallies[2],
         success: tallies[3],
-        failed: tallies[4]
+        failed: tallies[4] + tallies[5]
       }
     else
-      totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0 }
+      totals = { 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0 }
       json_data = project.nber_runs_json.is_a?(String) ? JSON.parse(project.nber_runs_json) : project.nber_runs_json
       json_data ||= {}
       json_data.each do |status_id, count|
@@ -805,8 +825,26 @@ module ApplicationHelper
         pending: totals[1],
         running: totals[2],
         success: totals[3],
-        failed: totals[4]
+        failed: totals[4] + totals[5]
       }
+    end
+  end
+
+  # Tooltip label used in summarized status displays (projects list, project
+  # header, pipeline left panel grid). Stopped runs are grouped under the
+  # failed icon, so the failed bucket is labeled "Failed/Stopped".
+  def run_summary_tooltip_label(key)
+    case key.to_sym
+    when :failed
+      'Failed/Stopped'
+    when :waiting, :pending
+      'Pending'
+    when :running
+      'Running'
+    when :completed, :success
+      'Success'
+    else
+      key.to_s.humanize
     end
   end
 

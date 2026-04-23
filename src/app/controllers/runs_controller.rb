@@ -1,5 +1,5 @@
 class RunsController < ApplicationController
-  before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy]
+  before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy, :restart, :stop]
   before_action :authorize_publication_snapshot_run_access, only: [:get_de_gene_list, :get_ge_geneset_list, :show]
   before_action :get_base_data, only: [:get_de_gene_list, :get_ge_geneset_list]
   include ApplicationHelper
@@ -617,6 +617,218 @@ class RunsController < ApplicationController
 
   # DELETE /runs/1
   # DELETE /runs/1.json
+  # POST /runs/:id/restart
+  # Re-submit an existing run without going through the form.
+  # Intended for steps with multiple_runs == true (steps with a single run are
+  # handled by the Reset button, which deletes the run and redirects to the
+  # form).
+  #
+  # The command is rebuilt from the run's stored attrs_json via Basic.set_run
+  # so that any fix applied to the command-building code (or to referenced
+  # annotations/datasets) is picked up on restart. Only runs in a terminal
+  # non-success state can be restarted (failed or stopped); pending or
+  # running runs must be stopped first via the Stop button.
+  def restart
+    unless editable?(@project) && analyzable?(@project)
+      render json: { status: 'error', message: 'You do not have permission to restart runs on this project.' }, status: :forbidden
+      return
+    end
+
+    if @project.locked_from_publication?(@run)
+      render json: { status: 'error', message: 'This run was created before publication and cannot be restarted.' }, status: :forbidden
+      return
+    end
+
+    unless @step && @step.multiple_runs
+      render json: { status: 'error', message: 'Restart is only available for steps that allow multiple runs.' }, status: :unprocessable_entity
+      return
+    end
+
+    unless [4, 5].include?(@run.status_id.to_i)
+      render json: { status: 'error', message: 'Only failed or stopped runs can be restarted. Stop the run first if it is pending or running.' }, status: :unprocessable_entity
+      return
+    end
+
+    unless @std_method
+      render json: { status: 'error', message: 'Run has no associated std_method; cannot rebuild command.' }, status: :unprocessable_entity
+      return
+    end
+
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    step_dir = project_dir + @step.name
+    output_dir = step_dir + @run.id.to_s
+
+    if File.directory?(output_dir)
+      %w[output.json output.log exec.out exec.err output.plot.json].each do |fname|
+        fpath = output_dir + fname
+        File.delete(fpath) if File.file?(fpath)
+      end
+    else
+      FileUtils.mkdir_p(output_dir)
+    end
+
+    # Kill any running container associated with the run.
+    Basic.kill_run(@run) rescue nil
+
+    # Cancel any live SLURM job; the run may be queued or running.
+    if @run.slurm_job_id.present?
+      begin
+        SlurmService.new(logger: Rails.logger).cancel_job(@run.slurm_job_id)
+      rescue => e
+        Rails.logger.warn("[runs#restart] scancel failed for Run##{@run.id} slurm_job_id=#{@run.slurm_job_id}: #{e.class} - #{e.message}")
+      end
+    end
+
+    @run.update(
+      status_id: 1,
+      error: nil,
+      pid: nil,
+      slurm_job_id: nil,
+      start_time: nil,
+      duration: nil,
+      process_duration: nil,
+      max_ram: nil,
+      submitted_at: Time.current,
+      waiting_duration: nil
+    )
+
+    # Rebuild command_json from the persisted attrs_json using the current
+    # code path (same as ReqsController#create_runs -> Req#set_runs). This
+    # ensures any recent fix to Basic.set_run (or to referenced annotations /
+    # datasets) is applied on restart.
+    h_cmd_params = JSON.parse(@step.command_json)
+    std_method_cmd = JSON.parse(@std_method.command_json)
+    std_method_cmd.each { |k, v| h_cmd_params[k] = v }
+
+    h_res_attrs = Basic.get_std_method_attrs(@std_method, @step)
+    h_attrs = h_res_attrs[:h_attrs]
+
+    h_data_classes = {}
+    DataClass.all.each { |dc| h_data_classes[dc.id] = dc }
+
+    h_annots = {}
+    Annot.where(project_id: @project.id).each { |a| h_annots[a.id] = a }
+
+    # Flatten group_pairs into group_ref / group_comp, mirroring the
+    # pre-set_run massaging done in ReqsController#create_runs.
+    h_run_attrs = Basic.safe_parse_json(@run.attrs_json, {})
+    if (gp = h_run_attrs['group_pairs']) && gp.is_a?(Array) && gp.size >= 2
+      h_run_attrs['group_ref'] = gp[0]
+      h_run_attrs['group_comp'] = gp[1]
+    end
+
+    h_p = {
+      project: @project,
+      h_cmd_params: h_cmd_params,
+      run: @run,
+      p: h_run_attrs,
+      h_attrs: h_attrs,
+      step: @step,
+      h_data_classes: h_data_classes,
+      std_method: @std_method,
+      h_env: @h_env,
+      h_annots: h_annots,
+      el_time: Time.now,
+      user_id: (current_user ? current_user.id : @run.user_id)
+    }
+
+    begin
+      h_set = Basic.set_run(Rails.logger, h_p)
+    rescue => e
+      Rails.logger.error("[runs#restart] Basic.set_run failed for Run##{@run.id}: #{e.class} - #{e.message}")
+      Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
+      Basic.upd_run(@project, @run, { status_id: 4, error: "Failed to rebuild command: #{e.message}" }, true)
+      render json: { status: 'error', message: "Failed to rebuild run command: #{e.message}" }, status: :internal_server_error
+      return
+    end
+
+    if h_set.is_a?(Hash) && h_set[:error]
+      Basic.upd_run(@project, @run, { status_id: 4, error: h_set[:error].to_s }, true)
+      render json: { status: 'error', message: "Failed to rebuild run command: #{h_set[:error]}" }, status: :unprocessable_entity
+      return
+    end
+
+    # Basic.set_run persists a fresh command_json and resets status_id to 1.
+    @run.reload
+
+    Basic.upd_project_step(@project, @step.id)
+    @project.broadcast(@step.id)
+
+    Basic.exec_run(Rails.logger, @run)
+
+    render json: { status: 'ok', run_id: @run.id, step_id: @step.id }
+  rescue => e
+    Rails.logger.error("[runs#restart] Run##{@run&.id} failed: #{e.class} - #{e.message}")
+    Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
+    render json: { status: 'error', message: e.message }, status: :internal_server_error
+  end
+
+  # POST /runs/:id/stop
+  # Stop a pending, queued or running run. Cancels the SLURM job (if any),
+  # kills the Docker container (if any), and marks the run + its enclosing
+  # project_step + project with status_id = 5 (stopped).
+  def stop
+    unless editable?(@project) && analyzable?(@project)
+      render json: { status: 'error', message: 'You do not have permission to stop runs on this project.' }, status: :forbidden
+      return
+    end
+
+    if @project.locked_from_publication?(@run)
+      render json: { status: 'error', message: 'This run was created before publication and cannot be stopped.' }, status: :forbidden
+      return
+    end
+
+    unless [1, 2, 6].include?(@run.status_id.to_i)
+      render json: { status: 'error', message: 'Only pending, waiting or running runs can be stopped.' }, status: :unprocessable_entity
+      return
+    end
+
+    if @run.slurm_job_id.present?
+      begin
+        SlurmService.new(logger: Rails.logger).cancel_job(@run.slurm_job_id)
+      rescue => e
+        Rails.logger.warn("[runs#stop] scancel failed for Run##{@run.id} slurm_job_id=#{@run.slurm_job_id}: #{e.class} - #{e.message}")
+      end
+    end
+
+    begin
+      Basic.kill_run(@run)
+    rescue => e
+      Rails.logger.warn("[runs#stop] kill_run failed for Run##{@run.id}: #{e.class} - #{e.message}")
+    end
+
+    if @run.pid.present? && @run.slurm_job_id.blank?
+      # Only attempt process kill for direct (non-SLURM) runs; slurm_job_id
+      # reuses the pid column and must not be signaled as a local PID.
+      begin
+        Process.kill('TERM', @run.pid.to_i)
+      rescue Errno::ESRCH, Errno::EPERM
+        # Already gone or not permitted; status update still proceeds.
+      end
+    end
+
+    duration = @run.start_time ? (Time.now - @run.start_time).to_f : @run.duration
+
+    @run.update(
+      status_id: 5,
+      error: 'Stopped by user',
+      duration: duration
+    )
+
+    if @project_step
+      @project_step.update(status_id: 5, error_message: 'Stopped by user')
+    end
+    Basic.upd_project_step(@project, @step.id)
+    @project.update(status_id: 5)
+    @project.broadcast(@step.id) if @project.respond_to?(:broadcast)
+
+    render json: { status: 'ok', run_id: @run.id, step_id: @step.id }
+  rescue => e
+    Rails.logger.error("[runs#stop] Run##{@run&.id} failed: #{e.class} - #{e.message}")
+    Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
+    render json: { status: 'error', message: e.message }, status: :internal_server_error
+  end
+
   def destroy
     @log = ''
     start_time = Time.now

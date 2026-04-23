@@ -363,13 +363,7 @@
               <tbody class="bg-white divide-y divide-gray-200">
                 <% @runs.each do |run| %>
                   <% run_locked = @project.locked_from_publication?(run) %>
-                  <% run_status = case run.status_id
-                                  when 1 then { name: 'waiting', class: 'warning', bg: 'bg-yellow-100', text: 'text-yellow-800' }
-                                  when 2 then { name: 'running', class: 'info', bg: 'bg-blue-100', text: 'text-blue-800' }
-                                  when 3 then { name: 'complete', class: 'success', bg: 'bg-green-100', text: 'text-green-800' }
-                                  when 4 then { name: 'failed', class: 'danger', bg: 'bg-red-100', text: 'text-red-800' }
-                                  else { name: 'unknown', class: 'secondary', bg: 'bg-gray-100', text: 'text-gray-800' }
-                                  end %>
+                  <% run_status_record = @h_statuses ? @h_statuses[run.status_id] : nil %>
                   <% std_method = (@h_std_methods && run.std_method_id) ? @h_std_methods[run.std_method_id] : nil %>
                   <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
                   <% h_method_attrs = (std_method && @step) ? (Basic.get_std_method_attrs(std_method, @step)[:h_attrs] rescue Basic.safe_parse_json(std_method.attrs_json, {})) : {} %>
@@ -429,8 +423,8 @@
                     <% end %>
                     <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= run.status_id %>" data-run-table-status-cell>
                       <div class="flex flex-col gap-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status[:bg] %> <%= run_status[:text] %>">
-                          <%= run_status[:name].humanize %>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <%= run_status_record&.run_badge_bg_class %> <%= run_status_record&.run_badge_text_class %>">
+                          <%= run_status_record&.ui_label %>
                         </span>
                         <%# Duration/Timer below status %>
                         <% if run.status_id == 3 && run.duration %>

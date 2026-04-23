@@ -392,6 +392,32 @@ module Basic
       "-v #{r}:#{r}"
     end
 
+    # Mount argument (-v host:container) that makes project data (USER_DATA_DIR
+    # and sibling upload dirs like UPLOAD_DATA_DIR) reachable from sibling
+    # docker containers spawned via DOCKER_CALL. Uses the parent of USER_DATA_DIR
+    # so that both users/ and fus/ subtrees are visible under the same path.
+    def user_data_docker_volume_mount_arg
+      user_data_root = Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.to_s
+      "-v #{user_data_root}:#{user_data_root}"
+    end
+
+    # Prefix for ad-hoc `docker run` invocations that execute an R script inside
+    # the asap_run container (used by legacy format conversions like
+    # MTX->H5 and RDS->Loom). The ENV DOCKER_CALL template is tailored for the
+    # Java parsing path (no `-c`, no /srv mount) and cannot be reused here, so
+    # we build a dedicated prefix that:
+    #   - targets the deployment-specific compose network (ASAP_RUN_DOCKER_NETWORK)
+    #   - mounts the user data root so project paths are reachable
+    #   - mounts /srv/asap_run/srv so the R scripts are available at /srv/
+    #   - appends `-c` so the caller can pass a single quoted shell command
+    def asap_run_docker_cmd_prefix(image_tag)
+      run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
+      if run_network.blank?
+        raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
+      end
+      "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{user_data_docker_volume_mount_arg} -v /srv/asap_run/srv:/srv #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
+    end
+
     def get_asap_docker_for_markers project
       version = project.version
       asap_docker_image = get_asap_docker(version)
@@ -854,10 +880,33 @@ module Basic
     def convert_other_formats file_path, logger
       
       init_file_path = file_path
+      type = nil
       logger.debug("INIT_PATH:" + file_path.to_s)
       base_dir = file_path.parent()
       tmp_file_path = base_dir + 'input_file'
       input_dir = base_dir + 'input_files'
+
+      # v8 preparsing materializes MTX triplets under fus/<fu_id>/input_file/, and the
+      # project root exposes that directory via a symlink named `input_file`. It is
+      # also possible for the caller (parse.rake) to pass the pre-extracted bundle
+      # path directly. In either case the archive/compression pipeline below has
+      # nothing to do and would fail because the "input file" is really a directory.
+      # Detect the pre-extracted MTX bundle and jump straight to the MTX->H5
+      # conversion using the existing directory.
+      resolved_input_path = File.exist?(file_path.to_s) ? Pathname.new(File.realpath(file_path.to_s)) : nil
+      if resolved_input_path && resolved_input_path.directory? && (resolved_input_path + 'matrix.mtx').file?
+        logger.debug("PRE_EXTRACTED_MTX_BUNDLE: " + resolved_input_path.to_s)
+        h5_file_path = base_dir + 'input.h5'
+        cmd = "#{asap_run_docker_cmd_prefix('v7')} 'Rscript --vanilla /srv/mtx_to_h5.R #{resolved_input_path} #{h5_file_path}'"
+        logger.debug("CMD_CONVERT:" + cmd)
+        `#{cmd}`
+        if File.exist?(h5_file_path) && File.size(h5_file_path) > 0
+          logger.debug("FINAL_PATH:" + h5_file_path.to_s)
+          return { :file_path => h5_file_path, :type => 'MEX' }
+        end
+        raise "MTX to H5 conversion failed for pre-extracted bundle at #{resolved_input_path}"
+      end
+
       if File.exist? input_dir
         FileUtils.rm_r input_dir
       end
@@ -981,7 +1030,7 @@ module Basic
       end
       
       if File.exist? input_dir and File.exist? input_dir + 'matrix.mtx'     
-        cmd = "#{ENV.fetch('DOCKER_CALL')} 'Rscript --vanilla /srv/mtx_to_h5.R #{input_dir} #{h5_file_path}'"
+        cmd = "#{asap_run_docker_cmd_prefix('v7')} 'Rscript --vanilla /srv/mtx_to_h5.R #{input_dir} #{h5_file_path}'"
         logger.debug("CMD_CONVERT:" + cmd)
         `#{cmd}`
         if File.exist? h5_file_path and File.size(h5_file_path) > 0
@@ -999,13 +1048,7 @@ module Basic
           ##try to convert
           logger.debug("TRY RDS CONVERSION")
           loom_file_path = base_dir + 'input.loom'
-#          cmd = "#{ENV.fetch('DOCKER_CALL')} \"Rscript -e \\\"rmarkdown::render('convert_seurat.Rmd', params = list(input=\'#{file_path.to_s}\', output=\'#{loom_file_path}\'))\\\"\""
-          run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
-          if run_network.blank?
-            raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
-          end
-          docker_call_v7 = "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2  -v /srv/asap_run/srv:/srv fabdavid/asap_run:v7 -c"
-          cmd = "#{docker_call_v7} 'Rscript --vanilla /srv/convert_seurat.R #{file_path.to_s} #{loom_file_path}'"
+          cmd = "#{asap_run_docker_cmd_prefix('v7')} 'Rscript --vanilla /srv/convert_seurat.R #{file_path.to_s} #{loom_file_path}'"
           logger.debug("CMD RDS: #{cmd}")
           `#{cmd}`
           if File.exist? loom_file_path
@@ -2449,8 +2492,7 @@ module Basic
         
         # Ensure the host root that contains USER_DATA_DIR is mounted so parser
         # containers can read/write project paths like /data/asap2_test/users/...
-        user_data_root = Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.to_s
-        required_mount = "-v #{user_data_root}:#{user_data_root}"
+        required_mount = user_data_docker_volume_mount_arg
         if !h_cmd['docker_call'].include?(required_mount)
           h_cmd['docker_call'].sub!(/^docker run\s+/, "docker run #{required_mount} ")
         end

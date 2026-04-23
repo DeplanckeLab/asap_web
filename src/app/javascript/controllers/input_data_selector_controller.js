@@ -7,7 +7,6 @@ export default class extends Controller {
     "dropdownText",
     "selectedDiv",
     "hiddenField",
-    "validationDiv",
     "option"
   ]
 
@@ -283,6 +282,73 @@ export default class extends Controller {
     return ''
   }
 
+  inlineValidationElement() {
+    const container = this.element.parentElement
+    if (!container) {
+      return null
+    }
+    const name = this.attrNameValue
+    const candidates = container.querySelectorAll("[data-input-data-validation-inline]")
+    for (let i = 0; i < candidates.length; i++) {
+      const el = candidates[i]
+      if (el.getAttribute("data-input-data-validation-inline") === name) {
+        return el
+      }
+    }
+    return null
+  }
+
+  normalizeMaxItems() {
+    const raw = this.maxItemsValue
+    if (raw == null || raw === "") {
+      return null
+    }
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+
+  minSelectionErrorMessage() {
+    const min = this.minItemsValue
+    const maxNum = this.normalizeMaxItems()
+    const onlyOneSelectable = !this.isMultipleValue || maxNum === 1
+
+    if (min > 0 && maxNum != null && min === maxNum) {
+      return `Please select exactly ${min} item${min > 1 ? "s" : ""}`
+    }
+    if (min === 1 && onlyOneSelectable) {
+      return "Please select exactly 1 item"
+    }
+    return `Please select at least ${min} item${min > 1 ? "s" : ""}`
+  }
+
+  selectedCountSuccessMessage(count) {
+    if (count === 1) {
+      return "1 item selected"
+    }
+    return `${count} items selected`
+  }
+
+  setInlineFeedback(inline, kind, text) {
+    if (!inline) {
+      return
+    }
+    const base = "ml-2 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium"
+    if (kind === "hide") {
+      inline.textContent = ""
+      inline.className = "ml-2 hidden"
+      return
+    }
+    if (kind === "error") {
+      inline.className = `${base} border-red-200 bg-red-50 text-red-800`
+      inline.textContent = text
+      return
+    }
+    if (kind === "ok") {
+      inline.className = `${base} border-green-200 bg-green-50 text-green-800`
+      inline.textContent = text
+    }
+  }
+
   filterOptionsByLoomFile(loomFile) {
     this.optionTargets.forEach((input) => {
       let optionValue = null
@@ -309,25 +375,24 @@ export default class extends Controller {
 
   validateSelection() {
     const selectedCount = this.optionTargets.filter((input) => input.checked).length
-    let errorMsg = ''
     let isValid = true
-    
+    const inline = this.inlineValidationElement()
+    const maxNum = this.normalizeMaxItems()
+
     if (this.minItemsValue > 0 && selectedCount < this.minItemsValue) {
-      errorMsg = 'Please select at least ' + this.minItemsValue + ' item' + (this.minItemsValue > 1 ? 's' : '')
-      this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
-      this.validationDivTarget.textContent = errorMsg
-      this.validationDivTarget.style.display = 'block'
+      this.setInlineFeedback(inline, "error", this.minSelectionErrorMessage())
       isValid = false
-    } else if (this.maxItemsValue && selectedCount > this.maxItemsValue) {
-      errorMsg = 'Please select at most ' + this.maxItemsValue + ' item' + (this.maxItemsValue > 1 ? 's' : '')
-      this.validationDivTarget.className = 'mt-1 text-xs text-red-600'
-      this.validationDivTarget.textContent = errorMsg
-      this.validationDivTarget.style.display = 'block'
+    } else if (maxNum != null && selectedCount > maxNum) {
+      this.setInlineFeedback(
+        inline,
+        "error",
+        "Please select at most " + maxNum + " item" + (maxNum > 1 ? "s" : "")
+      )
       isValid = false
+    } else if (selectedCount === 0 && this.minItemsValue === 0) {
+      this.setInlineFeedback(inline, "hide")
     } else {
-      // Hide validation message when there's no error (constraint message above button shows the info)
-      this.validationDivTarget.style.display = 'none'
-      this.validationDivTarget.textContent = ''
+      this.setInlineFeedback(inline, "ok", this.selectedCountSuccessMessage(selectedCount))
     }
     
     // Dispatch custom event for form validation

@@ -1,19 +1,22 @@
 /**
  * Discrete (categorical) color palettes for the main plot.
- * Colorblind-friendly set = first 10 entries aligned with tab10 / server base.
- * Extended = full server palette (visualization_colors.yml via window.CATEGORY_COLORS) plus extra distinct hues.
- * Super-Extended (extended_200 id) = same as Extended, then generated distinct colors up to 200 total.
+ *
+ * Two palettes are exposed:
+ *   - colorblind_friendly: 200 colors, starting with the server-provided
+ *     colorblind-friendly base (visualization_colors.yml via window.CATEGORY_COLORS)
+ *     plus additional distinct hues padded up to 200.
+ *   - high_contrast: 200 colors, not colorblind friendly, ordered so the first
+ *     entries are maximally distinct in CIELAB space (farthest-point-first)
+ *     and later entries are progressively closer to already-used colors.
  */
 
 export const DISCRETE_PALETTE_STORAGE_KEY = 'asap2_discrete_palette_id'
 
 export const DISCRETE_PALETTE_COLORBLIND = 'colorblind_friendly'
 
-export const DISCRETE_PALETTE_EXTENDED = 'extended'
+export const DISCRETE_PALETTE_HIGH_CONTRAST = 'high_contrast'
 
-export const DISCRETE_PALETTE_EXTENDED_200 = 'extended_200'
-
-const EXTENDED_200_TARGET = 200
+const PALETTE_TARGET_SIZE = 200
 
 const GOLDEN_RATIO_CONJ = 0.618033988749895
 
@@ -38,6 +41,40 @@ function hslToRgb (h, s, l) {
 
 function rgbToHex (r, g, b) {
   return '#' + [r, g, b].map((v) => clampByte(v).toString(16).padStart(2, '0')).join('')
+}
+
+function hexToRgbTriple (hex) {
+  const h = String(hex).replace('#', '')
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16)
+  ]
+}
+
+function srgbToLinear (c) {
+  const v = c / 255
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+}
+
+function rgbToLab (r, g, b) {
+  const rl = srgbToLinear(r)
+  const gl = srgbToLinear(g)
+  const bl = srgbToLinear(b)
+  // D65 reference white, sRGB matrix
+  const x = (rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375) / 0.95047
+  const y = (rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750)
+  const z = (rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041) / 1.08883
+  const f = (t) => t > 0.008856 ? Math.cbrt(t) : (7.787 * t) + 16 / 116
+  const fx = f(x); const fy = f(y); const fz = f(z)
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]
+}
+
+function labDistSq (a, b) {
+  const dL = a[0] - b[0]
+  const da = a[1] - b[1]
+  const db = a[2] - b[2]
+  return dL * dL + da * da + db * db
 }
 
 function generatedDistinctHex (index) {
@@ -83,19 +120,40 @@ const EXTENSION_ONLY_HEX = [
 ]
 
 export function getDefaultDiscretePaletteId () {
-  return DISCRETE_PALETTE_EXTENDED_200
+  return DISCRETE_PALETTE_COLORBLIND
 }
 
 export const VALID_DISCRETE_PALETTE_IDS = new Set([
   DISCRETE_PALETTE_COLORBLIND,
-  DISCRETE_PALETTE_EXTENDED,
-  DISCRETE_PALETTE_EXTENDED_200
+  DISCRETE_PALETTE_HIGH_CONTRAST
 ])
+
+// Map legacy ids (previous palette scheme) to the current ones. Any stored
+// preference pointing to a removed palette is migrated transparently.
+const LEGACY_PALETTE_ID_MAP = {
+  extended: DISCRETE_PALETTE_COLORBLIND,
+  extended_200: DISCRETE_PALETTE_COLORBLIND
+}
+
+function normalizeStoredPaletteId (raw) {
+  if (!raw) return null
+  if (VALID_DISCRETE_PALETTE_IDS.has(raw)) return raw
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PALETTE_ID_MAP, raw)) {
+    return LEGACY_PALETTE_ID_MAP[raw]
+  }
+  return null
+}
 
 export function readStoredDiscretePaletteId () {
   try {
-    const v = localStorage.getItem(DISCRETE_PALETTE_STORAGE_KEY)
-    if (v && VALID_DISCRETE_PALETTE_IDS.has(v)) return v
+    const raw = localStorage.getItem(DISCRETE_PALETTE_STORAGE_KEY)
+    const normalized = normalizeStoredPaletteId(raw)
+    if (normalized) {
+      if (normalized !== raw) {
+        try { localStorage.setItem(DISCRETE_PALETTE_STORAGE_KEY, normalized) } catch (e) { /* ignore */ }
+      }
+      return normalized
+    }
   } catch (e) {
     // ignore
   }
@@ -110,37 +168,32 @@ export function writeStoredDiscretePaletteId (id) {
   }
 }
 
-export function getColorblindFriendlyHexList () {
-  if (typeof window !== 'undefined' && window.CATEGORY_COLORS && window.CATEGORY_COLORS.length >= 10) {
-    return window.CATEGORY_COLORS.slice(0, 10)
-  }
-  return [...TAB10_FALLBACK]
-}
-
-export function getExtendedHexList () {
+function getColorblindBaseHexList () {
   const base = (typeof window !== 'undefined' && window.CATEGORY_COLORS && window.CATEGORY_COLORS.length > 0)
     ? [...window.CATEGORY_COLORS]
     : [...TAB10_FALLBACK]
   const combined = [...base]
-  const seen = new Set(combined.map(c => String(c).toLowerCase()))
+  const seen = new Set(combined.map((c) => String(c).toLowerCase()))
   for (let i = 0; i < EXTENSION_ONLY_HEX.length; i++) {
-    const h = EXTENSION_ONLY_HEX[i]
-    const k = h.toLowerCase()
+    const hex = EXTENSION_ONLY_HEX[i]
+    const k = hex.toLowerCase()
     if (!seen.has(k)) {
-      combined.push(h)
+      combined.push(hex)
       seen.add(k)
     }
   }
   return combined
 }
 
-export function getExtended200HexList () {
-  const base = getExtendedHexList()
-  const out = [...base]
+let colorblindFriendlyCache = null
+
+export function getColorblindFriendlyHexList () {
+  if (colorblindFriendlyCache) return colorblindFriendlyCache
+  const out = getColorblindBaseHexList()
   const seen = new Set(out.map((c) => String(c).toLowerCase()))
   let genI = 0
   const maxAttempts = 8000
-  while (out.length < EXTENDED_200_TARGET && genI < maxAttempts) {
+  while (out.length < PALETTE_TARGET_SIZE && genI < maxAttempts) {
     const hex = generatedDistinctHex(genI)
     genI++
     const k = hex.toLowerCase()
@@ -149,22 +202,89 @@ export function getExtended200HexList () {
       out.push(hex)
     }
   }
+  colorblindFriendlyCache = out
+  return out
+}
+
+let highContrastCache = null
+
+function buildHighContrastCandidatePool () {
+  const candidates = []
+  const seen = new Set()
+  // HSL grid: fine hue resolution, multiple saturations and lightnesses
+  // so the farthest-first selection has a rich pool to draw from.
+  for (let h = 0; h < 360; h += 10) {
+    for (const s of [55, 75, 95]) {
+      for (const l of [35, 50, 65, 80]) {
+        const [r, g, b] = hslToRgb(h, s, l)
+        const hex = rgbToHex(r, g, b)
+        const k = hex.toLowerCase()
+        if (seen.has(k)) continue
+        seen.add(k)
+        candidates.push({ hex, lab: rgbToLab(r, g, b) })
+      }
+    }
+  }
+  return candidates
+}
+
+export function getHighContrastHexList () {
+  if (highContrastCache) return highContrastCache
+
+  const candidates = buildHighContrastCandidatePool()
+
+  // Seed with a vivid red so the first color is deterministic and visually
+  // familiar. Subsequent colors are chosen greedily by maximizing the
+  // minimum CIELAB distance to the already-selected set.
+  const seedHex = '#e41a1c'
+  const [sr, sg, sb] = hexToRgbTriple(seedHex)
+  const seedLab = rgbToLab(sr, sg, sb)
+
+  const out = [seedHex]
+  const selected = new Set([seedHex.toLowerCase()])
+  const minDistSq = new Array(candidates.length)
+  for (let i = 0; i < candidates.length; i++) {
+    minDistSq[i] = labDistSq(candidates[i].lab, seedLab)
+  }
+
+  while (out.length < PALETTE_TARGET_SIZE) {
+    let bestIdx = -1
+    let bestDist = -1
+    for (let i = 0; i < candidates.length; i++) {
+      if (selected.has(candidates[i].hex.toLowerCase())) continue
+      const d = minDistSq[i]
+      if (d > bestDist) {
+        bestDist = d
+        bestIdx = i
+      }
+    }
+    if (bestIdx < 0) break
+
+    const picked = candidates[bestIdx]
+    out.push(picked.hex)
+    selected.add(picked.hex.toLowerCase())
+
+    for (let i = 0; i < candidates.length; i++) {
+      if (selected.has(candidates[i].hex.toLowerCase())) continue
+      const d = labDistSq(candidates[i].lab, picked.lab)
+      if (d < minDistSq[i]) minDistSq[i] = d
+    }
+  }
+
+  highContrastCache = out
   return out
 }
 
 export function getDiscretePaletteHexList (paletteId) {
-  if (paletteId === DISCRETE_PALETTE_COLORBLIND) return getColorblindFriendlyHexList()
-  if (paletteId === DISCRETE_PALETTE_EXTENDED_200) return getExtended200HexList()
-  return getExtendedHexList()
+  if (paletteId === DISCRETE_PALETTE_HIGH_CONTRAST) return getHighContrastHexList()
+  return getColorblindFriendlyHexList()
 }
 
 export function getDiscretePaletteSelectLabels () {
   const cb = getColorblindFriendlyHexList()
-  const ex = getExtendedHexList()
-  const x200 = getExtended200HexList()
+  const hc = getHighContrastHexList()
   return {
     [DISCRETE_PALETTE_COLORBLIND]: `Colorblind friendly (${cb.length} colors)`,
-    [DISCRETE_PALETTE_EXTENDED]: `Extended (${ex.length} colors)`,
-    [DISCRETE_PALETTE_EXTENDED_200]: `Super-Extended (${x200.length} colors)`
+    [DISCRETE_PALETTE_HIGH_CONTRAST]: `High contrast (${hc.length} colors)`
   }
 }

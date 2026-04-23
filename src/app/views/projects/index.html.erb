@@ -369,7 +369,7 @@
                           icon_class += " #{config[:icon_spin]}" if is_active && config[:icon_spin].present?
                           color_class = is_active ? config[:active_color] : 'text-gray-300'
                         %>
-                        <div class="flex flex-col items-center" title="<%= config[:ui_label] %>">
+                        <div class="flex flex-col items-center" title="<%= run_summary_tooltip_label(key) %>">
                           <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
                           <span class="text-[9px] leading-tight text-gray-400 mt-0.5"><%= count %></span>
                         </div>

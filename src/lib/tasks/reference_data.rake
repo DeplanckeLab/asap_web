@@ -10,7 +10,7 @@ namespace :reference_data do
       puts "Usage:"
       puts "  bin/rake reference_data:export LABEL=dev OUT=/tmp/asap-dev.json"
       puts "Optional:"
-      puts "  MODELS=Step,StdMethod,DockerImage,Version"
+      puts "  MODELS=Step,StdMethod,DockerImage,Version,Speed"
       puts "  INCLUDE_TIMESTAMPS=1"
       exit 1
     end
@@ -32,7 +32,7 @@ namespace :reference_data do
       puts "  bin/rake reference_data:compare LEFT=/tmp/asap-dev.json RIGHT=/tmp/asap-prod.json"
       puts "Optional:"
       puts "  OUT=/tmp/asap-diff-report.json"
-      puts "  MODELS=Step,StdMethod,DockerImage,Version"
+      puts "  MODELS=Step,StdMethod,DockerImage,Version,Speed"
       exit 1
     end
 

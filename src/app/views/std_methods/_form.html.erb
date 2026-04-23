@@ -33,9 +33,23 @@
     </div>
 
     <div>
+      <%= form.label :version_id, "Version ID", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :version_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :docker_image_id, "Docker Image ID", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.number_field :docker_image_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      </div>
+    </div>
+
+    <div>
       <%= form.label :step_id, "Step", class: "block text-sm font-medium text-gray-700" %>
       <div class="mt-1">
-        <%= form.collection_select :step_id, Step.order(:rank, :name), :id, :label, { prompt: "Select a step..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
+        <%= form.collection_select :step_id, (@steps || Step.none), :id, :label, { prompt: "Select a step..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
       </div>
     </div>
 
@@ -71,20 +85,6 @@
       <%= form.label :nber_cores, "Number of Cores", class: "block text-sm font-medium text-gray-700" %>
       <div class="mt-1">
         <%= form.number_field :nber_cores, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
-      </div>
-    </div>
-
-    <div>
-      <%= form.label :version_id, "Version ID", class: "block text-sm font-medium text-gray-700" %>
-      <div class="mt-1">
-        <%= form.number_field :version_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
-      </div>
-    </div>
-
-    <div>
-      <%= form.label :docker_image_id, "Docker Image ID", class: "block text-sm font-medium text-gray-700" %>
-      <div class="mt-1">
-        <%= form.number_field :docker_image_id, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
       </div>
     </div>
 

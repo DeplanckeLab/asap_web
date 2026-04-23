@@ -370,11 +370,34 @@ module Basic
     end
 
     def get_asap_docker version
-      h_env = JSON.parse(version.env_json)
-      list_docker_image_names = h_env['docker_images'].keys.map{|k| h_env['docker_images'][k]["name"] + ":" + h_env['docker_images'][k]["tag"]}
-      docker_images = DockerImage.where("full_name in (" + list_docker_image_names.map{|e| "'#{e}'"}.join(",") + ")").all
-      asap_docker_image = docker_images.select{|e| e.name == ENV.fetch('ASAP_DOCKER_NAME')}.first
-      return asap_docker_image
+      return nil if version.nil?
+
+      raw = version.env_json
+      return nil if raw.blank?
+
+      h_env = JSON.parse(raw)
+      unless h_env.is_a?(Hash)
+        return nil
+      end
+
+      docker_cfgs = h_env['docker_images']
+      return nil unless docker_cfgs.is_a?(Hash)
+
+      list_docker_image_names = docker_cfgs.filter_map do |_key, cfg|
+        next unless cfg.is_a?(Hash)
+
+        n = cfg['name'].to_s
+        next if n.empty?
+
+        "#{n}:#{cfg['tag']}"
+      end
+      return nil if list_docker_image_names.empty?
+
+      docker_images = DockerImage.where(full_name: list_docker_image_names).to_a
+      asap_docker_name = ENV.fetch('ASAP_DOCKER_NAME')
+      docker_images.find { |e| e.name == asap_docker_name }
+    rescue JSON::ParserError, TypeError
+      nil
     end
 
     # Mounted host:container at the same absolute path (typical Linux deploy).

@@ -8,7 +8,12 @@
       </p>
     </div>
     <% if admin? %>
-      <%= link_to 'New Standard Method', new_std_method_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+      <%
+        new_std_method_query = {}
+        new_std_method_query[:docker_image_id] = @selected_docker_image_id if @selected_docker_image_id.present?
+        new_std_method_query[:version_id] = @selected_version_id if @selected_version_id.present?
+      %>
+      <%= link_to 'New Standard Method', new_std_method_path(new_std_method_query), class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
     <% end %>
   </div>
 

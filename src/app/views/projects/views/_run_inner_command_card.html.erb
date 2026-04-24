@@ -1,0 +1,12 @@
+<%# locals: run, card_class, header_class, body_class, pre_class %>
+<% line = run_inner_command_line(local_assigns[:run]) %>
+<% if line.present? %>
+  <div class="<%= local_assigns[:card_class] %>">
+    <div class="<%= local_assigns[:header_class] %>">
+      Command
+    </div>
+    <div class="<%= local_assigns[:body_class] %>">
+      <pre class="<%= local_assigns[:pre_class] %>"><%= line %></pre>
+    </div>
+  </div>
+<% end %>

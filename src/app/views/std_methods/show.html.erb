@@ -57,10 +57,10 @@
           <dd class="text-gray-600 whitespace-pre-line"><%= raw @std_method.description %></dd>
         </div>
       <% end %>
-      <% if @std_method.program.present? %>
+      <% if @std_method.command_program.present? %>
         <div class="px-4 py-3 flex items-start justify-between">
           <dt class="font-medium text-gray-900">Program</dt>
-          <dd class="w-3/4 text-gray-600"><%= @std_method.program %></dd>
+          <dd class="w-3/4 text-gray-600"><%= @std_method.command_program %></dd>
         </div>
       <% end %>
       <% if @std_method.speed_id.present? %>

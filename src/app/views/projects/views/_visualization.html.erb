@@ -1583,7 +1583,6 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                      const annotId = item.dataset.annotId || null;
                      const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
                      if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
-                       console.log('[UI] Matrix dropdown change detected:', item.dataset.value, 'annot_id:', annotId);
                        geneMgr.onMatrixLayerChange(item.dataset.value, annotId);
                      }
                    })(this)">
@@ -1621,7 +1620,6 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                        const annotId = item.dataset.annotId || null;
                        const geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager;
                        if (geneMgr && typeof geneMgr.onMatrixLayerChange === 'function') {
-                         console.log('[UI] Matrix dropdown change detected:', item.dataset.value, 'annot_id:', annotId);
                          geneMgr.onMatrixLayerChange(item.dataset.value, annotId);
                        }
                      })(this)">

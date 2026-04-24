@@ -11,6 +11,15 @@
                 <% id = horiz_element['id'].to_s %>
                 <div class="horiz_element <%= horiz_element['container_class'] || '' %>">
                   <% if horiz_element['type'] == 'card' && (@h_el[id] || (horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?))) %>
+                    <% if id == 'card-downloads' %>
+                      <%= render partial: 'projects/views/run_inner_command_card', locals: {
+                        run: @run,
+                        card_class: 'card mb-3',
+                        header_class: 'card-header',
+                        body_class: 'card-body',
+                        pre_class: 'mb-0 small font-monospace text-break'
+                      } %>
+                    <% end %>
                     <div class="card <%= horiz_element['class'] || '' %>">
                       <% if @h_el[id] %>
                         <% if @h_el[id][:card_header] %>
@@ -28,6 +37,16 @@
               <% end %>
             </div>
           <% end %>
+        <% end %>
+        <% layout_includes_downloads = @layout.any? { |ve| (ve['horiz_elements'] || []).any? { |he| he['id'].to_s == 'card-downloads' } } %>
+        <% unless layout_includes_downloads %>
+          <%= render partial: 'projects/views/run_inner_command_card', locals: {
+            run: @run,
+            card_class: 'card mb-3',
+            header_class: 'card-header',
+            body_class: 'card-body',
+            pre_class: 'mb-0 small font-monospace text-break'
+          } %>
         <% end %>
       <% else %>
         <%# Default layout if no layout specified %>
@@ -55,6 +74,13 @@
               </div>
             <% end %>
             
+            <%= render partial: 'projects/views/run_inner_command_card', locals: {
+              run: @run,
+              card_class: 'card mb-3',
+              header_class: 'card-header',
+              body_class: 'card-body',
+              pre_class: 'mb-0 small font-monospace text-break'
+            } %>
             <% if @h_el['card-downloads'] %>
               <div class="card mb-3">
                 <% if @h_el['card-downloads'][:card_header] %>

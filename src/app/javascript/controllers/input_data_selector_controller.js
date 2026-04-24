@@ -48,11 +48,12 @@ export default class extends Controller {
       document.removeEventListener('click', this.boundCloseDropdown, true)
     }
     if (this._boundGroupRefChangeHandler) {
-      const refSelect = document.getElementById("attrs_group_ref")
+      const refSelect = this._deGroupRefSelect || document.getElementById("attrs_group_ref")
       if (refSelect) {
         refSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
       }
       this._boundGroupRefChangeHandler = null
+      this._deGroupRefSelect = null
     }
     if (this.formElement && this.boundMatrixContextChanged) {
       this.formElement.removeEventListener('input-data:matrix-context-changed', this.boundMatrixContextChanged)
@@ -599,12 +600,14 @@ export default class extends Controller {
       compSelect.dispatchEvent(new Event("change", { bubbles: true }))
     }
 
-    if (!this._boundGroupRefChangeHandler) {
-      this._boundGroupRefChangeHandler = () => {
-        refreshComparedSelect()
-      }
-      refSelect.addEventListener("change", this._boundGroupRefChangeHandler)
+    if (this._boundGroupRefChangeHandler && this._deGroupRefSelect) {
+      this._deGroupRefSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
     }
+    this._boundGroupRefChangeHandler = () => {
+      refreshComparedSelect()
+    }
+    this._deGroupRefSelect = refSelect
+    refSelect.addEventListener("change", this._boundGroupRefChangeHandler)
 
     refreshComparedSelect()
     refSelect.dispatchEvent(new Event("change", { bubbles: true }))

@@ -66,7 +66,7 @@
             <% if [4, 5].include?(run_status_id) %>
               <% if can_manage_run %>
                 <button type="button"
-                        class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
+                        class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                         title="Re-submit this run with the same parameters"
                         style="flex-shrink: 0;"
                         data-controller="restart-run"
@@ -246,6 +246,16 @@
         </div>
       <% end %>
 
+      <% if @run && @step && !@step.has_std_view %>
+        <%= render partial: 'projects/views/run_inner_command_card', locals: {
+          run: @run,
+          card_class: tw_class('card'),
+          header_class: tw_class('card-header'),
+          body_class: tw_class('card-body'),
+          pre_class: 'text-xs font-mono text-gray-900 m-0 whitespace-pre-wrap break-all'
+        } %>
+      <% end %>
+
       <% if @step && @step.has_std_view %>
         <%# Use std_view structure for additional content %>
         <% if @layout && @layout.any? %>
@@ -262,6 +272,15 @@
                   <% id = horiz_element['id'].to_s %>
                   <%# Only render the container if the card will actually be displayed %>
                   <% if horiz_element['type'] == 'card' && (@h_el[id] || (horiz_element['partial'] && @h_outputs && @h_outputs[horiz_element['output_name']] && (!horiz_element['admin'] || admin?))) %>
+                    <% if id == 'card-downloads' %>
+                      <%= render partial: 'projects/views/run_inner_command_card', locals: {
+                        run: @run,
+                        card_class: tw_class('card'),
+                        header_class: tw_class('card-header'),
+                        body_class: tw_class('card-body'),
+                        pre_class: 'text-xs font-mono text-gray-900 m-0 whitespace-pre-wrap break-all'
+                      } %>
+                    <% end %>
                     <% container_class_str = horiz_element['container_class'] || '' %>
                     <%# Swap col-md-4 and col-md-8 for params and downloads to fix layout %>
                     <% if id == 'card-params' && container_class_str == 'col-md-4' %>
@@ -472,6 +491,16 @@
               <% end %>
             <% end %>
           <% end %>
+          <% layout_includes_downloads = @layout.any? { |ve| (ve['horiz_elements'] || []).any? { |he| he['id'].to_s == 'card-downloads' } } %>
+          <% unless layout_includes_downloads %>
+            <%= render partial: 'projects/views/run_inner_command_card', locals: {
+              run: @run,
+              card_class: tw_class('card'),
+              header_class: tw_class('card-header'),
+              body_class: tw_class('card-body'),
+              pre_class: 'text-xs font-mono text-gray-900 m-0 whitespace-pre-wrap break-all'
+            } %>
+          <% end %>
         <% else %>
           <%# Default layout if no layout specified %>
           <div class="space-y-4">
@@ -654,6 +683,13 @@
               </div>
             <% end %>
             
+            <%= render partial: 'projects/views/run_inner_command_card', locals: {
+              run: @run,
+              card_class: tw_class('card'),
+              header_class: tw_class('card-header'),
+              body_class: tw_class('card-body'),
+              pre_class: 'text-xs font-mono text-gray-900 m-0 whitespace-pre-wrap break-all'
+            } %>
             <% if @h_el['card-downloads'] %>
               <div class="<%= tw_class('card') %>">
                 <% if @h_el['card-downloads'][:card_header] %>

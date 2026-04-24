@@ -31,6 +31,13 @@ module ApplicationHelper
     "#{run.step&.label || 'Step'} ##{run.num}"
   end
 
+  # Program/opts/args line from command_json (no docker run, no sh -c), for run result UI.
+  def run_inner_command_line(run)
+    return nil unless run&.command_json.present?
+
+    Basic.run_inner_command_display_string(run.command_json)
+  end
+
   def user_display_name(user, current_user: nil)
     return '-' unless user
     return 'me' if current_user && user.id == current_user.id

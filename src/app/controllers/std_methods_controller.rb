@@ -72,7 +72,7 @@ class StdMethodsController < ApplicationController
 
   def std_method_params
     params.require(:std_method).permit(
-      :name, :label, :step_id, :description, :short_label, :program, :command_json, :nber_cores,
+      :name, :label, :step_id, :description, :short_label, :command_json, :nber_cores,
       :link, :speed_id, :attrs_json, :attr_layout_json, :obj_attrs_json, :obsolete, :version_id, :docker_image_id
     )
   end

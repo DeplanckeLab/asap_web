@@ -476,6 +476,128 @@ module Basic
       source_meta.id
     end
 
+    def command_json_boolean_truthy?(val)
+      val == true || val == 1 || val.to_s.strip.casecmp('true').zero?
+    end
+
+    # command_json may request 0-based category indices for the CLI instead of labels.
+    #
+    # Per opt/arg (de.v8.py style):
+    #   { "opt": "--group1", "param_key": "group_ref", "use_group_category_index": true }
+    #
+    # Legacy top-level:
+    #   "group1_use_category_index": true, "group2_use_category_index": true
+    #   "group1": { "use_category_index": true }, "group2": { "use_category_index": true }
+    def command_json_use_category_index_for_de_group?(h_cmd, group_key)
+      return false unless h_cmd.is_a?(Hash)
+
+      top = h_cmd["#{group_key}_use_category_index"]
+      return true if command_json_boolean_truthy?(top)
+
+      nested = h_cmd[group_key.to_s]
+      return false unless nested.is_a?(Hash)
+
+      command_json_boolean_truthy?(nested['use_category_index'])
+    end
+
+    def de_param_keys_requiring_group_category_index(h_cmd)
+      return [] unless h_cmd.is_a?(Hash)
+
+      keys = []
+      %w[args opts].each do |list_key|
+        (h_cmd[list_key] || []).each do |entry|
+          next unless entry.is_a?(Hash)
+          next unless command_json_boolean_truthy?(entry['use_group_category_index'])
+
+          pk = entry['param_key']
+          keys << pk.to_s if pk.present?
+        end
+      end
+
+      keys << 'group_ref' if command_json_use_category_index_for_de_group?(h_cmd, 'group1')
+      keys << 'group_comp' if command_json_use_category_index_for_de_group?(h_cmd, 'group2')
+      keys.uniq
+    end
+
+    # list_cat_json is normally a JSON array of category labels (metadata import / add_cell_sets).
+    # A JSON object of categories is ordered like Basic metadata key ordering.
+    def de_group_category_labels_from_list_cat_json(parsed)
+      case parsed
+      when Array
+        parsed
+      when Hash
+        keys = parsed.keys
+        ordered_keys = if keys.all? { |k| k.to_s.match?(/\A-?\d+\z/) }
+                         keys.sort_by { |k| k.to_i }
+                       elsif keys.all? { |k| k.to_s.match?(/\A-?\d*\.?\d+\z/) }
+                         keys.sort_by { |k| k.to_f }
+                       else
+                         keys.sort { |a, b| a.to_s <=> b.to_s }
+                       end
+        ordered_keys.map { |k| parsed[k] }
+      else
+        []
+      end
+    end
+
+    def de_group_category_label_index(list_cats, raw)
+      target = raw.to_s.strip
+      list_cats.each_index.find do |i|
+        list_cats[i].nil? ? false : list_cats[i].to_s.strip == target
+      end
+    end
+
+    def annot_for_de_group_category_mapping(p, h_annots, project)
+      groups = p['groups']
+      if groups.is_a?(Array) && groups[0].is_a?(Hash) && groups[0]['annot_id'].present?
+        aid = groups[0]['annot_id'].to_i
+        annot = h_annots[aid] if h_annots.is_a?(Hash)
+        return annot if annot
+
+        return Annot.find_by(id: aid, project_id: project.id)
+      end
+
+      if p['groups_id'].present?
+        gid = p['groups_id'].to_i
+        annot = h_annots[gid] if h_annots.is_a?(Hash)
+        return annot if annot
+
+        return Annot.find_by(id: gid, project_id: project.id)
+      end
+
+      nil
+    end
+
+    def apply_de_group_category_indices_from_command_json!(logger, h_cmd_params, h_var, p, h_annots, project)
+      param_keys = de_param_keys_requiring_group_category_index(h_cmd_params)
+      return if param_keys.empty?
+
+      annot = annot_for_de_group_category_mapping(p, h_annots, project)
+      unless annot
+        raise StandardError, 'use_group_category_index requires attrs["groups"] with annot_id or attrs["groups_id"] pointing to the grouping metadata annot'
+      end
+
+      parsed = Basic.safe_parse_json(annot.list_cat_json, [])
+      list_cats = de_group_category_labels_from_list_cat_json(parsed)
+      if list_cats.empty?
+        logger.warn("[set_run] use_group_category_index set but annot #{annot.id} has no usable list_cat_json categories; leaving #{param_keys.join(', ')} as in attrs (e.g. binary 0/1 selections)")
+        return
+      end
+
+      param_keys.each do |pk|
+        raw = h_var[pk]
+        raise StandardError, "use_group_category_index is set for param_key #{pk.inspect} but that value is missing in attrs" if raw.nil? || raw.to_s.strip.empty?
+
+        idx = de_group_category_label_index(list_cats, raw)
+        if idx.nil?
+          raise StandardError, "#{pk} value #{raw.inspect} is not a category label in list_cat_json for annot #{annot.id} (name #{annot.name.inspect})"
+        end
+        h_var[pk] = idx.to_s
+      end
+
+      logger.debug("[set_run] DE group labels mapped to list_cat_json indices: #{param_keys.map { |k| "#{k}=#{h_var[k]}" }.join(' ')} annot_id=#{annot.id}")
+    end
+
     def ensure_markers_original_gene_attr logger, loom_filename
       return if loom_filename.blank? || !File.exist?(loom_filename)
 
@@ -2317,6 +2439,8 @@ module Basic
 
       logger.debug("H_VAR: " + h_var.to_json)
 
+      apply_de_group_category_indices_from_command_json!(logger, h_p[:h_cmd_params], h_var, p, h_p[:h_annots], h_p[:project])
+
       ### update parents's children
       run_parents.each do |run_parent|
         parent_run = h_parent_runs[run_parent[:run_id]]
@@ -2474,7 +2598,49 @@ module Basic
     def predict_duration h_predict_param
       return nil
     end
-    
+
+    # Body passed to sh -c for SLURM/docker execution (program, opts, args, redirects).
+    def core_command_shell_body_for_run(h_cmd)
+      return '' unless h_cmd.is_a?(Hash)
+
+      h_cmd = h_cmd.dup
+      h_cmd['opts'] ||= []
+      h_cmd['args'] ||= []
+      cmd_parts = [
+        h_cmd['program'],
+        h_cmd['opts'].map { |e| "#{e['opt']} #{safe_cmdline_param(e['value'])}" }.join(' '),
+        h_cmd['args'].map { |e| safe_cmdline_param(e['value']) }.join(' '),
+        (h_cmd['exec_stdout']) ? "1> #{h_cmd['exec_stdout']}" : nil,
+        (h_cmd['exec_stderr']) ? "2> #{h_cmd['exec_stderr']}" : nil
+      ]
+      cmd_parts.compact.join(' ')
+    end
+    private :core_command_shell_body_for_run
+
+    # Same shell body as RunExecutionJob previously built; kept for SLURM worker and docker wrapping.
+    def build_run_core_command(h_cmd)
+      h_cmd = h_cmd.dup
+      h_cmd['opts'] ||= []
+      h_cmd['args'] ||= []
+      shell_body = core_command_shell_body_for_run(h_cmd)
+      cmd = "sh -c '" + shell_body + "'"
+      cmd = [h_cmd['time_call'], cmd].join(' ') if h_cmd['time_call'].present?
+      cmd
+    end
+
+    # Human-readable program line for run pages (no docker run, no sh -c wrapper).
+    def run_inner_command_display_string(command_json)
+      h_cmd = safe_parse_json(command_json, {})
+      return nil unless h_cmd.is_a?(Hash) && h_cmd['program'].present?
+
+      shell_body = core_command_shell_body_for_run(h_cmd)
+      return nil if shell_body.blank?
+
+      out = shell_body
+      out = "#{h_cmd['time_call']} #{out}" if h_cmd['time_call'].present?
+      out.strip
+    end
+
     def build_docker_cmd h_cmd, core_cmd
       cmd = core_cmd
       

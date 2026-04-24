@@ -181,24 +181,7 @@ class RunExecutionJob < ApplicationJob
   end
 
   def build_core_command(h_cmd)
-    h_cmd['opts'] ||= []
-    h_cmd['args'] ||= []
-    
-    cmd_parts = [
-      h_cmd['program'],
-      h_cmd['opts'].map { |e| "#{e['opt']} #{Basic.safe_cmdline_param(e['value'])}" }.join(" "),
-      h_cmd['args'].map { |e| Basic.safe_cmdline_param(e['value']) }.join(" "),
-      (h_cmd['exec_stdout']) ? "1> #{h_cmd['exec_stdout']}" : nil,
-      (h_cmd['exec_stderr']) ? "2> #{h_cmd['exec_stderr']}" : nil
-    ]
-    
-    cmd = "sh -c '" + cmd_parts.compact.join(" ") + "'"
-    
-    if h_cmd['time_call']
-      cmd = [h_cmd['time_call'], cmd].join(" ")
-    end
-    
-    cmd
+    Basic.build_run_core_command(h_cmd)
   end
 end
 

@@ -106,6 +106,18 @@ export default class extends Controller {
     }
   }
 
+  metadataIdValueChanged() {
+    const id = this.metadataIdValue ? String(this.metadataIdValue).trim() : ''
+    if (!id || !this.visualizationController?.inlineRangeSliderData?.[id]) return
+    const sliderData = this.visualizationController.inlineRangeSliderData[id]
+    if (!sliderData?.values || sliderData.values.length === 0) return
+    this.minValue = sliderData.min
+    this.maxValue = sliderData.max
+    this.currentMinValue = sliderData.currentMin ?? sliderData.min
+    this.currentMaxValue = sliderData.currentMax ?? sliderData.max
+    this.initializeSlider()
+  }
+
   // Helper methods for safely calculating min/max on large arrays
   // Using spread operator with Math.min/max fails with arrays > ~65k-100k elements
   safeMin(arr) {

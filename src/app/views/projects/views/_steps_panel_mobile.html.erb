@@ -36,7 +36,7 @@
               <i class="far fa-circle text-base text-gray-400"></i>
             <% end %>
           </div>
-          <span class="<%= !selected_is_available ? 'text-gray-500' : (selected_is_complete ? 'text-green-600' : 'text-gray-900') %> font-semibold truncate">
+          <span class="<%= !selected_is_available ? 'text-gray-500' : (selected_is_complete ? 'text-green-600' : 'text-gray-900') %> text-sm font-semibold truncate">
             <%= selected_step.label.presence || selected_step.name %>
           </span>
         <% end %>

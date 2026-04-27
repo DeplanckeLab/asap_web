@@ -66,6 +66,11 @@ class ReqsController < ApplicationController
     ## create runs
     # {"input_matrix":{"run_id":"13","output_attr_name":"output_matrix"},"fit_model":"log"}
     h_attr_values = JSON.parse(@req.attrs_json)
+    # All-against-complementary: one run, no group_ref/group_comp/group_pairs; Python infers mode from attrs.
+    if Basic.command_json_boolean_truthy?(h_attr_values['all_against_compl'])
+      h_attr_values = h_attr_values.dup
+      %w[group_pairs group_ref group_comp groups2 second_group_from_other_metadata group_comp_from_other_metadata].each { |k| h_attr_values.delete(k) }
+    end
     @std_method = @req.std_method
     @step = @req.step
     h_version = @project

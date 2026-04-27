@@ -1,4 +1,4 @@
-<div class="flex flex-col h-full"
+<div class="flex flex-col h-full text-[13px] leading-snug"
      data-controller="step-selector"
      data-step-selector-project-id-value="<%= @project.id %>"
      data-step-selector-project-key-value="<%= @project.key %>"
@@ -12,9 +12,9 @@
   <div class="mb-4 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-2">
       <div class="flex items-center gap-3">
-        <h2 class="text-2xl font-bold text-gray-900">Analysis</h2>
+        <h2 class="text-lg font-bold text-gray-900">Analysis</h2>
         <% if @project_type %>
-          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
             <%= @project_type.name %>
           </span>
         <% end %>
@@ -22,7 +22,7 @@
       <div class="flex items-center gap-3 flex-shrink-0">
         <div id="analysis-direct-link-container" class="relative">
           <button type="button"
-                  class="h-9 px-3 bg-white hover:bg-gray-100 text-gray-700 rounded-md text-sm font-medium transition-colors cursor-pointer border border-gray-300 inline-flex items-center gap-2"
+                  class="h-9 px-3 bg-white hover:bg-gray-100 text-gray-700 rounded-md text-xs font-medium transition-colors cursor-pointer border border-gray-300 inline-flex items-center gap-2"
                   title="Show direct link"
                   onclick="toggleAnalysisDirectLinkPopover()">
             <i class="fas fa-link text-sm"></i>
@@ -51,7 +51,7 @@
 
         <% if defined?(@available_loom_files) && @available_loom_files.present? %>
           <div class="inline-flex items-center h-9">
-            <div class="inline-flex h-9 items-center px-3 border border-gray-300 rounded-l-md bg-gray-50 text-sm font-medium text-gray-700">
+            <div class="inline-flex h-9 items-center px-3 border border-gray-300 rounded-l-md bg-gray-50 text-xs font-medium text-gray-700">
               <i class="fa fa-filter mr-1"></i>
               <span>Filter runs</span>
               <span id="loom-filter-warning-icon"
@@ -76,7 +76,7 @@
             </div>
             <label for="analysis-loom-select" class="sr-only">Loom file</label>
             <select id="analysis-loom-select"
-                    class="-ml-px h-9 px-3 border border-gray-300 rounded-r-md text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    class="-ml-px h-9 px-3 border border-gray-300 rounded-r-md text-xs bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onchange="onAnalysisLoomFilterChange(this.value)">
               <% all_url_params = { view: 'analysis', loom_file: '__all__' } %>
               <% all_url_params[:step_id] = @selected_step_id if defined?(@selected_step_id) && @selected_step_id.present? %>
@@ -101,7 +101,7 @@
 
         <button id="analysis-pipeline-toggle-button"
                 type="button" 
-                class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors cursor-pointer inline-block"
+                class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors cursor-pointer inline-block"
                 data-mode="graph"
                 onclick="openPipelineGraphOrRunDetails()">
           Pipeline Graph
@@ -128,13 +128,13 @@
       <div data-step-selector-target="resultsContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
         <div class="overflow-y-auto overflow-x-hidden flex-1 min-w-0 w-full" style="width: 100%; max-width: 100%; min-width: 0; overflow-x: hidden;">
           <% has_server_content = (@load_sub_view && @sub_view_html.present?) || (@load_run_panel && @run_panel_html.present?) %>
-          <div class="text-center text-gray-500 py-12 px-6" data-step-selector-target="emptyState" <% if has_server_content %>style="display: none;"<% end %>>
+          <div class="text-center text-gray-500 text-sm py-12 px-6" data-step-selector-target="emptyState" <% if has_server_content %>style="display: none;"<% end %>>
             <i class="fas fa-mouse-pointer text-5xl mb-4 opacity-30"></i>
             <p class="mb-0 lg:hidden">Select a step from the dropdown above to view its results</p>
             <p class="mb-0 hidden lg:block">Select a step from the left panel to view its results</p>
           </div>
-          <div data-step-selector-target="loadingState" style="display: none;" class="text-center py-12 px-6">
-            <i class="fas fa-spinner fa-spin text-3xl text-blue-600 mb-4"></i>
+          <div data-step-selector-target="loadingState" style="display: none;" class="text-center text-sm py-12 px-6">
+            <i class="fas fa-spinner fa-spin text-2xl text-blue-600 mb-4"></i>
             <p class="text-gray-600 mb-0">Loading step...</p>
           </div>
           <% if has_server_content %>
@@ -169,18 +169,18 @@
           <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-shrink-0">
             <h2 id="step-help-modal-title"
                 data-step-selector-target="stepHelpTitle"
-                class="text-lg font-semibold text-gray-900 m-0 pr-2">
+                class="text-base font-semibold text-gray-900 m-0 pr-2">
               Step
             </h2>
             <button type="button"
-                    class="flex-shrink-0 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 cursor-pointer"
+                    class="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 cursor-pointer"
                     data-action="click->step-selector#closeStepHelp"
                     aria-label="Close">
               Close
             </button>
           </div>
           <div data-step-selector-target="stepHelpBody"
-               class="px-5 py-4 overflow-y-auto text-sm text-gray-700 flex-1 min-h-0">
+               class="px-5 py-4 overflow-y-auto text-xs text-gray-700 flex-1 min-h-0">
           </div>
         </div>
       </div>

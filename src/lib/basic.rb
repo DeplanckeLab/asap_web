@@ -480,10 +480,34 @@ module Basic
       val == true || val == 1 || val.to_s.strip.casecmp('true').zero?
     end
 
-    # command_json may request 0-based category indices for the CLI instead of labels.
+    # std_method attrs_json (per attr): optional "dropdown_placeholder" (or "placeholder") on
+    # input_data widgets sets the closed dropdown label instead of "-- Select <label> --".
     #
-    # Per opt/arg (de.v8.py style):
-    #   { "opt": "--group1", "param_key": "group_ref", "use_group_category_index": true }
+    # std_method attrs_json (per attr): for input_data attrs whose valid_types include "dataset",
+    # set_run sets h_var[attr_name] to the dataset field string (e.g. output_attr_name). For attrs
+    # named "groups" / "groups2", set_run also sets h_var["groups_annot_id"] and h_var["groups2_annot_id"]
+    # from the selection's annot_id (comma-separated if multiple) so command_json can reference
+    # those param_keys without use_annot_id.
+    # Optional: "set_h_var_to_annot_id": true stores the id in h_var[attr_name] itself instead of the
+    # dataset field string; do not combine that with use_annot_id on the same param_key.
+    #
+    # command_json may request 0-based category indices for the CLI instead of labels,
+    # or numeric annot ids instead of loom metadata names (e.g. Wilcoxon -meta).
+    #
+    # Optional on any args[] or opts[] entry (any step): after resolving #{...} placeholders,
+    # omit_when_null skips the entry if the value is blank (nothing added). You do not need
+    # null_value on that entry; it is only for entries that stay on the command with a literal
+    # when the resolved value is blank.
+    # omit_when_all_against_compl skips when attrs["all_against_compl"] is true (same mechanism,
+    # useful when the value can be non-empty but the flag must still drop the cli flag).
+    #
+    # Example (differential expression / de.v8.py style opts):
+    #   { "opt": "--group1", "param_key": "group_ref", "use_group_category_index": true,
+    #     "omit_when_null": true }
+    #   { "opt": "--group2", "param_key": "group_comp", "use_group_category_index": true,
+    #     "category_annot_param_key": "groups2", "omit_when_null": true }
+    # When category_annot_param_key is set but that attr is empty, the default attrs["groups"] annot is used.
+    #   { "opt": "-meta", "param_key": "metadata", "use_annot_id": true }
     #
     # Legacy top-level:
     #   "group1_use_category_index": true, "group2_use_category_index": true
@@ -519,6 +543,39 @@ module Basic
       keys.uniq
     end
 
+    def skip_command_json_arg_or_opt_entry?(entry, h_var, p, value_after_template_expand)
+      return false unless entry.is_a?(Hash)
+
+      if command_json_boolean_truthy?(entry['omit_when_all_against_compl'])
+        if command_json_boolean_truthy?(h_var['all_against_compl']) || command_json_boolean_truthy?(p['all_against_compl'])
+          return true
+        end
+      end
+
+      if command_json_boolean_truthy?(entry['omit_when_null'])
+        v = value_after_template_expand
+        return true if v.nil? || v.to_s.strip == ''
+      end
+
+      false
+    end
+
+    def de_param_keys_requiring_annot_id(h_cmd)
+      return [] unless h_cmd.is_a?(Hash)
+
+      keys = []
+      %w[args opts].each do |list_key|
+        (h_cmd[list_key] || []).each do |entry|
+          next unless entry.is_a?(Hash)
+          next unless command_json_boolean_truthy?(entry['use_annot_id'])
+
+          pk = entry['param_key']
+          keys << pk.to_s if pk.present?
+        end
+      end
+      keys.uniq
+    end
+
     # list_cat_json is normally a JSON array of category labels (metadata import / add_cell_sets).
     # A JSON object of categories is ordered like Basic metadata key ordering.
     def de_group_category_labels_from_list_cat_json(parsed)
@@ -547,6 +604,96 @@ module Basic
       end
     end
 
+    # Resolves one list_cat_json entry, or several CXG-style labels joined with " || " when
+    # list_cat_json stores each term separately (e.g. ontology term ids per cell vs. compound values).
+    # Returns a string for h_var: one index, or comma-separated indices for the CLI.
+    def de_group_category_index_string_from_label_value(list_cats, raw)
+      raw_s = raw.to_s.strip
+      return nil if raw_s.empty?
+
+      idx = de_group_category_label_index(list_cats, raw_s)
+      return idx.to_s unless idx.nil?
+
+      return nil unless raw_s.include?(' || ')
+
+      parts = raw_s.split(' || ').map(&:strip).reject(&:empty?)
+      return nil if parts.length < 2
+
+      indices = parts.map { |part| de_group_category_label_index(list_cats, part) }
+      return nil if indices.any?(&:nil?)
+
+      indices.uniq.join(',')
+    end
+
+    # Same distinct labels and sort order as AnnotationsController#categories (live loom).
+    # list_cat_json can lag edits or differ from what the visualization DE dropdown shows.
+    def de_discrete_category_labels_from_loom_for_de_indexing(annot, project, logger)
+      user_data_dir = ENV['USER_DATA_DIR'].presence || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
+      loom_path = project_dir + annot.filepath.to_s
+      return nil unless File.exist?(loom_path.to_s)
+
+      values = H5DataService.get_metadata_vector(loom_path.to_s, annot.name)
+      return nil unless values.is_a?(Array)
+
+      seen = {}
+      values.each do |value|
+        cat = (value.nil? || value.to_s.empty?) ? 'NA' : value.to_s
+        seen[cat] = true
+      end
+      seen.keys.sort
+    rescue StandardError => e
+      logger&.warn("[set_run] discrete category list from loom skipped annot=#{annot.id}: #{e.class} #{e.message}")
+      nil
+    end
+
+    # When attrs["groups2"] was never persisted (restart / old runs) but group_comp labels clearly
+    # belong to another discrete column on the same loom (e.g. FBdv stages vs FBbt cell types).
+    # Returns { annot:, list_cats:, label_source:, idx_str: } or nil. Tie-break: lowest annot id.
+    def de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, primary_annot, raw, logger)
+      return nil if primary_annot.blank? || raw.blank?
+
+      fp = primary_annot.filepath.to_s
+      return nil if fp.empty?
+
+      candidates = h_annots.values.compact.select do |a|
+        a.id != primary_annot.id &&
+          a.project_id == project.id &&
+          a.filepath.to_s == fp &&
+          a.dim.to_i == 1 &&
+          a.data_type_id.to_i == 3 &&
+          a.name.to_s.start_with?('/col_attrs/') &&
+          a.latest_version != false
+      end
+
+      best = nil
+      candidates.each do |cand|
+        list_c = de_discrete_category_labels_from_loom_for_de_indexing(cand, project, logger)
+        src = 'loom'
+        if list_c.nil? || list_c.empty?
+          list_c = de_group_category_labels_from_list_cat_json(Basic.safe_parse_json(cand.list_cat_json, []))
+          src = 'list_cat_json'
+        end
+        next if list_c.blank?
+
+        idx = de_group_category_index_string_from_label_value(list_c, raw)
+        next unless idx
+
+        if best.nil? || cand.id < best[:annot].id
+          best = {
+            annot: cand,
+            list_cats: list_c,
+            label_source: "#{src} (inferred same-loom column)",
+            idx_str: idx
+          }
+        end
+      end
+      if best && logger
+        logger.info("[set_run] group_comp inferred metadata column annot=#{best[:annot].id} (#{best[:annot].name.inspect}); primary was #{primary_annot.id}")
+      end
+      best
+    end
+
     def annot_for_de_group_category_mapping(p, h_annots, project)
       groups = p['groups']
       if groups.is_a?(Array) && groups[0].is_a?(Hash) && groups[0]['annot_id'].present?
@@ -568,34 +715,178 @@ module Basic
       nil
     end
 
+    def annot_from_de_input_data_selection(raw, h_annots, project)
+      parsed = raw.is_a?(String) ? Basic.safe_parse_json(raw, {}) : raw
+      parsed = parsed[0] if parsed.is_a?(Array) && parsed[0].is_a?(Hash)
+      return nil unless parsed.is_a?(Hash)
+
+      aid = (parsed['annot_id'] || parsed[:annot_id]).to_i
+      return nil if aid <= 0
+
+      annot = h_annots[aid] if h_annots.is_a?(Hash)
+      return annot if annot
+
+      Annot.find_by(id: aid, project_id: project.id)
+    end
+
+    # DE form toggles (see de_second_metadata_attrs.js): compared categories come from attrs["groups2"].
+    def de_second_metadata_column_enabled_for_de?(h_var, p)
+      %w[second_group_from_other_metadata group_comp_from_other_metadata].any? do |k|
+        command_json_boolean_truthy?(h_var[k] || p[k])
+      end
+    end
+
+    # Optional on opts/args next to use_group_category_index: "category_annot_param_key": "groups2"
+    # so group_comp maps against list_cat_json of attrs["groups2"] instead of attrs["groups"].
+    def category_annot_param_key_for_group_index(h_cmd, param_key)
+      return nil unless h_cmd.is_a?(Hash)
+
+      pk = param_key.to_s
+      %w[args opts].each do |list_key|
+        (h_cmd[list_key] || []).each do |entry|
+          next unless entry.is_a?(Hash)
+          next unless command_json_boolean_truthy?(entry['use_group_category_index'])
+          next unless entry['param_key'].to_s == pk
+
+          cap = entry['category_annot_param_key'].to_s.strip
+          return cap if cap.present?
+        end
+      end
+      nil
+    end
+
+    def annot_for_de_group_category_index_param(h_cmd_params, param_key, p, h_var, h_annots, project)
+      capk = category_annot_param_key_for_group_index(h_cmd_params, param_key)
+      if capk.present?
+        raw = h_var[capk] || p[capk]
+        if raw.present? && raw.to_s.strip != ''
+          annot = annot_from_de_input_data_selection(raw, h_annots, project)
+          unless annot
+            raise StandardError, "use_group_category_index for #{param_key.inspect} uses category_annot_param_key #{capk.inspect} but attrs did not resolve to an annot (invalid JSON selection)"
+          end
+          return annot
+        end
+        # Second metadata column not used (empty attr): use the same default annot as group_ref.
+      end
+
+      # Compared group labels come from attrs["groups2"] when second-metadata mode is on, but
+      # step command_json often omits category_annot_param_key: "groups2". Map group_comp against
+      # groups2's annot in that case (e.g. FBdv stages vs FBbt cell types on primary groups).
+      if param_key.to_s == 'group_comp' && de_second_metadata_column_enabled_for_de?(h_var, p)
+        g2_raw = h_var['groups2'] || p['groups2']
+        if g2_raw.present? && g2_raw.to_s.strip != ''
+          annot = annot_from_de_input_data_selection(g2_raw, h_annots, project)
+          return annot if annot
+        end
+      end
+
+      annot = annot_for_de_group_category_mapping(p, h_annots, project)
+      return annot if annot
+
+      raise StandardError, 'use_group_category_index requires attrs["groups"] with annot_id, or attrs["groups_id"], pointing to the grouping metadata annot (unless category_annot_param_key is set on the command opt)'
+    end
+
     def apply_de_group_category_indices_from_command_json!(logger, h_cmd_params, h_var, p, h_annots, project)
       param_keys = de_param_keys_requiring_group_category_index(h_cmd_params)
       return if param_keys.empty?
 
-      annot = annot_for_de_group_category_mapping(p, h_annots, project)
-      unless annot
-        raise StandardError, 'use_group_category_index requires attrs["groups"] with annot_id or attrs["groups_id"] pointing to the grouping metadata annot'
-      end
-
-      parsed = Basic.safe_parse_json(annot.list_cat_json, [])
-      list_cats = de_group_category_labels_from_list_cat_json(parsed)
-      if list_cats.empty?
-        logger.warn("[set_run] use_group_category_index set but annot #{annot.id} has no usable list_cat_json categories; leaving #{param_keys.join(', ')} as in attrs (e.g. binary 0/1 selections)")
-        return
-      end
+      all_against_compl = command_json_boolean_truthy?(p['all_against_compl'])
 
       param_keys.each do |pk|
+        raw_preflight = h_var[pk] || p[pk]
+        if all_against_compl && %w[group_ref group_comp].include?(pk.to_s) && (raw_preflight.nil? || raw_preflight.to_s.strip.empty?)
+          logger.debug("[set_run] skipping use_group_category_index for #{pk} (all_against_complementary)")
+          next
+        end
+
+        annot = annot_for_de_group_category_index_param(h_cmd_params, pk, p, h_var, h_annots, project)
+
+        list_cats = de_discrete_category_labels_from_loom_for_de_indexing(annot, project, logger)
+        label_source = 'loom'
+        if list_cats.nil? || list_cats.empty?
+          parsed = Basic.safe_parse_json(annot.list_cat_json, [])
+          list_cats = de_group_category_labels_from_list_cat_json(parsed)
+          label_source = 'list_cat_json'
+        end
+        if list_cats.empty?
+          logger.warn("[set_run] use_group_category_index set but annot #{annot.id} has no usable categories (loom empty/unreadable and list_cat_json empty); skipping #{pk} (e.g. binary 0/1 selections)")
+          next
+        end
+
         raw = h_var[pk]
         raise StandardError, "use_group_category_index is set for param_key #{pk.inspect} but that value is missing in attrs" if raw.nil? || raw.to_s.strip.empty?
 
-        idx = de_group_category_label_index(list_cats, raw)
-        if idx.nil?
-          raise StandardError, "#{pk} value #{raw.inspect} is not a category label in list_cat_json for annot #{annot.id} (name #{annot.name.inspect})"
+        idx_str = de_group_category_index_string_from_label_value(list_cats, raw)
+        # Restart uses persisted attrs_json; second-metadata toggles are often absent even when
+        # group_comp was chosen from attrs["groups2"]. If labels fit the second column, use it.
+        if idx_str.nil? && pk.to_s == 'group_comp'
+          g2_raw = h_var['groups2'] || p['groups2']
+          if g2_raw.present? && g2_raw.to_s.strip != ''
+            g2_annot = annot_from_de_input_data_selection(g2_raw, h_annots, project)
+            primary_annot_id = annot.id
+            if g2_annot && g2_annot.id != primary_annot_id
+              list_g2 = de_discrete_category_labels_from_loom_for_de_indexing(g2_annot, project, logger)
+              src_g2 = 'loom'
+              if list_g2.nil? || list_g2.empty?
+                list_g2 = de_group_category_labels_from_list_cat_json(Basic.safe_parse_json(g2_annot.list_cat_json, []))
+                src_g2 = 'list_cat_json'
+              end
+              if list_g2.present?
+                idx_g2 = de_group_category_index_string_from_label_value(list_g2, raw)
+                if idx_g2
+                  annot = g2_annot
+                  list_cats = list_g2
+                  label_source = "#{src_g2} (groups2 annot #{g2_annot.id})"
+                  idx_str = idx_g2
+                  logger.info("[set_run] group_comp matched groups2 column annot=#{g2_annot.id} (#{g2_annot.name.inspect}); primary groups annot was #{primary_annot_id}")
+                end
+              end
+            end
+          end
         end
-        h_var[pk] = idx.to_s
+        if idx_str.nil? && pk.to_s == 'group_comp'
+          inferred = de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, annot, raw, logger)
+          if inferred
+            annot = inferred[:annot]
+            list_cats = inferred[:list_cats]
+            label_source = inferred[:label_source]
+            idx_str = inferred[:idx_str]
+          end
+        end
+        if idx_str.nil?
+          preview = list_cats.first(15).map(&:inspect).join(', ')
+          more = list_cats.size > 15 ? " (+#{list_cats.size - 15} more)" : ''
+          raise StandardError, "#{pk} value #{raw.inspect} is not a category label for annot #{annot.id} (name #{annot.name.inspect}; labels from #{label_source}). Examples: #{preview}#{more}"
+        end
+        h_var[pk] = idx_str
+        logger.debug("[set_run] DE group label mapped to index string: #{pk}=#{h_var[pk]} annot_id=#{annot.id}")
+      end
+    end
+
+    # command_json: per opt/arg, "use_annot_id": true replaces the attr value (metadata column
+    # name, e.g. /col_attrs/Cluster) with this project's latest-version Annot id for the CLI.
+    # For grouping columns, prefer h_var["groups_annot_id"] / h_var["groups2_annot_id"] (set by set_run)
+    # with param_key groups_annot_id / groups2_annot_id instead of use_annot_id on "groups".
+    def apply_de_annot_ids_from_command_json!(logger, h_cmd_params, h_var, project)
+      param_keys = de_param_keys_requiring_annot_id(h_cmd_params)
+      return if param_keys.empty?
+
+      param_keys.each do |pk|
+        raw = h_var[pk]
+        raise StandardError, "use_annot_id is set for param_key #{pk.inspect} but that value is missing in attrs" if raw.nil? || raw.to_s.strip.empty?
+
+        name = raw.to_s.strip
+        annot = Annot.where(project_id: project.id, name: name, latest_version: true)
+                       .order(version_nber: :desc, id: :desc)
+                       .first
+        unless annot
+          raise StandardError, "#{pk} value #{name.inspect} is not a latest-version metadata name for this project (no matching annot)"
+        end
+
+        h_var[pk] = annot.id.to_s
       end
 
-      logger.debug("[set_run] DE group labels mapped to list_cat_json indices: #{param_keys.map { |k| "#{k}=#{h_var[k]}" }.join(' ')} annot_id=#{annot.id}")
+      logger.debug("[set_run] metadata names mapped to annot ids: #{param_keys.map { |k| "#{k}=#{h_var[k]}" }.join(' ')}")
     end
 
     def ensure_markers_original_gene_attr logger, loom_filename
@@ -2394,7 +2685,12 @@ module Basic
                 #                  h_var[k].push((project_dir + dt['output_filename']) + ":" + dt['output_attr_name'])
                 ## instead lets only consider the datasets from the current file and  restrict the available datasets to the file direct lineage + descendents
                 dataset_field = (h_p[:h_attrs][k.to_s]['dataset_field']) ? h_p[:h_attrs][k.to_s]['dataset_field'] : "output_attr_name"
-                tmp_var.push(dt[dataset_field])
+                cell = dt[dataset_field]
+                if cell.nil? || cell.to_s.strip.empty?
+                  # output_attr_name can be unset when output_attr has no name; loom path is still in output_dataset.
+                  cell = dt['output_dataset']
+                end
+                tmp_var.push(cell)
                 # end
                 
                 
@@ -2416,10 +2712,39 @@ module Basic
                 run_parents.push(h_parent)
               end
             end
+            attr_for_k = h_p[:h_attrs][k.to_s] || {}
+            use_annot_id_in_h_var = command_json_boolean_truthy?(attr_for_k['set_h_var_to_annot_id'])
+
             if list_datasets.size > 1
-              h_var[k] = tmp_var.join(",")
+              if use_annot_id_in_h_var
+                ids = list_datasets.map { |dt| (dt['annot_id'] || dt[:annot_id]).to_i }.reject { |id| id <= 0 }
+                if ids.size != list_datasets.size
+                  raise StandardError, "set_h_var_to_annot_id is set for attr #{k.inspect} but each selection must include annot_id (#{list_datasets.size} items, #{ids.size} ids)"
+                end
+                h_var[k] = ids.join(',')
+              else
+                h_var[k] = tmp_var.join(",")
+              end
+            elsif use_annot_id_in_h_var
+              dt0 = list_datasets[0]
+              aid = (dt0 && (dt0['annot_id'] || dt0[:annot_id])).to_i
+              if aid <= 0
+                raise StandardError, "set_h_var_to_annot_id is set for attr #{k.inspect} but the selection has no annot_id"
+              end
+              h_var[k] = aid.to_s
             else
               h_var[k] = tmp_var[0]
+            end
+
+            # DE / Wilcoxon: always expose selected metadata annot id(s) for attrs "groups" / "groups2"
+            # so command_json can use param_key groups_annot_id / groups2_annot_id without use_annot_id.
+            case k.to_s
+            when 'groups'
+              gids = list_datasets.map { |dt| (dt['annot_id'] || dt[:annot_id]).to_i }.reject { |z| z <= 0 }
+              h_var['groups_annot_id'] = gids.join(',') if gids.any?
+            when 'groups2'
+              gids = list_datasets.map { |dt| (dt['annot_id'] || dt[:annot_id]).to_i }.reject { |z| z <= 0 }
+              h_var['groups2_annot_id'] = gids.join(',') if gids.any?
             end
           end
         else
@@ -2439,6 +2764,7 @@ module Basic
 
       logger.debug("H_VAR: " + h_var.to_json)
 
+      apply_de_annot_ids_from_command_json!(logger, h_p[:h_cmd_params], h_var, h_p[:project])
       apply_de_group_category_indices_from_command_json!(logger, h_p[:h_cmd_params], h_var, p, h_p[:h_annots], h_p[:project])
 
       ### update parents's children
@@ -2475,12 +2801,14 @@ module Basic
       if h_p[:h_cmd_params]['args']
           h_p[:h_cmd_params]['args'].each do |h_arg|
           logger.debug "H_ARG: " + h_arg.to_json
-          std_method_attr = h_std_method_attrs[h_arg['param_key']]          
-          value = (h_arg['value'] || h_var[h_arg['param_key']] || ((std_method_attr) && std_method_attr['default'])).dup
-          logger.debug "VALUE: " + value.to_json + "[" + h_arg['value'].to_json + "]"
+          std_method_attr = h_std_method_attrs[h_arg['param_key']]
+          raw = h_arg['value'] || h_var[h_arg['param_key']] || ((std_method_attr) && std_method_attr['default'])
+          logger.debug "VALUE: " + raw.to_json + "[" + h_arg['value'].to_json + "]"
           # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
-          value_str = value.to_s.dup
+          value_str = raw.nil? ? ''.dup : raw.to_s.dup
           value = value_str.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
+          next if skip_command_json_arg_or_opt_entry?(h_arg, h_var, p, value)
+
           list_args.push({:param_key => h_arg['param_key'], :value => (value != nil and value != '') ? value : h_arg["null_value"]})
         end
       end
@@ -2489,11 +2817,13 @@ module Basic
       if h_p[:h_cmd_params]['opts']
         h_p[:h_cmd_params]['opts'].each do |opt|
           std_method_attr = h_std_method_attrs[opt['param_key']]
-          value = (opt['value'] || h_var[opt['param_key']] || (std_method_attr && std_method_attr['default'])).dup
-          logger.debug "VALUE: #{opt}: " + value.to_json          
+          raw = opt['value'] || h_var[opt['param_key']] || (std_method_attr && std_method_attr['default'])
+          logger.debug "VALUE: #{opt}: " + raw.to_json
           # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
-          value_str = value.to_s.dup
+          value_str = raw.nil? ? ''.dup : raw.to_s.dup
           value = value_str.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
+          next if skip_command_json_arg_or_opt_entry?(opt, h_var, p, value)
+
           list_opts.push({:opt => opt['opt'], :param_key => opt['param_key'], :value => (value != nil and value != '') ? value : opt["null_value"]})
         end
       end

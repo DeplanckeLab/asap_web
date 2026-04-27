@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { queryDeSecondMetadataHidden } from "visualization/de_second_metadata_attrs"
 
 export default class extends Controller {
   static targets = [
@@ -15,7 +16,26 @@ export default class extends Controller {
     isArray: Boolean,
     minItems: { type: Number, default: 0 },
     maxItems: { type: Number, default: null },
-    isMultiple: Boolean
+    isMultiple: Boolean,
+    dropdownPlaceholder: { type: String, default: "" }
+  }
+
+  emptyDropdownLabel() {
+    const custom = (this.dropdownPlaceholderValue || "").trim()
+    if (custom.length > 0) {
+      return custom
+    }
+    const title = this.attrNameValue.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+    return `-- Select ${title} --`
+  }
+
+  applyEmptyDropdownLabel() {
+    if (!this.hasDropdownTextTarget) {
+      return
+    }
+    this.dropdownTextTarget.textContent = this.emptyDropdownLabel()
+    this.dropdownTextTarget.classList.remove('text-gray-900', 'font-medium')
+    this.dropdownTextTarget.classList.add('text-gray-500')
   }
 
   connect() {
@@ -186,7 +206,8 @@ export default class extends Controller {
     }
 
     this.updateDependentCategorySelect(selectedValues)
-    this.updateDeGroupSelects(selectedValues)
+    this.updateDeGroupSelectsFromPrimaryMetadata(selectedValues)
+    this.updateDeGroupCompFromSecondaryMetadata(selectedValues)
     this.broadcastMatrixContextIfNeeded(selectedValues)
     
     // Update display
@@ -217,9 +238,7 @@ export default class extends Controller {
         this.selectedDivTarget.classList.add('hidden')
       }
     } else {
-      this.dropdownTextTarget.textContent = '-- Select ' + (this.attrNameValue.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())) + ' --'
-      this.dropdownTextTarget.classList.remove('text-gray-900', 'font-medium')
-      this.dropdownTextTarget.classList.add('text-gray-500')
+      this.applyEmptyDropdownLabel()
       this.selectedDivTarget.classList.add('hidden')
       this.selectedDivTarget.innerHTML = ''
     }
@@ -243,7 +262,7 @@ export default class extends Controller {
   }
 
   handleMatrixContextChanged(event) {
-    if (this.attrNameValue !== 'groups') {
+    if (this.attrNameValue !== 'groups' && this.attrNameValue !== 'groups2') {
       return
     }
     const loomFile = event && event.detail && event.detail.loomFile ? String(event.detail.loomFile) : ''
@@ -252,7 +271,7 @@ export default class extends Controller {
   }
 
   applyCurrentMatrixContextFromForm() {
-    if (this.attrNameValue !== 'groups') {
+    if (this.attrNameValue !== 'groups' && this.attrNameValue !== 'groups2') {
       return
     }
     const loomFile = this.getSelectedMatrixLoomFromForm()
@@ -518,10 +537,109 @@ export default class extends Controller {
     dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  async updateDeGroupSelects(selectedValues) {
-    // DE form specific behavior (legacy parity):
-    // when selecting "groups" (clustering metadata), update both
-    // "Reference group" and "Compared group" selects.
+  isSecondGroupFromOtherMetadata() {
+    const root = this.formElement || this.element.closest("form")
+    if (!root) {
+      return false
+    }
+    const h = queryDeSecondMetadataHidden(root)
+    return !!(h && String(h.value) === "true")
+  }
+
+  teardownDeGroupRefSyncedCompListener() {
+    if (this._boundGroupRefChangeHandler && this._deGroupRefSelect) {
+      this._deGroupRefSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
+    }
+    this._boundGroupRefChangeHandler = null
+    this._deGroupRefSelect = null
+  }
+
+  deFillCategorySelect(select, categoryNames, categories, keepValue, placeholderText) {
+    select.innerHTML = ""
+    if (!categoryNames || categoryNames.length === 0) {
+      const emptyOption = document.createElement("option")
+      emptyOption.value = ""
+      emptyOption.textContent = placeholderText
+      select.appendChild(emptyOption)
+      select.value = ""
+      return
+    }
+
+    categoryNames.forEach((name) => {
+      const count = categories ? categories[name] : null
+      const option = document.createElement("option")
+      option.value = name
+      option.textContent = Number.isFinite(Number(count))
+        ? `${name} (${count})`
+        : name
+      select.appendChild(option)
+    })
+
+    if (keepValue && categoryNames.includes(keepValue)) {
+      select.value = keepValue
+    } else {
+      select.value = categoryNames[0]
+    }
+  }
+
+  async resolveCategoriesForDeSelection(selected) {
+    let categories = this.normalizeCategories(selected ? selected.categories : null)
+    if ((!categories || Object.keys(categories).length === 0) && selected && selected.annot_id) {
+      categories = await this.fetchCategoriesForAnnot(selected.annot_id)
+    }
+    const categoryNames = categories
+      ? Object.keys(categories).filter((name) => name !== "").sort()
+      : []
+    return { categories, categoryNames }
+  }
+
+  async populateComparedFromSecondDataset(compSelect, previousComp) {
+    const root = this.formElement || this.element.closest("form")
+    const hidden2 = root ? root.querySelector("#attrs_groups2") : null
+    if (!hidden2 || !String(hidden2.value || "").trim()) {
+      compSelect.innerHTML = ""
+      const emptyComp = document.createElement("option")
+      emptyComp.value = ""
+      emptyComp.textContent = "Select a second metadata column"
+      compSelect.appendChild(emptyComp)
+      compSelect.value = ""
+      compSelect.dispatchEvent(new Event("change", { bubbles: true }))
+      return
+    }
+
+    let parsed = null
+    try {
+      parsed = JSON.parse(hidden2.value)
+    } catch (_e) {
+      parsed = null
+    }
+    if (!parsed || typeof parsed !== "object") {
+      compSelect.innerHTML = ""
+      const emptyComp = document.createElement("option")
+      emptyComp.value = ""
+      emptyComp.textContent = "Select a second metadata column"
+      compSelect.appendChild(emptyComp)
+      compSelect.value = ""
+      compSelect.dispatchEvent(new Event("change", { bubbles: true }))
+      return
+    }
+
+    if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === "object") {
+      parsed = parsed[0]
+    }
+
+    const { categories, categoryNames } = await this.resolveCategoriesForDeSelection(parsed)
+    this.deFillCategorySelect(
+      compSelect,
+      categoryNames,
+      categories,
+      previousComp,
+      "Select a compared group"
+    )
+    compSelect.dispatchEvent(new Event("change", { bubbles: true }))
+  }
+
+  async updateDeGroupSelectsFromPrimaryMetadata(selectedValues) {
     if (this.attrNameValue !== "groups") {
       return
     }
@@ -533,14 +651,7 @@ export default class extends Controller {
     }
 
     const selected = selectedValues.length > 0 ? selectedValues[0] : null
-    let categories = this.normalizeCategories(selected ? selected.categories : null)
-    if ((!categories || Object.keys(categories).length === 0) && selected && selected.annot_id) {
-      categories = await this.fetchCategoriesForAnnot(selected.annot_id)
-    }
-
-    const categoryNames = categories
-      ? Object.keys(categories).filter((name) => name !== "").sort()
-      : []
+    const { categories, categoryNames } = await this.resolveCategoriesForDeSelection(selected)
 
     const previousRef = refSelect.value
     const previousComp = compSelect.value
@@ -563,46 +674,37 @@ export default class extends Controller {
       return
     }
 
-    const buildCategoryOptions = (select, names, keepValue, placeholderText) => {
-      select.innerHTML = ""
-      if (names.length === 0) {
-        const emptyOption = document.createElement("option")
-        emptyOption.value = ""
-        emptyOption.textContent = placeholderText
-        select.appendChild(emptyOption)
-        select.value = ""
-        return
-      }
+    this.deFillCategorySelect(
+      refSelect,
+      categoryNames,
+      categories,
+      previousRef,
+      "Select a reference group"
+    )
 
-      names.forEach((name) => {
-        const count = categories[name]
-        const option = document.createElement("option")
-        option.value = name
-        option.textContent = Number.isFinite(Number(count))
-          ? `${name} (${count})`
-          : name
-        select.appendChild(option)
-      })
+    const dualSecondMetadata = this.isSecondGroupFromOtherMetadata()
 
-      if (keepValue && names.includes(keepValue)) {
-        select.value = keepValue
-      } else {
-        select.value = names[0]
-      }
+    if (dualSecondMetadata) {
+      this.teardownDeGroupRefSyncedCompListener()
+      await this.populateComparedFromSecondDataset(compSelect, previousComp)
+      refSelect.dispatchEvent(new Event("change", { bubbles: true }))
+      return
     }
-
-    buildCategoryOptions(refSelect, categoryNames, previousRef, "Select a reference group")
 
     const refreshComparedSelect = () => {
       const selectedRef = refSelect.value
       const comparedNames = categoryNames.filter((name) => name !== selectedRef)
-      buildCategoryOptions(compSelect, comparedNames, previousComp, "Select a compared group")
+      this.deFillCategorySelect(
+        compSelect,
+        comparedNames,
+        categories,
+        previousComp,
+        "Select a compared group"
+      )
       compSelect.dispatchEvent(new Event("change", { bubbles: true }))
     }
 
-    if (this._boundGroupRefChangeHandler && this._deGroupRefSelect) {
-      this._deGroupRefSelect.removeEventListener("change", this._boundGroupRefChangeHandler)
-    }
+    this.teardownDeGroupRefSyncedCompListener()
     this._boundGroupRefChangeHandler = () => {
       refreshComparedSelect()
     }
@@ -611,6 +713,41 @@ export default class extends Controller {
 
     refreshComparedSelect()
     refSelect.dispatchEvent(new Event("change", { bubbles: true }))
+  }
+
+  async updateDeGroupCompFromSecondaryMetadata(selectedValues) {
+    if (this.attrNameValue !== "groups2") {
+      return
+    }
+    if (!this.isSecondGroupFromOtherMetadata()) {
+      return
+    }
+
+    const compSelect = document.getElementById("attrs_group_comp")
+    if (!compSelect) {
+      return
+    }
+
+    const previousComp = compSelect.value
+    await this.populateComparedFromSecondDataset(compSelect, previousComp)
+  }
+
+  refreshDeGroupDropdownsAfterSecondMetadataToggle() {
+    if (this.attrNameValue !== "groups") {
+      return
+    }
+    const selectedValues = []
+    this.optionTargets.forEach((input) => {
+      if (!input.checked) {
+        return
+      }
+      try {
+        selectedValues.push(JSON.parse(input.value))
+      } catch (_e) {
+        /* ignore */
+      }
+    })
+    void this.updateDeGroupSelectsFromPrimaryMetadata(selectedValues)
   }
 
   normalizeCategories(rawCategories) {

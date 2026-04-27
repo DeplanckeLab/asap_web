@@ -1,4 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
+import {
+  queryDeSecondMetadataCheckbox,
+  queryDeSecondMetadataFormBlock,
+  queryDeSecondMetadataHidden
+} from "visualization/de_second_metadata_attrs"
+import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 
 export default class extends Controller {
   static targets = [
@@ -476,8 +482,74 @@ export default class extends Controller {
     
     // Initial validation
     this.syncDeGroupVisibility()
+    this.syncSecondGroupMetadataVisibility()
     this.validateForm()
     this.scheduleResourcePrediction()
+  }
+
+  syncSecondGroupMetadataVisibility() {
+    const toggle = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
+    const g2Container = this.attrsContainerTarget.querySelector("#form-container_groups2")
+    if (!toggle || !g2Container) {
+      return
+    }
+    if (toggle.dataset.secondGroupBound === "1") {
+      return
+    }
+    toggle.dataset.secondGroupBound = "1"
+
+    const clearGroupDataset2 = () => {
+      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (hidden) {
+        hidden.value = ""
+      }
+      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
+        inp.checked = false
+      })
+      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
+      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
+      if (selectedDiv) {
+        selectedDiv.innerHTML = ""
+        selectedDiv.classList.add("hidden")
+      }
+    }
+
+    const triggerPrimaryDeRefresh = () => {
+      const sel = '[data-input-data-selector-attr-name-value="groups"]'
+      const el = this.attrsContainerTarget.querySelector(sel)
+      if (!el || !this.application) {
+        return
+      }
+      const c = this.application.getControllerForElementAndIdentifier(el, "input-data-selector")
+      if (c && typeof c.refreshDeGroupDropdownsAfterSecondMetadataToggle === "function") {
+        c.refreshDeGroupDropdownsAfterSecondMetadataToggle()
+      }
+    }
+
+    const apply = () => {
+      const allAgainst = this.attrsContainerTarget.querySelector("#checkbox-all_against_compl")
+      if (allAgainst && allAgainst.checked) {
+        g2Container.style.display = "none"
+        this.validateForm()
+        return
+      }
+      const on = !!toggle.checked
+      g2Container.style.display = on ? "" : "none"
+      if (!on) {
+        clearGroupDataset2()
+      }
+      triggerPrimaryDeRefresh()
+      this.validateForm()
+    }
+
+    toggle.addEventListener("change", () => {
+      const hiddenAttr = queryDeSecondMetadataHidden(this.attrsContainerTarget)
+      if (hiddenAttr) {
+        hiddenAttr.value = toggle.checked ? "true" : "false"
+      }
+      apply()
+    })
+    apply()
   }
 
   syncDeGroupVisibility() {
@@ -488,13 +560,73 @@ export default class extends Controller {
     if (!toggle || !refContainer || !compContainer) {
       return
     }
+    if (toggle.dataset.deAllAgainstBound === '1') {
+      return
+    }
+    toggle.dataset.deAllAgainstBound = '1'
+
+    const g2Container = this.attrsContainerTarget.querySelector('#form-container_groups2')
+    const secondMetaBlock = queryDeSecondMetadataFormBlock(this.attrsContainerTarget)
+
+    const clearSecondMetadataUi = () => {
+      const st = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
+      const stHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
+      if (st) {
+        st.checked = false
+      }
+      if (stHidden) {
+        stHidden.value = 'false'
+      }
+      if (!g2Container) {
+        return
+      }
+      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (hidden) {
+        hidden.value = ''
+      }
+      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
+        inp.checked = false
+      })
+      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
+      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
+      if (selectedDiv) {
+        selectedDiv.innerHTML = ''
+        selectedDiv.classList.add('hidden')
+      }
+    }
 
     const applyVisibility = () => {
-      // Legacy behavior requested by user:
-      // when "All against complementary" is checked, hide both selectors.
-      const hideGroupSelectors = !!toggle.checked
-      refContainer.style.display = hideGroupSelectors ? 'none' : ''
-      compContainer.style.display = hideGroupSelectors ? 'none' : ''
+      // Checked = complementary mode: one run, no explicit ref/comp (server strips attrs); hide second-metadata UI too.
+      const allAgainst = !!toggle.checked
+      refContainer.style.display = allAgainst ? 'none' : ''
+      compContainer.style.display = allAgainst ? 'none' : ''
+      if (secondMetaBlock) {
+        secondMetaBlock.style.display = allAgainst ? 'none' : ''
+      }
+      if (g2Container) {
+        if (allAgainst) {
+          g2Container.style.display = 'none'
+        } else {
+          const stHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
+          const secondOn = stHidden && String(stHidden.value) === 'true'
+          g2Container.style.display = secondOn ? '' : 'none'
+        }
+      }
+      if (allAgainst) {
+        const gref = this.attrsContainerTarget.querySelector('#attrs_group_ref')
+        const gcomp = this.attrsContainerTarget.querySelector('#attrs_group_comp')
+        if (gref) {
+          gref.value = ''
+        }
+        if (gcomp) {
+          gcomp.value = ''
+        }
+        const gp = this.attrsContainerTarget.querySelector('#attrs_group_pairs')
+        if (gp) {
+          gp.value = ''
+        }
+        clearSecondMetadataUi()
+      }
       this.validateForm()
     }
 
@@ -640,6 +772,17 @@ export default class extends Controller {
         }
       }
     })
+
+    const secondHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
+    const secondOn = secondHidden && String(secondHidden.value) === "true"
+    const g2c = this.attrsContainerTarget.querySelector("#form-container_groups2")
+    if (secondOn && g2c && g2c.offsetParent !== null) {
+      const hidden2 = g2c.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (!hidden2 || !String(hidden2.value || "").trim()) {
+        isValid = false
+        errors.push("Second metadata: select a metadata column for the compared group")
+      }
+    }
     
     // Update submit button state (resource prediction can block submit like legacy ASAP)
     const blockedByPrediction = this._predictionPreventSubmit === true

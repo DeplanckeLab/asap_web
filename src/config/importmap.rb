@@ -15,6 +15,7 @@ pin "regl", to: "https://cdn.skypack.dev/regl@2.1.0"
 
 pin_all_from "app/javascript/controllers", under: "controllers"
 pin_all_from "app/javascript/visualization", under: "visualization"
+pin_all_from "app/javascript/lib", under: "lib"
 pin_all_from "app/javascript/channels", under: "channels"
 
 

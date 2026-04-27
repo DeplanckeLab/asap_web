@@ -132,6 +132,8 @@
                                              end %>
                     <% annot_run_ids = matching_annots.flat_map { |a| [a.run_id, a.ori_run_id, a.store_run_id] }.compact.uniq %>
                     <% h_runs_by_id = Run.where(id: annot_run_ids).index_by(&:id) %>
+                    <% input_data_dropdown_placeholder = (attr['dropdown_placeholder'].presence || attr['placeholder'].presence) %>
+                    <% input_data_dropdown_text = input_data_dropdown_placeholder.presence || "-- Select #{attr['label'] || attr_name.humanize} --" %>
 
                     <% if matching_annots.any? %>
                       <div class="input_data_widget relative"
@@ -140,12 +142,13 @@
                            data-input-data-selector-is-array-value="<%= attr['req_data_structure'] == 'array' ? 'true' : 'false' %>"
                            data-input-data-selector-min-items-value="<%= min_items %>"
                            data-input-data-selector-max-items-value="<%= max_items || '' %>"
-                           data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>">
+                           data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>"
+                           data-input-data-selector-dropdown-placeholder-value="<%= h(input_data_dropdown_placeholder.to_s) %>">
                         <button type="button"
                                 data-input-data-selector-target="dropdownButton"
                                 data-action="click->input-data-selector#toggleDropdown"
                                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-left shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white flex items-center justify-between">
-                          <span class="text-gray-500" data-input-data-selector-target="dropdownText">-- Select <%= attr['label'] || attr_name.humanize %> --</span>
+                          <span class="text-gray-500" data-input-data-selector-target="dropdownText"><%= input_data_dropdown_text %></span>
                           <span class="ml-2 text-gray-400">▼</span>
                         </button>
                         <div data-input-data-selector-target="dropdownMenu"

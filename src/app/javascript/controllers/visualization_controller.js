@@ -13,6 +13,12 @@ import { GeneManager } from "visualization/gene_manager"
 import { CustomPlotManager } from "visualization/custom_plot_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
 import { readStoredDiscretePaletteId, writeStoredDiscretePaletteId } from "visualization/discrete_palettes"
+import {
+  queryDeSecondMetadataCheckbox,
+  queryDeSecondMetadataFormBlock,
+  queryDeSecondMetadataHidden
+} from "visualization/de_second_metadata_attrs"
+import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import consumer from "channels/consumer"
 
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
@@ -12926,6 +12932,9 @@ export default class extends Controller {
     const selectors = [
       '[data-attr-widget="input_data"]',
       '[data-attr-name="groups"]',
+      '[data-attr-name="groups2"]',
+      '[data-attr-name="second_group_from_other_metadata"]',
+      '[data-attr-name="group_comp_from_other_metadata"]',
       '[data-attr-name="all_against_compl"]',
       '[data-attr-name="all_against_all"]',
       '[data-attr-name="group_pairs"]',
@@ -13014,6 +13023,122 @@ export default class extends Controller {
         }
       })
     })
+    this.initializeDeAllAgainstComplementaryDeVisibility(container)
+    this.initializeDeSecondGroupMetadataVisibility(container)
+  }
+
+  initializeDeAllAgainstComplementaryDeVisibility(container) {
+    if (!container) return
+    const toggle = container.querySelector('#checkbox-all_against_compl')
+    const refContainer = container.querySelector('#form-container_group_ref')
+    const compContainer = container.querySelector('#form-container_group_comp')
+    if (!toggle || !refContainer || !compContainer) return
+    if (toggle.dataset.deAllAgainstBound === '1') return
+    toggle.dataset.deAllAgainstBound = '1'
+
+    const g2Container = container.querySelector('#form-container_groups2')
+    const secondMetaBlock = queryDeSecondMetadataFormBlock(container)
+
+    const clearSecondMetadataUi = () => {
+      const st = queryDeSecondMetadataCheckbox(container)
+      const stHidden = queryDeSecondMetadataHidden(container)
+      if (st) st.checked = false
+      if (stHidden) stHidden.value = 'false'
+      if (!g2Container) return
+      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (hidden) hidden.value = ''
+      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
+        inp.checked = false
+      })
+      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
+      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
+      if (selectedDiv) {
+        selectedDiv.innerHTML = ''
+        selectedDiv.classList.add('hidden')
+      }
+    }
+
+    const applyVisibility = () => {
+      const allAgainst = !!toggle.checked
+      refContainer.style.display = allAgainst ? 'none' : ''
+      compContainer.style.display = allAgainst ? 'none' : ''
+      if (secondMetaBlock) secondMetaBlock.style.display = allAgainst ? 'none' : ''
+      if (g2Container) {
+        if (allAgainst) {
+          g2Container.style.display = 'none'
+        } else {
+          const stHidden = queryDeSecondMetadataHidden(container)
+          const secondOn = stHidden && String(stHidden.value) === 'true'
+          g2Container.style.display = secondOn ? '' : 'none'
+        }
+      }
+      if (allAgainst) {
+        const gref = container.querySelector('#attrs_group_ref')
+        const gcomp = container.querySelector('#attrs_group_comp')
+        if (gref) gref.value = ''
+        if (gcomp) gcomp.value = ''
+        const gp = container.querySelector('#attrs_group_pairs')
+        if (gp) gp.value = ''
+        clearSecondMetadataUi()
+      }
+    }
+
+    toggle.addEventListener('change', applyVisibility)
+    applyVisibility()
+  }
+
+  initializeDeSecondGroupMetadataVisibility(container) {
+    if (!container) return
+    const toggle = queryDeSecondMetadataCheckbox(container)
+    const g2Container = container.querySelector('#form-container_groups2')
+    if (!toggle || !g2Container) return
+    if (toggle.dataset.secondGroupBound === '1') return
+    toggle.dataset.secondGroupBound = '1'
+
+    const clearGroupDataset2 = () => {
+      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (hidden) hidden.value = ''
+      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
+        inp.checked = false
+      })
+      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
+      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
+      if (selectedDiv) {
+        selectedDiv.innerHTML = ''
+        selectedDiv.classList.add('hidden')
+      }
+    }
+
+    const triggerPrimaryDeRefresh = () => {
+      const sel = '[data-input-data-selector-attr-name-value="groups"]'
+      const el = container.querySelector(sel)
+      if (!el || !this.application) return
+      const c = this.application.getControllerForElementAndIdentifier(el, 'input-data-selector')
+      if (c && typeof c.refreshDeGroupDropdownsAfterSecondMetadataToggle === 'function') {
+        c.refreshDeGroupDropdownsAfterSecondMetadataToggle()
+      }
+    }
+
+    const apply = () => {
+      const allAgainst = container.querySelector('#checkbox-all_against_compl')
+      if (allAgainst && allAgainst.checked) {
+        g2Container.style.display = 'none'
+        return
+      }
+      const on = !!toggle.checked
+      g2Container.style.display = on ? '' : 'none'
+      if (!on) clearGroupDataset2()
+      triggerPrimaryDeRefresh()
+    }
+
+    toggle.addEventListener('change', () => {
+      const hiddenAttr = queryDeSecondMetadataHidden(container)
+      if (hiddenAttr) {
+        hiddenAttr.value = toggle.checked ? 'true' : 'false'
+      }
+      apply()
+    })
+    apply()
   }
 
   async updateDeSelectionPreview() {

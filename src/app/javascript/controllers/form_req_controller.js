@@ -402,7 +402,8 @@ export default class extends Controller {
     if (!this.hasAttrsContainerTarget || !this.projectKeyValue || !this.stepIdValue) {
       return
     }
-    
+
+    const preservedAttrValues = this.collectCurrentAttributeValues()
     const stepId = this.stepIdValue
     const projectKey = this.projectKeyValue
     
@@ -430,6 +431,7 @@ export default class extends Controller {
     .then(html => {
       if (html && html.trim().length > 0) {
         this.attrsContainerTarget.innerHTML = html
+        this.restoreAttributeValues(preservedAttrValues)
         // Re-initialize any event listeners that might be needed
         this.initializeAttributeListeners()
         // Validate form after attributes are loaded
@@ -442,6 +444,64 @@ export default class extends Controller {
     .catch(error => {
       console.error('[FormReqController] Error loading attributes:', error)
       this.attrsContainerTarget.innerHTML = `<p class="text-red-600 text-sm">Error loading attributes: ${error.message}</p>`
+    })
+  }
+
+  collectCurrentAttributeValues() {
+    if (!this.hasAttrsContainerTarget) {
+      return {}
+    }
+
+    const preserved = {}
+    const fields = this.attrsContainerTarget.querySelectorAll('input[name^="attrs["], select[name^="attrs["], textarea[name^="attrs["]')
+    fields.forEach((field) => {
+      const name = field.name
+      if (!name) {
+        return
+      }
+
+      if (field.type === 'radio') {
+        if (field.checked) {
+          preserved[name] = field.value
+        }
+        return
+      }
+
+      if (field.type === 'checkbox') {
+        preserved[name] = field.checked
+        return
+      }
+
+      preserved[name] = field.value
+    })
+
+    return preserved
+  }
+
+  restoreAttributeValues(preserved) {
+    if (!this.hasAttrsContainerTarget || !preserved || Object.keys(preserved).length === 0) {
+      return
+    }
+
+    const fields = this.attrsContainerTarget.querySelectorAll('input[name^="attrs["], select[name^="attrs["], textarea[name^="attrs["]')
+    fields.forEach((field) => {
+      const name = field.name
+      if (!name || !(name in preserved)) {
+        return
+      }
+
+      const value = preserved[name]
+      if (field.type === 'radio') {
+        field.checked = String(field.value) === String(value)
+        return
+      }
+
+      if (field.type === 'checkbox') {
+        field.checked = Boolean(value)
+        return
+      }
+
+      field.value = value == null ? '' : String(value)
     })
   }
   

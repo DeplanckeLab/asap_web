@@ -5,10 +5,11 @@
   # Build compact constraint badges to display next to the field label
   # (required / min-max items / min-max values). Keeps the user informed of
   # field rules without stealing vertical space below the input.
-  render_constraint_badges = lambda do |attr|
+  render_constraint_badges = lambda do |attr_name, attr|
     badges = []
-    if attr['not_null']
-      badges << %(<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">mandatory</span>)
+    auto_filled_required_attrs = %w[group_ref group_comp]
+    if attr['not_null'] && !auto_filled_required_attrs.include?(attr_name.to_s)
+      badges << %(<span class="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">required</span>)
     end
 
     widget = attr['widget']
@@ -102,7 +103,7 @@
                     <% if attr['description'].present? %>
                       <span class="text-gray-400 text-xs ml-1" title="<%= attr['description'] %>">?</span>
                     <% end %>
-                    <%= raw(render_constraint_badges.call(attr)) %>
+                    <%= raw(render_constraint_badges.call(attr_name, attr)) %>
                     <% if attr['widget'] == 'input_data' %>
                       <span data-input-data-validation-inline="<%= attr_name %>"
                             class="ml-2 hidden"
@@ -267,7 +268,7 @@
                         { id: "attrs_#{attr_name}" } %>
                     <label for="checkbox-<%= attr_name %>" class="ml-2 text-sm text-gray-700">
                       <%= raw(attr['label'] || attr_name.humanize) %>
-                      <%= raw(render_constraint_badges.call(attr)) %>
+                      <%= raw(render_constraint_badges.call(attr_name, attr)) %>
                     </label>
                   </div>
                   <% if attr['description'].present? %>

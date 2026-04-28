@@ -978,6 +978,10 @@ export default class extends Controller {
     if (!container) {
       return
     }
+    const attrName = container.getAttribute('data-attr-name')
+    if (attrName === 'group_ref' || attrName === 'group_comp') {
+      shouldShow = false
+    }
     const label = container.querySelector('label')
     if (!label) {
       return
@@ -988,8 +992,8 @@ export default class extends Controller {
       if (!badge) {
         badge = document.createElement('span')
         badge.setAttribute('data-conditional-mandatory-badge', '1')
-        badge.className = 'ml-2 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200'
-        badge.textContent = 'mandatory'
+        badge.className = 'ml-2 inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200'
+        badge.textContent = 'required'
         label.appendChild(badge)
       }
       return

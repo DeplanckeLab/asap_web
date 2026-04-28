@@ -58,6 +58,8 @@ export default class extends Controller {
     }
     
     this.restoreSelectionFromHiddenField()
+    this.selectRecommendedOptionOnInitialLoad()
+    this.updateRecommendationBadges()
     this.applyCurrentMatrixContextFromForm()
     this.updateSelectedItems()
     this.validateSelection()
@@ -179,6 +181,7 @@ export default class extends Controller {
   updateSelectedItems() {
     const selectedValues = []
     const selectedLabels = []
+    const selectedRecommendedFlags = []
     
     this.optionTargets.forEach((input) => {
       if (input.checked) {
@@ -189,7 +192,8 @@ export default class extends Controller {
           if (label) {
             const stepRunInfo = label.querySelector('.font-medium')
             if (stepRunInfo) {
-              selectedLabels.push(stepRunInfo.textContent)
+              selectedLabels.push(this.extractOptionDisplayLabel(stepRunInfo))
+              selectedRecommendedFlags.push(this.optionHasRecommendationBadge(stepRunInfo))
             }
           }
         } catch (e) {
@@ -208,34 +212,45 @@ export default class extends Controller {
     this.updateDependentCategorySelect(selectedValues)
     this.updateDeGroupSelectsFromPrimaryMetadata(selectedValues)
     this.updateDeGroupCompFromSecondaryMetadata(selectedValues)
+    this.syncInputMatrixToSelectedGroupsLoom(selectedValues)
+    this.syncInputMatrixCountFlags(selectedValues)
     this.broadcastMatrixContextIfNeeded(selectedValues)
     
     // Update display
     if (selectedValues.length > 0) {
-      this.dropdownTextTarget.textContent = selectedValues.length + ' item' + (selectedValues.length > 1 ? 's' : '') + ' selected'
-      this.dropdownTextTarget.classList.remove('text-gray-500')
-      this.dropdownTextTarget.classList.add('text-gray-900', 'font-medium')
+      const showSelectedValueInField = this.singleSelectionRequired() && selectedValues.length === 1
+      if (showSelectedValueInField) {
+        this.renderSelectedValueInDropdown(selectedLabels[0] || '1 item selected', selectedRecommendedFlags[0] === true)
+      } else {
+        this.dropdownTextTarget.textContent = selectedValues.length + ' item' + (selectedValues.length > 1 ? 's' : '') + ' selected'
+        this.dropdownTextTarget.classList.remove('text-gray-500')
+        this.dropdownTextTarget.classList.add('text-gray-900', 'font-medium')
+      }
       
       // Build selected items tags
       this.selectedDivTarget.innerHTML = ''
-      selectedLabels.forEach((label) => {
-        const badge = document.createElement('span')
-        badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2 mb-1'
-        badge.textContent = label
-        const removeBtn = document.createElement('button')
-        removeBtn.type = 'button'
-        removeBtn.className = 'ml-1.5 inline-flex items-center justify-center w-4 h-4 text-blue-600 hover:text-blue-800 rounded-full hover:bg-blue-200'
-        removeBtn.innerHTML = '×'
-        removeBtn.addEventListener('click', (e) => this.removeSelected(e))
-        badge.appendChild(removeBtn)
-        this.selectedDivTarget.appendChild(badge)
-      })
-      // Only show selected tags when dropdown is closed
-      const isDropdownOpen = !this.dropdownMenuTarget.classList.contains('hidden')
-      if (!isDropdownOpen) {
-        this.selectedDivTarget.classList.remove('hidden')
-      } else {
+      if (showSelectedValueInField) {
         this.selectedDivTarget.classList.add('hidden')
+      } else {
+        selectedLabels.forEach((label) => {
+          const badge = document.createElement('span')
+          badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2 mb-1'
+          badge.textContent = label
+          const removeBtn = document.createElement('button')
+          removeBtn.type = 'button'
+          removeBtn.className = 'ml-1.5 inline-flex items-center justify-center w-4 h-4 text-blue-600 hover:text-blue-800 rounded-full hover:bg-blue-200'
+          removeBtn.innerHTML = '×'
+          removeBtn.addEventListener('click', (e) => this.removeSelected(e))
+          badge.appendChild(removeBtn)
+          this.selectedDivTarget.appendChild(badge)
+        })
+        // Only show selected tags when dropdown is closed
+        const isDropdownOpen = !this.dropdownMenuTarget.classList.contains('hidden')
+        if (!isDropdownOpen) {
+          this.selectedDivTarget.classList.remove('hidden')
+        } else {
+          this.selectedDivTarget.classList.add('hidden')
+        }
       }
     } else {
       this.applyEmptyDropdownLabel()
@@ -245,6 +260,418 @@ export default class extends Controller {
     
     // Validate and trigger form validation
     this.validateSelection()
+  }
+
+  renderSelectedValueInDropdown(labelText, isRecommended) {
+    if (!this.hasDropdownTextTarget) {
+      return
+    }
+    this.dropdownTextTarget.innerHTML = ""
+    this.dropdownTextTarget.classList.remove('text-gray-500')
+    this.dropdownTextTarget.classList.add('text-gray-900', 'font-medium')
+
+    if (isRecommended) {
+      const badge = document.createElement("span")
+      badge.className = "inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800 mr-2 align-middle"
+      badge.textContent = "Recommended"
+      this.dropdownTextTarget.appendChild(badge)
+    }
+
+    const labelSpan = document.createElement("span")
+    labelSpan.textContent = labelText
+    this.dropdownTextTarget.appendChild(labelSpan)
+  }
+
+  optionHasRecommendationBadge(stepRunInfo) {
+    if (!stepRunInfo) {
+      return false
+    }
+    return !!stepRunInfo.querySelector('[data-recommendation-badge="1"]')
+  }
+
+  extractOptionDisplayLabel(stepRunInfo) {
+    if (!stepRunInfo) {
+      return ''
+    }
+    const cloned = stepRunInfo.cloneNode(true)
+    const badge = cloned.querySelector('[data-recommendation-badge="1"]')
+    if (badge) {
+      badge.remove()
+    }
+    return cloned.textContent ? cloned.textContent.trim() : ''
+  }
+
+  syncInputMatrixToSelectedGroupsLoom(selectedValues) {
+    if (this.attrNameValue !== "groups" && this.attrNameValue !== "groups2") {
+      return
+    }
+    if (!selectedValues || selectedValues.length === 0) {
+      return
+    }
+
+    const selectedGroup = selectedValues[0]
+    const groupLoom = selectedGroup && selectedGroup.output_filename ? String(selectedGroup.output_filename) : ""
+    if (!groupLoom) {
+      return
+    }
+
+    const matrixController = this.getInputMatrixController()
+    if (!matrixController) {
+      return
+    }
+
+    const currentMatrix = matrixController.getFirstCheckedOptionValue()
+    const currentMatrixLoom = currentMatrix && currentMatrix.output_filename ? String(currentMatrix.output_filename) : ""
+    if (currentMatrixLoom === groupLoom) {
+      return
+    }
+
+    const targetInput = matrixController.findRecommendedMatrixInputForLoom(groupLoom)
+    if (!targetInput) {
+      return
+    }
+
+    matrixController.selectSingleOption(targetInput)
+    matrixController.updateSelectedItems()
+  }
+
+  syncInputMatrixCountFlags(selectedValues) {
+    if (this.attrNameValue !== "input_matrix") {
+      return
+    }
+
+    const selected = selectedValues && selectedValues.length > 0 ? selectedValues[0] : null
+    const isCount = this.isCountDataset(selected)
+    this.setHiddenBooleanValue("attrs_input_matrix_is_count_table", isCount)
+    this.setHiddenBooleanValue("attrs_input_matrix_is_count", isCount)
+    this.setHiddenBooleanValue("attrs_is_count_table", isCount)
+    this.setHiddenBooleanValue("attrs_is_count", isCount)
+  }
+
+  setHiddenBooleanValue(fieldId, boolValue) {
+    const root = this.formElement || this.element.closest("form")
+    if (!root) {
+      return
+    }
+    const field = root.querySelector(`#${fieldId}, [name="attrs[${fieldId.replace(/^attrs_/, "")}]"]`)
+    if (!field) {
+      return
+    }
+    field.value = boolValue ? "true" : "false"
+  }
+
+  getInputMatrixController() {
+    const root = this.formElement || this.element.closest("form")
+    if (!root || !this.application) {
+      return null
+    }
+
+    const matrixElement = root.querySelector('[data-input-data-selector-attr-name-value="input_matrix"]')
+    if (!matrixElement) {
+      return null
+    }
+
+    return this.application.getControllerForElementAndIdentifier(matrixElement, "input-data-selector")
+  }
+
+  getFirstCheckedOptionValue() {
+    for (let i = 0; i < this.optionTargets.length; i++) {
+      const input = this.optionTargets[i]
+      if (!input.checked) {
+        continue
+      }
+      const parsed = this.parseOptionValue(input)
+      if (parsed) {
+        return parsed
+      }
+    }
+    return null
+  }
+
+  parseOptionValue(input) {
+    if (!input || !input.value) {
+      return null
+    }
+    try {
+      return JSON.parse(input.value)
+    } catch (_error) {
+      return null
+    }
+  }
+
+  optionDatasetName(optionValue) {
+    return optionValue && optionValue.output_dataset ? String(optionValue.output_dataset) : ""
+  }
+
+  optionLoomFile(optionValue) {
+    return optionValue && optionValue.output_filename ? String(optionValue.output_filename) : ""
+  }
+
+  optionArea(optionValue) {
+    const rows = Number(optionValue && optionValue.nber_rows)
+    const cols = Number(optionValue && optionValue.nber_cols)
+    if (!Number.isFinite(rows) || !Number.isFinite(cols)) {
+      return 0
+    }
+    return rows * cols
+  }
+
+  isCountDataset(optionValue) {
+    if (!optionValue || typeof optionValue !== "object") {
+      return false
+    }
+    if (typeof optionValue.is_count === "boolean") {
+      return optionValue.is_count
+    }
+    return false
+  }
+
+  isMatrixDataset(optionValue) {
+    return this.optionDatasetName(optionValue) === "/matrix"
+  }
+
+  isLayerDataset(optionValue) {
+    return this.optionDatasetName(optionValue).startsWith("/layers/")
+  }
+
+  isAsapNormalizedDataset(optionValue) {
+    if (!optionValue || typeof optionValue !== "object") {
+      return false
+    }
+    if (this.isCountDataset(optionValue)) {
+      return false
+    }
+    if (!this.isLayerDataset(optionValue)) {
+      return false
+    }
+    return optionValue.from_asap_pipeline === true
+  }
+
+  matrixOptionScore(optionValue) {
+    if (!optionValue || typeof optionValue !== "object") {
+      return 0
+    }
+
+    const attrName = optionValue.output_attr_name ? String(optionValue.output_attr_name) : ""
+    if (attrName === "/matrix") {
+      return 3
+    }
+    if (attrName === "matrix" || attrName === "output_matrix") {
+      return 2
+    }
+    return 1
+  }
+
+  selectTopByArea(inputs) {
+    if (!inputs || inputs.length === 0) {
+      return null
+    }
+    let best = inputs[0]
+    let bestArea = this.optionArea(this.parseOptionValue(best))
+    for (let i = 1; i < inputs.length; i++) {
+      const candidate = inputs[i]
+      const area = this.optionArea(this.parseOptionValue(candidate))
+      if (area > bestArea) {
+        best = candidate
+        bestArea = area
+      }
+    }
+    return best
+  }
+
+  findRecommendedMatrixInputForLoom(loomFile) {
+    const candidates = this.optionTargets.filter((input) => {
+      const optionValue = this.parseOptionValue(input)
+      return this.optionLoomFile(optionValue) === loomFile
+    })
+    if (candidates.length === 0) {
+      return null
+    }
+
+    const p1 = candidates.filter((input) => this.isAsapNormalizedDataset(this.parseOptionValue(input)))
+    if (p1.length > 0) {
+      return p1[0]
+    }
+
+    const p2 = candidates.filter((input) => {
+      const value = this.parseOptionValue(input)
+      return this.isMatrixDataset(value) && this.isCountDataset(value)
+    })
+    if (p2.length > 0) {
+      return p2[0]
+    }
+
+    const p3 = candidates.filter((input) => {
+      const value = this.parseOptionValue(input)
+      return this.isLayerDataset(value) && this.isCountDataset(value)
+    })
+    if (p3.length > 0) {
+      return this.selectTopByArea(p3)
+    }
+
+    const p4 = candidates.filter((input) => {
+      const value = this.parseOptionValue(input)
+      return this.isMatrixDataset(value) && !this.isCountDataset(value)
+    })
+    if (p4.length > 0) {
+      return p4[0]
+    }
+
+    const p5 = candidates.filter((input) => this.isLayerDataset(this.parseOptionValue(input)))
+    if (p5.length > 0) {
+      return p5[0]
+    }
+
+    return candidates[0]
+  }
+
+  clearRecommendationBadge(input) {
+    const label = input ? input.closest("label") : null
+    if (!label) {
+      return
+    }
+    const title = label.querySelector(".font-medium")
+    if (!title) {
+      return
+    }
+    const badge = title.querySelector('[data-recommendation-badge="1"]')
+    if (badge) {
+      badge.remove()
+    }
+  }
+
+  addRecommendationBadge(input) {
+    const label = input ? input.closest("label") : null
+    if (!label) {
+      return
+    }
+    const title = label.querySelector(".font-medium")
+    if (!title) {
+      return
+    }
+    if (title.querySelector('[data-recommendation-badge="1"]')) {
+      return
+    }
+
+    const badge = document.createElement("span")
+    badge.setAttribute("data-recommendation-badge", "1")
+    badge.className = "inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800 mr-2"
+    badge.textContent = "Recommended"
+    title.prepend(badge)
+  }
+
+  updateRecommendationBadges() {
+    if (this.attrNameValue !== "input_matrix") {
+      return
+    }
+
+    this.optionTargets.forEach((input) => this.clearRecommendationBadge(input))
+
+    const loomGroups = {}
+    this.optionTargets.forEach((input) => {
+      const value = this.parseOptionValue(input)
+      const loomFile = this.optionLoomFile(value)
+      if (!loomFile) {
+        return
+      }
+      if (!loomGroups[loomFile]) {
+        loomGroups[loomFile] = []
+      }
+      loomGroups[loomFile].push(input)
+    })
+
+    Object.keys(loomGroups).forEach((loomFile) => {
+      const recommended = this.findRecommendedMatrixInputForLoom(loomFile)
+      if (recommended) {
+        this.addRecommendationBadge(recommended)
+      }
+    })
+  }
+
+  selectRecommendedOptionOnInitialLoad() {
+    if (this.attrNameValue !== "input_matrix") {
+      return
+    }
+    if (!this.hasHiddenFieldTarget) {
+      return
+    }
+    if (String(this.hiddenFieldTarget.value || "").trim().length > 0) {
+      return
+    }
+    if (this.optionTargets.some((input) => input.checked)) {
+      return
+    }
+
+    const preferredLoom = this.detectPreferredLoomForInitialMatrixSelection()
+    let recommendedInput = null
+    if (preferredLoom) {
+      recommendedInput = this.findRecommendedMatrixInputForLoom(preferredLoom)
+    }
+    if (!recommendedInput) {
+      recommendedInput = this.findRecommendedMatrixInputAcrossAllLooms()
+    }
+    if (!recommendedInput) {
+      return
+    }
+
+    this.selectSingleOption(recommendedInput)
+  }
+
+  detectPreferredLoomForInitialMatrixSelection() {
+    const root = this.formElement || this.element.closest("form")
+    if (!root) {
+      return ""
+    }
+
+    const groupHidden = root.querySelector("#attrs_groups, [name='attrs[groups]']")
+    if (!groupHidden || !String(groupHidden.value || "").trim()) {
+      return ""
+    }
+
+    try {
+      const parsed = JSON.parse(groupHidden.value)
+      const first = Array.isArray(parsed) ? parsed[0] : parsed
+      return first && first.output_filename ? String(first.output_filename) : ""
+    } catch (_error) {
+      return ""
+    }
+  }
+
+  findRecommendedMatrixInputAcrossAllLooms() {
+    const loomGroups = {}
+    this.optionTargets.forEach((input) => {
+      const value = this.parseOptionValue(input)
+      const loomFile = this.optionLoomFile(value)
+      if (!loomFile) {
+        return
+      }
+      if (!loomGroups[loomFile]) {
+        loomGroups[loomFile] = []
+      }
+      loomGroups[loomFile].push(input)
+    })
+
+    const loomKeys = Object.keys(loomGroups)
+    if (loomKeys.length === 0) {
+      return null
+    }
+
+    for (let i = 0; i < loomKeys.length; i++) {
+      const candidate = this.findRecommendedMatrixInputForLoom(loomKeys[i])
+      if (candidate) {
+        return candidate
+      }
+    }
+    return null
+  }
+
+  selectSingleOption(targetInput) {
+    if (!targetInput) {
+      return
+    }
+    this.optionTargets.forEach((input) => {
+      input.checked = (input === targetInput)
+    })
   }
 
   broadcastMatrixContextIfNeeded(selectedValues) {
@@ -346,6 +773,12 @@ export default class extends Controller {
       return "1 item selected"
     }
     return `${count} items selected`
+  }
+
+  singleSelectionRequired() {
+    const maxNum = this.normalizeMaxItems()
+    const onlyOneSelectable = !this.isMultipleValue || maxNum === 1
+    return onlyOneSelectable && this.minItemsValue > 0
   }
 
   setInlineFeedback(inline, kind, text) {

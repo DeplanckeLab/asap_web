@@ -66,7 +66,7 @@ class ReqsController < ApplicationController
     ## create runs
     # {"input_matrix":{"run_id":"13","output_attr_name":"output_matrix"},"fit_model":"log"}
     h_attr_values = JSON.parse(@req.attrs_json)
-    # All-against-complementary: one run, no group_ref/group_comp/group_pairs; Python infers mode from attrs.
+    # All-against-complementary: one run, no explicit ref/comp/group_pairs attributes.
     if Basic.command_json_boolean_truthy?(h_attr_values['all_against_compl'])
       h_attr_values = h_attr_values.dup
       %w[group_pairs group_ref group_comp groups2 second_group_from_other_metadata group_comp_from_other_metadata].each { |k| h_attr_values.delete(k) }
@@ -443,6 +443,14 @@ class ReqsController < ApplicationController
       tmp_attrs.delete(:input_matrix_dataset) if tmp_attrs
     end
 
+    constraint_errors = validate_required_if_constraints(@h_attrs, tmp_attrs || {})
+    if constraint_errors.any?
+      respond_to do |format|
+        format.json { render json: { status: 'failed', errors: constraint_errors.join('; ') }, status: :unprocessable_entity }
+      end
+      return
+    end
+
     @req.attrs_json = (tmp_attrs) ? tmp_attrs.to_json : "{}"
     @req.user_id = (current_user) ? current_user.id : 1
 
@@ -573,6 +581,89 @@ class ReqsController < ApplicationController
         annot_id: (im['annot_id'] || im[:annot_id]).to_i,
         scale_factor: h['scale_factor'].to_s
       }
+    end
+
+    def validate_required_if_constraints(h_attrs, h_attr_values)
+      errors = []
+      return errors unless h_attrs.is_a?(Hash)
+
+      h_attrs.each_pair do |attr_name, attr_config|
+        next unless attr_config.is_a?(Hash)
+
+        constraints = attr_config['constraints']
+        next unless constraints.is_a?(Hash)
+
+        entries = normalize_required_if_entries(constraints['required_if'])
+        next if entries.empty?
+
+        is_required = entries.all? do |entry|
+          actual = fetch_attr_value(h_attr_values, entry[:attr])
+          values_equal_for_constraint?(actual, entry[:equals])
+        end
+        next unless is_required
+
+        value = fetch_attr_value(h_attr_values, attr_name)
+        next unless constraint_value_blank?(value)
+
+        label = attr_config['label'].presence || attr_name.to_s.humanize
+        errors << "#{label}: This field is required"
+      end
+
+      errors
+    end
+
+    def normalize_required_if_entries(required_if)
+      return [] if required_if.blank?
+
+      if required_if.is_a?(Array)
+        return required_if.filter_map do |entry|
+          next unless entry.is_a?(Hash)
+          attr = entry['attr'] || entry[:attr]
+          next if attr.blank?
+
+          equals = if entry.key?('equals')
+                     entry['equals']
+                   else
+                     entry[:equals]
+                   end
+          { attr: attr.to_s, equals: equals }
+        end
+      end
+
+      if required_if.is_a?(Hash)
+        return required_if.map { |attr, expected| { attr: attr.to_s, equals: expected } }
+      end
+
+      []
+    end
+
+    def fetch_attr_value(h_attr_values, key)
+      return nil unless h_attr_values
+      h_attr_values[key.to_s] || h_attr_values[key.to_sym]
+    end
+
+    def normalize_boolean_like(value)
+      return value if value == true || value == false
+
+      if value.is_a?(String)
+        v = value.strip.downcase
+        return true if %w[true 1].include?(v)
+        return false if %w[false 0].include?(v)
+      end
+
+      value
+    end
+
+    def values_equal_for_constraint?(actual, expected)
+      normalize_boolean_like(actual).to_s == normalize_boolean_like(expected).to_s
+    end
+
+    def constraint_value_blank?(value)
+      return true if value.nil?
+      return value.empty? if value.is_a?(Array) || value.is_a?(Hash)
+      return value.strip.empty? if value.is_a?(String)
+
+      false
     end
 
     # Use callbacks to share common setup or constraints between actions.

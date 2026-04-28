@@ -99,6 +99,47 @@
   margin-top: 0.1rem;
 }
 
+/* Global typography baseline across views (except summary panels). */
+body {
+  font-size: 13px;
+  line-height: 1.35rem;
+  color: #111827;
+}
+
+h1 { font-size: 1.25rem; line-height: 1.75rem; }
+h2 { font-size: 1.125rem; line-height: 1.6rem; }
+h3 { font-size: 1rem; line-height: 1.5rem; }
+h4 { font-size: 0.9375rem; line-height: 1.4rem; }
+h5, h6 { font-size: 0.875rem; line-height: 1.35rem; }
+
+p, label, li, td, th, input, select, textarea, button {
+  font-size: 0.8125rem;
+  line-height: 1.35rem;
+}
+
+/* Keep summary views untouched by the global baseline. */
+#result_summary p,
+#result_summary label,
+#result_summary li,
+#result_summary td,
+#result_summary th,
+#result_summary input,
+#result_summary select,
+#result_summary textarea,
+#result_summary button,
+#run_result_summary_panel p,
+#run_result_summary_panel label,
+#run_result_summary_panel li,
+#run_result_summary_panel td,
+#run_result_summary_panel th,
+#run_result_summary_panel input,
+#run_result_summary_panel select,
+#run_result_summary_panel textarea,
+#run_result_summary_panel button {
+  font-size: inherit;
+  line-height: inherit;
+}
+
 /* Tour chrome (panel, overlay root, try bar) sits above page UI including header dropdowns
    (nav/project use up to z-[10000]). Highlighted page nodes use a low z-index so they do not
    stack above the fixed header; only the popup is lifted. */

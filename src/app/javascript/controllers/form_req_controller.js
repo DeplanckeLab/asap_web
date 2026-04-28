@@ -596,7 +596,6 @@ export default class extends Controller {
     }
 
     const applyVisibility = () => {
-      // Checked = complementary mode: one run, no explicit ref/comp (server strips attrs); hide second-metadata UI too.
       const allAgainst = !!toggle.checked
       refContainer.style.display = allAgainst ? 'none' : ''
       compContainer.style.display = allAgainst ? 'none' : ''
@@ -682,6 +681,8 @@ export default class extends Controller {
       const attrName = container.getAttribute('data-attr-name')
       const widget = container.getAttribute('data-attr-widget')
       const notNull = container.getAttribute('data-attr-not-null') === 'true'
+      const conditionallyRequired = this.isConditionallyRequired(container)
+      this.syncMandatoryBadge(container, conditionallyRequired && !notNull)
       const minItems = parseInt(container.getAttribute('data-attr-min-items') || '0')
       const maxItems = container.getAttribute('data-attr-max-items')
       const minVal = container.getAttribute('data-attr-min-val')
@@ -751,7 +752,7 @@ export default class extends Controller {
       }
       
       // Check not_null constraint
-      if (notNull && isEmpty) {
+      if ((notNull || conditionallyRequired) && isEmpty) {
         isValid = false
         const label = container.querySelector('label')?.textContent?.trim() || attrName
         errors.push(`${label}: This field is required`)
@@ -805,6 +806,138 @@ export default class extends Controller {
     }
 
     return isValid && !blockedByPrediction
+  }
+
+  parseAttrConstraints(container) {
+    const raw = container?.getAttribute('data-attr-constraints')
+    if (!raw || raw.trim() === '') {
+      return {}
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') {
+        return parsed
+      }
+      return {}
+    } catch (_e) {
+      return {}
+    }
+  }
+
+  normalizeRequiredIfEntries(requiredIf) {
+    if (!requiredIf) {
+      return []
+    }
+    if (Array.isArray(requiredIf)) {
+      return requiredIf.filter((entry) => entry && typeof entry === 'object')
+    }
+    if (typeof requiredIf === 'object') {
+      return Object.keys(requiredIf).map((attrName) => ({ attr: attrName, equals: requiredIf[attrName] }))
+    }
+    return []
+  }
+
+  parseFieldValueForConstraint(attrName) {
+    if (!this.hasAttrsContainerTarget) {
+      return null
+    }
+    const container = this.attrsContainerTarget.querySelector(`#form-container_${attrName}`)
+    if (!container) {
+      return null
+    }
+
+    const widget = container.getAttribute('data-attr-widget')
+    if (widget === 'checkbox') {
+      const hiddenField = container.querySelector(`#attrs_${attrName}`)
+      return hiddenField ? hiddenField.value : null
+    }
+    if (widget === 'input_data') {
+      const hiddenField = container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (!hiddenField) {
+        return null
+      }
+      const raw = String(hiddenField.value || '').trim()
+      if (raw === '') {
+        return null
+      }
+      try {
+        return JSON.parse(raw)
+      } catch (_e) {
+        return raw
+      }
+    }
+
+    const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
+    if (!input) {
+      return null
+    }
+    if (input.type === 'checkbox') {
+      return input.checked
+    }
+    return input.value
+  }
+
+  normalizeBooleanLike(value) {
+    if (typeof value === 'boolean') {
+      return value
+    }
+    if (typeof value === 'string') {
+      const v = value.trim().toLowerCase()
+      if (v === 'true' || v === '1') {
+        return true
+      }
+      if (v === 'false' || v === '0' || v === '') {
+        return false
+      }
+    }
+    return value
+  }
+
+  valuesEqualForConstraint(actual, expected) {
+    const a = this.normalizeBooleanLike(actual)
+    const b = this.normalizeBooleanLike(expected)
+    return String(a) === String(b)
+  }
+
+  isConditionallyRequired(container) {
+    const constraints = this.parseAttrConstraints(container)
+    const entries = this.normalizeRequiredIfEntries(constraints.required_if)
+    if (entries.length === 0) {
+      return false
+    }
+    return entries.every((entry) => {
+      if (!entry.attr) {
+        return false
+      }
+      const actualValue = this.parseFieldValueForConstraint(String(entry.attr))
+      return this.valuesEqualForConstraint(actualValue, entry.equals)
+    })
+  }
+
+  syncMandatoryBadge(container, shouldShow) {
+    if (!container) {
+      return
+    }
+    const label = container.querySelector('label')
+    if (!label) {
+      return
+    }
+
+    let badge = label.querySelector('[data-conditional-mandatory-badge="1"]')
+    if (shouldShow) {
+      if (!badge) {
+        badge = document.createElement('span')
+        badge.setAttribute('data-conditional-mandatory-badge', '1')
+        badge.className = 'ml-2 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200'
+        badge.textContent = 'mandatory'
+        label.appendChild(badge)
+      }
+      return
+    }
+
+    if (badge) {
+      badge.remove()
+    }
   }
 
   submit(event) {

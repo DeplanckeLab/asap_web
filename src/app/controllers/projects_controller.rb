@@ -6765,65 +6765,8 @@ class ProjectsController < ApplicationController
       }]
     end
 
-    # Non-empty attr_layout_json only renders listed attrs. Merge any method attrs that define
-    # a widget but were omitted from the layout (e.g. group_comp_from_other_metadata / groups2).
-    present_in_layout = {}
-    @attr_layout.each do |vertical_el|
-      Array(vertical_el['horiz_elements']).each do |he|
-        Array(he['attr_list']).each { |name| present_in_layout[name.to_s] = true }
-      end
-    end
-
-    missing = []
-    @h_attrs.each_key do |name|
-      n = name.to_s
-      next if present_in_layout[n]
-
-      a = @h_attrs[name]
-      next unless a.is_a?(Hash) && a['widget'].present? && !a['obsolete']
-
-      missing << n
-    end
-
-    if missing.any?
-      priority = %w[second_group_from_other_metadata group_comp_from_other_metadata groups2]
-      ordered = (priority & missing) + (missing - priority)
-
-      # Second-metadata toggle + groups2 should appear before the "Compared group" select, not
-      # after the whole layout (attr_layout_json often lists group_comp before those attrs exist).
-      de_before_comp_keys = %w[second_group_from_other_metadata group_comp_from_other_metadata groups2]
-      slice_before_comp = de_before_comp_keys & ordered
-      rest = ordered - slice_before_comp
-      inserted_before_comp = false
-      if slice_before_comp.any?
-        @attr_layout.each do |vertical_el|
-          Array(vertical_el['horiz_elements']).each do |he|
-            list = Array(he['attr_list']).map(&:to_s)
-            idx = list.index('group_comp')
-            next unless idx
-
-            to_add = slice_before_comp.reject { |n| list.include?(n) }
-            next if to_add.empty?
-
-            he['attr_list'] = list[0, idx] + to_add + list[idx..]
-            inserted_before_comp = true
-            break
-          end
-          break if inserted_before_comp
-        end
-      end
-
-      tail = inserted_before_comp ? rest : ordered
-      if tail.any?
-        @attr_layout << {
-          'horiz_elements' => [{
-            'attr_list' => tail,
-            'class' => '',
-            'container_class' => 'col-12'
-          }]
-        }
-      end
-    end
+    # Layout is authoritative when provided:
+    # only attributes explicitly listed in attr_layout_json are rendered.
     
     # Get available runs for input selection
     @h_runs = {}

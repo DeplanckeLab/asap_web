@@ -8,7 +8,7 @@
   render_constraint_badges = lambda do |attr|
     badges = []
     if attr['not_null']
-      badges << %(<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">required</span>)
+      badges << %(<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">mandatory</span>)
     end
 
     widget = attr['widget']
@@ -46,15 +46,41 @@
 
     badges.empty? ? '' : %(<span class="ml-2 inline-flex flex-wrap gap-1 align-middle">#{badges.join}</span>)
   end
+
+  layout_title_for = lambda do |node|
+    next nil unless node.is_a?(Hash)
+    keys = %w[title card_title card-header header section_title subtitle label name]
+    keys.each do |k|
+      value = node[k]
+      return value if value.present?
+    end
+    nil
+  end
 %>
 
 <div class="space-y-4">
-  <% @attr_layout.each do |vertical_el| %>
-    <div class="space-y-4">
-      <% vertical_el["horiz_elements"].each do |horiz_element| %>
-        <div class="<%= horiz_element['container_class'] || 'w-full' %>">
-          <% if horiz_element['attr_list'] %>
-            <% horiz_element['attr_list'].each do |attr_name| %>
+  <% @attr_layout.each_with_index do |vertical_el, vertical_idx| %>
+    <% vertical_class = vertical_el['class'].presence || '' %>
+    <% vertical_title = layout_title_for.call(vertical_el) %>
+    <div class="space-y-4 <%= vertical_class %>">
+      <% if vertical_idx > 0 %><div class="pt-1"></div><% end %>
+      <% if vertical_title.present? %>
+        <h3 class="text-sm font-semibold text-gray-800"><%= vertical_title %></h3>
+      <% end %>
+      <% vertical_el["horiz_elements"].each_with_index do |horiz_element, horiz_idx| %>
+        <% section_container_class = horiz_element['container_class'].presence || 'w-full' %>
+        <% raw_custom_section_class = horiz_element['class'].to_s %>
+        <% custom_section_class = raw_custom_section_class.split.reject { |klass| klass == 'h-100' || klass == 'card' }.join(' ') %>
+        <% section_class = "bg-white border border-gray-200 rounded-lg shadow-sm p-4 space-y-4 #{custom_section_class}".strip %>
+        <% section_title = layout_title_for.call(horiz_element) %>
+        <div class="<%= section_container_class %>">
+          <div class="<%= section_class %>">
+            <% if horiz_idx > 0 %><div class="pt-1"></div><% end %>
+            <% if section_title.present? %>
+              <h4 class="text-sm font-medium text-gray-700"><%= section_title %></h4>
+            <% end %>
+            <% if horiz_element['attr_list'] %>
+              <% horiz_element['attr_list'].each do |attr_name| %>
               <% attr = @h_attrs[attr_name] %>
               <% next unless attr && attr['widget'] && !attr['obsolete'] %>
               <% form_attr_name = "attrs[" + attr_name + "]" %>
@@ -65,6 +91,7 @@
                    data-attr-name="<%= attr_name %>"
                    data-attr-widget="<%= attr['widget'] %>"
                    data-attr-not-null="<%= attr['not_null'] ? 'true' : 'false' %>"
+                   data-attr-constraints="<%= h((attr['constraints'] || {}).to_json) %>"
                    data-attr-min-items="<%= attr['min_nber_items'] || 0 %>"
                    data-attr-max-items="<%= attr['max_nber_items'] || '' %>"
                    data-attr-min-val="<%= attr['min_val'] || '' %>"
@@ -159,13 +186,21 @@
                               <% run = run_id ? (@h_runs[run_id] || h_runs_by_id[run_id]) : nil %>
                               <% step = run ? @h_steps[run.step_id] : @h_steps[annot.step_id] || @h_steps[annot.ori_step_id] %>
                               <% categories = Basic.safe_parse_json(annot.categories_json, {}) %>
+                              <% annot_data_class_names = annot.data_class_ids.to_s.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact %>
+                              <% is_count_dataset = annot_data_class_names.include?('int_matrix') %>
+                              <% from_asap_pipeline = !annot.imported %>
                               <% data_hash = {
                                    run_id: run_id,
                                    annot_id: annot.id,
                                    output_filename: annot.filepath,
                                    output_dataset: annot.name,
                                    output_attr_name: annot.attr_name,
-                                   categories: categories
+                                   categories: categories,
+                                   is_count: is_count_dataset,
+                                   nber_rows: annot.nber_rows,
+                                   nber_cols: annot.nber_cols,
+                                   imported: annot.imported,
+                                   from_asap_pipeline: from_asap_pipeline
                                  } %>
                               <% data_value = data_hash.to_json %>
                               <% display_label = [step&.label.presence || step&.name&.humanize, annot.display_name].compact.join(' - ') %>
@@ -265,8 +300,8 @@
                 
                 <div id="validation_<%= attr_name %>" class="text-xs text-red-600 mt-1"></div>
               </div>
+              <% end %>
             <% end %>
-          <% end %>
         </div>
       <% end %>
     </div>

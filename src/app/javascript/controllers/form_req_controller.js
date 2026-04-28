@@ -523,9 +523,11 @@ export default class extends Controller {
     attrInputs.forEach(input => {
       input.addEventListener('change', () => {
         console.log('[FormReqController] Attribute changed:', input.name || input.id)
+        this.syncDependencyVisibility()
         this.validateForm()
       })
       input.addEventListener('input', () => {
+        this.syncDependencyVisibility()
         this.validateForm()
       })
     })
@@ -543,8 +545,117 @@ export default class extends Controller {
     // Initial validation
     this.syncDeGroupVisibility()
     this.syncSecondGroupMetadataVisibility()
+    this.syncDependencyVisibility()
     this.validateForm()
     this.scheduleResourcePrediction()
+  }
+
+  parseRequiredAttrs(container) {
+    const raw = container?.getAttribute('data-attr-requires')
+    if (!raw || raw.trim() === '') {
+      return []
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) {
+        return []
+      }
+      return parsed.map((v) => String(v)).filter((v) => v.length > 0)
+    } catch (_e) {
+      return []
+    }
+  }
+
+  isAttrValuePresent(attrName) {
+    if (!this.hasAttrsContainerTarget) {
+      return false
+    }
+    const container = this.attrsContainerTarget.querySelector(`#form-container_${attrName}`)
+    if (!container) {
+      return false
+    }
+    const widget = container.getAttribute('data-attr-widget')
+    if (widget === 'input_data') {
+      const hiddenField = container.querySelector('[data-input-data-selector-target="hiddenField"]')
+      if (!hiddenField) {
+        return false
+      }
+      const raw = String(hiddenField.value || '').trim()
+      if (raw === '') {
+        return false
+      }
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          return parsed.some((entry) => entry && typeof entry === 'object' && Object.keys(entry).length > 0)
+        }
+        return !!(parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0)
+      } catch (_e) {
+        return false
+      }
+    }
+    if (widget === 'checkbox') {
+      const hiddenField = container.querySelector(`#attrs_${attrName}`)
+      return !!(hiddenField && String(hiddenField.value) === 'true')
+    }
+    const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
+    if (!input) {
+      return false
+    }
+    if (input.type === 'checkbox') {
+      return input.checked
+    }
+    return String(input.value || '').trim() !== ''
+  }
+
+  unmetRequiredAttrs(container) {
+    const requiredAttrs = this.parseRequiredAttrs(container)
+    if (requiredAttrs.length === 0) {
+      return []
+    }
+    return requiredAttrs.filter((attrName) => !this.isAttrValuePresent(attrName))
+  }
+
+  isDependencySatisfied(container) {
+    return this.unmetRequiredAttrs(container).length === 0
+  }
+
+  syncDependencyVisibility() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+    const attrContainers = this.attrsContainerTarget.querySelectorAll('[data-attr-name]')
+    attrContainers.forEach((container) => {
+      const unmet = this.unmetRequiredAttrs(container)
+      const inputWrap = container.querySelector('[data-attr-input-wrap="1"]')
+      const label = container.querySelector('label')
+      const message = String(container.getAttribute('data-attr-requires-message') || '').trim()
+
+      if (inputWrap) {
+        inputWrap.style.display = unmet.length > 0 ? 'none' : ''
+      }
+      if (!label) {
+        return
+      }
+
+      let badge = label.querySelector('[data-dependency-missing-badge="1"]')
+      if (unmet.length > 0) {
+        if (!badge) {
+          badge = document.createElement('span')
+          badge.setAttribute('data-dependency-missing-badge', '1')
+          badge.className = 'ml-2 inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200'
+          label.appendChild(badge)
+        }
+        if (message.length > 0) {
+          badge.textContent = message
+        } else {
+          console.warn('[FormReqController] Missing requires_message for', container.getAttribute('data-attr-name'))
+          badge.textContent = 'Missing dependency message'
+        }
+      } else if (badge) {
+        badge.remove()
+      }
+    })
   }
 
   syncSecondGroupMetadataVisibility() {
@@ -736,6 +847,9 @@ export default class extends Controller {
     
     attrContainers.forEach(container => {
       if (container.offsetParent === null) {
+        return
+      }
+      if (!this.isDependencySatisfied(container)) {
         return
       }
       const attrName = container.getAttribute('data-attr-name')

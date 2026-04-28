@@ -93,6 +93,8 @@
                    data-attr-widget="<%= attr['widget'] %>"
                    data-attr-not-null="<%= attr['not_null'] ? 'true' : 'false' %>"
                    data-attr-constraints="<%= h((attr['constraints'] || {}).to_json) %>"
+                   data-attr-requires="<%= h(Array(attr['requires']).to_json) %>"
+                   data-attr-requires-message="<%= h(attr['requires_message'].to_s) %>"
                    data-attr-min-items="<%= attr['min_nber_items'] || 0 %>"
                    data-attr-max-items="<%= attr['max_nber_items'] || '' %>"
                    data-attr-min-val="<%= attr['min_val'] || '' %>"
@@ -112,6 +114,7 @@
                   </label>
                 <% end %>
                 
+                <div data-attr-input-wrap="1">
                 <% case attr['widget'] %>
                 <% when 'input_data' %>
                   <% if attr['valid_types'].present? && attr['source_steps'].present? %>
@@ -300,6 +303,7 @@
                 <% end %>
                 
                 <div id="validation_<%= attr_name %>" class="text-xs text-red-600 mt-1"></div>
+                </div>
               </div>
               <% end %>
             <% end %>

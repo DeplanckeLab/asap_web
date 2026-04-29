@@ -524,23 +524,34 @@ module Basic
       command_json_boolean_truthy?(nested['use_category_index'])
     end
 
-    def de_param_keys_requiring_group_category_index(h_cmd)
-      return [] unless h_cmd.is_a?(Hash)
+    def command_json_group_category_mode_for_entry(entry)
+      return nil unless entry.is_a?(Hash)
+      return :pos if command_json_boolean_truthy?(entry['use_group_category_pos'])
+      return :index if command_json_boolean_truthy?(entry['use_group_category_index'])
 
-      keys = []
+      nil
+    end
+
+    def de_group_category_mode_by_param_key(h_cmd)
+      return {} unless h_cmd.is_a?(Hash)
+
+      modes = {}
       %w[args opts].each do |list_key|
         (h_cmd[list_key] || []).each do |entry|
-          next unless entry.is_a?(Hash)
-          next unless command_json_boolean_truthy?(entry['use_group_category_index'])
+          mode = command_json_group_category_mode_for_entry(entry)
+          next if mode.nil?
 
-          pk = entry['param_key']
-          keys << pk.to_s if pk.present?
+          pk = entry['param_key'].to_s
+          next if pk.blank?
+
+          # If both are present on duplicate entries for the same param_key, keep one-based mode.
+          modes[pk] = mode if modes[pk] != :pos
         end
       end
 
-      keys << 'group_ref' if command_json_use_category_index_for_de_group?(h_cmd, 'group1')
-      keys << 'group_comp' if command_json_use_category_index_for_de_group?(h_cmd, 'group2')
-      keys.uniq
+      modes['group_ref'] ||= :index if command_json_use_category_index_for_de_group?(h_cmd, 'group1')
+      modes['group_comp'] ||= :index if command_json_use_category_index_for_de_group?(h_cmd, 'group2')
+      modes
     end
 
     def skip_command_json_arg_or_opt_entry?(entry, h_var, p, value_after_template_expand)
@@ -607,12 +618,12 @@ module Basic
     # Resolves one list_cat_json entry, or several CXG-style labels joined with " || " when
     # list_cat_json stores each term separately (e.g. ontology term ids per cell vs. compound values).
     # Returns a string for h_var: one index, or comma-separated indices for the CLI.
-    def de_group_category_index_string_from_label_value(list_cats, raw)
+    def de_group_category_index_string_from_label_value(list_cats, raw, one_based: false)
       raw_s = raw.to_s.strip
       return nil if raw_s.empty?
 
       idx = de_group_category_label_index(list_cats, raw_s)
-      return idx.to_s unless idx.nil?
+      return (one_based ? idx + 1 : idx).to_s unless idx.nil?
 
       return nil unless raw_s.include?(' || ')
 
@@ -622,6 +633,7 @@ module Basic
       indices = parts.map { |part| de_group_category_label_index(list_cats, part) }
       return nil if indices.any?(&:nil?)
 
+      indices = indices.map { |i| one_based ? i + 1 : i }
       indices.uniq.join(',')
     end
 
@@ -650,7 +662,7 @@ module Basic
     # When attrs["groups2"] was never persisted (restart / old runs) but group_comp labels clearly
     # belong to another discrete column on the same loom (e.g. FBdv stages vs FBbt cell types).
     # Returns { annot:, list_cats:, label_source:, idx_str: } or nil. Tie-break: lowest annot id.
-    def de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, primary_annot, raw, logger)
+    def de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, primary_annot, raw, logger, one_based: false)
       return nil if primary_annot.blank? || raw.blank?
 
       fp = primary_annot.filepath.to_s
@@ -676,7 +688,7 @@ module Basic
         end
         next if list_c.blank?
 
-        idx = de_group_category_index_string_from_label_value(list_c, raw)
+        idx = de_group_category_index_string_from_label_value(list_c, raw, one_based: one_based)
         next unless idx
 
         if best.nil? || cand.id < best[:annot].id
@@ -736,7 +748,8 @@ module Basic
       end
     end
 
-    # Optional on opts/args next to use_group_category_index: "category_annot_param_key": "groups2"
+    # Optional on opts/args next to use_group_category_index/use_group_category_pos:
+    # "category_annot_param_key": "groups2"
     # so group_comp maps against list_cat_json of attrs["groups2"] instead of attrs["groups"].
     def category_annot_param_key_for_group_index(h_cmd, param_key)
       return nil unless h_cmd.is_a?(Hash)
@@ -745,7 +758,7 @@ module Basic
       %w[args opts].each do |list_key|
         (h_cmd[list_key] || []).each do |entry|
           next unless entry.is_a?(Hash)
-          next unless command_json_boolean_truthy?(entry['use_group_category_index'])
+          next if command_json_group_category_mode_for_entry(entry).nil?
           next unless entry['param_key'].to_s == pk
 
           cap = entry['category_annot_param_key'].to_s.strip
@@ -787,15 +800,17 @@ module Basic
     end
 
     def apply_de_group_category_indices_from_command_json!(logger, h_cmd_params, h_var, p, h_annots, project)
-      param_keys = de_param_keys_requiring_group_category_index(h_cmd_params)
-      return if param_keys.empty?
+      param_modes = de_group_category_mode_by_param_key(h_cmd_params)
+      return if param_modes.empty?
 
       all_against_compl = command_json_boolean_truthy?(p['all_against_compl'])
 
-      param_keys.each do |pk|
+      param_modes.each do |pk, mode|
+        one_based = mode == :pos
+        mode_name = one_based ? 'use_group_category_pos' : 'use_group_category_index'
         raw_preflight = h_var[pk] || p[pk]
         if all_against_compl && %w[group_ref group_comp].include?(pk.to_s) && (raw_preflight.nil? || raw_preflight.to_s.strip.empty?)
-          logger.debug("[set_run] skipping use_group_category_index for #{pk} (all_against_complementary)")
+          logger.debug("[set_run] skipping #{mode_name} for #{pk} (all_against_complementary)")
           next
         end
 
@@ -809,14 +824,14 @@ module Basic
           label_source = 'list_cat_json'
         end
         if list_cats.empty?
-          logger.warn("[set_run] use_group_category_index set but annot #{annot.id} has no usable categories (loom empty/unreadable and list_cat_json empty); skipping #{pk} (e.g. binary 0/1 selections)")
+          logger.warn("[set_run] #{mode_name} set but annot #{annot.id} has no usable categories (loom empty/unreadable and list_cat_json empty); skipping #{pk} (e.g. binary 0/1 selections)")
           next
         end
 
         raw = h_var[pk]
-        raise StandardError, "use_group_category_index is set for param_key #{pk.inspect} but that value is missing in attrs" if raw.nil? || raw.to_s.strip.empty?
+        raise StandardError, "#{mode_name} is set for param_key #{pk.inspect} but that value is missing in attrs" if raw.nil? || raw.to_s.strip.empty?
 
-        idx_str = de_group_category_index_string_from_label_value(list_cats, raw)
+        idx_str = de_group_category_index_string_from_label_value(list_cats, raw, one_based: one_based)
         # Restart uses persisted attrs_json; second-metadata toggles are often absent even when
         # group_comp was chosen from attrs["groups2"]. If labels fit the second column, use it.
         if idx_str.nil? && pk.to_s == 'group_comp'
@@ -832,7 +847,7 @@ module Basic
                 src_g2 = 'list_cat_json'
               end
               if list_g2.present?
-                idx_g2 = de_group_category_index_string_from_label_value(list_g2, raw)
+                idx_g2 = de_group_category_index_string_from_label_value(list_g2, raw, one_based: one_based)
                 if idx_g2
                   annot = g2_annot
                   list_cats = list_g2
@@ -845,7 +860,7 @@ module Basic
           end
         end
         if idx_str.nil? && pk.to_s == 'group_comp'
-          inferred = de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, annot, raw, logger)
+          inferred = de_infer_discrete_annot_for_unmatched_group_comp(project, h_annots, annot, raw, logger, one_based: one_based)
           if inferred
             annot = inferred[:annot]
             list_cats = inferred[:list_cats]

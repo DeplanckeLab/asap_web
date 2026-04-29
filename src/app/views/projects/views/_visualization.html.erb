@@ -159,7 +159,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <% end %>
           </div>
         </div>
-        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+        <div data-checkpoint-scroll-key="categorical-metadata-panel" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
             <%# Visible DISCRETE metadata %>
             <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []) %>
@@ -548,7 +548,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <% end %>
           </div>
         </div>
-        <div style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+        <div data-checkpoint-scroll-key="continuous-metadata-panel" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
           <% if @h_metadata[@default_loom_file] %>
             <% continuous_metadata_items = @h_metadata[@default_loom_file]['cell']['NUMERIC'].select { |metadata| metadata.nber_rows && metadata.nber_rows == 1 } %>
             <% continuous_metadata_items.each_with_index do |metadata, idx| %>
@@ -1396,8 +1396,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
 
           <button type="button"
                   id="checkpoint-comments-btn"
-                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; border-radius: 0; cursor: pointer; transition: background-color 0.2s; opacity: 0.45; pointer-events: none;"
-                  title="No checkpoint matches current view"
+                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; border-radius: 0; cursor: pointer; transition: background-color 0.2s; opacity: 1;"
+                  title="Checkpoint comments"
                   data-action="click->visualization#openCheckpointComments"
                   onmouseover="this.style.backgroundColor='#e5e7eb'"
                   onmouseout="this.style.backgroundColor='#f3f4f6'">
@@ -1663,7 +1663,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           })
         </script>
       </div>
-      <div style="flex: 1; padding: 20px; padding-top: 0; overflow-y: auto; min-height: 0;">
+      <div data-checkpoint-scroll-key="gene-results-panel" style="flex: 1; padding: 20px; padding-top: 0; overflow-y: auto; min-height: 0;">
 
         <!-- Gene Results Summary -->
         <div id="gene-results-summary" style="display: none; margin-bottom: 20px; padding: 12px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
@@ -1835,7 +1835,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                 </div>
               </div>
               <div id="de-run-feedback" style="display:none;font-size:12px;color:#1d4ed8;margin:0 0 8px 0;"></div>
-              <div id="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
+              <div id="saved-selections-list" data-checkpoint-scroll-key="saved-selections-list" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; box-sizing: border-box;">
                 <div style="font-size: 12px; color: #6b7280; font-style: italic; padding: 8px 0;">
                   No cell sets yet
                 </div>
@@ -1866,7 +1866,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   </button>
                 </div>
               </div>
-              <div id="gene-set-collections-list" style="flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; width: 100%; padding: 0 16px;">
+              <div id="gene-set-collections-list" data-checkpoint-scroll-key="gene-set-collections-list" style="flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; width: 100%; padding: 0 16px;">
                 <div id="gene-set-collections-table-body" style="display:flex;flex-direction:column;gap:4px;width:100%;">
                   <% collections = Array(@gene_set_collections) %>
                   <% if collections.any? %>
@@ -2314,15 +2314,65 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
   </div>
 </div>
 
-<div id="checkpoint-comments-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 12000; justify-content: center; align-items: center;" onclick="if (event.target === this && window.visualizationController) window.visualizationController.closeCheckpointComments()">
-  <div style="background: white; border-radius: 10px; width: 600px; max-width: 92vw; max-height: 75vh; overflow: hidden; display: flex; flex-direction: column;">
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-      <div id="checkpoint-comments-title" style="font-size: 15px; font-weight: 600; color: #111827;">Checkpoint comments</div>
+<div id="checkpoint-comments-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(15, 23, 42, 0.06); z-index: 12000; justify-content: center; align-items: center;" onmousedown="if (window.visualizationController) window.visualizationController.checkpointCommentsOverlayBackdropMouseDown(event)" onclick="if (window.visualizationController) window.visualizationController.checkpointCommentsOverlayBackdropClick(event)">
+  <div id="checkpoint-comments-modal" style="background: white; border: 1px solid #d1d5db; border-radius: 10px; width: 600px; max-width: 92vw; max-height: 75vh; overflow: hidden; display: flex; flex-direction: column;">
+    <div id="checkpoint-comments-header"
+         onmousedown="if (window.visualizationController) window.visualizationController.startCheckpointCommentsDrag(event)"
+         style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; cursor: move;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span id="checkpoint-comments-drag-handle"
+              title="Drag window"
+              style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; cursor:move; color:#6b7280; border-radius:4px;">
+          <i class="fas fa-grip-vertical" style="font-size: 12px;"></i>
+        </span>
+        <div id="checkpoint-comments-title" style="font-size: 15px; font-weight: 600; color: #111827;">Comments on...</div>
+      </div>
       <button type="button"
               style="background: none; border: none; font-size: 18px; color: #6b7280; cursor: pointer;"
               onclick="if (window.visualizationController) window.visualizationController.closeCheckpointComments()">
         <i class="fas fa-times"></i>
       </button>
+    </div>
+    <div id="checkpoint-comments-drift-banner" style="display: none; margin: 10px 16px 0 16px; padding: 10px 12px; border: 1px solid #ea580c; background: #fff7ed; color: #9a3412; border-radius: 6px; font-size: 12px; line-height: 1.45;">
+      <div id="checkpoint-comments-drift-message"></div>
+    </div>
+    <div style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 8px;">
+      <div id="checkpoint-comment-choice-section" style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #111827; cursor: pointer;">
+            <input type="radio" name="checkpoint-comment-mode" value="existing" onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
+            Existing checkpoint
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #111827; cursor: pointer;">
+            <input type="radio" name="checkpoint-comment-mode" value="new" checked onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
+            New checkpoint
+          </label>
+        </div>
+        <div id="checkpoint-comment-existing-wrap" style="display: flex; flex-direction: column; gap: 6px;">
+          <label for="checkpoint-comment-target-trigger" style="font-size: 12px; color: #4b5563;">Select checkpoint</label>
+          <div id="checkpoint-comment-target-widget" style="position: relative;">
+            <input type="hidden" id="checkpoint-comment-target-select" value="" />
+            <button type="button"
+                    id="checkpoint-comment-target-trigger"
+                    onclick="if (window.visualizationController) window.visualizationController.toggleCheckpointCommentTargetMenu(event)"
+                    style="width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 8px; font-size: 13px; background: #fff; cursor: pointer; text-align: left;">
+              <span id="checkpoint-comment-target-trigger-label" style="flex: 1; min-width: 0; color: #6b7280;">Select checkpoint</span>
+              <span style="flex-shrink: 0; color: #9ca3af; font-size: 10px;">▼</span>
+            </button>
+            <div id="checkpoint-comment-target-menu"
+                 style="display: none; position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; overflow: auto; z-index: 13050; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);">
+            </div>
+          </div>
+        </div>
+        <div id="checkpoint-comment-new-wrap" style="display: none; flex-direction: column; gap: 6px;">
+          <label for="checkpoint-comment-new-title" style="font-size: 12px; color: #4b5563;">New checkpoint name</label>
+          <input id="checkpoint-comment-new-title"
+                 type="text"
+                 maxlength="255"
+                 placeholder="Checkpoint title"
+                 style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 8px; font-size: 13px;">
+        </div>
+      </div>
     </div>
     <div id="checkpoint-comments-list" style="overflow: auto; flex: 1;"></div>
     <div style="display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #e5e7eb;">

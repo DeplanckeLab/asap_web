@@ -252,6 +252,12 @@ export default class extends Controller {
     if (!this._globalFilterOutsideHandler) this._globalFilterOutsideHandler = null
     if (!Array.isArray(this.checkpointHistory)) this.checkpointHistory = []
     if (this.currentMatchedCheckpointId === undefined) this.currentMatchedCheckpointId = null
+    if (this.lastLoadedCheckpointId === undefined) this.lastLoadedCheckpointId = null
+    if (this.lastLoadedCheckpointPersistedStateBaseline === undefined) {
+      this.lastLoadedCheckpointPersistedStateBaseline = null
+    }
+    if (this.currentCommentCheckpointId === undefined) this.currentCommentCheckpointId = null
+    if (this.checkpointCommentUiExactMatchOnly === undefined) this.checkpointCommentUiExactMatchOnly = false
     if (this.currentCheckpointLoadInProgress === undefined) this.currentCheckpointLoadInProgress = false
     if (this.currentCheckpointReadyForOverwrite === undefined) this.currentCheckpointReadyForOverwrite = false
     if (!this.adaptColorRangeByMetadataId) this.adaptColorRangeByMetadataId = {}
@@ -754,6 +760,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.stopCheckpointCommentsDrag()
     console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
     if (this.boundTurboBeforeCache) {
       document.removeEventListener('turbo:before-cache', this.boundTurboBeforeCache)
@@ -792,6 +799,8 @@ export default class extends Controller {
       cancelAnimationFrame(this.leftPanelResizeRaf)
       this.leftPanelResizeRaf = null
     }
+
+    this.removeCheckpointCommentTargetOutsideClose()
 
     if (this.checkpointMatchTimer) {
       window.clearInterval(this.checkpointMatchTimer)
@@ -2077,10 +2086,10 @@ export default class extends Controller {
     const commentsBtn = document.getElementById('checkpoint-comments-btn')
     if (!commentsBtn) return
 
-    commentsBtn.style.opacity = enabled ? '1' : '0.45'
-    commentsBtn.style.pointerEvents = enabled ? 'auto' : 'none'
+    commentsBtn.style.opacity = '1'
+    commentsBtn.style.pointerEvents = 'auto'
     commentsBtn.style.color = Number(commentCount) > 0 ? '#10b981' : '#374151'
-    commentsBtn.title = enabled ? 'Checkpoint comments' : 'No checkpoint matches current view'
+    commentsBtn.title = 'Checkpoint comments'
   }
 
   loadCheckpointFromUrlIfPresent() {
@@ -2542,7 +2551,9 @@ export default class extends Controller {
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
+    this.lastLoadedCheckpointPersistedStateBaseline = null
     let checkpoint = null
+    let persistedBaselineForComments = null
     try {
       this.setCheckpointViewLoading(true)
 
@@ -2561,6 +2572,8 @@ export default class extends Controller {
       const payload = await response.json()
       checkpoint = payload.checkpoint
       if (!checkpoint || !checkpoint.state) return
+
+      persistedBaselineForComments = JSON.parse(JSON.stringify(checkpoint.state))
 
       const requestedLoom = checkpoint.state.embedding?.loomFile || checkpoint.state.visualizationEmbedding?.loomFile || checkpoint.state.loomFile || null
       const requestedName = checkpoint.state.visualizationEmbedding?.name || null
@@ -2607,9 +2620,10 @@ export default class extends Controller {
         state_signature: currentSignature
       })
       this.currentMatchedCheckpointId = checkpoint.id
+      this.lastLoadedCheckpointId = checkpoint.id
+      this.lastLoadedCheckpointPersistedStateBaseline = persistedBaselineForComments
       const commentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
       this.updateCheckpointCommentsButtonState(commentCount, true)
-      this.refreshCurrentCheckpointMatch()
       this.checkpointTrace('loadCheckpointById:apply-success', {
         checkpointId: String(checkpoint.id || checkpointId),
         blockers: this.collectCheckpointUiBlockers()
@@ -2623,6 +2637,9 @@ export default class extends Controller {
       alert('Failed to apply checkpoint state. Please retry.')
     } finally {
       this.isApplyingCheckpointState = false
+      if (checkpoint?.id && this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === String(checkpoint.id)) {
+        this.refreshCurrentCheckpointMatch()
+      }
       this.closeCheckpointHistory()
       this.uiManager?.hideMetadataDropdownSpinner?.()
       this.checkpointTrace('loadCheckpointById:apply-finally', {
@@ -2633,88 +2650,645 @@ export default class extends Controller {
     }
   }
 
+  resolveCheckpointCommentMode() {
+    if (this.checkpointCommentUiExactMatchOnly === true) return 'existing'
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!modal) return 'new'
+    const selected = modal.querySelector('input[name="checkpoint-comment-mode"]:checked')
+    if (selected?.value === 'new') return 'new'
+    if (selected?.value === 'existing') return 'existing'
+    return 'new'
+  }
+
+  updateCheckpointCommentChoiceSectionVisibility(visible) {
+    const section = document.getElementById('checkpoint-comment-choice-section')
+    if (!section) return
+    section.style.display = visible ? 'flex' : 'none'
+  }
+
+  updateCheckpointCommentsModalTitle() {
+    const titleEl = document.getElementById('checkpoint-comments-title')
+    if (!titleEl) return
+    if (this.checkpointCommentUiExactMatchOnly === true && this.currentMatchedCheckpointId) {
+      const history = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+      const cp = history.find((item) => String(item.id) === String(this.currentMatchedCheckpointId))
+      const rawName = (cp && String(cp.title || '').trim()) || ''
+      const name = rawName || `ID ${this.currentMatchedCheckpointId}`
+      const nameEsc = this.escapeHtml(name)
+      titleEl.innerHTML = `Comments on <span style="color:#1d4ed8;text-decoration:underline;text-underline-offset:2px;">${nameEsc}</span>`
+      return
+    }
+    titleEl.textContent = 'Comments on...'
+  }
+
+  getCheckpointCommentModeRadioElements() {
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!modal) return { existingRadio: null, newRadio: null }
+    return {
+      existingRadio: modal.querySelector('input[name="checkpoint-comment-mode"][value="existing"]'),
+      newRadio: modal.querySelector('input[name="checkpoint-comment-mode"][value="new"]')
+    }
+  }
+
+  getCheckpointCommentModalElements() {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    const title = document.getElementById('checkpoint-comments-title')
+    const list = document.getElementById('checkpoint-comments-list')
+    const targetSelect = document.getElementById('checkpoint-comment-target-select')
+    const existingWrap = document.getElementById('checkpoint-comment-existing-wrap')
+    const newWrap = document.getElementById('checkpoint-comment-new-wrap')
+    const newTitleInput = document.getElementById('checkpoint-comment-new-title')
+    const commentInput = document.getElementById('checkpoint-comment-input')
+    return { overlay, title, list, targetSelect, existingWrap, newWrap, newTitleInput, commentInput }
+  }
+
+  updateCheckpointCommentsDriftBanner(options = {}) {
+    const wrap = document.getElementById('checkpoint-comments-drift-banner')
+    const messageEl = document.getElementById('checkpoint-comments-drift-message')
+    if (!wrap || !messageEl) return
+    const visible = options.visible === true
+    const message = String(options.message || '').trim()
+    if (!visible || !message) {
+      wrap.style.display = 'none'
+      wrap.style.border = ''
+      wrap.style.background = ''
+      wrap.style.color = ''
+      messageEl.textContent = ''
+      return
+    }
+    wrap.style.display = 'block'
+    messageEl.textContent = message
+    wrap.style.border = '1px solid #ea580c'
+    wrap.style.background = '#fff7ed'
+    wrap.style.color = '#9a3412'
+  }
+
+  applyCheckpointCommentsDriftBannerForCurrentState() {
+    const persistedBaseline = this.lastLoadedCheckpointPersistedStateBaseline
+    const lastLoadedDiffersFromCurrent =
+      !!this.lastLoadedCheckpointId &&
+      persistedBaseline &&
+      typeof persistedBaseline === 'object' &&
+      !this.isCheckpointStateAlreadyApplied(persistedBaseline)
+    if (!lastLoadedDiffersFromCurrent) {
+      this.updateCheckpointCommentsDriftBanner({ visible: false })
+      return
+    }
+    const presentationOnly = this.isLastLoadedCheckpointDriftPresentationOnly(persistedBaseline)
+    if (presentationOnly) {
+      this.updateCheckpointCommentsDriftBanner({
+        visible: true,
+        message:
+          'Presentation differs from the last loaded checkpoint (scroll, folds, plot layout, pan/zoom, display). Underlying data matches; comments still refer to its saved layout.'
+      })
+    } else {
+      this.updateCheckpointCommentsDriftBanner({
+        visible: true,
+        message:
+          'View differs from the last loaded checkpoint. Comments on that checkpoint refer to its saved layout and data.'
+      })
+    }
+  }
+
+  renderCheckpointCommentsList(checkpoint) {
+    const { list } = this.getCheckpointCommentModalElements()
+    if (!list) return
+    const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
+    if (comments.length === 0) {
+      list.innerHTML = '<div style="padding: 10px; color: #6b7280;">No comments yet.</div>'
+      return
+    }
+
+    list.innerHTML = comments.map((comment) => {
+      const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ''
+      const canManage = comment.user_can_manage === true
+      const commentId = this.escapeHtml(comment.id || '')
+      return `
+        <div style="padding:10px;border-bottom:1px solid #e5e7eb;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</span>
+            ${canManage ? `
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <button type="button"
+                      onclick="if (window.visualizationController) window.visualizationController.editCheckpointComment('${commentId}')"
+                      style="padding:2px 6px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:4px;cursor:pointer;font-size:11px;">
+                Edit
+              </button>
+              <button type="button"
+                      onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointComment('${commentId}')"
+                      style="padding:2px 6px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:4px;cursor:pointer;font-size:11px;">
+                Delete
+              </button>
+            </span>
+            ` : ''}
+          </div>
+          <div style="font-size:13px;color:#111827;white-space:pre-wrap;">${this.escapeHtml(comment.body || '')}</div>
+        </div>
+      `
+    }).join('')
+  }
+
+  removeCheckpointCommentTargetOutsideClose() {
+    if (!this._checkpointCommentTargetOutsideBound) return
+    document.removeEventListener('click', this._checkpointCommentTargetOutsideBound, true)
+    this._checkpointCommentTargetOutsideBound = null
+  }
+
+  ensureCheckpointCommentTargetOutsideCloseBound() {
+    if (this._checkpointCommentTargetOutsideBound) return
+    this._checkpointCommentTargetOutsideBound = (event) => {
+      const menu = document.getElementById('checkpoint-comment-target-menu')
+      const trigger = document.getElementById('checkpoint-comment-target-trigger')
+      if (!menu || !trigger || menu.style.display === 'none') return
+      if (menu.contains(event.target) || trigger.contains(event.target)) return
+      this.closeCheckpointCommentTargetMenu()
+    }
+    document.addEventListener('click', this._checkpointCommentTargetOutsideBound, true)
+  }
+
+  closeCheckpointCommentTargetMenu() {
+    const menu = document.getElementById('checkpoint-comment-target-menu')
+    if (!menu) return
+    menu.style.display = 'none'
+  }
+
+  layoutCheckpointCommentTargetMenuMaxHeight() {
+    const menu = document.getElementById('checkpoint-comment-target-menu')
+    const trigger = document.getElementById('checkpoint-comment-target-trigger')
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!menu || !trigger) return
+    const triggerRect = trigger.getBoundingClientRect()
+    const margin = 10
+    let maxPx = window.innerHeight - triggerRect.bottom - margin
+    if (modal) {
+      const modalRect = modal.getBoundingClientRect()
+      const roomInsideModal = modalRect.bottom - triggerRect.bottom - margin
+      maxPx = Math.min(maxPx, roomInsideModal)
+    }
+    menu.style.maxHeight = `${Math.max(80, Math.floor(maxPx))}px`
+  }
+
+  toggleCheckpointCommentTargetMenu(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const menu = document.getElementById('checkpoint-comment-target-menu')
+    const trigger = document.getElementById('checkpoint-comment-target-trigger')
+    if (!menu || !trigger || trigger.disabled) return
+    const opening = menu.style.display === 'none' || !menu.style.display
+    if (opening) {
+      this.ensureCheckpointCommentTargetOutsideCloseBound()
+      menu.style.display = 'block'
+      this.layoutCheckpointCommentTargetMenuMaxHeight()
+    } else {
+      this.closeCheckpointCommentTargetMenu()
+    }
+  }
+
+  syncCheckpointCommentTargetDropdownLabel() {
+    const labelEl = document.getElementById('checkpoint-comment-target-trigger-label')
+    const hidden = document.getElementById('checkpoint-comment-target-select')
+    if (!labelEl || !hidden) return
+    const history = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+    const id = hidden.value ? String(hidden.value) : ''
+    if (!id) {
+      labelEl.textContent = 'Select checkpoint'
+      labelEl.style.color = '#6b7280'
+      return
+    }
+    const cp = history.find((item) => String(item.id) === id)
+    if (!cp) {
+      labelEl.textContent = 'Select checkpoint'
+      labelEl.style.color = '#6b7280'
+      return
+    }
+    const commentCount = Number(cp.comments_count || (Array.isArray(cp.comments) ? cp.comments.length : 0))
+    const title = cp.title || 'Untitled checkpoint'
+    const titleEsc = this.escapeHtml(title)
+    const isLast = this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === id
+    const dateCompact = this.formatCheckpointCommentCompactDate(cp.created_at)
+    const dateEsc = this.escapeHtml(dateCompact)
+    const commentsBadge = `<span title="Comments" style="flex-shrink:0;padding:0 5px;border-radius:3px;font-size:10px;font-weight:600;line-height:1.4;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">${commentCount}</span>`
+    const lastBadge = isLast
+      ? '<span style="flex-shrink:0;margin-left:auto;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;">Last loaded</span>'
+      : ''
+    labelEl.innerHTML = `<span style="display:flex;align-items:center;gap:6px;width:100%;min-width:0;"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:#111827;">${titleEsc}</span>${dateCompact ? `<span style="flex-shrink:0;font-size:10px;color:#6b7280;font-variant-numeric:tabular-nums;">${dateEsc}</span>` : ''}${commentsBadge}${lastBadge}</span>`
+    labelEl.style.color = '#111827'
+  }
+
+  formatCheckpointCommentCompactDate(iso) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return ''
+    try {
+      return d.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      })
+    } catch (_e) {
+      return ''
+    }
+  }
+
+  checkpointCommentTargetMenuRowHtml(checkpoint, { isLastLoaded, showTopDivider }) {
+    const id = String(checkpoint.id)
+    const commentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+    const titleEsc = this.escapeHtml(checkpoint.title || 'Untitled checkpoint')
+    const dateCompact = this.formatCheckpointCommentCompactDate(checkpoint.created_at)
+    const dateEsc = this.escapeHtml(dateCompact)
+    const rowBg = isLastLoaded ? '#fffbeb' : '#ffffff'
+    const rowHover = isLastLoaded ? '#ffedd5' : '#f9fafb'
+    const topBorder = showTopDivider ? 'border-top:1px solid #e5e7eb;' : ''
+    const commentsBadge = `<span title="Comments" style="flex-shrink:0;padding:0 5px;border-radius:3px;font-size:10px;font-weight:600;line-height:1.4;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">${commentCount}</span>`
+    const lastLoadedBadge = isLastLoaded
+      ? '<span style="flex-shrink:0;margin-left:auto;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;">Last loaded</span>'
+      : ''
+    return `
+      <button type="button"
+              data-checkpoint-id="${this.escapeHtml(id)}"
+              style="display:block;width:100%;text-align:left;padding:4px 10px;border:none;border-bottom:1px solid #f3f4f6;background:${rowBg};cursor:pointer;${topBorder}"
+              onmouseenter="this.style.backgroundColor='${rowHover}'"
+              onmouseleave="this.style.backgroundColor='${rowBg}'"
+              onclick="if (window.visualizationController) window.visualizationController.pickCheckpointCommentTarget(event)">
+        <div style="display:flex;align-items:center;gap:6px;width:100%;min-width:0;">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:#111827;">${titleEsc}</span>
+          ${dateCompact ? `<span style="flex-shrink:0;font-size:10px;color:#6b7280;font-variant-numeric:tabular-nums;">${dateEsc}</span>` : ''}
+          ${commentsBadge}
+          ${lastLoadedBadge}
+        </div>
+      </button>
+    `
+  }
+
+  pickCheckpointCommentTarget(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const checkpointId = event?.currentTarget?.dataset?.checkpointId
+    if (!checkpointId) return
+    const hidden = document.getElementById('checkpoint-comment-target-select')
+    if (hidden) hidden.value = String(checkpointId)
+    this.closeCheckpointCommentTargetMenu()
+    this.onCheckpointCommentTargetChanged().catch((error) => {
+      console.error('[CheckpointComments] failed to apply checkpoint target', error)
+    })
+  }
+
+  renderCheckpointCommentTargetOptions() {
+    if (this.checkpointCommentUiExactMatchOnly === true) return
+    const { targetSelect } = this.getCheckpointCommentModalElements()
+    const menu = document.getElementById('checkpoint-comment-target-menu')
+    const trigger = document.getElementById('checkpoint-comment-target-trigger')
+    if (!targetSelect || !menu) return
+    const history = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+
+    if (history.length === 0) {
+      menu.innerHTML = '<div style="padding:12px;color:#6b7280;font-size:13px;">No checkpoints available.</div>'
+      targetSelect.value = ''
+      if (trigger) {
+        trigger.disabled = true
+        trigger.style.opacity = '0.6'
+        trigger.style.cursor = 'not-allowed'
+      }
+      this.syncCheckpointCommentTargetDropdownLabel()
+      return
+    }
+
+    if (trigger) {
+      trigger.disabled = false
+      trigger.style.opacity = '1'
+      trigger.style.cursor = 'pointer'
+    }
+
+    const lastLoadedId = this.lastLoadedCheckpointId ? String(this.lastLoadedCheckpointId) : ''
+    const lastLoadedEntry = lastLoadedId
+      ? history.find((item) => String(item.id) === lastLoadedId)
+      : null
+    const others = lastLoadedEntry
+      ? history.filter((item) => String(item.id) !== lastLoadedId)
+      : [...history]
+
+    let body = ''
+    if (lastLoadedEntry) {
+      body += this.checkpointCommentTargetMenuRowHtml(lastLoadedEntry, { isLastLoaded: true, showTopDivider: false })
+    }
+    others.forEach((checkpoint, idx) => {
+      body += this.checkpointCommentTargetMenuRowHtml(checkpoint, {
+        isLastLoaded: false,
+        showTopDivider: !!(lastLoadedEntry && idx === 0)
+      })
+    })
+    menu.innerHTML = body
+    if (menu.style.display === 'block') {
+      this.layoutCheckpointCommentTargetMenuMaxHeight()
+    }
+
+    const lastLoadedInHistory = !!(lastLoadedId && history.some((item) => String(item.id) === lastLoadedId))
+    if (!this.currentCommentCheckpointId || !history.some((item) => String(item.id) === String(this.currentCommentCheckpointId))) {
+      if (lastLoadedInHistory) {
+        this.currentCommentCheckpointId = lastLoadedId
+      } else {
+        this.currentCommentCheckpointId = this.currentMatchedCheckpointId || history[0].id
+      }
+    }
+    targetSelect.value = this.currentCommentCheckpointId ? String(this.currentCommentCheckpointId) : ''
+    this.syncCheckpointCommentTargetDropdownLabel()
+  }
+
+  captureCheckpointCommentDraftState() {
+    this.checkpointCommentDraftState = this.buildCheckpointState()
+    this.checkpointCommentVisitedExisting = false
+  }
+
+  async renderCheckpointCommentsForSelectedTarget() {
+    const { title, list } = this.getCheckpointCommentModalElements()
+    if (!title || !list) return
+    if (!this.currentCommentCheckpointId) {
+      this.updateCheckpointCommentsModalTitle()
+      list.innerHTML = '<div style="padding: 10px; color: #6b7280;">Select a checkpoint to view comments.</div>'
+      return
+    }
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentCommentCheckpointId)}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    })
+    if (!response.ok) return
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    this.mergeCheckpointIntoHistory(checkpoint)
+    const checkpointCommentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+    this.updateCheckpointCommentsButtonState(checkpointCommentCount, true)
+    this.updateCheckpointCommentsModalTitle()
+    this.renderCheckpointCommentsList(checkpoint)
+  }
+
+  async onCheckpointCommentTargetChanged() {
+    const { targetSelect } = this.getCheckpointCommentModalElements()
+    if (!targetSelect) return
+    this.currentCommentCheckpointId = targetSelect.value ? String(targetSelect.value) : null
+    if (this.currentCommentCheckpointId) {
+      this.checkpointCommentVisitedExisting = true
+      if (this.isOpeningCheckpointComments !== true) {
+        const targetCheckpoint = (this.checkpointHistory || []).find((item) => String(item?.id) === String(this.currentCommentCheckpointId))
+        const alreadyApplied = !!(targetCheckpoint?.state && this.isCheckpointStateAlreadyApplied(targetCheckpoint.state))
+        if (!alreadyApplied) {
+          await this.loadCheckpointById(this.currentCommentCheckpointId)
+        }
+      }
+    }
+    await this.renderCheckpointCommentsForSelectedTarget()
+    this.syncCheckpointCommentTargetDropdownLabel()
+  }
+
+  async onCheckpointCommentModeChanged() {
+    const mode = this.resolveCheckpointCommentMode()
+    const { existingWrap, newWrap, list } = this.getCheckpointCommentModalElements()
+    if (existingWrap) existingWrap.style.display = mode === 'existing' ? 'flex' : 'none'
+    if (newWrap) newWrap.style.display = mode === 'new' ? 'flex' : 'none'
+    if (mode === 'existing') {
+      await this.onCheckpointCommentTargetChanged()
+      return
+    }
+    if (this.checkpointCommentVisitedExisting === true && this.checkpointCommentDraftState) {
+      if (!this.isCheckpointStateAlreadyApplied(this.checkpointCommentDraftState)) {
+        this.setCheckpointViewLoading(true)
+        try {
+          await this.applyCheckpointState(this.checkpointCommentDraftState)
+        } finally {
+          this.setCheckpointViewLoading(false)
+        }
+      }
+    }
+    this.updateCheckpointCommentsModalTitle()
+    if (list) {
+      list.innerHTML = '<div style="padding: 10px; color: #6b7280;">Comments will be attached after creating the new checkpoint.</div>'
+    }
+  }
+
   async openCheckpointComments(event) {
     if (event) {
       event.preventDefault()
       event.stopPropagation()
     }
 
-    if (!this.currentMatchedCheckpointId) return
+    this.closeCheckpointCommentTargetMenu()
+    this.captureCheckpointCommentDraftState()
+    await this.fetchCheckpointHistory()
+    const history = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+    const hasExactMatch = !!this.currentMatchedCheckpointId
+    this.checkpointCommentUiExactMatchOnly = hasExactMatch
 
-    const projectIdentifier = this.getProjectIdentifier()
-    if (!projectIdentifier) return
-
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      credentials: 'same-origin'
-    })
-
-    if (!response.ok) {
-      return
+    let preferredCheckpointId = null
+    if (hasExactMatch) {
+      preferredCheckpointId = this.currentMatchedCheckpointId
+    } else if (this.lastLoadedCheckpointId && history.some((item) => String(item.id) === String(this.lastLoadedCheckpointId))) {
+      preferredCheckpointId = this.lastLoadedCheckpointId
+    } else if (history.length > 0) {
+      preferredCheckpointId = history[0].id
     }
 
-    const payload = await response.json()
-    const checkpoint = payload.checkpoint
-    this.mergeCheckpointIntoHistory(checkpoint)
-    this.refreshCurrentCheckpointMatch()
-    const checkpointCommentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
-    this.updateCheckpointCommentsButtonState(checkpointCommentCount, true)
-
-    const overlay = document.getElementById('checkpoint-comments-overlay')
-    const title = document.getElementById('checkpoint-comments-title')
-    const list = document.getElementById('checkpoint-comments-list')
-    if (!overlay || !title || !list) return
-
-    title.textContent = checkpoint.title || 'Checkpoint comments'
-    const comments = Array.isArray(checkpoint.comments) ? checkpoint.comments : []
-    if (comments.length === 0) {
-      list.innerHTML = '<div style="padding: 10px; color: #6b7280;">No comments yet.</div>'
+    if (hasExactMatch && this.currentMatchedCheckpointId && history.some((item) => String(item.id) === String(this.currentMatchedCheckpointId))) {
+      this.currentCommentCheckpointId = String(this.currentMatchedCheckpointId)
+      const hidden = document.getElementById('checkpoint-comment-target-select')
+      if (hidden) hidden.value = this.currentCommentCheckpointId
+      this.updateCheckpointCommentChoiceSectionVisibility(false)
     } else {
-      list.innerHTML = comments.map((comment) => {
-        const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ''
-        const canManage = comment.user_can_manage === true
-        const commentId = this.escapeHtml(comment.id || '')
-        return `
-          <div style="padding:10px;border-bottom:1px solid #e5e7eb;">
-            <div style="font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <span>${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</span>
-              ${canManage ? `
-              <span style="display:inline-flex;align-items:center;gap:6px;">
-                <button type="button"
-                        onclick="if (window.visualizationController) window.visualizationController.editCheckpointComment('${commentId}')"
-                        style="padding:2px 6px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:4px;cursor:pointer;font-size:11px;">
-                  Edit
-                </button>
-                <button type="button"
-                        onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointComment('${commentId}')"
-                        style="padding:2px 6px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:4px;cursor:pointer;font-size:11px;">
-                  Delete
-                </button>
-              </span>
-              ` : ''}
-            </div>
-            <div style="font-size:13px;color:#111827;white-space:pre-wrap;">${this.escapeHtml(comment.body || '')}</div>
-          </div>
-        `
-      }).join('')
+      this.updateCheckpointCommentChoiceSectionVisibility(true)
+      if (this.lastLoadedCheckpointId && history.some((item) => String(item.id) === String(this.lastLoadedCheckpointId))) {
+        this.currentCommentCheckpointId = String(this.lastLoadedCheckpointId)
+      } else if (preferredCheckpointId && history.some((item) => String(item.id) === String(preferredCheckpointId))) {
+        this.currentCommentCheckpointId = String(preferredCheckpointId)
+      }
+      this.renderCheckpointCommentTargetOptions()
     }
 
+    const hasPreferredExisting = !!(this.currentCommentCheckpointId && history.some((item) => String(item.id) === String(this.currentCommentCheckpointId)))
+    const persistedBaseline = this.lastLoadedCheckpointPersistedStateBaseline
+    const lastLoadedDiffersFromCurrent =
+      !!this.lastLoadedCheckpointId &&
+      !!(persistedBaseline && typeof persistedBaseline === 'object') &&
+      !this.isCheckpointStateAlreadyApplied(persistedBaseline)
+    const defaultMode = hasExactMatch
+      ? 'existing'
+      : (lastLoadedDiffersFromCurrent || !hasPreferredExisting ? 'new' : 'existing')
+    this.applyCheckpointCommentsDriftBannerForCurrentState()
+    const { existingRadio, newRadio } = this.getCheckpointCommentModeRadioElements()
+    if (!hasExactMatch && existingRadio && newRadio) {
+      if (defaultMode === 'new') {
+        newRadio.checked = true
+        existingRadio.checked = false
+      } else {
+        existingRadio.checked = true
+        newRadio.checked = false
+      }
+    }
+    this.isOpeningCheckpointComments = true
+    try {
+      await this.onCheckpointCommentModeChanged()
+    } finally {
+      this.isOpeningCheckpointComments = false
+    }
+    this.updateCheckpointCommentsModalTitle()
+    const { overlay } = this.getCheckpointCommentModalElements()
+    if (!overlay) return
+    this._checkpointCommentsBackdropCloseArmed = false
     overlay.style.display = 'flex'
+    this.layoutCheckpointCommentsOverlay()
+    this.bindCheckpointCommentsOverlayLayout()
+    this.ensureCheckpointCommentsModalPositioned()
+  }
+
+  layoutCheckpointCommentsOverlay() {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    if (!overlay || overlay.style.display === 'none') return
+    const headerEl = document.getElementById('project-page-header')
+    const topPx = headerEl ? Math.max(0, Math.round(headerEl.getBoundingClientRect().bottom)) : 0
+    overlay.style.left = '0'
+    overlay.style.width = '100%'
+    overlay.style.top = `${topPx}px`
+    overlay.style.height = `${Math.max(0, window.innerHeight - topPx)}px`
+    overlay.style.backgroundColor = 'rgba(15, 23, 42, 0.06)'
+  }
+
+  bindCheckpointCommentsOverlayLayout() {
+    if (this._checkpointCommentsOverlayLayoutBound) return
+    this._checkpointCommentsOverlayLayoutBound = () => {
+      this.layoutCheckpointCommentsOverlay()
+    }
+    window.addEventListener('resize', this._checkpointCommentsOverlayLayoutBound)
+  }
+
+  unbindCheckpointCommentsOverlayLayout() {
+    if (!this._checkpointCommentsOverlayLayoutBound) return
+    window.removeEventListener('resize', this._checkpointCommentsOverlayLayoutBound)
+    this._checkpointCommentsOverlayLayoutBound = null
+  }
+
+  checkpointCommentsOverlayBackdropMouseDown(event) {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    if (!overlay || event.currentTarget !== overlay) return
+    this._checkpointCommentsBackdropCloseArmed = event.target === overlay
+  }
+
+  checkpointCommentsOverlayBackdropClick(event) {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    if (!overlay || event.target !== overlay) return
+    if (this._checkpointCommentsBackdropCloseArmed === true) {
+      this.closeCheckpointComments()
+    }
   }
 
   closeCheckpointComments() {
     const overlay = document.getElementById('checkpoint-comments-overlay')
     if (!overlay) return
+    this._checkpointCommentsBackdropCloseArmed = false
+    this.closeCheckpointCommentTargetMenu()
+    this.removeCheckpointCommentTargetOutsideClose()
+    this.unbindCheckpointCommentsOverlayLayout()
     overlay.style.display = 'none'
+    this.stopCheckpointCommentsDrag()
+    const draftState = this.checkpointCommentDraftState
+    if (draftState) {
+      if (!this.isCheckpointStateAlreadyApplied(draftState)) {
+        this.applyCheckpointState(draftState).catch((error) => {
+          console.error('[CheckpointComments] failed to restore draft state on close', error)
+        })
+      }
+    }
+    this.checkpointCommentVisitedExisting = false
+    this.checkpointCommentUiExactMatchOnly = false
+    this.updateCheckpointCommentChoiceSectionVisibility(true)
+    this.updateCheckpointCommentsDriftBanner({ visible: false })
+  }
+
+  ensureCheckpointCommentsModalPositioned() {
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!overlay || !modal) return
+    if (modal.dataset.dragPositioned === 'true') return
+    const modalRect = modal.getBoundingClientRect()
+    const overlayRect = overlay.getBoundingClientRect()
+    const left = Math.max(8, (overlayRect.width - modalRect.width) / 2)
+    const top = Math.max(8, (overlayRect.height - modalRect.height) / 2)
+    modal.style.position = 'absolute'
+    modal.style.left = `${left}px`
+    modal.style.top = `${top}px`
+    modal.style.margin = '0'
+    modal.dataset.dragPositioned = 'true'
+  }
+
+  startCheckpointCommentsDrag(event) {
+    const interactiveTarget = event.target instanceof Element
+      ? event.target.closest('button, input, textarea, select, option, a, label')
+      : null
+    if (interactiveTarget) return
+    event.preventDefault()
+    event.stopPropagation()
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!overlay || !modal) return
+    this.ensureCheckpointCommentsModalPositioned()
+    const modalRect = modal.getBoundingClientRect()
+    const overlayRect = overlay.getBoundingClientRect()
+    this._checkpointCommentsDrag = {
+      offsetX: event.clientX - modalRect.left,
+      offsetY: event.clientY - modalRect.top,
+      overlayWidth: overlayRect.width,
+      overlayHeight: overlayRect.height
+    }
+    if (!this.boundCheckpointCommentsDragMove) {
+      this.boundCheckpointCommentsDragMove = this.handleCheckpointCommentsDragMove.bind(this)
+    }
+    if (!this.boundCheckpointCommentsDragStop) {
+      this.boundCheckpointCommentsDragStop = this.stopCheckpointCommentsDrag.bind(this)
+    }
+    document.addEventListener('mousemove', this.boundCheckpointCommentsDragMove)
+    document.addEventListener('mouseup', this.boundCheckpointCommentsDragStop)
+  }
+
+  handleCheckpointCommentsDragMove(event) {
+    if (!this._checkpointCommentsDrag) return
+    const overlay = document.getElementById('checkpoint-comments-overlay')
+    const modal = document.getElementById('checkpoint-comments-modal')
+    if (!overlay || !modal) return
+    const drag = this._checkpointCommentsDrag
+    const overlayRect = overlay.getBoundingClientRect()
+    const modalRect = modal.getBoundingClientRect()
+    const maxLeft = Math.max(8, drag.overlayWidth - modalRect.width - 8)
+    const maxTop = Math.max(8, drag.overlayHeight - modalRect.height - 8)
+    const nextLeft = Math.min(maxLeft, Math.max(8, event.clientX - drag.offsetX - overlayRect.left))
+    const nextTop = Math.min(maxTop, Math.max(8, event.clientY - drag.offsetY - overlayRect.top))
+    modal.style.left = `${nextLeft}px`
+    modal.style.top = `${nextTop}px`
+  }
+
+  stopCheckpointCommentsDrag() {
+    this._checkpointCommentsDrag = null
+    if (this.boundCheckpointCommentsDragMove) {
+      document.removeEventListener('mousemove', this.boundCheckpointCommentsDragMove)
+    }
+    if (this.boundCheckpointCommentsDragStop) {
+      document.removeEventListener('mouseup', this.boundCheckpointCommentsDragStop)
+    }
   }
 
   async submitCheckpointComment(event) {
     event.preventDefault()
     event.stopPropagation()
 
-    if (!this.currentMatchedCheckpointId) return
-    const input = document.getElementById('checkpoint-comment-input')
+    const { input, newTitleInput } = {
+      input: document.getElementById('checkpoint-comment-input'),
+      newTitleInput: document.getElementById('checkpoint-comment-new-title')
+    }
     if (!input) return
     const body = input.value.trim()
     if (!body) return
@@ -2723,7 +3297,48 @@ export default class extends Controller {
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
 
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+    const mode = this.resolveCheckpointCommentMode()
+    if (mode === 'new') {
+      const requestedTitle = (newTitleInput?.value || '').trim()
+      if (!requestedTitle) {
+        alert('Please provide a name for the new checkpoint.')
+        return
+      }
+      const createResponse = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          checkpoint: {
+            title: requestedTitle,
+            state: this.checkpointCommentDraftState || this.buildCheckpointState()
+          }
+        })
+      })
+      if (!createResponse.ok) {
+        const errorPayload = await createResponse.json().catch(() => ({}))
+        alert(errorPayload.error || 'Failed to create checkpoint.')
+        return
+      }
+      const createdPayload = await createResponse.json()
+      const createdCheckpoint = createdPayload?.checkpoint
+      if (!createdCheckpoint?.id) return
+      this.mergeCheckpointIntoHistory(createdCheckpoint)
+      this.currentCommentCheckpointId = createdCheckpoint.id
+      this.currentMatchedCheckpointId = createdCheckpoint.id
+      this.renderCheckpointCommentTargetOptions()
+    }
+
+    const targetCheckpointId = this.currentCommentCheckpointId
+    if (!targetCheckpointId) {
+      alert('Please select a checkpoint.')
+      return
+    }
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(targetCheckpointId)}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -2743,15 +3358,49 @@ export default class extends Controller {
       return
     }
 
+    const updatedPayload = await response.json().catch(() => ({}))
+    const updatedCheckpoint = updatedPayload?.checkpoint || null
+    if (updatedCheckpoint?.id) {
+      this.mergeCheckpointIntoHistory(updatedCheckpoint)
+      const updatedCommentCount = Number(updatedCheckpoint.comments_count || (Array.isArray(updatedCheckpoint.comments) ? updatedCheckpoint.comments.length : 0))
+      this.updateCheckpointCommentsButtonState(updatedCommentCount, true)
+      this.currentCommentCheckpointId = updatedCheckpoint.id
+      this.currentMatchedCheckpointId = updatedCheckpoint.id
+      this.renderCheckpointCommentTargetOptions()
+    }
+
     input.value = ''
-    await this.openCheckpointComments()
+    if (newTitleInput && mode === 'new') {
+      newTitleInput.value = ''
+      const { existingRadio, newRadio } = this.getCheckpointCommentModeRadioElements()
+      if (existingRadio && newRadio) {
+        existingRadio.checked = true
+        newRadio.checked = false
+      }
+      const { existingWrap, newWrap, list } = this.getCheckpointCommentModalElements()
+      if (existingWrap) existingWrap.style.display = 'flex'
+      if (newWrap) newWrap.style.display = 'none'
+      if (updatedCheckpoint) {
+        this.updateCheckpointCommentsModalTitle()
+        this.renderCheckpointCommentsList(updatedCheckpoint)
+      } else {
+        await this.renderCheckpointCommentsForSelectedTarget()
+      }
+    } else {
+      if (updatedCheckpoint) {
+        this.updateCheckpointCommentsModalTitle()
+        this.renderCheckpointCommentsList(updatedCheckpoint)
+      } else {
+        await this.renderCheckpointCommentsForSelectedTarget()
+      }
+    }
   }
 
   async editCheckpointComment(commentId) {
-    if (!this.currentMatchedCheckpointId || !commentId) return
+    if (!this.currentCommentCheckpointId || !commentId) return
     const list = document.getElementById('checkpoint-comments-list')
     if (!list) return
-    const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentMatchedCheckpointId))
+    const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentCommentCheckpointId))
     const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
     const target = comments.find((comment) => String(comment.id) === String(commentId))
     if (!target) return
@@ -2765,7 +3414,7 @@ export default class extends Controller {
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
 
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentCommentCheckpointId)}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -2787,18 +3436,18 @@ export default class extends Controller {
       return
     }
 
-    await this.openCheckpointComments()
+    await this.renderCheckpointCommentsForSelectedTarget()
   }
 
   async deleteCheckpointComment(commentId) {
-    if (!this.currentMatchedCheckpointId || !commentId) return
+    if (!this.currentCommentCheckpointId || !commentId) return
     if (!window.confirm('Delete this comment?')) return
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
 
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentMatchedCheckpointId)}`, {
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentCommentCheckpointId)}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -2819,7 +3468,7 @@ export default class extends Controller {
       return
     }
 
-    await this.openCheckpointComments()
+    await this.renderCheckpointCommentsForSelectedTarget()
   }
 
   async loadMetadataCoordinates(metadataId) {
@@ -6084,6 +6733,18 @@ export default class extends Controller {
       })
     }
 
+    const customPlotWindowState = this.customPlotManager?.get2DPlotCheckpointState?.() || null
+    const hasAxisSelection = !!(this.getAxisSelectionFromDom('x') || this.getAxisSelectionFromDom('y') || this.selectedXButton || this.selectedYButton)
+    if (hasAxisSelection && customPlotWindowState == null) {
+      console.info('[CheckpointState] customPlotWindow serialized as null despite axis selection', {
+        hasSelectedXButton: !!this.selectedXButton,
+        hasSelectedYButton: !!this.selectedYButton,
+        domXSelection: this.getAxisSelectionFromDom('x'),
+        domYSelection: this.getAxisSelectionFromDom('y'),
+        customPlotVisible: this.customPlotManager?.isPlotVisible?.() === true
+      })
+    }
+
     const state = {
       version: 1,
       loomFile: this.getCurrentLoomFile(),
@@ -6116,13 +6777,14 @@ export default class extends Controller {
       },
       adaptColorRangeByMetadataId: { ...(this.adaptColorRangeByMetadataId || {}) },
       axes: {
-        x: this.selectedXButton ? { metadataId: this.selectedXButton.metadataId, isGene: !!this.selectedXButton.isGene } : null,
-        y: this.selectedYButton ? { metadataId: this.selectedYButton.metadataId, isGene: !!this.selectedYButton.isGene } : null
+        x: this.getAxisSelectionFromDom('x') || (this.selectedXButton ? { metadataId: this.selectedXButton.metadataId, isGene: !!this.selectedXButton.isGene } : null),
+        y: this.getAxisSelectionFromDom('y') || (this.selectedYButton ? { metadataId: this.selectedYButton.metadataId, isGene: !!this.selectedYButton.isGene } : null)
       },
       foldState: {
         metadata: metadataFoldState,
         genes: geneFoldState
       },
+      panelScroll: this.buildPanelScrollState(),
       genes: {
         tags: geneTags
       },
@@ -6141,7 +6803,7 @@ export default class extends Controller {
         labelPlacementMode: this.labelPlacementMode,
         manualLabelLocks: manualLabelLocks
       },
-      customPlotWindow: this.customPlotManager?.get2DPlotCheckpointState?.() || null,
+      customPlotWindow: customPlotWindowState,
       interaction: {
         mode: this.interactionMode,
         bounds: this.currentBounds || null
@@ -6172,6 +6834,132 @@ export default class extends Controller {
     return this.getMetadataFoldHeaders().find((header) => String(header.dataset.metadataId) === normalizedMetadataId) || null
   }
 
+  buildPanelScrollState() {
+    const panelScroll = {}
+    document.querySelectorAll('[data-checkpoint-scroll-key]').forEach((el) => {
+      const key = String(el.dataset.checkpointScrollKey || '').trim()
+      if (!key) return
+      const maxScrollable = Math.max(0, (el.scrollHeight || 0) - (el.clientHeight || 0))
+      const scrollTop = Math.max(0, Number(el.scrollTop || 0))
+      const ratio = maxScrollable > 0 ? (scrollTop / maxScrollable) : 0
+      const anchor = this.computePanelScrollAnchor(el)
+      panelScroll[key] = {
+        absoluteTop: scrollTop,
+        ratio,
+        anchor
+      }
+    })
+    return panelScroll
+  }
+
+  computePanelScrollAnchor(containerEl) {
+    if (!containerEl) return null
+    const containerRect = containerEl.getBoundingClientRect()
+    const candidates = Array.from(containerEl.querySelectorAll('[data-metadata-item], [data-gene-item], [data-selection-state-id], [data-collection-key], [data-gene-set-key]'))
+    let bestCandidate = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    candidates.forEach((candidate) => {
+      const rect = candidate.getBoundingClientRect()
+      const candidateBottom = rect.bottom - containerRect.top
+      if (candidateBottom <= 0) return
+      const distance = Math.abs(rect.top - containerRect.top)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestCandidate = candidate
+      }
+    })
+    if (!bestCandidate) return null
+    const anchorType =
+      bestCandidate.dataset.metadataItem ? 'metadata-item' :
+      bestCandidate.dataset.geneItem ? 'gene-item' :
+      bestCandidate.dataset.selectionStateId ? 'selection-state-id' :
+      bestCandidate.dataset.collectionKey ? 'collection-key' :
+      bestCandidate.dataset.geneSetKey ? 'gene-set-key' :
+      null
+    const anchorId =
+      bestCandidate.dataset.metadataItem ||
+      bestCandidate.dataset.geneItem ||
+      bestCandidate.dataset.selectionStateId ||
+      bestCandidate.dataset.collectionKey ||
+      bestCandidate.dataset.geneSetKey ||
+      null
+    if (!anchorType || !anchorId) return null
+    return {
+      type: anchorType,
+      id: String(anchorId),
+      offset: Math.round(bestCandidate.getBoundingClientRect().top - containerRect.top)
+    }
+  }
+
+  restorePanelScrollState(state) {
+    const panelScroll = state?.panelScroll || {}
+    const entries = Object.entries(panelScroll)
+    if (entries.length === 0) return
+    const applyScroll = () => {
+      entries.forEach(([key, value]) => {
+        const selector = `[data-checkpoint-scroll-key="${String(key).replace(/"/g, '\\"')}"]`
+        const el = document.querySelector(selector)
+        if (!el) return
+        if (typeof value === 'number') {
+          el.scrollTop = Math.max(0, Number(value || 0))
+          return
+        }
+        if (!value || typeof value !== 'object') return
+        const restoredByAnchor = this.restorePanelScrollByAnchor(el, value.anchor)
+        if (restoredByAnchor) return
+        const maxScrollable = Math.max(0, (el.scrollHeight || 0) - (el.clientHeight || 0))
+        if (Number.isFinite(Number(value.ratio)) && maxScrollable > 0) {
+          el.scrollTop = Math.round(Math.max(0, Math.min(1, Number(value.ratio))) * maxScrollable)
+          return
+        }
+        if (Number.isFinite(Number(value.absoluteTop))) {
+          el.scrollTop = Math.max(0, Number(value.absoluteTop || 0))
+        }
+      })
+    }
+    applyScroll()
+    requestAnimationFrame(() => requestAnimationFrame(applyScroll))
+  }
+
+  restorePanelScrollByAnchor(containerEl, anchor) {
+    if (!containerEl || !anchor || typeof anchor !== 'object') return false
+    const selectorMap = {
+      'metadata-item': (id) => `[data-metadata-item="${String(id).replace(/"/g, '\\"')}"]`,
+      'gene-item': (id) => `[data-gene-item="${String(id).replace(/"/g, '\\"')}"]`,
+      'selection-state-id': (id) => `[data-selection-state-id="${String(id).replace(/"/g, '\\"')}"]`,
+      'collection-key': (id) => `[data-collection-key="${String(id).replace(/"/g, '\\"')}"]`,
+      'gene-set-key': (id) => `[data-gene-set-key="${String(id).replace(/"/g, '\\"')}"]`
+    }
+    const buildSelector = selectorMap[String(anchor.type || '')]
+    if (!buildSelector || !anchor.id) return false
+    const anchorEl = containerEl.querySelector(buildSelector(anchor.id))
+    if (!anchorEl) return false
+    const containerRect = containerEl.getBoundingClientRect()
+    const anchorRect = anchorEl.getBoundingClientRect()
+    const desiredOffset = Number.isFinite(Number(anchor.offset)) ? Number(anchor.offset) : 0
+    const delta = anchorRect.top - containerRect.top - desiredOffset
+    containerEl.scrollTop = Math.max(0, Math.round((containerEl.scrollTop || 0) + delta))
+    return true
+  }
+
+  getAxisSelectionFromDom(axis) {
+    const normalizedAxis = axis === 'y' ? 'y' : 'x'
+    const selectors = normalizedAxis === 'x'
+      ? ['.categorical-x-btn[data-active="true"]', '.continuous-x-btn[data-active="true"]', '.gene-x-btn[data-active="true"]']
+      : ['.continuous-y-btn[data-active="true"]', '.gene-y-btn[data-active="true"]']
+    for (const selector of selectors) {
+      const activeButton = document.querySelector(selector)
+      if (!activeButton) continue
+      const metadataId = activeButton.dataset.metadataId || activeButton.dataset.geneId || null
+      if (!metadataId) continue
+      return {
+        metadataId: String(metadataId),
+        isGene: !!activeButton.dataset.geneId
+      }
+    }
+    return null
+  }
+
   shouldExcludeCheckpointMatchPath(path, key) {
     if (key === 'signature' || key === 'version' || key === 'foldState' || key === 'clientSavedAt') return true
 
@@ -6185,11 +6973,38 @@ export default class extends Controller {
     return false
   }
 
+  normalizePanelScrollForSignature(panelScrollValue) {
+    if (!panelScrollValue || typeof panelScrollValue !== 'object') return panelScrollValue
+    const normalized = {}
+    Object.keys(panelScrollValue).sort().forEach((panelKey) => {
+      const raw = panelScrollValue[panelKey]
+      if (Number.isFinite(Number(raw))) {
+        normalized[panelKey] = Math.round(Number(raw))
+        return
+      }
+      if (raw && typeof raw === 'object') {
+        if (Number.isFinite(Number(raw.absoluteTop))) {
+          normalized[panelKey] = Math.round(Number(raw.absoluteTop))
+          return
+        }
+        if (Number.isFinite(Number(raw.ratio))) {
+          normalized[panelKey] = `ratio:${Number(raw.ratio).toFixed(4)}`
+          return
+        }
+      }
+      normalized[panelKey] = 0
+    })
+    return normalized
+  }
+
   normalizeCheckpointState(value, path = []) {
     if (Array.isArray(value)) {
       return value.map((item, idx) => this.normalizeCheckpointState(item, [...path, String(idx)]))
     }
     if (value && typeof value === 'object') {
+      if (path.length > 0 && path[path.length - 1] === 'panelScroll') {
+        return this.normalizePanelScrollForSignature(value)
+      }
       const out = {}
       Object.keys(value).sort().forEach((key) => {
         if (this.shouldExcludeCheckpointMatchPath(path, key)) return
@@ -6202,6 +7017,40 @@ export default class extends Controller {
 
   computeCheckpointStateSignature(state) {
     return JSON.stringify(this.normalizeCheckpointState(state))
+  }
+
+  stripCheckpointStateForDataComparison(state) {
+    if (!state || typeof state !== 'object') return null
+    let clone
+    try {
+      clone = JSON.parse(JSON.stringify(state))
+    } catch (_e) {
+      return null
+    }
+    const removeKeys = [
+      'foldState',
+      'panelScroll',
+      'customPlotWindow',
+      'display',
+      'interaction',
+      'signature',
+      'version',
+      'clientSavedAt'
+    ]
+    removeKeys.forEach((k) => {
+      if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]
+    })
+    return clone
+  }
+
+  isLastLoadedCheckpointDriftPresentationOnly(persistedBaseline) {
+    if (!persistedBaseline || typeof persistedBaseline !== 'object') return false
+    if (this.isCheckpointStateAlreadyApplied(persistedBaseline)) return false
+    const current = this.buildCheckpointState()
+    const strippedCurrent = this.stripCheckpointStateForDataComparison(current)
+    const strippedBaseline = this.stripCheckpointStateForDataComparison(persistedBaseline)
+    if (!strippedCurrent || !strippedBaseline) return false
+    return this.computeCheckpointStateSignature(strippedCurrent) === this.computeCheckpointStateSignature(strippedBaseline)
   }
 
   collectCheckpointStateDiffs(currentValue, checkpointValue, path = '', diffs = [], maxDiffs = 25) {
@@ -6262,10 +7111,15 @@ export default class extends Controller {
   }
 
   logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history) {
-    if (window.CHECKPOINT_DEBUG !== true) return
+    const diagnosticsEnabled = window.CHECKPOINT_DEBUG === true || window.CHECKPOINT_MATCH_DIAG === true
+    const lastLoadedId = this.lastLoadedCheckpointId ? String(this.lastLoadedCheckpointId) : ''
+    const lastLoadedCheckpoint = lastLoadedId
+      ? history.find((item) => String(item.id) === lastLoadedId && item.state)
+      : null
+    if (!diagnosticsEnabled && !lastLoadedCheckpoint) return
 
     const previousId = previousMatchedCheckpointId ? String(previousMatchedCheckpointId) : ''
-    const logKey = `${currentSignature}|${previousId}|${history.length}`
+    const logKey = `${currentSignature}|${previousId}|${lastLoadedId}|${history.length}`
     const now = Date.now()
     if (this.lastCheckpointMismatchLogKey === logKey && now - (this.lastCheckpointMismatchLogAt || 0) < 5000) {
       return
@@ -6277,10 +7131,11 @@ export default class extends Controller {
     const previousCheckpoint = previousId
       ? history.find((item) => String(item.id) === previousId && item.state)
       : null
-    const checkpoint = previousCheckpoint || fallbackCheckpoint
+    const checkpoint = lastLoadedCheckpoint || previousCheckpoint || fallbackCheckpoint
     if (!checkpoint || !checkpoint.state) {
       console.warn('[CheckpointMatch] No checkpoint state available for mismatch diff', {
         previousMatchedCheckpointId: previousId || null,
+        lastLoadedCheckpointId: lastLoadedId || null,
         historySize: history.length,
         currentSignature
       })
@@ -6292,13 +7147,21 @@ export default class extends Controller {
     const normalizedCheckpoint = this.normalizeCheckpointState(checkpoint.state)
     const diffs = this.collectCheckpointStateDiffs(normalizedCurrent, normalizedCheckpoint, '', [], 25)
 
+    const diffExamples = diffs.slice(0, 8).map((diff) => ({
+      path: diff.path,
+      current: diff.current,
+      checkpoint: diff.checkpoint
+    }))
+
     console.groupCollapsed('[CheckpointMatch] Signature mismatch detected')
     console.log('[CheckpointMatch] previousMatchedCheckpointId', previousId || null)
+    console.log('[CheckpointMatch] lastLoadedCheckpointId', lastLoadedId || null)
     console.log('[CheckpointMatch] comparedCheckpointId', checkpoint.id)
     console.log('[CheckpointMatch] currentSignature', currentSignature)
     console.log('[CheckpointMatch] checkpointSignature', checkpointSignature)
     console.log('[CheckpointMatch] blockers', this.collectCheckpointUiBlockers())
     console.log('[CheckpointMatch] firstDiffs', diffs)
+    console.log('[CheckpointMatch] diffExamples', diffExamples)
     console.log('[CheckpointMatch] currentColoring', normalizedCurrent?.coloring || null)
     console.log('[CheckpointMatch] checkpointColoring', normalizedCheckpoint?.coloring || null)
     console.log('[CheckpointMatch] currentInteraction', normalizedCurrent?.interaction || null)
@@ -6332,7 +7195,7 @@ export default class extends Controller {
     const history = this.checkpointHistory || []
     if (history.length === 0) {
       this.currentMatchedCheckpointId = null
-      this.updateCheckpointCommentsButtonState(0, false)
+      this.updateCheckpointCommentsButtonState(0, true)
       return
     }
 
@@ -6358,7 +7221,7 @@ export default class extends Controller {
         this.updateCheckpointCommentsButtonState(commentCount, true)
       } else {
         this.currentMatchedCheckpointId = null
-        this.updateCheckpointCommentsButtonState(0, false)
+        this.updateCheckpointCommentsButtonState(0, true)
         this.logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history)
       }
     } finally {
@@ -6562,20 +7425,26 @@ export default class extends Controller {
 
       const gridCheckbox = document.getElementById('show-grid-checkbox')
       if (gridCheckbox) {
-        gridCheckbox.checked = !!state.display.showGrid
-        this.toggleGrid()
+        if (Object.prototype.hasOwnProperty.call(state.display, 'showGrid')) {
+          gridCheckbox.checked = !!state.display.showGrid
+          this.toggleGrid()
+        }
       }
 
       const axesCheckbox = document.getElementById('show-axes-checkbox')
       if (axesCheckbox) {
-        axesCheckbox.checked = !!state.display.showAxes
-        this.toggleAxes()
+        if (Object.prototype.hasOwnProperty.call(state.display, 'showAxes')) {
+          axesCheckbox.checked = !!state.display.showAxes
+          this.toggleAxes()
+        }
       }
 
       const categoriesCheckbox = document.getElementById('show-categories-checkbox')
       if (categoriesCheckbox) {
-        categoriesCheckbox.checked = !!state.display.showCategories
-        this.toggleCategories()
+        if (Object.prototype.hasOwnProperty.call(state.display, 'showCategories')) {
+          categoriesCheckbox.checked = !!state.display.showCategories
+          this.toggleCategories()
+        }
       }
     }
 
@@ -6584,6 +7453,7 @@ export default class extends Controller {
     } catch (foldRestoreError) {
       console.error('[FoldRestore] failed', foldRestoreError)
     }
+    this.restorePanelScrollState(state)
     this.syncAdaptColorRangeState()
     if (embeddingCoordinatesReady || (Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0)) {
       await this.restoreColoringAndAxisState(state)
@@ -6785,7 +7655,9 @@ export default class extends Controller {
       const xButton = state.axes.x.isGene
         ? document.querySelector(`.gene-x-btn[data-gene-id="${state.axes.x.metadataId}"]`)
         : document.querySelector(`.categorical-x-btn[data-metadata-id="${state.axes.x.metadataId}"], .continuous-x-btn[data-metadata-id="${state.axes.x.metadataId}"]`)
-      if (xButton) xButton.click()
+      if (xButton && xButton.dataset.active !== 'true') {
+        xButton.click()
+      }
     } else {
       this.resetAllXButtons()
       this.selectedXButton = null
@@ -6795,7 +7667,9 @@ export default class extends Controller {
       const yButton = state.axes.y.isGene
         ? document.querySelector(`.gene-y-btn[data-gene-id="${state.axes.y.metadataId}"]`)
         : document.querySelector(`.continuous-y-btn[data-metadata-id="${state.axes.y.metadataId}"]`)
-      if (yButton) yButton.click()
+      if (yButton && yButton.dataset.active !== 'true') {
+        yButton.click()
+      }
     } else {
       this.resetAllYButtons()
       this.selectedYButton = null

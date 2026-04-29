@@ -652,6 +652,12 @@ export class CustomPlotManager {
     }
 
     let modal = document.getElementById('2d-plot-modal')
+    const modalHidden = !modal || window.getComputedStyle(modal).display === 'none'
+    if (modalHidden) {
+      await this.open2DPlotModal()
+      modal = document.getElementById('2d-plot-modal')
+    }
+
     for (let i = 0; i < 40; i++) {
       if (modal && window.getComputedStyle(modal).display !== 'none') {
         break

@@ -1,4 +1,6 @@
 class CheckpointsController < ApplicationController
+  CURRENT_VISUALIZATION_CHECKPOINT_TITLE = '__current_visualization_view__'.freeze
+
   before_action :set_project
   before_action :set_checkpoint, only: [:show, :update, :destroy]
 
@@ -6,7 +8,10 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_readable!
 
-    checkpoints = @project.checkpoints.includes(:user).order(created_at: :desc)
+    checkpoints = @project.checkpoints
+      .where.not(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+      .includes(:user)
+      .order(created_at: :desc)
     render json: {
       checkpoints: checkpoints.map { |checkpoint| checkpoint_payload(checkpoint, include_state: true) }
     }
@@ -19,9 +24,24 @@ class CheckpointsController < ApplicationController
     render json: { checkpoint: checkpoint_payload(@checkpoint, include_state: true) }
   end
 
+  def current
+    return if performed?
+    return unless ensure_readable!
+
+    checkpoint = @project.checkpoints.find_by(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    render json: {
+      checkpoint: checkpoint ? checkpoint_payload(checkpoint, include_state: true) : nil
+    }
+  end
+
   def create
     return if performed?
     return unless ensure_analyzable!
+
+    if checkpoint_title == CURRENT_VISUALIZATION_CHECKPOINT_TITLE
+      render json: { error: 'Checkpoint title is reserved.' }, status: :unprocessable_entity
+      return
+    end
 
     checkpoint = @project.checkpoints.new
     checkpoint.user = current_user
@@ -49,6 +69,11 @@ class CheckpointsController < ApplicationController
   def update
     return if performed?
     return unless ensure_analyzable!
+
+    if checkpoint_title == CURRENT_VISUALIZATION_CHECKPOINT_TITLE
+      render json: { error: 'Checkpoint title is reserved.' }, status: :unprocessable_entity
+      return
+    end
 
     if checkpoint_title.present?
       @checkpoint.title = checkpoint_title
@@ -108,6 +133,23 @@ class CheckpointsController < ApplicationController
 
     @checkpoint.destroy
     render json: { success: true }
+  end
+
+  def upsert_current
+    return if performed?
+    return unless ensure_analyzable!
+
+    checkpoint = @project.checkpoints.find_or_initialize_by(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    checkpoint.user = current_user
+    checkpoint.state = checkpoint_state
+    checkpoint.comments = []
+    checkpoint.is_landing_page = false
+
+    if checkpoint.save
+      render json: { checkpoint: checkpoint_payload(checkpoint, include_state: true) }
+    else
+      render json: { error: checkpoint.errors.full_messages.join(', ') }, status: :unprocessable_entity
+    end
   end
 
   private

@@ -1,7 +1,12 @@
 Rails.application.routes.draw do
   devise_for :users
   resources :projects do
-    resources :checkpoints, only: [:index, :create, :show, :update, :destroy]
+    resources :checkpoints, only: [:index, :create, :show, :update, :destroy] do
+      collection do
+        get :current
+        put :current, action: :upsert_current
+      end
+    end
     collection do
       get :organisms_for_version
       post :bulk_destroy

@@ -285,9 +285,29 @@ export class MemoryManager {
       }
     }
     
+    const debugInfo = {
+      knownCellCount: Number(knownCellCount || 0),
+      resolvedCellCount: Number(cellCount || 0),
+      defaultBufferSize: DEFAULT_BUFFER_SIZE,
+      minBufferSize: MIN_BUFFER_SIZE,
+      memoryAllocationMbLimit: MEMORY_ALLOCATION_MB,
+      usedPerformanceMemory: false,
+      availableMemoryMb: null,
+      allocatedMb: null,
+      mbPerVector: null,
+      optimalCount: null,
+      finalCount: null,
+      fallbackUsed: false,
+      reason: null,
+      computedAt: new Date().toISOString()
+    }
+
     if (cellCount === 0) {
-      // console.log(`🧠 [MEMORY] No cell count available yet, using default buffer size: ${DEFAULT_BUFFER_SIZE} metadata vectors`)
-      // console.log(`🧠 [MEMORY] Buffer size will be recalculated once data is loaded`)
+      debugInfo.fallbackUsed = true
+      debugInfo.reason = 'cell_count_unavailable'
+      debugInfo.finalCount = DEFAULT_BUFFER_SIZE
+      this.controller.lastMemoryBufferComputation = debugInfo
+      window.__vizMemoryBufferDebug = debugInfo
       return DEFAULT_BUFFER_SIZE
     }
     
@@ -310,6 +330,8 @@ export class MemoryManager {
       
       // Use the lesser of: configured allocation or 10% of available memory
       allocatedMB = Math.min(MEMORY_ALLOCATION_MB, availableMB * 0.10)
+      debugInfo.usedPerformanceMemory = true
+      debugInfo.availableMemoryMb = Number(availableMB.toFixed(2))
       
       // console.log(`🧠 [MEMORY] Available: ${availableMB.toFixed(1)}MB, Using: ${allocatedMB.toFixed(1)}MB for cache`)
     } else {
@@ -319,6 +341,13 @@ export class MemoryManager {
     // Calculate how many vectors fit in allocated memory
     const optimalCount = Math.floor(allocatedMB / mbPerVector)
     const finalCount = Math.max(MIN_BUFFER_SIZE, optimalCount)
+    debugInfo.allocatedMb = Number(allocatedMB.toFixed(2))
+    debugInfo.mbPerVector = Number(mbPerVector.toFixed(4))
+    debugInfo.optimalCount = optimalCount
+    debugInfo.finalCount = finalCount
+    debugInfo.reason = 'computed_from_cell_count'
+    this.controller.lastMemoryBufferComputation = debugInfo
+    window.__vizMemoryBufferDebug = debugInfo
     
     // console.log(`🧠 [MEMORY] Cell count: ${cellCount.toLocaleString()}, ~${mbPerVector.toFixed(2)}MB per vector`)
     // console.log(`🧠 [MEMORY] Optimal metadata buffer: ${finalCount} vectors (${(finalCount * mbPerVector).toFixed(1)}MB total)`)

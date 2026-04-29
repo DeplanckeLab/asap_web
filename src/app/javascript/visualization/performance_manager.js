@@ -496,15 +496,27 @@ export class PerformanceManager {
     
     // console.log('🔍 [DIAGNOSTIC] Counts:', { metadataCount, embeddingCount, memoryCount, loadingCount, currentEmbeddingLoaded })
 
+    // Build the metadata scope from the current panel (what users actually see/use here).
+    const scopedMetadataTypeById = new Map()
+    const scopedMetadataButtons = document.querySelectorAll('[data-metadata-item] button[data-action*="waterDropClicked"][data-metadata-id][data-metadata-type]')
+    scopedMetadataButtons.forEach((button) => {
+      const metadataId = String(button.dataset.metadataId || '').trim()
+      const metadataType = String(button.dataset.metadataType || '').trim()
+      if (!metadataId || !metadataType) return
+      scopedMetadataTypeById.set(metadataId, metadataType)
+    })
+    const scopedMetadataIds = new Set(scopedMetadataTypeById.keys())
+
     // Count metadata types
     let continuousCount = 0
     let categoricalCount = 0
     let continuousDBCount = 0
     let categoricalDBCount = 0
 
-    Object.values(this.controller.loadedMetadataVectors || {}).forEach(metadata => {
+    Object.entries(this.controller.loadedMetadataVectors || {}).forEach(([metadataId, metadata]) => {
+      if (scopedMetadataIds.size > 0 && !scopedMetadataIds.has(String(metadataId))) return
       if (metadata.data_type === 'NUMERIC') continuousCount++
-      else if (metadata.data_type === 'DISCRETE') categoricalCount++
+      else if (metadata.data_type === 'DISCRETE' || metadata.data_type === 'STRING') categoricalCount++
     })
 
     // Get total available embedding count (different from cached embeddings)
@@ -583,15 +595,28 @@ export class PerformanceManager {
               // console.log(`📊 Retrieved ${allItems.length} items from database`)
               
               allItems.forEach(item => {
+                const itemId = String(item.id || '').trim()
+                const itemLoomNormalized = item.loomFile === '' ? null : item.loomFile
+                const currentLoomNormalized = currentLoomFile === '' ? null : currentLoomFile
+                const loomMatches = itemLoomNormalized === currentLoomNormalized
+
+                // Check if loom file matches
+                if (loomMatches) {
+                  matchingLoomCount++
+                }
+
+                // Restrict DB-type counts to metadata currently in this visualization panel.
+                if (scopedMetadataIds.size > 0 && !scopedMetadataIds.has(itemId)) {
+                  return
+                }
+                if (!loomMatches) {
+                  return
+                }
+
                 if (item.data_type === 'NUMERIC') {
                   continuousDBCountActual++
-                } else if (item.data_type === 'DISCRETE') {
+                } else if (item.data_type === 'DISCRETE' || item.data_type === 'STRING') {
                   categoricalDBCountActual++
-                }
-                
-                // Check if loom file matches
-                if (item.loomFile === currentLoomFile) {
-                  matchingLoomCount++
                 }
               })
               
@@ -659,7 +684,8 @@ export class PerformanceManager {
         loadedMetadataVectorsKeys: Object.keys(this.controller.loadedMetadataVectors || {}).join(', ') || 'none',
         embeddingsByLoomValueKeys: this.controller.embeddingsByLoomValue ? Object.keys(this.controller.embeddingsByLoomValue).join(', ') || 'none' : 'none',
         hasMetadataData: hasMetadataData,
-        metadataDataName: metadataDataName
+        metadataDataName: metadataDataName,
+        scopedMetadataIdsCount: scopedMetadataIds.size
       }
     }
   }

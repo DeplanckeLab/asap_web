@@ -594,12 +594,10 @@ export class UIManager {
     const icon = statusIcon.querySelector('i')
     if (!icon) return
     
-    // Show the icon
-    statusIcon.style.display = 'flex'
-    
     switch (state) {
       case 'not-loaded':
         // Gray circle with animated spinner
+        statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#9ca3af'
         icon.className = 'fas fa-spinner fa-spin'
         icon.style.color = 'white'
@@ -608,6 +606,7 @@ export class UIManager {
         
       case 'downloading':
         // Blue circle with spinner
+        statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#3b82f6'
         icon.className = 'fas fa-spinner fa-spin'
         icon.style.color = 'white'
@@ -616,6 +615,7 @@ export class UIManager {
         
       case 'in-db':
         // Orange circle with check
+        statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#f59e0b'
         icon.className = 'fas fa-check'
         icon.style.color = 'white'
@@ -624,6 +624,7 @@ export class UIManager {
         
       case 'in-memory':
         // Green circle with check
+        statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#10b981'
         icon.className = 'fas fa-check'
         icon.style.color = 'white'
@@ -632,6 +633,7 @@ export class UIManager {
 
       case 'error':
         // Red circle with exclamation
+        statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#dc2626'
         icon.className = 'fas fa-exclamation'
         icon.style.color = 'white'

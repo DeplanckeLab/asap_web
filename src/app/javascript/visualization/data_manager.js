@@ -14,6 +14,33 @@ export class DataManager {
     }
   }
 
+  bumpMemoryLoadCounter(metadataId, source) {
+    const root = (window.__vizMemoryLoads && typeof window.__vizMemoryLoads === 'object')
+      ? window.__vizMemoryLoads
+      : {
+          total: 0,
+          disk: 0,
+          network: 0,
+          byMetadataId: {},
+          lastLoadedMetadataId: null,
+          lastSource: null,
+          lastLoadedAt: null
+        }
+    window.__vizMemoryLoads = root
+
+    root.total += 1
+    if (source === 'disk') {
+      root.disk += 1
+    } else if (source === 'network') {
+      root.network += 1
+    }
+    const key = String(metadataId)
+    root.byMetadataId[key] = Number(root.byMetadataId[key] || 0) + 1
+    root.lastLoadedMetadataId = key
+    root.lastSource = source
+    root.lastLoadedAt = new Date().toISOString()
+  }
+
   // Data decompression methods
   decompressBinaryCoordinates(arrayBuffer) {
     // OPTIMIZED: Use Int16Array for much faster decompression
@@ -317,6 +344,7 @@ export class DataManager {
         delete cleanData.timestamp
         
         this.controller.loadedMetadataVectors[metadataId] = cleanData
+        this.bumpMemoryLoadCounter(metadataId, 'disk')
         const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
         // Update status icon to show it's in memory (loaded from disk)
         this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
@@ -387,6 +415,7 @@ export class DataManager {
       if (vectorData) {
         // FIRST: Store in memory cache immediately
         this.controller.loadedMetadataVectors[metadataId] = vectorData
+        this.bumpMemoryLoadCounter(metadataId, 'network')
         const enrichedData = this.ensureMetadataVectorValues(metadataId, vectorData)
         const dataToPersist = { ...vectorData }
         if (dataToPersist.values && dataToPersist.compressed_data) {

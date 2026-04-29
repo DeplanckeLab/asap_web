@@ -252,6 +252,8 @@ export default class extends Controller {
     if (!this._globalFilterOutsideHandler) this._globalFilterOutsideHandler = null
     if (!Array.isArray(this.checkpointHistory)) this.checkpointHistory = []
     if (this.currentMatchedCheckpointId === undefined) this.currentMatchedCheckpointId = null
+    if (this.currentCheckpointLoadInProgress === undefined) this.currentCheckpointLoadInProgress = false
+    if (this.currentCheckpointReadyForOverwrite === undefined) this.currentCheckpointReadyForOverwrite = false
     if (!this.adaptColorRangeByMetadataId) this.adaptColorRangeByMetadataId = {}
     this.uiManager.updateGlobalFilterSummary()
     if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
@@ -544,7 +546,9 @@ export default class extends Controller {
     
     // Memory management for metadata vectors
     this.metadataUsageTracker = new Map() // Track when metadata was last accessed
-    this.maxMetadataInMemory = 5 // Default buffer size, will be adjusted based on dataset size
+    const initialCellCount = this.getCellCountFromServerData()
+    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(initialCellCount > 0 ? initialCellCount : null)
+    window.getMetadataBufferDebug = () => window.__vizMemoryBufferDebug
     
     // Initialize interaction mode state
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
@@ -622,41 +626,13 @@ export default class extends Controller {
       this.performanceManager.createDiagnosticButton()
     }, 3000) // Wait 3 seconds after connection
     
-    // Start automatic preloading if enabled (avoid duplicate scheduling on reconnect)
-    if (this.autoPreloadMetadata && this._autoPreloadScheduled !== true) {
-      this._autoPreloadScheduled = true
-      // console.log('🚀 Starting automatic metadata preloading...')
-      // console.log('🔍 [DEBUG] Loom file state before preloading:', {
-        // currentLoomFile: this.currentLoomFile,
-        // defaultLoomFileValue: this.defaultLoomFileValue,
-        // hasLoomFileSelectTarget: this.hasLoomFileSelectTarget,
-        // loomFileSelectValue: this.loomFileSelectTarget?.value,
-        // embeddingsByLoomValue: !!this.embeddingsByLoomValue
-      // })
-      
-      // Add a small delay to ensure loom file is set, then check all metadata status before preloading
-      setTimeout(async () => {
-        if (this._autoPreloadStarted === true) {
-          return
-        }
-        this._autoPreloadStarted = true
-        try {
-          // Check status of all metadata before preloading
-          await this.checkAllMetadataStatusBeforePreload()
-          
-          // Then start preloading (wait for it to complete)
-          await this.preloadAllMetadata()
-        } catch (error) {
-          // console.log('Background metadata preload encountered an error:', error)
-        }
-      }, 200) // Slightly longer delay to ensure UI is fully ready
-    }
-
     this.checkpointMatchTimer = window.setInterval(() => {
       this.refreshCurrentCheckpointMatch()
     }, 1500)
 
-    this.loadInitialCheckpointOnEntry()
+    this.loadInitialCheckpointOnEntry().finally(() => {
+      this.scheduleAutoMetadataPreload()
+    })
 
     this.boundCheckpointTraceClick = (event) => {
       if (window.CHECKPOINT_TRACE !== true) return
@@ -679,16 +655,19 @@ export default class extends Controller {
     document.addEventListener('click', this.boundCheckpointTraceClick, true)
 
     this.boundBeforeUnload = (event) => {
-      if (this.skipBeforeUnloadForConfirmedNavigation === true) {
-        return
-      }
-      if (!this.shouldWarnBeforeLeavingVisualization()) return
-      const message = 'Are you sure you want to leave this page? You will lost your unsaved last changes. Tip: if you want to access another page without leaving this page, press Shift when clicking on links to open the link in another page.'
-      event.preventDefault()
-      event.returnValue = message
-      return message
+      this.persistCurrentVisualizationStateBeforeTeardown('beforeunload')
     }
     window.addEventListener('beforeunload', this.boundBeforeUnload)
+
+    this.boundTurboBeforeCache = () => {
+      this.persistCurrentVisualizationStateBeforeTeardown('turbo:before-cache')
+    }
+    document.addEventListener('turbo:before-cache', this.boundTurboBeforeCache)
+
+    this.boundTurboBeforeVisit = () => {
+      this.persistCurrentVisualizationStateBeforeTeardown('turbo:before-visit')
+    }
+    document.addEventListener('turbo:before-visit', this.boundTurboBeforeVisit)
 
     this.boundInAppNavigationGuardClick = (event) => {
       if (!this.shouldWarnBeforeLeavingVisualization()) return
@@ -775,6 +754,16 @@ export default class extends Controller {
   }
 
   disconnect() {
+    console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
+    if (this.boundTurboBeforeCache) {
+      document.removeEventListener('turbo:before-cache', this.boundTurboBeforeCache)
+      this.boundTurboBeforeCache = null
+    }
+    if (this.boundTurboBeforeVisit) {
+      document.removeEventListener('turbo:before-visit', this.boundTurboBeforeVisit)
+      this.boundTurboBeforeVisit = null
+    }
+
     if (this.dividerInitTimeoutId != null) {
       window.clearTimeout(this.dividerInitTimeoutId)
       this.dividerInitTimeoutId = null
@@ -888,8 +877,7 @@ export default class extends Controller {
   }
 
   shouldWarnBeforeLeavingVisualization() {
-    if (!this.hasMetadataSelectTarget) return false
-    return !this.isCurrentViewSavedAsCheckpoint()
+    return false
   }
 
   isCurrentViewSavedAsCheckpoint() {
@@ -2116,18 +2104,338 @@ export default class extends Controller {
     if (this.initialEntryCheckpointHandled === true) return
     this.initialEntryCheckpointHandled = true
 
+    this.currentCheckpointReadyForOverwrite = false
+    this.restoredCurrentCheckpointOnEntry = false
     await this.fetchCheckpointHistory()
 
     const params = new URLSearchParams(window.location.search)
     const checkpointIdFromUrl = params.get('checkpoint_id')
     if (checkpointIdFromUrl) {
       await this.loadCheckpointById(checkpointIdFromUrl)
+      this.currentCheckpointReadyForOverwrite = true
+      return
+    }
+
+    const loadedCurrentCheckpoint = await this.loadCurrentCheckpointOnEntry()
+    if (loadedCurrentCheckpoint) {
+      this.restoredCurrentCheckpointOnEntry = true
+      this.currentCheckpointReadyForOverwrite = true
       return
     }
 
     const landingCheckpoint = (this.checkpointHistory || []).find((checkpoint) => checkpoint.is_landing_page === true)
     if (landingCheckpoint?.id) {
       await this.loadCheckpointById(String(landingCheckpoint.id))
+    }
+    this.currentCheckpointReadyForOverwrite = true
+  }
+
+  isHardReloadNavigation() {
+    const navigationEntry = performance.getEntriesByType('navigation')[0]
+    const navigationType = navigationEntry?.type || null
+    return navigationType === 'reload' || performance?.navigation?.type === 1
+  }
+
+  scheduleAutoMetadataPreload() {
+    if (!this.autoPreloadMetadata) return
+    if (this._autoPreloadScheduled === true) return
+
+    this._autoPreloadScheduled = true
+    setTimeout(async () => {
+      if (this._autoPreloadStarted === true) {
+        return
+      }
+      this._autoPreloadStarted = true
+      try {
+        await this.checkAllMetadataStatusBeforePreload()
+        const navigationEntry = performance.getEntriesByType('navigation')[0]
+        const isHardReload = navigationEntry?.type === 'reload' || performance?.navigation?.type === 1
+        const restoredCurrent = this.restoredCurrentCheckpointOnEntry === true
+        const loadedMetadataCount = Object.keys(this.loadedMetadataVectors || {}).length
+        const hasWarmMetadataMemory = loadedMetadataCount > 1
+        console.info('[PreloadFlow] scheduleAutoMetadataPreload decision', {
+          navigationType: navigationEntry?.type || null,
+          legacyNavigationType: performance?.navigation?.type ?? null,
+          isHardReload,
+          restoredCurrentCheckpointOnEntry: restoredCurrent,
+          loadedMetadataCount,
+          hasWarmMetadataMemory,
+          currentCheckpointReadyForOverwrite: this.currentCheckpointReadyForOverwrite === true,
+          autoPreloadMetadata: this.autoPreloadMetadata === true
+        })
+        if (restoredCurrent && !isHardReload && hasWarmMetadataMemory) {
+          console.info('[PreloadFlow] skipping preload because restored current checkpoint on warm non-reload navigation')
+          return
+        }
+        await this.preloadAllMetadata({ forceMemoryPromotion: isHardReload })
+      } catch (_error) {
+        // Keep background preload best-effort only.
+      }
+    }, 200)
+  }
+
+  currentVisualizationSessionStorageKey() {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return null
+    return `viz_current_checkpoint_state_${projectIdentifier}`
+  }
+
+  buildCurrentCheckpointPersistencePayload() {
+    const state = this.buildCheckpointState()
+    state.clientSavedAt = new Date().toISOString()
+    return state
+  }
+
+  persistCurrentVisualizationStateBeforeTeardown(reason) {
+    if (!this.hasMetadataSelectTarget) return
+    if (this.currentCheckpointLoadInProgress === true) return
+    if (this.currentCheckpointReadyForOverwrite !== true) return
+    if (!this.element || !this.element.isConnected) {
+      console.info('[CheckpointPersist] skipping save; controller element already detached', { reason })
+      return
+    }
+    if (this.getMetadataFoldHeaders().length === 0) {
+      console.info('[CheckpointPersist] skipping save; no metadata headers in DOM', { reason })
+      return
+    }
+    this.persistCurrentVisualizationStateToSession()
+    this.persistCurrentCheckpointOnServer(reason)
+  }
+
+  persistCurrentVisualizationStateToSession() {
+    if (!this.hasMetadataSelectTarget) return
+    if (this.currentCheckpointLoadInProgress === true) return
+    if (this.currentCheckpointReadyForOverwrite !== true) return
+    const sessionKey = this.currentVisualizationSessionStorageKey()
+    if (!sessionKey) return
+
+    try {
+      const state = this.buildCurrentCheckpointPersistencePayload()
+      const payload = {
+        state,
+        saved_at: state.clientSavedAt
+      }
+      sessionStorage.setItem(sessionKey, JSON.stringify(payload))
+      this._lastPersistedState = state
+    } catch (error) {
+      this.checkpointDebug('persistCurrentVisualizationStateToSession:error', {
+        error: String(error?.message || error)
+      })
+    }
+  }
+
+  readCurrentVisualizationStateFromSession() {
+    const sessionKey = this.currentVisualizationSessionStorageKey()
+    if (!sessionKey) return null
+
+    try {
+      const raw = sessionStorage.getItem(sessionKey)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return null
+      if (!parsed.state || typeof parsed.state !== 'object') return null
+      return parsed.state
+    } catch (error) {
+      this.checkpointDebug('readCurrentVisualizationStateFromSession:error', {
+        error: String(error?.message || error)
+      })
+      return null
+    }
+  }
+
+  isCheckpointStateAlreadyApplied(targetState) {
+    if (!targetState || typeof targetState !== 'object') return false
+    try {
+      const currentState = this.buildCheckpointState()
+      const currentFoldSignature = this.computeFoldStateSignature(currentState.foldState || {})
+      const targetFoldSignature = this.computeFoldStateSignature(targetState.foldState || {})
+      if (currentFoldSignature !== targetFoldSignature) {
+        console.info('[CheckpointApply] state differs by fold; will apply', {
+          currentExpanded: Object.entries(currentState.foldState?.metadata || {}).filter(([, v]) => v).map(([k]) => k),
+          targetExpanded: Object.entries(targetState.foldState?.metadata || {}).filter(([, v]) => v).map(([k]) => k)
+        })
+        return false
+      }
+      const currentSignature = this.computeCheckpointStateSignature(currentState)
+      const targetSignature = this.computeCheckpointStateSignature(targetState)
+      const equal = currentSignature === targetSignature
+      if (equal) {
+        console.info('[CheckpointApply] state already applied; skipping apply')
+      }
+      return equal
+    } catch (_error) {
+      return false
+    }
+  }
+
+  computeFoldStateSignature(foldState) {
+    const normalize = (value) => {
+      if (Array.isArray(value)) {
+        return value.map((item) => normalize(item))
+      }
+      if (value && typeof value === 'object') {
+        const out = {}
+        Object.keys(value).sort().forEach((key) => {
+          out[key] = normalize(value[key])
+        })
+        return out
+      }
+      return value
+    }
+    return JSON.stringify(normalize(foldState || {}))
+  }
+
+  persistCurrentCheckpointOnServer(reason = 'unknown') {
+    if (!this.hasMetadataSelectTarget) return
+    if (this.currentCheckpointLoadInProgress === true) return
+    if (this.currentCheckpointReadyForOverwrite !== true) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const state = this._lastPersistedState && this._lastPersistedState.clientSavedAt
+      ? this._lastPersistedState
+      : this.buildCurrentCheckpointPersistencePayload()
+    const expandedFoldKeys = Object.entries(state.foldState?.metadata || {})
+      .filter(([, v]) => v === true)
+      .map(([k]) => k)
+    console.info('[CheckpointPersist] persist current checkpoint', {
+      reason,
+      clientSavedAt: state.clientSavedAt,
+      expandedMetadataCount: expandedFoldKeys.length,
+      expandedMetadataIds: expandedFoldKeys
+    })
+
+    fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/current`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      keepalive: true,
+      body: JSON.stringify({
+        checkpoint: {
+          state: state
+        }
+      })
+    }).catch((error) => {
+      this.checkpointDebug('persistCurrentCheckpointOnServer:error', {
+        reason,
+        error: String(error?.message || error)
+      })
+    })
+  }
+
+  async loadCurrentCheckpointOnEntry() {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return false
+
+    this.currentCheckpointLoadInProgress = true
+    try {
+      const sessionEntry = this.readCurrentVisualizationStateEntryFromSession()
+      const sessionState = sessionEntry?.state || null
+      const sessionClientSavedAtMs = this.parseTimestampToMs(
+        sessionState?.clientSavedAt || sessionEntry?.saved_at
+      )
+
+      let serverState = null
+      let serverClientSavedAtMs = null
+      try {
+        const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/current`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          const checkpoint = payload?.checkpoint
+          if (checkpoint?.state) {
+            serverState = checkpoint.state
+            serverClientSavedAtMs = this.parseTimestampToMs(checkpoint.state?.clientSavedAt)
+          }
+        }
+      } catch (error) {
+        this.checkpointDebug('loadCurrentCheckpointOnEntry:server-fetch-error', {
+          error: String(error?.message || error)
+        })
+      }
+
+      let stateToApply = null
+      let sourceLabel = 'none'
+      if (sessionState && serverState) {
+        if (sessionClientSavedAtMs != null && serverClientSavedAtMs != null) {
+          if (sessionClientSavedAtMs >= serverClientSavedAtMs) {
+            stateToApply = sessionState
+            sourceLabel = 'session-newer'
+          } else {
+            stateToApply = serverState
+            sourceLabel = 'server-newer'
+          }
+        } else if (sessionClientSavedAtMs != null) {
+          stateToApply = sessionState
+          sourceLabel = 'session-server-untimestamped'
+        } else if (serverClientSavedAtMs != null) {
+          stateToApply = serverState
+          sourceLabel = 'server-session-untimestamped'
+        } else {
+          stateToApply = sessionState
+          sourceLabel = 'session-tie-breaker'
+        }
+      } else if (sessionState) {
+        stateToApply = sessionState
+        sourceLabel = 'session-only'
+      } else if (serverState) {
+        stateToApply = serverState
+        sourceLabel = 'server-only'
+      }
+
+      console.info('[CheckpointApply] loadCurrentCheckpointOnEntry source resolved', {
+        source: sourceLabel,
+        sessionClientSavedAt: sessionClientSavedAtMs != null ? new Date(sessionClientSavedAtMs).toISOString() : null,
+        serverClientSavedAt: serverClientSavedAtMs != null ? new Date(serverClientSavedAtMs).toISOString() : null,
+        hasSession: !!sessionState,
+        hasServer: !!serverState
+      })
+
+      if (!stateToApply) return false
+
+      if (this.isCheckpointStateAlreadyApplied(stateToApply)) {
+        return true
+      }
+      await this.applyCheckpointState(stateToApply)
+      return true
+    } catch (error) {
+      this.checkpointDebug('loadCurrentCheckpointOnEntry:error', {
+        error: String(error?.message || error)
+      })
+      return false
+    } finally {
+      this.currentCheckpointLoadInProgress = false
+    }
+  }
+
+  parseTimestampToMs(value) {
+    if (value == null) return null
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null
+    const parsed = Date.parse(String(value))
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  readCurrentVisualizationStateEntryFromSession() {
+    const sessionKey = this.currentVisualizationSessionStorageKey()
+    if (!sessionKey) return null
+    try {
+      const raw = sessionStorage.getItem(sessionKey)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return null
+      if (!parsed.state || typeof parsed.state !== 'object') return null
+      return parsed
+    } catch (_error) {
+      return null
     }
   }
 
@@ -3747,7 +4055,7 @@ export default class extends Controller {
   }
 
   // Preload all metadata (embeddings + metadata vectors) for instant switching
-  async preloadAllMetadata() {
+  async preloadAllMetadata(options = {}) {
     if (this._preloadAllMetadataInProgress) {
       return
     }
@@ -3766,10 +4074,16 @@ export default class extends Controller {
     // })
     
     // Get cell count from server-side data for accurate buffer size calculation
-    const cellCount = this.getCellCountFromServerData()
+    let cellCount = this.getCellCountFromServerData()
+    if (!(cellCount > 0) && this.memoryManager?.getCellCountFromDatabase) {
+      const dbCellCount = await this.memoryManager.getCellCountFromDatabase()
+      if (dbCellCount > 0) {
+        cellCount = dbCellCount
+      }
+    }
     
     // Calculate and set optimal buffer size based on dataset characteristics
-    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCount)
+    this.maxMetadataInMemory = this.memoryManager.calculateOptimalBufferSize(cellCount > 0 ? cellCount : null)
     // console.log(`🧠 [Memory] Set memory buffer size to ${this.maxMetadataInMemory} metadata vectors`)
     if (cellCount > 0) {
       // console.log(`🧠 [Memory] Used cell count from server data: ${cellCount.toLocaleString()}`)
@@ -3945,7 +4259,17 @@ export default class extends Controller {
     // console.log(`  - Total metadata: ${totalMetadataCount}, Buffer size: ${this.maxMetadataInMemory}`)
     
     // If total metadata count is less than buffer size, preload ALL metadata
-    const shouldPreloadAllMetadata = totalMetadataCount <= this.maxMetadataInMemory
+    const forceMemoryPromotion = options.forceMemoryPromotion === true
+    const shouldPreloadAllMetadata = forceMemoryPromotion || totalMetadataCount <= this.maxMetadataInMemory
+    console.info('[PreloadFlow] preloadAllMetadata threshold decision', {
+      forceMemoryPromotion,
+      cellCount,
+      maxMetadataInMemory: this.maxMetadataInMemory,
+      totalMetadataCount,
+      categoricalCount: categoricalMetadata.length,
+      continuousCount: continuousMetadata.length,
+      shouldPreloadAllMetadata
+    })
     if (shouldPreloadAllMetadata) {
       // console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) ≤ buffer size (${this.maxMetadataInMemory}) → Preloading ALL metadata!`)
     } else {
@@ -4299,6 +4623,14 @@ export default class extends Controller {
     // console.log(`  📈 ${continuousCount}/${continuousMetadata.length} Continuous`)
     // console.log(`  ⏭️  ${skippedCount} items skipped (already in database)`)
     this.memoryManager.logMemoryUsage('After preloading all metadata')
+    console.info('[PreloadFlow] preloadAllMetadata completed', {
+      forceMemoryPromotion,
+      embeddingCount,
+      categoricalLoadedCount: categoricalCount,
+      continuousLoadedCount: continuousCount,
+      skippedCount,
+      loadedMetadataVectorsCount: Object.keys(this.loadedMetadataVectors || {}).length
+    })
     
     // Performance assessment after preloading
     await this.assessPerformanceAfterPreload()
@@ -5698,7 +6030,7 @@ export default class extends Controller {
     })
 
     const metadataFoldState = {}
-    document.querySelectorAll('[data-action*="toggleMetadata"][data-metadata-id]').forEach((header) => {
+    this.getMetadataFoldHeaders().forEach((header) => {
       const metadataId = header.dataset.metadataId
       const chevron = header.querySelector('.fa-chevron-right')
       const isExpanded = chevron && chevron.style.transform === 'rotate(90deg)'
@@ -5831,8 +6163,17 @@ export default class extends Controller {
     return state
   }
 
+  getMetadataFoldHeaders() {
+    return Array.from(document.querySelectorAll('[data-action~="click->visualization#toggleMetadata"][data-metadata-id]'))
+  }
+
+  getMetadataFoldHeaderById(metadataId) {
+    const normalizedMetadataId = String(metadataId)
+    return this.getMetadataFoldHeaders().find((header) => String(header.dataset.metadataId) === normalizedMetadataId) || null
+  }
+
   shouldExcludeCheckpointMatchPath(path, key) {
-    if (key === 'signature' || key === 'version' || key === 'foldState') return true
+    if (key === 'signature' || key === 'version' || key === 'foldState' || key === 'clientSavedAt') return true
 
     const parent = path.join('.')
     if (parent === 'selection' && key === 'activeTab') return true
@@ -6041,6 +6382,8 @@ export default class extends Controller {
     const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
     const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null
     const checkpointEmbeddingName = state.visualizationEmbedding?.name || null
+    const selectedEmbeddingIdBeforeApply = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
+    const selectedLoomFileBeforeApply = String(this.getCurrentLoomFile() || '')
     let embeddingCoordinatesReady = !checkpointEmbeddingId
     this.checkpointDebug('applyCheckpointState:start', {
       checkpointEmbeddingId: checkpointEmbeddingId ? String(checkpointEmbeddingId) : null,
@@ -6110,8 +6453,23 @@ export default class extends Controller {
 
       if (resolvedEmbeddingId) {
         try {
-          const loaded = await this.loadMetadataCoordinates(resolvedEmbeddingId)
-          embeddingCoordinatesReady = loaded === true && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+          const targetLoomForCompare = String(targetLoomForLoad || '')
+          const sameEmbeddingAlreadyLoaded =
+            selectedEmbeddingIdBeforeApply === resolvedEmbeddingId &&
+            selectedLoomFileBeforeApply === targetLoomForCompare &&
+            Array.isArray(this.currentCoordinates) &&
+            this.currentCoordinates.length > 0
+
+          if (sameEmbeddingAlreadyLoaded) {
+            embeddingCoordinatesReady = true
+            this.checkpointDebug('applyCheckpointState:skip-loadMetadataCoordinates-already-loaded', {
+              resolvedEmbeddingId,
+              targetLoomForLoad: targetLoomForCompare
+            })
+          } else {
+            const loaded = await this.loadMetadataCoordinates(resolvedEmbeddingId)
+            embeddingCoordinatesReady = loaded === true && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+          }
         } catch (error) {
           embeddingCoordinatesReady = false
           this.checkpointDebug('applyCheckpointState:loadMetadataCoordinates-threw', {
@@ -6221,7 +6579,11 @@ export default class extends Controller {
       }
     }
 
-    await this.restoreFoldAndSwitchState(state)
+    try {
+      await this.restoreFoldAndSwitchState(state)
+    } catch (foldRestoreError) {
+      console.error('[FoldRestore] failed', foldRestoreError)
+    }
     this.syncAdaptColorRangeState()
     if (embeddingCoordinatesReady || (Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0)) {
       await this.restoreColoringAndAxisState(state)
@@ -6283,13 +6645,36 @@ export default class extends Controller {
 
   async restoreFoldAndSwitchState(state) {
     const metadataFoldState = state.foldState?.metadata || {}
+    const totalHeadersInDom = this.getMetadataFoldHeaders().length
+    console.info('[FoldRestore] start', {
+      metadataFoldStateKeys: Object.keys(metadataFoldState).length,
+      expandedKeys: Object.entries(metadataFoldState).filter(([, v]) => v === true).map(([k]) => k),
+      totalHeadersInDom
+    })
     for (const [metadataId, shouldBeExpanded] of Object.entries(metadataFoldState)) {
-      const header = document.querySelector(`[data-action*="toggleMetadata"][data-metadata-id="${metadataId}"]`)
-      if (!header) continue
+      const header = this.getMetadataFoldHeaderById(metadataId)
+      if (!header) {
+        if (shouldBeExpanded) {
+          console.warn('[FoldRestore] header not found for expanded metadata', { metadataId })
+        }
+        continue
+      }
       const chevron = header.querySelector('.fa-chevron-right')
       const isExpanded = !!(chevron && chevron.style.transform === 'rotate(90deg)')
       if (isExpanded !== !!shouldBeExpanded) {
+        console.info('[FoldRestore] toggling metadata', { metadataId, from: isExpanded, to: !!shouldBeExpanded })
         await this.toggleMetadata({ currentTarget: header, timeStamp: performance.now() })
+        const chevronAfter = header.querySelector('.fa-chevron-right')
+        const isExpandedAfter = !!(chevronAfter && chevronAfter.style.transform === 'rotate(90deg)')
+        const nextSibling = header.nextElementSibling
+        const nextDisplay = nextSibling ? nextSibling.style.display : null
+        console.info('[FoldRestore] after toggleMetadata', {
+          metadataId,
+          targetExpanded: !!shouldBeExpanded,
+          actualExpanded: isExpandedAfter,
+          chevronTransform: chevronAfter ? chevronAfter.style.transform : null,
+          nextSiblingDisplay: nextDisplay
+        })
       }
     }
 
@@ -6365,11 +6750,27 @@ export default class extends Controller {
       if (colorButton) {
         this.setWaterDropButtonActive(colorButton)
       }
-      // Apply coloring through the data path deterministically.
-      const loadedColorVector = await this.dataManager.loadAndVisualizeMetadataVector(String(coloringMetadataId))
+      const normalizedColoringMetadataId = String(coloringMetadataId)
+      const alreadyLoadedColoringVector =
+        String(this.currentMetadataId || this.currentMetadataVector?.id || '') === normalizedColoringMetadataId &&
+        !!this.currentMetadataVector &&
+        Array.isArray(this.currentCoordinates) &&
+        this.currentCoordinates.length > 0
+
+      let loadedColorVector = null
+      if (alreadyLoadedColoringVector) {
+        this.updateVisualizationWithMetadataVector()
+        loadedColorVector = this.currentMetadataVector
+        this.checkpointDebug('restoreColoringAndAxisState:skip-loadAndVisualizeMetadataVector-already-loaded', {
+          coloringMetadataId: normalizedColoringMetadataId
+        })
+      } else {
+        // Apply coloring through the data path deterministically.
+        loadedColorVector = await this.dataManager.loadAndVisualizeMetadataVector(normalizedColoringMetadataId)
+      }
       this.syncCurrentMetadataIdWithPanelByName()
       this.checkpointDebug('restoreColoringAndAxisState:color-reapply', {
-        coloringMetadataId: String(coloringMetadataId),
+        coloringMetadataId: normalizedColoringMetadataId,
         colorButtonFound: !!colorButton,
         loadedVector: !!loadedColorVector,
         currentMetadataId: this.currentMetadataId || null,

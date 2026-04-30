@@ -2403,10 +2403,6 @@ export default class extends Controller {
           currentCheckpointReadyForOverwrite: this.currentCheckpointReadyForOverwrite === true,
           autoPreloadMetadata: this.autoPreloadMetadata === true
         })
-        if (restoredCurrent && !isHardReload && hasWarmMetadataMemory) {
-          console.info('[PreloadFlow] skipping preload because restored current checkpoint on warm non-reload navigation')
-          return
-        }
         await this.preloadAllMetadata({ forceMemoryPromotion: true })
       } catch (_error) {
         // Keep background preload best-effort only.
@@ -2848,7 +2844,7 @@ export default class extends Controller {
       })
 
       await this.applyCheckpointState(checkpoint.state)
-      this.refreshAllMetadataStatusFromMemory()
+      await this.checkAllMetadataStatusBeforePreload()
       this.checkpointDebug('loadCheckpointById:after-apply', {
         selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
         currentLoomFile: this.currentLoomFile,
@@ -4960,18 +4956,6 @@ export default class extends Controller {
     if (button) {
       await this.checkSingleMetadataStatus(button)
     }
-  }
-
-  refreshAllMetadataStatusFromMemory() {
-    const statusIcons = document.querySelectorAll('.metadata-status-icon[data-metadata-id]')
-    statusIcons.forEach((icon) => {
-      const metadataId = String(icon.dataset.metadataId || '').trim()
-      if (!metadataId) return
-      const isInMemory = !!this.dataManager.getMetadataVectorById(metadataId)
-      if (isInMemory) {
-        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-      }
-    })
   }
 
   // Preload all metadata (embeddings + metadata vectors) for instant switching

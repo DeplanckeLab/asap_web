@@ -826,5 +826,86 @@ export class MemoryManager {
     }
     return false
   }
+
+  buildGeneSetItemModuleScoreKey(itemId, annotId = null, dataset = null) {
+    const normalizedItemId = String(itemId || '').trim()
+    const normalizedAnnotId = String(annotId || 'base').trim() || 'base'
+    const normalizedDataset = String(dataset || '/matrix').trim() || '/matrix'
+    return `gene_set_item_module_score:${normalizedItemId}:${normalizedAnnotId}:${normalizedDataset}`
+  }
+
+  async storeGeneSetItemModuleScoreInIndexedDB(itemId, payload = {}) {
+    if (!this.controller.db) return false
+    const normalizedItemId = String(itemId || '').trim()
+    if (!normalizedItemId) return false
+
+    const values = Array.isArray(payload.values) ? payload.values.map((value) => Number(value || 0)) : []
+    if (values.length === 0) return false
+
+    const dataset = String(payload.dataset || '/matrix').trim() || '/matrix'
+    const annotId = String(payload.annotId || 'base').trim() || 'base'
+    const key = this.buildGeneSetItemModuleScoreKey(normalizedItemId, annotId, dataset)
+    const loomFile = this.controller.currentLoomFile || this.controller.getCurrentLoomFileForRequest?.() || 'parsing/output.loom'
+    const minVal = Number.isFinite(Number(payload.minVal)) ? Number(payload.minVal) : Math.min(...values)
+    const maxVal = Number.isFinite(Number(payload.maxVal)) ? Number(payload.maxVal) : Math.max(...values)
+    const durationMs = Number.isFinite(Number(payload.durationMs)) ? Math.max(0, Number(payload.durationMs)) : null
+
+    try {
+      const transaction = this.controller.db.transaction(['geneExpression'], 'readwrite')
+      const objectStore = transaction.objectStore('geneExpression')
+      objectStore.put({
+        id: key,
+        kind: 'gene_set_item_module_score',
+        itemId: normalizedItemId,
+        name: String(payload.name || '').trim() || '',
+        values,
+        minVal,
+        maxVal,
+        loomFile,
+        dataset,
+        annotId,
+        durationMs,
+        timestamp: Date.now()
+      })
+      return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve(true)
+        transaction.onerror = () => reject(false)
+      })
+    } catch (error) {
+      console.error('💾 Error storing gene set item module score in IndexedDB:', error)
+      return false
+    }
+  }
+
+  async loadGeneSetItemModuleScoreFromIndexedDB(itemId, options = {}) {
+    if (!this.controller.db) return null
+    const normalizedItemId = String(itemId || '').trim()
+    if (!normalizedItemId) return null
+
+    const dataset = String(options.dataset || '/matrix').trim() || '/matrix'
+    const annotId = String(options.annotId || 'base').trim() || 'base'
+    const key = this.buildGeneSetItemModuleScoreKey(normalizedItemId, annotId, dataset)
+
+    const record = await this._getGeneExpressionRecord(key)
+    if (!record) return null
+
+    const currentLoom = this.controller.getCurrentLoomFile?.() || this.controller.currentLoomFile || 'parsing/output.loom'
+    const storedLoom = record.loomFile || 'parsing/output.loom'
+    if (storedLoom !== currentLoom) return null
+
+    const values = Array.isArray(record.values) ? record.values.map((value) => Number(value || 0)) : []
+    if (values.length === 0) return null
+
+    return {
+      itemId: normalizedItemId,
+      name: String(record.name || '').trim() || null,
+      values,
+      minVal: Number.isFinite(Number(record.minVal)) ? Number(record.minVal) : Math.min(...values),
+      maxVal: Number.isFinite(Number(record.maxVal)) ? Number(record.maxVal) : Math.max(...values),
+      durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : null,
+      dataset: String(record.dataset || dataset),
+      annotId: String(record.annotId || annotId)
+    }
+  }
 }
 

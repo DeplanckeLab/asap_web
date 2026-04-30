@@ -439,6 +439,20 @@ class GeneSetCollectionImportJob < ApplicationJob
     loom_path = project_dir + normalized_loom
     raise ArgumentError, 'Loom file not found' unless File.exist?(loom_path)
 
+    autocomplete_file = loom_path.dirname + 'autocomplete_genes.json'
+    parsed = AsapData::DatasetStableLookup.from_autocomplete_json_file(autocomplete_file.to_s)
+    if parsed
+      log_import(
+        :info,
+        'stable_lookup_built',
+        rows: parsed[:stable_ids].size,
+        accession_keys: parsed[:by_accession].length,
+        symbol_keys: parsed[:by_symbol].length,
+        source: 'autocomplete_json'
+      )
+      return [parsed[:by_accession], parsed[:by_symbol]]
+    end
+
     stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
     accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
     gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
@@ -455,7 +469,14 @@ class GeneSetCollectionImportJob < ApplicationJob
       by_symbol[symbol] ||= stable_id if symbol.present?
     end
 
-    log_import(:info, 'stable_lookup_built', rows: size, accession_keys: by_accession.length, symbol_keys: by_symbol.length)
+    log_import(
+      :info,
+      'stable_lookup_built',
+      rows: size,
+      accession_keys: by_accession.length,
+      symbol_keys: by_symbol.length,
+      source: 'extract_metadata'
+    )
     [by_accession, by_symbol]
   end
 

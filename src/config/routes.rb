@@ -48,6 +48,7 @@ Rails.application.routes.draw do
       get :gene_set_collection_status
       get :gene_set_item_genes
       get :gene_set_item_module_score
+      post :cancel_gene_set_item_module_score
       get :download_gene_set_collection
       post :save_manual_gene_set
       post :import_gene_set_collection

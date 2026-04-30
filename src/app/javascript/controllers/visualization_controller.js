@@ -21,6 +21,26 @@ import {
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import consumer from "channels/consumer"
 
+const VISUALIZATION_ONTOP_UI_ROOT_SELECTOR = [
+  '#checkpoint-history-overlay',
+  '#checkpoint-comments-overlay',
+  '#checkpoint-loading-overlay',
+  '#module-score-loading-overlay',
+  '#visualization-leave-guard-overlay',
+  '#annotation-popup-overlay',
+  '#annotation-popup-gene-modal-overlay',
+  '#settings-window',
+  '#2d-plot-modal',
+  '#range-slider-modal',
+  '#gradient-editor-modal',
+  '#discrete-palette-confirm-overlay',
+  '#compose-selection-overlay',
+  '#compose-selection-details-overlay',
+  '#de-selection-overlay',
+  '#global-filter-panel',
+  '.guided-tour-overlay'
+].join(',')
+
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
 export default class extends Controller {
@@ -136,6 +156,31 @@ export default class extends Controller {
           zIndex: style.zIndex
         }
       })
+  }
+
+  isOntopVisualizationUiRootActive(root) {
+    if (!root) return false
+    const cs = window.getComputedStyle(root)
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false
+    if (cs.pointerEvents === 'none') return false
+    return true
+  }
+
+  isClientPointOverVisualizationOntopUi(clientX, clientY) {
+    if (typeof clientX !== 'number' || typeof clientY !== 'number') return false
+    if (typeof document.elementsFromPoint !== 'function') return false
+    const stack = document.elementsFromPoint(clientX, clientY)
+    if (!stack || stack.length === 0) return false
+    const mainCanvas = this.canvas
+    const customCanvas = this.customPlotManager && this.customPlotManager.currentCanvas
+    for (let i = 0; i < stack.length; i++) {
+      const el = stack[i]
+      if (el === mainCanvas || el === customCanvas) return false
+      if (!el || !el.closest) continue
+      const root = el.closest(VISUALIZATION_ONTOP_UI_ROOT_SELECTOR)
+      if (root && this.isOntopVisualizationUiRootActive(root)) return true
+    }
+    return false
   }
 
   connect() {
@@ -687,6 +732,7 @@ export default class extends Controller {
       if (!anchor) return
       if (anchor.closest('#visualization-leave-guard-overlay')) return
       if (anchor.closest('#checkpoint-loading-overlay')) return
+      if (anchor.closest('#module-score-loading-overlay')) return
       const rawHref = (anchor.getAttribute('href') || '').trim()
       if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return
       if (anchor.hasAttribute('download')) return
@@ -761,6 +807,13 @@ export default class extends Controller {
 
   disconnect() {
     this.stopCheckpointCommentsDrag()
+    if (this.moduleScoreAbortController) {
+      this.moduleScoreAbortController.abort()
+      this.moduleScoreAbortController = null
+    }
+    this.currentModuleScoreRequestId = null
+    this.moduleScoreCancellationRequested = false
+    this.stopModuleScoreLoading()
     console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
     if (this.boundTurboBeforeCache) {
       document.removeEventListener('turbo:before-cache', this.boundTurboBeforeCache)
@@ -2105,6 +2158,157 @@ export default class extends Controller {
     loadingOverlay.style.display = isLoading ? 'flex' : 'none'
   }
 
+  setModuleScoreLoading(isLoading, contextLabel = null) {
+    const loadingOverlay = document.getElementById('module-score-loading-overlay')
+    if (!loadingOverlay) return
+    const textEl = document.getElementById('module-score-loading-text')
+    const elapsedEl = document.getElementById('module-score-loading-elapsed')
+    const estimateEl = document.getElementById('module-score-loading-estimate')
+    const cancelBtn = document.getElementById('module-score-cancel-btn')
+    if (textEl) {
+      const label = String(contextLabel || '').trim()
+      textEl.textContent = label.length > 0
+        ? `Computing ModuleScore on ${label}...`
+        : 'Computing ModuleScore...'
+    }
+    if (elapsedEl) {
+      elapsedEl.textContent = 'Elapsed: 0.0s'
+    }
+    if (estimateEl) {
+      estimateEl.textContent = 'Est. remaining: --'
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = !isLoading
+      cancelBtn.style.opacity = isLoading ? '1' : '0.6'
+      cancelBtn.style.cursor = isLoading ? 'pointer' : 'not-allowed'
+    }
+    loadingOverlay.style.display = isLoading ? 'flex' : 'none'
+  }
+
+  startModuleScoreLoading(contextLabel = null, estimatedDurationMs = null) {
+    this.stopModuleScoreLoading()
+    this.setModuleScoreLoading(true, contextLabel)
+    const textEl = document.getElementById('module-score-loading-text')
+    const elapsedEl = document.getElementById('module-score-loading-elapsed')
+    const estimateEl = document.getElementById('module-score-loading-estimate')
+    const startMs = performance.now()
+    const normalizedEstimateMs = Number.isFinite(Number(estimatedDurationMs)) ? Math.max(0, Number(estimatedDurationMs)) : null
+    const label = String(contextLabel || '').trim()
+    const renderText = () => {
+      if (!elapsedEl) return
+      const elapsedMs = Math.max(0, performance.now() - startMs)
+      const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10)
+      elapsedEl.textContent = `Elapsed: ${elapsedSec.toFixed(1)}s`
+      if (normalizedEstimateMs && normalizedEstimateMs > 0) {
+        const remainingMs = Math.max(0, normalizedEstimateMs - elapsedMs)
+        const remainingSec = Math.max(0, Math.round(remainingMs / 100) / 10)
+        if (estimateEl) estimateEl.textContent = `Est. remaining: ${remainingSec.toFixed(1)}s`
+        return
+      }
+      if (estimateEl) estimateEl.textContent = 'Est. remaining: --'
+    }
+    renderText()
+    this.moduleScoreLoadingTimer = window.setInterval(renderText, 100)
+  }
+
+  stopModuleScoreLoading() {
+    if (this.moduleScoreLoadingTimer) {
+      window.clearInterval(this.moduleScoreLoadingTimer)
+      this.moduleScoreLoadingTimer = null
+    }
+    this.setModuleScoreLoading(false)
+  }
+
+  generateModuleScoreRequestId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID()
+    }
+    return `ms_${Date.now()}_${Math.floor(Math.random() * 1000000)}`
+  }
+
+  async cancelModuleScoreComputation(event = null) {
+    if (event?.preventDefault) event.preventDefault()
+    if (event?.stopPropagation) event.stopPropagation()
+    const requestId = String(this.currentModuleScoreRequestId || '').trim()
+    if (!requestId) return
+
+    this.moduleScoreCancellationRequested = true
+    if (this.moduleScoreAbortController) {
+      this.moduleScoreAbortController.abort()
+      this.moduleScoreAbortController = null
+    }
+
+    const projectIdentifier = this.getProjectIdentifier()
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (projectIdentifier) {
+      fetch(`/projects/${encodeURIComponent(projectIdentifier)}/cancel_gene_set_item_module_score`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ request_id: requestId })
+      }).catch(() => {})
+    }
+
+    this.currentModuleScoreRequestId = null
+    this.stopModuleScoreLoading()
+    this.uiManager.hideMetadataDropdownSpinner()
+  }
+
+  moduleScorePredictionStorageKey(annotId, dataset) {
+    const loomFile = String(this.getCurrentLoomFileForRequest?.() || this.currentLoomFile || '')
+    return `modulescore_prediction:${loomFile}:${String(annotId || 'base')}:${String(dataset || '/matrix')}`
+  }
+
+  getPredictedModuleScoreDurationMs(annotId, dataset) {
+    const key = this.moduleScorePredictionStorageKey(annotId, dataset)
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      const averageMs = Number(parsed?.averageMs)
+      if (!Number.isFinite(averageMs) || averageMs <= 0) return null
+      return averageMs
+    } catch (_error) {
+      return null
+    }
+  }
+
+  updatePredictedModuleScoreDurationMs(annotId, dataset, durationMs) {
+    const normalizedDurationMs = Number(durationMs)
+    if (!Number.isFinite(normalizedDurationMs) || normalizedDurationMs <= 0) return
+    const key = this.moduleScorePredictionStorageKey(annotId, dataset)
+    let count = 0
+    let averageMs = normalizedDurationMs
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        const parsedCount = Number(parsed?.count)
+        const parsedAverageMs = Number(parsed?.averageMs)
+        if (Number.isFinite(parsedCount) && parsedCount > 0 && Number.isFinite(parsedAverageMs) && parsedAverageMs > 0) {
+          count = parsedCount
+          averageMs = parsedAverageMs
+        }
+      }
+    } catch (_error) {
+      // Keep update best effort.
+    }
+    const nextCount = count + 1
+    const nextAverageMs = ((averageMs * count) + normalizedDurationMs) / nextCount
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        count: nextCount,
+        averageMs: Math.round(nextAverageMs)
+      }))
+    } catch (_error) {
+      // Keep update best effort.
+    }
+  }
+
   updateCheckpointCommentsButtonState(commentCount = 0, enabled = true) {
     const commentsBtn = document.getElementById('checkpoint-comments-btn')
     if (!commentsBtn) return
@@ -2203,7 +2407,7 @@ export default class extends Controller {
           console.info('[PreloadFlow] skipping preload because restored current checkpoint on warm non-reload navigation')
           return
         }
-        await this.preloadAllMetadata({ forceMemoryPromotion: isHardReload })
+        await this.preloadAllMetadata({ forceMemoryPromotion: true })
       } catch (_error) {
         // Keep background preload best-effort only.
       }
@@ -2644,6 +2848,7 @@ export default class extends Controller {
       })
 
       await this.applyCheckpointState(checkpoint.state)
+      this.refreshAllMetadataStatusFromMemory()
       this.checkpointDebug('loadCheckpointById:after-apply', {
         selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
         currentLoomFile: this.currentLoomFile,
@@ -4315,8 +4520,8 @@ export default class extends Controller {
     try {
       // console.log(`🔍 [DEBUG] Starting preloadMetadataToDisk for metadata ${metadataId}`)
       
-      // Use the original logic from the working version
-      const loomFile = this.getCurrentLoomFileForRequest()
+      // Resolve the metadata-specific loom file from the DOM first.
+      const loomFile = this.getLoomFileForMetadataRequest(metadataId)
       
       // console.log(`🔍 [DEBUG] Using original loom file logic: loomFile="${loomFile}"`)
       
@@ -4577,6 +4782,20 @@ export default class extends Controller {
     return loomFile
   }
 
+  getLoomFileForMetadataRequest(metadataId) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return this.getCurrentLoomFileForRequest()
+
+    const selectorMetadataId = normalizedMetadataId.replace(/"/g, '\\"')
+    const metadataNodes = Array.from(document.querySelectorAll(`[data-metadata-id="${selectorMetadataId}"][data-metadata-loom-file]`))
+    const scopedLoomFile = metadataNodes
+      .map((node) => String(node.dataset.metadataLoomFile || '').trim())
+      .find((loomFile) => loomFile.length > 0)
+
+    if (scopedLoomFile) return scopedLoomFile
+    return this.getCurrentLoomFileForRequest()
+  }
+
   // Get cell count from server-side data (embeddingsByLoomValue)
   getCellCountFromServerData() {
     // Try to get cell count from embeddingsByLoomValue first
@@ -4741,6 +4960,18 @@ export default class extends Controller {
     if (button) {
       await this.checkSingleMetadataStatus(button)
     }
+  }
+
+  refreshAllMetadataStatusFromMemory() {
+    const statusIcons = document.querySelectorAll('.metadata-status-icon[data-metadata-id]')
+    statusIcons.forEach((icon) => {
+      const metadataId = String(icon.dataset.metadataId || '').trim()
+      if (!metadataId) return
+      const isInMemory = !!this.dataManager.getMetadataVectorById(metadataId)
+      if (isInMemory) {
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+      }
+    })
   }
 
   // Preload all metadata (embeddings + metadata vectors) for instant switching
@@ -5107,6 +5338,7 @@ export default class extends Controller {
           // If we should preload all to memory, only load if it's in database
           if (shouldPreloadAllMetadata) {
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
+            const metadataLoomFile = this.getLoomFileForMetadataRequest(metadataId)
             
             // Check if this metadata is in the database
             if (metadataInDatabase.has(metadataId.toString())) {
@@ -5118,7 +5350,7 @@ export default class extends Controller {
               // console.log(`🔍 [MEMORY] Starting memory load for existing metadata ${metadataId} at ${memoryLoadStart.toFixed(2)}ms`)
               // console.log(`🔍 [DEBUG] About to call loadSingleMetadataVector for existing metadata ${metadataId}`)
               try {
-                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId)
+                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
                 const memoryLoadEnd = performance.now()
                 const memoryLoadDuration = (memoryLoadEnd - memoryLoadStart).toFixed(2)
                 // console.log(`🔍 [MEMORY] Completed memory load for existing metadata ${metadataId} in ${memoryLoadDuration}ms`)
@@ -5154,7 +5386,24 @@ export default class extends Controller {
                 console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
               }
             } else {
-              skippedCount++
+              try {
+                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
+                if (metadata) {
+                  const globalIndex = i + batchIndex
+                  if (globalIndex < categoricalMetadata.length) {
+                    categoricalCount++
+                  } else {
+                    continuousCount++
+                  }
+                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                  this.uiManager.showCheckboxesForMetadata(metadataId)
+                } else {
+                  skippedCount++
+                }
+              } catch (error) {
+                console.error(`  ❌ Failed to fetch ${metadataId} for forced memory preload:`, error)
+                skippedCount++
+              }
             }
             continue
           }
@@ -5203,9 +5452,10 @@ export default class extends Controller {
               // Load from server to disk (IndexedDB)
               // If we have enough buffer space, also load into memory for instant access
               let result
+              const metadataLoomFile = this.getLoomFileForMetadataRequest(metadataId)
               if (shouldPreloadAllMetadata) {
                 // Load into memory AND disk
-                result = await this.dataManager.loadSingleMetadataVector(metadataId)
+                result = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
                 if (result) {
                   result = { success: true, metadataId, name: result.name }
                 } else {
@@ -5242,7 +5492,7 @@ export default class extends Controller {
                 const newMetadataLoadStart = performance.now()
                 // console.log(`🔍 [MEMORY] Starting memory load for new metadata ${metadataId} at ${newMetadataLoadStart.toFixed(2)}ms`)
                 try {
-                  const memoryMetadata = await this.dataManager.loadSingleMetadataVector(metadataId)
+                  const memoryMetadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
                   const newMetadataLoadEnd = performance.now()
                   const newMetadataLoadDuration = (newMetadataLoadEnd - newMetadataLoadStart).toFixed(2)
                   // console.log(`🔍 [MEMORY] Completed memory load for new metadata ${metadataId} in ${newMetadataLoadDuration}ms`)
@@ -6494,6 +6744,7 @@ export default class extends Controller {
     const oldMetadataId = this.currentMetadataVector?.id || this.currentMetadataId || 'none'
     this.currentMetadataVector = null
     this.currentMetadataId = null
+    this.activeGeneSetColoringState = null
     // console.log('🎨 [CLEAR COLORING] Cleared currentMetadataVector and currentMetadataId (was:', oldMetadataId, ')')
     
     // Clear custom color range
@@ -6804,6 +7055,7 @@ export default class extends Controller {
       },
       coloring: {
         metadataId: this.currentMetadataId || null,
+        geneSetItem: this.getActiveGeneSetColoringState(),
         categoryColorOverrides: categoryColorOverrides,
         customColorRange: this.customColorRange,
         currentColorScheme: this.currentColorScheme
@@ -6825,6 +7077,7 @@ export default class extends Controller {
         genes: geneFoldState
       },
       panelScroll: this.buildPanelScrollState(),
+      bottomRightPanel: this.buildBottomRightPanelCheckpointState(),
       genes: {
         tags: geneTags
       },
@@ -6890,6 +7143,107 @@ export default class extends Controller {
       }
     })
     return panelScroll
+  }
+
+  buildBottomRightPanelCheckpointState() {
+    const subView = this.getCurrentBottomRightPanelSubView()
+    const geneSetsState = this.geneSetCollectionsController?.getCheckpointState?.() || null
+    const panelState = { geneSetsState }
+    const scrollContainer = this.getBottomRightPanelScrollContainer(subView, panelState)
+    const anchorElement = this.getBottomRightPanelTopVisibleElement(scrollContainer, subView)
+
+    return {
+      subView,
+      firstVisibleElementId: anchorElement?.id || null,
+      scrollTop: scrollContainer ? Math.max(0, Number(scrollContainer.scrollTop || 0)) : 0,
+      geneSetsState
+    }
+  }
+
+  getActiveGeneSetColoringState() {
+    const activeButton = document.querySelector('[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id][data-active="true"]')
+    if (!activeButton) return null
+    const itemId = String(activeButton.dataset.geneSetItemId || '').trim()
+    if (!itemId) return null
+    return {
+      itemId,
+      name: String(activeButton.dataset.geneSetName || '').trim() || null
+    }
+  }
+
+  getCurrentBottomRightPanelSubView() {
+    if (this.currentSelectionTab === 'gene-sets' || this.currentSelectionTab === 'cells') {
+      return this.currentSelectionTab
+    }
+    const cellsContent = document.getElementById('cells-tab-content')
+    if (cellsContent && cellsContent.style.display !== 'none') return 'cells'
+    return 'gene-sets'
+  }
+
+  getBottomRightPanelScrollContainer(subView = null, panelState = null) {
+    const normalizedSubView = subView === 'gene-sets' ? 'gene-sets' : this.getCurrentBottomRightPanelSubView()
+    if (normalizedSubView === 'gene-sets') {
+      const isDetailMode = panelState?.geneSetsState?.mode === 'detail'
+      if (isDetailMode) return document.getElementById('gene-set-items-list')
+      return document.getElementById('gene-set-collections-list')
+    }
+    return document.getElementById('saved-selections-list')
+  }
+
+  getBottomRightPanelTopVisibleElement(containerEl, subView) {
+    if (!containerEl) return null
+    const selector = (() => {
+      if (subView !== 'gene-sets') return '[data-role="saved-selection-row"]'
+      if (containerEl.id === 'gene-set-items-list') return '[data-gene-set-item-row="true"]'
+      return '[data-gene-set-collection-row="true"]'
+    })()
+    const candidates = Array.from(containerEl.querySelectorAll(selector))
+    const containerRect = containerEl.getBoundingClientRect()
+    let bestCandidate = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    candidates.forEach((candidate) => {
+      const rect = candidate.getBoundingClientRect()
+      if ((rect.bottom - containerRect.top) <= 0) return
+      const distance = Math.abs(rect.top - containerRect.top)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestCandidate = candidate
+      }
+    })
+    return bestCandidate
+  }
+
+  async restoreBottomRightPanelState(state) {
+    const panelState = state?.bottomRightPanel
+    if (!panelState || typeof panelState !== 'object') return
+    const subView = panelState.subView === 'gene-sets' ? 'gene-sets' : 'cells'
+    this.setSelectionTab(subView)
+    if (subView === 'gene-sets' && panelState.geneSetsState && this.geneSetCollectionsController?.applyCheckpointState) {
+      await this.geneSetCollectionsController.applyCheckpointState(panelState.geneSetsState)
+    }
+
+    const applyRestore = () => {
+      const containerEl = this.getBottomRightPanelScrollContainer(subView, panelState)
+      if (!containerEl) return
+
+      const anchorId = String(panelState.firstVisibleElementId || '').trim()
+      if (anchorId) {
+        const anchorEl = document.getElementById(anchorId)
+        if (anchorEl && containerEl.contains(anchorEl)) {
+          const containerRect = containerEl.getBoundingClientRect()
+          const anchorRect = anchorEl.getBoundingClientRect()
+          containerEl.scrollTop = Math.max(0, Math.round((containerEl.scrollTop || 0) + (anchorRect.top - containerRect.top)))
+          return
+        }
+      }
+
+      if (Number.isFinite(Number(panelState.scrollTop))) {
+        containerEl.scrollTop = Math.max(0, Number(panelState.scrollTop || 0))
+      }
+    }
+
+    applyRestore()
+    requestAnimationFrame(() => requestAnimationFrame(applyRestore))
   }
 
   computePanelScrollAnchor(containerEl) {
@@ -7070,6 +7424,7 @@ export default class extends Controller {
     const removeKeys = [
       'foldState',
       'panelScroll',
+      'bottomRightPanel',
       'customPlotWindow',
       'display',
       'interaction',
@@ -7493,6 +7848,11 @@ export default class extends Controller {
     } catch (foldRestoreError) {
       console.error('[FoldRestore] failed', foldRestoreError)
     }
+    if (state.bottomRightPanel && typeof state.bottomRightPanel === 'object') {
+      await this.restoreBottomRightPanelState(state)
+    } else {
+      this.setSelectionTab(state.selection?.activeTab === 'gene-sets' ? 'gene-sets' : 'cells')
+    }
     this.restorePanelScrollState(state)
     this.syncAdaptColorRangeState()
     if (embeddingCoordinatesReady || (Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0)) {
@@ -7525,8 +7885,6 @@ export default class extends Controller {
       this.updateSelectionCount()
       this.updateSelectedPointColors()
     }
-
-    this.setSelectionTab(state.selection?.activeTab === 'gene-sets' ? 'gene-sets' : 'cells')
 
     this.dataManager.updateCellFiltering(true)
     if (this.metadataData?.id) {
@@ -7653,7 +8011,14 @@ export default class extends Controller {
     }
 
     const coloringMetadataId = state.coloring?.metadataId
-    if (coloringMetadataId) {
+    const checkpointGeneSetItemColoring = checkpointColoringState.geneSetItem || this.extractGeneSetItemColoringFromMetadataId(coloringMetadataId)
+    if (checkpointGeneSetItemColoring?.itemId) {
+      const restoredGeneSetColoring = await this.restoreGeneSetItemColoringState(checkpointGeneSetItemColoring)
+      if (!restoredGeneSetColoring) {
+        this.resetAllWaterDropButtons()
+        this.clearMetadataColoring()
+      }
+    } else if (coloringMetadataId) {
       // Avoid toggle-off behavior when a water drop is already active from previous state.
       this.resetAllWaterDropButtons()
       const colorButton = document.querySelector(`[data-action*="waterDropClicked"][data-metadata-id="${coloringMetadataId}"], [data-action*="geneWaterDropClicked"][data-layer-metadata-id="${coloringMetadataId}"], [data-action*="geneWaterDropClicked"][data-metadata-id="${coloringMetadataId}"]`)
@@ -7714,6 +8079,32 @@ export default class extends Controller {
       this.resetAllYButtons()
       this.selectedYButton = null
     }
+  }
+
+  async restoreGeneSetItemColoringState(geneSetItemState) {
+    const itemId = String(geneSetItemState?.itemId || '').trim()
+    if (!itemId) return false
+    const selectorItemId = itemId.replace(/"/g, '\\"')
+    const colorButton = document.querySelector(`[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${selectorItemId}"]`)
+    if (!colorButton) return false
+    colorButton.dataset.active = 'false'
+    await this.geneSetWaterDropClicked({
+      currentTarget: colorButton,
+      preventDefault: () => {},
+      stopPropagation: () => {}
+    })
+    return true
+  }
+
+  extractGeneSetItemColoringFromMetadataId(metadataId) {
+    const normalized = String(metadataId || '').trim()
+    if (!normalized.startsWith('gene_set_item_')) return null
+    const suffix = normalized.slice('gene_set_item_'.length)
+    const separatorIndex = suffix.indexOf('_')
+    if (separatorIndex <= 0) return null
+    const itemId = suffix.slice(0, separatorIndex).trim()
+    if (!itemId) return null
+    return { itemId }
   }
 
   syncCurrentMetadataIdWithPanelByName() {
@@ -8758,7 +9149,13 @@ export default class extends Controller {
     const geneSetName = button.dataset.geneSetName || 'Gene set'
     if (!itemId) return
 
-    const isCurrentlyActive = button.dataset.active === 'true'
+    const currentColoringId = String(this.currentMetadataId || this.currentMetadataVector?.id || '')
+    const expectedMetadataPrefix = `gene_set_item_${itemId}_`
+    const buttonClaimsActive = button.dataset.active === 'true'
+    const isCurrentlyActive = buttonClaimsActive && currentColoringId.startsWith(expectedMetadataPrefix)
+    if (buttonClaimsActive && !isCurrentlyActive) {
+      button.dataset.active = 'false'
+    }
     if (isCurrentlyActive) {
       this.resetAllWaterDropButtons()
       this.removeAllCategoryColors()
@@ -8781,31 +9178,71 @@ export default class extends Controller {
     }
 
     this.uiManager.showMetadataDropdownSpinner()
+    let showedModuleScoreOverlay = false
+    this.moduleScoreCancellationRequested = false
     try {
-      const params = new URLSearchParams({
-        item_id: String(itemId),
-        loom_file: String(currentLoomFile),
-        dataset: String(currentDataset || '/matrix')
+      const annotId = this.geneManager?.currentMatrixAnnotId || 'base'
+      const normalizedDataset = String(currentDataset || '/matrix')
+      const cachedModuleScore = await this.memoryManager?.loadGeneSetItemModuleScoreFromIndexedDB?.(String(itemId), {
+        dataset: normalizedDataset,
+        annotId: String(annotId)
       })
-      const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' }
-      })
-      const payload = await response.json()
-      if (!response.ok || payload.status !== 'ok') {
-        throw new Error(payload.message || 'Failed to compute ModuleScore')
-      }
+      let scoreValues = Array.isArray(cachedModuleScore?.values) ? cachedModuleScore.values : []
+      let minVal = Number.isFinite(Number(cachedModuleScore?.minVal)) ? Number(cachedModuleScore.minVal) : null
+      let maxVal = Number.isFinite(Number(cachedModuleScore?.maxVal)) ? Number(cachedModuleScore.maxVal) : null
 
-      const scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []
       if (scoreValues.length === 0) {
-        alert('ModuleScore returned no values for this gene set.')
-        return
+        const requestId = this.generateModuleScoreRequestId()
+        this.currentModuleScoreRequestId = requestId
+        this.moduleScoreAbortController = new AbortController()
+        const predictedDurationMs = this.getPredictedModuleScoreDurationMs(String(annotId), normalizedDataset)
+        this.startModuleScoreLoading(geneSetName, predictedDurationMs)
+        showedModuleScoreOverlay = true
+        const moduleScoreComputeStart = performance.now()
+        const params = new URLSearchParams({
+          item_id: String(itemId),
+          loom_file: String(currentLoomFile),
+          dataset: normalizedDataset,
+          request_id: requestId
+        })
+        const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+          signal: this.moduleScoreAbortController.signal
+        })
+        const payload = await response.json()
+        if (payload?.status === 'canceled') {
+          return
+        }
+        if (!response.ok || payload.status !== 'ok') {
+          throw new Error(payload.message || 'Failed to compute ModuleScore')
+        }
+
+        scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []
+        if (scoreValues.length === 0) {
+          alert('ModuleScore returned no values for this gene set.')
+          return
+        }
+        minVal = this.dataManager.safeMin(scoreValues)
+        maxVal = this.dataManager.safeMax(scoreValues)
+        const moduleScoreDurationMs = Math.round(Math.max(0, performance.now() - moduleScoreComputeStart))
+        this.updatePredictedModuleScoreDurationMs(String(annotId), normalizedDataset, moduleScoreDurationMs)
+        this.memoryManager?.storeGeneSetItemModuleScoreInIndexedDB?.(String(itemId), {
+          name: geneSetName,
+          values: scoreValues,
+          minVal,
+          maxVal,
+          dataset: normalizedDataset,
+          annotId: String(annotId),
+          durationMs: moduleScoreDurationMs
+        }).catch(() => {})
+      } else {
+        if (!Number.isFinite(minVal)) minVal = this.dataManager.safeMin(scoreValues)
+        if (!Number.isFinite(maxVal)) maxVal = this.dataManager.safeMax(scoreValues)
       }
 
       const metadataId = `gene_set_item_${itemId}_${this.geneManager?.currentMatrixAnnotId || 'base'}`
-      const minVal = this.dataManager.safeMin(scoreValues)
-      const maxVal = this.dataManager.safeMax(scoreValues)
       const metadataVector = {
         id: metadataId,
         name: geneSetName,
@@ -8840,8 +9277,17 @@ export default class extends Controller {
       this.dataManager.updateAllCategoryDistributions()
       this.dataManager.updateCellFiltering(true)
     } catch (error) {
+      if (this.moduleScoreCancellationRequested === true || error?.name === 'AbortError') {
+        return
+      }
       alert(error.message || 'Failed to apply gene set coloring')
     } finally {
+      this.currentModuleScoreRequestId = null
+      this.moduleScoreAbortController = null
+      this.moduleScoreCancellationRequested = false
+      if (showedModuleScoreOverlay) {
+        this.stopModuleScoreLoading()
+      }
       this.uiManager.hideMetadataDropdownSpinner()
     }
   }
@@ -10534,6 +10980,9 @@ export default class extends Controller {
       // canvas: !!this.canvas,
       // target: event.target?.tagName
     // })
+    if (this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     const allowLabelInteraction = this.interactionMode === 'pick' || this.interactionMode === 'pan'
     if (allowLabelInteraction && this.tryStartLabelInteraction(event)) {
       return
@@ -10549,6 +10998,9 @@ export default class extends Controller {
   }
 
   onInteractionMouseMove(event) {
+    if (this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     // Track how often this is called (for debugging performance issues)
     if (!this.mouseMoveCount) this.mouseMoveCount = 0
     this.mouseMoveCount++
@@ -10626,6 +11078,11 @@ export default class extends Controller {
   }
 
   onInteractionMouseUp(event) {
+    const overOntop = this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)
+    const activePlotGesture = this.isPanning || this.isDrawingLasso || this.draggingLabel
+    if (overOntop && !activePlotGesture) {
+      return
+    }
     // Handle label drag end in pick/move mode (ReGL)
     if ((this.interactionMode === 'pick' || this.interactionMode === 'pan') && this.draggingLabel && this.rendererType === 'regl') {
       if (!this.labelDragMoved) {
@@ -10685,6 +11142,9 @@ export default class extends Controller {
   }
 
   onInteractionDoubleClick(event) {
+    if (this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     // console.log('Double-click event:', this.interactionMode)
     if (this.interactionMode === 'lasso') {
       this.onLassoDoubleClick(event)
@@ -10697,6 +11157,9 @@ export default class extends Controller {
   }
 
   onInteractionWheel(event) {
+    if (this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     // Always prevent default scroll behavior when over the plot
     if (event.cancelable) {
       event.preventDefault()
@@ -13539,6 +14002,7 @@ export default class extends Controller {
     const selectionPrefix = options.selectionPrefix || ''
 
     node.dataset.selectionId = String(item.id)
+    node.id = this.buildSavedSelectionRowElementId(item.id)
     node.style.marginBottom = trailingMargin
 
     const checkbox = node.querySelector('[data-role="saved-selection-checkbox"]')
@@ -13606,6 +14070,18 @@ export default class extends Controller {
     }
 
     return node
+  }
+
+  buildSavedSelectionRowElementId(selectionId) {
+    const normalized = String(selectionId || '').trim()
+    return `saved-selection-row-${this.sanitizeCheckpointDomIdPart(normalized)}`
+  }
+
+  sanitizeCheckpointDomIdPart(value) {
+    return String(value || '')
+      .replace(/[^A-Za-z0-9\-_:]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'item'
   }
 
   buildSavedSelectionsDeletingOverlayNode() {
@@ -14248,8 +14724,6 @@ export default class extends Controller {
       '[data-attr-widget="input_data"]',
       '[data-attr-name="groups"]',
       '[data-attr-name="groups2"]',
-      '[data-attr-name="second_group_from_other_metadata"]',
-      '[data-attr-name="group_comp_from_other_metadata"]',
       '[data-attr-name="all_against_compl"]',
       '[data-attr-name="all_against_all"]',
       '[data-attr-name="group_pairs"]',

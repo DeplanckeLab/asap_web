@@ -58,6 +58,21 @@ export class GeneSetCollectionsController {
       .replace(/'/g, '&#39;')
   }
 
+  sanitizeCheckpointDomIdPart(value) {
+    return String(value || '')
+      .replace(/[^A-Za-z0-9\-_:]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'item'
+  }
+
+  buildCollectionRowElementId(collectionId) {
+    return `gene-set-collection-row-${this.sanitizeCheckpointDomIdPart(collectionId)}`
+  }
+
+  buildCollectionItemRowElementId(itemId) {
+    return `gene-set-item-row-${this.sanitizeCheckpointDomIdPart(itemId)}`
+  }
+
   isRenameableCollection(collectionId, isCustom, isLocked = false) {
     return isCustom === true && isLocked !== true && String(collectionId || '').startsWith('local_collection:')
   }
@@ -295,7 +310,8 @@ export class GeneSetCollectionsController {
       const identifierLabel = this.escapeHtml(item.identifier || '-')
 
       return `
-        <div data-gene-set-item-row="true"
+        <div id="${this.buildCollectionItemRowElementId(itemId)}"
+             data-gene-set-item-row="true"
              data-gene-set-item-id="${itemId}"
              style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
           <div style="flex:1;min-width:0;">
@@ -901,6 +917,45 @@ export class GeneSetCollectionsController {
     if (this.listView) this.listView.style.display = 'flex'
   }
 
+  isDetailViewOpen() {
+    if (!this.detailView || !this.listView) return false
+    return this.detailView.style.display !== 'none' && this.listView.style.display === 'none'
+  }
+
+  getCheckpointState() {
+    const mode = this.isDetailViewOpen() ? 'detail' : 'list'
+    return {
+      mode,
+      selectedCollectionId: this.selectedCollectionId ? String(this.selectedCollectionId) : null,
+      detailQuery: this.itemsFilterInput ? String(this.itemsFilterInput.value || '') : ''
+    }
+  }
+
+  async applyCheckpointState(state) {
+    if (!state || typeof state !== 'object') return
+    const mode = state.mode === 'detail' ? 'detail' : 'list'
+    if (mode !== 'detail') {
+      this.closeCollectionDetail()
+      return
+    }
+
+    const selectedCollectionId = String(state.selectedCollectionId || '').trim()
+    if (!selectedCollectionId) {
+      this.closeCollectionDetail()
+      return
+    }
+
+    const row = this.listBody?.querySelector?.(`[data-gene-set-collection-row="true"][data-collection-id="${selectedCollectionId.replace(/"/g, '\\"')}"]`)
+    const label = row?.dataset?.collectionLabel || ''
+    await this.openCollectionDetail(selectedCollectionId, label)
+
+    const detailQuery = String(state.detailQuery || '')
+    if (this.itemsFilterInput) this.itemsFilterInput.value = detailQuery
+    if (detailQuery.length > 0) {
+      await this.fetchCollectionItems(selectedCollectionId, detailQuery)
+    }
+  }
+
   upsertCollectionFromPayload(collection) {
     if (!this.listBody || !collection || typeof collection !== 'object') return
     const collectionId = String(collection.id || '').trim()
@@ -921,6 +976,7 @@ export class GeneSetCollectionsController {
     const row = this.listBody.querySelector(`[data-gene-set-collection-row="true"][data-collection-id="${collectionId}"]`)
     if (row) {
       row.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;'
+      row.id = this.buildCollectionRowElementId(collectionId)
       row.dataset.collectionLabel = label
       row.dataset.collectionName = label.toLowerCase()
       row.dataset.collectionCount = String(itemCount)
@@ -942,6 +998,7 @@ export class GeneSetCollectionsController {
       `
     } else {
       const newRow = document.createElement('div')
+      newRow.id = this.buildCollectionRowElementId(collectionId)
       newRow.setAttribute('data-gene-set-collection-row', 'true')
       newRow.setAttribute('data-collection-id', collectionId)
       newRow.setAttribute('data-collection-label', label)

@@ -12,8 +12,8 @@ class ProjectsController < ApplicationController
   helper_method :de_filter_cache_key
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -3299,21 +3299,13 @@ class ProjectsController < ApplicationController
       return
     end
 
-    dataset_stable_by_accession = {}
-    dataset_stable_by_symbol = {}
+    perf_req_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
     begin
-      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
-      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
-      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
-      dataset_size = [stable_values.length, accession_values.length, gene_values.length].min
-      dataset_size.times do |idx|
-        stable_id = stable_values[idx].to_s.strip
-        next if stable_id.blank?
-        accession = accession_values[idx].to_s.strip.downcase
-        symbol = gene_values[idx].to_s.strip.downcase
-        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
-        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
-      end
+      dataset_lookup = cached_dataset_stable_lookup(loom_path)
+      dataset_stable_by_accession = dataset_lookup[:by_accession]
+      dataset_stable_by_symbol = dataset_lookup[:by_symbol]
+      dataset_stable_ids = dataset_lookup[:stable_ids]
     rescue => e
       Rails.logger.error("gene_set_collection_items: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
       render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
@@ -3343,9 +3335,6 @@ class ProjectsController < ApplicationController
       total_count = filtered_items.length
       limited_items = filtered_items.first(limit)
 
-      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
-      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
-
       items_payload = limited_items.map do |item|
         genes = item[:genes]
         in_dataset_count = genes.count do |gene|
@@ -3353,7 +3342,7 @@ class ProjectsController < ApplicationController
             gene,
             dataset_stable_by_accession: dataset_stable_by_accession,
             dataset_stable_by_symbol: dataset_stable_by_symbol,
-            dataset_stable_ids: stable_ids
+            dataset_stable_ids: dataset_stable_ids
           )
         end
 
@@ -3400,9 +3389,6 @@ class ProjectsController < ApplicationController
       total_count = filtered_items.length
       limited_items = filtered_items.first(limit)
 
-      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
-      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
-
       items_payload = limited_items.map do |item|
         genes = item[:genes]
         in_dataset_count = genes.count do |gene|
@@ -3410,7 +3396,7 @@ class ProjectsController < ApplicationController
             gene,
             dataset_stable_by_accession: dataset_stable_by_accession,
             dataset_stable_by_symbol: dataset_stable_by_symbol,
-            dataset_stable_ids: stable_ids
+            dataset_stable_ids: dataset_stable_ids
           )
         end
 
@@ -3448,12 +3434,15 @@ class ProjectsController < ApplicationController
     end
 
     payload = nil
+    perf_db = {}
     RemoteGene.with_remote(db_version) do
       conn = RemoteGene.connection
 
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       collection_row = conn.select_one(
         "SELECT id, label FROM gene_sets WHERE id = #{collection_id} AND organism_id = #{@project.organism_id.to_i} AND COALESCE(obsolete, FALSE) = FALSE"
       )
+      perf_db[:collection_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
       unless collection_row
         render json: { status: 'error', message: 'Gene set collection not found' }, status: :not_found
         return
@@ -3465,7 +3454,11 @@ class ProjectsController < ApplicationController
         where_clause += " AND LOWER(COALESCE(name, '')) LIKE #{escaped_query}"
       end
 
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       total_count = conn.select_value("SELECT COUNT(*) FROM gene_set_items WHERE #{where_clause}").to_i
+      perf_db[:count_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       rows = conn.select_all(<<~SQL)
         SELECT
           id,
@@ -3482,12 +3475,17 @@ class ProjectsController < ApplicationController
         ORDER BY LOWER(COALESCE(name, ''))
         LIMIT #{limit}
       SQL
+      perf_db[:rows_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
 
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       all_gene_ids = rows.flat_map do |row|
         row['content'].to_s.split(',').map { |v| v.to_i }.select { |v| v > 0 }
       end.uniq
+      perf_db[:parse_gene_ids_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+      perf_db[:unique_gene_ids] = all_gene_ids.length
 
       gene_lookup = {}
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       if all_gene_ids.any?
         gene_rows = conn.select_all(<<~SQL)
           SELECT id, ensembl_id, name
@@ -3502,7 +3500,9 @@ class ProjectsController < ApplicationController
           }
         end
       end
+      perf_db[:gene_lookup_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
 
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       payload = {
         status: 'ok',
         collection: {
@@ -3533,7 +3533,21 @@ class ProjectsController < ApplicationController
         total_count: total_count,
         limit: limit
       }
+      perf_db[:build_items_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
     end
+
+    perf_db[:remote_total_ms] = perf_db.values_at(:collection_ms, :count_ms, :rows_ms, :parse_gene_ids_ms, :gene_lookup_ms, :build_items_ms).compact.sum.round(1)
+    perf_request_total_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - perf_req_t0) * 1000.0).round(1)
+    Rails.logger.info(
+      "[perf][gene_set_collection_items] project_id=#{@project.id} collection_id=#{collection_id} " \
+      "db=#{db_version} loom_file=#{loom_file} filtered=#{query.present?} " \
+      "total_count=#{payload[:total_count]} returned=#{payload[:items].length} " \
+      "unique_gene_ids=#{perf_db[:unique_gene_ids]} " \
+      "ms_collection=#{perf_db[:collection_ms]} ms_count=#{perf_db[:count_ms]} ms_rows=#{perf_db[:rows_ms]} " \
+      "ms_parse_gene_ids=#{perf_db[:parse_gene_ids_ms]} ms_gene_lookup=#{perf_db[:gene_lookup_ms]} " \
+      "ms_build_items=#{perf_db[:build_items_ms]} ms_remote_total=#{perf_db[:remote_total_ms]} " \
+      "ms_request_total=#{perf_request_total_ms}"
+    )
 
     render json: payload
   end
@@ -3612,21 +3626,11 @@ class ProjectsController < ApplicationController
       return
     end
 
-    dataset_stable_by_accession = {}
-    dataset_stable_by_symbol = {}
     begin
-      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
-      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
-      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
-      dataset_size = [stable_values.length, accession_values.length, gene_values.length].min
-      dataset_size.times do |idx|
-        stable_id = stable_values[idx].to_s.strip
-        next if stable_id.blank?
-        accession = accession_values[idx].to_s.strip.downcase
-        symbol = gene_values[idx].to_s.strip.downcase
-        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
-        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
-      end
+      dataset_lookup = cached_dataset_stable_lookup(loom_path)
+      dataset_stable_by_accession = dataset_lookup[:by_accession]
+      dataset_stable_by_symbol = dataset_lookup[:by_symbol]
+      dataset_stable_ids = dataset_lookup[:stable_ids]
     rescue => e
       Rails.logger.error("gene_set_item_genes: failed to extract dataset gene mappings from #{loom_path}: #{e.message}")
       render json: { status: 'error', message: 'Failed to read dataset gene identifiers' }, status: :unprocessable_entity
@@ -3651,9 +3655,6 @@ class ProjectsController < ApplicationController
         return
       end
 
-      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
-      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
-
       genes_found = []
       missing_genes = []
       local_item[:genes].each do |gene|
@@ -3666,7 +3667,7 @@ class ProjectsController < ApplicationController
           gene,
           dataset_stable_by_accession: dataset_stable_by_accession,
           dataset_stable_by_symbol: dataset_stable_by_symbol,
-          dataset_stable_ids: stable_ids
+          dataset_stable_ids: dataset_stable_ids
         )
           genes_found << payload
         else
@@ -3692,9 +3693,6 @@ class ProjectsController < ApplicationController
         return
       end
 
-      stable_ids = Set.new(dataset_stable_by_accession.values.map { |v| v.to_s.strip }.reject(&:blank?))
-      dataset_stable_by_symbol.each_value { |v| stable_ids.add(v.to_s.strip) unless v.to_s.strip.blank? }
-
       genes = []
       missing_genes = []
       manual_item[:genes].each do |gene|
@@ -3704,7 +3702,7 @@ class ProjectsController < ApplicationController
         accession_key = ensembl_value.downcase
         symbol_key = symbol_value.downcase
         selected_stable_id = nil
-        selected_stable_id = stable_value if stable_value.present? && stable_ids.include?(stable_value)
+        selected_stable_id = stable_value if stable_value.present? && dataset_stable_ids.include?(stable_value)
         selected_stable_id ||= dataset_stable_by_accession[accession_key] if accession_key.present?
         selected_stable_id ||= dataset_stable_by_symbol[symbol_key] if symbol_key.present?
 
@@ -3912,6 +3910,7 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/gene_set_item_module_score
   def gene_set_item_module_score
+    started_module_score_execution = false
     item_id = params[:item_id].to_i
     if item_id <= 0
       render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
@@ -3971,6 +3970,12 @@ class ProjectsController < ApplicationController
       end
     end
 
+    request_id = params[:request_id].to_s.strip
+    if request_id.blank?
+      render json: { status: 'error', message: 'Missing module score request identifier' }, status: :unprocessable_entity
+      return
+    end
+
     cmd = [
       'java',
       '-jar',
@@ -3983,7 +3988,58 @@ class ProjectsController < ApplicationController
       '-m', 'seurat'
     ]
 
-    stdout, stderr, status = Open3.capture3(*cmd)
+    stdout = ''
+    stderr = ''
+    status = nil
+    canceled = false
+    run_key = module_score_run_cache_key(request_id)
+    cancel_key = module_score_cancel_cache_key(request_id)
+    Rails.cache.write(cancel_key, false, expires_in: 30.minutes)
+    started_module_score_execution = true
+
+    Open3.popen3(*cmd) do |stdin, stdout_io, stderr_io, wait_thr|
+      stdin.close
+      Rails.cache.write(
+        run_key,
+        {
+          pid: wait_thr.pid,
+          project_id: @project.id,
+          user_id: current_user&.id
+        },
+        expires_in: 30.minutes
+      )
+
+      stdout_reader = Thread.new { stdout_io.read.to_s }
+      stderr_reader = Thread.new { stderr_io.read.to_s }
+
+      while wait_thr.alive?
+        if Rails.cache.read(cancel_key) == true
+          canceled = true
+          terminate_module_score_process(wait_thr.pid)
+          break
+        end
+        sleep 0.1
+      end
+
+      status = wait_thr.value
+      stdout = stdout_reader.value
+      stderr = stderr_reader.value
+    end
+  ensure
+    return unless started_module_score_execution
+    Rails.cache.delete(run_key) if defined?(run_key) && run_key.present?
+    Rails.cache.delete(cancel_key) if defined?(cancel_key) && cancel_key.present?
+
+    if canceled
+      render json: { status: 'canceled', request_id: request_id }
+      return
+    end
+
+    if status.nil?
+      render json: { status: 'error', message: 'ModuleScore execution did not complete' }, status: :unprocessable_entity
+      return
+    end
+
     unless status.success?
       stderr_msg = stderr.to_s.strip
       stderr_msg = stderr_msg[0..500] if stderr_msg.length > 500
@@ -4004,6 +4060,38 @@ class ProjectsController < ApplicationController
     end
 
     render json: { status: 'ok', scores: scores, dataset: dataset_path }
+  end
+
+  # POST /projects/:id/cancel_gene_set_item_module_score
+  def cancel_gene_set_item_module_score
+    request_id = params[:request_id].to_s.strip
+    if request_id.blank?
+      render json: { status: 'error', message: 'Missing module score request identifier' }, status: :unprocessable_entity
+      return
+    end
+
+    run_key = module_score_run_cache_key(request_id)
+    cancel_key = module_score_cancel_cache_key(request_id)
+    run_data = Rails.cache.read(run_key)
+
+    if run_data.is_a?(Hash)
+      if run_data[:project_id].to_i != @project.id
+        render json: { status: 'error', message: 'Invalid module score request scope' }, status: :forbidden
+        return
+      end
+      current_user_id = current_user&.id
+      if current_user_id.present? && run_data[:user_id].present? && run_data[:user_id].to_i != current_user_id.to_i
+        render json: { status: 'error', message: 'Invalid module score request owner' }, status: :forbidden
+        return
+      end
+    end
+
+    Rails.cache.write(cancel_key, true, expires_in: 10.minutes)
+    if run_data.is_a?(Hash) && run_data[:pid].present?
+      terminate_module_score_process(run_data[:pid].to_i)
+    end
+
+    render json: { status: 'ok', request_id: request_id }
   end
 
   # GET /projects/1/sample_identifiers?loom_file=...
@@ -6681,6 +6769,7 @@ class ProjectsController < ApplicationController
     
     # Get attribute layout from std_method
     @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
+    ensure_de_second_metadata_attrs_and_layout!(@step, @h_attrs, @attr_layout)
     
     # If no layout, create a simple default layout
     if @attr_layout.empty? && @h_attrs.any?
@@ -6758,6 +6847,51 @@ class ProjectsController < ApplicationController
     Rails.logger.error("[get_attributes] Error: #{e.class} - #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
     render plain: "<div class='p-4 text-center text-red-600'>Error loading attributes: #{e.message}</div>", status: :internal_server_error
+  end
+
+  def ensure_de_second_metadata_attrs_and_layout!(step, h_attrs, attr_layout)
+    return unless step&.name.to_s == 'de'
+    return unless h_attrs.is_a?(Hash) && attr_layout.is_a?(Array)
+    return unless h_attrs['groups'].is_a?(Hash)
+
+    toggle_attr_name = if h_attrs.key?('group_comp_from_other_metadata')
+                        'group_comp_from_other_metadata'
+                      elsif h_attrs.key?('second_group_from_other_metadata')
+                        'second_group_from_other_metadata'
+                      else
+                        'group_comp_from_other_metadata'
+                      end
+
+    unless h_attrs[toggle_attr_name].is_a?(Hash)
+      h_attrs[toggle_attr_name] = {
+        'label' => 'Use another metadata for compared group',
+        'widget' => 'checkbox',
+        'default' => false
+      }
+    end
+
+    unless h_attrs['groups2'].is_a?(Hash)
+      groups2_attr = Basic.safe_parse_json(h_attrs['groups'].to_json, {})
+      groups2_attr['label'] = 'Compared group metadata'
+      groups2_attr['default'] = nil
+      h_attrs['groups2'] = groups2_attr
+    end
+
+    attr_layout.each do |vertical|
+      next unless vertical.is_a?(Hash) && vertical['horiz_elements'].is_a?(Array)
+      vertical['horiz_elements'].each do |horiz|
+        next unless horiz.is_a?(Hash) && horiz['attr_list'].is_a?(Array)
+        attrs = horiz['attr_list']
+        next unless attrs.include?('groups')
+
+        attrs.delete(toggle_attr_name)
+        attrs.delete('groups2')
+
+        insert_idx = attrs.index('group_comp') || attrs.length
+        attrs.insert(insert_idx, toggle_attr_name)
+        attrs.insert(insert_idx + 1, 'groups2')
+      end
+    end
   end
 
   # POST /projects/:id/upd_pred
@@ -6949,6 +7083,46 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def module_score_run_cache_key(request_id)
+      "module_score_run:#{request_id}"
+    end
+
+    def module_score_cancel_cache_key(request_id)
+      "module_score_cancel:#{request_id}"
+    end
+
+    def terminate_module_score_process(pid)
+      normalized_pid = pid.to_i
+      return if normalized_pid <= 0
+
+      begin
+        Process.kill('TERM', normalized_pid)
+      rescue Errno::ESRCH
+        return
+      rescue StandardError
+        # Keep cancellation best effort.
+      end
+
+      10.times do
+        sleep 0.1
+        begin
+          Process.getpgid(normalized_pid)
+        rescue Errno::ESRCH
+          return
+        rescue StandardError
+          break
+        end
+      end
+
+      begin
+        Process.kill('KILL', normalized_pid)
+      rescue Errno::ESRCH
+        nil
+      rescue StandardError
+        nil
+      end
+    end
+
     def import_validation_json(validation)
       if validation[:skip_name_checks]
         return { skip_name_checks: true }
@@ -7948,29 +8122,55 @@ class ProjectsController < ApplicationController
       payload
     end
 
+    def cached_dataset_stable_lookup(loom_path)
+      mtime = File.mtime(loom_path).to_i
+      cache_key = "projects:dataset_stable_lookup:#{@project.id}:#{loom_path}:#{mtime}"
+      miss = false
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      autocomplete_file = loom_path.dirname + 'autocomplete_genes.json'
+      result = Rails.cache.fetch(cache_key, expires_in: 6.hours) do
+        miss = true
+        parsed = AsapData::DatasetStableLookup.from_autocomplete_json_file(autocomplete_file.to_s)
+        if parsed
+          parsed.merge(source: :autocomplete_json)
+        else
+          stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+          accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+          gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+          size = [stable_values.length, accession_values.length, gene_values.length].min
+          by_accession = {}
+          by_symbol = {}
+          stable_ids = Set.new
+
+          size.times do |idx|
+            stable_id = stable_values[idx].to_s.strip
+            next if stable_id.blank?
+            stable_ids.add(stable_id)
+            accession = accession_values[idx].to_s.strip.downcase
+            symbol = gene_values[idx].to_s.strip.downcase
+            by_accession[accession] ||= stable_id if accession.present?
+            by_symbol[symbol] ||= stable_id if symbol.present?
+          end
+
+          { by_accession: by_accession, by_symbol: by_symbol, stable_ids: stable_ids, source: :extract_metadata }
+        end
+      end
+      elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+      Rails.logger.info(
+        "[perf][dataset_stable_lookup] project_id=#{@project.id} loom=#{File.basename(loom_path.to_s)} " \
+        "miss=#{miss} ms=#{elapsed_ms} source=#{result[:source]} rows=#{result[:stable_ids].size} " \
+        "accession_keys=#{result[:by_accession].size} symbol_keys=#{result[:by_symbol].size}"
+      )
+      result
+    end
+
     def build_dataset_stable_lookup_for_export(loom_file)
       user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
       project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
       loom_path = project_dir + loom_file
       raise ArgumentError, 'Loom file not found' unless File.exist?(loom_path)
-
-      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
-      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
-      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
-      size = [stable_values.length, accession_values.length, gene_values.length].min
-
-      dataset_stable_by_accession = {}
-      dataset_stable_by_symbol = {}
-      size.times do |idx|
-        stable_id = stable_values[idx].to_s.strip
-        next if stable_id.blank?
-        accession = accession_values[idx].to_s.strip.downcase
-        symbol = gene_values[idx].to_s.strip.downcase
-        dataset_stable_by_accession[accession] ||= stable_id if accession.present?
-        dataset_stable_by_symbol[symbol] ||= stable_id if symbol.present?
-      end
-
-      [dataset_stable_by_accession, dataset_stable_by_symbol]
+      dataset_lookup = cached_dataset_stable_lookup(loom_path)
+      [dataset_lookup[:by_accession], dataset_lookup[:by_symbol]]
     end
 
     def resolve_dataset_stable_id_for_export(symbol:, ensembl_id:, existing_stable_id:, dataset_stable_by_accession:, dataset_stable_by_symbol:)

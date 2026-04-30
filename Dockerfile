@@ -106,9 +106,8 @@ RUN gem install rails
 # Add custom R-packages
 WORKDIR /app
 
-## comment these 3 lines for the first build
-COPY src/Gemfile ./
-# COPY src/Gemfile.lock ./
+# Copy lockfile so bundle install matches versions used on the host and under ./src:/app.
+COPY src/Gemfile src/Gemfile.lock ./
 RUN bundle install
 
 # Copy package.json and yarn.lock and install node dependencies - comment first line if first build

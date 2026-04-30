@@ -1026,6 +1026,9 @@ export class CustomPlotManager {
   }
   
   handleCanvasMouseMove(event) {
+    if (this.controller.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     if (!this.currentCanvas) {
       return
     }
@@ -1098,6 +1101,9 @@ export class CustomPlotManager {
   }
   
   handleCanvasClick(event) {
+    if (this.controller.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     if (!this.currentCanvas || !this.currentPlotPoints || this.currentPlotPoints.length === 0) {
       return
     }
@@ -1167,6 +1173,9 @@ export class CustomPlotManager {
   }
 
   handleCanvasMouseDown(event) {
+    if (this.controller.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      return
+    }
     if (!this.currentCanvas) return
     if (this.controller.interactionMode !== 'lasso') return
     if (event.button !== 0) return
@@ -1181,6 +1190,10 @@ export class CustomPlotManager {
   }
 
   handleCanvasMouseUp(event) {
+    const overOntop = this.controller.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)
+    if (overOntop && !this.isDrawingLasso) {
+      return
+    }
     if (!this.isDrawingLasso) return
     if (this.controller.interactionMode !== 'lasso') {
       this.finishCustomLassoSelection(false)

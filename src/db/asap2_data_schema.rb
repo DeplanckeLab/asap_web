@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 0) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -74,6 +74,11 @@ ActiveRecord::Schema[8.1].define(version: 0) do
     t.text "identifier"
     t.text "name"
     t.datetime "updated_at", precision: nil
+    t.index ["gene_set_id", "identifier"], name: "gene_set_id_identifier_gene_set_items"
+    t.index ["gene_set_id", "name"], name: "gene_set_items_gene_set_id_name"
+    t.index ["gene_set_id"], name: "gene_set_id_gene_set_items"
+    t.index "gene_set_id, lower(coalesce(name, ''::text))", name: "idx_gene_set_items_gene_set_lower_name"
+    t.index "lower(coalesce(name, ''::text)) gin_trgm_ops", name: "idx_gene_set_items_name_gin_trgm", using: :gin
   end
 
   create_table "gene_sets", id: false, force: :cascade do |t|

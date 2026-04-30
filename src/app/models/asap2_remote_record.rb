@@ -9,13 +9,13 @@ class Asap2RemoteRecord < ApplicationRecord
     def with_remote(version = default_remote_db, role: :writing)
       shard = normalized_shard(version)
       raise ArgumentError, "Unknown remote database #{version}" unless shard
-      ActiveRecord::Base.connected_to(role: role, shard: shard) { yield }
+      Asap2RemoteRecord.connected_to(role: role, shard: shard) { yield }
     end
 
     def connection_for(version = default_remote_db)
       shard = normalized_shard(version)
       raise ArgumentError, "Unknown remote database #{version}" unless shard
-      ActiveRecord::Base.connected_to(role: :writing, shard: shard) { connection }
+      Asap2RemoteRecord.connected_to(role: :writing, shard: shard) { connection }
     end
 
     private

@@ -10,9 +10,10 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_12_173146) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "pg_trgm"
 
   create_table "bla", id: false, force: :cascade do |t|
     t.integer "a"
@@ -45,8 +46,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_12_173146) do
     t.index ["original_value"], name: "index_compliance_term_replacements_on_original_value"
   end
 
-  create_table "db_sets", id: false, force: :cascade do |t|
-    t.serial "id", null: false
+  create_table "db_sets", id: :serial, force: :cascade do |t|
     t.text "label"
     t.text "tag"
     t.integer "tool_id"
@@ -65,24 +65,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_12_173146) do
     t.text "value"
   end
 
-  create_table "gene_set_items", id: false, force: :cascade do |t|
+  create_table "gene_set_items", id: :serial, force: :cascade do |t|
     t.integer "asap_data_id"
     t.text "content"
     t.datetime "created_at", precision: nil
     t.integer "gene_set_id"
-    t.serial "id", null: false
     t.text "identifier"
     t.text "name"
     t.datetime "updated_at", precision: nil
+    t.index "gene_set_id, lower(COALESCE(name, ''::text))", name: "idx_gene_set_items_gene_set_lower_name"
+    t.index "lower(COALESCE(name, ''::text)) gin_trgm_ops", name: "idx_gene_set_items_name_gin_trgm", using: :gin
     t.index ["gene_set_id", "identifier"], name: "gene_set_id_identifier_gene_set_items"
     t.index ["gene_set_id", "name"], name: "gene_set_items_gene_set_id_name"
     t.index ["gene_set_id"], name: "gene_set_id_gene_set_items"
   end
 
-  create_table "gene_sets", id: false, force: :cascade do |t|
+  create_table "gene_sets", id: :serial, force: :cascade do |t|
     t.integer "asap_data_id"
     t.datetime "created_at", precision: nil
-    t.serial "id", null: false
     t.text "label"
     t.integer "latest_ensembl_release"
     t.integer "nb_items", default: 3

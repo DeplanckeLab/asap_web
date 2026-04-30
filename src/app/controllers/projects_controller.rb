@@ -442,46 +442,8 @@ class ProjectsController < ApplicationController
              .order(:name)
       )
       
-      # Get unique filepaths with their minimum step rank and run id for ordering
-      # We use the minimum to get the earliest step/run that created each file
-      filepath_info = {}
-      all_annots.each do |annot|
-        next unless annot.filepath.present?
-        
-        filepath = annot.filepath
-        step_rank = annot.step&.rank
-        run_id = annot.run_id
-        
-        if filepath_info[filepath]
-          # Update with minimum step rank and run id
-          # Priority: step_rank first, then run_id
-          existing = filepath_info[filepath]
-          existing_step_rank = existing[:step_rank] || 9999
-          existing_run_id = existing[:run_id] || 999999
-          
-          current_step_rank = step_rank || 9999
-          current_run_id = run_id || 999999
-          
-          # Compare: step_rank first, then run_id if step_rank is equal
-          should_update = false
-          if current_step_rank < existing_step_rank
-            should_update = true
-          elsif current_step_rank == existing_step_rank && current_run_id < existing_run_id
-            should_update = true
-          end
-          
-          if should_update
-            existing[:step_rank] = step_rank
-            existing[:run_id] = run_id
-          end
-        else
-          # Initialize with this annotation's step rank and run id
-          filepath_info[filepath] = {
-            step_rank: step_rank,
-            run_id: run_id
-          }
-        end
-      end
+      # Associate each loom file to the run that produced its /matrix annotation.
+      filepath_info = build_filepath_info_from_matrix_annots(all_annots)
       
       # Sort loom files by step rank (ascending) then by run id (ascending)
       # Use high numbers for nil values to push them to the end
@@ -2298,41 +2260,7 @@ class ProjectsController < ApplicationController
            .order(:name)
     ).to_a
     
-    # Get unique filepaths with their minimum step rank and run id for ordering
-    filepath_info = {}
-    all_annots.each do |annot|
-      next unless annot.filepath.present?
-      
-      filepath = annot.filepath
-      step_rank = annot.step&.rank
-      run_id = annot.run_id
-      
-      if filepath_info[filepath]
-        existing = filepath_info[filepath]
-        existing_step_rank = existing[:step_rank] || 9999
-        existing_run_id = existing[:run_id] || 999999
-        
-        current_step_rank = step_rank || 9999
-        current_run_id = run_id || 999999
-        
-        should_update = false
-        if current_step_rank < existing_step_rank
-          should_update = true
-        elsif current_step_rank == existing_step_rank && current_run_id < existing_run_id
-          should_update = true
-        end
-        
-        if should_update
-          existing[:step_rank] = step_rank
-          existing[:run_id] = run_id
-        end
-      else
-        filepath_info[filepath] = {
-          step_rank: step_rank,
-          run_id: run_id
-        }
-      end
-    end
+    filepath_info = build_filepath_info_from_matrix_annots(all_annots)
     
     # Get selected loom file from params
     @selected_loom_file = params[:loom_file].presence
@@ -8588,32 +8516,7 @@ class ProjectsController < ApplicationController
                         .includes(:step, run: [:std_method])
                         .order(:name)
 
-      filepath_info = {}
-      all_annots.each do |annot|
-        next unless annot.filepath.present?
-
-        filepath = annot.filepath
-        step_rank = annot.step&.rank
-        run_id = annot.run_id
-
-        if filepath_info[filepath]
-          existing = filepath_info[filepath]
-          existing_step_rank = existing[:step_rank] || 9999
-          existing_run_id = existing[:run_id] || 999999
-          current_step_rank = step_rank || 9999
-          current_run_id = run_id || 999999
-
-          should_update = false
-          should_update = true if current_step_rank < existing_step_rank
-          should_update = true if current_step_rank == existing_step_rank && current_run_id < existing_run_id
-          if should_update
-            existing[:step_rank] = step_rank
-            existing[:run_id] = run_id
-          end
-        else
-          filepath_info[filepath] = { step_rank: step_rank, run_id: run_id }
-        end
-      end
+      filepath_info = build_filepath_info_from_matrix_annots(all_annots)
 
       @available_loom_files = filepath_info.keys.sort_by do |filepath|
         info = filepath_info[filepath]
@@ -8634,32 +8537,7 @@ class ProjectsController < ApplicationController
                         .includes(:step, run: [:std_method])
                         .order(:name)
 
-      filepath_info = {}
-      all_annots.each do |annot|
-        next unless annot.filepath.present?
-
-        filepath = annot.filepath
-        step_rank = annot.step&.rank
-        run_id = annot.run_id
-
-        if filepath_info[filepath]
-          existing = filepath_info[filepath]
-          existing_step_rank = existing[:step_rank] || 9999
-          existing_run_id = existing[:run_id] || 999999
-          current_step_rank = step_rank || 9999
-          current_run_id = run_id || 999999
-
-          should_update = false
-          should_update = true if current_step_rank < existing_step_rank
-          should_update = true if current_step_rank == existing_step_rank && current_run_id < existing_run_id
-          if should_update
-            existing[:step_rank] = step_rank
-            existing[:run_id] = run_id
-          end
-        else
-          filepath_info[filepath] = { step_rank: step_rank, run_id: run_id }
-        end
-      end
+      filepath_info = build_filepath_info_from_matrix_annots(all_annots)
 
       @available_loom_files = filepath_info.keys.sort_by do |filepath|
         info = filepath_info[filepath]
@@ -8699,6 +8577,41 @@ class ProjectsController < ApplicationController
       end
 
       @selected_data_type = params[:data_type].presence || 'matrices'
+    end
+
+    # Build filepath metadata from /matrix annotations only, so each loom file
+    # points to the run that produced its expression matrix.
+    def build_filepath_info_from_matrix_annots(all_annots)
+      filepath_info = {}
+
+      all_annots.each do |annot|
+        next unless annot.filepath.present?
+        next unless annot.name == '/matrix'
+
+        filepath = annot.filepath
+        step_rank = annot.step&.rank
+        run_id = annot.run_id
+
+        if filepath_info[filepath]
+          existing = filepath_info[filepath]
+          existing_step_rank = existing[:step_rank] || 9999
+          existing_run_id = existing[:run_id] || 999999
+          current_step_rank = step_rank || 9999
+          current_run_id = run_id || 999999
+
+          should_update = false
+          should_update = true if current_step_rank < existing_step_rank
+          should_update = true if current_step_rank == existing_step_rank && current_run_id < existing_run_id
+          if should_update
+            existing[:step_rank] = step_rank
+            existing[:run_id] = run_id
+          end
+        else
+          filepath_info[filepath] = { step_rank: step_rank, run_id: run_id }
+        end
+      end
+
+      filepath_info
     end
 
     def load_settings_context

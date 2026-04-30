@@ -1999,7 +1999,7 @@ export default class extends Controller {
       const commentCount = Number(checkpoint.comments_count || 0)
       const checkpointId = this.escapeHtml(checkpoint.id)
       return `
-        <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px 72px 72px 72px;align-items:center;padding:10px 12px;border-bottom:1px solid #e5e7eb;column-gap:8px;">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
           <div style="min-width:0;">
             <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
             <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
@@ -2007,31 +2007,45 @@ export default class extends Controller {
           <div style="display:flex;align-items:center;justify-content:center;">
             <input type="checkbox"
                    ${checkpoint.is_landing_page === true ? 'checked' : ''}
+                   onclick="event.stopPropagation()"
                    onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
                    style="width:14px;height:14px;cursor:pointer;" />
           </div>
-          <div style="display:flex;align-items:center;justify-content:center;">
+          <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
             <button type="button"
                     data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this)"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;"
-                    title="Copy direct link to clipboard">
-              Link
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, false)"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link without comments">
+              Copy link
             </button>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;">
             <button type="button"
                     data-checkpoint-id="${checkpointId}"
                     onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;">
-              Load
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
+            </button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, true)"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link and open comments">
+              Copy link
+            </button>
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointWithCommentsById('${checkpointId}')"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
             </button>
           </div>
           <div style="display:flex;align-items:center;justify-content:center;">
             <button type="button"
                     data-checkpoint-id="${checkpointId}"
                     onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
-                    style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;">
+                    style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
               Delete
             </button>
           </div>
@@ -2040,11 +2054,20 @@ export default class extends Controller {
     }).join('')
 
     listContainer.innerHTML = `
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px 72px 72px 72px;align-items:center;padding:8px 12px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:8px;position:sticky;top:0;z-index:1;">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
         <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Use As Landing Page</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Link</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Load</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">Use as</span>
+          <span style="display:block;">landing page</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">Without</span>
+          <span style="display:block;">comments</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">With</span>
+          <span style="display:block;">comments</span>
+        </div>
         <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
       </div>
       ${rowsHtml}
@@ -2119,8 +2142,12 @@ export default class extends Controller {
 
     const params = new URLSearchParams(window.location.search)
     const checkpointIdFromUrl = params.get('checkpoint_id')
+    const shouldOpenCommentsFromUrl = ['1', 'true', 'yes'].includes(String(params.get('open_checkpoint_comments') || '').toLowerCase())
     if (checkpointIdFromUrl) {
       await this.loadCheckpointById(checkpointIdFromUrl)
+      if (shouldOpenCommentsFromUrl) {
+        await this.openCheckpointComments()
+      }
       this.currentCheckpointReadyForOverwrite = true
       return
     }
@@ -2448,12 +2475,17 @@ export default class extends Controller {
     }
   }
 
-  copyCheckpointDirectLink(checkpointId, button = null) {
+  copyCheckpointDirectLink(checkpointId, button = null, withComments = false) {
     if (!checkpointId) return
 
     const url = new URL(window.location.href)
     url.searchParams.set('view', 'visualization')
     url.searchParams.set('checkpoint_id', String(checkpointId))
+    if (withComments) {
+      url.searchParams.set('open_checkpoint_comments', '1')
+    } else {
+      url.searchParams.delete('open_checkpoint_comments')
+    }
     const urlText = url.toString()
 
     navigator.clipboard.writeText(urlText).then(() => {
@@ -2544,6 +2576,12 @@ export default class extends Controller {
 
     const checkpointId = event.currentTarget?.dataset?.checkpointId
     await this.loadCheckpointById(checkpointId)
+  }
+
+  async loadCheckpointWithCommentsById(checkpointId) {
+    if (!checkpointId) return
+    await this.loadCheckpointById(checkpointId)
+    await this.openCheckpointComments()
   }
 
   async loadCheckpointById(checkpointId) {
@@ -4673,6 +4711,7 @@ export default class extends Controller {
       if (isInMemory) {
         // console.log(`🔍 [STATUS] Metadata ${metadataId} found in memory - setting to green`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        this.uiManager.showCheckboxesForMetadata(metadataId)
         return
       }
 
@@ -4684,6 +4723,7 @@ export default class extends Controller {
       if (isInDatabase) {
         // console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+        this.uiManager.showCheckboxesForMetadata(metadataId)
         return
       }
 

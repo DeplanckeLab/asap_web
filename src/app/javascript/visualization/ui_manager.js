@@ -315,10 +315,13 @@ export class UIManager {
     // console.log(`🔍 [UI] showCheckboxesForMetadata called for ${metadataId}`)
     
     const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
+    const metadataButton = document.querySelector(`button[data-metadata-id="${metadataId}"][data-metadata-type]`)
+    const declaredMetadataType = metadataButton?.dataset?.metadataType
     // console.log(`🔍 [UI] getMetadataVectorById result for ${metadataId}:`, metadataVector ? 'found' : 'not found')
     
-    const isCategorical = metadataVector?.data_type === 'DISCRETE'
-    const isContinuous = metadataVector?.data_type === 'NUMERIC'
+    const resolvedMetadataType = metadataVector?.data_type || declaredMetadataType
+    const isCategorical = resolvedMetadataType === 'DISCRETE'
+    const isContinuous = resolvedMetadataType === 'NUMERIC'
     
     if (isCategorical) {
       // For categorical metadata, show the new UI elements

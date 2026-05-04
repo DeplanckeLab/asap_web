@@ -139,10 +139,17 @@
     nber_down = 0
 
     File.open(file, 'r') do |f|
-      header = f.gets
+      first = f.gets
       lines = []
-      while (l = f.gets)
-        lines << l.chomp.split("\t")
+      if first && Basic.de_output_txt_first_line_is_column_header?(first)
+        while (l = f.gets)
+          lines << l.chomp.split("\t")
+        end
+      else
+        lines << first.chomp.split("\t") if first
+        while (l = f.gets)
+          lines << l.chomp.split("\t")
+        end
       end
 
       lines.reverse.each do |t|

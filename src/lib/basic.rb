@@ -509,6 +509,12 @@ module Basic
     # When category_annot_param_key is set but that attr is empty, the default attrs["groups"] annot is used.
     #   { "opt": "-meta", "param_key": "metadata", "use_annot_id": true }
     #
+    # de.v8.py db file (written in the run output_dir before the container starts). In merged command_json:
+    #   "db_json": { "filename": "db.json", "annots": ["metadata", "groups_annot_id", "groups2_annot_id"] }
+    # "annots" lists h_var param keys whose values are annot id(s) (comma-separated allowed). Optional "filename"
+    # defaults to db.json. set_run writes JSON {"annots":[{<Annot as_json>}, ...]} to that file and persists on
+    # the saved command_json, e.g. "db_json": { "filename", "annots", "annot_ids" } for get_commands.
+    #
     # Legacy top-level:
     #   "group1_use_category_index": true, "group2_use_category_index": true
     #   "group1": { "use_category_index": true }, "group2": { "use_category_index": true }
@@ -585,6 +591,382 @@ module Basic
         end
       end
       keys.uniq
+    end
+
+    # ExtractMetadata JSON for 2D gene metadata may list values as either:
+    # - column-major: values[col][gene_idx] (outer size = nber_cols), or
+    # - row-major: values[gene_idx][col] (outer size = nber_rows).
+    # run_de_filter and downstream filter_de assume column-major. This normalizes to column-major arrays.
+    def de_attrs_values_to_column_major(vals, json_nber_rows, json_nber_cols, annot)
+      return [vals, 'skip:not_nested_array'] unless vals.is_a?(Array) && vals[0].is_a?(Array)
+
+      outer = vals.size
+      inner = vals.map { |r| r.is_a?(Array) ? r.size : 0 }.max
+      nr = annot.nber_rows.to_i
+      nc = annot.nber_cols.to_i
+      jr = json_nber_rows.to_i
+      jc = json_nber_cols.to_i
+      nr = jr if nr <= 0 && jr.positive?
+      nc = jc if nc <= 0 && jc.positive?
+
+      if nr.positive? && nc.positive? && outer == nc && inner >= nr
+        return [vals, "column_major json_nr=#{jr} json_nc=#{jc} annot_nr=#{annot.nber_rows} annot_nc=#{annot.nber_cols} outer=#{outer} inner=#{inner}"]
+      end
+
+      if nr.positive? && nc.positive? && outer == nr && inner >= nc
+        transposed = (0...nc).map do |ci|
+          (0...outer).map do |ri|
+            row = vals[ri]
+            row.is_a?(Array) && ci < row.size ? row[ci] : nil
+          end
+        end
+        return [transposed, "transposed_row_major json_nr=#{jr} json_nc=#{jc} annot_nr=#{annot.nber_rows} annot_nc=#{annot.nber_cols} outer=#{outer} inner=#{inner}"]
+      end
+
+      headers = safe_parse_json(annot.headers_json, [])
+      hlen = headers.is_a?(Array) ? headers.size : 0
+      if hlen >= 5 && (outer == hlen || outer == hlen + 1) && inner > outer * 5
+        return [vals, "column_major_via_headers hlen=#{hlen} outer=#{outer} inner=#{inner}"]
+      end
+      if hlen >= 5 && (inner == hlen || inner == hlen + 1) && outer > inner * 5
+        transposed = (0...inner).map do |ci|
+          (0...outer).map do |ri|
+            row = vals[ri]
+            row.is_a?(Array) && ci < row.size ? row[ci] : nil
+          end
+        end
+        return [transposed, "transposed_via_headers hlen=#{hlen} outer=#{outer} inner=#{inner}"]
+      end
+
+      if inner.positive? && inner < 256 && outer > inner * 50
+        transposed = (0...inner).map do |ci|
+          (0...outer).map do |ri|
+            row = vals[ri]
+            row.is_a?(Array) && ci < row.size ? row[ci] : nil
+          end
+        end
+        return [transposed, "transposed_heuristic outer=#{outer} inner=#{inner}"]
+      end
+
+      [vals, "unknown_assume_column_major outer=#{outer} inner=#{inner} nr=#{nr} nc=#{nc} jr=#{jr} jc=#{jc}"]
+    end
+
+    # DE /attrs matrices: legacy runs expose five numeric columns (logFC, P-value, FDR, Avg group1, Avg group2)
+    # as the first columns in ExtractMetadata JSON "values". v8+ may prepend string columns; column titles
+    # are stored on Annot#headers_json (same order as output.json "headers", before optional leading HDF5-only
+    # fields such as Gene). Returns 0-based indices into values[col][gene_idx] for those five metrics in order,
+    # plus sort_idx (logFC source column) for ranking rows. Falls back to [0,1,2,3,4] when headers are absent
+    # or ambiguous.
+    def de_normalize_de_header_label(s)
+      s.to_s.strip.downcase.gsub(/\s+/, ' ')
+    end
+
+    def de_metric_indices_from_header_names(headers)
+      return nil unless headers.is_a?(Array) && headers.any?
+
+      nh = headers.map { |h| de_normalize_de_header_label(h) }
+      logfc = nh.index { |x| %w[logfc log2fc].include?(x) || x.match?(/\Alog2?fc\z/) || (x.include?('fold') && x.include?('change')) }
+      pval = nh.index { |x| %w[p-value p value pvalue p_val p.val].include?(x) || x.match?(/\Ap[\._]?value\z/) }
+      fdr = nh.index { |x| x == 'fdr' || x.match?(/\Aadj\.?\s*p/) || x.start_with?('padj') }
+      avg1 = nh.index { |x| x == 'avg group1' || x == 'avg_group1' || (x.include?('avg') && x.include?('group') && x.match?(/1/)) }
+      avg2 = nh.index { |x| x == 'avg group2' || x == 'avg_group2' || (x.include?('avg') && x.include?('group') && x.match?(/2/)) }
+      return nil if logfc.nil? || pval.nil? || fdr.nil? || avg1.nil? || avg2.nil?
+
+      { logfc: logfc, p_value: pval, fdr: fdr, avg1: avg1, avg2: avg2 }
+    end
+
+    def de_tail_headers_are_legacy_metric_pack?(five_headers)
+      m = de_metric_indices_from_header_names(five_headers)
+      m && m[:logfc].zero? && m[:p_value] == 1 && m[:fdr] == 2 && m[:avg1] == 3 && m[:avg2] == 4
+    end
+
+    def de_metric_source_indices_for_extract_metadata(annot, n_value_cols)
+      n = n_value_cols.to_i
+      return { indices: [0, 1, 2, 3, 4], sort_idx: 0 } if n < 5
+
+      headers = safe_parse_json(annot.headers_json, [])
+      headers = [] unless headers.is_a?(Array)
+
+      offset = 0
+      if headers.any? && n == headers.size + 1
+        offset = 1
+      end
+
+      if headers.size >= 5
+        tail = headers.last(5)
+        if de_tail_headers_are_legacy_metric_pack?(tail)
+          start_h = headers.size - 5
+          idxs = (0...5).map { |k| start_h + k + offset }
+          return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
+        end
+      end
+
+      by_name = de_metric_indices_from_header_names(headers)
+      if by_name
+        idxs = %i[logfc p_value fdr avg1 avg2].map { |k| by_name[k] + offset }
+        return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
+      end
+
+      { indices: [0, 1, 2, 3, 4], sort_idx: 0 }
+    end
+
+    def de_format_output_txt_metric_value(val, metric_slot)
+      if val.nil? || val.to_s.strip.empty? || val.to_s.strip.casecmp('na').zero?
+        return 'NA'
+      end
+
+      if [1, 2].include?(metric_slot) || !val.is_a?(Float)
+        val
+      elsif val.abs > 0.001
+        format('%.3f', val)
+      else
+        format('%.e', val)
+      end
+    end
+
+    def de_output_txt_first_line_is_column_header?(line)
+      t = line.to_s.strip.split("\t")
+      return false if t.empty?
+
+      return false if Integer(t[0], exception: false)
+
+      t[0].strip.casecmp('gene index').zero?
+    end
+
+    # v8 all-against-complementary DE: HDF paths like /attrs/de_<run_id>_<k> (k = contrast index).
+    # Returns [run_id_from_name, contrast_index] so paths work even when Annot.run_id points at another pipeline row.
+    def de_attrs_de_output_matrix_match(name)
+      s = name.to_s.strip
+      return nil if s.blank?
+
+      s = s.sub(/\Aattrs\//, '/attrs/')
+      m = s.match(%r{\A/attrs/de_(\d+)_(\d+)\z}i)
+      return nil unless m
+
+      [m[1].to_i, m[2].to_i]
+    end
+
+    def de_attrs_de_output_annot?(annot)
+      annot && de_attrs_de_output_matrix_match(annot.name)
+    end
+
+    # Loom filepath (relative to project dir) for this run, from attrs input_matrix when present.
+    def de_run_loom_relative_filepath(run)
+      return nil unless run
+
+      h = safe_parse_json(run.attrs_json, {})
+      im = h['input_matrix'] || h[:input_matrix]
+      if im.is_a?(Hash)
+        aid = (im['annot_id'] || im[:annot_id]).to_i
+        if aid.positive?
+          a = Annot.find_by(id: aid)
+          return a.filepath if a&.filepath.present?
+        end
+      end
+      nil
+    end
+
+    # All DE contrast matrix annots for this run: prefer Annot.run_id match, then name /attrs/de_<run.id>_k on same loom.
+    def de_attrs_de_output_annots_for_run(run, by_run)
+      rid = run.id
+      from_run = Array(by_run[rid])
+      matched = from_run.select do |a|
+        m = de_attrs_de_output_matrix_match(a.name)
+        m && m[0] == rid
+      end
+
+      if matched.size <= 1
+        fp = de_run_loom_relative_filepath(run)
+        rel_scope = Annot.where(project_id: run.project_id)
+        extra = if fp.present?
+                  rel_scope.where(filepath: fp).to_a.select do |a|
+                    m = de_attrs_de_output_matrix_match(a.name)
+                    m && m[0] == rid
+                  end
+                elsif ApplicationRecord.connection.adapter_name.match?(/postgresql/i)
+                  pat = "^(/attrs/|attrs/)de_#{rid.to_i}_[0-9]+$"
+                  rel_scope.where('name ~* ?', pat).to_a.select do |a|
+                    m = de_attrs_de_output_matrix_match(a.name)
+                    m && m[0] == rid
+                  end
+                else
+                  rel_scope.to_a.select do |a|
+                    m = de_attrs_de_output_matrix_match(a.name)
+                    m && m[0] == rid
+                  end
+                end
+        matched = (matched + extra).uniq(&:id)
+      end
+
+      matched.sort_by do |a|
+        m = de_attrs_de_output_matrix_match(a.name)
+        m ? m[1] : 0
+      end
+    end
+
+    # One TSV per v8 contrast: de/<run_id>/annot_<annot_id>/output.txt (tab-separated; separate file per contrast).
+    # Legacy single-file DE: de/<run_id>/output.txt
+    def de_annot_output_txt_path(project_dir, annot, run_id: nil)
+      base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
+      m_attrs = annot && de_attrs_de_output_matrix_match(annot.name)
+      rid = m_attrs ? m_attrs[0] : (annot&.run_id || run_id)
+      raise ArgumentError, 'de_annot_output_txt_path needs annot or run_id' if rid.blank?
+
+      rid = rid.to_i
+      if m_attrs
+        ((base + 'de') + rid.to_s) + "annot_#{annot.id}" + 'output.txt'
+      else
+        ((base + 'de') + rid.to_s) + 'output.txt'
+      end
+    end
+
+    # Directory containing output.txt and filtered.{up,down}.json for DE gene lists.
+    def de_filter_gene_list_dir(project_dir, run_id, de_annot_id)
+      base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
+      rid = run_id.to_i
+      annot = nil
+      if de_annot_id.to_i.positive?
+        cand = Annot.find_by(id: de_annot_id.to_i)
+        if cand && de_attrs_de_output_matrix_match(cand.name)
+          m = de_attrs_de_output_matrix_match(cand.name)
+          annot = cand if m && m[0] == rid
+        elsif cand && cand.run_id.to_i == rid
+          annot = cand
+        end
+      end
+      if annot && de_attrs_de_output_matrix_match(annot.name)
+        Pathname(de_annot_output_txt_path(base, annot)).dirname
+      else
+        (base + 'de') + rid.to_s
+      end
+    end
+
+    # Slug used inside h_stats / JSON keys (run_id + contrast index + category label).
+    def de_stats_key_category_slug(reference_group, contrast_index)
+      k = contrast_index.to_i
+      raw = reference_group.to_s.strip
+      label = raw.downcase.gsub(/[^a-z0-9]+/, '_').squeeze('_').gsub(/\A_+|_+\z/, '')[0, 56]
+      label = 'group' if label.blank?
+
+      "#{k}_#{label}"
+    end
+
+    # Key for filtered DE stats (must stay stable for a given contrast). Legacy: run id only.
+    def de_de_filter_stats_key(run, annot:, reference_group:, contrast_index:)
+      return run.id.to_s if annot.nil?
+
+      rid = (de_attrs_de_output_matrix_match(annot.name)&.first || run.id).to_i
+      k = contrast_index.nil? ? (de_attrs_de_output_matrix_match(annot.name)&.last || 0) : contrast_index.to_i
+      slug = de_stats_key_category_slug(reference_group, k)
+
+      "#{rid}__#{slug}"
+    end
+
+    # Same rules as lib/filter_de.cpp: tab TSV columns 5 = logFC, 7 = FDR; writes filtered.{up,down}.json beside output.txt.
+    def de_filter_write_filtered_json!(output_txt_path, fdr_cutoff, fc_cutoff)
+      path = output_txt_path.to_s
+      return { 'up' => 0, 'down' => 0 } unless File.exist?(path) && File.size(path).positive?
+
+      fdr_c = fdr_cutoff.to_f
+      fc_val = fc_cutoff.to_f
+      fc_val = 1.0 if fc_val <= 0
+      log_fc_c = Math.log2(fc_val)
+      vec_up = []
+      vec_down = []
+      i = 0
+      File.foreach(path, mode: 'rt', encoding: 'UTF-8') do |line|
+        t = line.chomp.split("\t")
+        if t.size > 7 && t[7] != 'NA' && t[5] != 'NA'
+          fdr = Float(t[7]) rescue nil
+          logfc = Float(t[5]) rescue nil
+          if fdr && logfc && fdr <= fdr_c
+            if logfc >= 0 && logfc >= log_fc_c
+              vec_up << i
+            elsif logfc <= 0 && logfc <= -log_fc_c
+              vec_down << i
+            end
+          end
+        end
+        i += 1
+      end
+      dir = Pathname.new(File.dirname(path))
+      FileUtils.mkdir_p(dir)
+      File.write((dir + 'filtered.up.json').to_s, "[#{vec_up.join(',')}]")
+      File.write((dir + 'filtered.down.json').to_s, "[#{vec_down.join(',')}]")
+      { 'up' => vec_up.size, 'down' => vec_down.size }
+    end
+
+    # First discrete groups annot id from run attrs (v8 DE: list_cat_json order matches /attrs/de_<run>_k).
+    def de_groups_discrete_annot_id_for_de_table(run)
+      return nil unless run
+
+      h = safe_parse_json(run.attrs_json, {})
+      g = h['groups'] || h[:groups]
+      if g.is_a?(Array) && g[0].is_a?(Hash)
+        aid = (g[0]['annot_id'] || g[0][:annot_id]).to_i
+        return aid if aid.positive?
+      end
+      if h['groups_annot_id'].present?
+        found = h['groups_annot_id'].to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i).find { |id| id.positive? }
+        return found if found
+      end
+      gid = (h['groups_id'] || h[:groups_id]).to_i
+      return gid if gid.positive?
+
+      g2 = h['groups2'] || h[:groups2]
+      if g2.is_a?(Array) && g2[0].is_a?(Hash)
+        aid2 = (g2[0]['annot_id'] || g2[0][:annot_id]).to_i
+        return aid2 if aid2.positive?
+      end
+
+      nil
+    end
+
+    def de_reference_group_label_for_contrast_index(groups_annot, contrast_index)
+      return nil unless groups_annot
+
+      list_cats = de_group_category_labels_from_list_cat_json(safe_parse_json(groups_annot.list_cat_json, []))
+      return nil if list_cats.blank?
+
+      idx = contrast_index.to_i
+      return nil if idx.negative? || idx >= list_cats.size
+
+      list_cats[idx].nil? ? nil : list_cats[idx].to_s.strip.presence
+    end
+
+    def de_table_rows_for_runs(completed_runs)
+      return [] if completed_runs.blank?
+
+      run_ids = completed_runs.map(&:id)
+      by_run = Annot.where(run_id: run_ids).group_by(&:run_id)
+
+      group_annot_ids = completed_runs.map { |r| de_groups_discrete_annot_id_for_de_table(r) }.compact.uniq
+      groups_annots_by_id = group_annot_ids.any? ? Annot.where(id: group_annot_ids).index_by(&:id) : {}
+
+      rows = []
+      completed_runs.each do |run|
+        gid = de_groups_discrete_annot_id_for_de_table(run)
+        groups_annot = gid ? groups_annots_by_id[gid] : nil
+
+        attrs_des = de_attrs_de_output_annots_for_run(run, by_run)
+        if attrs_des.any?
+          attrs_des.each do |a|
+            m = de_attrs_de_output_matrix_match(a.name)
+            k = m ? m[1] : 0
+            ref_label = de_reference_group_label_for_contrast_index(groups_annot, k)
+            rows << {
+              run: run,
+              annot: a,
+              contrast_index: k,
+              reference_group: ref_label,
+              stats_key: de_de_filter_stats_key(run, annot: a, reference_group: ref_label, contrast_index: k)
+            }
+          end
+        else
+          rows << { run: run, annot: nil, contrast_index: nil, reference_group: nil, stats_key: run.id.to_s }
+        end
+      end
+      rows
     end
 
     # list_cat_json is normally a JSON array of category labels (metadata import / add_cell_sets).
@@ -902,6 +1284,73 @@ module Basic
       end
 
       logger.debug("[set_run] metadata names mapped to annot ids: #{param_keys.map { |k| "#{k}=#{h_var[k]}" }.join(' ')}")
+    end
+
+    def de_db_json_spec(h_cmd_params)
+      return nil unless h_cmd_params.is_a?(Hash)
+
+      spec = h_cmd_params['db_json']
+      return nil unless spec.is_a?(Hash)
+
+      keys = spec['annots']
+      return nil unless keys.is_a?(Array) && keys.any?
+
+      fn = File.basename(spec['filename'].to_s.presence || 'db.json')
+      fn = 'db.json' if fn.blank? || fn == '.'
+
+      { filename: fn, param_keys: keys.map(&:to_s).reject(&:blank?) }
+    end
+
+    def de_annot_ids_from_db_json_param_keys(h_var, p, param_keys)
+      ids = []
+      param_keys.each do |pk|
+        raw = nil
+        raw = h_var[pk] if h_var.is_a?(Hash)
+        raw = p[pk] if raw.nil? && p.is_a?(Hash)
+        raw = p[pk.to_sym] if raw.nil? && p.is_a?(Hash)
+        next if raw.nil? || raw.to_s.strip.empty?
+
+        raw.to_s.split(',').each do |part|
+          n = part.to_i
+          ids << n if n.positive?
+        end
+      end
+      ids.uniq
+    end
+
+    def de_db_json_payload_from_annot_ids(annot_ids, project_id)
+      clean_ids = Array(annot_ids).map(&:to_i).select(&:positive?).uniq
+      return nil if clean_ids.empty?
+
+      rows = Annot.where(id: clean_ids, project_id: project_id).order(:id).map(&:as_json)
+      { 'annots' => rows }
+    end
+
+    def write_de_db_json!(logger, h_cmd_params, h_var, p, project, output_dir)
+      spec = de_db_json_spec(h_cmd_params)
+      return nil unless spec
+
+      annot_ids = de_annot_ids_from_db_json_param_keys(h_var, p, spec[:param_keys])
+      if annot_ids.empty?
+        raise StandardError,
+              "db_json is configured but no positive annot ids were resolved from db_json.annots #{spec[:param_keys].inspect}"
+      end
+
+      payload = de_db_json_payload_from_annot_ids(annot_ids, project.id)
+      if !payload || payload['annots'].empty?
+        raise StandardError,
+              "db_json: no Annot rows for project_id=#{project.id} with ids #{annot_ids.inspect}"
+      end
+
+      target = output_dir + spec[:filename]
+      File.open(target.to_s, 'w') { |f| f.write(JSON.generate(payload)) }
+      logger&.debug("[set_run] wrote #{spec[:filename]} (#{payload['annots'].size} annot row(s), ids #{annot_ids.join(',')})")
+
+      {
+        'filename' => spec[:filename],
+        'annots' => spec[:param_keys],
+        'annot_ids' => annot_ids
+      }
     end
 
     def ensure_markers_original_gene_attr logger, loom_filename
@@ -2298,8 +2747,10 @@ module Basic
         'GENE' => 2
       }
 
-      if !meta['headers']
-        meta['headers'] = ["logFC", "P-value", "FDR", "Avg group1", "Avg group2"] if de_step_ids.include? run.step_id
+      # Legacy DE tools omitted headers; de.v8.py now sends "headers" from output.json.
+      meta['headers'] ||= meta['header'] if meta['header'].is_a?(Array)
+      if !meta['headers'] && de_step_ids.include?(run.step_id)
+        meta['headers'] = ["logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
       end
 
       ori_annot2 = nil
@@ -2552,10 +3003,11 @@ module Basic
         'step_name' => h_p[:step].name,
         'run_num' => run.num,
         'asap_data_docker_db_conn' => 'postgres:5434/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
-        'asap_data_direct_db_conn' => 'postgres:5433/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]) #h_p[:project].version_id.to_s,
+        'asap_data_direct_db_conn' => 'postgres:5433/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
+        'asap_docker_db_conn' => 'postgres:5434/' + ENV["POSTGRES_DB"]
       }
 
- #      puts "Elapsed time 9b:" + (Time.now-h_p[:el_time]).to_s
+      #      puts "Elapsed time 9b:" + (Time.now-h_p[:el_time]).to_s
 
       ###optional variables stored in 
       #['output_matrix_dataset'].each do |e|
@@ -2782,6 +3234,8 @@ module Basic
       apply_de_annot_ids_from_command_json!(logger, h_p[:h_cmd_params], h_var, h_p[:project])
       apply_de_group_category_indices_from_command_json!(logger, h_p[:h_cmd_params], h_var, p, h_p[:h_annots], h_p[:project])
 
+      db_json_cmd_meta = write_de_db_json!(logger, h_p[:h_cmd_params], h_var, p, h_p[:project], output_dir)
+
       ### update parents's children
       run_parents.each do |run_parent|
         parent_run = h_parent_runs[run_parent[:run_id]]
@@ -2848,8 +3302,26 @@ module Basic
       
       #      logger.debug "ATTRS_json: " + h_p[:h_attrs].to_json
       #      logger.debug "H_VAR: " + h_var.to_json
-      
-      h_env_docker_image = h_p[:h_env]['docker_images'][docker_image]
+
+      docker_image_key = docker_image.to_s.strip.presence
+      unless docker_image_key
+        h_res[:error] = 'command_json is missing docker_image after merging step and std_method command_json.'
+        return h_res
+      end
+
+      h_images = h_p[:h_env]['docker_images']
+      unless h_images.is_a?(Hash)
+        h_res[:error] = 'version env_json has no docker_images hash.'
+        return h_res
+      end
+
+      h_env_docker_image = h_images[docker_image_key]
+      unless h_env_docker_image.is_a?(Hash)
+        known = h_images.keys.join(', ')
+        h_res[:error] = "command_json docker_image is #{docker_image_key.inspect} but env_json docker_images defines only: #{known}"
+        return h_res
+      end
+
       logger.debug(h_env_docker_image.to_json)
       image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
       h_cmd = {
@@ -2863,7 +3335,8 @@ module Basic
         :args => list_args,
         :opts => list_opts
       }
-        
+      h_cmd[:db_json] = db_json_cmd_meta if db_json_cmd_meta
+
       if predictable
         
         h_predict_params = {}
@@ -2974,16 +3447,18 @@ module Basic
     end
 
     # Human-readable program line for run pages (no docker run, no sh -c wrapper).
+    # Omits time_call prefix and stdout/stderr redirects (1> / 2>) for a concise card.
     def run_inner_command_display_string(command_json)
       h_cmd = safe_parse_json(command_json, {})
       return nil unless h_cmd.is_a?(Hash) && h_cmd['program'].present?
 
-      shell_body = core_command_shell_body_for_run(h_cmd)
+      h_display = h_cmd.dup
+      h_display['exec_stdout'] = nil
+      h_display['exec_stderr'] = nil
+      shell_body = core_command_shell_body_for_run(h_display)
       return nil if shell_body.blank?
 
-      out = shell_body
-      out = "#{h_cmd['time_call']} #{out}" if h_cmd['time_call'].present?
-      out.strip
+      shell_body.strip
     end
 
     def build_docker_cmd h_cmd, core_cmd

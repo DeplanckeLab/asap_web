@@ -258,6 +258,7 @@
       @h_std_methods = {}
       StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
     end
+    @de_table_rows ||= Basic.de_table_rows_for_runs(completed_runs)
   %>
 
   <% de_auto_filter = params[:de_fdr].present? || params[:de_fc].present? %>
@@ -384,8 +385,9 @@
       Object.keys(stats).forEach(function(runId) {
         var up = (stats[runId] && stats[runId].up != null) ? parseInt(stats[runId].up, 10) : 0;
         var down = (stats[runId] && stats[runId].down != null) ? parseInt(stats[runId].down, 10) : 0;
+        var badgeKey = runId.replace(/_/g, '-');
 
-        var upBadge = document.getElementById('de-up-badge-' + runId);
+        var upBadge = document.getElementById('de-up-badge-' + badgeKey);
         if (upBadge) {
           upBadge.textContent = up + ' genes';
           if (upBadge.parentElement) upBadge.parentElement.setAttribute('data-sort-value', String(up));
@@ -397,7 +399,7 @@
           }
         }
 
-        var downBadge = document.getElementById('de-down-badge-' + runId);
+        var downBadge = document.getElementById('de-down-badge-' + badgeKey);
         if (downBadge) {
           downBadge.textContent = down + ' genes';
           if (downBadge.parentElement) downBadge.parentElement.setAttribute('data-sort-value', String(down));
@@ -413,7 +415,7 @@
     .catch(function(error) {
       console.error('[de-filter] request failed', error);
     })
-    .finally(function() {
+    .then(function() {
       if (spinner) spinner.classList.add('hidden');
     });
   }

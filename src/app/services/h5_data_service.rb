@@ -5,6 +5,88 @@ require 'shellwords'
 class H5DataService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
+  # ASAP.jar ExtractDataset only accepts /matrix or /layers/* (JSON error otherwise).
+  # /attrs/* DE tables are compound or non-float HDF5; read a small slice with h5py in the run container.
+  H5_ATTRS_PREVIEW_PY = <<~PYTHON
+    import json
+    import sys
+
+    import h5py
+
+    def cell(v):
+        if v is None:
+            return None
+        if hasattr(v, 'item'):
+            try:
+                v = v.item()
+            except Exception:
+                pass
+        if isinstance(v, (bytes, bytearray)):
+            return v.decode('utf-8', 'replace')
+        if isinstance(v, (str, int, float, bool)):
+            return v
+        return str(v)
+
+    def main():
+        loom = sys.argv[1]
+        path = sys.argv[2]
+        max_r = int(sys.argv[3])
+        max_c = int(sys.argv[4])
+        with h5py.File(loom, 'r') as f:
+            if path not in f:
+                print(json.dumps({'error': 'not_found', 'path': path}))
+                return 2
+            d = f[path]
+            if not hasattr(d, 'shape'):
+                print(json.dumps({'error': 'not_a_dataset', 'path': path}))
+                return 3
+            sh = tuple(int(x) for x in d.shape)
+            dt = d.dtype
+            names = getattr(dt, 'names', None)
+            take_r = min(max_r, sh[0]) if len(sh) >= 1 else 0
+            if take_r <= 0:
+                print(json.dumps({'rows': [], 'nber_rows': 0, 'nber_cols': 0, 'column_names': []}))
+                return 0
+            rows = []
+            if len(sh) == 1 and names:
+                block = d[:take_r]
+                all_names = [str(n) for n in names]
+                take_c_eff = min(max_c, len(all_names))
+                use_names = all_names[:take_c_eff]
+                for i in range(block.shape[0]):
+                    rows.append([cell(block[i][n]) for n in use_names])
+                out = {
+                    'rows': rows,
+                    'nber_rows': sh[0],
+                    'nber_cols': len(all_names),
+                    'column_names': use_names,
+                }
+            elif len(sh) >= 2:
+                take_c = min(max_c, sh[1])
+                block = d[:take_r, :take_c]
+                for i in range(block.shape[0]):
+                    rows.append([cell(block[i, j]) for j in range(block.shape[1])])
+                out = {
+                    'rows': rows,
+                    'nber_rows': sh[0],
+                    'nber_cols': sh[1],
+                    'column_names': [str(j) for j in range(block.shape[1])],
+                }
+            elif len(sh) == 1:
+                block = d[:take_r]
+                for i in range(block.shape[0]):
+                    rows.append([cell(block[i])])
+                out = {'rows': rows, 'nber_rows': sh[0], 'nber_cols': 1, 'column_names': ['value']}
+            else:
+                print(json.dumps({'error': 'unsupported_rank', 'rank': len(sh)}))
+                return 4
+            print(json.dumps(out, default=str))
+        return 0
+
+    if __name__ == '__main__':
+        sys.exit(main() or 0)
+  PYTHON
+
   def self.asap_command(*args)
     ['docker', 'exec', ASAP_RUN_CONTAINER, 'java', '-jar', '/srv/ASAP.jar'] + args
   end
@@ -56,6 +138,40 @@ class H5DataService
       Rails.logger.error("h5 query failed: #{stderr}")
       raise "Failed to query h5 file"
     end
+  end
+
+  # Extract one or more rows from a 2D loom dataset (e.g. /matrix, /attrs/...).
+  # ASAP.jar ExtractRow requires exactly one of: -indexes, -names, -stable_ids (not -start/-nber).
+  def self.extract_row_by_indexes(h5_file, i_annot, indexes)
+    idx = Array(indexes).map(&:to_i).uniq
+    raise ArgumentError, 'indexes required' if idx.empty?
+
+    cmd = asap_command(
+      '-T', 'ExtractRow',
+      '-loom', h5_file,
+      '-iAnnot', i_annot.to_s,
+      '-indexes', idx.map(&:to_s).join(',')
+    )
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      raise "ASAP.jar ExtractRow failed for #{i_annot} (exit #{status.exitstatus}): #{stderr}"
+    end
+
+    JSON.parse(stdout)
+  end
+
+  # Full row range via repeated ExtractRow (index list size is bounded per call).
+  def self.extract_matrix_rows_chunked(h5_file, i_annot, total_rows, chunk_size: 1000)
+    total = total_rows.to_i
+    total = 1 if total < 1
+    all_rows = []
+    (0...total).each_slice(chunk_size) do |slice|
+      j = extract_row_by_indexes(h5_file, i_annot, slice)
+      batch = j['rows'] || []
+      all_rows.concat(batch)
+    end
+    nc = all_rows.first.is_a?(Array) ? all_rows.first.size : nil
+    { 'rows' => all_rows, 'nber_rows' => all_rows.size, 'nber_cols' => nc }
   end
 
   # 1b. Pathway expression data (same as genes but from pathway-specific loom file)
@@ -204,6 +320,136 @@ class H5DataService
       Rails.logger.error "Error extracting metadata from #{metadata_path}: #{e.message}"
       []
     end
+  end
+
+  # DE and other /attrs/ tables: compound HDF5 (ExtractRow float path fails). ASAP.jar ExtractDataset
+  # rejects paths outside /matrix and /layers/*. Read a bounded slice via h5py in ASAP_RUN_CONTAINER.
+  def self.get_attrs_matrix_sample_for_preview(h5_file, annot_path, max_preview_rows: 10, max_preview_cols: 10, total_rows: nil, total_cols: nil)
+    internal = annot_path.to_s.sub(%r{\A/+}, '')
+
+    tr = max_preview_rows
+    tr = [max_preview_rows, total_rows.to_i].min if total_rows.to_i.positive?
+    tr = 1 if tr < 1
+
+    tc = max_preview_cols
+    tc = [max_preview_cols, total_cols.to_i].min if total_cols.to_i.positive?
+    tc = 1 if tc < 1
+
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+      h5_file, internal, tr.to_s, tc.to_s,
+      stdin_data: H5_ATTRS_PREVIEW_PY
+    )
+
+    parsed =
+      begin
+        JSON.parse(stdout.to_s.strip)
+      rescue JSON::ParserError => e
+        hint = [stdout, stderr].map { |s| s.to_s.strip[0, 500] }.reject(&:empty?).join(' | ')
+        raise "attrs preview: invalid JSON (#{e.message}). #{hint}"
+      end
+
+    if parsed['error']
+      raise "attrs preview (#{annot_path}): #{parsed['error']} (#{parsed.inspect})"
+    end
+
+    unless status.success?
+      msg = stderr.to_s.strip
+      msg = stdout.to_s.strip[0, 500] if msg.empty?
+      raise "attrs preview docker/python failed (exit #{status.exitstatus}): #{msg}"
+    end
+
+    all_rows = parsed['rows']
+    unless all_rows.is_a?(Array) && all_rows.any?
+      raise "attrs preview returned no rows for #{annot_path}"
+    end
+
+    sample_rows = all_rows.map { |r| r.is_a?(Array) ? r : [r] }
+
+    nr = parsed['nber_rows'].to_i
+    nr = total_rows.to_i if nr <= 0 && total_rows.to_i.positive?
+    nr = sample_rows.size if nr <= 0
+
+    # Full column count from the file (compound dtype or matrix width), not only the preview slice.
+    nc_full = parsed['nber_cols'].to_i
+    nc_full = sample_rows.first.size if nc_full <= 0 && sample_rows.first.is_a?(Array)
+    if total_cols.to_i.positive? && nc_full.positive? && total_cols.to_i != nc_full
+      Rails.logger.warn(
+        "[H5DataService.get_attrs_matrix_sample_for_preview] #{annot_path}: Annot nber_cols=#{total_cols} " \
+        "does not match HDF5 column count #{nc_full}"
+      )
+    end
+
+    cn = parsed['column_names']
+    cn = nil unless cn.is_a?(Array) && cn.any?
+
+    {
+      nber_rows: nr,
+      nber_cols: nc_full,
+      values: sample_rows,
+      column_names: cn
+    }
+  end
+
+  # Full /attrs/ matrix (all genes x all columns) for DE filter output. Java ExtractMetadata often does not
+  # return nested "values" for compound /attrs datasets; this uses the same h5py path as the preview reader.
+  def self.get_attrs_matrix_full_for_de_filter(h5_file, annot_path, annot)
+    internal = annot_path.to_s.sub(%r{\A/+}, '')
+
+    max_r = annot.nber_rows.to_i
+    max_r = 50_000_000 if max_r <= 0
+    max_r = [[max_r, 50_000_000].min, 1].max
+
+    max_c = annot.nber_cols.to_i
+    max_c = 2048 if max_c <= 0
+    max_c = [[max_c, 4096].min, 1].max
+
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+      h5_file.to_s, internal, max_r.to_s, max_c.to_s,
+      stdin_data: H5_ATTRS_PREVIEW_PY
+    )
+
+    parsed =
+      begin
+        JSON.parse(stdout.to_s.strip)
+      rescue JSON::ParserError => e
+        hint = [stdout, stderr].map { |s| s.to_s.strip[0, 500] }.reject(&:empty?).join(' | ')
+        raise "attrs full matrix: invalid JSON (#{e.message}). #{hint}"
+      end
+
+    if parsed['error']
+      raise "attrs full matrix (#{annot_path}): #{parsed['error']} (#{parsed.inspect})"
+    end
+
+    unless status.success?
+      msg = stderr.to_s.strip
+      msg = stdout.to_s.strip[0, 500] if msg.empty?
+      raise "attrs full matrix docker/python failed (exit #{status.exitstatus}): #{msg}"
+    end
+
+    all_rows = parsed['rows']
+    unless all_rows.is_a?(Array) && all_rows.any?
+      raise "attrs full matrix returned no rows for #{annot_path}"
+    end
+
+    rows = all_rows.map { |r| r.is_a?(Array) ? r : [r] }
+
+    nr = parsed['nber_rows'].to_i
+    nr = rows.size if nr <= 0
+
+    nc_full = parsed['nber_cols'].to_i
+    nc_full = rows.first.size if nc_full <= 0 && rows.first.is_a?(Array)
+
+    cn = parsed['column_names']
+    cn = nil unless cn.is_a?(Array) && cn.any?
+
+    {
+      'values' => rows,
+      'nber_rows' => nr,
+      'nber_cols' => nc_full,
+      'column_names' => cn
+    }
   end
 
   # Extract the full metadata vector for all cells (one value per cell)

@@ -474,6 +474,21 @@ module ApplicationHelper
       "</span>"
   end
 
+  # When std_method attrs_json defines "default" for a param, run badges and display_run_attrs_txt
+  # omit that param if h_attrs[param].to_s matches (use sma.key?("default") so false / 0 work).
+  # opt[:reject_if_default] defaults to true; pass false to show every stored param for that render.
+  def std_method_attrs_map_for_run_display(run, h_std_method_attrs)
+    return {} unless run && h_std_method_attrs.is_a?(Hash) && h_std_method_attrs.any?
+
+    nested = h_std_method_attrs[run.std_method_id]
+    if nested.is_a?(Hash)
+      nested
+    else
+      first_val = h_std_method_attrs.values.first
+      (first_val.is_a?(Hash) && (first_val.key?('label') || first_val.key?('default') || first_val.key?('description'))) ? h_std_method_attrs : {}
+    end
+  end
+
   # Display run attributes
   def display_run_attrs_base(run, h_attrs, h_std_method_attrs, opt)
     return { datasets: [], attrs: [] } unless run && h_attrs
@@ -485,24 +500,15 @@ module ApplicationHelper
       reject_attrs = @h_dashboard_card[run.step_id]["reject_attrs"]
     end
     
-    method_attrs_map = if h_std_method_attrs.is_a?(Hash) && h_std_method_attrs.any?
-                          nested = h_std_method_attrs[run.std_method_id]
-                          if nested.is_a?(Hash)
-                            nested
-                          else
-                            first_val = h_std_method_attrs.values.first
-                            (first_val.is_a?(Hash) && (first_val.key?('label') || first_val.key?('default') || first_val.key?('description'))) ? h_std_method_attrs : {}
-                          end
-                        else
-                          {}
-                        end
+    method_attrs_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
+    reject_if_default = opt.fetch(:reject_if_default, true)
 
     array = h_attrs.keys.reject { |attr|
       reject_attrs.include?(attr) ||
-      (opt[:reject_if_default] && run &&
+      (reject_if_default && run &&
        (sma = method_attrs_map[attr]).is_a?(Hash) &&
-       (attr_default = sma['default']) &&
-       attr_default.to_s == h_attrs[attr].to_s)
+       sma.key?('default') &&
+       sma['default'].to_s == h_attrs[attr].to_s)
     }.map { |attr|
       render_run_param_badge(
         run: run,
@@ -528,17 +534,26 @@ module ApplicationHelper
   end
 
   # Plain-text run parameters for reproduction shell scripts (legacy ASAP get_commands).
-  def display_run_attrs_txt(run, h_attrs, h_std_method_attrs)
+  def display_run_attrs_txt(run, h_attrs, h_std_method_attrs, opt = {})
     return '' unless run && h_attrs.is_a?(Hash)
 
-    reject_attrs = if @h_dashboard_card && @h_dashboard_card[run.step_id]
+    reject_attrs = if defined?(@h_dashboard_card) && @h_dashboard_card && @h_dashboard_card[run.step_id]
                      @h_dashboard_card[run.step_id]['reject_attrs'] || []
                    else
                      []
                    end
 
+    method_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
+    reject_if_default = opt.fetch(:reject_if_default, true)
+
     list = []
-    h_attrs.keys.reject { |attr| reject_attrs.include?(attr) }.each do |attr|
+    h_attrs.keys.reject { |attr|
+      reject_attrs.include?(attr) ||
+      (reject_if_default &&
+       (sma = method_map[attr]).is_a?(Hash) &&
+       sma.key?('default') &&
+       sma['default'].to_s == h_attrs[attr].to_s)
+    }.each do |attr|
       v = h_attrs[attr]
       txt = ''
       list_datasets = []

@@ -31,6 +31,8 @@
               "Shared by #{owner_email_part || 'unknown'}"
             elsif @project.public? && owner_user
               "Owned by #{owner_email_part || 'unknown'}"
+            elsif admin?
+              'Admin access'
             else
               'Read only access'
             end %>

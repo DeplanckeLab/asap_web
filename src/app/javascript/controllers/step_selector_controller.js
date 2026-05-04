@@ -172,6 +172,7 @@ export default class extends Controller {
       urlParams.get('ge_fdr') ||
       urlParams.get('gene_list_run_id') ||
       urlParams.get('gene_list_type') ||
+      urlParams.get('gene_list_de_annot_id') ||
       urlParams.get('geneset_list_run_id') ||
       urlParams.get('geneset_list_type')
     )
@@ -1115,7 +1116,7 @@ export default class extends Controller {
       'de_fdr', 'de_fc',
       'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis',
       'ge_fdr',
-      'gene_list_run_id', 'gene_list_type', 'geneset_list_run_id', 'geneset_list_type']
+      'gene_list_run_id', 'gene_list_type', 'gene_list_de_annot_id', 'geneset_list_run_id', 'geneset_list_type']
     keysToRemove.forEach(k => url.searchParams.delete(k))
     window.history.replaceState({}, '', url.toString())
   }
@@ -2246,7 +2247,10 @@ export default class extends Controller {
       
       // Remove all existing duration/timer elements (there might be multiple)
       // Remove elements that contain timers or are timer containers
-      const existingDurations = durationContainer.querySelectorAll('.text-xs.text-gray-500.mt-0.5, .text-xs.text-gray-500.space-y-0.5, [data-controller*="run-timer"]')
+      // Escape dots in Tailwind fractional classes (mt-0.5, space-y-0.5) so querySelectorAll parses valid selectors
+      const existingDurations = durationContainer.querySelectorAll(
+        '.text-xs.text-gray-500.mt-0\\.5, .text-xs.text-gray-500.space-y-0\\.5, [data-controller*="run-timer"]'
+      )
       existingDurations.forEach(el => {
         el.remove()
       })

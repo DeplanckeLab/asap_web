@@ -213,11 +213,29 @@
             <% end %>
             <% if @step && @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
             <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
-                <% if @h_res[output["key"]] && output["key"] != 'nber_rows' && output["key"] != 'nber_cols' %>
+                <% if @h_res.key?(output["key"]) && output["key"] != 'nber_rows' && output["key"] != 'nber_cols' %>
                   <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
                     <span class="text-sm font-medium text-gray-900"><%= output["label"] %>: <span class="font-bold"><%= @h_res[output["key"]] %></span></span>
                   </div>
                 <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <% if @step && !["gene_filtering", "cell_filtering"].include?(@step.name) && @run.status_id == 3 && @h_res && @h_dashboard_card[@step.id] && @h_dashboard_card[@step.id]["output_values"] && @h_dashboard_card[@step.id]["output_values"].any? %>
+        <div class="pt-4 relative">
+          <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-2">
+            <i class="fas fa-chart-bar text-gray-500"></i>
+            Output summary
+          </h4>
+          <div class="flex flex-wrap gap-3">
+            <% @h_dashboard_card[@step.id]["output_values"].each do |output| %>
+              <% if @h_res.key?(output["key"]) %>
+                <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                  <span class="text-sm font-medium text-gray-900"><%= output["label"] %>: <span class="font-bold"><%= @h_res[output["key"]] %></span></span>
+                </div>
               <% end %>
             <% end %>
           </div>
@@ -413,7 +431,7 @@
                                           <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                             <span><%= display_name %></span>
                                             <%= dimension_badge(annot.nber_rows, :row, @project) %>
-                                            <%= dimension_badge(annot.nber_cols, :col, @project) %>
+                                            <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) %>
                                           <% end %>
                                         <% end %>
                                       </div>
@@ -448,13 +466,18 @@
                                           <% display_name = annot_name.gsub(/^\/attrs\//, '').gsub(/^\//, '') %>
                                           <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                             <span><%= display_name %></span>
+                                            <%= dimension_badge(annot.nber_rows, :row, @project) %>
+                                            <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) %>
                                           <% end %>
                                         <% end %>
                                       </div>
                                     </div>
                                   <% end %>
                                 </div>
+                              <% elsif id == 'card-downloads' %>
+                                <%= raw translate_bootstrap_in_html(@h_el[id][:card_body]) %>
                               <% else %>
+                                <%= run_output_metadata_summary_html(@h_res, @project) %>
                                 <%= raw translate_bootstrap_in_html(@h_el[id][:card_body]) %>
                               <% end %>
                             </div>
@@ -635,7 +658,7 @@
                               <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                 <span><%= display_name %></span>
                                 <%= dimension_badge(annot.nber_rows, :row, @project) %>
-                                <%= dimension_badge(annot.nber_cols, :col, @project) %>
+                                <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) %>
                               <% end %>
                             <% end %>
                           </div>
@@ -668,15 +691,18 @@
                             <% global_attrs.each do |annot| %>
                               <% annot_name = annot.name || '' %>
                               <% display_name = annot_name.gsub(/^\/attrs\//, '').gsub(/^\//, '') %>
-                              <button type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors">
+                              <%= link_to annot_path(annot, from: 'run', run_id: @run.id, step_id: @step&.id), class: 'inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors' do %>
                                 <span><%= display_name %></span>
-                              </button>
+                                <%= dimension_badge(annot.nber_rows, :row, @project) %>
+                                <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) %>
+                              <% end %>
                             <% end %>
                           </div>
                         </div>
                       <% end %>
                     </div>
                   <% else %>
+                    <%= run_output_metadata_summary_html(@h_res, @project) %>
                     <%= raw translate_bootstrap_in_html(@h_el['card-results'][:card_body]) %>
                   <% end %>
                 </div>

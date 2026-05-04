@@ -79,13 +79,15 @@ class RunsController < ApplicationController
     @h_run_attrs = (@run.attrs_json) ? JSON.parse(@run.attrs_json) : {}
     @data = []
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    @de_gene_list_annot_id = params[:de_annot_id].presence
+    de_list_dir = Basic.de_filter_gene_list_dir(@project_dir, @run.id, @de_gene_list_annot_id)
     list_filtered_rows = []
     if params[:from]== 'ge_form'
       filename = @project_dir + "tmp" + "#{de_filter_cache_key}_#{@run.id}_filtered.json"
       tmp_h = Basic.safe_parse_json(File.read(filename), {})
       list_filtered_rows = tmp_h[params[:type]] if tmp_h[params[:type]]
     else
-      filename = @project_dir + "de" + @run.id.to_s + "filtered.#{params[:type]}.json"
+      filename = de_list_dir + "filtered.#{params[:type]}.json"
       list_filtered_rows = Basic.safe_parse_json(File.read(filename), [])
     end
     @h_filtered_rows = {}
@@ -97,11 +99,11 @@ class RunsController < ApplicationController
     list_filtered_rows.map{|e| @h_filtered_rows[e.to_i] = 1}
     @nber_genes = list_filtered_rows.size
     
-    filename = @project_dir + "de" + @run.id.to_s + "output.txt"
+    output_txt = de_list_dir + 'output.txt'
     i = 0
     j = 0
 
-    @tmp_data = File.readlines(filename)
+    @tmp_data = File.readlines(output_txt)
     if params[:type] == 'up'
       #File.open(filename, 'r') do |f|
       @tmp_data.reverse.each do |l|     

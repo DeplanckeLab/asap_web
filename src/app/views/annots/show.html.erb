@@ -59,9 +59,13 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <% if @annot.dim != 3 %>
             <div>
-              <span class="text-sm font-medium text-gray-500">Annotation Type</span>
+              <span class="text-sm font-medium text-gray-500">Metadata type</span>
               <p class="mt-1 text-sm text-gray-900">
-                <%= (@annot.dim == 1) ? col_label(@project, plural: false).capitalize : row_label(@project, plural: false).capitalize %>
+                <% if @annot.name.to_s.start_with?('/attrs/') %>
+                  Global
+                <% else %>
+                  <%= (@annot.dim == 1) ? col_label(@project, plural: false).capitalize : row_label(@project, plural: false).capitalize %>
+                <% end %>
               </p>
             </div>
           <% end %>
@@ -70,13 +74,20 @@
             <div class="mt-2 flex flex-wrap gap-2">
               <% if @annot.dim == 3 || @annot.name == '/matrix' || @annot.name.start_with?('/layers/') %>
                 <%= dimension_badge(@annot.nber_rows, :row, @project) if @annot.nber_rows %>
-                <%= dimension_badge(@annot.nber_cols, :col, @project) if @annot.nber_cols %>
+                <%= dimension_badge_col_aligned_with_matrix(@annot.nber_cols, @annot.filepath, @project) if @annot.nber_cols %>
               <% elsif @annot.name.start_with?('/col_attrs/') %>
                 <%= dimension_badge(@matrix_nber_cols, :col, @project) if @matrix_nber_cols %>
                 <%= component_dimension_badge(@annot.nber_rows) %>
               <% elsif @annot.name.start_with?('/row_attrs/') %>
                 <%= dimension_badge(@matrix_nber_rows, :row, @project) if @matrix_nber_rows %>
                 <%= component_dimension_badge(@annot.nber_cols) %>
+              <% elsif @annot.name.start_with?('/attrs/') %>
+                <% if @annot.nber_rows.present? || @annot.nber_cols.present? %>
+                  <%= dimension_badge(@annot.nber_rows, :row, @project) if @annot.nber_rows.present? %>
+                  <%= dimension_badge_col_aligned_with_matrix(@annot.nber_cols, @annot.filepath, @project) if @annot.nber_cols.present? %>
+                <% else %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">Global</span>
+                <% end %>
               <% else %>
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
                   Global
@@ -125,7 +136,8 @@
             <span class="text-sm font-medium text-gray-500">Produced by Analysis</span>
             <p class="mt-1 text-sm text-gray-900">
               <% if @run %>
-                <%= link_to run_path(@run), class: 'text-blue-600 hover:text-blue-800 hover:underline' do %>
+                <% analysis_run_url = project_path(@project, view: 'analysis', panel_mode: 'run_details', step_id: @run.step_id, run_id: @run.id, loom_file: '__all__') %>
+                <%= link_to analysis_run_url, class: 'text-blue-600 hover:text-blue-800 hover:underline' do %>
                   <%= @run.step ? (@run.step.label.presence || @run.step.name.humanize) : 'Unknown' %>
                   <% if @run.step && @run.step.multiple_runs %>
                     #<%= @run.num || @run.id %>
@@ -171,27 +183,44 @@
         </h4>
         
         <% if @matrix_preview %>
-          <%# 2D metadata matrix preview (e.g. /col_attrs/X_pca) %>
+          <%# 2D metadata matrix preview (e.g. /col_attrs/X_pca, /attrs/ DE table) %>
           <% mp = @matrix_preview %>
+          <% ch = mp[:column_headers] %>
+          <% attrs_global = mp[:attrs_global] %>
           <% is_col_attrs = @annot.name.start_with?('/col_attrs/') %>
           <% entry_label_singular = is_col_attrs ? col_label(@project, plural: false) : row_label(@project, plural: false) %>
           <% component_label_singular = 'component' %>
           <div class="mb-4">
             <p class="text-sm text-gray-600 mb-2">
-              Sample: first <%= mp[:shown_rows] %> <%= component_label_singular.pluralize(mp[:shown_rows]) %>
-              × first <%= mp[:shown_cols] %> <%= entry_label_singular.pluralize(mp[:shown_cols]) %>
-              <span class="text-gray-500">(full shape: <%= mp[:nber_rows] %> × <%= mp[:nber_cols] %>)</span>
+              <% if attrs_global %>
+                Sample: first <%= mp[:shown_rows] %> <%= row_label(@project, plural: true) %>
+                × first <%= mp[:shown_cols] %> columns
+                <% if mp[:shown_cols].to_i < mp[:nber_cols].to_i %>
+                  <span class="text-gray-500">(table has <%= mp[:nber_cols] %> columns total)</span>
+                <% end %>
+              <% else %>
+                Sample: first <%= mp[:shown_rows] %> <%= component_label_singular.pluralize(mp[:shown_rows]) %>
+                × first <%= mp[:shown_cols] %> <%= entry_label_singular.pluralize(mp[:shown_cols]) %>
+              <% end %>
             </p>
             <div class="overflow-x-auto border border-gray-200 rounded-lg">
               <table class="min-w-full divide-y divide-gray-200 text-sm">
                 <thead class="bg-gray-50">
                   <tr>
-                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
-                      <%= component_label_singular.capitalize %> \ <%= entry_label_singular.capitalize %>
-                    </th>
-                    <% (1..mp[:shown_cols]).each do |j| %>
-                      <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        <%= entry_label_singular.capitalize %> <%= j %>
+                    <% unless attrs_global %>
+                      <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
+                        <%= component_label_singular.capitalize %> \ <%= entry_label_singular.capitalize %>
+                      </th>
+                    <% end %>
+                    <% (0...mp[:shown_cols]).each do |j| %>
+                      <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 tracking-wider">
+                        <% if ch.is_a?(Array) && ch[j].present? %>
+                          <%= ch[j].to_s %>
+                        <% elsif attrs_global %>
+                          <%= "Column #{j + 1}" %>
+                        <% else %>
+                          <%= entry_label_singular.capitalize %> <%= j + 1 %>
+                        <% end %>
                       </th>
                     <% end %>
                   </tr>
@@ -199,9 +228,11 @@
                 <tbody class="bg-white divide-y divide-gray-200">
                   <% mp[:rows].each_with_index do |row, i| %>
                     <tr class="hover:bg-gray-50">
-                      <td class="px-3 py-2 text-xs font-medium text-gray-900 bg-gray-50 border-r border-gray-200">
-                        <%= component_label_singular.capitalize %> <%= i + 1 %>
-                      </td>
+                      <% unless attrs_global %>
+                        <td class="px-3 py-2 text-xs font-medium text-gray-900 bg-gray-50 border-r border-gray-200">
+                          <%= component_label_singular.capitalize %> <%= i + 1 %>
+                        </td>
+                      <% end %>
                       <% row.each do |cell| %>
                         <td class="px-3 py-2 text-xs text-gray-700 text-center">
                           <%= (number_with_precision(cell, precision: 3) rescue cell.to_s) %>

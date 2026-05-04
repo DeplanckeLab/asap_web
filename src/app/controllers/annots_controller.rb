@@ -83,39 +83,29 @@ class AnnotsController < ApplicationController
     @h_sums = {}
     @matrix_preview = nil
 
-    # A col_attrs/row_attrs annotation is 2D (multi-component) when both its
-    # nber_rows and nber_cols are > 1 (e.g. /col_attrs/X_pca shape (50, 5007)
-    # or /col_attrs/X_umap shape (2, 5007)). In that case ExtractMetadata returns
-    # a 2D values array and the usual vector-based preview does not apply.
+    # 2D metadata: col_attrs/row_attrs (e.g. PCA) or /attrs/ tables (e.g. DE) when
+    # ExtractMetadata returns a matrix of values.
     is_2d_metadata = @annot.dim != 3 &&
                      @annot.nber_rows.to_i > 1 &&
                      @annot.nber_cols.to_i > 1 &&
-                     (@annot.name.start_with?('/col_attrs/') || @annot.name.start_with?('/row_attrs/'))
+                     (@annot.name.start_with?('/col_attrs/') || @annot.name.start_with?('/row_attrs/') ||
+                      @annot.name.start_with?('/attrs/'))
 
     if @annot.dim == 3
       # Expression matrix - extract sample and compute distributions
       begin
         # Check if file exists
         if File.exist?(loom_path)
-          # Get sample of matrix (10x10) using ExtractRow
-          sample_cmd = H5DataService.asap_command(
-            '-T', 'ExtractRow',
-            '-loom', loom_path.to_s,
-            '-iAnnot', @annot.name,
-            '-start', '0',
-            '-nber', '10'
-          )
-          stdout, stderr, status = Open3.capture3(*sample_cmd)
-          if status.success?
-            begin
-              sample_data = JSON.parse(stdout)
-              @preview_data = sample_data['rows'] || []
-            rescue JSON::ParserError => e
-              Rails.logger.error("Failed to parse expression matrix sample: #{e.message}")
-              @preview_data = []
-            end
-          else
-            Rails.logger.error("Failed to extract expression matrix sample: #{stderr}")
+          # ExtractRow requires -indexes (or -names / -stable_ids), not -start/-nber.
+          begin
+            n_sample = 10
+            n_total = @annot.nber_rows.to_i
+            n_sample = [n_sample, n_total].min if n_total.positive?
+            n_sample = 1 if n_sample < 1
+            sample_data = H5DataService.extract_row_by_indexes(loom_path.to_s, @annot.name, (0...n_sample).to_a)
+            @preview_data = sample_data['rows'] || []
+          rescue StandardError => e
+            Rails.logger.error("Failed to extract expression matrix sample: #{e.message}")
             @preview_data = []
           end
         else
@@ -153,18 +143,115 @@ class AnnotsController < ApplicationController
         Rails.logger.error("Error extracting expression matrix data: #{e.message}")
       end
     elsif is_2d_metadata
-      # 2D metadata annotation (e.g. /col_attrs/X_pca) - extract a 10x10 sample.
+      # 2D metadata: /col_attrs|/row_attrs via ExtractMetadata; /attrs/* (e.g. DE) via h5py in asap_run (ExtractDataset only allows /matrix and /layers).
       if File.exist?(loom_path)
-        matrix = H5DataService.get_metadata_matrix(loom_path.to_s, @annot.name)
         max_preview_rows = 10
         max_preview_cols = 10
-        sample_rows = matrix[:values].first(max_preview_rows).map { |row| row.first(max_preview_cols) }
+        matrix = if @annot.name.start_with?('/attrs/')
+          # Do not pass total_cols: Annot nber_cols can lag the HDF5 compound; cap width only here.
+          attrs_col_cap = 128
+          H5DataService.get_attrs_matrix_sample_for_preview(
+            loom_path.to_s,
+            @annot.name,
+            max_preview_rows: max_preview_rows,
+            max_preview_cols: attrs_col_cap,
+            total_rows: @annot.nber_rows,
+            total_cols: nil
+          )
+        else
+          m = H5DataService.get_metadata_matrix(loom_path.to_s, @annot.name)
+          {
+            nber_rows: m[:nber_rows],
+            nber_cols: m[:nber_cols],
+            values: m[:values].first(max_preview_rows).map { |row| row.first(max_preview_cols) }
+          }
+        end
+        sample_rows = matrix[:values]
+        h5_col_names = if @annot.name.start_with?('/attrs/') && matrix[:column_names].is_a?(Array) && matrix[:column_names].any?
+          matrix[:column_names].map(&:to_s)
+        end
+
+        output_json_headers = nil
+        if @annot.headers_json.present?
+          begin
+            parsed = JSON.parse(@annot.headers_json)
+            output_json_headers = parsed.map(&:to_s) if parsed.is_a?(Array) && parsed.any?
+          rescue JSON::ParserError
+            output_json_headers = nil
+          end
+        end
+        output_json_headers ||= annot_metadata_headers_from_run_output_json(@annot, @project_dir)
+
+        # Table headers: same labels as output.json "metadata" entry (headers), not HDF5 dtype names.
+        column_headers = output_json_headers
+        column_headers = h5_col_names if column_headers.nil? && h5_col_names
+
+        rw = sample_rows.first&.size.to_i
+        # /attrs/: HDF5 compound may include Gene not listed in output.json "headers".
+        # Leading Gene, or EnsemblID then Gene when first header is Ensembl-like (no separate Gene column needed).
+        if @annot.name.start_with?('/attrs/') && sample_rows.first.is_a?(Array) && h5_col_names.is_a?(Array) && h5_col_names.any? &&
+           output_json_headers.is_a?(Array) && output_json_headers.any? &&
+           rw == output_json_headers.size + 1
+          drop_idx = nil
+          if preview_attrs_matrix_column_name_gene_like?(h5_col_names.first)
+            drop_idx = 0
+          elsif preview_attrs_matrix_header_ensembl_id_like?(h5_col_names.first) &&
+                h5_col_names.size >= 2 && preview_attrs_matrix_column_name_gene_like?(h5_col_names[1]) &&
+                preview_attrs_matrix_header_ensembl_id_like?(output_json_headers.first)
+            drop_idx = 1
+          elsif preview_attrs_matrix_h5_column_names_numeric?(h5_col_names)
+            # 2D /attrs/ preview: Python uses "0","1",… not compound dtype names; first column is still Gene in file.
+            drop_idx = 0
+          end
+          if drop_idx
+            sample_rows = sample_rows.map do |row|
+              next row unless row.is_a?(Array) && row.size > drop_idx
+              row[0...drop_idx] + row[(drop_idx + 1)..]
+            end
+          end
+        end
+
+        # Preview: omit leading Gene column when output.json (or HDF5) labels include Gene at same width.
+        if column_headers.is_a?(Array) && column_headers.any? &&
+           preview_attrs_matrix_column_name_gene_like?(column_headers.first) &&
+           sample_rows.first.is_a?(Array) && sample_rows.first.size.positive? &&
+           sample_rows.first.size == column_headers.size
+          column_headers = column_headers.drop(1)
+          sample_rows = sample_rows.map do |row|
+            next row unless row.is_a?(Array)
+            row.size > 1 ? row.drop(1) : []
+          end
+        end
+
+        # First column is Ensembl-like id: drop redundant Gene as second column (same width as headers).
+        if column_headers.is_a?(Array) && column_headers.size >= 2 &&
+           preview_attrs_matrix_header_ensembl_id_like?(column_headers.first) &&
+           preview_attrs_matrix_column_name_gene_like?(column_headers[1]) &&
+           sample_rows.first.is_a?(Array) && sample_rows.first.size == column_headers.size
+          column_headers = [column_headers[0]] + column_headers[2..]
+          sample_rows = sample_rows.map do |row|
+            next row unless row.is_a?(Array) && row.size >= 2
+            [row[0]] + row[2..]
+          end
+        end
+
+        full_nr = @annot.nber_rows.to_i.positive? ? @annot.nber_rows.to_i : matrix[:nber_rows].to_i
+        file_nc = matrix[:nber_cols].to_i
+        full_nc = if @annot.name.start_with?('/attrs/') && file_nc.positive?
+          file_nc
+        elsif @annot.nber_cols.to_i.positive?
+          @annot.nber_cols.to_i
+        else
+          file_nc
+        end
         @matrix_preview = {
-          nber_rows: matrix[:nber_rows],
-          nber_cols: matrix[:nber_cols],
+          nber_rows: full_nr.to_i,
+          nber_cols: full_nc.to_i,
           shown_rows: sample_rows.size,
           shown_cols: sample_rows.first&.size.to_i,
-          rows: sample_rows
+          rows: sample_rows,
+          column_headers: column_headers,
+          attrs_global: @annot.name.start_with?('/attrs/')
         }
       else
         Rails.logger.error("Loom file not found: #{loom_path}")
@@ -293,21 +380,19 @@ class AnnotsController < ApplicationController
     end
 
     if @annot.dim == 3
-      cmd = H5DataService.asap_command(
-        '-T', 'ExtractRow',
-        '-loom', loom_path.to_s,
-        '-iAnnot', @annot.name,
-        '-start', '0',
-        '-nber', (@annot.nber_rows || 100).to_s
-      )
-      stdout, stderr, status = Open3.capture3(*cmd)
-
-      unless status.success?
-        render plain: "Failed to extract data: #{stderr}", status: :internal_server_error
+      total_rows = @annot.nber_rows.to_i
+      if total_rows <= 0
+        render plain: 'Cannot download: row count is missing for this matrix.', status: :unprocessable_entity
         return
       end
 
-      data = JSON.parse(stdout) rescue {}
+      begin
+        data = H5DataService.extract_matrix_rows_chunked(loom_path.to_s, @annot.name, total_rows, chunk_size: 1000)
+      rescue StandardError => e
+        render plain: "Failed to extract data: #{e.message}", status: :internal_server_error
+        return
+      end
+
       rows = data['rows'] || []
 
       if format_type == 'json'
@@ -459,6 +544,51 @@ class AnnotsController < ApplicationController
     unless annot_visible_under_publication_rules?(@annot.project, @annot)
       redirect_to unauthorized_path and return
     end
+  end
+
+  # Redundant HDF5 / header column titled exactly "Gene" or "Genes" (compound id column).
+  # Do not match gene_name, GeneName, gene_symbol, etc. those stay in the preview.
+  def preview_attrs_matrix_column_name_gene_like?(s)
+    t = s.to_s.strip
+    return false if t.empty?
+
+    t.casecmp?('gene') || t.casecmp?('genes')
+  end
+
+  def preview_attrs_matrix_h5_column_names_numeric?(names)
+    names.is_a?(Array) && names.any? && names.all? { |x| x.to_s.match?(/\A\d+\z/) }
+  end
+
+  # Matches EnsemblID, ensembl_id, Ensembl gene id, etc. (output.json / HDF5 compound labels).
+  def preview_attrs_matrix_header_ensembl_id_like?(s)
+    t = s.to_s.strip.downcase.gsub(/[^a-z0-9]/, '')
+    return true if t == 'ensemblid' || t == 'ensemblids'
+    return true if t.start_with?('ensembl') && (t.include?('id') || t.end_with?('ids'))
+
+    false
+  end
+
+  # Column titles from the run's output.json "metadata" array (same source as finish_run / headers_json).
+  def annot_metadata_headers_from_run_output_json(annot, project_dir)
+    run = annot.run
+    return nil unless run&.step
+
+    step_dir = project_dir + run.step.name
+    output_dir = run.step.multiple_runs == true ? step_dir + run.id.to_s : step_dir
+    outp = output_dir + 'output.json'
+    return nil unless File.exist?(outp)
+
+    h_out = Basic.safe_parse_json(File.read(outp), {})
+    meta = h_out['metadata']
+    return nil unless meta.is_a?(Array)
+
+    entry = meta.find { |m| m.is_a?(Hash) && m['name'].to_s == annot.name.to_s }
+    return nil unless entry.is_a?(Hash)
+
+    raw = entry['headers']
+    return nil unless raw.is_a?(Array) && raw.any?
+
+    raw.map(&:to_s)
   end
 
   # Compute bins for histogram

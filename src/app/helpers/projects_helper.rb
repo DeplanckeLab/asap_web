@@ -85,6 +85,42 @@ module ProjectsHelper
     content_tag(:span, "#{count_int} #{label}", class: badge_class)
   end
 
+  # Column count for the same loom as /matrix: if it matches matrix columns, use
+  # col_label (cells); otherwise the value is a table width (e.g. DE fields), not cells.
+  def dimension_badge_col_aligned_with_matrix(count, filepath, project)
+    return '' unless count.present?
+
+    dims = matrix_dims_for_filepath(project, filepath)
+    matrix_cols = dims&.dig(:cols)
+    if matrix_cols.present? && count.to_i != matrix_cols.to_i
+      table_columns_badge(count)
+    else
+      dimension_badge(count, :col, project)
+    end
+  end
+
+  def matrix_dims_for_filepath(project, filepath)
+    return nil if project.blank? || filepath.blank?
+
+    @_matrix_dims_for_filepath ||= {}
+    key = [project.id, filepath.to_s]
+    return @_matrix_dims_for_filepath[key] if @_matrix_dims_for_filepath.key?(key)
+
+    m = Annot.where(project_id: project.id, filepath: filepath, name: '/matrix').first
+    @_matrix_dims_for_filepath[key] =
+      if m
+        { rows: m.nber_rows, cols: m.nber_cols }
+      end
+  end
+
+  def table_columns_badge(count)
+    count_int = count.to_i
+    label = (count_int == 1) ? 'column' : 'columns'
+    # Same neutral styling as component_dimension_badge: not the cell axis.
+    badge_class = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'
+    content_tag(:span, "#{count_int} #{label}", class: badge_class)
+  end
+
   # Generate a neutral badge for the component dimension of a multi-component
   # metadata annotation (e.g. the 50 PCs of /col_attrs/X_pca or the 2 axes of
   # /col_attrs/X_umap). This is the per-entry vector length and is NOT a
@@ -207,5 +243,52 @@ module ProjectsHelper
     
     # Build download URL
     get_file_project_path(@project, step: step_name, filename: filename, run_id: run_id)
+  end
+
+  # Single chip for output.json "metadata" (e.g. DE --write-metadata), same family as Global metadata badges in run Results.
+  def run_output_metadata_summary_html(h_res, project)
+    return ''.html_safe unless h_res.is_a?(Hash)
+
+    meta = h_res['metadata']
+    return ''.html_safe unless meta.is_a?(Array) && meta.any?
+
+    m = meta.find { |e| e.is_a?(Hash) }
+    return ''.html_safe unless m
+
+    raw_name = m['name'].to_s.presence || 'metadata'
+    display_name = ERB::Util.html_escape(raw_name.gsub(/\A\/attrs\//, '').gsub(%r{\A/}, ''))
+
+    detail_bits = []
+    detail_bits << ERB::Util.html_escape(m['type'].to_s) if m['type'].present?
+    if m.key?('nber_rows') && m.key?('nber_cols')
+      detail_bits << "#{ERB::Util.html_escape(m['nber_rows'].to_s)} x #{ERB::Util.html_escape(m['nber_cols'].to_s)}"
+    elsif m.key?('nber_rows')
+      detail_bits << "#{ERB::Util.html_escape(row_label(project, plural: true))} #{ERB::Util.html_escape(m['nber_rows'].to_s)}"
+    elsif m.key?('nber_cols')
+      detail_bits << "#{ERB::Util.html_escape(col_label(project, plural: true))} #{ERB::Util.html_escape(m['nber_cols'].to_s)}"
+    end
+
+    detail_html = if detail_bits.any?
+                    %(<span class="text-xs text-gray-500 ml-2">#{detail_bits.join(' · ')}</span>)
+                  else
+                    ''
+                  end
+
+    tooltip_bits = []
+    if meta.size > 1
+      names = meta.filter_map { |e| e['name'].presence if e.is_a?(Hash) }.map(&:to_s)
+      tooltip_bits << "#{meta.size} outputs: #{names.join(', ')}" if names.any?
+    end
+    col_headers = m['headers'].presence || m['header']
+    if col_headers.is_a?(Array) && col_headers.any?
+      tooltip_bits << "Columns: #{col_headers.join(', ')}"
+    end
+    title_attr = if tooltip_bits.any?
+                   %{ title="#{ERB::Util.html_escape(tooltip_bits.join(' | '))}"}
+                 else
+                   ''
+                 end
+
+    %(<div class="pt-1"><div class="inline-flex items-center flex-wrap gap-x-1 gap-y-0.5 max-w-full px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300"#{title_attr}><span class="font-medium text-gray-800">#{display_name}</span>#{detail_html}</div></div>).html_safe
   end
 end

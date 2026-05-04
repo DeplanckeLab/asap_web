@@ -346,15 +346,18 @@ class ProjectsController < ApplicationController
           @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
           @data = []
           project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+          de_aid = params[:gene_list_de_annot_id].presence
+          @de_gene_list_annot_id = de_aid
+          de_list_dir = Basic.de_filter_gene_list_dir(project_dir, gl_run.id, de_aid)
 
-          filename = project_dir + "de" + gl_run.id.to_s + "filtered.#{params[:type]}.json"
+          filename = de_list_dir + "filtered.#{params[:type]}.json"
           list_filtered_rows = Basic.safe_parse_json(File.read(filename), [])
           @h_filtered_rows = {}
           list_filtered_rows.each { |e| @h_filtered_rows[e.to_i] = 1 }
           @nber_genes = list_filtered_rows.size
 
-          filename = project_dir + "de" + gl_run.id.to_s + "output.txt"
-          @tmp_data = File.readlines(filename)
+          output_txt = de_list_dir + 'output.txt'
+          @tmp_data = File.readlines(output_txt)
           i = 0; j = 0
           if params[:type] == 'up'
             @tmp_data.reverse.each do |l|
@@ -1715,14 +1718,6 @@ class ProjectsController < ApplicationController
         list_cmds.push('')
       end
 
-      h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
-      h_std_method_attrs = { run.std_method_id => h_method_attr_defs }
-      attrs_txt = helpers.display_run_attrs_txt(run, h_run_attrs, h_std_method_attrs)
-      operation = "Running #{@h_steps[run.step_id]&.label} [#{run.id}] [#{reproduction_run_short_txt(run)}] (#{attrs_txt})"
-      list_cmds.push("## #{operation}")
-      list_cmds.push("echo '-> #{operation}'")
-      list_cmds.push('')
-
       h_cmd = Basic.safe_parse_json(run.command_json, {})
       if h_cmd['docker_call']
         h_cmd['docker_call'] = h_cmd['docker_call'].gsub('-v /srv/asap_run/srv:/srv', '')
@@ -1739,6 +1734,40 @@ class ProjectsController < ApplicationController
           h_cmd[ek][i]['value'] = h_cmd[ek][i]['value'].to_s.gsub(project_dir.to_s, '$PROJECT_DIR')
         end
       end
+
+      db_meta = h_cmd['db_json']
+      if db_meta.is_a?(Hash)
+        df = File.basename((db_meta['filename'] || 'db.json').to_s)
+        if df.present? && df != '.'
+          db_filepath = output_dir + df
+          local_db_path = "#{local_output_dir}#{df}"
+          db_operation = "writing #{df} (annot dump for de.v8)"
+          list_cmds.push("## #{db_operation}")
+          list_cmds.push("echo '-> #{db_operation}'")
+          db_body = nil
+          db_body = File.read(db_filepath.to_s) if File.exist?(db_filepath.to_s)
+          if db_body.blank? && db_meta['annot_ids'].is_a?(Array) && db_meta['annot_ids'].any?
+            pl = Basic.de_db_json_payload_from_annot_ids(db_meta['annot_ids'], @project.id)
+            db_body = JSON.generate(pl) if pl && pl['annots'].present?
+          end
+          if db_body.present?
+            safe_db = db_body.gsub("'", "'\\''")
+            list_cmds.push("docker run --net=host --entrypoint '/bin/sh' --rm -v $ASAP_PROJECTS_DIR:$ASAP_PROJECTS_DIR #{docker_name} -c \"echo '#{safe_db}' > #{local_db_path}\"")
+            list_cmds.push('')
+          else
+            list_cmds.push("## #{db_operation} skipped (file missing on server and annot_ids could not rebuild payload)")
+            list_cmds.push('')
+          end
+        end
+      end
+
+      h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
+      h_std_method_attrs = { run.std_method_id => h_method_attr_defs }
+      attrs_txt = helpers.display_run_attrs_txt(run, h_run_attrs, h_std_method_attrs)
+      operation = "Running #{@h_steps[run.step_id]&.label} [#{run.id}] [#{reproduction_run_short_txt(run)}] (#{attrs_txt})"
+      list_cmds.push("## #{operation}")
+      list_cmds.push("echo '-> #{operation}'")
+      list_cmds.push('')
 
       cmd_line = Basic.build_cmd(h_cmd)
       cmd_line = cmd_line.gsub(project_dir.to_s, '$PROJECT_DIR')
@@ -2028,7 +2057,8 @@ class ProjectsController < ApplicationController
       "cache_key=#{de_filter_cache_key} runs=#{@runs.size} fdr=#{@h_de_filter['fdr_cutoff']} fc=#{@h_de_filter['fc_cutoff']}"
     )
 
-    @h_stats = run_de_filter(annots, @h_de_filter)
+    @h_stats = run_de_filter(annots, @h_de_filter, de_runs: @runs)
+    @de_table_rows = Basic.de_table_rows_for_runs(@runs.select { |r| r.status_id == 3 })
 
     @h_std_methods = {}
     StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
@@ -2252,22 +2282,34 @@ class ProjectsController < ApplicationController
     # Get project type for display
     @project_type = @project.project_type
     
-    # Get all annotations with step and run information for ordering
-    all_annots = apply_publication_snapshot_to_annots(
-      Annot.where(project_id: @project.id)
-           .where.not(filepath: nil)
-           .includes(:step, run: [:std_method])
-           .order(:name)
-    ).to_a
-    
-    filepath_info = build_filepath_info_from_matrix_annots(all_annots)
-    
-    # Get selected loom file from params
     @selected_loom_file = params[:loom_file].presence
-    
-    # Get selected data type from params or default to matrices
     @selected_data_type = params[:data_type].presence || 'matrices'
-    
+
+    # Scope to one loom when the client asks for a specific file (AJAX right panel).
+    # Loading every Annot for the project is very slow on large projects.
+    annot_relation = Annot.where(project_id: @project.id).where.not(filepath: nil)
+    annot_relation = annot_relation.where(filepath: @selected_loom_file) if @selected_loom_file.present?
+
+    all_annots = apply_publication_snapshot_to_annots(
+      annot_relation.includes(:step, :data_type, run: [:std_method]).order(:name)
+    ).to_a
+
+    filepath_info = if @selected_loom_file.present?
+      matrix_annot = all_annots.find { |a| a.name == '/matrix' }
+      if matrix_annot
+        {
+          @selected_loom_file => {
+            step_rank: matrix_annot.step&.rank,
+            run_id: matrix_annot.run_id
+          }
+        }
+      else
+        {}
+      end
+    else
+      build_filepath_info_from_matrix_annots(all_annots)
+    end
+
     # Get available loom files list for empty state check
     @available_loom_files = filepath_info.keys.sort_by do |filepath|
       info = filepath_info[filepath]
@@ -8554,15 +8596,18 @@ class ProjectsController < ApplicationController
           @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
           @data = []
           project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+          de_aid = params[:gene_list_de_annot_id].presence
+          @de_gene_list_annot_id = de_aid
+          de_list_dir = Basic.de_filter_gene_list_dir(project_dir, gl_run.id, de_aid)
 
-          filename = project_dir + "de" + gl_run.id.to_s + "filtered.#{params[:type]}.json"
+          filename = de_list_dir + "filtered.#{params[:type]}.json"
           list_filtered_rows = Basic.safe_parse_json(File.read(filename), [])
           @h_filtered_rows = {}
           list_filtered_rows.each { |e| @h_filtered_rows[e.to_i] = 1 }
           @nber_genes = list_filtered_rows.size
 
-          filename = project_dir + "de" + gl_run.id.to_s + "output.txt"
-          @tmp_data = File.readlines(filename)
+          output_txt = de_list_dir + 'output.txt'
+          @tmp_data = File.readlines(output_txt)
           i = 0
           j = 0
           if params[:type] == 'up'
@@ -9864,14 +9909,27 @@ class ProjectsController < ApplicationController
     true
   end
 
-  def run_de_filter(annots, h_de_filter)
+  def run_de_filter(annots, h_de_filter, de_runs: nil)
+    user_id = de_filter_cache_key
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-    h_stats = {}
+
+    completed =
+      if de_runs
+        de_runs.select { |r| r.status_id == 3 }
+      else
+        Run.where(id: annots.map(&:run_id).uniq, status_id: 3).order(created_at: :desc).to_a
+      end
+    table_rows = Basic.de_table_rows_for_runs(completed)
+    annots_union = (annots + table_rows.filter_map { |r| r[:annot] }).uniq(&:id)
 
     h_annots_by_loom_path = {}
-    annots_to_do = annots.select do |annot|
-      output_txt = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
-      !File.exist?(output_txt) || File.size(output_txt) == 0
+    annots_to_do = annots_union.select do |annot|
+      output_txt = Basic.de_annot_output_txt_path(project_dir, annot)
+      next true unless File.exist?(output_txt) && File.size(output_txt).positive?
+
+      first_line = File.open(output_txt, 'r', &:gets)
+      ncol = first_line&.chomp&.split("\t")&.size.to_i
+      ncol != 10 || Basic.de_output_txt_first_line_is_column_header?(first_line)
     end
     annots_to_do.each do |annot|
       h_annots_by_loom_path[annot.filepath] ||= []
@@ -9885,8 +9943,12 @@ class ProjectsController < ApplicationController
     loom_paths = annots_to_do.map(&:filepath).uniq
     loom_paths.each do |loom_path|
       to_compute = h_annots_by_loom_path[loom_path].any? do |annot|
-        output_file = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
-        !File.exist?(output_file) || File.size(output_file) == 0
+        output_file = Basic.de_annot_output_txt_path(project_dir, annot)
+        next true unless File.exist?(output_file) && File.size(output_file).positive?
+
+        first_line = File.open(output_file, 'r', &:gets)
+        ncol = first_line&.chomp&.split("\t")&.size.to_i
+        ncol != 10 || Basic.de_output_txt_first_line_is_column_header?(first_line)
       end
 
       next unless to_compute
@@ -9912,95 +9974,154 @@ class ProjectsController < ApplicationController
       res.select { |g| h_ensembl_ids[g.ensembl_id] }.each { |g| h_genes[g.ensembl_id] = g }
     end
 
-    annots_to_do.select { |a| File.exist?(project_dir + 'de' + a.run_id.to_s) }.each do |annot|
+    annots_to_do.select do |a|
+      owner_run_id = Basic.de_attrs_de_output_matrix_match(a.name)&.first || a.run_id
+      File.exist?(project_dir + 'de' + owner_run_id.to_s)
+    end.each do |annot|
       loom_path = annot.filepath
       loom_file = project_dir + loom_path
-      output_file = project_dir + 'de' + annot.run_id.to_s + 'output.txt'
+      output_file = Basic.de_annot_output_txt_path(project_dir, annot)
 
-      next if File.exist?(output_file) && File.size(output_file) > 0
+      if File.exist?(output_file) && File.size(output_file).positive?
+        first_line = File.open(output_file, 'r', &:gets)
+        ncol = first_line&.chomp&.split("\t")&.size.to_i
+        next if ncol == 10 && !Basic.de_output_txt_first_line_is_column_header?(first_line)
+      end
 
-      cmd3 = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata --scientific -prec 5 -loom #{loom_file} -meta \"#{annot.name}\""
-      h_results = Basic.safe_parse_json(`#{cmd3}`.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8), {})
-      if h_results['values']
-        h_results['values'].each_index do |i|
-          h_results['values'][i] = h_results['values'][i].map { |e| e ? e.to_f : 'NA' } if h_results['values'][i]
+      h_results = {}
+      vals = nil
+      attrs_via_h5py = false
+      meta_name = annot.name.to_s
+      meta_norm = meta_name.sub(/\Aattrs\//, '/attrs/')
+      # v8 /attrs/ DE matrices: h5py is faster and returns the nested layout ExtractMetadata often skips.
+      if meta_norm.start_with?('/attrs/')
+        begin
+          h_results = H5DataService.get_attrs_matrix_full_for_de_filter(loom_file.to_s, meta_norm, annot)
+          vals = h_results['values']
+          attrs_via_h5py = true
+        rescue => e
+          Rails.logger.error(
+            "[run_de_filter] attrs_matrix_h5py_failed project_id=#{@project.id} run_id=#{annot.run_id} annot_id=#{annot.id} " \
+            "loom=#{loom_file} meta=#{annot.name} error=#{e.class}: #{e.message}"
+          )
         end
       end
+
+      unless vals.is_a?(Array) && vals[0].is_a?(Array)
+        cmd3 = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata --scientific -prec 5 -loom #{loom_file} -meta \"#{annot.name}\""
+        h_results = Basic.safe_parse_json(`#{cmd3}`.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8), {})
+        vals = h_results['values']
+        attrs_via_h5py = false
+        unless vals.is_a?(Array) && vals[0].is_a?(Array)
+          if meta_norm.start_with?('/attrs/') && !attrs_via_h5py
+            begin
+              h_results = H5DataService.get_attrs_matrix_full_for_de_filter(loom_file.to_s, meta_norm, annot)
+              vals = h_results['values']
+              attrs_via_h5py = true
+            rescue => e
+              Rails.logger.error(
+                "[run_de_filter] attrs_matrix_h5py_retry_failed project_id=#{@project.id} run_id=#{annot.run_id} annot_id=#{annot.id} " \
+                "loom=#{loom_file} meta=#{annot.name} error=#{e.class}: #{e.message}"
+              )
+            end
+          end
+        end
+      end
+      json_nr = h_results['nber_rows'].to_i
+      json_nc = h_results['nber_cols'].to_i
+      vals, de_orient_note = Basic.de_attrs_values_to_column_major(vals, json_nr, json_nc, annot)
+      n_cols = vals.is_a?(Array) ? vals.size : 0
+      pack = Basic.de_metric_source_indices_for_extract_metadata(annot, n_cols)
+      metric_idxs = pack[:indices]
+      sort_col = pack[:sort_idx]
 
       ensembl_ids = h_ensembl_ids_by_loom_path[loom_path]
       gene_names = h_gene_names_by_loom_path[loom_path]
 
+      sample_preview = nil
+      FileUtils.mkdir_p(output_file.dirname)
       File.open(output_file, 'w') do |f|
-        if h_results['values'] && h_results['values'][0] && h_results['values'][0].size > 0
-          f.write(
-            (0..h_results['values'][0].size - 1).to_a
-              .select { |e| h_results['values'][0][e] }
-              .sort { |a, b| h_results['values'][0][a].to_f <=> h_results['values'][0][b].to_f }
-              .map { |i|
-                if ensembl_ids && ensembl_ids[i] && (g = h_genes[ensembl_ids[i]])
-                  details = [i, g.ensembl_id, g.name, g.alt_names, g.description]
-                else
-                  details = [i, nil, gene_names ? gene_names[i] : nil, nil, nil]
-                end
-                (details + (0..4).map { |vi|
-                  val = h_results['values'][vi][i]
-                  if val
-                    if [1, 2].include?(vi) || !val.is_a?(Float)
-                      val
-                    elsif val.is_a?(Float) && val.abs > 0.001
-                      '%.3f' % val
-                    else
-                      '%.e' % val
-                    end
-                  else
-                    'NA'
-                  end
-                }).join("\t")
-              }.join("\n") + "\n"
-          )
+        if vals.is_a?(Array) && vals[sort_col].is_a?(Array) && vals[sort_col].size.positive?
+          sort_series = vals[sort_col]
+          n_matrix = sort_series.size
+          n_acc = ensembl_ids&.size.to_i
+          n_gene = gene_names&.size.to_i
+          loom_n = if n_acc.positive? && n_gene.positive?
+                     [n_acc, n_gene].min
+                   elsif n_acc.positive?
+                     n_acc
+                   elsif n_gene.positive?
+                     n_gene
+                   else
+                     0
+                   end
+          n_use = loom_n.positive? && n_matrix > loom_n ? loom_n : n_matrix
+          body = (0...n_use).to_a
+            .select { |e| sort_series[e] }
+            .sort { |a, b| sort_series[a].to_f <=> sort_series[b].to_f }
+            .map { |i|
+              if ensembl_ids && ensembl_ids[i] && (g = h_genes[ensembl_ids[i]])
+                details = [i, g.ensembl_id, g.name, g.alt_names, g.description]
+              else
+                details = [i, nil, gene_names ? gene_names[i] : nil, nil, nil]
+              end
+              metric_cells = (0..4).map do |slot|
+                ci = metric_idxs[slot]
+                raw = vals[ci].is_a?(Array) ? vals[ci][i] : nil
+                Basic.de_format_output_txt_metric_value(raw, slot)
+              end
+              (details + metric_cells).join("\t")
+            }.join("\n") + "\n"
+          f.write(body)
+          sample_preview = body.lines.first&.chomp&.slice(0, 240)
         end
       end
-    end
 
-    user_id = de_filter_cache_key
-    list_of_run_ids = annots.map(&:run_id)
-
-    filtered_stats_txt_file = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.txt"
-    File.delete(filtered_stats_txt_file) if File.exist?(filtered_stats_txt_file)
-
-    FileUtils.mkdir_p(project_dir + 'tmp')
-    cmd = "echo '#{list_of_run_ids.join("\n")}' | xargs -P 24 -I '{}' lib/filter_de '#{project_dir}' #{h_de_filter['fdr_cutoff']} #{h_de_filter['fc_cutoff']} de_results #{user_id} '{}' > #{project_dir + 'toto.txt'}"
-    script_file = project_dir + 'tmp' + "#{user_id}_de_script.sh"
-    File.open(script_file, 'w') { |f| f.write(cmd) }
-    stdout, stderr, status = Open3.capture3('sh', script_file.to_s)
-    unless status.success?
-      Rails.logger.error(
-        "[run_de_filter] command_failed project_id=#{@project.id} cache_key=#{user_id} " \
-        "status=#{status.exitstatus} stdout=#{stdout.to_s.strip} stderr=#{stderr.to_s.strip}"
+      Rails.logger.info(
+        "[run_de_filter] wrote_de_output_txt project_id=#{@project.id} run_id=#{annot.run_id} annot_id=#{annot.id} " \
+        "attrs_h5py=#{attrs_via_h5py} orient=#{de_orient_note} n_cols=#{n_cols} metric_idxs=#{metric_idxs.inspect} sort_col=#{sort_col} " \
+        "fdr_cutoff=#{h_de_filter['fdr_cutoff']} fc_cutoff=#{h_de_filter['fc_cutoff']} " \
+        "sample_line=#{sample_preview.inspect}"
       )
-      raise "DE filtering failed (status #{status.exitstatus})"
     end
 
-    unless File.exist?(filtered_stats_txt_file)
-      Rails.logger.error(
-        "[run_de_filter] missing_stats_file project_id=#{@project.id} cache_key=#{user_id} " \
-        "expected=#{filtered_stats_txt_file}"
-      )
-      raise 'DE filtering failed (stats file missing)'
+    h_stats = {}
+    table_rows.each do |row|
+      p = Basic.de_annot_output_txt_path(project_dir, row[:annot], run_id: row[:run].id)
+      next unless File.exist?(p) && File.size(p).positive?
+
+      key = row[:stats_key].to_s
+      h_stats[key] = Basic.de_filter_write_filtered_json!(p, h_de_filter['fdr_cutoff'], h_de_filter['fc_cutoff'])
     end
 
-    File.open(filtered_stats_txt_file, 'r') do |f|
-      while (l = f.gets)
-        t = l.chomp.split("\t")
-        h_stats[t[0]] = { 'up' => t[1].to_i, 'down' => t[2].to_i }
+    if h_stats.any?
+      all_zero = h_stats.values.all? { |v| v['up'].to_i.zero? && v['down'].to_i.zero? }
+      if all_zero
+        sample_lines = table_rows.take(3).map do |row|
+          p = Basic.de_annot_output_txt_path(project_dir, row[:annot], run_id: row[:run].id)
+          rid = row[:run].id
+          if !File.exist?(p)
+            "#{rid}:missing"
+          elsif File.size(p).to_i <= 0
+            "#{rid}:empty"
+          else
+            File.open(p, 'r', &:readline)&.chomp&.slice(0, 400)
+          end
+        end
+        Rails.logger.warn(
+          "[run_de_filter] all_zero_up_down project_id=#{@project.id} cache_key=#{user_id} " \
+          "fdr_cutoff=#{h_de_filter['fdr_cutoff']} fc_cutoff=#{h_de_filter['fc_cutoff']} " \
+          "sample_output_txt_lines=#{sample_lines.inspect}"
+        )
       end
     end
 
     filtered_stats_json = project_dir + 'tmp' + "#{user_id}_de_filtered_stats.json"
+    FileUtils.mkdir_p(project_dir + 'tmp')
     File.open(filtered_stats_json, 'w') { |f| f.write(h_stats.to_json) }
 
     Rails.logger.info(
-      "[run_de_filter] success project_id=#{@project.id} cache_key=#{user_id} runs=#{list_of_run_ids.size} stats=#{h_stats.size}"
+      "[run_de_filter] success project_id=#{@project.id} cache_key=#{user_id} table_rows=#{table_rows.size} stats=#{h_stats.size}"
     )
 
     h_stats
@@ -10010,14 +10131,6 @@ class ProjectsController < ApplicationController
       "error=#{e.class}: #{e.message}"
     )
     raise
-  ensure
-    if script_file && File.exist?(script_file)
-      begin
-        File.delete(script_file)
-      rescue => e
-        Rails.logger.warn("[run_de_filter] script_cleanup_failed #{script_file}: #{e.message}")
-      end
-    end
   end
 
   # Get all run IDs in the pipeline that created a given run
@@ -12504,7 +12617,7 @@ class ProjectsController < ApplicationController
           "<div class='flex items-center justify-between mb-2'><div class='font-semibold text-gray-900'>#{helpers.display_run(run)}</div><span class='inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium #{status_badge_classes}'>#{status_name}</span></div>",
           "<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2'>Parameters</p>",
           helpers.display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
-          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Output summary</p><div class='flex flex-wrap gap-1.5'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res[e["key"]] }.map { |e| "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200'>#{e["label"]}:#{(h_res[e["key"]]) ? h_res[e["key"]] : 'NA'}</span>" }.join(" ") + "</div>") : ''),
+          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Output summary</p><div class='flex flex-wrap gap-1.5'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res.key?(e["key"]) }.map { |e| v = h_res[e["key"]]; disp = v.nil? ? "NA" : v; "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200'>#{e["label"]}:#{disp}</span>" }.join(" ") + "</div>") : ''),
           ((h_files.keys.size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Results</p><div class='flex flex-wrap gap-1.5'>" + h_files.keys.map { |k| helpers.display_download_btn(run, h_files[k]) }.join(" ") + "</div>") : ""),
           ((run.status_id == 3 && h_res['warnings']) ? h_res['warnings'].map { |e|
             if e.is_a?(Hash)

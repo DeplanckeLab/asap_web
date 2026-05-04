@@ -296,7 +296,13 @@ class ProjectCloneService
         end
       end
     end
-    
+
+    if new_command['db_json'].is_a?(Hash) && new_command['db_json']['annot_ids'].is_a?(Array)
+      old_ids = new_command['db_json']['annot_ids']
+      new_ids = old_ids.map { |aid| @h_annots[aid.to_i]&.id }.compact.uniq
+      new_command['db_json'] = new_command['db_json'].merge('annot_ids' => new_ids)
+    end
+
     new_command
   end
 

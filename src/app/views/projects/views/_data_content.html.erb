@@ -81,7 +81,7 @@
                   <div class="flex flex-wrap gap-2 items-center">
                     <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
                       <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
-                      <%= dimension_badge(annot.nber_cols, :col, @project) if annot.nber_cols %>
+                      <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) if annot.nber_cols %>
                     <% elsif annot.name.start_with?('/col_attrs/') %>
                       <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
                       <%= component_dimension_badge(annot.nber_rows) %>

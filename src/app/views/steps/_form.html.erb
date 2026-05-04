@@ -95,6 +95,34 @@
       </div>
     </div>
 
+    <div>
+      <%= form.label :command_json, "Command JSON", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :command_json, rows: 4, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :output_json, "Output JSON (expected_outputs, finish_run)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :output_json, rows: 8, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :dashboard_card_json, "Dashboard card JSON", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :dashboard_card_json, rows: 6, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
+    <div>
+      <%= form.label :show_view_json, "Show view JSON (std run panel layout)", class: "block text-sm font-medium text-gray-700" %>
+      <div class="mt-1">
+        <%= form.text_area :show_view_json, rows: 6, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 font-mono text-xs" %>
+      </div>
+    </div>
+
     <div class="flex items-center gap-4">
       <%= form.check_box :multiple_runs, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
       <%= form.label :multiple_runs, "Multiple Runs", class: "text-sm font-medium text-gray-700" %>

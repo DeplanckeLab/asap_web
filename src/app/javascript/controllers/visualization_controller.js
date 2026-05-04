@@ -363,6 +363,10 @@ export default class extends Controller {
     this.labelPlacementMode = 'avoid-collisions'
     this.freezeMovedLabels = true
     
+    // Histogram display (gene and numerical metadata range sliders)
+    this.histogramScale = 'normal'
+    this.histogramIgnoreZeros = true
+
     // Initialize custom plot axis scale preferences
     this.customPlotXAxisScale = 'normal'
     this.customPlotYAxisScale = 'normal'
@@ -7069,6 +7073,8 @@ export default class extends Controller {
         pointSize: this.currentPointSize,
         categoryOrder: this.categoryOrder,
         numericalOrder: this.numericalOrder,
+        histogramScale: this.histogramScale === 'log' ? 'log' : 'normal',
+        histogramIgnoreZeros: this.histogramIgnoreZeros !== false,
         showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
         showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
         showCategories: !!document.getElementById('show-categories-checkbox')?.checked,
@@ -7777,6 +7783,24 @@ export default class extends Controller {
     if (state.display) {
       this.categoryOrder = state.display.categoryOrder || this.categoryOrder
       this.numericalOrder = state.display.numericalOrder || this.numericalOrder
+      if (state.display.histogramScale === 'log' || state.display.histogramScale === 'normal') {
+        this.histogramScale = state.display.histogramScale
+      }
+      if (Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
+        this.histogramIgnoreZeros = state.display.histogramIgnoreZeros !== false
+      }
+      const histogramScaleSelect = document.getElementById('histogram-scale-select')
+      if (histogramScaleSelect) {
+        histogramScaleSelect.value = this.histogramScale === 'log' ? 'log' : 'normal'
+      }
+      const histogramIgnoreZerosCheckbox = document.getElementById('histogram-ignore-zeros-checkbox')
+      if (histogramIgnoreZerosCheckbox) {
+        histogramIgnoreZerosCheckbox.checked = this.histogramIgnoreZeros !== false
+      }
+      if (Object.prototype.hasOwnProperty.call(state.display, 'histogramScale') ||
+          Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
+        this.refreshHistogramsAfterGlobalHistogramOptionsChanged()
+      }
       this.showLabelBoxes = state.display.showLabelBoxes !== false
       this.labelFontSizeMode = state.display.labelFontSizeMode || this.labelFontSizeMode
       this.labelFontSize = Number(state.display.labelFontSize || this.labelFontSize)
@@ -20580,6 +20604,107 @@ export default class extends Controller {
     }
   }
   
+  // Build histogram bins for gene and metadata range sliders (linear or log10-spaced bins on the value axis).
+  buildHistogramBins(values, minEdge, maxEdge, numBins) {
+    const scale = this.histogramScale === 'log' ? 'log' : 'normal'
+    const ignoreZeros = this.histogramIgnoreZeros !== false
+    const bins = new Array(numBins).fill(0)
+    const binRanges = new Array(numBins)
+    const sourceValues = ignoreZeros ? values.filter((v) => v !== 0) : values
+    const sourceCount = sourceValues.length
+
+    const useLog = scale === 'log' && minEdge > 0 && maxEdge > 0
+    if (useLog) {
+      const logMin = Math.log10(minEdge)
+      const logMax = Math.log10(maxEdge)
+      const span = logMax - logMin
+      if (span > 0) {
+        for (let i = 0; i < numBins; i++) {
+          const t0 = logMin + (i / numBins) * span
+          const t1 = logMin + ((i + 1) / numBins) * span
+          binRanges[i] = { min: Math.pow(10, t0), max: Math.pow(10, t1) }
+        }
+        const invSpan = numBins / span
+        for (let vi = 0; vi < sourceValues.length; vi++) {
+          const v = sourceValues[vi]
+          if (v <= 0 || !Number.isFinite(v)) continue
+          const lv = Math.log10(v)
+          let binIndex = Math.floor((lv - logMin) * invSpan)
+          if (binIndex < 0) binIndex = 0
+          if (binIndex > numBins - 1) binIndex = numBins - 1
+          bins[binIndex]++
+        }
+      } else {
+        for (let i = 0; i < numBins; i++) {
+          binRanges[i] = { min: minEdge, max: maxEdge }
+        }
+        for (let vi = 0; vi < sourceValues.length; vi++) {
+          const v = sourceValues[vi]
+          if (v > 0 && Number.isFinite(v)) bins[0]++
+        }
+      }
+    } else {
+      const binWidth = (maxEdge - minEdge) / numBins
+      for (let i = 0; i < numBins; i++) {
+        binRanges[i] = {
+          min: minEdge + i * binWidth,
+          max: minEdge + (i + 1) * binWidth
+        }
+      }
+      if (binWidth > 0) {
+        const invBinWidth = 1 / binWidth
+        for (let vi = 0; vi < sourceValues.length; vi++) {
+          const v = sourceValues[vi]
+          if (!Number.isFinite(v)) continue
+          let binIndex = Math.floor((v - minEdge) * invBinWidth)
+          if (binIndex < 0) binIndex = 0
+          if (binIndex > numBins - 1) binIndex = numBins - 1
+          bins[binIndex]++
+        }
+      }
+    }
+
+    let maxCount = 0
+    for (let i = 0; i < numBins; i++) {
+      if (bins[i] > maxCount) maxCount = bins[i]
+    }
+    return { bins, maxCount, binRanges, sourceCount }
+  }
+
+  // Position of a value on the histogram value axis as a fraction in [0, 1] (for selection overlay; matches buildHistogramBins).
+  histogramSelectionFraction(value, minEdge, maxEdge) {
+    const scale = this.histogramScale === 'log' ? 'log' : 'normal'
+    const useLog = scale === 'log' && minEdge > 0 && maxEdge > 0
+    if (!Number.isFinite(value) || !Number.isFinite(minEdge) || !Number.isFinite(maxEdge)) {
+      return 0
+    }
+    let v = value
+    if (v < minEdge) v = minEdge
+    if (v > maxEdge) v = maxEdge
+    if (useLog) {
+      const logMin = Math.log10(minEdge)
+      const logMax = Math.log10(maxEdge)
+      const span = logMax - logMin
+      if (span <= 0) return 0
+      if (v <= 0) return 0
+      const t = (Math.log10(v) - logMin) / span
+      return Math.min(1, Math.max(0, t))
+    }
+    const span = maxEdge - minEdge
+    if (span <= 0) return 0
+    const t = (v - minEdge) / span
+    return Math.min(1, Math.max(0, t))
+  }
+
+  refreshHistogramsAfterGlobalHistogramOptionsChanged() {
+    this.refreshHistogramsAndBarplots()
+    const densityBtn = document.getElementById('density-plot-btn')
+    const densityActive = densityBtn && densityBtn.classList.contains('active')
+    if (this.rangeSliderData?.values && densityActive) {
+      this.drawDensityPlot(this.rangeSliderData.values)
+    }
+  }
+
   // Draw density plot
   drawDensityPlot(values) {
     // Cache canvas and context for better performance
@@ -20599,17 +20724,9 @@ export default class extends Controller {
     // Create histogram with optimized binning
     const bins = 50
     const { min, max } = this.rangeSliderData
-    const binWidth = (max - min) / bins
-    const histogram = new Array(bins).fill(0)
+    const { bins: histogram, maxCount } = this.buildHistogramBins(values, min, max, bins)
     
-    // Optimize histogram creation
-    const invBinWidth = 1 / binWidth
-    for (let i = 0; i < values.length; i++) {
-      const binIndex = Math.min(Math.floor((values[i] - min) * invBinWidth), bins - 1)
-      histogram[binIndex]++
-    }
-    
-    const maxCount = this.dataManager.safeMax(histogram)
+    const denom = maxCount > 0 ? maxCount : 1
     
     // Draw histogram
     ctx.fillStyle = '#4b5563'
@@ -20620,20 +20737,24 @@ export default class extends Controller {
     histogram.forEach((count, i) => {
       const x = (i / bins) * width
       const barWidth = width / bins
-      const barHeight = (count / maxCount) * (height - margins.top - margins.bottom)
+      const barHeight = (count / denom) * (height - margins.top - margins.bottom)
       const y = height - margins.bottom - barHeight
       
       ctx.fillRect(x, y, barWidth - 1, barHeight)
       ctx.strokeRect(x, y, barWidth - 1, barHeight)
     })
     
-    // Draw range selection
+    // Draw range selection (same value-axis mapping as histogram bins: linear or log10)
     const { currentMin, currentMax } = this.rangeSliderData
-    const minX = ((currentMin - min) / (max - min)) * width
-    const maxX = ((currentMax - min) / (max - min)) * width
+    const minFrac = this.histogramSelectionFraction(currentMin, min, max)
+    const maxFrac = this.histogramSelectionFraction(currentMax, min, max)
+    const f0 = Math.min(minFrac, maxFrac)
+    const f1 = Math.max(minFrac, maxFrac)
+    const minX = f0 * width
+    const maxX = f1 * width
     
     ctx.fillStyle = 'rgba(59, 130, 246, 0.18)'
-    ctx.fillRect(minX, 0, maxX - minX, height)
+    ctx.fillRect(minX, 0, Math.max(0, maxX - minX), height)
     
     // Draw range lines
     ctx.strokeStyle = '#ef4444'

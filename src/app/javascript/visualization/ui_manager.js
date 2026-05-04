@@ -1692,6 +1692,31 @@ export class UIManager {
       })
     }
 
+    const histogramScaleSelect = document.getElementById('histogram-scale-select')
+    if (histogramScaleSelect) {
+      histogramScaleSelect.value = this.controller.histogramScale === 'log' ? 'log' : 'normal'
+      if (!histogramScaleSelect.dataset.histogramScaleBound) {
+        histogramScaleSelect.dataset.histogramScaleBound = '1'
+        histogramScaleSelect.addEventListener('change', (e) => {
+          const v = e.target.value
+          this.controller.histogramScale = v === 'log' ? 'log' : 'normal'
+          this.controller.refreshHistogramsAfterGlobalHistogramOptionsChanged()
+        })
+      }
+    }
+
+    const histogramIgnoreZerosCheckbox = document.getElementById('histogram-ignore-zeros-checkbox')
+    if (histogramIgnoreZerosCheckbox) {
+      histogramIgnoreZerosCheckbox.checked = this.controller.histogramIgnoreZeros !== false
+      if (!histogramIgnoreZerosCheckbox.dataset.histogramIgnoreZerosBound) {
+        histogramIgnoreZerosCheckbox.dataset.histogramIgnoreZerosBound = '1'
+        histogramIgnoreZerosCheckbox.addEventListener('change', (e) => {
+          this.controller.histogramIgnoreZeros = !!e.target.checked
+          this.controller.refreshHistogramsAfterGlobalHistogramOptionsChanged()
+        })
+      }
+    }
+
     const discretePaletteSelect = document.getElementById('discrete-palette-select')
     if (discretePaletteSelect) {
       const labels = getDiscretePaletteSelectLabels()

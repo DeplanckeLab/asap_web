@@ -2107,6 +2107,30 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             </select>
           </div>
         </div>
+
+        <p style="margin: 16px 0 0 0; padding-top: 14px; border-top: 1px solid #e5e7eb; color: #374151;">
+          <span style="display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; margin-bottom: 10px;">
+            Histograms
+          </span>
+          <span style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 12px; line-height: 1.4;">
+            Genes and numerical metadata
+          </span>
+          <span style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <label for="histogram-scale-select" style="font-size: 13px; font-weight: 500;">Scale</label>
+            <select id="histogram-scale-select"
+                    style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
+              <option value="normal" selected>Normal</option>
+              <option value="log">Log</option>
+            </select>
+          </span>
+          <span style="display: flex; align-items: center; justify-content: space-between;">
+            <label for="histogram-ignore-zeros-checkbox" style="font-size: 13px; font-weight: 500; cursor: pointer;">Ignore 0 values</label>
+            <input type="checkbox"
+                   id="histogram-ignore-zeros-checkbox"
+                   checked
+                   style="width: 16px; height: 16px; cursor: pointer;">
+          </span>
+        </p>
       </div>
       
       <!-- Main Plot Settings -->

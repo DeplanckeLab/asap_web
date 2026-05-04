@@ -1047,31 +1047,25 @@ export default class extends Controller {
     
     // Create histogram using only filtered values
     const numBins = 50
-    const binWidth = (this.maxValue - this.minValue) / numBins
-    const bins = new Array(numBins).fill(0)
-    
-    filteredValues.forEach(value => {
-      const binIndex = Math.min(Math.floor((value - this.minValue) / binWidth), numBins - 1)
-      bins[binIndex]++
-    })
-    
-    const maxCount = this.safeMax(bins)
+    const { bins, maxCount, binRanges, sourceCount } = this.visualizationController.buildHistogramBins(
+      filteredValues,
+      this.minValue,
+      this.maxValue,
+      numBins
+    )
     const barWidth = plotWidth / numBins
+    const denom = maxCount > 0 ? maxCount : 1
+    const totalForDensity = sourceCount > 0 ? sourceCount : filteredValues.length
     
     // Store bin data for hover tooltip
-    // Use filteredValues.length for density calculation
-    const totalFilteredCount = filteredValues.length
     this.binData = bins.map((count, i) => ({
       count,
-      density: totalFilteredCount > 0 ? (count / totalFilteredCount) * 100 : 0,
-      range: {
-        min: this.minValue + i * binWidth,
-        max: this.minValue + (i + 1) * binWidth
-      },
+      density: totalForDensity > 0 ? (count / totalForDensity) * 100 : 0,
+      range: binRanges[i] || { min: this.minValue, max: this.maxValue },
       x: leftMargin + i * barWidth,
-      y: topMargin + plotHeight - (count / maxCount) * plotHeight,
+      y: topMargin + plotHeight - (count / denom) * plotHeight,
       width: barWidth - 1,
-      height: (count / maxCount) * plotHeight
+      height: (count / denom) * plotHeight
     }))
     
     // Draw bars
@@ -1080,16 +1074,18 @@ export default class extends Controller {
       ctx.fillRect(bin.x, bin.y, bin.width, bin.height)
     })
     
-    // Draw range selection overlay
-    const range = this.maxValue - this.minValue
-    const minPercent = (this.currentMinValue - this.minValue) / range
-    const maxPercent = (this.currentMaxValue - this.minValue) / range
+    // Draw range selection overlay (linear or log10 along value axis, matching histogram bins)
+    const vc = this.visualizationController
+    const minPercent = vc.histogramSelectionFraction(this.currentMinValue, this.minValue, this.maxValue)
+    const maxPercent = vc.histogramSelectionFraction(this.currentMaxValue, this.minValue, this.maxValue)
+    const p0 = Math.min(minPercent, maxPercent)
+    const p1 = Math.max(minPercent, maxPercent)
     
     // Check if filter is disabled (gray) or enabled (blue)
     const isFilterDisabled = this.visualizationController?.disabledFilters?.has(this.metadataIdValue)
     ctx.fillStyle = isFilterDisabled ? 'rgba(209, 213, 219, 0.5)' : 'rgba(59, 130, 246, 0.18)' // gray or blue
-    const overlayX = leftMargin + minPercent * plotWidth
-    const overlayWidth = (maxPercent - minPercent) * plotWidth
+    const overlayX = leftMargin + p0 * plotWidth
+    const overlayWidth = (p1 - p0) * plotWidth
     ctx.fillRect(overlayX, topMargin, overlayWidth, plotHeight)
     
     // Draw axis titles and tick labels

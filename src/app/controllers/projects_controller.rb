@@ -4424,7 +4424,7 @@ class ProjectsController < ApplicationController
     clas_list = []
     if annot_cell_set&.cell_set_id
       clas_list = Cla.active.where(cell_set_id: annot_cell_set.cell_set_id)
-                     .includes(:project, :annot)
+                     .includes(:project, :annot, :cla_source)
                      .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
                      .to_a
       clas_list = clas_list.select { |cla| cla.project && readable?(cla.project) }
@@ -4518,7 +4518,8 @@ class ProjectsController < ApplicationController
         annot_id: cla.annot_id,
         cat_idx: cla.cat_idx,
         metadata_name: metadata_name,
-        category_label: category_label
+        category_label: category_label,
+        origin: cla.origin_label
       }
     end
 
@@ -4540,7 +4541,7 @@ class ProjectsController < ApplicationController
 
     clas = Cla.active.joins(:cell_set)
              .where(cell_sets: { key: cell_set_key })
-             .includes(:project, :annot, :cell_set, :user)
+             .includes(:project, :annot, :cell_set, :user, :cla_source)
              .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
              .to_a
 
@@ -4604,7 +4605,8 @@ class ProjectsController < ApplicationController
         nber_agree: cla.nber_agree || 0,
         nber_disagree: cla.nber_disagree || 0,
         created_by: creator_label,
-        created_at: cla.created_at&.strftime('%b %d, %Y')
+        created_at: cla.created_at&.strftime('%b %d, %Y'),
+        origin: cla.origin_label
       }
     end
 

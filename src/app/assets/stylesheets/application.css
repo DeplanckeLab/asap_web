@@ -70,6 +70,12 @@
 }
 
 @media (min-width: 768px) {
+  header .menu-item,
+  header .nav-top-dropdown-button {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
   header .menu-item.menu-item-default:hover,
   header .menu-item.menu-item-default:focus {
     color: #374151 !important;

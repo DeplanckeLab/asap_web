@@ -18,6 +18,7 @@ class Project < ApplicationRecord
   belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
   has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
   has_many :annots, dependent: :destroy
+  has_many :annot_cell_sets, inverse_of: :project
   has_many :ot_projects, dependent: :destroy
   has_many :ott_projects, dependent: :destroy
   has_many :compliance_mappings, dependent: :destroy

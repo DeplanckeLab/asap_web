@@ -109,7 +109,7 @@ cp.comments.each do |c|
 summary_checkpoint_comments << { checkpoint_title: cp.title, body: (c['body'] || c[:body] || c['comment']).to_s, user_name: (c['user_name'] || c[:user_name]).to_s, created_at: (c['created_at'] || c[:created_at]).to_s }
 end
 end
-summary_cla_records = Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user).order(created_at: :desc).to_a
+summary_cla_records = Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source).order(created_at: :desc).to_a
 summary_annotation_options = summary_cla_records.group_by(&:annot_id).map do |aid, clas|
 annot = clas.first&.annot; next unless annot; { id: aid, label: (annot.display_name.presence || annot.name.to_s), count: clas.length }
 end.compact.sort_by { |e| e[:label].to_s.downcase }
@@ -551,6 +551,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                   <tr>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Origin</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Up-regulated genes</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Down-regulated genes</th>
@@ -569,6 +570,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                     <tr data-summary-annotation-row data-annot-id="<%= cla.annot_id %>" class="<%= summary_default_annotation_id.present? && cla.annot_id != summary_default_annotation_id ? 'hidden' : '' %>">
                       <td class="px-2 py-1.5 text-xs text-gray-700"><%= cluster_category_label %></td>
                       <td class="px-2 py-1.5 text-xs text-gray-700"><%= cla.name.presence || cla.cat.presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= cla.origin_label.presence || '-' %></td>
                       <% cell_set_md5 = cla.cell_set&.key.to_s.presence %>
                       <td class="px-2 py-1.5 text-xs text-gray-600 font-mono whitespace-nowrap">
                         <% if cell_set_md5 %>
@@ -626,6 +628,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Metadata name</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
+                      <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Origin</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Up-regulated genes</th>
                       <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Down-regulated genes</th>
@@ -1085,7 +1088,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
     const loadCellSetAnnotations = async (cellSetKey) => {
       if (!annotationsCellSetTbody || !projectKey || !cellSetKey) return
       showCellSetAnnotationsView()
-      annotationsCellSetTbody.innerHTML = '<tr><td colspan="10" class="px-2 py-3 text-xs text-gray-500">Loading annotations...</td></tr>'
+      annotationsCellSetTbody.innerHTML = '<tr><td colspan="11" class="px-2 py-3 text-xs text-gray-500">Loading annotations...</td></tr>'
       if (annotationsCellSetEmpty) annotationsCellSetEmpty.classList.add('hidden')
 
       try {
@@ -1112,6 +1115,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.metadata_name || '-')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.cluster_category || '-')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap">${escapeHtml(row.label || '-')}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">${escapeHtml(row.origin || '-')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-600 font-mono whitespace-nowrap">${escapeHtml(shortHash)}</td>
               <td class="px-2 py-1.5 text-xs text-gray-600">${renderGeneBadges(row.up_genes, 'up')}</td>
               <td class="px-2 py-1.5 text-xs text-gray-600">${renderGeneBadges(row.down_genes, 'down')}</td>
@@ -1122,7 +1126,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
           `
         }).join('')
       } catch (_error) {
-        annotationsCellSetTbody.innerHTML = '<tr><td colspan="10" class="px-2 py-3 text-xs text-red-600">Unable to load annotations for this cell set.</td></tr>'
+        annotationsCellSetTbody.innerHTML = '<tr><td colspan="11" class="px-2 py-3 text-xs text-red-600">Unable to load annotations for this cell set.</td></tr>'
       }
     }
 

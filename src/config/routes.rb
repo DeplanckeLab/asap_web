@@ -153,11 +153,13 @@ Rails.application.routes.draw do
   resources :home do
     collection do
       get :home
+      get :guided_tours
       get :tutorial
       get :file_format
       get :cross_references
       get :cross_references_admin
       get :faq
+      get :citing
       get :contact
       post :contact_submit
       get :rate
@@ -216,6 +218,7 @@ Rails.application.routes.draw do
   end
   get '/api-doc', to: 'home#api_documentation', as: :api_doc
   get '/api-doc/index.html', to: redirect('/api-doc', status: 302)
+  get '/guided-tours', to: 'home#guided_tours', as: :public_guided_tours
   get '/sitemap.xml', to: 'home#sitemap', as: :sitemap
   get '/robots.txt', to: 'home#robots', as: :robots
   root "home#welcome"

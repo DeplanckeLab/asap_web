@@ -978,6 +978,7 @@ if (typeof openAnnotationPopup !== 'function') {
       content += '</div>';
     } else {
       clas.forEach(function(cla) {
+        var originRawDm = (cla.origin != null && String(cla.origin).trim() !== '') ? String(cla.origin).trim() : '';
         content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">';
         content += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">';
         content += '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-wrap:wrap;">';
@@ -992,6 +993,11 @@ if (typeof openAnnotationPopup !== 'function') {
           content += claGeneBadgesRowHtml(cla.down_genes, 'down');
         }
         if (cla.comment) content += '<div style="font-size: 12px; color: #374151;"><strong>Comment:</strong> ' + escapeHtml(cla.comment) + '</div>';
+        if (originRawDm) {
+          content += '<div style="display:flex;justify-content:flex-end;margin-top:8px;">';
+          content += '<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;">' + escapeHtml(originRawDm) + '</span>';
+          content += '</div>';
+        }
         content += '</div>';
       });
     }

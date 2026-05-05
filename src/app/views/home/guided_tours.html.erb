@@ -1,0 +1,42 @@
+<% content_for :title, "Guided Tours - ASAP" %>
+<% content_for :meta_description, "Browse all ASAP guided tours and start them directly from this page." %>
+
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Guided tours</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Choose a tour and start it directly in your current session.
+    </p>
+  </div>
+
+  <% if @guided_tours.any? %>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <% @guided_tours.each do |tour| %>
+        <section class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 p-5">
+          <div class="flex items-start justify-between gap-3">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><%= tour.name %></h2>
+            <span class="text-xs text-gray-500 dark:text-gray-400">#<%= tour.rank %></span>
+          </div>
+
+          <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">
+            <%= pluralize(tour.guided_tour_steps.size, "step") %>
+            <% if tour.duration_time.present? %>
+              - about <%= tour.duration_time %> seconds
+            <% end %>
+          </p>
+
+          <div class="mt-4">
+            <%= link_to "Start guided tour",
+                        guided_tour_start_url(tour.id),
+                        class: "inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800",
+                        data: { controller: "nav-item", action: "click->nav-item#navigate" } %>
+          </div>
+        </section>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No guided tours are available yet.
+    </div>
+  <% end %>
+</div>

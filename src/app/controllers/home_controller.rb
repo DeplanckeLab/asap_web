@@ -261,6 +261,12 @@ class HomeController < ApplicationController
 
   end
 
+  def guided_tours
+    @guided_tours = GuidedTour
+      .ordered
+      .includes(:guided_tour_steps)
+  end
+
   def rate
     @rating = current_user.ratings.order(created_at: :desc).first
   end
@@ -291,6 +297,9 @@ class HomeController < ApplicationController
   end
 
   def faq
+  end
+
+  def citing
   end
 
   private

@@ -716,6 +716,27 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                       </span>
                     </div>
                     
+                    <!-- Per-metadata histogram options -->
+                    <div style="margin-bottom: 8px;">
+                      <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: nowrap; overflow: hidden;">
+                        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #4b5563; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; cursor: pointer;">
+                          <input type="checkbox"
+                                 data-range-slider-target="histogramIgnoreZeros"
+                                 data-action="change->range-slider#histogramIgnoreZerosChanged"
+                                 checked
+                                 style="width: 14px; height: 14px; cursor: pointer; flex: 0 0 auto;">
+                          <span style="white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis;">Ignore 0s</span>
+                        </label>
+                        <label style="font-size: 11px; color: #4b5563; white-space: nowrap; flex: 0 0 auto;">x-axis</label>
+                        <select data-range-slider-target="histogramScale"
+                                data-action="change->range-slider#histogramScaleChanged"
+                                style="width: 92px; min-width: 92px; max-width: 92px; padding: 3px 6px; font-size: 11px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer; flex: 0 0 auto;">
+                          <option value="normal" selected>Normal</option>
+                          <option value="log">Log</option>
+                        </select>
+                      </div>
+                    </div>
+
                     <!-- Histogram with Highlighted Range -->
                     <div style="margin-bottom: 8px;">
                       <canvas data-range-slider-target="canvas" class="density-plot-canvas" data-metadata-id="<%= metadata.id %>" 
@@ -2113,7 +2134,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             Histograms
           </span>
           <span style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 12px; line-height: 1.4;">
-            Genes and numerical metadata
+            Gene expression only
           </span>
           <span style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
             <label for="histogram-scale-select" style="font-size: 13px; font-weight: 500;">Scale</label>
@@ -4291,6 +4312,7 @@ function renderExistingAnnotationsTab(clas) {
     clas.forEach(function(cla) {
       var score = (cla.nber_agree || 0) - (cla.nber_disagree || 0)
       var scoreColor = score > 0 ? '#10b981' : (score < 0 ? '#ef4444' : '#9ca3af')
+      var originRaw = (cla.origin != null && String(cla.origin).trim() !== '') ? String(cla.origin).trim() : ''
 
       content += '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; background:#fff;">'
 
@@ -4325,9 +4347,14 @@ function renderExistingAnnotationsTab(clas) {
         content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Comment: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cla.comment)) + '</span></div>'
       }
 
-      content += '<div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">'
+      content += '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; flex-wrap: wrap;">'
+      content += '<div style="display: flex; align-items: center; gap: 12px;">'
       content += '<span style="font-size: 12px; color: #10b981;"><i class="far fa-thumbs-up"></i> ' + (cla.nber_agree || 0) + '</span>'
       content += '<span style="font-size: 12px; color: #ef4444;"><i class="far fa-thumbs-down"></i> ' + (cla.nber_disagree || 0) + '</span>'
+      content += '</div>'
+      if (originRaw) {
+        content += '<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;flex-shrink:0;">' + escapeHtml(originRaw) + '</span>'
+      }
       content += '</div>'
 
       content += '</div>'

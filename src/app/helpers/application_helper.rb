@@ -172,6 +172,12 @@ module ApplicationHelper
         path: ratings_path,
         icon: "fas fa-star"
       },
+      {
+        label: "Guided tours",
+        description: "Manage guided tours and their steps",
+        path: guided_tours_path,
+        icon: "fas fa-route"
+      },
       { label: "Tools", path: tools_path, icon: "fas fa-wrench" },
       { label: "Tool Types", path: tool_types_path, icon: "fas fa-tags" },
       { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
@@ -272,6 +278,12 @@ module ApplicationHelper
         path: "https://github.com/DeplanckeLab/ASAP/discussions",
         icon: "fas fa-comments",
         external: true
+      },
+      {
+        label: "Citing ASAP",
+        description: "How to cite ASAP and who references it",
+        path: citing_home_index_path,
+        icon: "fas fa-quote-right"
       },
       {
         label: "Feature requests and issues",

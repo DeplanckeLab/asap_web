@@ -363,9 +363,10 @@ export default class extends Controller {
     this.labelPlacementMode = 'avoid-collisions'
     this.freezeMovedLabels = true
     
-    // Histogram display (gene and numerical metadata range sliders)
+    // Histogram display (gene expression range sliders)
     this.histogramScale = 'normal'
     this.histogramIgnoreZeros = true
+    this.metadataHistogramOptions = {}
 
     // Initialize custom plot axis scale preferences
     this.customPlotXAxisScale = 'normal'
@@ -7075,6 +7076,7 @@ export default class extends Controller {
         numericalOrder: this.numericalOrder,
         histogramScale: this.histogramScale === 'log' ? 'log' : 'normal',
         histogramIgnoreZeros: this.histogramIgnoreZeros !== false,
+        metadataHistogramOptions: this.buildMetadataHistogramOptionsCheckpointState(),
         showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
         showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
         showCategories: !!document.getElementById('show-categories-checkbox')?.checked,
@@ -7789,6 +7791,12 @@ export default class extends Controller {
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
         this.histogramIgnoreZeros = state.display.histogramIgnoreZeros !== false
       }
+      this.metadataHistogramOptions = {}
+      if (state.display.metadataHistogramOptions && typeof state.display.metadataHistogramOptions === 'object') {
+        Object.entries(state.display.metadataHistogramOptions).forEach(([metadataId, options]) => {
+          this.metadataHistogramOptions[String(metadataId)] = this.resolveHistogramOptions(options)
+        })
+      }
       const histogramScaleSelect = document.getElementById('histogram-scale-select')
       if (histogramScaleSelect) {
         histogramScaleSelect.value = this.histogramScale === 'log' ? 'log' : 'normal'
@@ -7798,9 +7806,16 @@ export default class extends Controller {
         histogramIgnoreZerosCheckbox.checked = this.histogramIgnoreZeros !== false
       }
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramScale') ||
-          Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
+          Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros') ||
+          Object.prototype.hasOwnProperty.call(state.display, 'metadataHistogramOptions')) {
         this.refreshHistogramsAfterGlobalHistogramOptionsChanged()
       }
+      document.querySelectorAll('[data-controller~="range-slider"]').forEach((element) => {
+        const rangeSliderController = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
+        if (rangeSliderController && typeof rangeSliderController.initializeHistogramControls === 'function') {
+          rangeSliderController.initializeHistogramControls()
+        }
+      })
       this.showLabelBoxes = state.display.showLabelBoxes !== false
       this.labelFontSizeMode = state.display.labelFontSizeMode || this.labelFontSizeMode
       this.labelFontSize = Number(state.display.labelFontSize || this.labelFontSize)
@@ -20605,9 +20620,10 @@ export default class extends Controller {
   }
   
   // Build histogram bins for gene and metadata range sliders (linear or log10-spaced bins on the value axis).
-  buildHistogramBins(values, minEdge, maxEdge, numBins) {
-    const scale = this.histogramScale === 'log' ? 'log' : 'normal'
-    const ignoreZeros = this.histogramIgnoreZeros !== false
+  buildHistogramBins(values, minEdge, maxEdge, numBins, options = null) {
+    const resolved = this.resolveHistogramOptions(options)
+    const scale = resolved.scale
+    const ignoreZeros = resolved.ignoreZeros
     const bins = new Array(numBins).fill(0)
     const binRanges = new Array(numBins)
     const sourceValues = ignoreZeros ? values.filter((v) => v !== 0) : values
@@ -20672,8 +20688,9 @@ export default class extends Controller {
   }
 
   // Position of a value on the histogram value axis as a fraction in [0, 1] (for selection overlay; matches buildHistogramBins).
-  histogramSelectionFraction(value, minEdge, maxEdge) {
-    const scale = this.histogramScale === 'log' ? 'log' : 'normal'
+  histogramSelectionFraction(value, minEdge, maxEdge, options = null) {
+    const resolved = this.resolveHistogramOptions(options)
+    const scale = resolved.scale
     const useLog = scale === 'log' && minEdge > 0 && maxEdge > 0
     if (!Number.isFinite(value) || !Number.isFinite(minEdge) || !Number.isFinite(maxEdge)) {
       return 0
@@ -20703,6 +20720,46 @@ export default class extends Controller {
     if (this.rangeSliderData?.values && densityActive) {
       this.drawDensityPlot(this.rangeSliderData.values)
     }
+  }
+
+  resolveHistogramOptions(options = null) {
+    const fallbackScale = this.histogramScale === 'log' ? 'log' : 'normal'
+    const scale = options && Object.prototype.hasOwnProperty.call(options, 'scale')
+      ? (options.scale === 'log' ? 'log' : 'normal')
+      : fallbackScale
+    const fallbackIgnoreZeros = this.histogramIgnoreZeros !== false
+    const ignoreZeros = options && Object.prototype.hasOwnProperty.call(options, 'ignoreZeros')
+      ? options.ignoreZeros !== false
+      : fallbackIgnoreZeros
+    return { scale, ignoreZeros }
+  }
+
+  getMetadataHistogramOptions(metadataId) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return { scale: 'normal', ignoreZeros: true }
+    const savedOptions = this.metadataHistogramOptions?.[normalizedMetadataId] || {}
+    return {
+      scale: savedOptions.scale === 'log' ? 'log' : 'normal',
+      ignoreZeros: savedOptions.ignoreZeros !== false
+    }
+  }
+
+  setMetadataHistogramOptions(metadataId, options = {}) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return
+    const current = this.getMetadataHistogramOptions(normalizedMetadataId)
+    this.metadataHistogramOptions[normalizedMetadataId] = this.resolveHistogramOptions({
+      ...current,
+      ...options
+    })
+  }
+
+  buildMetadataHistogramOptionsCheckpointState() {
+    const serialized = {}
+    Object.entries(this.metadataHistogramOptions || {}).forEach(([metadataId, options]) => {
+      serialized[String(metadataId)] = this.resolveHistogramOptions(options)
+    })
+    return serialized
   }
 
   // Draw density plot

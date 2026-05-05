@@ -1,5 +1,8 @@
 module Basic
 
+  # Cla rows created by parsing / load_annot (add_clas) use this cla_sources.id (ASAP auto annotation).
+  ASAP_AUTO_CLA_SOURCE_ID = 3
+
   # Raised when a cloned project needs the same metadata column on the immediate parent project
   # (see marker_groups_annot_id) and that source Annot row cannot be found.
   SourceAnnotResolutionError = Class.new(StandardError)
@@ -2477,12 +2480,12 @@ module Basic
                 ac.save
                 h_annot_cell_sets[[a.id, cat_idx]] = ac
                 puts "Create annot_cell_set #{ac.id}"
-                # elsif ac.cell_set_id != cell_set                                                                                                              
-                #   ac.update({:cell_set_id => cell_set.id})                                                                                         
-                #   h_annot_cell_sets[[h_a[:annot].id, cat_idx]]= ac                                                                                            
-                # puts "Update annot_cell_set #{ac.id}"                                                                                                         
               else
                 puts "annot_cell_set #{ac.id} exists!"
+                if ac.cell_set_id != cell_set.id
+                  ac.update!(cell_set_id: cell_set.id)
+                  puts "Update annot_cell_set #{ac.id} cell_set_id to #{cell_set.id} (category membership changed)"
+                end
               end
               
             end
@@ -2497,6 +2500,24 @@ module Basic
       return h_cell_set_by_cat_idx
     end
 
+    # Map metadata category labels to original Cell Ontology terms (one query per distinct label set).
+    # Prefer identifier match over name; lowest id wins when several rows share the same identifier or name.
+    def h_cell_ontology_terms_by_cat_label(labels)
+      labels = labels.map(&:to_s).uniq.reject(&:empty?)
+      return {} if labels.empty?
+
+      terms = ::CellOntologyTerm.where(original: true)
+        .where("identifier IN (?) OR name IN (?)", labels, labels)
+        .order(:id)
+      by_ident = {}
+      by_name = {}
+      terms.each do |term|
+        by_ident[term.identifier] ||= term if term.identifier.present?
+        by_name[term.name] ||= term if term.name.present?
+      end
+      labels.index_with { |name| by_ident[name] || by_name[name] }
+    end
+
     def add_clas project, a, h_cell_sets, cache = nil
       cache ||= {}
       cla_by_annot_cat = cache[:cla_by_annot_cat] ||= {}
@@ -2508,16 +2529,11 @@ module Basic
       list_cats =  Basic.safe_parse_json(a.list_cat_json, [])
       h_cat_aliases = Basic.safe_parse_json(a.cat_aliases_json, {})
 
-      # Resolve ontology terms in batch for all categories not already cached.
+      # Resolve ontology terms (see h_cell_ontology_terms_by_cat_label).
       missing_names = list_cats.map(&:to_s).select { |name| name != '' }.uniq.reject { |name| cot_by_name_or_identifier.key?(name) }
       if missing_names.any?
-        terms = ::CellOntologyTerm.where(original: true).where("identifier IN (?) OR name IN (?)", missing_names, missing_names)
-        terms.each do |term|
-          cot_by_name_or_identifier[term.identifier] ||= term if term.identifier.present?
-          cot_by_name_or_identifier[term.name] ||= term if term.name.present?
-        end
-        missing_names.each do |name|
-          cot_by_name_or_identifier[name] = nil unless cot_by_name_or_identifier.key?(name)
+        h_cell_ontology_terms_by_cat_label(missing_names).each do |name, term|
+          cot_by_name_or_identifier[name] = term
         end
       end
 
@@ -2544,7 +2560,7 @@ module Basic
           cot = cot_by_name_or_identifier[annot_name.to_s]
           cot_ids = (cot) ? cot.id : nil
           h_cla = {
-            :cla_source_id => 3,
+            :cla_source_id => ASAP_AUTO_CLA_SOURCE_ID,
             :name => (cot) ? "" : annot_name, # : 1,
             :annot_id => a.id,
             :num => 1,
@@ -2566,6 +2582,9 @@ module Basic
           if !cla
             cla = Cla.new(h_cla)
             cla.save
+          elsif cla.cla_source_id == ASAP_AUTO_CLA_SOURCE_ID
+            cla.assign_attributes(h_cla)
+            cla.save if cla.changed?
           end
           cla_by_annot_cat[annot_cat_key] = cla
           existing_clas_for_annot[i] ||= cla

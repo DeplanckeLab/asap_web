@@ -6,7 +6,7 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static LIVE_COUNT_UPDATE_MAX_CELLS = 10000
 
-  static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas", "adaptColorRangeButton"]
+  static targets = ["track", "activeTrack", "minHandle", "maxHandle", "minInput", "maxInput", "selectedCount", "totalCount", "canvas", "adaptColorRangeButton", "histogramIgnoreZeros", "histogramScale"]
   static values = { 
     metadataId: String,
     min: Number,
@@ -78,6 +78,7 @@ export default class extends Controller {
     
     // Initialize button appearance
     this.updateButtonAppearance()
+    this.initializeHistogramControls()
     
     // Check if data is already available (e.g., for genes that loaded data before slider connected)
     if (this.visualizationController?.inlineRangeSliderData?.[this.metadataIdValue]) {
@@ -116,6 +117,50 @@ export default class extends Controller {
     this.currentMinValue = sliderData.currentMin ?? sliderData.min
     this.currentMaxValue = sliderData.currentMax ?? sliderData.max
     this.initializeSlider()
+  }
+
+  isGeneSlider() {
+    return this.metadataIdValue && String(this.metadataIdValue).startsWith('gene_')
+  }
+
+  getHistogramOptions() {
+    if (!this.visualizationController) {
+      return { scale: 'normal', ignoreZeros: true }
+    }
+    if (this.isGeneSlider()) {
+      return {
+        scale: this.visualizationController.histogramScale === 'log' ? 'log' : 'normal',
+        ignoreZeros: this.visualizationController.histogramIgnoreZeros !== false
+      }
+    }
+    const metadataOptions = this.visualizationController.getMetadataHistogramOptions(this.metadataIdValue)
+    return {
+      scale: metadataOptions.scale === 'log' ? 'log' : 'normal',
+      ignoreZeros: metadataOptions.ignoreZeros !== false
+    }
+  }
+
+  initializeHistogramControls() {
+    if (!this.hasHistogramIgnoreZerosTarget || !this.hasHistogramScaleTarget) return
+    const options = this.getHistogramOptions()
+    this.histogramIgnoreZerosTarget.checked = options.ignoreZeros !== false
+    this.histogramScaleTarget.value = options.scale === 'log' ? 'log' : 'normal'
+  }
+
+  histogramIgnoreZerosChanged(event) {
+    if (!this.visualizationController || this.isGeneSlider()) return
+    this.visualizationController.setMetadataHistogramOptions(this.metadataIdValue, {
+      ignoreZeros: !!event.target.checked
+    })
+    this.drawDensityPlot()
+  }
+
+  histogramScaleChanged(event) {
+    if (!this.visualizationController || this.isGeneSlider()) return
+    this.visualizationController.setMetadataHistogramOptions(this.metadataIdValue, {
+      scale: event.target.value === 'log' ? 'log' : 'normal'
+    })
+    this.drawDensityPlot()
   }
 
   // Helper methods for safely calculating min/max on large arrays
@@ -1047,11 +1092,13 @@ export default class extends Controller {
     
     // Create histogram using only filtered values
     const numBins = 50
+    const histogramOptions = this.getHistogramOptions()
     const { bins, maxCount, binRanges, sourceCount } = this.visualizationController.buildHistogramBins(
       filteredValues,
       this.minValue,
       this.maxValue,
-      numBins
+      numBins,
+      histogramOptions
     )
     const barWidth = plotWidth / numBins
     const denom = maxCount > 0 ? maxCount : 1
@@ -1076,8 +1123,8 @@ export default class extends Controller {
     
     // Draw range selection overlay (linear or log10 along value axis, matching histogram bins)
     const vc = this.visualizationController
-    const minPercent = vc.histogramSelectionFraction(this.currentMinValue, this.minValue, this.maxValue)
-    const maxPercent = vc.histogramSelectionFraction(this.currentMaxValue, this.minValue, this.maxValue)
+    const minPercent = vc.histogramSelectionFraction(this.currentMinValue, this.minValue, this.maxValue, histogramOptions)
+    const maxPercent = vc.histogramSelectionFraction(this.currentMaxValue, this.minValue, this.maxValue, histogramOptions)
     const p0 = Math.min(minPercent, maxPercent)
     const p1 = Math.max(minPercent, maxPercent)
     
@@ -1103,7 +1150,7 @@ export default class extends Controller {
     ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    const xAxisTitle = 'Value bins'
+    const xAxisTitle = histogramOptions.scale === 'log' ? 'Value bins (log)' : 'Value bins'
     ctx.fillText(xAxisTitle, rect.width / 2, rect.height - bottomMargin + 15)
     
     // Y-axis title (left side, rotated)

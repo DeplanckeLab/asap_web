@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_22_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_23_121500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -826,6 +826,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_22_090000) do
     t.datetime "created_at", precision: nil
     t.text "name"
     t.datetime "updated_at", precision: nil
+  end
+
+  create_table "ncbi_taxonomy_nodes", primary_key: "tax_id", id: :serial, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "order_tax_id"
+    t.integer "parent_tax_id"
+    t.string "rank", default: "", null: false
+    t.string "scientific_name", default: "", null: false
+    t.datetime "updated_at", null: false
+    t.index ["order_tax_id"], name: "index_ncbi_taxonomy_nodes_on_order_tax_id"
+    t.index ["parent_tax_id"], name: "index_ncbi_taxonomy_nodes_on_parent_tax_id"
+    t.index ["rank"], name: "index_ncbi_taxonomy_nodes_on_rank"
   end
 
   create_table "normalizations", id: :serial, force: :cascade do |t|

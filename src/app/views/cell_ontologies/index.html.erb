@@ -42,6 +42,7 @@
               <th scope="col" class="px-6 py-3">Name</th>
               <th scope="col" class="px-6 py-3">Version</th>
               <th scope="col" class="px-6 py-3">Tag</th>
+              <th scope="col" class="px-6 py-3">Obsolete</th>
               <th scope="col" class="px-6 py-3">Format</th>
               <th scope="col" class="px-6 py-3">Terms</th>
               <th scope="col" class="px-6 py-3">Organisms</th>
@@ -83,6 +84,13 @@
                 </td>
                 <td class="whitespace-nowrap px-6 py-4 font-mono text-xs text-gray-600 dark:text-gray-400">
                   <%= ontology.tag.presence || "—" %>
+                </td>
+                <td class="whitespace-nowrap px-6 py-4 text-gray-600 dark:text-gray-300">
+                  <% if ontology.obsolete? %>
+                    <span class="font-medium text-amber-800 dark:text-amber-200">Yes</span>
+                  <% else %>
+                    No
+                  <% end %>
                 </td>
                 <td class="whitespace-nowrap px-6 py-4 text-gray-600 dark:text-gray-300">
                   <%= ontology.format.presence || "—" %>

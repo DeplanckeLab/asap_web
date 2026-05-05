@@ -85,7 +85,7 @@ class ProjectsController < ApplicationController
       format.html
       format.json {
 
-        file_path = Pathname.new(ENV.fetch("ASAP_PREDICTION_DATA_ROOT")) + 'projects.json'
+        file_path = Pathname.new(ENV.fetch("PROD_DATA_DIR")) + 'projects.json'
         headers['Content-Type'] = 'application/json'
         headers['Cache-Control'] = 'no-cache'
         headers['Content-Disposition'] = "inline; filename=#{File.basename(file_path)}"
@@ -4460,6 +4460,20 @@ class ProjectsController < ApplicationController
       symbol_map_by_project_id[project_id] = project_map
     end
 
+    cot_ids = clas_list.flat_map do |cla|
+      parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
+    end.map { |value| value.to_i }.select(&:positive?).uniq
+    cot_map = {}
+    if cot_ids.any?
+      CellOntologyTerm.where(id: cot_ids).pluck(:id, :identifier, :name).each do |id, identifier, name|
+        cot_map[id] = {
+          id: id,
+          identifier: identifier.to_s,
+          name: name.to_s
+        }
+      end
+    end
+
     cla_data = clas_list.map do |cla|
       proj = cla.project
       meta = cla.annot
@@ -4468,6 +4482,7 @@ class ProjectsController < ApplicationController
       sm = symbol_map_by_project_id[cla.project_id] || {}
       up_ids = parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids)
       down_ids = parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+      cot_ids_for_cla = parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
       up_genes = up_ids.filter_map do |gid|
         key = gid.to_s.strip
         next if key.blank?
@@ -4497,6 +4512,9 @@ class ProjectsController < ApplicationController
         name: cla.name,
         cell_ontology_term_ids: cla.cell_ontology_term_ids,
         sorted_cell_ontology_term_ids: cla.sorted_cell_ontology_term_ids,
+        cell_ontology_terms: cot_ids_for_cla.filter_map do |cot_id|
+          cot_map[cot_id.to_i]
+        end,
         up_gene_ids: cla.up_gene_ids,
         sorted_up_gene_ids: cla.sorted_up_gene_ids,
         down_gene_ids: cla.down_gene_ids,
@@ -7015,7 +7033,7 @@ class ProjectsController < ApplicationController
         error: 'Could not read prediction output from the server.',
         time_display: '',
         ram_display: '',
-        time_title: 'The prediction script did not return JSON. Check Docker and ASAP_PREDICTION_DATA_ROOT (pred_models under that root).',
+        time_title: 'The prediction script did not return JSON. Check Docker and PROD_DATA_DIR (pred_models under that root).',
         ram_title: ''
       )
       return

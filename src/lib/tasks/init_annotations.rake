@@ -60,7 +60,7 @@ module InitAnnotationsRake
     }
   end
 
-  def build_cot_map_for_annot(a, list_cats, names_map)
+  def build_cot_map_for_annot(a, list_cats, names_map, organism_tax_id = nil)
     labels_for_cot = []
     list_cats.each do |k|
       s = k.to_s.strip
@@ -71,7 +71,7 @@ module InitAnnotationsRake
         labels_for_cot << s2 if s2 != "" && !s2.match(/^-?[0-9.]+$/)
       end
     end
-    Basic.h_cell_ontology_terms_by_cat_label(labels_for_cot.uniq)
+    Basic.h_cell_ontology_terms_by_cat_label(labels_for_cot.uniq, organism_tax_id)
   end
 
   # ASAP clas on this project that the rake would never (re)assert for a managed slot.
@@ -106,7 +106,7 @@ module InitAnnotationsRake
       h_cat_aliases = {} unless h_cat_aliases.is_a?(Hash)
       names_map = h_cat_aliases["names"]
       names_map = {} unless names_map.is_a?(Hash)
-      cot_by_label = build_cot_map_for_annot(a, list_cats, names_map)
+      cot_by_label = build_cot_map_for_annot(a, list_cats, names_map, p.organism&.tax_id)
 
       intended = asap_intended_attrs(p, a, cla.cat_idx, k, list_cats, cot_by_label, h_cell_sets, asap_src)
       if intended.nil?
@@ -181,7 +181,7 @@ task init_annotations: :environment do
 
       puts h_cat_aliases.to_json
 
-      cot_by_label = InitAnnotationsRake.build_cot_map_for_annot(a, list_cats, names_map)
+      cot_by_label = InitAnnotationsRake.build_cot_map_for_annot(a, list_cats, names_map, p.organism&.tax_id)
 
       sel_clas = []
       h_nber_clas = {}

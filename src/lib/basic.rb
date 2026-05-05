@@ -405,7 +405,7 @@ module Basic
 
     # Mounted host:container at the same absolute path (typical Linux deploy).
     def prediction_data_root_mount
-      ENV.fetch('ASAP_PREDICTION_DATA_ROOT')
+      ENV.fetch('PROD_DATA_DIR')
     end
 
     # Directory containing version subfolders, passed to prediction.tool.2.R (first path argument).
@@ -2500,15 +2500,116 @@ module Basic
       return h_cell_set_by_cat_idx
     end
 
+    # Memo key: tax_id -> NcbiTaxonomyNode.order_tax_id_for(tax_id) (may be nil). Pass {} from batch resolvers.
+    def ncbi_order_tax_id_for_memo(tid, memo)
+      tid = tid.to_i
+      return nil unless tid.positive?
+
+      if memo
+        return memo[tid] if memo.key?(tid)
+
+        memo[tid] = ::NcbiTaxonomyNode.order_tax_id_for(tid)
+      else
+        ::NcbiTaxonomyNode.order_tax_id_for(tid)
+      end
+    end
+
+    def ncbi_taxonomy_nodes_available?
+      defined?(::NcbiTaxonomyNode) && ::NcbiTaxonomyNode.table_exists?
+    rescue StandardError
+      false
+    end
+
+    # :exact = ontology tax_ids lists project species; :order = same NCBI order as an anchor (ncbi_taxonomy_nodes);
+    # :universal = ontology has no tax_ids restriction; nil = not applicable.
+    def cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: nil)
+      return nil unless term.original == true
+
+      tax_id = organism_tax_id.to_i
+      return nil if tax_id <= 0
+
+      ontology = term.cell_ontology
+      return :universal unless ontology
+
+      tax_ids = ontology.tax_id_list
+      return :universal if tax_ids.empty?
+
+      return :exact if tax_ids.include?(tax_id)
+
+      return nil unless ncbi_taxonomy_nodes_available?
+
+      project_order = ncbi_order_tax_id_for_memo(tax_id, order_tax_id_memo)
+      return nil if project_order.blank?
+
+      if tax_ids.any? { |anchor|
+        aid = anchor.to_i
+        next false unless aid.positive?
+
+        anchor_order = ncbi_order_tax_id_for_memo(aid, order_tax_id_memo)
+        anchor_order.present? && anchor_order == project_order
+      }
+        :order
+      else
+        nil
+      end
+    end
+
+    def cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id, order_tax_id_memo: nil)
+      tid = organism_tax_id.to_i
+      return true if tid <= 0
+
+      !cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: order_tax_id_memo).nil?
+    end
+
+    # Prefer exact species ontologies, then same-order (e.g. Diptera), then tax-unrestricted ontologies.
+    def pick_terms_by_taxonomy_priority(matches, organism_tax_id, order_tax_id_memo)
+      return matches if matches.empty?
+
+      exact = []
+      order = []
+      universal = []
+
+      matches.each do |term|
+        case cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: order_tax_id_memo)
+        when :exact
+          exact << term
+        when :order
+          order << term
+        when :universal
+          universal << term
+        end
+      end
+
+      pool = if exact.any?
+               exact
+             elsif order.any?
+               order
+             elsif universal.any?
+               universal
+             else
+               matches
+             end
+
+      pool.sort_by(&:id)
+    end
+
     # Map metadata category labels to original Cell Ontology terms (one query per distinct label set).
     # Prefer identifier match over name; lowest id wins when several rows share the same identifier or name.
-    def h_cell_ontology_terms_by_cat_label(labels)
+    # Skips obsolete terms and terms in obsolete ontologies (see CellOntologyTerm.with_active_cell_ontology).
+    # When organism_tax_id is present: filter by applicability, then exact species > same NCBI order > universal ontology.
+    def h_cell_ontology_terms_by_cat_label(labels, organism_tax_id = nil)
       labels = labels.map(&:to_s).uniq.reject(&:empty?)
       return {} if labels.empty?
 
-      terms = ::CellOntologyTerm.where(original: true)
-        .where("identifier IN (?) OR name IN (?)", labels, labels)
+      terms = ::CellOntologyTerm.original.with_active_cell_ontology
+        .where("cell_ontology_terms.identifier IN (?) OR cell_ontology_terms.name IN (?)", labels, labels)
+        .includes(:cell_ontology)
         .order(:id)
+      if organism_tax_id.present?
+        order_memo = {}
+        terms = terms.select { |term| cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id, order_tax_id_memo: order_memo) }
+        terms = pick_terms_by_taxonomy_priority(terms, organism_tax_id, order_memo)
+      end
       by_ident = {}
       by_name = {}
       terms.each do |term|
@@ -2532,7 +2633,7 @@ module Basic
       # Resolve ontology terms (see h_cell_ontology_terms_by_cat_label).
       missing_names = list_cats.map(&:to_s).select { |name| name != '' }.uniq.reject { |name| cot_by_name_or_identifier.key?(name) }
       if missing_names.any?
-        h_cell_ontology_terms_by_cat_label(missing_names).each do |name, term|
+        h_cell_ontology_terms_by_cat_label(missing_names, project&.organism&.tax_id).each do |name, term|
           cot_by_name_or_identifier[name] = term
         end
       end

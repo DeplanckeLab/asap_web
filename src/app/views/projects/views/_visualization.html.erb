@@ -1275,7 +1275,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           <i class="fas fa-filter" style="font-size: 14px; color: #6b7280; transition: color 0.2s;"></i>
           <span id="active-filter-count" style="font-size: 14px; color: #374151;">0 filters</span>
           <div id="global-filter-switch"
-               data-action="click->visualization#toggleGlobalFilters"
+               data-action="click->visualization#toggleGlobalFilters:stop"
                data-filters-enabled="true"
                title="Global filter switch"
                style="position: relative; width: 38px; height: 20px; border-radius: 9999px; background-color: #d1d5db; cursor: pointer; display: flex; align-items: center; transition: background-color 0.2s;">
@@ -2442,7 +2442,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
 <div id="checkpoint-loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.35); z-index: 12500; justify-content: center; align-items: center;">
   <div style="background: white; border: 1px solid #d1d5db; border-radius: 10px; padding: 18px 22px; min-width: 220px; display: flex; align-items: center; justify-content: center; gap: 10px;">
     <i class="fas fa-spinner fa-spin" style="font-size: 15px; color: #374151;"></i>
-    <span style="font-size: 14px; color: #111827; font-weight: 500;">Loading view...</span>
+    <span id="checkpoint-loading-message" style="font-size: 14px; color: #111827; font-weight: 500;">Loading checkpoint</span>
   </div>
 </div>
 
@@ -4300,6 +4300,23 @@ function claProvenanceInlineHtml(cla) {
   return '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;line-height:1.35;max-width:100%;min-width:0;"><span style="font-size:11px;color:#64748b;flex-shrink:0;">from </span>' + claProvenanceBadgeHtml(cla) + tail + '</span>'
 }
 
+function claOntologyBadgesHtml(cla) {
+  var terms = Array.isArray(cla.cell_ontology_terms) ? cla.cell_ontology_terms : []
+  if (terms.length === 0) return ''
+  var html = '<div class="flex flex-wrap gap-1 mt-1">'
+  terms.forEach(function(term) {
+    var identifier = term && term.identifier != null ? String(term.identifier).trim() : ''
+    var name = term && term.name != null ? String(term.name).trim() : ''
+    if (!identifier && !name) return
+    html += '<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">'
+    if (identifier) html += '<span class="font-mono">' + escapeHtml(identifier) + '</span>'
+    if (name) html += '<span class="text-blue-600">' + escapeHtml(name) + '</span>'
+    html += '</span>'
+  })
+  html += '</div>'
+  return html
+}
+
 function renderExistingAnnotationsTab(clas) {
   var content = ''
 
@@ -4330,9 +4347,8 @@ function renderExistingAnnotationsTab(clas) {
         content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Name: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cla.name)) + '</span></div>'
       }
 
-      if (cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids) {
-        var cotIds = cla.sorted_cell_ontology_term_ids || cla.cell_ontology_term_ids
-        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span><span style="font-size: 12px; color: #374151;">' + escapeHtml(String(cotIds)) + '</span></div>'
+      if (cla.cell_ontology_terms && cla.cell_ontology_terms.length > 0) {
+        content += '<div style="margin-bottom: 6px;"><span style="font-size: 12px; color: #6b7280; font-weight: 500;">Cell ontology: </span>' + claOntologyBadgesHtml(cla) + '</div>'
       }
 
       if (typeof claGeneBadgesRowHtml === 'function' && cla.up_genes && cla.up_genes.length > 0) {

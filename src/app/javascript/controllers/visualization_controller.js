@@ -2157,9 +2157,14 @@ export default class extends Controller {
     }
   }
 
-  setCheckpointViewLoading(isLoading) {
+  setCheckpointViewLoading(isLoading, message = null) {
     const loadingOverlay = document.getElementById('checkpoint-loading-overlay')
     if (!loadingOverlay) return
+    const labelEl = document.getElementById('checkpoint-loading-message')
+    if (labelEl) {
+      const trimmed = message != null ? String(message).trim() : ''
+      labelEl.textContent = trimmed.length > 0 ? trimmed : 'Loading checkpoint'
+    }
     loadingOverlay.style.display = isLoading ? 'flex' : 'none'
   }
 
@@ -2575,6 +2580,7 @@ export default class extends Controller {
     if (!projectIdentifier) return false
 
     this.currentCheckpointLoadInProgress = true
+    this.setCheckpointViewLoading(true, 'Loading checkpoint')
     try {
       const sessionEntry = this.readCurrentVisualizationStateEntryFromSession()
       const sessionState = sessionEntry?.state || null
@@ -2646,6 +2652,7 @@ export default class extends Controller {
       if (this.isCheckpointStateAlreadyApplied(stateToApply)) {
         return true
       }
+
       await this.applyCheckpointState(stateToApply)
       return true
     } catch (error) {
@@ -2654,6 +2661,7 @@ export default class extends Controller {
       })
       return false
     } finally {
+      this.setCheckpointViewLoading(false)
       this.currentCheckpointLoadInProgress = false
     }
   }
@@ -2798,7 +2806,7 @@ export default class extends Controller {
     let checkpoint = null
     let persistedBaselineForComments = null
     try {
-      this.setCheckpointViewLoading(true)
+      this.setCheckpointViewLoading(true, 'Loading checkpoint')
 
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
         method: 'GET',
@@ -3304,7 +3312,7 @@ export default class extends Controller {
     }
     if (this.checkpointCommentVisitedExisting === true && this.checkpointCommentDraftState) {
       if (!this.isCheckpointStateAlreadyApplied(this.checkpointCommentDraftState)) {
-        this.setCheckpointViewLoading(true)
+        this.setCheckpointViewLoading(true, 'Loading checkpoint')
         try {
           await this.applyCheckpointState(this.checkpointCommentDraftState)
         } finally {

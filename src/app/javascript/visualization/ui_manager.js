@@ -898,36 +898,37 @@ export class UIManager {
     
     const definedCount = summary?.total || 0
     const activeCount = filtersEnabled ? definedCount : 0
-    
+    const switchCanToggle = definedCount > 0 || !filtersEnabled
+    const summaryBarInteractive = switchCanToggle
+
     if (countElement) {
       countElement.textContent = `${definedCount}`
       countElement.style.color = '#111827'
       countElement.style.opacity = hasDataManager && definedCount > 0 ? '1' : '0.6'
     }
 
-    const switchInteractive = definedCount > 0
     if (switchElement) {
       switchElement.dataset.filtersEnabled = filtersEnabled ? 'true' : 'false'
-      if (!filtersEnabled && switchInteractive) {
-        switchElement.style.backgroundColor = '#f87171'
-      } else if (filtersEnabled && switchInteractive) {
+      if (!filtersEnabled && switchCanToggle) {
+        switchElement.style.backgroundColor = '#ef4444'
+      } else if (filtersEnabled && definedCount > 0) {
         switchElement.style.backgroundColor = '#10b981'
       } else {
         switchElement.style.backgroundColor = '#d1d5db'
       }
-      switchElement.style.cursor = switchInteractive ? 'pointer' : 'not-allowed'
-      switchElement.style.opacity = switchInteractive ? '1' : '0.5'
+      switchElement.style.cursor = switchCanToggle ? 'pointer' : 'not-allowed'
+      switchElement.style.opacity = switchCanToggle ? '1' : '0.5'
       const toggle = switchElement.querySelector('div')
       if (toggle) {
-        toggle.style.transform = filtersEnabled && switchInteractive ? 'translateX(18px)' : 'translateX(0px)'
+        toggle.style.transform = filtersEnabled && definedCount > 0 ? 'translateX(18px)' : 'translateX(0px)'
       }
     }
-    
+
     container.dataset.activeFilters = activeCount
     container.dataset.definedFilters = definedCount
-    
+
     const hasFilters = definedCount > 0
-    container.style.pointerEvents = hasFilters ? 'auto' : 'none'
+    container.style.pointerEvents = summaryBarInteractive ? 'auto' : 'none'
     container.style.cursor = hasFilters ? 'pointer' : 'default'
     container.style.backgroundColor = hasFilters ? '#ffffff' : '#f3f4f6'
     container.style.borderColor = '#d1d5db'

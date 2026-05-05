@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # Verifies Cla rows created by Basic.add_clas (ASAP auto annotations) against the same rules used at creation:
-# - category string maps via Basic.h_cell_ontology_terms_by_cat_label (identifier before name, stable id)
+# - category string maps via Basic.h_cell_ontology_terms_by_cat_label (identifier before name, stable id;
+#   chosen term: exact species ontology > same NCBI order > universal (empty tax_ids); multiple_cot_rows uses same tier)
 # - cell_ontology_term_ids must equal that chosen term id (or be empty when there is no match)
 # - name must be blank when an ontology term is linked, else equal to the category label
 # - cla.cat must match annot.list_cat_json at cla.cat_idx when list_cat_json is present
@@ -10,7 +11,7 @@
 #   docker compose -f docker-compose.test.yml exec website bundle exec rake cla:verify_asap
 #
 # Optional env:
-#   PROJECT_ID=123        only clas for that project
+#   PROJECT_KEY=my_proj   only clas for that project
 #   LIMIT=5000            max clas scanned (default 100000)
 #   INCLUDE_OBSOLETE=1    include obsolete clas
 #   MAX_WARN_LINES=50     cap warning lines printed (default 50)
@@ -28,16 +29,22 @@ namespace :cla do
     max_warn = (ENV["MAX_WARN_LINES"].presence || 50).to_i
     max_err = (ENV["MAX_ERROR_LINES"].presence || 200).to_i
     raise_on_error = ENV["RAISE_ON_ERROR"] != "0"
+    project_key = ENV["PROJECT_KEY"].to_s.strip
 
     scope = Cla.where(cla_source_id: source_id)
-    scope = scope.where(project_id: ENV["PROJECT_ID"].to_i) if ENV["PROJECT_ID"].present?
+    if project_key.present?
+      project = Project.find_by(key: project_key)
+      raise "project with key #{project_key.inspect} not found" unless project
+
+      scope = scope.where(project_id: project.id)
+    end
     scope = scope.where(obsolete: [false, nil]) unless ENV["INCLUDE_OBSOLETE"].present?
 
     scanned = 0
     errors_by_cla = {}
     warnings = []
 
-    scope.includes(:annot).find_each do |cla|
+    scope.includes(:annot, project: :organism).find_each do |cla|
       break if scanned >= limit
 
       scanned += 1
@@ -61,11 +68,23 @@ namespace :cla do
         next
       end
 
-      chosen = Basic.h_cell_ontology_terms_by_cat_label([cat])[cat]
-      all_matches = CellOntologyTerm.original
-        .where("identifier IN (?) OR name IN (?)", [cat], [cat])
+      project_tax_id = cla.project&.organism&.tax_id
+      order_memo = {}
+      chosen = Basic.h_cell_ontology_terms_by_cat_label([cat], project_tax_id)[cat]
+      tier = if project_tax_id.present?
+               chosen && Basic.cell_ontology_match_tier(chosen, project_tax_id, order_tax_id_memo: order_memo)
+             end
+
+      all_matches = CellOntologyTerm.original.with_active_cell_ontology
+        .where("cell_ontology_terms.identifier IN (?) OR cell_ontology_terms.name IN (?)", [cat], [cat])
+        .includes(:cell_ontology)
         .order(:id)
         .to_a
+        .select { |term| Basic.cell_ontology_term_applicable_to_tax_id?(term, project_tax_id, order_tax_id_memo: order_memo) }
+
+      if tier
+        all_matches = all_matches.select { |t| Basic.cell_ontology_match_tier(t, project_tax_id, order_tax_id_memo: order_memo) == tier }
+      end
 
       stored_raw = cla.cell_ontology_term_ids.to_s.strip
       stored_ids = stored_raw.split(",").map(&:strip).reject(&:empty?).map(&:to_i).uniq

@@ -4,6 +4,7 @@ class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
   before_save :sanitize_non_raw_text_parsing_attrs!
+  before_destroy :archive_runs_to_del_runs!
 
   # Associations
   belongs_to :user, optional: true
@@ -778,6 +779,21 @@ class Project < ApplicationRecord
   end
 
   private
+
+  # Centralized safeguard: before deleting a project, persist terminal run
+  # metadata in del_runs so cleanup jobs and UI can retain run history.
+  def archive_runs_to_del_runs!
+    del_run_columns = DelRun.column_names
+
+    runs.where(status_id: [3, 4]).find_each do |run|
+      del_run = DelRun.find_or_initialize_by(project_id: run.project_id, run_id: run.id)
+      attrs = run.attributes.except('id', 'slurm_job_id')
+      del_run.assign_attributes(attrs.slice(*del_run_columns))
+      del_run.run_id = run.id
+      del_run.project_id = run.project_id
+      del_run.save!
+    end
+  end
 
   def sanitize_non_raw_text_parsing_attrs!
     return if parsing_attrs_json.blank?

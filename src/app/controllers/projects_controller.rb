@@ -13,6 +13,7 @@ class ProjectsController < ApplicationController
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
@@ -7321,13 +7322,14 @@ class ProjectsController < ApplicationController
       @sandbox_self_destruct_at = nil
       return unless @project.sandbox? && !current_user
 
-      sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i
+      sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i
       last_seen_at = @project.viewed_at || @project.updated_at || @project.created_at || Time.current
       @sandbox_self_destruct_at = last_seen_at + sandbox_idle_days.days
     end
 
     def track_project_view!
       return if admin?
+      return if request_user_agent_indicates_bot?
 
       ProjectViewTracker.track!(
         project: @project,
@@ -11277,6 +11279,15 @@ class ProjectsController < ApplicationController
         parts += " #{std_method_name}"
       end
       parts
+    end
+
+    def forbid_bot_html_access_to_public_project_show
+      return unless request.get?
+      return unless request.format.html?
+      return unless @project&.public?
+      return unless request_user_agent_indicates_bot?
+
+      head :forbidden
     end
 
     def set_project

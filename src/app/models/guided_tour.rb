@@ -8,6 +8,7 @@ class GuidedTour < ApplicationRecord
   before_validation :assign_rank, on: :create
 
   scope :ordered, -> { order(:rank, :id) }
+  scope :visible, -> { where(hidden: false) }
 
   private
 

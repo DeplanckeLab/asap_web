@@ -643,8 +643,15 @@ class FuPreparsingService
         end
       end
       
-      # Build R script command with actual values if we have them
-      models_base = Basic.prediction_models_path_for_r
+      # Build R script command with actual values if we have them.
+      # This must never raise from here, otherwise prediction failures
+      # incorrectly fail the whole preparsing job.
+      models_base = begin
+        Basic.prediction_models_path_for_r
+      rescue KeyError => config_error
+        @logger.warn("[FuPreparsingService] Prediction models path unavailable: #{config_error.message}")
+        '<prediction_models_path_unavailable>'
+      end
       if version_id && std_method_id
         r_script_cmd = "Rscript prediction.tool.2.R predict #{models_base}/#{version_id} #{std_method_id} #{nber_rows} #{nber_cols}"
       elsif version_id

@@ -427,7 +427,7 @@
               </div>
             </div>
             <% if @sandbox_self_destruct_at.present? %>
-              <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2').to_i %>
+              <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
               <% countdown = sandbox_self_destruct_countdown(@sandbox_self_destruct_at) %>
               <div class="hidden xl:flex items-stretch border-l border-gray-700 pl-6 text-sm text-gray-300">
                 <div class="flex flex-col justify-center">

@@ -66,10 +66,23 @@ class ReqsController < ApplicationController
     ## create runs
     # {"input_matrix":{"run_id":"13","output_attr_name":"output_matrix"},"fit_model":"log"}
     h_attr_values = JSON.parse(@req.attrs_json)
-    # All-against-complementary: one run, no explicit ref/comp/group_pairs attributes.
-    if Basic.command_json_boolean_truthy?(h_attr_values['all_against_compl'])
-      h_attr_values = h_attr_values.dup
-      %w[group_pairs group_ref group_comp groups2 second_group_from_other_metadata group_comp_from_other_metadata].each { |k| h_attr_values.delete(k) }
+    all_against_compl = Basic.command_json_boolean_truthy?(h_attr_values['all_against_compl'])
+    # When all-against-complementary is enabled, combinatorial runs require group_pairs.
+    # Rebuild them from selected group categories when the UI payload omits them.
+    if all_against_compl
+      group_pairs = h_attr_values['group_pairs']
+      if group_pairs.blank?
+        categories = []
+        groups = h_attr_values['groups']
+        if groups.is_a?(Array) && groups.first.is_a?(Hash)
+          raw_categories = groups.first['categories']
+          if raw_categories.is_a?(Hash)
+            categories = raw_categories.keys.map { |k| k.to_s.strip }.reject(&:blank?).sort
+          end
+        end
+        h_attr_values = h_attr_values.dup
+        h_attr_values['group_pairs'] = categories.map { |group_name| [group_name, ''] } if categories.any?
+      end
     end
     @std_method = @req.std_method
     @step = @req.step

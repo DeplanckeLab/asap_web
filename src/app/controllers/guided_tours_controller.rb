@@ -3,11 +3,11 @@ class GuidedToursController < ApplicationController
   before_action :set_guided_tour, only: [:show, :edit, :update, :destroy]
 
   def index
-    @guided_tours = GuidedTour.ordered
+    @guided_tours = GuidedTour.visible.ordered
   end
 
   def show
-    @guided_tours = GuidedTour.ordered
+    @guided_tours = GuidedTour.visible.ordered
     @guided_tour_steps = @guided_tour.guided_tour_steps.ordered
     @new_guided_tour_step = @guided_tour.guided_tour_steps.build
   end
@@ -64,6 +64,6 @@ class GuidedToursController < ApplicationController
   end
 
   def guided_tour_params
-    params.require(:guided_tour).permit(:name, :rank, :duration_time)
+    params.require(:guided_tour).permit(:name, :rank, :duration_time, :hidden)
   end
 end

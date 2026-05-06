@@ -14897,8 +14897,6 @@ export default class extends Controller {
         const gcomp = container.querySelector('#attrs_group_comp')
         if (gref) gref.value = ''
         if (gcomp) gcomp.value = ''
-        const gp = container.querySelector('#attrs_group_pairs')
-        if (gp) gp.value = ''
         clearSecondMetadataUi()
       }
     }

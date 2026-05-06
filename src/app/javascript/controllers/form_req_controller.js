@@ -791,10 +791,6 @@ export default class extends Controller {
         if (gcomp) {
           gcomp.value = ''
         }
-        const gp = this.attrsContainerTarget.querySelector('#attrs_group_pairs')
-        if (gp) {
-          gp.value = ''
-        }
         clearSecondMetadataUi()
       }
       this.validateForm()

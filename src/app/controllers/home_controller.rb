@@ -68,20 +68,19 @@ class HomeController < ApplicationController
     base = ENV.fetch('SERVER_URL').chomp('/')
     render plain: <<~ROBOTS, content_type: 'text/plain'
       User-agent: *
-      Allow: /
+      Disallow: /projects/
 
       User-agent: GPTBot
-      Allow: /
+      Disallow: /projects/
 
       User-agent: PerplexityBot
-      Allow: /
+      Disallow: /projects/
 
       User-agent: ClaudeBot
-      Allow: /
+      Disallow: /projects/
 
       User-agent: Googlebot
-      Allow: /
-
+      Disallow: /projects/
 
       Sitemap: #{base}/sitemap.xml
     ROBOTS
@@ -263,6 +262,7 @@ class HomeController < ApplicationController
 
   def guided_tours
     @guided_tours = GuidedTour
+      .visible
       .ordered
       .includes(:guided_tour_steps)
   end

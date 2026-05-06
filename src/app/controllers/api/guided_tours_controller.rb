@@ -3,12 +3,12 @@
 module Api
   class GuidedToursController < ApplicationController
     def index
-      tours = GuidedTour.ordered.select(:id, :name)
+      tours = GuidedTour.visible.ordered.select(:id, :name)
       render json: { guided_tours: tours.map { |t| { id: t.id, name: t.name } } }
     end
 
     def show
-      tour = GuidedTour.includes(:guided_tour_steps).find(params[:id])
+      tour = GuidedTour.visible.includes(:guided_tour_steps).find(params[:id])
       steps = tour.guided_tour_steps.ordered.map do |step|
         {
           id: step.id,

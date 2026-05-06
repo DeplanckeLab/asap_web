@@ -723,6 +723,13 @@ export default class extends Controller {
       this.updateRunStatusInDOM(runRow, runStatus)
     }
 
+    // Keep DE/Markers subviews stable while runs finish in background.
+    // Their own controllers/widgets handle lightweight status updates and a
+    // full right-panel reload would reset filters, pagination, and scroll.
+    if (this.isStableDeSubviewOpen()) {
+      return
+    }
+
     // Decide how to refresh the right panel based on what it is currently
     // showing. Three mutually-exclusive cases:
     //
@@ -824,6 +831,16 @@ export default class extends Controller {
         this.loadStepResults(currentStepIdNum, stepEl, false, '', 'run_status_changed')
       }, 0)
     }
+  }
+
+  isStableDeSubviewOpen() {
+    if (!this.hasContentTarget) {
+      return false
+    }
+    return !!(
+      this.contentTarget.querySelector('#markers-container') ||
+      this.contentTarget.querySelector('#de-filter-root')
+    )
   }
 
   // Update the status pill in the right-panel summary header directly from the

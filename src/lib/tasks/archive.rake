@@ -4,9 +4,11 @@ require 'digest'
 require 'tempfile'
 require 'find'
 
-# Guided tour demo project (ASAP48) and matching disk keys: never archive to S3.
-GUIDED_TOUR_ARCHIVE_EXEMPT_PROJECT_KEYS = %w[ASAP48].freeze
-GUIDED_TOUR_ARCHIVE_EXEMPT_PUBLIC_IDS = [48].freeze
+def guided_tour_demo_project_id_for_archive
+  return @guided_tour_demo_project_id_for_archive if instance_variable_defined?(:@guided_tour_demo_project_id_for_archive)
+
+  @guided_tour_demo_project_id_for_archive = Project.guided_tour_demo_project&.id
+end
 
 def include_project_fus_for_archive(project, project_dir)
   upload_data_dir = Pathname.new(Fu.global_upload_root)
@@ -139,11 +141,129 @@ rescue StandardError
   false
 end
 
+def upload_project_archive_from_snapshot!(project, restored_project_dir:, s3b:)
+  archive_file = restored_project_dir.dirname + "#{project.key}.tgz"
+  File.delete(archive_file) if File.exist?(archive_file)
+
+  cmd = "tar -cf - -C #{Shellwords.escape(restored_project_dir.dirname.to_s)} #{Shellwords.escape(project.key)} | pigz -9 -p 16 > #{Shellwords.escape(archive_file.to_s)}"
+  `#{cmd}`
+  raise "Archive rebuild command failed for #{project.key}" unless $?.success?
+  raise "Archive rebuild missing for #{project.key}" unless File.exist?(archive_file) && File.size(archive_file).to_i.positive?
+
+  local_md5 = file_md5_hex(archive_file)
+  s3_obj = Basic.write_file_on_s3(s3b, archive_file.to_s, { key: project.key, md5: local_md5 })
+  raise "S3 upload failed for rebuilt archive #{project.key}" unless s3_obj
+
+  h_s3_settings = Basic.get_s3_settings
+  verify_client = Basic.connect_s3(s3b, h_s3_settings)
+  local_size = File.size(archive_file).to_i
+  remote_head = verify_client.head_object(bucket: s3b[:key], key: project.key)
+  remote_size = remote_head.content_length.to_i
+  raise "S3 and rebuilt archive size mismatch for #{project.key}" unless local_size == remote_size
+
+  remote_md5 = s3_object_md5_hex(verify_client, bucket: s3b[:key], key: project.key)
+  raise "S3 and rebuilt archive MD5 mismatch for #{project.key}" unless local_md5 == remote_md5
+
+  { remote_size: remote_size, local_md5: local_md5 }
+ensure
+  File.delete(archive_file) if archive_file.present? && File.exist?(archive_file)
+end
+
+def archived_project_fus_verification(project, s3_client:, s3_bucket:, s3b:, tmp_root:, delete_verified: false, dry_run: false, repair_archive: false)
+  upload_root = Pathname.new(Fu.global_upload_root)
+  fu_ids = Fu.where(project_id: project.id).pluck(:id)
+  existing_fu_ids = fu_ids.select { |fu_id| File.directory?(upload_root + fu_id.to_s) }
+  missing_global = fu_ids.size - existing_fu_ids.size
+
+  if existing_fu_ids.empty?
+    return {
+      status: :no_global_fus,
+      checked: fu_ids.size,
+      verified: 0,
+      missing_in_archive: 0,
+      missing_global: missing_global,
+      repaired: 0,
+      would_delete: 0,
+      deleted: 0
+    }
+  end
+
+  tmp_dir = tmp_root + "verify_fus_project_#{project.id}_#{project.key}"
+  snapshot = retrieve_project_snapshot_from_s3(
+    project,
+    s3_client: s3_client,
+    s3_bucket: s3_bucket,
+    tmp_dir: tmp_dir
+  )
+  return { status: :archive_missing, checked: fu_ids.size, verified: 0, missing_in_archive: existing_fu_ids.size, missing_global: missing_global, repaired: 0, would_delete: 0, deleted: 0 } if snapshot.nil?
+
+  project_fus_root = snapshot[:restored_dir] + 'fus'
+  FileUtils.mkdir_p(project_fus_root) unless File.exist?(project_fus_root)
+  checked = fu_ids.size
+  verified = 0
+  missing_in_archive = 0
+  repaired = 0
+  would_delete = 0
+  deleted = 0
+  missing_fu_ids = []
+
+  existing_fu_ids.each do |fu_id|
+    global_fu_dir = upload_root + fu_id.to_s
+    archived_fu_dir = project_fus_root + fu_id.to_s
+
+    unless File.directory?(archived_fu_dir)
+      missing_in_archive += 1
+      missing_fu_ids << fu_id
+      next
+    end
+
+    verified += 1
+    next unless delete_verified
+
+    if dry_run
+      would_delete += 1
+    else
+      FileUtils.rm_r(global_fu_dir)
+      deleted += 1
+    end
+  rescue StandardError => e
+    puts "[verify_archived_fus] project=#{project.id} key=#{project.key} fu_id=#{fu_id} error=#{e.class} #{e.message}"
+  end
+
+  if repair_archive && missing_fu_ids.any?
+    if dry_run
+      repaired = missing_fu_ids.size
+    else
+      missing_fu_ids.each do |fu_id|
+        src = upload_root + fu_id.to_s
+        dst = project_fus_root + fu_id.to_s
+        FileUtils.cp_r(src, dst)
+      end
+      upload_project_archive_from_snapshot!(project, restored_project_dir: snapshot[:restored_dir], s3b: s3b)
+      repaired = missing_fu_ids.size
+      verified += missing_fu_ids.size
+      missing_in_archive = 0
+    end
+  end
+
+  {
+    status: :ok,
+    checked: checked,
+    verified: verified,
+    missing_in_archive: missing_in_archive,
+    missing_global: missing_global,
+    repaired: repaired,
+    would_delete: would_delete,
+    deleted: deleted
+  }
+ensure
+  FileUtils.rm_r(tmp_dir) if tmp_dir.present? && File.exist?(tmp_dir)
+end
+
 def archive_project_to_s3!(project, s3b:, dry_run: false)
-  exempt_by_key = GUIDED_TOUR_ARCHIVE_EXEMPT_PROJECT_KEYS.include?(project.key.to_s)
-  exempt_by_public = project.public? && GUIDED_TOUR_ARCHIVE_EXEMPT_PUBLIC_IDS.include?(project.public_id)
-  if exempt_by_key || exempt_by_public
-    Rails.logger.info("[archive] skip guided-tour exempt project key=#{project.key} public_id=#{project.public_id.inspect}")
+  demo_id = guided_tour_demo_project_id_for_archive
+  if demo_id.present? && project.id == demo_id
+    Rails.logger.info("[archive] skip guided-tour demo project id=#{project.id} key=#{project.key} public_id=#{project.public_id.inspect}")
     return :exempt
   end
 
@@ -219,6 +339,80 @@ rescue Aws::S3::Errors::ServiceError => e
   :failed
 end
 
+def delete_rows_referencing_project_id!(project_id)
+  conn = ActiveRecord::Base.connection
+  tables = conn.tables - ['projects', 'schema_migrations', 'ar_internal_metadata']
+  tables_with_project_id = tables.select { |table| conn.columns(table).map(&:name).include?('project_id') }
+  run_ids = conn.select_values("SELECT id FROM runs WHERE project_id = #{project_id.to_i}").map(&:to_i)
+  req_ids = conn.select_values("SELECT id FROM reqs WHERE project_id = #{project_id.to_i}").map(&:to_i)
+  annot_ids = conn.select_values("SELECT id FROM annots WHERE project_id = #{project_id.to_i}").map(&:to_i)
+
+  unless run_ids.empty?
+    tables.each do |table|
+      next if table == 'runs'
+      next unless conn.columns(table).map(&:name).include?('run_id')
+
+      quoted_table = conn.quote_table_name(table)
+      conn.execute("DELETE FROM #{quoted_table} WHERE run_id IN (#{run_ids.join(',')})")
+    end
+  end
+
+  unless req_ids.empty?
+    tables.each do |table|
+      next if table == 'reqs'
+      next unless conn.columns(table).map(&:name).include?('req_id')
+
+      quoted_table = conn.quote_table_name(table)
+      conn.execute("DELETE FROM #{quoted_table} WHERE req_id IN (#{req_ids.join(',')})")
+    end
+  end
+
+  unless annot_ids.empty?
+    tables.each do |table|
+      next if table == 'annots'
+      next unless conn.columns(table).map(&:name).include?('annot_id')
+
+      quoted_table = conn.quote_table_name(table)
+      conn.execute("DELETE FROM #{quoted_table} WHERE annot_id IN (#{annot_ids.join(',')})")
+    end
+  end
+
+  # Known dependency order for ASAP schema (children before parents).
+  ordered_tables = %w[
+    annot_cell_sets
+    annots
+    runs
+    reqs
+    project_view_logs
+  ]
+  ordered_tables.each do |table|
+    next unless tables_with_project_id.include?(table)
+    quoted_table = conn.quote_table_name(table)
+    conn.execute("DELETE FROM #{quoted_table} WHERE project_id = #{project_id.to_i}")
+    tables_with_project_id.delete(table)
+  end
+
+  # Best-effort pass for remaining project_id references.
+  3.times do
+    progress = false
+    tables_with_project_id.dup.each do |table|
+      quoted_table = conn.quote_table_name(table)
+      begin
+        conn.execute("DELETE FROM #{quoted_table} WHERE project_id = #{project_id.to_i}")
+        tables_with_project_id.delete(table)
+        progress = true
+      rescue ActiveRecord::InvalidForeignKey
+        next
+      end
+    end
+    break if tables_with_project_id.empty? || !progress
+  end
+
+  return if tables_with_project_id.empty?
+
+  raise "Unresolved project_id references for project_id=#{project_id}: #{tables_with_project_id.join(', ')}"
+end
+
 def delete_sandbox_project!(project, s3b:, dry_run: false)
   user_data_dir = Pathname.new(ENV.fetch('USER_DATA_DIR'))
   project_dir = user_data_dir + project.user_id.to_s + project.key
@@ -240,7 +434,7 @@ def delete_sandbox_project!(project, s3b:, dry_run: false)
   end
 
   Fu.where(project_id: project.id).update_all(project_id: nil)
-
+  delete_rows_referencing_project_id!(project.id)
   project.destroy!
 
   FileUtils.rm_r(project_dir) if File.exist?(project_dir)
@@ -254,7 +448,7 @@ end
 desc 'Archive projects to S3 (optionally one key)'
 task :archive, [:project_key] => :environment do |_t, args|
   s3b = archive_s3_bucket_config
-  idle_days = ENV.fetch('PROJECT_ARCHIVE_IDLE_DAYS', '7').to_i
+  idle_days = ENV.fetch('PROJECT_ARCHIVE_IDLE_DAYS', '1').to_i
   cutoff_time = Time.current - idle_days.days
 
   projects = if args[:project_key].present?
@@ -281,9 +475,78 @@ task :unarchive, [:project_key] => :environment do |_t, args|
 end
 
 namespace :projects do
+  desc 'Verify FU directories are inside archived project S3 tarballs; optionally delete verified global FU dirs'
+  task :verify_archived_fus, [:project_key] => :environment do |_t, args|
+    project_key = args[:project_key].to_s.strip
+    project_key = nil if project_key.empty?
+    delete_verified = ENV['DELETE_VERIFIED'] == '1'
+    dry_run = ENV['DRY_RUN'] == '1'
+    repair_archive = ENV['REPAIR_ARCHIVE'] == '1'
+    lock_file = Pathname.new(Rails.root) + 'tmp' + 'verify_archived_fus.lock'
+    tmp_root = Pathname.new(Rails.root) + 'tmp' + 'verify_archived_fus'
+    FileUtils.mkdir_p(lock_file.dirname) unless File.exist?(lock_file.dirname)
+    FileUtils.mkdir_p(tmp_root) unless File.exist?(tmp_root)
+
+    s3b = archive_s3_bucket_config
+    h_s3_settings = Basic.get_s3_settings
+    s3_client = Basic.connect_s3(s3b, h_s3_settings)
+
+    scope = Project.where(sandbox: false, archive_status_id: 3)
+    scope = scope.where(key: project_key) if project_key
+
+    puts "[verify_archived_fus] start project_key=#{project_key || 'all'} delete_verified=#{delete_verified} dry_run=#{dry_run} repair_archive=#{repair_archive}"
+    puts "[verify_archived_fus] archived_projects_in_scope=#{scope.count}"
+
+    counts = Hash.new(0)
+
+    File.open(lock_file, File::RDWR | File::CREAT, 0o644) do |f|
+      unless f.flock(File::LOCK_EX | File::LOCK_NB)
+        puts '[verify_archived_fus] another run is already in progress; exiting'
+        next
+      end
+
+      scope.find_each do |project|
+        fu_ids = Fu.where(project_id: project.id).pluck(:id)
+        next if fu_ids.empty?
+        upload_root = Pathname.new(Fu.global_upload_root)
+        existing_fu_count = fu_ids.count { |fu_id| File.directory?(upload_root + fu_id.to_s) }
+        next if existing_fu_count.zero?
+
+        result = archived_project_fus_verification(
+          project,
+          s3_client: s3_client,
+          s3_bucket: s3b[:key],
+          s3b: s3b,
+          tmp_root: tmp_root,
+          delete_verified: delete_verified,
+          dry_run: dry_run,
+          repair_archive: repair_archive
+        )
+
+        counts[:projects_with_fu] += 1
+        counts[:"status_#{result[:status]}"] += 1
+        counts[:checked] += result[:checked]
+        counts[:verified] += result[:verified]
+        counts[:missing_in_archive] += result[:missing_in_archive]
+        counts[:missing_global] += result[:missing_global]
+        counts[:repaired] += result[:repaired]
+        counts[:would_delete] += result[:would_delete]
+        counts[:deleted] += result[:deleted]
+
+        puts "[verify_archived_fus] project=#{project.id} key=#{project.key} fu_count=#{fu_ids.size} existing_global_fu_count=#{existing_fu_count} status=#{result[:status]} checked=#{result[:checked]} verified=#{result[:verified]} missing_in_archive=#{result[:missing_in_archive]} missing_global=#{result[:missing_global]} repaired=#{result[:repaired]} would_delete=#{result[:would_delete]} deleted=#{result[:deleted]}"
+      rescue StandardError => e
+        counts[:failed_projects] += 1
+        puts "[verify_archived_fus] project=#{project.id} key=#{project.key} failed error=#{e.class} #{e.message}"
+      end
+
+      puts "[verify_archived_fus] done projects_with_fu=#{counts[:projects_with_fu]} status_ok=#{counts[:status_ok]} status_archive_missing=#{counts[:status_archive_missing]} checked=#{counts[:checked]} verified=#{counts[:verified]} missing_in_archive=#{counts[:missing_in_archive]} missing_global=#{counts[:missing_global]} repaired=#{counts[:repaired]} would_delete=#{counts[:would_delete]} deleted=#{counts[:deleted]} failed_projects=#{counts[:failed_projects]}"
+      f.flock(File::LOCK_UN)
+    end
+  end
+
   desc 'Archive inactive projects (nightly cron task)'
   task :archive_inactive, [:days, :project_key] => :environment do |_t, args|
-    days = (args[:days] || ENV.fetch('PROJECT_ARCHIVE_IDLE_DAYS', '7')).to_i
+    days = (args[:days] || ENV.fetch('PROJECT_ARCHIVE_IDLE_DAYS', '1')).to_i
     cutoff_time = Time.current - days.days
     project_key = args[:project_key].to_s.strip
     project_key = nil if project_key.empty?
@@ -332,7 +595,7 @@ namespace :projects do
 
   desc 'Delete inactive sandbox projects (nightly cron task)'
   task :delete_inactive_sandboxes, [:days] => :environment do |_t, args|
-    days = (args[:days] || ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '2')).to_i
+    days = (args[:days] || ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1')).to_i
     cutoff_time = Time.current - days.days
     dry_run = ENV['DRY_RUN'] == '1'
     lock_file = Pathname.new(Rails.root) + 'tmp' + 'delete_inactive_sandboxes.lock'

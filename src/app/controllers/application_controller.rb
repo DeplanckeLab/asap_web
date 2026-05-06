@@ -18,6 +18,17 @@ class ApplicationController < ActionController::Base
 
   protected
 
+  # Same signal as ActionController::AllowBrowser (useragent gem): known crawlers/preview bots.
+  def request_user_agent_indicates_bot?
+    ua = request.user_agent
+    return false if ua.blank?
+
+    require 'useragent'
+    UserAgent.parse(ua).bot?
+  rescue StandardError
+    false
+  end
+
   def configure_permitted_parameters
     devise_parameter_sanitizer.permit(:sign_up, keys: [:displayed_name])
     devise_parameter_sanitizer.permit(:account_update, keys: [:displayed_name])

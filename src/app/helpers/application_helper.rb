@@ -194,9 +194,10 @@ module ApplicationHelper
   end
 
   def guided_tours_for_menu
-    return [] unless GuidedTour.exists?
+    tours = GuidedTour.visible.ordered.select(:id, :name)
+    return [] unless tours.exists?
 
-    GuidedTour.ordered.select(:id, :name)
+    tours
   end
 
   def guided_tour_start_url(tour_id)

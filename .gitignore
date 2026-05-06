@@ -8,6 +8,7 @@ src/config/.s3.json
 .env.test
 .env.dev
 .env.prod
+.env.test*
 nginx.prod.conf
 data
 postgres-data

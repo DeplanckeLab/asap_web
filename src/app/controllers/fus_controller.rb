@@ -113,27 +113,15 @@ class FusController < ApplicationController
       
       # For completion, check:
       # 1. This is the last chunk
-      # 2. File size matches expected size (exact match preferred)
-      # For single-chunk uploads, accept if we've written all the chunk data we received
-      # (this handles edge cases where file_size param might be slightly inaccurate)
+      # 2. File size matches expected size
+      # For single-chunk uploads, accept only when the written bytes exactly
+      # match the received chunk payload size (client file_size can be off).
       is_complete = if is_last_chunk
         if current_size == file_size
           true
         elsif total_chunks == 1 && current_size == chunk_data_size && chunk_data_size > 0
-          # Single chunk upload: if we wrote all the chunk data, consider it complete
-          # Update file_size to match actual size for consistency
+          # Single-chunk upload with accurate bytes written.
           Rails.logger.info("[FusController#upload_chunk] Single-chunk upload: file_size param (#{file_size}) doesn't match actual (#{current_size}), but chunk data written successfully. Marking as complete.")
-          true
-        elsif total_chunks == 1 && chunk_data_size > 0 && current_size >= chunk_data_size
-          # Single chunk upload: if current_size is at least as large as chunk_data_size, 
-          # and we're on the last chunk, consider it complete (handles cases where file was written correctly)
-          # This handles the case where the file might have been written correctly but sizes don't match exactly
-          if current_size > chunk_data_size * 1.1
-            # File is significantly larger - might be written multiple times, but still mark as complete
-            Rails.logger.warn("[FusController#upload_chunk] Single-chunk upload: current_size (#{current_size}) is much larger than chunk_data_size (#{chunk_data_size}). File may have been written multiple times, but marking as complete.")
-          else
-            Rails.logger.info("[FusController#upload_chunk] Single-chunk upload: current_size (#{current_size}) >= chunk_data_size (#{chunk_data_size}), marking as complete.")
-          end
           true
         else
           false

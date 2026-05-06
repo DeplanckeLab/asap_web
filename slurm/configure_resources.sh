@@ -27,10 +27,10 @@ echo "  CPUs: $SLURM_CPUS"
 echo "  RAM: ${SLURM_RAM_MB}MB"
 echo ""
 
-# Update slurm.conf
+# Update slurm.conf (gitignored local file; copy from slurm/slurm.conf.example if missing)
 CONF_FILE="slurm/slurm.conf"
 if [ ! -f "$CONF_FILE" ]; then
-  echo "Error: $CONF_FILE not found"
+  echo "Error: $CONF_FILE not found. Copy slurm/slurm.conf.example to slurm/slurm.conf and edit hostnames first."
   exit 1
 fi
 

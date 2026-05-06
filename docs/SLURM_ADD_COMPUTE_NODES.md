@@ -16,7 +16,7 @@ With a **single** `NodeName` in the default partition, Slurm can only place jobs
    - From node → controller: Slurm ports (typically **6817** for `slurmctld`, **6819** if the node must talk to `slurmdbd` depending on your layout).
    - Controller → node: **6818** for `slurmd`.
    - From node → **Docker registry** and any hosts needed for `docker pull` / `docker run` used by pipelines.
-4. **Shared project data**: ASAP runs use paths under `USER_DATA_DIR` (e.g. `/data/asap2_test/...`). Each compute node must see the **same files** as the website (NFS or equivalent). Local disk-only copies are not enough unless you change the architecture.
+4. **Shared project data**: ASAP runs use paths under `USER_DATA_DIR`. Each compute node must see the **same files** as the website (NFS or equivalent). Local disk-only copies are not enough unless you change the architecture.
 5. **Docker**: Jobs are often launched as `docker run` on the **compute node**. Install Docker, grant the Slurm job user access to the **docker socket** where appropriate, and ensure **ASAP_RUN_DOCKER_NETWORK** (or your compose network) is consistent so containers can reach Postgres and other services.
 6. **Hostname/DNS**: `NodeName` in `slurm.conf` must resolve (or use `NodeAddr`) from the controller.
 
@@ -46,7 +46,7 @@ sudo systemctl enable --now munge
 
 ### 4. Register the node on the controller
 
-On the machine where **`slurmctld`** runs, edit `slurm.conf` (the repo file is `slurm/slurm.conf`; production is usually `/etc/slurm/slurm.conf`):
+On the machine where **`slurmctld`** runs, edit `slurm.conf` (track a local copy from `slurm/slurm.conf.example`; production is usually `/etc/slurm/slurm.conf`):
 
 - Add a line:
 
@@ -87,7 +87,7 @@ The node should reach **IDLE** (or mixed), not **DOWN** / **NOT_RESPONDING**.
 
 ## Repo template
 
-See commented examples at the bottom of `slurm/slurm.conf`. Replace placeholders with real hostnames, IPs, and hardware counts before enabling.
+See commented examples at the bottom of `slurm/slurm.conf.example`. Replace placeholders with real hostnames, IPs, and hardware counts before enabling your local `slurm.conf`.
 
 ## Optional: separate partition for production
 

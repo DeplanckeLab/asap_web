@@ -27,6 +27,14 @@ Rails.application.configure do
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   config.assume_ssl = true
 
+  trusted_proxies_env = ENV.fetch("TRUSTED_PROXIES", "").to_s
+  unless trusted_proxies_env.empty?
+    trusted_proxies = trusted_proxies_env.split(",").map(&:strip).reject(&:empty?).map do |entry|
+      IPAddr.new(entry)
+    end
+    config.action_dispatch.trusted_proxies = trusted_proxies
+  end
+
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = true
 

@@ -43,7 +43,7 @@ Mount slurm.conf and munge.key into website container:
 ```yaml
 website:
   volumes:
-    - ./slurm/slurm.conf:/etc/slurm/slurm.conf:ro
+    - ./slurm/slurm.conf:/etc/slurm/slurm.conf:ro   # use a local gitignored slurm.conf copied from slurm.conf.example
     - /etc/munge/munge.key:/etc/munge/munge.key:ro
   environment:
     - SLURM_CONF_FILE=/etc/slurm/slurm.conf

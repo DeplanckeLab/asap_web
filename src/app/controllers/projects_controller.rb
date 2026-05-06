@@ -7330,6 +7330,7 @@ class ProjectsController < ApplicationController
     def track_project_view!
       return if admin?
       return if request_user_agent_indicates_bot?
+      return unless @session_cookie_in_request
 
       ProjectViewTracker.track!(
         project: @project,

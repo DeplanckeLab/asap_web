@@ -2,7 +2,9 @@
 
 This document describes the SLURM integration for the docker-compose environment.
 
-**Restarting Compose or Slurm** (checklist, stuck jobs, verification): see **`RESTART_DOCKER_AND_SLURM.md`**.
+Site-specific copies of ops docs live beside these templates without the `.example` suffix (those paths are gitignored). Copy when you need local paths and credentials.
+
+**Restarting Compose or Slurm** (checklist, stuck jobs, verification): see **`RESTART_DOCKER_AND_SLURM.md.example`**.
 
 **Adding compute nodes** (more concurrent jobs): see **`SLURM_ADD_COMPUTE_NODES.md`**. That is an operations task (extra machines, `slurmd`, shared `/data`, munge); it cannot be done from the Rails app alone.
 
@@ -25,7 +27,7 @@ The setup includes:
 - MySQL 8.0 container
 - Stores job accounting information
 - Database: `slurm_acct_db`
-- User: `slurm` / Password: `slurm`
+- DB credentials: configure via your Compose env / secrets (do not commit passwords)
 
 ### SLURM Database Daemon (slurmdbd)
 - Connects SLURM to MySQL database
@@ -43,7 +45,7 @@ The setup includes:
 
 ## Configuration
 
-Configuration files are in `/srv/asap2_test/slurm/`:
+Configuration files are in `/path/to/your/checkout/slurm/`:
 
 - `slurm.conf` - Main SLURM configuration
 - `slurmdbd.conf` - Database daemon configuration
@@ -61,7 +63,7 @@ SLURM is configured to use **90% of total system resources**, leaving **10% for 
 
 To reconfigure resources, run:
 ```bash
-cd /srv/asap2_test
+cd /path/to/your/checkout
 ./slurm/configure_resources.sh
 docker-compose restart slurmctld slurmd
 ```
@@ -121,7 +123,7 @@ docker-compose restart slurmctld slurmd slurmdbd
 
 ## Stuck jobs after slurmd or Compose restart
 
-See **[RESTART_DOCKER_AND_SLURM.md](RESTART_DOCKER_AND_SLURM.md)** section 5 and the **`slurm/cancel_stuck_jobs_after_restart.sh`** helper (also documented there with optional **`systemd`** hook).
+See **`RESTART_DOCKER_AND_SLURM.md.example`** section 5 and the **`slurm/cancel_stuck_jobs_after_restart.sh`** helper (also documented there with optional **`systemd`** hook).
 
 ## Notes
 

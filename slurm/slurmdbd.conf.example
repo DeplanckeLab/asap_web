@@ -7,6 +7,6 @@ StorageType=accounting_storage/mysql
 StorageHost=slurmdb
 StoragePort=3306
 StorageUser=slurm
-StoragePass=slurm
+StoragePass=REPLACE_WITH_SAFE_SECRET
 StorageLoc=slurm_acct_db
 

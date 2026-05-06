@@ -1,5 +1,8 @@
 #!/bin/bash
 # Script to initialize SLURM database directly via SQL (bypassing munge/sacctmgr issues)
+#
+# Template: copy to init-slurm-database-direct.sh (gitignored). Export MYSQL_SLURM_PASSWORD
+# to match the accounting database user before running.
 
 set -e
 
@@ -33,28 +36,28 @@ echo "Step 4: Initializing cluster in database..."
 CURRENT_TIME=$(date +%s)
 
 # Check if cluster already exists
-CLUSTER_EXISTS=$(docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -Nse "SELECT COUNT(*) FROM cluster_table WHERE name='asap_cluster';" 2>&1)
+CLUSTER_EXISTS=$(docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -Nse "SELECT COUNT(*) FROM cluster_table WHERE name='asap_cluster';" 2>&1)
 
 if [ "$CLUSTER_EXISTS" = "1" ]; then
     echo "Cluster 'asap_cluster' already exists in database"
 else
     echo "Adding cluster 'asap_cluster' to database..."
-    docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "
+    docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "
     INSERT IGNORE INTO cluster_table (creation_time, mod_time, deleted, name, control_host, control_port, rpc_version, federation, fed_id, fed_state)
-    VALUES ($CURRENT_TIME, $CURRENT_TIME, 0, 'asap_cluster', 'updeplasrv4-new.epfl.ch', 6817, 0, '', 0, 0);
+    VALUES ($CURRENT_TIME, $CURRENT_TIME, 0, 'asap_cluster', 'controller.example.org', 6817, 0, '', 0, 0);
     " 2>&1
     echo "✓ Cluster added to database"
 fi
 
 # Step 5: Create root account
 echo "Step 5: Creating root account..."
-ACCOUNT_EXISTS=$(docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -Nse "SELECT COUNT(*) FROM acct_table WHERE name='root';" 2>&1)
+ACCOUNT_EXISTS=$(docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -Nse "SELECT COUNT(*) FROM acct_table WHERE name='root';" 2>&1)
 
 if [ "$ACCOUNT_EXISTS" = "1" ]; then
     echo "Root account already exists"
 else
     echo "Adding root account..."
-    docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "
+    docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "
     INSERT IGNORE INTO acct_table (creation_time, mod_time, deleted, name, description, organization)
     VALUES ($CURRENT_TIME, $CURRENT_TIME, 0, 'root', 'Root account', 'asap_cluster');
     " 2>&1
@@ -63,13 +66,13 @@ fi
 
 # Step 6: Create root user association
 echo "Step 6: Creating root user association..."
-ASSOC_EXISTS=$(docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -Nse "SELECT COUNT(*) FROM asap_cluster_assoc_table WHERE user='root' AND acct='root' AND \`partition\`='';" 2>&1)
+ASSOC_EXISTS=$(docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -Nse "SELECT COUNT(*) FROM asap_cluster_assoc_table WHERE user='root' AND acct='root' AND \`partition\`='';" 2>&1)
 
 if [ "$ASSOC_EXISTS" = "1" ]; then
     echo "Root association already exists"
 else
     echo "Adding root user association..."
-    docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "
+    docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "
     INSERT IGNORE INTO asap_cluster_assoc_table 
     (creation_time, mod_time, deleted, user, acct, \`partition\`, parent_acct, lft, rgt, shares, is_def, max_tres_pj, max_tres_pn, max_tres_mins_pj)
     VALUES 
@@ -81,13 +84,13 @@ fi
 # Step 7: Verify database setup
 echo "Step 7: Verifying database setup..."
 echo "Clusters in database:"
-docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "SELECT name, control_host FROM cluster_table;" 2>&1
+docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "SELECT name, control_host FROM cluster_table;" 2>&1
 echo ""
 echo "Accounts in database:"
-docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "SELECT name, description FROM acct_table WHERE deleted=0;" 2>&1
+docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "SELECT name, description FROM acct_table WHERE deleted=0;" 2>&1
 echo ""
 echo "Associations in database:"
-docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e "SELECT user, acct, \`partition\` FROM asap_cluster_assoc_table WHERE deleted=0;" 2>&1
+docker exec slurmdb mysql -u slurm -p"$MYSQL_SLURM_PASSWORD" slurm_acct_db -e "SELECT user, acct, \`partition\` FROM asap_cluster_assoc_table WHERE deleted=0;" 2>&1
 
 # Step 8: Stop slurmctld if running
 echo "Step 8: Stopping slurmctld..."

@@ -53,12 +53,12 @@ AccountingStorageType=accounting_storage/slurmdbd
 AccountingStorageHost=slurmdbd
 AccountingStoragePort=6819
 AccountingStorageUser=root
-AccountingStoragePass=slurm
+AccountingStoragePass=REPLACE_WITH_SAFE_SECRET
 
 # Node definitions
 # Hardware: 4 Sockets, 18 Cores per Socket, 2 Threads per Core = 144 CPUs total
 # Host node (slurmd running on host)
-NodeName=updeplasrv4-new.epfl.ch NodeAddr=128.178.238.41 CPUs=144 Boards=1 SocketsPerBoard=4 CoresPerSocket=18 ThreadsPerCore=2 RealMemory=694741 State=UNKNOWN
+NodeName=compute01.example.org NodeAddr=10.0.0.10 CPUs=64 Boards=1 SocketsPerBoard=2 CoresPerSocket=16 ThreadsPerCore=2 RealMemory=256000 State=UNKNOWN
 
 # Example: second compute node (uncomment and set hostname, IP, CPUs, RealMemory after the host is ready).
 # Same munge key, Slurm version, shared USER_DATA_DIR, and Docker must be available on that host.
@@ -66,6 +66,6 @@ NodeName=updeplasrv4-new.epfl.ch NodeAddr=128.178.238.41 CPUs=144 Boards=1 Socke
 
 # Partition definitions
 # List all NodeName values that should run ASAP jobs, comma-separated.
-PartitionName=debug Nodes=updeplasrv4-new.epfl.ch Default=YES MaxTime=INFINITE State=UP
-# After adding nodes: PartitionName=debug Nodes=updeplasrv4-new.epfl.ch,compute02.example.org Default=YES MaxTime=INFINITE State=UP
+PartitionName=debug Nodes=compute01.example.org Default=YES MaxTime=INFINITE State=UP
+# After adding nodes: PartitionName=debug Nodes=compute01.example.org,compute02.example.org Default=YES MaxTime=INFINITE State=UP
 

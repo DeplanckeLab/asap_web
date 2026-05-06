@@ -51,3 +51,23 @@ src/package-lock.json
 # Ignore Byebug command history file.
 #.byebug_history
 .env_asap_run
+
+# Security runbooks and host Fail2ban material: keep on the server or a private ops repo only.
+/docs/fail2ban*.md
+/ops/fail2ban/
+
+# Local ops snapshot (not committed). Tracked sources of truth are *.example templates.
+/private/
+
+# Site-specific copies of SLURM/docs (redacted templates committed as *.example).
+/docs/DEPLOYMENT_PERMISSIONS.md
+/docs/RESTART_DOCKER_AND_SLURM.md
+/docs/SLURM_SETUP.md
+/docs/SLURM_COMMANDS.md
+/slurm/slurm.conf
+/slurm/slurm.conf.client
+/slurm/slurmdbd.conf
+/slurm/init-slurm-database-direct.sh
+/slurm/install-slurm-host.sh
+/slurm/fresh-install-slurm-host.sh
+/slurm/SECURITY_AND_PERFORMANCE.md

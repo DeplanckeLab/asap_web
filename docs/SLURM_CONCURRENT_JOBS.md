@@ -1,10 +1,10 @@
 # Concurrent jobs and fair scheduling (Slurm)
 
-**Restarting Docker Compose or Slurm:** see **[RESTART_DOCKER_AND_SLURM.md](RESTART_DOCKER_AND_SLURM.md)**.
+**Restarting Docker Compose or Slurm:** see **`docs/RESTART_DOCKER_AND_SLURM.md.example`** (site-specific copies without `.example` are gitignored).
 
 ## Parallel runs on one server
 
-The repo template `slurm/slurm.conf` uses **consumable** CPU and memory on each node so **multiple jobs can run at once** on the same machine:
+The repo template `slurm/slurm.conf.example` uses **consumable** CPU and memory on each node so **multiple jobs can run at once** on the same machine:
 
 ```conf
 SelectType=select/cons_tres

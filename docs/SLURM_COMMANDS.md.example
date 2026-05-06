@@ -1,12 +1,14 @@
 # SLURM Command Reference
 
+Redacted template: copy to `SLURM_COMMANDS.md` (gitignored) for your checkout path and data layout.
+
 Quick reference for checking SLURM job status and managing jobs.
 
 ## Quick Status Check
 
 Use the provided script:
 ```bash
-cd /srv/asap2_test
+cd /path/to/your/checkout
 ./slurm/check_status.sh
 ```
 
@@ -82,13 +84,13 @@ docker exec slurmctld scancel -t PENDING
 Job output files are written to the project directories:
 ```bash
 # Find output files for a specific run
-find /data/asap2_test -name "slurm_*.out" -mtime -1
+find ${YOUR_USER_DATA_DIR} -name "slurm_*.out" -mtime -1
 
 # View output of a specific job
-cat /data/asap2_test/src/app/.../slurm_<run_id>.out
+cat ${YOUR_USER_DATA_DIR}/src/app/.../slurm_<run_id>.out
 
 # View error output
-cat /data/asap2_test/src/app/.../slurm_<run_id>.err
+cat ${YOUR_USER_DATA_DIR}/src/app/.../slurm_<run_id>.err
 ```
 
 ## Common Job States

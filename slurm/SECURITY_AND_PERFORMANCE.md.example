@@ -1,5 +1,7 @@
 # Security and Performance Analysis: SLURM on Host
 
+Redacted template with generic data paths. Copy to `SECURITY_AND_PERFORMANCE.md` (gitignored) if you keep a site-specific narrative alongside production.
+
 ## Security Considerations
 
 ### 1. **Network Access (Low Risk)**
@@ -37,7 +39,7 @@
      - Isolate job processes
 
 ### 4. **File System Access (Same as Before)**
-- **Current**: Containers already have volume mounts (`/data/asap2`, `/data/asap2_test`)
+- **Current**: Containers already have volume mounts (`/path/to/data/instance`, `/path/to/data/instance_test`)
 - **Risk**: Same as current setup - no change
 - **Note**: Jobs execute on host, so they have same file access as before
 
@@ -77,7 +79,7 @@
    SlurmdUser=slurm
    
    # Ensure slurm user has access to data directories
-   sudo chown -R slurm:slurm /data/asap2 /data/asap2_test
+   sudo chown -R slurm:slurm /path/to/data/instance /path/to/data/instance_test
    ```
 
 2. **Firewall Configuration** (Medium Priority):

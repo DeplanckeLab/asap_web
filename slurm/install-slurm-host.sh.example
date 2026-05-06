@@ -1,5 +1,7 @@
 #!/bin/bash
 # Script to install and configure slurmctld and slurmdbd on the host machine
+#
+# Template: copy to install-slurm-host.sh (gitignored) and replace placeholder paths.
 
 set -e
 
@@ -25,7 +27,7 @@ sudo chown slurm:slurm /var/spool/slurmctld /var/spool/slurmdbd /var/log/slurm 2
 
 # Ensure slurm user has access to data directories (for job execution)
 echo "Setting up permissions for slurm user on data directories..."
-sudo chown -R slurm:slurm /data/asap2 /data/asap2_test /srv/asap_run_new 2>/dev/null || echo "Warning: Could not change ownership of data directories (may need manual setup)"
+sudo chown -R slurm:slurm /path/to/data1 /path/to/data2 /path/to/asap_run 2>/dev/null || echo "Warning: Could not change ownership of data directories (may need manual setup)"
 
 # Add slurm user to docker group (needed for docker exec commands in jobs)
 echo "Adding slurm user to docker group..."
@@ -37,7 +39,7 @@ if docker exec slurmctld cat /etc/slurm/slurm.conf > /tmp/slurm.conf 2>/dev/null
     echo "Copied slurm.conf from container"
 else
     echo "Container not available, using local slurm.conf"
-    cp /srv/asap2_test/slurm/slurm.conf /tmp/slurm.conf
+    cp /path/to/your/checkout/slurm/slurm.conf /tmp/slurm.conf
 fi
 
 echo "Updating slurm.conf for host..."
@@ -68,7 +70,7 @@ if docker exec slurmdbd cat /etc/slurm/slurmdbd.conf > /tmp/slurmdbd.conf 2>/dev
     echo "Copied slurmdbd.conf from container"
 else
     echo "Container not available, using local slurmdbd.conf"
-    cp /srv/asap2_test/slurm/slurmdbd.conf /tmp/slurmdbd.conf
+    cp /path/to/your/checkout/slurm/slurmdbd.conf /tmp/slurmdbd.conf
 fi
 
 # Update slurmdbd.conf for host

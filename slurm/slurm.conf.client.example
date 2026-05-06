@@ -3,7 +3,7 @@
 # See the slurm.conf man page for more information.
 #
 ClusterName=asap_cluster
-SlurmctldHost=updeplasrv4-new.epfl.ch
+SlurmctldHost=controller.example.internal
 #SlurmctldHost=
 #
 #DisableRootJobs=NO
@@ -112,7 +112,7 @@ PriorityFlags=FAIR_TREE
 #
 # LOGGING AND ACCOUNTING
 #AccountingStorageEnforce=0
-AccountingStorageHost=updeplasrv4-new.epfl.ch
+AccountingStorageHost=controller.example.internal
 #AccountingStoragePass=
 AccountingStoragePort=6819
 AccountingStorageType=accounting_storage/slurmdbd
@@ -149,8 +149,8 @@ SlurmdLogFile=/var/log/slurm/slurmd.log
 #
 #
 # COMPUTE NODES
-NodeName=updeplasrv4-new.epfl.ch NodeAddr=128.178.238.41 CPUs=144 Boards=1 SocketsPerBoard=4 CoresPerSocket=18 ThreadsPerCore=2 RealMemory=694741 State=UNKNOWN
-PartitionName=debug Nodes=updeplasrv4-new.epfl.ch Default=YES MaxTime=INFINITE State=UP
+NodeName=compute01.example.org NodeAddr=10.0.0.10 CPUs=64 Boards=1 SocketsPerBoard=2 CoresPerSocket=16 ThreadsPerCore=2 RealMemory=256000 State=UNKNOWN
+PartitionName=debug Nodes=compute01.example.org Default=YES MaxTime=INFINITE State=UP
 
 AuthType=auth/munge
 

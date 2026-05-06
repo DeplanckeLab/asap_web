@@ -222,6 +222,7 @@ Rails.application.routes.draw do
   get '/guided-tours', to: 'home#guided_tours', as: :public_guided_tours
   get '/sitemap.xml', to: 'home#sitemap', as: :sitemap
   get '/robots.txt', to: 'home#robots', as: :robots
+  post '/security/session_cookie_challenge/solve', to: 'security#solve_session_cookie_challenge'
   root "home#welcome"
 
 end

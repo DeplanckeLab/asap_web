@@ -1,5 +1,7 @@
 # Deployment Permissions Guide
 
+Redacted template: copy to `DEPLOYMENT_PERMISSIONS.md` (gitignored) for site-specific paths and POSIX ids.
+
 ## Container User Configuration
 
 The application runs as **non-root user** (`rvmuser`, UID 1006) for security and portability.
@@ -15,9 +17,9 @@ The application runs as **non-root user** (`rvmuser`, UID 1006) for security and
 - Data directories must be writable by UID 1006 (rvmuser)
 - Application creates directories with `chmod 0777` for cross-container access
 - Key directories:
-  - `/data/asap2_test/users/*` - User project data
-  - `/data/asap2_test/fus/*` - File uploads
-  - `/data/asap2_test/parsing/*` - Parsing output
+  - `${YOUR_USER_DATA_DIR}/users/*` - User project data
+  - `${YOUR_USER_DATA_DIR}/fus/*` - File uploads
+  - `${YOUR_USER_DATA_DIR}/parsing/*` - Parsing output
 
 ### 3. SLURM Authentication
 - Container needs access to munge key or munge socket
@@ -76,9 +78,9 @@ If migrating from root to non-root:
 
 1. **Fix existing file permissions:**
    ```bash
-   sudo chown -R 1006:985 /data/asap2_test
-   sudo find /data/asap2_test -type d -exec chmod 775 {} \;
-   sudo find /data/asap2_test -type f -exec chmod 664 {} \;
+   sudo chown -R 1006:985 ${YOUR_USER_DATA_DIR}
+   sudo find ${YOUR_USER_DATA_DIR} -type d -exec chmod 775 {} \;
+   sudo find ${YOUR_USER_DATA_DIR} -type f -exec chmod 664 {} \;
    ```
 
 2. **Update docker-compose.yml:**

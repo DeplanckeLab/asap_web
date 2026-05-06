@@ -4,8 +4,13 @@ This directory contains SLURM configuration files for the docker-compose setup.
 
 ## Files
 
-- `slurm.conf` - Main SLURM configuration file
-- `slurmdbd.conf` - SLURM database daemon configuration
+Production-specific `slurm.conf`, `slurm.conf.client`, `slurmdbd.conf`, and several host install scripts are **gitignored**. Use the tracked templates:
+
+- `slurm.conf.example`, `slurm.conf.client.example`, `slurmdbd.conf.example`
+- `install-slurm-host.sh.example`, `fresh-install-slurm-host.sh.example`, `init-slurm-database-direct.sh.example`
+
+Copy each to the matching name **without** `.example`, edit hostnames and secrets, then keep those copies local or in a private ops repo.
+
 - `cgroup.conf` - Cgroup configuration for resource limits
 
 ## Configuration Details
@@ -20,17 +25,18 @@ This directory contains SLURM configuration files for the docker-compose setup.
 - Older docs referred to `slurmctld` / `slurmd` **containers**; production may use host `slurmd` instead.
 
 ### Resource Limits
-- **CPUs**: 90% of total system CPUs (automatically configured)
-- **Memory**: 90% of total system RAM (automatically configured)
-- **Partition**: `debug` (default partition)
-- **Remaining**: 10% reserved for database and web app
+Templates ship with placeholder node sizing; tune `CPUs`, `RealMemory`, and partitions for each host.
 
-To update resource limits, run:
+- **CPUs**: Often set to ~90% of total system CPUs when using `./slurm/configure_resources.sh`
+- **Memory**: Size `RealMemory` (MB) per node line to fit your hosts; `./slurm/configure_resources.sh` can suggest values on the machine where you run it
+- **Partition**: `debug` (default partition) in templates
+- **Remaining capacity**: Leave headroom on the controller node for databases and web services
+
+To regenerate resource knobs on the current machine, run:
 ```bash
 ./slurm/configure_resources.sh
 ```
-
-This will automatically detect system resources and configure SLURM to use 90% of available CPU and RAM.
+Review the resulting local `slurm.conf` before deploying to `/etc/slurm`.
 
 ### Accessing SLURM
 

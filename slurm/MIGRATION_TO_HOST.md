@@ -40,7 +40,7 @@ Moving slurmctld and slurmdbd from Docker containers to the host machine to reso
 
 ### 1. Install SLURM on Host
 ```bash
-sudo /srv/asap2_test/slurm/install-slurm-host.sh
+sudo /path/to/your/checkout/slurm/install-slurm-host.sh
 ```
 
 ### 2. Verify Host Services

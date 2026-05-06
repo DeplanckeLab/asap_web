@@ -1,0 +1,81 @@
+<div style="max-width: 680px; margin: 40px auto; font-family: Arial, sans-serif;">
+  <h1>Access blocked</h1>
+  <p>Your IP <strong><%= @banned_ip %></strong> is currently banned.</p>
+  <p><%= SessionCookieGate::BAN_MESSAGE %></p>
+  <p>To remove the ban, solve the puzzle below: click the differently colored square.</p>
+
+  <div style="margin-top: 20px;">
+    <canvas id="ip-ban-puzzle-canvas" width="<%= @ip_ban_challenge[:size] %>" height="<%= @ip_ban_challenge[:size] %>" style="border: 1px solid #cccccc;"></canvas>
+  </div>
+
+  <div id="ip-ban-puzzle-status" style="margin-top: 16px; font-weight: 600;"></div>
+
+  <script>
+    (function() {
+      const challenge = {
+        size: <%= @ip_ban_challenge[:size] %>,
+        cellSize: <%= @ip_ban_challenge[:cell_size] %>,
+        targetCol: <%= @ip_ban_challenge[:target_col] %>,
+        targetRow: <%= @ip_ban_challenge[:target_row] %>,
+        nonce: "<%= @ip_ban_challenge[:nonce] %>"
+      };
+
+      const canvas = document.getElementById('ip-ban-puzzle-canvas');
+      const statusEl = document.getElementById('ip-ban-puzzle-status');
+      const ctx = canvas.getContext('2d');
+      const rows = Math.floor(challenge.size / challenge.cellSize);
+      const cols = rows;
+
+      function drawPuzzle() {
+        for (let row = 0; row < rows; row += 1) {
+          for (let col = 0; col < cols; col += 1) {
+            const isTarget = row === challenge.targetRow && col === challenge.targetCol;
+            ctx.fillStyle = isTarget ? '#6aa9ff' : '#4f7fd8';
+            ctx.fillRect(
+              col * challenge.cellSize,
+              row * challenge.cellSize,
+              challenge.cellSize - 2,
+              challenge.cellSize - 2
+            );
+          }
+        }
+      }
+
+      function csrfToken() {
+        const meta = document.querySelector("meta[name='csrf-token']");
+        return meta ? meta.content : '';
+      }
+
+      async function submitSolve(x, y) {
+        statusEl.textContent = 'Verifying puzzle...';
+        try {
+          const response = await fetch('/security/session_cookie_challenge/solve', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken()
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ nonce: challenge.nonce, x: x, y: y })
+          });
+          const data = await response.json();
+          statusEl.textContent = data.message;
+          if (data.ok) {
+            setTimeout(function() { window.location.reload(); }, 1200);
+          }
+        } catch (_error) {
+          statusEl.textContent = 'Unable to verify puzzle. Please retry.';
+        }
+      }
+
+      canvas.addEventListener('click', function(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor(event.clientX - rect.left);
+        const y = Math.floor(event.clientY - rect.top);
+        submitSolve(x, y);
+      });
+
+      drawPuzzle();
+    })();
+  </script>
+</div>

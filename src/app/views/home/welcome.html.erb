@@ -3,7 +3,7 @@
 
 <!-- Hero -->
 <div class="relative overflow-hidden">
-  <div class="max-w-[85rem] mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-28 lg:pt-20 lg:pb-36">
+  <div class="max-w-[85rem] mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-16 lg:pt-10 lg:pb-20">
     
     <!-- Centered Content Wrapper -->
     <div class="max-w-4xl mx-auto text-center">
@@ -11,17 +11,17 @@
       <!-- Logo Header (Kept your original H1 classes) -->
       <h1 class="block text-3xl font-bold text-gray-800 sm:text-4xl lg:text-6xl lg:leading-tight dark:text-white">
         <div class="flex justify-center">
-          <%= image_tag "ASAP_avecTagline_Colors.svg", 
-              class: 'h-24 sm:h-32 md:h-40 w-auto object-contain', 
+          <%= image_tag "ASAP_avecTagline_Colors.svg",
+              class: 'h-16 sm:h-24 md:h-28 w-auto object-contain',
               alt: 'ASAP Logo' %> 
         </div>
       </h1>
 
       <!-- Tagline (Kept your original P classes) -->
-      <p class="mt-3 text-lg text-gray-800 dark:text-neutral-400 max-w-2xl mx-auto">
+      <p class="mt-2 text-base text-gray-800 dark:text-neutral-400 max-w-2xl mx-auto">
         A collaborative portal to analyze single-cell transcriptomics data.
       </p>
-      <div class="mt-5 max-w-2xl mx-auto rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10" role="alert" aria-live="polite">
+      <div class="mt-4 max-w-2xl mx-auto rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-left shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10" role="alert" aria-live="polite">
         <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">
           Service alert
         </p>
@@ -31,7 +31,7 @@
       </div>
 
       <!-- Buttons (Centered) -->
-      <div class="mt-8 flex flex-col sm:flex-row justify-center gap-3 w-full sm:w-auto">
+      <div class="mt-6 flex flex-col sm:flex-row justify-center gap-2.5 w-full sm:w-auto">
         <a class="<%= tw_btn(:primary) %> justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
            href="<%= new_project_path %>"
            data-guided-tour="welcome-create-project-cta">
@@ -47,7 +47,7 @@
       </div>
 
       <!-- Tutorial Link (Replacement for the video) -->
-      <div class="mt-6">
+      <div class="mt-4">
         <a class="inline-flex items-center gap-x-1.5 text-sm font-medium text-blue-600 decoration-2 hover:underline focus:outline-none focus:underline dark:text-blue-500" href="<%= public_guided_tours_path %>">
           Check the guided tours
           <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
@@ -55,7 +55,7 @@
       </div>
 
       <!-- Feedback (Centered) -->
-      <div class="mt-10 flex flex-wrap justify-center gap-6">
+      <div class="mt-6 flex flex-wrap justify-center gap-4">
         <% feedback_menu_links.each do |link| %>
           <a href="<%= link[:path] %>"
              class="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
@@ -67,8 +67,8 @@
       </div>
 
       <!-- Partners (Formatted as a clean footer-style row) -->
-      <div class="mt-16 pt-10 border-t border-gray-200 dark:border-neutral-800">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center max-w-3xl mx-auto">
+      <div class="mt-8 pt-6 border-t border-gray-200 dark:border-neutral-800">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 items-center max-w-3xl mx-auto">
           
           <!-- SIB -->
           <div class="flex items-center gap-4 justify-center md:justify-start">

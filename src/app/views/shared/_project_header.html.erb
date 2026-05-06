@@ -523,6 +523,13 @@
                 Compliance
               <% end %>
             <% end %>
+            <% if admin? %>
+              <%= link_to project_path(@project, view: 'access'),
+                  class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'access' ? 'bg-gray-100 font-medium' : ''}" do %>
+                <i class="fas fa-chart-area text-lg mr-3 text-emerald-500"></i>
+                Access analytics
+              <% end %>
+            <% end %>
             
             <% if clonable?(@project) %>
               <!-- Clone -->
@@ -637,6 +644,10 @@
         <% if @project.compliance_schemas.any? %>
           <%= link_to project_path(@project, view: 'compliance'),
               class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'compliance' ? 'bg-gray-700' : ''}", title: "Compliance", data: { guided_tour: "project-nav-compliance" } do %><i class="fas fa-check-circle text-lg"></i><% end %>
+        <% end %>
+        <% if admin? %>
+          <%= link_to project_path(@project, view: 'access'),
+              class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'access' ? 'bg-gray-700' : ''}", title: "Access analytics" do %><i class="fas fa-chart-area text-lg"></i><% end %>
         <% end %>
         <% if clonable?(@project) %>
           <%= button_to clone_project_path(@project),

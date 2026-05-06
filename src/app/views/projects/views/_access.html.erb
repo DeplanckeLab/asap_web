@@ -1,0 +1,60 @@
+<% windows = @project_view_access_windows || [] %>
+
+<div class="space-y-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-900">Project access analytics</h2>
+    <p class="text-sm text-gray-600 mt-1">
+      Admin-only view based on <code>project_view_logs</code> entries for this project.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <% windows.each do |window| %>
+      <% points = window[:points] || [] %>
+      <% max_value = [window[:max].to_i, 1].max %>
+      <% width = 720.0 %>
+      <% height = 220.0 %>
+      <% left_pad = 32.0 %>
+      <% right_pad = 12.0 %>
+      <% top_pad = 12.0 %>
+      <% bottom_pad = 24.0 %>
+      <% plot_width = width - left_pad - right_pad %>
+      <% plot_height = height - top_pad - bottom_pad %>
+      <% denom = [points.length - 1, 1].max %>
+      <% polyline_points = points.each_with_index.map do |entry, idx|
+           x = left_pad + (idx.to_f / denom) * plot_width
+           y = top_pad + plot_height - ((entry[:count].to_f / max_value) * plot_height)
+           "#{x.round(2)},#{y.round(2)}"
+         end.join(" ") %>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <p class="font-semibold text-gray-900"><%= window[:label] %></p>
+          <span class="text-xs text-gray-500">
+            Total accesses: <span class="font-semibold text-gray-700"><%= number_with_delimiter(window[:total].to_i) %></span>
+          </span>
+        </div>
+
+        <svg viewBox="0 0 <%= width %> <%= height %>" class="w-full h-52 bg-gray-50 rounded border border-gray-100">
+          <line x1="<%= left_pad %>" y1="<%= top_pad %>" x2="<%= left_pad %>" y2="<%= top_pad + plot_height %>" stroke="#D1D5DB" stroke-width="1" />
+          <line x1="<%= left_pad %>" y1="<%= top_pad + plot_height %>" x2="<%= left_pad + plot_width %>" y2="<%= top_pad + plot_height %>" stroke="#D1D5DB" stroke-width="1" />
+
+          <polyline fill="none" stroke="#2563EB" stroke-width="2.5" points="<%= polyline_points %>" />
+
+          <% if points.any? %>
+            <% last = points.last %>
+            <% x_last = left_pad + plot_width %>
+            <% y_last = top_pad + plot_height - ((last[:count].to_f / max_value) * plot_height) %>
+            <circle cx="<%= x_last.round(2) %>" cy="<%= y_last.round(2) %>" r="3.5" fill="#1D4ED8" />
+          <% end %>
+        </svg>
+
+        <div class="flex items-center justify-between text-xs text-gray-500 mt-2">
+          <span><%= points.first&.dig(:time)&.strftime("%Y-%m-%d %H:%M") %></span>
+          <span>max: <%= max_value %></span>
+          <span><%= points.last&.dig(:time)&.strftime("%Y-%m-%d %H:%M") %></span>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

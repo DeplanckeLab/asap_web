@@ -7415,6 +7415,13 @@ class ProjectsController < ApplicationController
     end
 
     def authorize_requested_view_access!(view_type)
+      if view_type == 'access'
+        return true if admin?
+
+        handle_project_unauthorized_access
+        return false
+      end
+
       return true unless view_type == 'settings'
       return true if editable?(@project) || analyzable?(@project) || exportable?(@project)
 
@@ -7428,7 +7435,7 @@ class ProjectsController < ApplicationController
 
     def resolve_project_view_type(requested_view)
       view = requested_view.to_s
-      allowed_views = %w[summary visualization analysis data settings compliance]
+      allowed_views = %w[summary visualization analysis data settings compliance access]
       return view if allowed_views.include?(view)
 
       #project_has_embeddings? ? 'visualization' : 'summary'
@@ -7474,11 +7481,67 @@ class ProjectsController < ApplicationController
         load_settings_context
       when 'compliance'
         load_compliance_context
+      when 'access'
+        load_access_context
       else
         @view_type = 'summary'
         load_analysis_context
         load_summary_context
       end
+    end
+
+    def load_access_context
+      @project_view_access_windows = [
+        build_project_access_window(
+          label: "Last 24 hours",
+          range_start: 24.hours.ago,
+          bucket_seconds: 1.hour
+        ),
+        build_project_access_window(
+          label: "Last week",
+          range_start: 7.days.ago,
+          bucket_seconds: 1.day
+        ),
+        build_project_access_window(
+          label: "Last month",
+          range_start: 30.days.ago,
+          bucket_seconds: 1.day
+        ),
+        build_project_access_window(
+          label: "Last year",
+          range_start: 365.days.ago,
+          bucket_seconds: 7.days
+        )
+      ]
+    end
+
+    def build_project_access_window(label:, range_start:, bucket_seconds:)
+      range_end = Time.current
+      base = range_start.to_i
+
+      bucket_counts = Hash.new(0)
+      ProjectViewLog.where(project_id: @project.id, created_at: range_start..range_end).pluck(:created_at).each do |created_at|
+        ts = created_at.to_i
+        bucket_index = (ts - base) / bucket_seconds
+        next if bucket_index.negative?
+
+        bucket_start = Time.zone.at(base + (bucket_index * bucket_seconds))
+        bucket_counts[bucket_start] += 1
+      end
+
+      points = []
+      cursor = Time.zone.at(base)
+      while cursor <= range_end
+        points << { time: cursor, count: bucket_counts[cursor] || 0 }
+        cursor += bucket_seconds
+      end
+
+      {
+        label: label,
+        total: points.sum { |entry| entry[:count] },
+        max: points.map { |entry| entry[:count] }.max.to_i,
+        points: points
+      }
     end
 
     def load_visualization_context

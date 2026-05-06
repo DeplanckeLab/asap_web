@@ -175,7 +175,7 @@ module ApplicationHelper
       {
         label: "Guided tours",
         description: "Manage guided tours and their steps",
-        path: guided_tours_path,
+        path: editor_guided_tours_path,
         icon: "fas fa-route"
       },
       { label: "Tools", path: tools_path, icon: "fas fa-wrench" },

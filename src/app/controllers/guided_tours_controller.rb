@@ -3,11 +3,11 @@ class GuidedToursController < ApplicationController
   before_action :set_guided_tour, only: [:show, :edit, :update, :destroy]
 
   def index
-    @guided_tours = GuidedTour.visible.ordered
+    @guided_tours = GuidedTour.ordered
   end
 
   def show
-    @guided_tours = GuidedTour.visible.ordered
+    @guided_tours = GuidedTour.ordered
     @guided_tour_steps = @guided_tour.guided_tour_steps.ordered
     @new_guided_tour_step = @guided_tour.guided_tour_steps.build
   end
@@ -39,6 +39,15 @@ class GuidedToursController < ApplicationController
   def destroy
     @guided_tour.destroy
     redirect_to guided_tours_path, notice: 'Guided tour was successfully deleted.'
+  end
+
+  def editor
+    first_tour = GuidedTour.ordered.first
+    if first_tour
+      redirect_to guided_tour_path(first_tour)
+    else
+      redirect_to new_guided_tour_path, notice: 'Create your first guided tour.'
+    end
   end
 
   def reorder

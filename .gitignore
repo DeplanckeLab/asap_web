@@ -17,6 +17,7 @@ startdb
 *.sql
 *.sql.gz
 src/tmp/**
+tmp/nginx-logs/**
 src/log/**
 !src/log/.keep
 !src/tmp/.keep

@@ -34,8 +34,10 @@ class ApplicationController < ActionController::Base
       return
     end
 
-    if SessionCookieGate.blocked?(ip)
-      render_ip_ban_challenge(ip)
+    strict_validation = strict_session_validation_required?
+
+    if SessionCookieGate.blocked?(ip) && strict_validation
+      render_ip_ban_challenge(ip, strict: true)
       return
     end
 
@@ -46,7 +48,9 @@ class ApplicationController < ActionController::Base
 
     @session_cookie_in_request = false
     return unless should_enforce_session_cookie_challenge?
-    render_ip_ban_challenge(ip)
+    return if challenge_bypass_requested? && !strict_validation
+
+    render_ip_ban_challenge(ip, strict: strict_validation)
     return
   end
 
@@ -67,10 +71,44 @@ class ApplicationController < ActionController::Base
     true
   end
 
-  def render_ip_ban_challenge(ip)
+  def strict_session_validation_required?
+    project_key = project_key_from_path
+    return false if project_key.blank?
+
+    project = Project.find_by(key: project_key)
+    project&.archived_on_s3? || false
+  end
+
+  def project_key_from_path
+    path = request.path.to_s
+    match = path.match(%r{\A/projects/([^/]+)})
+    return nil unless match
+
+    key = match[1].to_s
+    return nil if key.blank? || key == 'new'
+
+    key
+  end
+
+  def challenge_bypass_requested?
+    params[:challenge_bypass].to_s == '1'
+  end
+
+  def challenge_auto_continue_url
+    uri = URI.parse(request.original_fullpath)
+    current_params = Rack::Utils.parse_nested_query(uri.query)
+    current_params['challenge_bypass'] = '1'
+    uri.query = current_params.to_query
+    uri.to_s
+  end
+
+  def render_ip_ban_challenge(ip, strict:)
     @session_cookie_in_request = false
+    @project = Project.find_by(key: project_key_from_path) if @project.nil?
     @ip_ban_challenge = SessionCookieGate.challenge_for(ip)
     @banned_ip = ip
+    @ip_ban_challenge_strict = strict
+    @ip_ban_challenge_auto_continue_url = strict ? nil : challenge_auto_continue_url
 
     render 'shared/ip_ban_challenge', status: :forbidden
   end

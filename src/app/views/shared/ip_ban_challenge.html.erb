@@ -1,8 +1,13 @@
 <div style="max-width: 680px; margin: 40px auto; font-family: Arial, sans-serif;">
-  <h1>Access blocked</h1>
-  <p>Your IP <strong><%= @banned_ip %></strong> is currently banned.</p>
-  <p><%= SessionCookieGate::BAN_MESSAGE %></p>
-  <p>To remove the ban, solve the puzzle below: click the differently colored square.</p>
+  <h1>Session verification</h1>
+  <% if @ip_ban_challenge_strict %>
+    <p>Archived project: validation required.</p>
+    <p><b>Click the square with a different color.</b></p>
+    <p>Success: auto-reload.</p>
+  <% else %>
+    <p><b>Click the square with a different color.</b></p>
+    <p>Skip: auto-continue in <span id="ip-ban-puzzle-countdown">10</span>s.</p>
+  <% end %>
 
   <div style="margin-top: 20px;">
     <canvas id="ip-ban-puzzle-canvas" width="<%= @ip_ban_challenge[:size] %>" height="<%= @ip_ban_challenge[:size] %>" style="border: 1px solid #cccccc;"></canvas>
@@ -10,8 +15,10 @@
 
   <div id="ip-ban-puzzle-status" style="margin-top: 16px; font-weight: 600;"></div>
 
-  <script>
+  <%= javascript_tag nonce: true do %>
     (function() {
+      const strictMode = <%= @ip_ban_challenge_strict ? 'true' : 'false' %>;
+      const autoContinueUrl = <%= raw(@ip_ban_challenge_auto_continue_url.present? ? @ip_ban_challenge_auto_continue_url.to_json : "''") %>;
       const challenge = {
         size: <%= @ip_ban_challenge[:size] %>,
         cellSize: <%= @ip_ban_challenge[:cell_size] %>,
@@ -22,9 +29,19 @@
 
       const canvas = document.getElementById('ip-ban-puzzle-canvas');
       const statusEl = document.getElementById('ip-ban-puzzle-status');
+      const countdownEl = document.getElementById('ip-ban-puzzle-countdown');
+      if (!canvas) {
+        if (statusEl) { statusEl.textContent = 'Challenge could not load. Please refresh this page.'; }
+        return;
+      }
       const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        if (statusEl) { statusEl.textContent = 'Challenge could not load. Please refresh this page.'; }
+        return;
+      }
       const rows = Math.floor(challenge.size / challenge.cellSize);
       const cols = rows;
+      let solved = false;
 
       function drawPuzzle() {
         for (let row = 0; row < rows; row += 1) {
@@ -61,6 +78,7 @@
           const data = await response.json();
           statusEl.textContent = data.message;
           if (data.ok) {
+            solved = true;
             setTimeout(function() { window.location.reload(); }, 1200);
           }
         } catch (_error) {
@@ -75,7 +93,23 @@
         submitSolve(x, y);
       });
 
+      if (!strictMode && autoContinueUrl) {
+        let secondsLeft = 10;
+        const timer = setInterval(function() {
+          secondsLeft -= 1;
+          if (countdownEl) {
+            countdownEl.textContent = String(secondsLeft);
+          }
+          if (secondsLeft <= 0) {
+            clearInterval(timer);
+            if (!solved) {
+              window.location.href = autoContinueUrl;
+            }
+          }
+        }, 1000);
+      }
+
       drawPuzzle();
     })();
-  </script>
+  <% end %>
 </div>

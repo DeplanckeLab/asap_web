@@ -30,7 +30,7 @@
     @h_stats ||= {}
 
     unless @h_std_methods
-      asap_docker_image = Basic.get_asap_docker(@project.version_for_docker_image)
+      asap_docker_image = Basic.get_asap_docker(@project.version)
       @h_std_methods = {}
       StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
     end

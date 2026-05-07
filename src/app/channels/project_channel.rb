@@ -33,8 +33,12 @@ class ProjectChannel < ApplicationCable::Channel
     parsing_complete = true
     parsing_step_id = nil
 
-    parsing_step = project.catalog_steps.where(name: 'parsing').first
-    parsing_step ||= Step.where(name: 'parsing').order(:id).last
+    asap_docker_image = Basic.get_asap_docker(project.version)
+    parsing_step = if asap_docker_image
+                     Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+                   else
+                     Step.where(name: 'parsing').order(:id).last
+                   end
 
     if parsing_step
       parsing_step_id = parsing_step.id

@@ -11,7 +11,7 @@ class RunsController < ApplicationController
     @h_nber_runs = JSON.parse(@ps.nber_runs_json)
     @h_steps = {}
     #    Step.where(:version_id => @project.version_id).all.map{|s| @h_steps[s.id] = s}
-    @project.catalog_steps.each { |s| @h_steps[s.id] = s }
+    Step.where(:docker_image_id => @asap_docker_image.id).all.map{|s| @h_steps[s.id] = s}
     @h_statuses = {}
     Status.all.map{|s| @h_statuses[s.id] = s}
     #    @h_std_methods = {}
@@ -208,7 +208,7 @@ class RunsController < ApplicationController
     
     # Get steps hash for display helpers
     @h_steps = {}
-    @project.catalog_steps.each { |s| @h_steps[s.id] = s }
+    Step.where(docker_image_id: @asap_docker_image.id).each { |s| @h_steps[s.id] = s }
     
     # Get statuses hash
     @h_statuses = {}
@@ -885,7 +885,7 @@ class RunsController < ApplicationController
     def set_run
       @run = Run.find(params[:id])
       @project = @run.project
-      @version = @project.version_for_catalog
+      @version =@project.version
       @h_env = Basic.safe_parse_json(@version.env_json, {})
       @list_docker_image_names = @h_env['docker_images'].keys.map{|k| @h_env['docker_images'][k]["name"] + ":" + @h_env['docker_images'][k]["tag"]}
       @docker_images = DockerImage.where("full_name in (#{@list_docker_image_names.map{|e| "'#{e}'"}.join(",")})").all

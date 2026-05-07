@@ -2,7 +2,7 @@ require "application_system_test_case"
 
 class ProjectsTest < ApplicationSystemTestCase
   setup do
-    @project = create_test_project!
+    @project = projects(:one)
   end
 
   test "visiting the index" do

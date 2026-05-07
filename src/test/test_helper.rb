@@ -10,17 +10,9 @@ module ActiveSupport
     # Run tests in parallel with specified workers
     parallelize(workers: :number_of_processors)
 
-    # No YAML fixtures (db:fixtures:load replaces entire tables).
+    # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
+    fixtures :all
 
-    def create_test_project!(**attrs)
-      Project.create!(
-        {
-          name: "Test project",
-          key: "t#{SecureRandom.hex(8)}",
-          public: false,
-          sandbox: true
-        }.merge(attrs)
-      )
-    end
+    # Add more helper methods to be used by all tests here...
   end
 end

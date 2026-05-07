@@ -1,11 +1,11 @@
 namespace :safety do
   def ensure_not_production_db!(task_name:, override_env:)
-    next unless Rails.env.production?
+    return unless Rails.env.production?
 
     db_name = ActiveRecord::Base.connection_db_config&.database.to_s
     allow_override = ENV[override_env] == "1"
 
-    next if allow_override
+    return if allow_override
 
     abort(
       "[SAFETY] Refusing to run #{task_name} in production " \

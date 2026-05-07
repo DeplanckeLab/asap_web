@@ -39,21 +39,13 @@ class ApplicationController < ActionController::Base
       return
     end
 
-    if session_cookie_name_in_request?
-      SessionCookieGate.clear_strikes!(ip)
-      @session_cookie_in_request = true
+    if session_clearance_cookie_present?
+      @session_cookie_in_request = session_cookie_name_in_request?
       return
     end
 
     @session_cookie_in_request = false
-
-    strikes = SessionCookieGate.increment_strike(ip)
-    return if strikes < 2
-
-    SessionCookieGate.block!(ip)
-    SessionCookieGate.clear_strikes!(ip)
-    SessionCookieGateAuditLogger.ban!(ip: ip, strikes: strikes, reason: 'second_request_without_session_cookie')
-    Rails.logger.warn("session_cookie_gate_ban ip=#{ip} strikes=#{strikes} permanent=true")
+    return unless should_enforce_session_cookie_challenge?
     render_ip_ban_challenge(ip)
     return
   end
@@ -64,6 +56,15 @@ class ApplicationController < ActionController::Base
     return true if request.path == '/security/session_cookie_challenge/solve'
 
     false
+  end
+
+  # Enforce challenge on all HTML page requests.
+  # API polling and assets are excluded by format/method checks.
+  def should_enforce_session_cookie_challenge?
+    return false unless request.get?
+    format = request.format
+    return false unless format.html? || format.to_s == '*/*'
+    true
   end
 
   def render_ip_ban_challenge(ip)
@@ -80,6 +81,24 @@ class ApplicationController < ActionController::Base
 
   def session_cookie_name_in_request?
     request.cookies.key?(session_cookie_key)
+  end
+
+  def session_clearance_cookie_name
+    :asap_session_clearance
+  end
+
+  def session_clearance_cookie_present?
+    cookies.signed[session_clearance_cookie_name].to_s == 'ok'
+  end
+
+  def grant_session_clearance!
+    cookies.signed[session_clearance_cookie_name] = {
+      value: 'ok',
+      httponly: true,
+      same_site: :lax,
+      secure: Rails.env.production?,
+      expires: 24.hours.from_now
+    }
   end
 
   def get_real_ip

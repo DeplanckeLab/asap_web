@@ -15,9 +15,10 @@ class SecurityController < ApplicationController
     )
 
     if solved
+      grant_session_clearance!
       SessionCookieGateAuditLogger.unban!(ip: ip, source: 'puzzle')
       Fail2banBridge.unban_ip(ip)
-      render json: { ok: true, message: 'IP unbanned successfully. Please retry your request.' }, status: :ok
+      render json: { ok: true, message: 'Verification successful. Please retry your request.' }, status: :ok
     else
       render json: { ok: false, message: 'Puzzle verification failed. Please try again.' }, status: :unprocessable_entity
     end

@@ -7351,6 +7351,7 @@ class ProjectsController < ApplicationController
       @project_archive_transitioning = [2, 4].include?(@project.archive_status_id)
       @project_unarchive_state = nil
       return unless @project_files_missing
+      return if request_user_agent_indicates_bot?
 
       if @project.queue_unarchive_if_needed!
         @project_unarchive_state = 'queued'

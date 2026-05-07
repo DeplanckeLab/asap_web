@@ -298,6 +298,7 @@ class Project < ApplicationRecord
   # Index data for Elasticsearch.
   # Technology and tissue are pulled from ComplianceMapping / ComplianceTermReplacement
   # records (the actively maintained resolved terms) rather than the legacy Project columns.
+  # archive_status_id is not indexed; archive state is derived from disk, S3, and DB jobs, not from search.
   def as_indexed_json(options = {})
     {
       name: respond_to?(:name) ? (name || '') : '',
@@ -380,6 +381,57 @@ class Project < ApplicationRecord
 
   def display_name
     name.presence || key.presence || "Project #{id}"
+  end
+
+  # Resolves which Version record drives DockerImage / Step lists in the UI (pipeline, analysis, graphs).
+  # When version_id is NULL (e.g. after DB recovery), use the same activated modern stack as elsewhere
+  # (see ProjectsController#index v8 check: Version.where(activated: true).where("id > 3")).
+  def version_for_docker_image
+    v = version
+    return v if v
+
+    Version.where(activated: true).where("id > 3").order(id: :desc).first
+  end
+
+  # Version used with Basic.get_asap_docker when loading Step / StdMethod catalog rows for this project.
+  # Prefer projects.version_id (association or DB lookup); when NULL, use version_for_docker_image.
+  # Two different versions can reference the same docker image tag, so catalog queries must scope by
+  # both versions.id and docker_images.id, not by docker image alone.
+  def version_for_catalog
+    if version_id.present?
+      version.presence || Version.find_by(id: version_id)
+    else
+      version_for_docker_image
+    end
+  end
+
+  def asap_docker_image_for_catalog
+    v = version_for_catalog
+    v ? Basic.get_asap_docker(v) : nil
+  end
+
+  def catalog_steps
+    v = version_for_catalog
+    img = asap_docker_image_for_catalog
+    return Step.none unless v && img
+
+    Step.where(version_id: v.id, docker_image_id: img.id)
+  end
+
+  def catalog_std_methods(include_obsolete: false)
+    v = version_for_catalog
+    img = asap_docker_image_for_catalog
+    return StdMethod.none unless v && img
+
+    rel = StdMethod.where(version_id: v.id, docker_image_id: img.id)
+    rel = rel.where(obsolete: false) unless include_obsolete
+    rel
+  end
+
+  def catalog_std_methods_for_step(step_id)
+    return StdMethod.none if step_id.blank?
+
+    catalog_std_methods.where(step_id: step_id)
   end
 
   def broadcast(step_id)
@@ -488,9 +540,9 @@ class Project < ApplicationRecord
 
   def integrate
     logger = Rails.logger
-    v = self.version
+    v = version_for_catalog
     unless v
-      logger.error("[Project#integrate] Project #{self.id} has no version")
+      logger.error("[Project#integrate] Project #{self.id} has no version for catalog")
       return
     end
 
@@ -501,13 +553,13 @@ class Project < ApplicationRecord
       return
     end
 
-    parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_step = Step.where(version_id: v.id, docker_image_id: asap_docker_image.id, name: 'parsing').first
     unless parsing_step
-      logger.error("[Project#integrate] Could not find parsing step for docker image #{asap_docker_image.id}")
+      logger.error("[Project#integrate] Could not find parsing step for version_id=#{v.id} docker_image_id=#{asap_docker_image.id}")
       return
     end
 
-    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'integration').first
+    parsing_std_method = StdMethod.where(version_id: v.id, docker_image_id: asap_docker_image.id, name: 'integration').first
 
     project_step = ProjectStep.find_or_create_by(project_id: self.id, step_id: parsing_step.id)
 
@@ -749,10 +801,10 @@ class Project < ApplicationRecord
   # Called lazily when needed for display (show, step_results, refresh_steps_panel)
   # Only creates ProjectStep records for steps that match the project's project type
   def ensure_project_steps
-    asap_docker_image = Basic.get_asap_docker(version)
+    asap_docker_image = asap_docker_image_for_catalog
     return unless asap_docker_image
-    
-    Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+
+    catalog_steps.find_each do |step|
       # Filter by project type if project has a project type
       if project_type
         step_attrs = Basic.safe_parse_json(step.attrs_json, {})

@@ -432,7 +432,7 @@ class ReqsController < ApplicationController
     # Enforce deterministic input_matrix payload for cell_filtering.
     # This prevents unexpected /attrs/* datasets from being used as matrix input.
     if @step&.name == 'cell_filtering'
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = Basic.get_asap_docker(@project.version_for_docker_image)
       parsing_step = Step.where(name: 'parsing', docker_image_id: asap_docker_image&.id).first
       parsing_runs = parsing_step ? Run.where(project_id: @project.id, step_id: parsing_step.id).order(created_at: :desc) : Run.none
       parsing_run = parsing_runs.where(status_id: 3).first || parsing_runs.first

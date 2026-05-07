@@ -225,10 +225,9 @@ class ProjectCloneService
   end
 
   def build_steps_hash
-    asap_docker_image = Basic.get_asap_docker(source_project.version)
-    return {} unless asap_docker_image
-    
-    Step.where(docker_image_id: asap_docker_image.id).index_by(&:id)
+    return {} unless source_project.asap_docker_image_for_catalog
+
+    source_project.catalog_steps.index_by(&:id)
   end
 
   def update_output_json(run)
@@ -378,10 +377,9 @@ class ProjectCloneService
   end
 
   def rename_run_folders
-    asap_docker_image = Basic.get_asap_docker(source_project.version)
-    return unless asap_docker_image
-    
-    Step.where(docker_image_id: asap_docker_image.id, multiple_runs: true).find_each do |step|
+    return unless source_project.asap_docker_image_for_catalog
+
+    source_project.catalog_steps.where(multiple_runs: true).find_each do |step|
       Run.where(project_id: source_project.id, step_id: step.id).find_each do |run|
         old_run_dir = @new_project_dir + step.name + run.id.to_s
         new_run_dir = @new_project_dir + step.name + @h_runs[run.id].id.to_s

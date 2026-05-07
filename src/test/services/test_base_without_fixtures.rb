@@ -17,3 +17,17 @@ class TestBaseWithoutFixtures < ActiveSupport::TestCase
   end
 end
 
+class IntegrationTestWithoutFixtures < ActionDispatch::IntegrationTest
+  def self.fixtures(*names)
+    @fixtures = []
+  end
+
+  def setup_fixtures
+    # Skip fixture loading
+  end
+
+  def teardown_fixtures
+    # Skip fixture teardown
+  end
+end
+

@@ -19,7 +19,7 @@
     completed_runs = @runs&.select { |r| r.status_id == 3 } || []
 
     unless @h_std_methods
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = Basic.get_asap_docker(@project.version_for_docker_image)
       @h_std_methods = {}
       StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
     end
@@ -254,7 +254,7 @@
       @h_stats = Basic.safe_parse_json(File.read(filter_stats_file), {})
     end
     unless @h_std_methods
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = Basic.get_asap_docker(@project.version_for_docker_image)
       @h_std_methods = {}
       StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image
     end

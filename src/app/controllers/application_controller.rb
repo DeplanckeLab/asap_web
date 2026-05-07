@@ -26,6 +26,12 @@ class ApplicationController < ActionController::Base
       return
     end
 
+    # Emergency bypass: SESSION_COOKIE_ENFORCEMENT=0
+    if ENV['SESSION_COOKIE_ENFORCEMENT'].to_s.strip == '0'
+      @session_cookie_in_request = true
+      return
+    end
+
     return if skip_session_cookie_policy?
 
     ip = request.remote_ip.to_s

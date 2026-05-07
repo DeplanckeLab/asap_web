@@ -133,9 +133,9 @@ class ProjectsController < ApplicationController
     track_project_view!
     set_sandbox_self_destruct_at!
 
-    if @project.version_id < 4
-       redirect_to "https://asap-old.epfl.ch/projects/#{@project.key}", allow_other_host: true
-       return
+    if @project.version_id.present? && @project.version_id < 4
+      redirect_to "https://asap-old.epfl.ch/projects/#{@project.key}", allow_other_host: true
+      return
     end
 
     
@@ -1601,10 +1601,10 @@ class ProjectsController < ApplicationController
     project_dir = @project_dir
 
     @h_steps = {}
-    Step.where(docker_image_id: asap_docker_image.id).find_each { |s| @h_steps[s.id] = s }
-    @h_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id).index_by(&:id)
+    @project.catalog_steps.find_each { |s| @h_steps[s.id] = s }
+    @h_std_methods = @project.catalog_std_methods(include_obsolete: true).index_by(&:id)
     @h_dashboard_card = {}
-    Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+    @project.catalog_steps.find_each do |step|
       @h_dashboard_card[step.id] = Basic.safe_parse_json(step.dashboard_card_json, {})
     end
 
@@ -2036,8 +2036,8 @@ class ProjectsController < ApplicationController
   def filter_de_results
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
 
-    asap_docker_image = Basic.get_asap_docker(@project.version)
-    de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
+    asap_docker_image = @project.asap_docker_image_for_catalog
+    de_step = @project.catalog_steps.where(name: 'de').first
     @step = de_step
     @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: de_step.id)).includes(:annots).order(created_at: :desc)
     annots = Annot.where(run_id: @runs.map(&:id)).to_a
@@ -2062,7 +2062,7 @@ class ProjectsController < ApplicationController
     @de_table_rows = Basic.de_table_rows_for_runs(@runs.select { |r| r.status_id == 3 })
 
     @h_std_methods = {}
-    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+    @project.catalog_std_methods(include_obsolete: true).each { |s| @h_std_methods[s.id] = s }
 
     respond_to do |format|
       format.html { render partial: 'projects/views/de_results_table', layout: false }
@@ -2074,8 +2074,8 @@ class ProjectsController < ApplicationController
   def filter_ge_results
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
 
-    asap_docker_image = Basic.get_asap_docker(@project.version)
-    ge_step_ids = Step.where(docker_image_id: asap_docker_image.id, name: 'ge').pluck(:id)
+    asap_docker_image = @project.asap_docker_image_for_catalog
+    ge_step_ids = @project.catalog_steps.where(name: 'ge').pluck(:id)
     @step = Step.find_by(id: ge_step_ids.first)
     ge_runs_scope = if ge_step_ids.any?
                       @project.runs.where(step_id: ge_step_ids)
@@ -2156,7 +2156,7 @@ class ProjectsController < ApplicationController
     )
 
     @h_std_methods = {}
-    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+    @project.catalog_std_methods(include_obsolete: true).each { |s| @h_std_methods[s.id] = s }
 
     respond_to do |format|
       format.html { render partial: 'projects/views/ge_results_table', layout: false }
@@ -2551,15 +2551,15 @@ class ProjectsController < ApplicationController
       return
     end
 
-    asap_docker_image = Basic.get_asap_docker(@project.version)
-    import_metadata_step = Step.where(docker_image_id: asap_docker_image.id, name: 'import_metadata').first
+    asap_docker_image = @project.asap_docker_image_for_catalog
+    import_metadata_step = @project.catalog_steps.where(name: 'import_metadata').first
 
     unless import_metadata_step
       render json: { status: 'error', message: 'Import metadata step not found' }, status: :unprocessable_entity
       return
     end
 
-    std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'add_meta').first
+    std_method = @project.catalog_std_methods(include_obsolete: true).find_by(name: 'add_meta')
 
     last_run = Run.joins(:step)
                   .where(project_id: @project.id, steps: { name: 'import_metadata' })
@@ -2657,9 +2657,9 @@ class ProjectsController < ApplicationController
       return
     end
 
-    asap_docker_image = Basic.get_asap_docker(@project.version)
-    step = Step.where(docker_image_id: asap_docker_image.id, name: 'cell_selection').first
-    std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'cell_sel').first
+    asap_docker_image = @project.asap_docker_image_for_catalog
+    step = @project.catalog_steps.where(name: 'cell_selection').first
+    std_method = @project.catalog_std_methods(include_obsolete: true).find_by(name: 'cell_sel')
     unless step && std_method
       render json: { status: 'error', message: 'Selection step configuration not found' }, status: :unprocessable_entity
       return
@@ -4392,10 +4392,10 @@ class ProjectsController < ApplicationController
     @runs = runs_scope.order(:step_id, :num, :id)
     
     # Get steps hash
-    asap_docker_image = Basic.get_asap_docker(@project.version)
+    asap_docker_image = @project.asap_docker_image_for_catalog
     @h_steps = {}
     if asap_docker_image
-      Step.where(docker_image_id: asap_docker_image.id).each do |step|
+      @project.catalog_steps.each do |step|
         @h_steps[step.id] = step
       end
     end
@@ -4984,10 +4984,10 @@ class ProjectsController < ApplicationController
               .to_a
     
     # Get steps hash for display
-    asap_docker_image = Basic.get_asap_docker(@project.version)
+    asap_docker_image = @project.asap_docker_image_for_catalog
     @h_steps = {}
     if asap_docker_image
-      Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+      @project.catalog_steps.each { |s| @h_steps[s.id] = s }
     end
     
     # Prepare data for the partial (similar to std_step)
@@ -5656,9 +5656,12 @@ class ProjectsController < ApplicationController
       # Get runs for this step, optionally filtered by selected loom file context.
       # For multi-run steps, treat same-name step IDs within the same docker image
       # as one logical step and load their runs together.
+      vcat = @project.version_for_catalog
       step_ids_for_runs =
-        if @step.multiple_runs
-          Step.where(docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        if @step.multiple_runs && vcat
+          Step.where(version_id: vcat.id, docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        elsif @step.multiple_runs
+          [@step.id]
         else
           [@step.id]
         end
@@ -6892,10 +6895,10 @@ class ProjectsController < ApplicationController
     successful_runs.each { |run| @h_runs[run.id] = run }
     
       # Get steps for lookups
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       @h_steps = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+        @project.catalog_steps.each { |s| @h_steps[s.id] = s }
       end
       
       # Get annotations for input_data widgets (needed to find annot_id)
@@ -7332,10 +7335,19 @@ class ProjectsController < ApplicationController
       return if request_user_agent_indicates_bot?
       return unless @session_cookie_in_request
 
+      sid = session.id
+      if current_user.nil? && sid.blank?
+        Rails.logger.warn(
+          "[track_project_view!] skip guest view tracking project_id=#{@project.id}: session id blank " \
+          "(session cookie present but no rack session id yet)"
+        )
+        return
+      end
+
       ProjectViewTracker.track!(
         project: @project,
         current_user: current_user,
-        session_id: session.id,
+        session_id: sid,
         viewed_at: Time.current
       )
     end
@@ -8510,7 +8522,7 @@ class ProjectsController < ApplicationController
       @visualization_de_methods = []
       @visualization_de_unavailable_methods = {}
 
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       return unless asap_docker_image
 
       de_step = Step.find_by(docker_image_id: asap_docker_image.id, name: 'de')
@@ -8518,7 +8530,7 @@ class ProjectsController < ApplicationController
 
       @visualization_de_step_id = de_step.id
       project_type_tag = @project.project_type&.tag
-      std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false, step_id: de_step.id).order(:name).to_a
+      std_methods = @project.catalog_std_methods_for_step(de_step.id).order(:name).to_a
 
       std_methods.each do |method|
         method_obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
@@ -8792,9 +8804,12 @@ class ProjectsController < ApplicationController
     end
 
     def analysis_single_visible_run_id_for_step(step, all_annots_for_loom, selected_loom_file)
+      vcat = @project.version_for_catalog
       step_ids_for_runs =
-        if step.multiple_runs
-          Step.where(docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        if step.multiple_runs && vcat
+          Step.where(version_id: vcat.id, docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        elsif step.multiple_runs
+          [step.id]
         else
           [step.id]
         end
@@ -9658,7 +9673,7 @@ class ProjectsController < ApplicationController
   end
 
   def marker_run_for_annot(annot)
-    asap_docker_image = Basic.get_asap_docker(@project.version)
+    asap_docker_image = @project.asap_docker_image_for_catalog
     return nil unless asap_docker_image
 
     marker_step = Step.find_by(docker_image_id: asap_docker_image.id, name: 'markers')
@@ -10319,10 +10334,10 @@ class ProjectsController < ApplicationController
       end
       
       # Get all std_methods for this step
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       return { unlocked: true, reason: nil } unless asap_docker_image # If no docker image, allow step (fallback)
       
-      std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, step_id: step.id, obsolete: false).all
+      std_methods = @project.catalog_std_methods_for_step(step.id).to_a
       
       if @project.id == 69560 && step.name == 'normalization'
         Rails.logger.info("[DEBUG] StdMethods count: #{std_methods.count}")
@@ -10346,7 +10361,7 @@ class ProjectsController < ApplicationController
       # Get steps by name for lookup
       h_steps_by_name = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+        @project.catalog_steps.each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
       end
       
       # Track missing requirements for computing the lock reason
@@ -10669,10 +10684,10 @@ class ProjectsController < ApplicationController
       DataClass.all.each { |dc| h_data_classes[dc.id] = dc; h_data_classes[dc.name] = dc }
       
       # Get steps by name for lookup - use steps from project's docker_image_id
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       h_steps_by_name = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+        @project.catalog_steps.each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
       end
       
       # Check each parameter that requires a dataset
@@ -10876,9 +10891,9 @@ class ProjectsController < ApplicationController
     end
 
     def prepare_steps_with_status
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       @all_project_steps = if asap_docker_image
-                             Step.where(docker_image_id: asap_docker_image.id)
+                             @project.catalog_steps
                                  .where.not(hidden: true)
                                  .order(:rank, :name)
                            else
@@ -10933,7 +10948,7 @@ class ProjectsController < ApplicationController
           # Check if any std_method for this step matches the project type
           # If all std_methods are restricted to other project types, exclude the step
           if asap_docker_image
-            std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, step_id: step.id, obsolete: false)
+            std_methods = @project.catalog_std_methods_for_step(step.id)
             
             if std_methods.any?
               # Check if at least one method matches the project type
@@ -11980,7 +11995,7 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[prepare_cell_filtering_data] Starting for project #{@project.id}")
       
       # Get the docker image for this project
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       Rails.logger.info("[prepare_cell_filtering_data] Docker image: #{asap_docker_image&.id || 'not found'}, version: #{@project.version}")
       
       if asap_docker_image.nil?
@@ -12223,7 +12238,7 @@ class ProjectsController < ApplicationController
       @std_method = nil
       @h_method_details = nil
       if @step
-        @std_method = StdMethod.where(step_id: @step.id, obsolete: false).first
+        @std_method = @project.catalog_std_methods_for_step(@step.id).first
         # @h_method_details = get_attr(@step, @std_method) if @std_method
         # For now, we'll work without method details
       end
@@ -12232,7 +12247,7 @@ class ProjectsController < ApplicationController
     # Prepare data for standard dashboard and view
     def prepare_std_step_data
       # Get docker image and steps
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       unless asap_docker_image
         Rails.logger.warn("[prepare_std_step_data] No docker image found for version: #{@project.version}")
         return
@@ -12240,7 +12255,7 @@ class ProjectsController < ApplicationController
       
       # Get all steps for this docker image
       @h_steps = {}
-      Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+      @project.catalog_steps.each { |s| @h_steps[s.id] = s }
       
       # Get statuses
       @h_statuses = {}
@@ -12270,9 +12285,12 @@ class ProjectsController < ApplicationController
       runs_count = runs_array.size
       # Total runs for this step without UI filtering (loom filter, etc.).
       # We only show the std form for multi-run steps when there are truly no runs at all.
+      vcat = @project.version_for_catalog
       total_run_step_ids =
-        if @step.multiple_runs
-          Step.where(docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        if @step.multiple_runs && vcat
+          Step.where(version_id: vcat.id, docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+        elsif @step.multiple_runs
+          [@step.id]
         else
           [@step.id]
         end
@@ -12351,7 +12369,7 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[prepare_std_form_data] Called for step #{@step.id} (#{@step.name})")
       
       # Get docker image
-      asap_docker_image = Basic.get_asap_docker(@project.version)
+      asap_docker_image = @project.asap_docker_image_for_catalog
       unless asap_docker_image
         Rails.logger.error("[prepare_std_form_data] No docker image found for version #{@project.version}")
         @std_methods = []
@@ -12367,7 +12385,7 @@ class ProjectsController < ApplicationController
       
       # Get standard methods for this step
       @h_std_methods = {}
-      all_std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false, step_id: @step.id).order(:name).to_a
+      all_std_methods = @project.catalog_std_methods_for_step(@step.id).order(:name).to_a
       all_std_methods.each { |s| @h_std_methods[s.id] = s }
       
       @std_methods = all_std_methods
@@ -12377,7 +12395,7 @@ class ProjectsController < ApplicationController
       @h_steps ||= {}
       @h_steps_by_name = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+        @project.catalog_steps.each { |s| @h_steps_by_name[s.name] = s if s.respond_to?(:name) }
       end
       # Also populate from @h_steps if it exists (for backward compatibility)
       @h_steps.each { |id, step| @h_steps_by_name[step.name] = step if step.respond_to?(:name) && !@h_steps_by_name[step.name] }
@@ -12620,10 +12638,10 @@ class ProjectsController < ApplicationController
       
       # Ensure @h_steps is set
       unless @h_steps
-        asap_docker_image = Basic.get_asap_docker(@project.version)
+        asap_docker_image = @project.asap_docker_image_for_catalog
         @h_steps = {}
         if asap_docker_image
-          Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s }
+          @project.catalog_steps.each { |s| @h_steps[s.id] = s }
         end
       end
       
@@ -12782,7 +12800,7 @@ class ProjectsController < ApplicationController
         @step = step
         @std_method = run.std_method
 
-        asap_docker_image = Basic.get_asap_docker(@project.version)
+        asap_docker_image = @project.asap_docker_image_for_catalog
         @asap_docker_image = asap_docker_image
 
         @ps = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
@@ -12818,7 +12836,7 @@ class ProjectsController < ApplicationController
         end
 
         @h_steps = {}
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| @h_steps[s.id] = s } if asap_docker_image
+        @project.catalog_steps.each { |s| @h_steps[s.id] = s } if asap_docker_image
 
         @h_statuses = {}
         Status.all.each { |s| @h_statuses[s.id] = s }

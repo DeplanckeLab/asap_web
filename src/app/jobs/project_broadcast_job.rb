@@ -29,7 +29,7 @@ class ProjectBroadcastJob < ApplicationJob
     h_data = get_results(project, step_id)
 
     # Determine stage based on step_id - parsing step means we're in creation/parsing stage
-    parsing_step = Step.where(name: 'parsing').first
+    parsing_step = project.catalog_steps.where(name: 'parsing').first
     stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
 
     # Aggregate run counts across all project steps for header display.
@@ -84,9 +84,7 @@ class ProjectBroadcastJob < ApplicationJob
     step = Step.find(step_id)
     h_status = {}
     Status.all.map{|s| h_status[s.id]=s}
-#    summary_step = Step.where(:version_id => project.version_id, :name => 'summary').first
-    asap_docker_image = Basic.get_asap_docker(project.version)
-    summary_step = Step.where(:docker_image_id => asap_docker_image.id, :name => 'summary').first
+    summary_step = project.catalog_steps.where(name: 'summary').first
 
     step_header_callback =
       if respond_to?(:get_step_header_project_path)
@@ -114,9 +112,12 @@ class ProjectBroadcastJob < ApplicationJob
       h_res[:parsing_status_id] = parsing_run.status_id if parsing_run
     else
       # Always derive counts from runs in the DB (same step_id scope as step_results).
+      vcat = project.version_for_catalog
       step_ids_for_runs =
-        if step.multiple_runs
-          Step.where(docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        if step.multiple_runs && vcat
+          Step.where(version_id: vcat.id, docker_image_id: step.docker_image_id, name: step.name).pluck(:id)
+        elsif step.multiple_runs
+          [step_id]
         else
           [step_id]
         end
@@ -151,12 +152,8 @@ class ProjectBroadcastJob < ApplicationJob
     # the parsing step tied to the project's ASAP docker image.
     parsing_step = Step.find_by(id: current_step_id)
     unless parsing_step&.name == 'parsing'
-      asap_docker_image = Basic.get_asap_docker(project.version)
-      parsing_step = if asap_docker_image
-                       Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
-                     else
-                       Step.where(name: 'parsing').order(:id).last
-                     end
+      parsing_step = project.catalog_steps.where(name: 'parsing').first
+      parsing_step ||= Step.where(name: 'parsing').order(:id).last
     end
 
     # Check parsing step status

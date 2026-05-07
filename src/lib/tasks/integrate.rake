@@ -14,9 +14,9 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     exit 1
   end
 
-  version = project.version
+  version = project.version_for_catalog
   unless version
-    logger.error("[IntegrateRake] Project #{project_key} has no version")
+    logger.error("[IntegrateRake] Project #{project_key} has no version for catalog")
     exit 1
   end
 
@@ -47,9 +47,9 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     logger.warn("[IntegrateRake] Could not set permissions on #{tmp_dir}: #{e.message}")
   end
 
-  parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+  parsing_step = Step.where(version_id: version.id, docker_image_id: asap_docker_image.id, name: 'parsing').first
   unless parsing_step
-    logger.error("[IntegrateRake] Could not find parsing step for docker image #{asap_docker_image.id}")
+    logger.error("[IntegrateRake] Could not find parsing step for version_id=#{version.id} docker_image_id=#{asap_docker_image.id}")
     exit 1
   end
 

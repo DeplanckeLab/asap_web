@@ -12,10 +12,10 @@ class ProjectParsingJob < ApplicationJob
 
     start_time = Time.now
 
-    # Get version and docker image info
-    version = project.version
+    # Get version and docker image info (same catalog resolution as pipeline / Project#catalog_steps)
+    version = project.version_for_catalog
     unless version
-      Rails.logger.error("[ProjectParsingJob] Project #{project_id} has no version")
+      Rails.logger.error("[ProjectParsingJob] Project #{project_id} has no version for catalog")
       return
     end
 
@@ -28,15 +28,15 @@ class ProjectParsingJob < ApplicationJob
     end
 
     # Find parsing step and std_method
-    parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_step = Step.where(version_id: version.id, docker_image_id: asap_docker_image.id, name: 'parsing').first
     unless parsing_step
-      Rails.logger.error("[ProjectParsingJob] Could not find parsing step for docker image #{asap_docker_image.id}")
+      Rails.logger.error("[ProjectParsingJob] Could not find parsing step for version_id=#{version.id} docker_image_id=#{asap_docker_image.id}")
       return
     end
 
-    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_std_method = StdMethod.where(version_id: version.id, docker_image_id: asap_docker_image.id, name: 'parsing').first
     unless parsing_std_method
-      Rails.logger.error("[ProjectParsingJob] Could not find parsing std_method for docker image #{asap_docker_image.id}")
+      Rails.logger.error("[ProjectParsingJob] Could not find parsing std_method for version_id=#{version.id} docker_image_id=#{asap_docker_image.id}")
       return
     end
 

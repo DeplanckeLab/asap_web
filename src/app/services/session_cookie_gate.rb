@@ -12,8 +12,28 @@ class SessionCookieGate
 
   BAN_MESSAGE = 'This IP is banned due to repeated requests without a valid session cookie.'
   STRIKE_WINDOW_SECONDS = 1.hour.to_i
+  STRIKE_DEBOUNCE_SECONDS = ENV.fetch('SESSION_COOKIE_GATE_STRIKE_DEBOUNCE_SECONDS', '3').to_f
   CHALLENGE_TTL_SECONDS = 10.minutes.to_i
   CHALLENGE_KEY_PREFIX = 'asap:session_cookie_gate:v1:challenge'
+
+  STRIKE_INCREMENT_LUA = <<~LUA
+    local strikes_key = KEYS[1]
+    local tick_key = KEYS[2]
+    local now = tonumber(ARGV[1])
+    local gap = tonumber(ARGV[2])
+    local ttl = tonumber(ARGV[3])
+    local last_raw = redis.call('get', tick_key)
+    local last = 0
+    if last_raw ~= false then last = tonumber(last_raw) end
+    if last == 0 or (now - last >= gap) then
+      local n = redis.call('incr', strikes_key)
+      redis.call('expire', strikes_key, ttl)
+      redis.call('set', tick_key, tostring(now), 'EX', ttl)
+      return n
+    end
+    local cur = redis.call('get', strikes_key)
+    if cur == false then return 0 else return tonumber(cur) end
+  LUA
 
   class << self
     def redis
@@ -34,7 +54,9 @@ class SessionCookieGate
     end
 
     def clear_strikes!(ip)
-      redis.del("#{STRIKE_KEY_PREFIX}:#{ip}")
+      strikes_key = "#{STRIKE_KEY_PREFIX}:#{ip}"
+      tick_key = "#{STRIKE_KEY_PREFIX}:tick:#{ip}"
+      redis.del(strikes_key, tick_key)
     end
 
     def challenge_for(ip)
@@ -91,13 +113,17 @@ class SessionCookieGate
       false
     end
 
-    # Increments consecutive cookieless strikes for ip and resets the rolling window TTL.
+    # Increments strikes only after STRIKE_DEBOUNCE_SECONDS since the prior counted hit.
+    # Avoids banning real browsers when many parallel cookieless requests start (Turbo/assets).
     def increment_strike(ip)
-      key = "#{STRIKE_KEY_PREFIX}:#{ip}"
-      redis.multi do |multi|
-        multi.incr(key)
-        multi.expire(key, STRIKE_WINDOW_SECONDS)
-      end.first.to_i
+      strikes_key = "#{STRIKE_KEY_PREFIX}:#{ip}"
+      tick_key = "#{STRIKE_KEY_PREFIX}:tick:#{ip}"
+      now = Time.now.to_f
+      redis.eval(
+        STRIKE_INCREMENT_LUA,
+        keys: [strikes_key, tick_key],
+        argv: [now, STRIKE_DEBOUNCE_SECONDS, STRIKE_WINDOW_SECONDS]
+      ).to_i
     end
   end
 end

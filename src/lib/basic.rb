@@ -2225,7 +2225,7 @@ module Basic
         }
         s3 = connect_s3(s3b, h_s3_settings)
 
-        p.update(:archive_status_id => 4)
+        p.update_archive_metadata!(archive_status_id: 4)
         user_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s
         FileUtils.mkdir_p(user_dir) unless File.exist?(user_dir)
 
@@ -2244,7 +2244,7 @@ module Basic
           end
 
           unless downloaded && File.exist?(filepath) && File.size(filepath).to_i > 0
-            p.update(:archive_status_id => 3)
+            p.update_archive_metadata!(archive_status_id: 3)
             return false
           end
         end
@@ -2256,16 +2256,16 @@ module Basic
         extraction_ok = $?.success? && File.exist?(project_dir) && `du -s #{Shellwords.escape(project_dir.to_s)}`.to_i > 10
 
         unless extraction_ok
-          p.update(:archive_status_id => 3)
+          p.update_archive_metadata!(archive_status_id: 3)
           return false
         end
 
         File.delete(filepath) if File.exist?(filepath)
-        p.update(:archive_status_id => 1, :disk_size_archived => nil)
+        p.update_archive_metadata!(archive_status_id: 1, disk_size_archived: nil)
         true
       rescue => e
         Rails.logger.error("[Basic.unarchive] #{e.class}: #{e.message}")
-        p.update(:archive_status_id => 3) if p
+        p.update_archive_metadata!(archive_status_id: 3) if p
         false
       end
     end

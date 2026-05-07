@@ -421,6 +421,7 @@ class Project < ApplicationRecord
     3 => { label: 'Archived', icon: 'fas fa-archive' },
     4 => { label: 'Unarchiving', icon: 'fas fa-spinner fa-spin' }
   }.freeze
+  ARCHIVE_METADATA_FIELDS = %w[archive_status_id disk_size_archive disk_size_archived].freeze
 
   def archive_status_label_for_display
     ARCHIVE_STATE_DISPLAY.dig(archive_status_id, :label) || archive_status&.display_name.presence || 'Unknown'
@@ -432,6 +433,18 @@ class Project < ApplicationRecord
     else
       archive_status&.icon_class
     end
+  end
+
+  # Update archive bookkeeping fields without bumping updated_at.
+  # This keeps "last updated" semantics tied to meaningful project content changes.
+  def update_archive_metadata!(attrs)
+    attrs = attrs.to_h.stringify_keys
+    invalid_keys = attrs.keys - ARCHIVE_METADATA_FIELDS
+    if invalid_keys.any?
+      raise ArgumentError, "Unsupported archive metadata fields: #{invalid_keys.join(', ')}"
+    end
+
+    update_columns(attrs)
   end
 
   # When DB state does not match the local USER_DATA_DIR tree (e.g. DB from production but files from dev,
@@ -450,13 +463,13 @@ class Project < ApplicationRecord
         Rails.logger.info(
           "[Project#reconcile_archive_status_with_filesystem!] Project #{id} (#{key}): folder present but status was archived; setting unarchived"
         )
-        update!(archive_status_id: 1, disk_size_archived: nil)
+        update_archive_metadata!(archive_status_id: 1, disk_size_archived: nil)
         true
       elsif !data_present && effective_unarchived
         Rails.logger.info(
           "[Project#reconcile_archive_status_with_filesystem!] Project #{id} (#{key}): project data missing or empty but status was unarchived; setting archived"
         )
-        update!(archive_status_id: 3)
+        update_archive_metadata!(archive_status_id: 3)
         true
       else
         false
@@ -469,18 +482,18 @@ class Project < ApplicationRecord
       reload
       effective_unarchived = archive_status_id.nil? || archive_status_id == 1
       if effective_unarchived && disk_size_archived.present? && filesystem_project_data_missing?
-        update!(archive_status_id: 3)
+        update_archive_metadata!(archive_status_id: 3)
       end
 
       if being_unarchived?
         stale_unarchive = updated_at.present? && updated_at < 15.minutes.ago
         return false unless stale_unarchive
-        update!(archive_status_id: 3)
+        update_archive_metadata!(archive_status_id: 3)
       end
 
       return false unless archived_on_s3?
 
-      update!(archive_status_id: 4)
+      update_archive_metadata!(archive_status_id: 4)
       ProjectUnarchiveJob.perform_later(id)
       true
     end

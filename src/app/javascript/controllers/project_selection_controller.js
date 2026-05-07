@@ -146,6 +146,12 @@ export default class extends Controller {
     return this.getStoredIds()
   }
 
+  getSelectedProjectIdsOnPage() {
+    return this.checkboxTargets
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value)
+  }
+
   getSingleCellSelectedProjectIds() {
     return this.getStoredSingleCellIds()
   }

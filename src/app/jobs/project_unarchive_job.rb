@@ -10,13 +10,13 @@ class ProjectUnarchiveJob < ApplicationJob
       broadcast_unarchive_status(project, 'completed', project_unarchived: true)
     else
       Rails.logger.error("[ProjectUnarchiveJob] Unarchive failed for project #{project.id} (#{project.key})")
-      project.update(archive_status_id: 3) if project.archive_status_id == 4
+      project.update_archive_metadata!(archive_status_id: 3) if project.archive_status_id == 4
       broadcast_unarchive_status(project, 'failed', project_unarchived: false)
     end
   rescue StandardError => e
     Rails.logger.error("[ProjectUnarchiveJob] Error for project #{project_id}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n"))
-    project.update(archive_status_id: 3) if project && project.archive_status_id == 4
+    project.update_archive_metadata!(archive_status_id: 3) if project && project.archive_status_id == 4
     if project
       broadcast_unarchive_status(project, 'failed', project_unarchived: false)
     end

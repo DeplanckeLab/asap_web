@@ -92,7 +92,7 @@ development:
 test:
   primary:
     <<: *default
-    database: <%= ENV["POSTGRES_DB"] %>
+    database: <%= ENV.fetch("POSTGRES_TEST_DB", "asap_test") %>
   cache:
     <<: *sqlite
     database: solid/cache_development.sqlite3

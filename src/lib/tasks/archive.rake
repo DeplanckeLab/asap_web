@@ -285,7 +285,7 @@ def archive_project_to_s3!(project, s3b:, dry_run: false)
   archive_file = Pathname.new("#{project_dir}.tgz")
   File.delete(archive_file) if File.exist?(archive_file)
 
-  project.update!(archive_status_id: 2)
+  project.update_archive_metadata!(archive_status_id: 2)
   include_project_fus_for_archive(project, project_dir)
 
   cmd = "tar -cf - -C #{Shellwords.escape(base_dir.to_s)} #{Shellwords.escape(project.key)} | pigz -9 -p 32 > #{Shellwords.escape(archive_file.to_s)}"
@@ -321,11 +321,11 @@ def archive_project_to_s3!(project, s3b:, dry_run: false)
 
   File.delete(archive_file) if File.exist?(archive_file)
   FileUtils.rm_r(project_dir) if File.exist?(project_dir)
-  project.update!(archive_status_id: 3, disk_size_archived: remote_size)
+  project.update_archive_metadata!(archive_status_id: 3, disk_size_archived: remote_size)
   :archived
 rescue StandardError => e
   Rails.logger.error("[archive] project=#{project.id} key=#{project.key} error=#{e.class} #{e.message}")
-  project.update(archive_status_id: 1) if project.archive_status_id == 2
+  project.update_archive_metadata!(archive_status_id: 1) if project.archive_status_id == 2
   :failed
 end
 
@@ -747,7 +747,7 @@ namespace :projects do
             if dry_run
               puts "[rescue_archive_states][dry-run] would set archive_status_id=3 for key=#{project.key} to clear stuck being-unarchived (missing both)"
             else
-              project.update!(archive_status_id: 3)
+              project.update_archive_metadata!(archive_status_id: 3)
               puts "[rescue_archive_states] set archive_status_id=3 for key=#{project.key} (was 4, missing both) so unarchive can be retried after S3/path is fixed"
             end
             counts[:missing_both_reset_from_unarchiving] += 1
@@ -762,7 +762,7 @@ namespace :projects do
           if dry_run
             puts "[rescue_archive_states][dry-run] would set archive_status_id=3 for key=#{project.key} (S3 exists, local missing)"
           else
-            project.update!(archive_status_id: 3)
+            project.update_archive_metadata!(archive_status_id: 3)
           end
           counts[:marked_archived_s3_only] += 1
           FileUtils.rm_r(tmp_dir) if File.exist?(tmp_dir)
@@ -773,7 +773,7 @@ namespace :projects do
           if dry_run
             puts "[rescue_archive_states][dry-run] would set archive_status_id=1 and disk_size_archived=nil for key=#{project.key} (local exists, S3 missing)"
           else
-            project.update!(archive_status_id: 1, disk_size_archived: nil)
+            project.update_archive_metadata!(archive_status_id: 1, disk_size_archived: nil)
           end
           counts[:marked_unarchived_local_only] += 1
           FileUtils.rm_r(tmp_dir) if File.exist?(tmp_dir)
@@ -797,7 +797,7 @@ namespace :projects do
         if dry_run
           puts "[rescue_archive_states][dry-run] would set archive_status_id=1 and disk_size_archived=nil for key=#{project.key}"
         else
-          project.update!(archive_status_id: 1, disk_size_archived: nil)
+          project.update_archive_metadata!(archive_status_id: 1, disk_size_archived: nil)
         end
         counts[:status_reset] += 1
 

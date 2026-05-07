@@ -17,12 +17,14 @@ export default class extends Controller {
       return
     }
 
-    const selectedIds = selectionController.getSelectedProjectIds()
+    const selectedIds = typeof selectionController.getSelectedProjectIdsOnPage === 'function'
+      ? selectionController.getSelectedProjectIdsOnPage()
+      : []
     if (selectedIds.length === 0) {
       return
     }
 
-    const confirmMessage = `Are you sure you want to delete ${selectedIds.length} selected project(s)? Projects you don't have permission to delete will be skipped. This action cannot be undone.`
+    const confirmMessage = `Are you sure you want to delete ${selectedIds.length} selected project(s) on this page? Projects you don't have permission to delete will be skipped. This action cannot be undone.`
     if (!confirm(confirmMessage)) {
       return
     }

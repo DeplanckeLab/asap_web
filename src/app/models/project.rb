@@ -416,9 +416,9 @@ class Project < ApplicationRecord
   # UI: +archive_status_id+ is what jobs and Basic.unarchive use. Rows in +archive_statuses+ can have
   # mismatched +name+ / +icon_class+ after imports or legacy data; do not trust them for tooltips/icons.
   ARCHIVE_STATE_DISPLAY = {
-    1 => { label: 'Unarchived', icon: 'fas fa-folder-open' },
+    1 => { label: 'Unarchived', icon: 'fas fa-file' },
     2 => { label: 'Archiving', icon: 'fas fa-spinner fa-spin' },
-    3 => { label: 'Archived', icon: 'fas fa-archive' },
+    3 => { label: 'Archived', icon: 'fas fa-file-zipper' },
     4 => { label: 'Unarchiving', icon: 'fas fa-spinner fa-spin' }
   }.freeze
   ARCHIVE_METADATA_FIELDS = %w[archive_status_id disk_size_archive disk_size_archived].freeze

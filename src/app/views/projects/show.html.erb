@@ -7,8 +7,14 @@ end %>
 <% content_for :meta_description, meta_desc %>
 
 <!-- Content Area: unarchive-in-progress applies to every tab (same condition as visualization used to use alone) -->
+<%# Metadata-only views (summary, settings, admin access) read only database-backed
+    information, so they can render without the project files being unarchived. The
+    unarchive overlay is suppressed for them unless the user explicitly clicked the
+    Unarchive button (force_unarchive=1), in which case we fall through to the regular
+    overlay so the unarchive progress is shown. %>
 <% unarchive_state = @project_unarchive_state.to_s %>
-<% show_unarchive_pending = @project_archive_transitioning || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state)) %>
+<% suppress_unarchive_overlay = metadata_only_view_request? && %w[summary settings access].include?(@view_type.to_s) %>
+<% show_unarchive_pending = !suppress_unarchive_overlay && (@project_archive_transitioning || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state))) %>
 <% if show_unarchive_pending %>
   <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
     <%= render 'projects/views/unarchive_pending_overlay' %>

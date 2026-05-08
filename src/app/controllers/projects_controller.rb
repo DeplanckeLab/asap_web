@@ -9,8 +9,13 @@ require 'set'
 
 class ProjectsController < ApplicationController
   include ComplianceHelpers
-  helper_method :de_filter_cache_key
+  helper_method :de_filter_cache_key, :metadata_only_view_request?, :force_unarchive_requested?
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
+
+  # Project show views that only depend on database metadata (no need for unarchived
+  # project files on disk). These views can be rendered for archived projects without
+  # triggering an unarchive job.
+  METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
   before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
@@ -7354,6 +7359,7 @@ class ProjectsController < ApplicationController
       @project_unarchive_state = nil
       return unless @project_files_missing
       return if request_user_agent_indicates_bot?
+      return if metadata_only_view_request?
 
       if @project.queue_unarchive_if_needed!
         @project_unarchive_state = 'queued'
@@ -7435,6 +7441,20 @@ class ProjectsController < ApplicationController
 
     def selective_project_view_loading_enabled?
       ENV.fetch('PROJECT_SELECTIVE_VIEW_LOADING', '1') != '0'
+    end
+
+    # Whether the current request targets a metadata-only project view (summary,
+    # settings, admin access analytics). Used to skip the unarchive overlay/queue
+    # when the user just wants to read database-backed information.
+    # The +force_unarchive+ query param overrides this so the explicit Unarchive
+    # button on the summary page can still kick off the unarchive flow.
+    def metadata_only_view_request?
+      return false if force_unarchive_requested?
+      METADATA_ONLY_PROJECT_VIEWS.include?(params[:view].to_s)
+    end
+
+    def force_unarchive_requested?
+      ActiveModel::Type::Boolean.new.cast(params[:force_unarchive])
     end
 
     def resolve_project_view_type(requested_view)
@@ -9087,25 +9107,37 @@ class ProjectsController < ApplicationController
       fu = Fu.find_by(id: @project.fu_id)
       return unless fu
 
-      project_dir = summary_project_data_root(@project)
-      return unless project_dir && Dir.exist?(project_dir.to_s)
-
-      fus_dir = project_dir + "fus" + fu.id.to_s
-      return unless Dir.exist?(fus_dir.to_s)
-
       expected, = ProjectInputFinalizerService.canonical_input_filename_parts(fu.upload_file_name)
-      expected_path = fus_dir + expected
+
       basename =
-        if File.file?(expected_path.to_s) || File.symlink?(expected_path.to_s)
+        if @project.filesystem_project_data_missing?
+          # Archived/missing data: rely on the canonical filename derived from
+          # the Fu record. The summary view still surfaces the button (in a
+          # disabled state) so the user can see the link exists, and it will
+          # work transparently once the project has been unarchived.
           expected
         else
-          candidates = Dir.children(fus_dir.to_s).select do |name|
-            next false if name.include?("/") || name.start_with?(".")
-            p = fus_dir + name
-            next false unless File.file?(p.to_s) || File.symlink?(p.to_s)
-            name == "input_file" || (name.start_with?("input_file.") && name.length > "input_file.".length)
+          fus_dir = nil
+          project_dir = summary_project_data_root(@project)
+          if project_dir && Dir.exist?(project_dir.to_s)
+            candidate_dir = project_dir + "fus" + fu.id.to_s
+            fus_dir = candidate_dir if Dir.exist?(candidate_dir.to_s)
           end
-          candidates.max_by { |n| [n.length, n] }
+
+          if fus_dir
+            expected_path = fus_dir + expected
+            if File.file?(expected_path.to_s) || File.symlink?(expected_path.to_s)
+              expected
+            else
+              candidates = Dir.children(fus_dir.to_s).select do |name|
+                next false if name.include?("/") || name.start_with?(".")
+                p = fus_dir + name
+                next false unless File.file?(p.to_s) || File.symlink?(p.to_s)
+                name == "input_file" || (name.start_with?("input_file.") && name.length > "input_file.".length)
+              end
+              candidates.max_by { |n| [n.length, n] }
+            end
+          end
         end
       return if basename.blank?
 
@@ -11376,6 +11408,7 @@ class ProjectsController < ApplicationController
       return unless request.format.html?
       return unless @project&.public?
       return unless request_user_agent_indicates_bot?
+      return if params[:view].to_s == 'summary'
 
       head :forbidden
     end

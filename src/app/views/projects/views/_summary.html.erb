@@ -68,6 +68,23 @@ font-size: inherit;
   else
     summary_owner_email_part
   end
+  # Archive-state guard: when the project is not in the unarchived state (or its
+  # files are missing locally) the buttons that need to read from the project
+  # directory must be disabled, and an explicit Unarchive call-to-action shown
+  # at the top of the page. Database-backed information stays visible so that
+  # bots and humans can always read the project metadata.
+  summary_archive_status_id = @project.archive_status_id
+  summary_archive_currently_unarchiving = summary_archive_status_id == 4
+  summary_archive_currently_archiving = summary_archive_status_id == 2
+  summary_archive_on_storage = summary_archive_status_id == 3
+  summary_archive_data_unavailable = !summary_archive_status_id.in?([nil, 1]) || @project.filesystem_project_data_missing?
+  summary_archive_disabled_tooltip = if summary_archive_currently_unarchiving
+    'Project files are being unarchived. Downloads will be available once the data is restored.'
+  elsif summary_archive_currently_archiving
+    'Project files are being archived. Downloads are disabled while the archive is being created.'
+  else
+    'Project files are archived. Click the Unarchive button at the top of this page to restore the data and enable downloads.'
+  end
 downloaded_from_sources = @project.provider_projects.filter_map do |pp|
 provider = pp.provider
 next unless provider
@@ -117,6 +134,52 @@ summary_default_annotation_id = summary_annotation_options.first&.dig(:id)
 summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 %>
 <div class="adaptive-dashboard" data-guided-tour="project-summary-dashboard">
+<% if summary_archive_data_unavailable %>
+  <div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+       data-guided-tour="summary-archive-banner">
+    <div class="flex items-start gap-3">
+      <i class="fas fa-file-zipper text-amber-700 mt-1"></i>
+      <div class="text-sm text-amber-900">
+        <p class="font-semibold">
+          <% if summary_archive_currently_unarchiving %>
+            This project is currently being unarchived
+          <% elsif summary_archive_currently_archiving %>
+            This project is currently being archived
+          <% else %>
+            This project's data is archived
+          <% end %>
+        </p>
+        <p class="mt-1">
+          The information below is read from the database and is always available.
+          To open the visualization, analysis, data or compliance views, or to download project files, the project data must first be unarchived.
+        </p>
+      </div>
+    </div>
+    <% if summary_archive_currently_unarchiving %>
+      <span class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-amber-200 text-amber-900 cursor-not-allowed opacity-80"
+            aria-disabled="true"
+            title="Unarchive already in progress">
+        <i class="fas fa-spinner fa-spin"></i>
+        <span>Unarchiving...</span>
+      </span>
+    <% elsif summary_archive_currently_archiving %>
+      <span class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-amber-200 text-amber-900 cursor-not-allowed opacity-80"
+            aria-disabled="true"
+            title="Archive currently being created; data files are not available">
+        <i class="fas fa-spinner fa-spin"></i>
+        <span>Archiving...</span>
+      </span>
+    <% else %>
+      <%= link_to project_path(@project, view: 'summary', force_unarchive: 1),
+          class: "inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors",
+          title: "Restore project files from the archive. The page will reload and show the unarchive progress.",
+          data: { turbo: false, guided_tour: "summary-archive-unarchive-button" } do %>
+        <i class="fas fa-box-open"></i>
+        <span>Unarchive project</span>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>
 <div class="mb-4">
 <h2 class="font-bold text-gray-900 mb-2" style="font-size: clamp(1.5rem, 3.5vw, 2.75rem);">Summary</h2>
 </div>
@@ -213,14 +276,43 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
         </div>
         <div class="flex flex-row gap-2">
           <% if @summary_show_submitted_file_link && @summary_input_file_get_file_query_param.present? %>
-            <%= link_to get_file_project_path(@project.key, filename: @summary_input_file_get_file_query_param), target: "_blank", rel: "noopener noreferrer", class: "badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200", data: { guided_tour: "summary-repro-submitted-file-link" }, aria: { label: "Input file download" } do %>
-              <i class="fas fa-download text-gray-500" aria-hidden="true"></i>
-              <span>Input file</span>
+            <% if summary_archive_data_unavailable %>
+              <span class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-400 font-medium cursor-not-allowed"
+                    aria-disabled="true"
+                    title="<%= summary_archive_disabled_tooltip %>"
+                    data-guided-tour="summary-repro-submitted-file-link"
+                    aria-label="Input file download (disabled, project archived)">
+                <i class="fas fa-download text-gray-400" aria-hidden="true"></i>
+                <span>Input file</span>
+              </span>
+            <% else %>
+              <%= link_to get_file_project_path(@project.key, filename: @summary_input_file_get_file_query_param), target: "_blank", rel: "noopener noreferrer", class: "badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200", data: { guided_tour: "summary-repro-submitted-file-link" }, aria: { label: "Input file download" } do %>
+                <i class="fas fa-download text-gray-500" aria-hidden="true"></i>
+                <span>Input file</span>
+              <% end %>
             <% end %>
           <% end %>
-          <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="LOOM and H5AD downloads"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></button>
+          <% if summary_archive_data_unavailable %>
+            <button type="button" disabled
+                    class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-400 font-medium cursor-not-allowed"
+                    aria-disabled="true"
+                    title="<%= summary_archive_disabled_tooltip %>"
+                    data-guided-tour="summary-repro-downloads-trigger"
+                    aria-label="LOOM and H5AD downloads (disabled, project archived)">
+              <i class="fas fa-download text-gray-400" aria-hidden="true"></i><span>LOOM/H5AD</span>
+            </button>
+          <% else %>
+            <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="LOOM and H5AD downloads"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></button>
+          <% end %>
         </div>
-        <%= link_to "List of Loom files (JSON)", get_loom_files_json_project_path(@project.key, download: 1), class: "badge-text px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium text-center hover:bg-gray-200", data: { guided_tour: "summary-repro-loom-json-link" } %>
+        <% if summary_archive_data_unavailable %>
+          <span class="badge-text px-2 py-1 rounded bg-gray-100 text-gray-400 font-medium text-center cursor-not-allowed"
+                aria-disabled="true"
+                title="<%= summary_archive_disabled_tooltip %>"
+                data-guided-tour="summary-repro-loom-json-link">List of Loom files (JSON)</span>
+        <% else %>
+          <%= link_to "List of Loom files (JSON)", get_loom_files_json_project_path(@project.key, download: 1), class: "badge-text px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium text-center hover:bg-gray-200", data: { guided_tour: "summary-repro-loom-json-link" } %>
+        <% end %>
       </div>
     </div>
 </div>

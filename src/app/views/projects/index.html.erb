@@ -382,8 +382,18 @@
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="event.stopPropagation()">
       		    <div class="flex flex-col items-start gap-2">
 		      <div class="flex items-center gap-2">
-			<%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100", data: (gt_demo && project.id == gt_demo.id ? { guided_tour: "demo-project-view-list" } : {}) %>
-			
+			<%= link_to "View", project_path(project),
+			    class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100",
+			    data: (gt_demo && project.id == gt_demo.id ? { guided_tour: "demo-project-view-list", turbo_prefetch: false } : { turbo_prefetch: false }) %>
+			<%= link_to project_path(project, view: 'summary'),
+			    class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200",
+			    title: "Summary page (always available, even for archived projects)",
+			    onclick: "event.stopPropagation();",
+			    data: { turbo_prefetch: false },
+			    aria: { label: "Summary page" } do %>
+			  <i class="fas fa-circle-info"></i>
+			<% end %>
+
 			<% if clonable?(project) && project.version_id.to_i >= 4 %>
 			<%= button_to raw('<i class="fas fa-clone mr-1"></i><span>Clone</span>'),
 			    clone_project_path(project),

@@ -355,16 +355,30 @@ export class DataManager {
     // Check if currently loading
     if (this.controller.loadingMetadataVectors.has(metadataId)) {
       const waitStart = Date.now()
-      while (this.controller.loadingMetadataVectors.has(metadataId) && Date.now() - waitStart < 8000) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+      const maxWaitMs = 1200
+      while (this.controller.loadingMetadataVectors.has(metadataId) && Date.now() - waitStart < maxWaitMs) {
+        // If another async path already materialized this vector, consume it immediately.
+        const inMemoryVector = this.controller.loadedMetadataVectors[metadataId]
+        if (inMemoryVector) {
+          this.perfLog('metadata_wait_short_circuit', {
+            metadataId: metadataId ? String(metadataId) : null,
+            waitMs: Date.now() - waitStart
+          })
+          return this.ensureMetadataVectorValues(metadataId, inMemoryVector)
+        }
+        await new Promise(resolve => setTimeout(resolve, 50))
       }
 
       if (!this.controller.loadingMetadataVectors.has(metadataId)) {
         return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
       }
 
-      // The metadata stayed "loading" for too long, which blocks all future color switches.
-      console.error(`Metadata ${metadataId} remained in loading state for too long; resetting loading flag`)
+      // The metadata stayed "loading" for too long; do not block user-driven coloring.
+      this.perfLog('metadata_loading_flag_timeout', {
+        metadataId: metadataId ? String(metadataId) : null,
+        waitedMs: Date.now() - waitStart
+      })
+      console.warn(`Metadata ${metadataId} remained in loading state; resetting loading flag to avoid UI stall`)
       this.controller.loadingMetadataVectors.delete(metadataId)
     }
     
@@ -989,7 +1003,11 @@ export class DataManager {
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     // console.log('Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
-    
+    const previousVisibleCells = this.controller.currentVisibleCells
+    const hadFilterBefore = Array.isArray(previousVisibleCells)
+    const hasFilterNow = Array.isArray(filteredIndices)
+    const filterModeChanged = hadFilterBefore !== hasFilterNow
+
     // Update the current visible cells state
     this.controller.currentVisibleCells = filteredIndices
     
@@ -999,11 +1017,15 @@ export class DataManager {
     // Update point count display immediately
     this.controller.uiManager.updatePointCountDisplay(filteredIndices)
     
-    // Update sidebar category counts with visual indicators (for ALL categorical metadata)
-    this.controller.uiManager.updateSidebarCategoryCounts()
-    
-    // Update all range slider counts to reflect combined filtering (for ALL continuous metadata)
-    this.controller.uiManager.updateAllRangeSliderCounts()
+    // Update expensive filter-related UI only when filtering is/was active.
+    // On pure metadata coloring switches with no active filters, this avoids redundant O(n) work.
+    if (hasFilterNow || hadFilterBefore) {
+      // Update sidebar category counts with visual indicators (for ALL categorical metadata)
+      this.controller.uiManager.updateSidebarCategoryCounts()
+      
+      // Update all range slider counts to reflect combined filtering (for ALL continuous metadata)
+      this.controller.uiManager.updateAllRangeSliderCounts()
+    }
     
     // Refresh selection summary after every filtering action.
     // With no lasso selection it shows visible cells count; with lasso it shows lassoed cells.
@@ -1012,11 +1034,14 @@ export class DataManager {
     // Update global filter summary (count and switch state)
     this.controller.uiManager.updateGlobalFilterSummary()
     
-    // Update category distribution bar plots to reflect filtered cells
-    this.updateAllCategoryDistributions()
-    
-    // Redraw all density plots (histograms in range sliders) to reflect filtered cells
-    this.redrawAllDensityPlots()
+    // These are also expensive and only need refresh when filter state is active/changed.
+    if (hasFilterNow || hadFilterBefore || filterModeChanged) {
+      // Update category distribution bar plots to reflect filtered cells
+      this.updateAllCategoryDistributions()
+      
+      // Redraw all density plots (histograms in range sliders) to reflect filtered cells
+      this.redrawAllDensityPlots()
+    }
     
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(async () => {
@@ -1375,6 +1400,12 @@ export class DataManager {
         }
       }
       
+      // If no filters are active and we are not forcing a color update,
+      // skip the visibility pipeline entirely.
+      if (!hasFilterNow && !shouldUpdateColors) {
+        return
+      }
+
       // If we need to update colors (e.g., color range adapted), render colors first
       if (shouldUpdateColors && this.controller.currentMetadataVector) {
         // console.log('🎨 [FILTER] Updating colors via renderPointsWithCurrentColoring') */

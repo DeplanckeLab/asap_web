@@ -39,6 +39,10 @@ export class ReglRenderer {
     // Buffers
     this.positionBuffer = null
     this.colorBuffer = null
+    this.byteToFloat = new Float32Array(256)
+    for (let i = 0; i < 256; i++) {
+      this.byteToFloat[i] = i / 255
+    }
     
     this.initialize()
   }
@@ -238,13 +242,16 @@ export class ReglRenderer {
   }
   
   /**
-   * Update colors for specific point indices
-   * @param {Map<number, number>} colorMap - Map of point index -> hex color
+   * Update colors for all points in draw order.
+   * Supports Map<number, number> and typed arrays (Uint32Array/Array<number>).
    */
-  updateColors(colorMap) {
+  updateColors(colorData) {
     const startTime = performance.now()
     
-    // console.log(`🎨 [ReGL] updateColors called with ${colorMap.size} color updates`)
+    const colorCount = (colorData && typeof colorData.length === 'number')
+      ? colorData.length
+      : (colorData?.size || 0)
+    // console.log(`🎨 [ReGL] updateColors called with ${colorCount} color updates`)
     // console.log(`🎨 [ReGL] Renderer state: numPoints=${this.numPoints}, colorsLength=${this.colors?.length || 0}, hasColorBuffer=${!!this.colorBuffer}`)
     
     if (!this.colors || !this.colorBuffer) {
@@ -254,9 +261,9 @@ export class ReglRenderer {
     
     let transparentCount = 0
     let visibleCount = 0
-    const sampleUpdates = []
-    
-    colorMap.forEach((hexColor, index) => {
+    const byteToFloat = this.byteToFloat
+
+    const applyColorAtIndex = (index, hexColor) => {
       if (index >= this.numPoints) {
         console.warn(`🎨 [ReGL] WARNING: Index ${index} >= numPoints ${this.numPoints}, skipping`)
         return
@@ -271,48 +278,45 @@ export class ReglRenderer {
         this.colors[offset + 2] = 0
         this.colors[offset + 3] = 0 // Fully transparent
         transparentCount++
-        
-        if (sampleUpdates.length < 5 && index < 100) {
-          sampleUpdates.push(`idx${index}: transparent (0x00000000)`)
-        }
       }
       // Check if this is an RGBA color (> 0xFFFFFF means 32-bit RGBA)
       else if (hexColor > 0xFFFFFF) {
         // RGBA format: 0xRRGGBBAA
-        const r = ((hexColor >>> 24) & 0xFF) / 255
-        const g = ((hexColor >>> 16) & 0xFF) / 255
-        const b = ((hexColor >>> 8) & 0xFF) / 255
-        const a = (hexColor & 0xFF) / 255
+        const r = byteToFloat[(hexColor >>> 24) & 0xFF]
+        const g = byteToFloat[(hexColor >>> 16) & 0xFF]
+        const b = byteToFloat[(hexColor >>> 8) & 0xFF]
+        const a = byteToFloat[hexColor & 0xFF]
         
         this.colors[offset] = r
         this.colors[offset + 1] = g
         this.colors[offset + 2] = b
         this.colors[offset + 3] = a
         visibleCount++
-        
-        if (sampleUpdates.length < 5 && index < 100) {
-          sampleUpdates.push(`idx${index}: rgba(${r.toFixed(2)},${g.toFixed(2)},${b.toFixed(2)},${a.toFixed(2)})`)
-        }
       } else {
         // RGB format: 0xRRGGBB - set alpha to 1.0 (fully opaque)
-        const r = ((hexColor >> 16) & 0xFF) / 255
-        const g = ((hexColor >> 8) & 0xFF) / 255
-        const b = (hexColor & 0xFF) / 255
+        const r = byteToFloat[(hexColor >> 16) & 0xFF]
+        const g = byteToFloat[(hexColor >> 8) & 0xFF]
+        const b = byteToFloat[hexColor & 0xFF]
         
         this.colors[offset] = r
         this.colors[offset + 1] = g
         this.colors[offset + 2] = b
         this.colors[offset + 3] = 1.0 // Always set to fully opaque for normal colors
         visibleCount++
-        
-        if (sampleUpdates.length < 5 && index < 100) {
-          sampleUpdates.push(`idx${index}: rgb(${r.toFixed(2)},${g.toFixed(2)},${b.toFixed(2)}) alpha=1.0`)
-        }
       }
-    })
+    }
+
+    if (colorData && typeof colorData.length === 'number') {
+      for (let index = 0; index < colorData.length; index++) {
+        applyColorAtIndex(index, colorData[index])
+      }
+    } else if (colorData && typeof colorData.forEach === 'function') {
+      colorData.forEach((hexColor, index) => {
+        applyColorAtIndex(index, hexColor)
+      })
+    }
     
     // console.log(`🎨 [ReGL] Color updates: ${visibleCount} visible, ${transparentCount} hidden`)
-    // console.log(`🎨 [ReGL] Sample color updates:`, sampleUpdates.slice(0, 5))
     
     // console.log(`🎨 [ReGL] Updating color buffer with subdata...`)
     this.colorBuffer.subdata(this.colors)
@@ -333,7 +337,19 @@ export class ReglRenderer {
     })
     
     const elapsed = performance.now() - startTime
-    // console.log(`🎨 [ReGL] Updated ${colorMap.size.toLocaleString()} colors in ${elapsed.toFixed(2)}ms`)
+    try {
+      if (localStorage.getItem('vizPerfLogging') === '1') {
+        console.log(`[PERF] regl_updateColors: ${elapsed.toFixed(2)}ms`, {
+          points: this.numPoints,
+          updates: colorCount,
+          visible: visibleCount,
+          transparent: transparentCount
+        })
+      }
+    } catch (error) {
+      // Ignore localStorage access errors
+    }
+    // console.log(`🎨 [ReGL] Updated ${colorCount.toLocaleString()} colors in ${elapsed.toFixed(2)}ms`)
     
     return this
   }

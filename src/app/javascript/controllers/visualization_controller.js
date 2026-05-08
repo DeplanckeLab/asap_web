@@ -321,6 +321,10 @@ export default class extends Controller {
     // Color update optimization
     this.lastColorUpdateHash = null // Hash of color state for change detection
     this.colorUpdateCache = new Map() // Cache for color calculations
+    if (!this._valuesRefIds) this._valuesRefIds = new WeakMap()
+    if (this._nextValuesRefId === undefined) this._nextValuesRefId = 1
+    if (!this._stableSortedCategoriesCache) this._stableSortedCategoriesCache = new Map()
+    if (!this._stablePaletteIndexCache) this._stablePaletteIndexCache = new Map()
     
     // Color cache for visibility updates (performance optimization)
     this.cachedColorsByCellIndex = new Map() // Cache colors by cell index for fast lookup
@@ -5741,7 +5745,8 @@ export default class extends Controller {
       return
     }
     
-    const colorMap = new Map()
+    const colorBuildStart = performance.now()
+    const colorMap = new Uint32Array(this.displayOrder.length)
     
     // Get current filtered indices to hide invisible points
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
@@ -5765,6 +5770,7 @@ export default class extends Controller {
       if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.colorManager.getCategoryColors()
+        this.cachedColorsByCellIndex = new Map()
         
         // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
         // Otherwise fall back to unique categories from values
@@ -5806,19 +5812,27 @@ export default class extends Controller {
             
             this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
             const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-            colorMap.set(drawPos, isSelected ? 0xff0000 : metadataColor)
+            const pointColor = isSelected ? 0xff0000 : metadataColor
+            colorMap[drawPos] = pointColor
+            this.cachedColorsByCellIndex.set(cellIndex, pointColor)
           } else {
             // Hide filtered-out points
-            colorMap.set(drawPos, 0x00000000)
+            colorMap[drawPos] = 0x00000000
+            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           }
         }
-        
-        // Cache colors for fast visibility updates
-        this.colorManager.calculateAndCacheColors(coloringMetadataVector)
+        this.lastColoringMetadataId = coloringMetadataVector.id
+        this.lastColorRange = null
         
         // Update colors in ReGL
+        const updateColorsStart = performance.now()
         this.reglRenderer.updateColors(colorMap)
+        const updateColorsMs = performance.now() - updateColorsStart
         this.reglRenderer.render()
+        this.logPerf('coloring_discrete_updateColors', updateColorsMs, {
+          points: colorMap.length,
+          metadataId: coloringMetadataVector.id
+        })
         
         // Check if we need to reorder points for category display
         // Only reorder if this is the first time loading this metadata or if order preference changed
@@ -5848,6 +5862,7 @@ export default class extends Controller {
         // Continuous/numeric metadata coloring
         const values = coloringMetadataVector.values
         const compressionInfo = coloringMetadataVector.compression_info
+        this.cachedColorsByCellIndex = new Map()
         
         // console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
         
@@ -5899,20 +5914,24 @@ export default class extends Controller {
             
             this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
             const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-            colorMap.set(drawPos, isSelected ? 0xff0000 : metadataColor)
+            const pointColor = isSelected ? 0xff0000 : metadataColor
+            colorMap[drawPos] = pointColor
+            this.cachedColorsByCellIndex.set(cellIndex, pointColor)
           } else {
             // Hide filtered-out points
-            colorMap.set(drawPos, 0x00000000)
+            colorMap[drawPos] = 0x00000000
+            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           }
         }
-        
-        // Cache colors for fast visibility updates
-        this.colorManager.calculateAndCacheColors(coloringMetadataVector)
+        this.lastColoringMetadataId = coloringMetadataVector.id
+        this.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
         
         // console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
         
         // Update colors in ReGL (but don't render yet, we'll reorder first)
+        const updateColorsStart = performance.now()
         this.reglRenderer.updateColors(colorMap)
+        const updateColorsMs = performance.now() - updateColorsStart
 
         // Check if we need to reorder points for numeric display
         // Force reordering if:
@@ -5946,6 +5965,10 @@ export default class extends Controller {
         } else {
           // Just render without reordering
           this.reglRenderer.render()
+          this.logPerf('coloring_numeric_updateColors', updateColorsMs, {
+            points: colorMap.length,
+            metadataId: coloringMetadataVector.id
+          })
           
           // Render continuous color legend
           this.renderContinuousColorLegend()
@@ -5973,11 +5996,11 @@ export default class extends Controller {
         if (isVisible) {
           this.originalPointColors.set(cellIndex, defaultColor) // Store by cell index
           const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-          colorMap.set(drawPos, isSelected ? 0xff0000 : defaultColor)
+          colorMap[drawPos] = isSelected ? 0xff0000 : defaultColor
           visibleCount++
         } else {
           // Hide filtered-out points
-          colorMap.set(drawPos, 0x00000000)
+          colorMap[drawPos] = 0x00000000
           hiddenCount++
         }
       }
@@ -5991,8 +6014,13 @@ export default class extends Controller {
       
       // Update colors in ReGL
       // console.log('🎨 [RENDER] Updating ReGL renderer with default blue colors...')
+      const updateColorsStart = performance.now()
       this.reglRenderer.updateColors(colorMap)
+      const updateColorsMs = performance.now() - updateColorsStart
       this.reglRenderer.render()
+      this.logPerf('coloring_default_updateColors', updateColorsMs, {
+        points: colorMap.length
+      })
       // console.log('🎨 [RENDER] ReGL renderer updated and rendered')
       
       // Refresh 2D plot if open
@@ -6015,7 +6043,18 @@ export default class extends Controller {
     this.colorUpdateCache.set('lastColorMap', colorMap)
     this.lastColorUpdateHash = currentColorHash
     
+    const colorBuildMs = performance.now() - colorBuildStart
     const elapsed = performance.now() - startTime
+    this.logPerf('coloring_buildColorMap', colorBuildMs, {
+      points: colorMap.length,
+      metadataId: coloringMetadataVector?.id || null,
+      metadataType: coloringMetadataVector?.data_type || 'default'
+    })
+    this.logPerf('coloring_total', elapsed, {
+      points: this.displayOrder?.length || 0,
+      metadataId: coloringMetadataVector?.id || null,
+      metadataType: coloringMetadataVector?.data_type || 'default'
+    })
     this.recordPerformanceMetrics('ColorUpdate', elapsed)
     // console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
     
@@ -6056,10 +6095,18 @@ export default class extends Controller {
   // Get categories in a STABLE order for color assignment (always largest-first)
   // This ensures colors are consistent regardless of user's display preference
   getStableSortedCategories(values, categories) {
+    if (!values || !categories || categories.length === 0) return []
+    const valuesRefId = this.getValuesRefCacheId(values)
+    const categoriesKey = categories.map(c => String(c)).join('\u0001')
+    const cacheKey = `${valuesRefId}|${categories.length}|${categoriesKey}`
+    const cached = this._stableSortedCategoriesCache.get(cacheKey)
+    if (cached) return cached
+
     const categoryFrequencies = {}
-    values.forEach(value => {
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i]
       categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
-    })
+    }
     
     // Always sort largest-first for stable color assignment
     const sorted = [...categories].sort((a, b) => {
@@ -6067,7 +6114,20 @@ export default class extends Controller {
       const freqB = categoryFrequencies[b] || 0
       return freqB - freqA // Always descending (largest first)
     })
+    this._stableSortedCategoriesCache.set(cacheKey, sorted)
     return sorted
+  }
+
+  getValuesRefCacheId(values) {
+    if (!values || (typeof values !== 'object' && typeof values !== 'function')) {
+      return 'scalar'
+    }
+    let id = this._valuesRefIds.get(values)
+    if (!id) {
+      id = this._nextValuesRefId++
+      this._valuesRefIds.set(values, id)
+    }
+    return id
   }
 
 
@@ -6078,6 +6138,8 @@ export default class extends Controller {
     this._cachedColorMap = null
     this._cachedCentroids = null
     this._cachedCentroidsKey = null
+    if (this._stableSortedCategoriesCache) this._stableSortedCategoriesCache.clear()
+    if (this._stablePaletteIndexCache) this._stablePaletteIndexCache.clear()
     //console.log('Color map cache cleared')
   }
 
@@ -9717,14 +9779,22 @@ export default class extends Controller {
     } else {
       allCategories = [...new Set(vector.values)]
     }
-    const stableSortedCategories = this.getStableSortedCategories(vector.values, allCategories)
-    const idx = stableSortedCategories.indexOf(categoryName)
-    if (idx >= 0) return idx
-    const catStr = String(categoryName)
-    for (let i = 0; i < stableSortedCategories.length; i++) {
-      if (String(stableSortedCategories[i]) === catStr) return i
+    const valuesRefId = this.getValuesRefCacheId(vector.values)
+    const categoriesKey = allCategories.map(c => String(c)).join('\u0001')
+    const cacheKey = `${String(mid)}|${valuesRefId}|${allCategories.length}|${categoriesKey}`
+
+    let indexMap = this._stablePaletteIndexCache.get(cacheKey)
+    if (!indexMap) {
+      const stableSortedCategories = this.getStableSortedCategories(vector.values, allCategories)
+      indexMap = new Map()
+      for (let i = 0; i < stableSortedCategories.length; i++) {
+        indexMap.set(String(stableSortedCategories[i]), i)
+      }
+      this._stablePaletteIndexCache.set(cacheKey, indexMap)
     }
-    return -1
+
+    const idx = indexMap.get(String(categoryName))
+    return Number.isFinite(idx) ? idx : -1
   }
   
   // Get color for a category (using the same color palette as the plot)
@@ -12886,7 +12956,7 @@ export default class extends Controller {
       this.reorderDisplayOrderForSelectedCells()
     }
     
-    const colorMap = new Map()
+    const colorMap = new Uint32Array(this.displayOrder.length)
     
     if (hasSelections) {
       // console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
@@ -12899,18 +12969,18 @@ export default class extends Controller {
         
         if (!isVisible) {
           // Hide filtered-out points
-          colorMap.set(drawPos, 0x00000000)
+          colorMap[drawPos] = 0x00000000
           this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           continue
         }
         
         if (this.selectedCells.has(cellIndex)) {
-          colorMap.set(drawPos, 0xff0000) // Red
+          colorMap[drawPos] = 0xff0000 // Red
           this.cachedColorsByCellIndex.set(cellIndex, 0xff0000)
         } else {
           // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
           const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
-          colorMap.set(drawPos, originalColor)
+          colorMap[drawPos] = originalColor
           this.cachedColorsByCellIndex.set(cellIndex, originalColor)
         }
       }
@@ -12925,13 +12995,13 @@ export default class extends Controller {
         
         if (!isVisible) {
           // Hide filtered-out points
-          colorMap.set(drawPos, 0x00000000)
+          colorMap[drawPos] = 0x00000000
           this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           continue
         }
         
         const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
-        colorMap.set(drawPos, originalColor)
+        colorMap[drawPos] = originalColor
         this.cachedColorsByCellIndex.set(cellIndex, originalColor)
       }
     }
@@ -13324,7 +13394,7 @@ export default class extends Controller {
     
     // Rebuild buffer using new display order
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
-    const colorMap = new Map()
+    const colorMap = new Uint32Array(this.displayOrder.length)
     
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
@@ -13337,7 +13407,7 @@ export default class extends Controller {
       // Get color for this cell
       const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
       const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-      colorMap.set(drawPos, isSelected ? 0xff0000 : baseColor)
+      colorMap[drawPos] = isSelected ? 0xff0000 : baseColor
     }
     
     // Update ReGL buffers with reordered data
@@ -13407,7 +13477,7 @@ export default class extends Controller {
     
     // Rebuild buffer using new display order
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
-    const colorMap = new Map()
+    const colorMap = new Uint32Array(this.displayOrder.length)
     
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
@@ -13423,10 +13493,10 @@ export default class extends Controller {
       if (isVisible) {
         const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-        colorMap.set(drawPos, isSelected ? 0xff0000 : baseColor)
+        colorMap[drawPos] = isSelected ? 0xff0000 : baseColor
       } else {
         // Hide filtered-out points
-        colorMap.set(drawPos, 0x00000000)
+        colorMap[drawPos] = 0x00000000
       }
     }
     
@@ -19667,7 +19737,8 @@ export default class extends Controller {
     
     // Create color map to hide/show points based on filtering
     // We'll use the alpha channel approach: set alpha to 0 for hidden points
-    const colorMap = new Map()
+    const colorBuildStart = performance.now()
+    const colorMap = new Uint32Array(this.displayOrder.length)
     let visibleCount = 0
     let hiddenCount = 0
     
@@ -19684,7 +19755,7 @@ export default class extends Controller {
       if (shouldBeVisible) {
         // Use cached color (much faster than recalculating)
         const cachedColor = this.cachedColorsByCellIndex.get(cellIndex) || 0x3b82f6
-        colorMap.set(drawPos, cachedColor)
+        colorMap[drawPos] = cachedColor
         visibleCount++
         
         if (samplePositions.includes(drawPos)) {
@@ -19692,7 +19763,7 @@ export default class extends Controller {
         }
       } else {
         // Hide point by making it fully transparent
-        colorMap.set(drawPos, 0x00000000)
+        colorMap[drawPos] = 0x00000000
         hiddenCount++
         
         if (samplePositions.includes(drawPos)) {
@@ -19709,6 +19780,7 @@ export default class extends Controller {
     // console.log(`🎨 [ReGL] About to call updateColors with ${colorMap.size} color updates`)
     
     // Update colors (which includes alpha channel)
+    const colorBuildMs = performance.now() - colorBuildStart
     const updateColorsStart = performance.now()
     this.reglRenderer.updateColors(colorMap)
     const updateColorsTime = performance.now() - updateColorsStart
@@ -19722,6 +19794,19 @@ export default class extends Controller {
     // console.log(`🎨 [ReGL] Visibility update completed`)
     
     const elapsed = performance.now() - startTime
+    this.logPerf('visibility_buildColorMap', colorBuildMs, {
+      points: colorMap.length,
+      visible: visibleCount,
+      hidden: hiddenCount
+    })
+    this.logPerf('visibility_updateColors', updateColorsTime, {
+      points: colorMap.length
+    })
+    this.logPerf('visibility_total', elapsed, {
+      points: colorMap.length,
+      visible: visibleCount,
+      hidden: hiddenCount
+    })
     // console.log(`🎨 [ReGL] Total visibility update time: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
   }
 
@@ -19730,6 +19815,24 @@ export default class extends Controller {
   // Get a summary of current filtering constraints
 
   // Performance monitoring helper
+  perfLoggingEnabled() {
+    try {
+      return localStorage.getItem('vizPerfLogging') === '1'
+    } catch (error) {
+      return false
+    }
+  }
+
+  logPerf(label, durationMs, details = null) {
+    if (!this.perfLoggingEnabled()) return
+    const rounded = Number(durationMs).toFixed(2)
+    if (details && typeof details === 'object') {
+      console.log(`[PERF] ${label}: ${rounded}ms`, details)
+      return
+    }
+    console.log(`[PERF] ${label}: ${rounded}ms`)
+  }
+
   recordPerformanceMetrics(operationName, duration) {
     this.performanceMetrics.updateCount++
     this.performanceMetrics.lastUpdateTime = duration
@@ -21295,26 +21398,36 @@ export default class extends Controller {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
     
+    // Build category distributions in a single pass across cells.
+    // Previous implementation scanned all cells once per canvas/category.
+    const displayedCategories = Array.from(canvases)
+      .map(canvas => canvas.dataset.category)
+      .filter(category => category !== undefined && category !== null)
+    const displayedCategorySet = new Set(displayedCategories)
+    const perDisplayedCategoryCounts = {}
+    const displayedCategoryTotals = {}
+    displayedCategories.forEach(category => {
+      perDisplayedCategoryCounts[category] = {}
+      displayedCategoryTotals[category] = 0
+    })
+
+    for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+      if (filteredSet && !filteredSet.has(i)) continue
+
+      const displayedCategoryValue = displayedMetadataVector.values[i]
+      const displayedCategory = String(displayedCategoryValue)
+      if (!displayedCategorySet.has(displayedCategory)) continue
+
+      const coloringCategory = coloringMetadataVector.values[i]
+      const distributionCounts = perDisplayedCategoryCounts[displayedCategory]
+      distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
+      displayedCategoryTotals[displayedCategory] += 1
+    }
+
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
-      
-      // Find all cells that belong to this displayed category (filtered only)
-      const cellsInDisplayedCategory = []
-      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (
-          this.metadataValueEqualsDatasetCategory(displayedMetadataVector.values[i], displayedCategory) &&
-          (!filteredSet || filteredSet.has(i))
-        ) {
-          cellsInDisplayedCategory.push(i)
-        }
-      }
-      
-      // Count how many cells in this displayed category belong to each coloring category
-      const distributionCounts = {}
-      cellsInDisplayedCategory.forEach(cellIndex => {
-        const coloringCategory = coloringMetadataVector.values[cellIndex]
-        distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
-      })
+      const distributionCounts = perDisplayedCategoryCounts[displayedCategory] || {}
+      const cellsInDisplayedCategoryCount = displayedCategoryTotals[displayedCategory] || 0
       
       // Store segment information for tooltip
       const segments = []
@@ -21330,7 +21443,9 @@ export default class extends Controller {
           }
           const colorHex = this.getCategoryColor(coloringCategory, paletteSlot, coloringMetaId)
 
-          const percentage = (count / cellsInDisplayedCategory.length) * 100
+          const percentage = cellsInDisplayedCategoryCount > 0
+            ? (count / cellsInDisplayedCategoryCount) * 100
+            : 0
           const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width
 
           segments.push({
@@ -21382,7 +21497,7 @@ export default class extends Controller {
         console.warn('[vizDebugCategoryBars] row', {
           displayedMetadataId: metadataId,
           displayedCategory,
-          cellsInDisplayedCategory: cellsInDisplayedCategory.length,
+          cellsInDisplayedCategory: cellsInDisplayedCategoryCount,
           dotComputedBackground: dotComputedBg,
           colorDiskComputedBackground: disk,
           segmentHex0: segments[0] && segments[0].color,

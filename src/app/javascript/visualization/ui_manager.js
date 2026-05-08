@@ -1349,7 +1349,14 @@ export class UIManager {
     const debugSummary = new Map()
     const missingMetadata = new Set()
     const logPrefix = '[FILTER COUNTS]'
-    if (window.CHECKPOINT_TRACE === true) {
+    const checkpointTraceEnabled = window.CHECKPOINT_TRACE === true
+    let perfLogEnabled = false
+    try {
+      perfLogEnabled = localStorage.getItem('vizPerfLogging') === '1'
+    } catch (error) {
+      perfLogEnabled = false
+    }
+    if (checkpointTraceEnabled) {
       console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
         totalCheckboxes: allCategoryCheckboxes.length,
         visibleCheckboxes: visibleCheckboxes.length,
@@ -1443,7 +1450,7 @@ export class UIManager {
         }
 
         debugSummary.set(metadataId, debugEntry)
-      } else {
+      } else if (checkpointTraceEnabled) {
         console.warn(`${logPrefix} Missing count element for category`, {
           metadataId,
           category,
@@ -1452,7 +1459,7 @@ export class UIManager {
       }
     })
 
-    if (debugSummary.size > 0 || missingMetadata.size > 0) {
+    if (checkpointTraceEnabled && (debugSummary.size > 0 || missingMetadata.size > 0)) {
       const metadataSummaries = []
       debugSummary.forEach((value) => {
         metadataSummaries.push({
@@ -1478,7 +1485,7 @@ export class UIManager {
     const perfTime = performance.now() - perfStart
     // console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)
     
-    if (perfTime > 100) {
+    if (perfTime > 100 && perfLogEnabled) {
       console.warn(`⚠️ [PERF] updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
     }
   }

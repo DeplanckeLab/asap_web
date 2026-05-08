@@ -514,13 +514,13 @@ class Project < ApplicationRecord
       return
     end
 
-    parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_step = Step.where(docker_image_id: asap_docker_image.id, version_id: version_id, name: 'parsing').first
     unless parsing_step
       logger.error("[Project#integrate] Could not find parsing step for docker image #{asap_docker_image.id}")
       return
     end
 
-    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'integration').first
+    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, version_id: version_id, name: 'integration').first
 
     project_step = ProjectStep.find_or_create_by(project_id: self.id, step_id: parsing_step.id)
 
@@ -765,7 +765,7 @@ class Project < ApplicationRecord
     asap_docker_image = Basic.get_asap_docker(version)
     return unless asap_docker_image
     
-    Step.where(docker_image_id: asap_docker_image.id).find_each do |step|
+    Step.where(docker_image_id: asap_docker_image.id, version_id: version_id).find_each do |step|
       # Filter by project type if project has a project type
       if project_type
         step_attrs = Basic.safe_parse_json(step.attrs_json, {})

@@ -5658,7 +5658,9 @@ class ProjectsController < ApplicationController
       # as one logical step and load their runs together.
       step_ids_for_runs =
         if @step.multiple_runs
-          Step.where(docker_image_id: @step.docker_image_id, name: @step.name).pluck(:id)
+          scoped_steps = step_scope_for_project(@project)
+          scoped_steps = scoped_steps.where(name: @step.name)
+          scoped_steps.pluck(:id)
         else
           [@step.id]
         end
@@ -9159,7 +9161,23 @@ class ProjectsController < ApplicationController
       return nil unless project&.version
       asap_docker_image = Basic.get_asap_docker(project.version)
       return nil unless asap_docker_image
-      Step.find_by(docker_image_id: asap_docker_image.id, name: 'parsing')
+      Step.find_by(docker_image_id: asap_docker_image.id, version_id: project.version_id, name: 'parsing')
+    end
+
+    def step_scope_for_project(project)
+      return Step.none unless project&.version
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      return Step.none unless asap_docker_image
+
+      Step.where(docker_image_id: asap_docker_image.id, version_id: project.version_id)
+    end
+
+    def std_method_scope_for_project(project)
+      return StdMethod.none unless project&.version
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      return StdMethod.none unless asap_docker_image
+
+      StdMethod.where(docker_image_id: asap_docker_image.id, version_id: project.version_id)
     end
 
     def selection_session_cache
@@ -10323,7 +10341,12 @@ class ProjectsController < ApplicationController
       asap_docker_image = Basic.get_asap_docker(@project.version)
       return { unlocked: true, reason: nil } unless asap_docker_image # If no docker image, allow step (fallback)
       
-      std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, step_id: step.id, obsolete: false).all
+      std_methods = StdMethod.where(
+        docker_image_id: asap_docker_image.id,
+        version_id: @project.version_id,
+        step_id: step.id,
+        obsolete: false
+      ).all
       
       if @project.id == 69560 && step.name == 'normalization'
         Rails.logger.info("[DEBUG] StdMethods count: #{std_methods.count}")
@@ -10347,7 +10370,8 @@ class ProjectsController < ApplicationController
       # Get steps by name for lookup
       h_steps_by_name = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+        Step.where(docker_image_id: asap_docker_image.id, version_id: @project.version_id)
+            .each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
       end
       
       # Track missing requirements for computing the lock reason
@@ -10673,7 +10697,8 @@ class ProjectsController < ApplicationController
       asap_docker_image = Basic.get_asap_docker(@project.version)
       h_steps_by_name = {}
       if asap_docker_image
-        Step.where(docker_image_id: asap_docker_image.id).each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
+        Step.where(docker_image_id: asap_docker_image.id, version_id: @project.version_id)
+            .each { |s| h_steps_by_name[s.name] = s if s.respond_to?(:name) }
       end
       
       # Check each parameter that requires a dataset
@@ -10879,7 +10904,7 @@ class ProjectsController < ApplicationController
     def prepare_steps_with_status
       asap_docker_image = Basic.get_asap_docker(@project.version)
       @all_project_steps = if asap_docker_image
-                             Step.where(docker_image_id: asap_docker_image.id)
+                             Step.where(docker_image_id: asap_docker_image.id, version_id: @project.version_id)
                                  .where.not(hidden: true)
                                  .order(:rank, :name)
                            else
@@ -10934,7 +10959,7 @@ class ProjectsController < ApplicationController
           # Check if any std_method for this step matches the project type
           # If all std_methods are restricted to other project types, exclude the step
           if asap_docker_image
-            std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, step_id: step.id, obsolete: false)
+            std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, version_id: @project.version_id, step_id: step.id, obsolete: false)
             
             if std_methods.any?
               # Check if at least one method matches the project type

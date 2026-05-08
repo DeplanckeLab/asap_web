@@ -28,13 +28,13 @@ class ProjectParsingJob < ApplicationJob
     end
 
     # Find parsing step and std_method
-    parsing_step = Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_step = Step.where(docker_image_id: asap_docker_image.id, version_id: project.version_id, name: 'parsing').first
     unless parsing_step
       Rails.logger.error("[ProjectParsingJob] Could not find parsing step for docker image #{asap_docker_image.id}")
       return
     end
 
-    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+    parsing_std_method = StdMethod.where(docker_image_id: asap_docker_image.id, version_id: project.version_id, name: 'parsing').first
     unless parsing_std_method
       Rails.logger.error("[ProjectParsingJob] Could not find parsing std_method for docker image #{asap_docker_image.id}")
       return

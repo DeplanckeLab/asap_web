@@ -149,9 +149,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= categorical_count %>
             </span>
+            <button type="button"
+                    data-action="click->visualization#foldAllPanelItems"
+                    data-panel-kind="categorical-metadata"
+                    style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                    onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                    title="Fold All"
+                    aria-label="Fold All">
+              <i class="fas fa-angles-up" style="font-size: 12px;"></i>
+            </button>
             <% if can_edit_project %>
               <button type="button" onclick="openAddMetadataModal()"
-                      style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                      style="background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
                       onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
                       title="Add metadata">
                 <i class="fas fa-plus" style="font-size: 14px;"></i>
@@ -269,7 +279,18 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   </div>
                 </div>
                 <!-- Categories (initially hidden) -->
-                <div style="padding-left: 32px; padding-bottom: 8px; display: none;">
+                <div style="padding-left: 32px; padding-bottom: 8px; display: none; overflow: visible;">
+                  <div class="metadata-categories-rail-wrap" style="position: relative;">
+                    <div class="metadata-categories-jump-control" style="visibility: hidden; position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: visible;">
+                      <button type="button"
+                              class="metadata-categories-jump-top"
+                              data-action="click->visualization#scrollMetadataCategoriesPanelItemToTop"
+                              title="Scroll this metadata to top of panel"
+                              style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; margin: 0; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; color: #374151; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.06);">
+                        <i class="fas fa-arrow-up" style="font-size: 12px;"></i>
+                      </button>
+                    </div>
+                    <div class="metadata-categories-list" style="box-sizing: border-box;">
                   <% if metadata.categories_json.present? %>
                     <% begin %>
                       <% categories = JSON.parse(metadata.categories_json) %>
@@ -457,6 +478,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                   <% else %>
                     <div style="font-size: 12px; color: #6b7280; padding: 8px;">No category data available</div>
                   <% end %>
+                    </div>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -538,9 +561,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <span style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">
               <%= continuous_count %>
             </span>
+            <button type="button"
+                    data-action="click->visualization#foldAllPanelItems"
+                    data-panel-kind="continuous-metadata"
+                    style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                    onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                    title="Fold All"
+                    aria-label="Fold All">
+              <i class="fas fa-angles-up" style="font-size: 12px;"></i>
+            </button>
             <% if can_edit_project %>
               <button type="button" onclick="openAddMetadataModal()"
-                      style="margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
+                      style="background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: color 0.2s;"
                       onmouseover="this.style.color='#22c55e'" onmouseout="this.style.color='#9ca3af'"
                       title="Add metadata">
                 <i class="fas fa-plus" style="font-size: 14px;"></i>
@@ -1012,6 +1045,12 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             color: #6b7280;
             padding: 12px;
             text-align: left;
+          }
+          .metadata-categories-jump-control {
+            pointer-events: none;
+          }
+          .metadata-categories-jump-control .metadata-categories-jump-top {
+            pointer-events: auto;
           }
           /* Four columns always: category | best (0 width when compact) | cell count | annot / markers */
           .metadata-category-row {
@@ -1506,9 +1545,19 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
       <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 10px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Gene Expression</h2>
+            <h2 style="margin: 0; font-size: 18px; font-weight: 600;"><%= row_label(@project).to_s.pluralize.capitalize %></h2>
             <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
           </div>
+          <button type="button"
+                  data-action="click->visualization#foldAllPanelItems"
+                  data-panel-kind="gene-expression"
+                  style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                  onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                  onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                  title="Fold All"
+                  aria-label="Fold All">
+            <i class="fas fa-angles-up" style="font-size: 12px;"></i>
+          </button>
         </div>
         <!-- Gene Tags Container with Input -->
         <div style="position: relative;">

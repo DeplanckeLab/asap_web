@@ -590,6 +590,7 @@ export default class extends Controller {
         this.leftPanelResizeRaf = requestAnimationFrame(() => {
           this.leftPanelResizeRaf = null
           this.updateMetadataClaColumns(nextWidth)
+          this.refreshMetadataCategoriesJumpListeners()
         })
       })
       this.leftPanelResizeObserver.observe(leftPanel)
@@ -812,6 +813,8 @@ export default class extends Controller {
       })
     }
     document.addEventListener('submit', this.boundInAppNavigationGuardSubmit, true)
+
+    this.refreshMetadataCategoriesJumpListeners()
   }
 
   disconnect() {
@@ -937,6 +940,27 @@ export default class extends Controller {
     if (this.boundFilterSavedSelectionsOutsideClick) {
       document.removeEventListener('click', this.boundFilterSavedSelectionsOutsideClick, true)
       this.boundFilterSavedSelectionsOutsideClick = null
+    }
+
+    if (this.categoricalPanelJumpRaf != null) {
+      cancelAnimationFrame(this.categoricalPanelJumpRaf)
+      this.categoricalPanelJumpRaf = null
+    }
+
+    if (this.boundCategoricalMetadataPanelScroll && this.element) {
+      const panel = this.element.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+      if (panel) {
+        panel.removeEventListener('scroll', this.boundCategoricalMetadataPanelScroll)
+      }
+      this.boundCategoricalMetadataPanelScroll = null
+    }
+
+    if (this.element) {
+      this.element.querySelectorAll('.metadata-categories-jump-control').forEach((control) => {
+        control.style.visibility = 'hidden'
+        control.style.pointerEvents = 'none'
+        this.resetMetadataCategoriesJumpControl(control)
+      })
     }
 
     if (window.visualizationController === this) {
@@ -8390,6 +8414,7 @@ export default class extends Controller {
             categoriesDiv.style.maxHeight = 'none'
             categoriesDiv.style.overflow = 'visible'
             categoriesDiv.removeEventListener('transitionend', handleExpandTransitionEnd)
+            this.refreshMetadataCategoriesJumpListeners()
           }
         }
         categoriesDiv.addEventListener('transitionend', handleExpandTransitionEnd)
@@ -8491,6 +8516,7 @@ export default class extends Controller {
           categoriesDiv.style.transition = ''
           categoriesDiv.style.overflow = ''
           this.updateMetadataClaColumns()
+          this.refreshMetadataCategoriesJumpListeners()
         }, 300) // Match transition duration
       }
       
@@ -8503,8 +8529,47 @@ export default class extends Controller {
     
     // Check if browser repaint is the bottleneck
     requestAnimationFrame(() => {
+      this.refreshMetadataCategoriesJumpListeners()
       // console.log(`⏱️ [TOGGLE] ✅ After browser repaint: ${(performance.now() - perfStart).toFixed(2)}ms`)
     })
+  }
+
+  async foldAllPanelItems(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const panelKind = String(event.currentTarget?.dataset?.panelKind || '').trim()
+    if (!panelKind) return
+
+    if (panelKind === 'categorical-metadata' || panelKind === 'continuous-metadata') {
+      const checkpointKey = panelKind === 'categorical-metadata' ? 'categorical-metadata-panel' : 'continuous-metadata-panel'
+      const panel = this.element.querySelector(`[data-checkpoint-scroll-key="${checkpointKey}"]`)
+      if (!panel) return
+
+      const headers = Array.from(panel.querySelectorAll('[data-action*="toggleMetadata"]'))
+      for (const header of headers) {
+        const chevron = header.querySelector('.fa-chevron-right')
+        const isExpanded = !!(chevron && chevron.style.transform === 'rotate(90deg)')
+        if (!isExpanded) continue
+        await this.toggleMetadata({ currentTarget: header, timeStamp: performance.now() })
+      }
+      return
+    }
+
+    if (panelKind === 'gene-expression') {
+      const panel = this.element.querySelector('[data-checkpoint-scroll-key="gene-results-panel"]')
+      if (!panel || !this.geneManager || typeof this.geneManager.toggleGeneExpansion !== 'function') return
+
+      const geneItems = Array.from(panel.querySelectorAll('[data-gene-item]'))
+      geneItems.forEach((geneItem) => {
+        const geneId = geneItem.getAttribute('data-gene-item')
+        const rangeSection = geneItem.querySelector('.gene-range-section')
+        const isExpanded = !!(rangeSection && rangeSection.style.display !== 'none')
+        if (isExpanded && geneId) {
+          this.geneManager.toggleGeneExpansion(geneId)
+        }
+      })
+    }
   }
 
   // Initialize draggable divider (moved from inline JS)
@@ -10516,6 +10581,7 @@ export default class extends Controller {
   // Handle window resize with debouncing
   async handleWindowResize() {
     this.updateMetadataClaColumns()
+    this.refreshMetadataCategoriesJumpListeners()
 
     // Debounce resize events to avoid excessive redraws during drag
     if (this.resizeTimeout) {
@@ -13528,8 +13594,9 @@ export default class extends Controller {
       
       // Only update if categories are visible (unfolded)
       if (categoriesDiv && categoriesDiv.style.display !== 'none') {
+        const listRoot = categoriesDiv.querySelector('.metadata-categories-list') || categoriesDiv
         // Get all category items
-        const categoryItems = Array.from(categoriesDiv.children)
+        const categoryItems = Array.from(listRoot.children)
         
         if (categoryItems.length === 0) return
         
@@ -13557,12 +13624,14 @@ export default class extends Controller {
         
         // Re-append in the new sorted order
         categoriesData.forEach(data => {
-          categoriesDiv.appendChild(data.element)
+          listRoot.appendChild(data.element)
         })
         
         updatedCount++
       }
     })
+
+    this.refreshMetadataCategoriesJumpListeners()
     
     // console.log(`📊 Updated category order in ${updatedCount} metadata panel(s)`)
   }
@@ -13633,8 +13702,10 @@ export default class extends Controller {
     const categoriesDiv = metadataContainer.querySelector('div[style*="padding-left: 32px"]')
     if (!categoriesDiv) return
     
+    const listRoot = categoriesDiv.querySelector('.metadata-categories-list') || categoriesDiv
+
     // Get all category items
-    const categoryItems = Array.from(categoriesDiv.children)
+    const categoryItems = Array.from(listRoot.children)
     
     // Create a map of category name to element
     const categoryMap = new Map()
@@ -13650,11 +13721,126 @@ export default class extends Controller {
     sortedCategories.forEach(category => {
       const item = categoryMap.get(String(category))
       if (item) {
-        categoriesDiv.appendChild(item)
+        listRoot.appendChild(item)
       }
     })
+
+    this.refreshMetadataCategoriesJumpListeners()
     
     // console.log('📊 Updated left panel category order')
+  }
+
+  refreshMetadataCategoriesJumpListeners() {
+    if (!this.element?.querySelector) {
+      return
+    }
+    const panel = this.element.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+    if (!panel) {
+      return
+    }
+    if (!this.boundCategoricalMetadataPanelScroll) {
+      this.boundCategoricalMetadataPanelScroll = () => {
+        if (this.categoricalPanelJumpRaf != null) {
+          return
+        }
+        this.categoricalPanelJumpRaf = requestAnimationFrame(() => {
+          this.categoricalPanelJumpRaf = null
+          this.refreshAllMetadataCategoriesJumpFrames()
+        })
+      }
+    }
+    panel.removeEventListener('scroll', this.boundCategoricalMetadataPanelScroll)
+    panel.addEventListener('scroll', this.boundCategoricalMetadataPanelScroll)
+    this.refreshAllMetadataCategoriesJumpFrames()
+  }
+
+  refreshAllMetadataCategoriesJumpFrames() {
+    if (!this.element?.querySelectorAll) {
+      return
+    }
+    this.element.querySelectorAll('[data-metadata-item]').forEach((metadataItem) => {
+      this.updateMetadataCategoriesJumpFrame(metadataItem)
+    })
+  }
+
+  updateMetadataCategoriesJumpFrame(metadataItem) {
+    const panel = this.element?.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+    if (!panel || !metadataItem) {
+      return
+    }
+    const header = metadataItem.querySelector('[data-action*="toggleMetadata"][data-metadata-id]')
+    const categoriesBlock = header?.nextElementSibling
+    const control = metadataItem.querySelector('.metadata-categories-jump-control')
+    const railWrap = metadataItem.querySelector('.metadata-categories-rail-wrap')
+    const listEl = metadataItem.querySelector('.metadata-categories-list')
+    if (!header || !categoriesBlock || !control || !railWrap || !listEl) {
+      return
+    }
+    if (categoriesBlock.style.display === 'none') {
+      control.style.visibility = 'hidden'
+      control.style.pointerEvents = 'none'
+      this.resetMetadataCategoriesJumpControl(control)
+      return
+    }
+    const panelRect = panel.getBoundingClientRect()
+    const headerRect = header.getBoundingClientRect()
+    const listRect = listEl.getBoundingClientRect()
+    const headerScrolledPast = headerRect.bottom < panelRect.top + 2
+    const listStillInView = listRect.bottom > panelRect.top + 8
+    const show = headerScrolledPast && listStillInView
+    if (!show) {
+      control.style.visibility = 'hidden'
+      control.style.pointerEvents = 'none'
+      this.resetMetadataCategoriesJumpControl(control)
+      return
+    }
+    const wrapRect = railWrap.getBoundingClientRect()
+    const jumpBtnOffset = 30
+    control.style.visibility = 'visible'
+    control.style.pointerEvents = 'auto'
+    control.style.position = 'fixed'
+    control.style.top = `${Math.round(panelRect.top + 4)}px`
+    control.style.left = `${Math.round(wrapRect.left - jumpBtnOffset)}px`
+    control.style.width = '34px'
+    control.style.height = 'auto'
+    control.style.overflow = 'visible'
+    control.style.zIndex = '30'
+  }
+
+  resetMetadataCategoriesJumpControl(control) {
+    if (!control) {
+      return
+    }
+    control.style.position = 'absolute'
+    control.style.left = '0'
+    control.style.top = '0'
+    control.style.width = '0'
+    control.style.height = '0'
+    control.style.overflow = 'visible'
+    control.style.zIndex = ''
+  }
+
+  scrollMetadataCategoriesPanelItemToTop(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const button = event.currentTarget
+    const metadataItem = button.closest('[data-metadata-item]')
+    if (!metadataItem) {
+      return
+    }
+    const panel = this.element.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+    const alignEl = metadataItem.querySelector('[data-action*="toggleMetadata"][data-metadata-id]') || metadataItem
+    if (panel && typeof panel.scrollTo === 'function') {
+      const panelRect = panel.getBoundingClientRect()
+      const alignRect = alignEl.getBoundingClientRect()
+      const delta = alignRect.top - panelRect.top + panel.scrollTop
+      panel.scrollTo({ top: Math.max(0, delta), behavior: 'smooth' })
+    } else {
+      alignEl.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+    requestAnimationFrame(() => {
+      this.updateMetadataCategoriesJumpFrame(metadataItem)
+    })
   }
 
   // Save selection method
